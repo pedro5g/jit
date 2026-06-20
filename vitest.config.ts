@@ -12,10 +12,7 @@ export default defineConfig({
     globals: true,
     watch: false,
     isolate: true,
-    setupFiles: [
-      resolve(__dirname, "tests/baseline.test.ts"),
-      resolve(__dirname, "tests/setup.ts"),
-    ],
+    setupFiles: [resolve(__dirname, "tests/baseline.test.ts"), resolve(__dirname, "tests/setup.ts")],
     typecheck: {
       include: ["**/*.test.ts"],
       enabled: true,
