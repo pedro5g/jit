@@ -1,0 +1,60 @@
+{
+  "type": "module",
+  "private": false,
+  "packageManager": "pnpm@11.8.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pedro5g/jit.git"
+  },
+  "support": {
+    "backing": {
+      "npm-funding": true
+    }
+  },
+  "scripts": {
+    "fix": "pnpm run format && pnpm run lint",
+    "format": "biome check --write .",
+    "format:check": "biome check .",
+    "lint": "biome lint --write .",
+    "lint:check": "biome lint .",
+    "clean": "pnpm run -r clean",
+    "build": "pnpm run -r --filter jit build",
+    "test:watch": "vitest",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run test && pnpm run build",
+    "dev": "tsx --conditions @jit/source",
+    "dev:watch": "tsx --conditions @jit/source --watch",
+    "prepare": "husky",
+    "check:semver": "tsx scripts/check-semver.ts"
+  },
+  "lint-staged": {
+    "packages/*/src/**/*.ts": [
+      "biome format --no-errors-on-unmatched --write",
+      "biome lint --no-errors-on-unmatched --write"
+    ],
+    "packages/*/**/*.json": [
+      "biome format --no-errors-on-unmatched --write",
+      "biome lint --no-errors-on-unmatched --write"
+    ],
+    "packages/*/**/*.md": [
+      "prettier --ignore-unknown --write"
+    ]
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
+    "@types/node": "^26.0.0",
+    "@types/semver": "^7.7.1",
+    "husky": "^9.1.7",
+    "jit": "workspace:*",
+    "lint-staged": "^17.0.7",
+    "prettier": "^3.8.4",
+    "semver": "^7.8.5",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9",
+    "zshy": "^0.7.3"
+  },
+  "license": "MIT"
+}
