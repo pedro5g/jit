@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: setup node.js
+        uses: actions/setup-node@v4
+        with:
+          with:
+            node-version: 20
+            cache: "pnpm"
+
+      - name: install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: check formatting & lint
+        run: |
+          pnpm run format:check
+          pnpm run lint:check
+
+      - name: check semver version
+        run: pnpm run check:semver
+
+      - name: run tests
+        run: pnpm run test
+
+      - name: build project
+        run: pnpm run build

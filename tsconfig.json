@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "customConditions": [
+      "@jit/source"
+    ],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": [
+      "node",
+    ]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.mts",
+    "**/*.cts"
+  ],
+  "exclude": [
+    "**/*.d.ts",
+    "**/*.d.cts",
+    "**/*.d.mts",
+    "vitest.root.mjs"
+  ]
+}

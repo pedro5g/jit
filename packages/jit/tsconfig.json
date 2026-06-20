@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "customConditions": [
+      "@jit/source"
+    ],
+    "noEmit": true,
+    "types": [
+      "vitest",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "**/*.ts"
+  ],
+}
