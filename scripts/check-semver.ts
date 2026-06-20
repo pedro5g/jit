@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { __dirname } from "../__dirname.js";
 import semver from "semver";
+import { __dirname } from "../__dirname.js";
 
 const packageJsonPath = join(__dirname, "./packages/jit/package.json");
 

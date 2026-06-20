@@ -4,4 +4,6 @@ if [ -n "$(git ls-files --others --exclude-standard)" ]; then
   exit 1
 fi
 pnpm check:semver
+pnpm run format:check
+pnpm run lint:check
 npx lint-staged --verbose
