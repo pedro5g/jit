@@ -25,7 +25,9 @@
         "noMisleadingInstantiator": "off",
         "noEmptyInterface": "off",
         "noConfusingVoidType": "off",
-        "noThenProperty": "off"
+        "noThenProperty": "off",
+        "noAssignInExpressions": "off",
+        "noMisleadingCharacterClass": "off"
       },
       "style": {
         "noUnusedTemplateLiteral": "off", // why is this even a best practice?
