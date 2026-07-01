@@ -1,5 +1,7 @@
-import { ATS } from "../ATS/index.js";
+import * as ATS from "../core/ats/index.js";
 import { type Builder, Equal, type Literal, Parse, type Path, type Scope, Utils } from "../shared/index.js";
+
+type EqualSchema<T = any> = ATS.TypeSchema<T> & { readonly def: any };
 
 function isCompositeTypeName(x: string): boolean {
   if (x === "object") return true;
@@ -141,6 +143,23 @@ optional.writeable = function optionalEquals(x: Builder): Builder {
       `  if (${LEFT} === undefined || ${RIGHT} === undefined) return false;`,
       //if it has survived this far, none of them are undefined and they are different,
       //then we trigger the internal validator (e.g., string validation, object validation, etc.)
+      x(LEFT_PATH, RIGHT_PATH, IX),
+      `}`,
+    ].join("\n");
+  };
+};
+
+function nullish<T>(deepEqualFn: Equal<T>): Equal<T | null | undefined> {
+  return (l, r) => Equal.SameValue(l, r) || deepEqualFn(l!, r!);
+}
+
+nullish.writeable = function nullishEquals(x: Builder): Builder {
+  return function continueNullishEquals(LEFT_PATH, RIGHT_PATH, IX) {
+    const LEFT = Parse.join_path(LEFT_PATH, IX.isOptional);
+    const RIGHT = Parse.join_path(RIGHT_PATH, IX.isOptional);
+    return [
+      `if (!Object.is(${LEFT}, ${RIGHT})) {`,
+      `  if (${LEFT} == null || ${RIGHT} == null) return false;`,
       x(LEFT_PATH, RIGHT_PATH, IX),
       `}`,
     ].join("\n");
@@ -516,31 +535,42 @@ object.writeable = function objectEquals(
   return continueObjectEquals;
 };
 
-const fold = (x: ATS.TypeSchema<any>): Equal<any> => {
+const fold = (x: EqualSchema): Equal<any> => {
   switch (true) {
     case x.type in defaults:
       return defaults[x.type as keyof typeof defaults];
     case x.type === ATS.TypeName.optional:
-      return optional(fold(x.item));
+      return optional(fold(x.def.innerType));
     case x.type === ATS.TypeName.nullable:
-      return nullable(fold(x.item));
+      return nullable(fold(x.def.innerType));
+    case x.type === ATS.TypeName.nullish:
+      return nullish(fold(x.def.innerType));
     case x.type === ATS.TypeName.set:
-      return set(fold(x.item));
+      return set(fold(x.def.element));
     case x.type === ATS.TypeName.array:
-      return array(fold(x.item));
+      return array(fold(x.def.element));
     case x.type === ATS.TypeName.map:
-      return map(fold(x.key), fold(x.value));
+      return map(fold(x.def.key), fold(x.def.value));
     case x.type === ATS.TypeName.record:
-      return record(fold(x.value), fold(x.key));
+      return record(fold(x.def.value), fold(x.def.key));
     case x.type === ATS.TypeName.tuple:
-      return tuple(x.items.map(fold));
+      return tuple(x.def.items.map(fold), x.def.rest ? fold(x.def.rest) : undefined);
     case x.type === ATS.TypeName.union:
-      return union(x.schemas.map(fold));
+      return union(x.def.options.map(fold));
     case x.type === ATS.TypeName.intersection:
-      return intersection(x.schemas.map(fold));
+      return intersection(x.def.options.map(fold));
+    case x.type === ATS.TypeName.default:
+    case x.type === ATS.TypeName.brand:
+    case x.type === ATS.TypeName.pipe:
+    case x.type === ATS.TypeName.readonly:
+    case x.type === ATS.TypeName.refine:
+    case x.type === ATS.TypeName.coerce:
+      return fold(x.def.innerType);
+    case x.type === ATS.TypeName.lazy:
+      return fold(x.def.getter());
     case x.type === ATS.TypeName.object: {
       const props: Record<string, Equal<any>> = {};
-      for (const k in x.props) props[k] = fold(x.props[k]);
+      for (const k in x.def.props) props[k] = fold(x.def.props[k]);
       return object(props);
     }
 
@@ -549,34 +579,45 @@ const fold = (x: ATS.TypeSchema<any>): Equal<any> => {
   }
 };
 
-const compileWriteable = (x: ATS.TypeSchema<any>): Builder => {
+const compileWriteable = (x: EqualSchema): Builder => {
   switch (true) {
     case x.type in writeableDefaults:
       return writeableDefaults[x.type as keyof typeof writeableDefaults];
     case x.type === ATS.TypeName.literal:
-      return literalEquals<any>(x.literalValue, false);
+      return literalEquals<any>(x.def.value, false);
     case x.type === ATS.TypeName.optional:
-      return optional.writeable(compileWriteable(x.item));
+      return optional.writeable(compileWriteable(x.def.innerType));
     case x.type === ATS.TypeName.nullable:
-      return nullable.writeable(compileWriteable(x.item));
+      return nullable.writeable(compileWriteable(x.def.innerType));
+    case x.type === ATS.TypeName.nullish:
+      return nullish.writeable(compileWriteable(x.def.innerType));
     case x.type === ATS.TypeName.set:
-      return set.writeable(compileWriteable(x.item));
+      return set.writeable(compileWriteable(x.def.element));
     case x.type === ATS.TypeName.map:
-      return map.writeable(compileWriteable(x.key), compileWriteable(x.value));
+      return map.writeable(compileWriteable(x.def.key), compileWriteable(x.def.value));
     case x.type === ATS.TypeName.array:
-      return array.writable(compileWriteable(x.item));
+      return array.writable(compileWriteable(x.def.element));
     case x.type === ATS.TypeName.tuple:
-      return tuple.writeable(x.items.map(compileWriteable));
+      return tuple.writeable(x.def.items.map(compileWriteable), x.def.rest ? compileWriteable(x.def.rest) : undefined);
     case x.type === ATS.TypeName.union:
-      return union.writeable(...x.schemas.map(compileWriteable));
+      return union.writeable(...x.def.options.map(compileWriteable));
     case x.type === ATS.TypeName.intersection:
-      return intersection.writeable(...x.schemas.map(compileWriteable));
+      return intersection.writeable(...x.def.options.map(compileWriteable));
     case x.type === ATS.TypeName.record:
-      return record.writeable(compileWriteable(x.value));
+      return record.writeable(compileWriteable(x.def.value));
+    case x.type === ATS.TypeName.default:
+    case x.type === ATS.TypeName.brand:
+    case x.type === ATS.TypeName.pipe:
+    case x.type === ATS.TypeName.readonly:
+    case x.type === ATS.TypeName.refine:
+    case x.type === ATS.TypeName.coerce:
+      return compileWriteable(x.def.innerType);
+    case x.type === ATS.TypeName.lazy:
+      return compileWriteable(x.def.getter());
     case x.type === ATS.TypeName.object: {
       const props: Record<string, Builder & { type: string }> = {};
-      for (const key in x.props) {
-        const child = x.props[key];
+      for (const key in x.def.props) {
+        const child = x.def.props[key] as EqualSchema;
         props[key] = Object.assign(compileWriteable(child), {
           type: child.type,
         });
@@ -588,14 +629,14 @@ const compileWriteable = (x: ATS.TypeSchema<any>): Builder => {
   }
 };
 
-export function deepEqual<T>(type: ATS.TypeSchema<T>): Equal<ATS.Infer<typeof type>> {
+export function deepEqual<TSchema extends ATS.TypeSchema>(type: TSchema): Equal<ATS.Infer<TSchema>> {
   const index: Scope = { bindings: new Map(), isOptional: false };
   const isNullary = type.type in writeableDefaults && type.type !== ATS.TypeName.object;
   const ROOT_CHECK = `if (Object.is(l, r)) return true;`;
   const BODY = compileWriteable(type)(["l"], ["r"], index);
   return isNullary || (type.type as any) === ATS.TypeName.enum
-    ? (globalThis.Function("l", "r", [BODY, "return true"].join("\n")) as Equal<ATS.Infer<typeof type>>)
-    : (globalThis.Function("l", "r", [ROOT_CHECK, BODY, "return true"].join("\n")) as Equal<ATS.Infer<typeof type>>);
+    ? (globalThis.Function("l", "r", [BODY, "return true"].join("\n")) as Equal<ATS.Infer<TSchema>>)
+    : (globalThis.Function("l", "r", [ROOT_CHECK, BODY, "return true"].join("\n")) as Equal<ATS.Infer<TSchema>>);
 }
 
 deepEqual.writeable = compileWriteable;

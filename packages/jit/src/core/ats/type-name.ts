@@ -1,0 +1,49 @@
+import { Utils } from "../../shared/index.js";
+
+export const TypeName = {
+  string: "string",
+  number: "number",
+  int: "int",
+  nan: "nan",
+  null: "null",
+  nullable: "nullable",
+  nullish: "nullish",
+  boolean: "boolean",
+  object: "object",
+  optional: "optional",
+  array: "array",
+  set: "set",
+  tuple: "tuple",
+  union: "union",
+  record: "record",
+  map: "map",
+  unknown: "unknown",
+  file: "file",
+  any: "any",
+  void: "void",
+  never: "never",
+  enum: "enum",
+  literal: "literal",
+  bigint: "bigint",
+  date: "date",
+  symbol: "symbol",
+  regex: "regex",
+  undefined: "undefined",
+  intersection: "intersection",
+  default: "default",
+  brand: "brand",
+  lazy: "lazy",
+  pipe: "pipe",
+  refine: "refine",
+  coerce: "coerce",
+  readonly: "readonly",
+  promise: "promise",
+  instanceof: "instanceof",
+  discriminatedUnion: "discriminatedUnion",
+} as const;
+
+export type AnyTypeName = TypeName[keyof TypeName];
+
+export type TypeName = typeof TypeName;
+
+export const TypeNames = Utils.Object_keys(TypeName) as AnyTypeName[];
