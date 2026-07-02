@@ -17,6 +17,7 @@ import type {
   RequiredShape,
   SchemaShape,
 } from "../ats/index.js";
+import type { EntityHint, HashStrategy, OrderDirection, PropertySelector } from "../hints/index.js";
 import type { SchemaInput } from "./unwrap-schema.js";
 
 export interface BuilderCore<TSchema extends AnyTypeSchema> {
@@ -29,7 +30,16 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   default(defaultValue: InferSchema<TSchema> | (() => InferSchema<TSchema>)): Builder<DefaultSchema<TSchema>>;
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
   pipe<TOutput>(transform: (value: InferSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
+  entity(options: EntityHint<HintTarget<InferSchema<TSchema>>>): Builder<TSchema>;
+  indexBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
+  ordered(
+    key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>,
+    direction?: OrderDirection
+  ): Builder<TSchema>;
+  hash(strategy?: HashStrategy): Builder<TSchema>;
 }
+
+type HintTarget<T> = T extends readonly (infer TElement)[] ? TElement : T;
 
 export interface ObjectOperators<TShape extends SchemaShape> {
   partial(): ObjectBuilder<PartialShape<TShape>>;

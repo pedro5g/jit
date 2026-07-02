@@ -263,6 +263,29 @@ describe("JIT AST builders", () => {
       expectTypeOf(FactoryUserId._type).toEqualTypeOf<string & { readonly __brand: "FactoryUserId" }>();
     });
 
+    it("should attach compile hints through fluent APIs without mutating original schemas", () => {
+      const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+      const Users = JIT.array(User);
+      const IndexedUsers = Users.entity({ key: "id" }).indexBy("id").ordered("id", "asc").hash("ordered");
+      const schema = IndexedUsers.schema;
+
+      expect(Users.schema.annotations).toBeUndefined();
+      expect(schema.annotations?.hints?.entity?.key).toBe("id");
+      expect(schema.annotations?.hints?.collection?.identify).toBe("id");
+      expect(schema.annotations?.hints?.collection?.indexed).toBe(true);
+      expect(schema.annotations?.hints?.collection?.ordered?.direction).toBe("asc");
+      expect(schema.annotations?.hints?.hash?.strategy).toBe("ordered");
+      expect(schema._type).toBeNull();
+      expect(Object.keys(schema)).toEqual(["type", "_type", "def", "annotations"]);
+
+      expectTypeOf(schema._type).toEqualTypeOf<
+        {
+          readonly id: number;
+          readonly name: string;
+        }[]
+      >();
+    });
+
     it("should generate transformations and lazy schemas", () => {
       const transformer = (value: string) => parseInt(value, 10);
       const piped = JIT.string().pipe(transformer).schema;

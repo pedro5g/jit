@@ -4,10 +4,13 @@ import type { CompareHint } from "./compare-hint.js";
 import type { DiffHint } from "./diff-hint.js";
 import type { EntityHint } from "./entity-hint.js";
 import type { HashHint } from "./hash-hint.js";
+import type { IndexHint, OrderHint } from "./hint-types.js";
 import type { SerializeHint } from "./serialize-hint.js";
 
 export interface CompileHints<T = unknown> {
   entity?: EntityHint<T>;
+  index?: IndexHint;
+  order?: OrderHint<T>;
   collection?: CollectionHint<T>;
   compare?: CompareHint;
   clone?: CloneHint;

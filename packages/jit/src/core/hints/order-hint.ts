@@ -1,5 +1,7 @@
 import type { Compare, Configurable } from "./shared.js";
 
+export type { OrderHint } from "./hint-types.js";
+
 export const OrderDirection = {
   asc: "asc",
   desc: "desc",
@@ -11,8 +13,8 @@ export const OrderStrategy = {
   custom: "custom",
 } as const;
 export type OrderStrategy = keyof typeof OrderStrategy;
-export interface OrderHint<T> {
+export type OrderHintShape<T> = {
   direction?: Configurable<OrderDirection>;
   strategy?: Configurable<OrderStrategy>;
   comparer?: Compare<T>;
-}
+};

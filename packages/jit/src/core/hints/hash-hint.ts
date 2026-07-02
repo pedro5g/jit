@@ -5,6 +5,4 @@ export const HashStrategy = {
   reference: "reference",
 } as const;
 export type HashStrategy = keyof typeof HashStrategy;
-export interface HashHint {
-  strategy?: HashStrategy;
-}
+export type { HashHint } from "./hint-types.js";

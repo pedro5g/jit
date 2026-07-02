@@ -1,3 +1,4 @@
+export { compileEqual } from "../compiler/equal.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
 export * from "./object/index.js";
