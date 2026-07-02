@@ -1,5 +1,6 @@
 import * as Transform from "../../transforms/index.js";
 import { type AnyTypeSchema, type ObjectSchema, type SchemaShape, TypeName } from "../ats/index.js";
+import { attachHint, type EntityHint, type HashStrategy, type OrderDirection } from "../hints/index.js";
 import type { AnyBuilder, Builder, ObjectBuilder } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
 
@@ -38,6 +39,63 @@ const baseBuilderPrototype = {
 
   pipe(this: RuntimeBuilder, transform: (value: unknown) => unknown): AnyBuilder {
     return createBuilder(Transform.pipe(this.schema, transform));
+  },
+
+  entity(this: RuntimeBuilder, options: EntityHint<unknown>): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        entity: {
+          ...options,
+          type: "entity",
+        },
+      })
+    );
+  },
+
+  indexBy(this: RuntimeBuilder, key: string): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        index: {
+          type: "index",
+          key,
+        },
+        collection: {
+          identify: key,
+          indexed: true,
+        },
+      })
+    );
+  },
+
+  ordered(this: RuntimeBuilder, key: string, direction?: OrderDirection): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        order: {
+          type: "order",
+          key,
+          ...(direction ? { direction } : {}),
+        },
+        collection: {
+          identify: key,
+          ordered: {
+            type: "order",
+            key,
+            ...(direction ? { direction } : {}),
+          },
+        },
+      })
+    );
+  },
+
+  hash(this: RuntimeBuilder, strategy?: HashStrategy): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        hash: {
+          type: "hash",
+          ...(strategy ? { strategy } : {}),
+        },
+      })
+    );
   },
 };
 

@@ -380,6 +380,7 @@ Namespace barrels must not become dependency-cycle hubs.
 
 Rules:
 
+- package root `index.ts` files are re-export only; they must not contain runtime logic, helper functions, initialization, or implementation details;
 - use `export type` for types;
 - avoid top-level initialization in barrels;
 - avoid importing a package root from inside the same package;
