@@ -13,6 +13,8 @@
     "moduleResolution": "nodenext",
     "types": [
       "node",
+      "vitest",
+      "vitest/globals",
     ]
   },
   "include": [

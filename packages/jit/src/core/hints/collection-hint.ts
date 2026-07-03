@@ -3,6 +3,8 @@ import type { Configurable } from "./shared.js";
 
 export interface CollectionHint<T> {
   identify?: Configurable<PropertyKey>;
+  groupBy?: Configurable<PropertyKey>;
+  uniqueBy?: Configurable<PropertyKey>;
   unique?: Configurable<boolean>;
   indexed?: Configurable<boolean>;
   searchable?: Configurable<boolean>;

@@ -266,13 +266,21 @@ describe("JIT AST builders", () => {
     it("should attach compile hints through fluent APIs without mutating original schemas", () => {
       const User = JIT.object({ id: JIT.number(), name: JIT.string() });
       const Users = JIT.array(User);
-      const IndexedUsers = Users.entity({ key: "id" }).indexBy("id").ordered("id", "asc").hash("ordered");
+      const IndexedUsers = Users.entity({ key: "id" })
+        .keyed("id")
+        .groupBy("name")
+        .sortBy("id", "asc")
+        .uniqueBy("id")
+        .hash("ordered");
       const schema = IndexedUsers.schema;
 
       expect(Users.schema.annotations).toBeUndefined();
       expect(schema.annotations?.hints?.entity?.key).toBe("id");
       expect(schema.annotations?.hints?.collection?.identify).toBe("id");
       expect(schema.annotations?.hints?.collection?.indexed).toBe(true);
+      expect(schema.annotations?.hints?.collection?.groupBy).toBe("name");
+      expect(schema.annotations?.hints?.collection?.uniqueBy).toBe("id");
+      expect(schema.annotations?.hints?.collection?.unique).toBe(true);
       expect(schema.annotations?.hints?.collection?.ordered?.direction).toBe("asc");
       expect(schema.annotations?.hints?.hash?.strategy).toBe("ordered");
       expect(schema._type).toBeNull();

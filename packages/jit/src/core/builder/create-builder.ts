@@ -52,6 +52,68 @@ const baseBuilderPrototype = {
     );
   },
 
+  keyed(this: RuntimeBuilder, key: string): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        entity: {
+          type: "entity",
+          key: key as unknown as EntityHint<unknown>["key"],
+          cacheIndex: true,
+        },
+        index: {
+          type: "index",
+          key,
+        },
+        collection: {
+          identify: key,
+          indexed: true,
+          unique: true,
+        },
+      })
+    );
+  },
+
+  groupBy(this: RuntimeBuilder, key: string): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        collection: {
+          groupBy: key,
+        },
+      })
+    );
+  },
+
+  sortBy(this: RuntimeBuilder, key: string, direction?: OrderDirection): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        order: {
+          type: "order",
+          key,
+          ...(direction ? { direction } : {}),
+        },
+        collection: {
+          ordered: {
+            type: "order",
+            key,
+            ...(direction ? { direction } : {}),
+          },
+        },
+      })
+    );
+  },
+
+  uniqueBy(this: RuntimeBuilder, key: string): AnyBuilder {
+    return createBuilder(
+      attachHint(this.schema, {
+        collection: {
+          identify: key,
+          uniqueBy: key,
+          unique: true,
+        },
+      })
+    );
+  },
+
   indexBy(this: RuntimeBuilder, key: string): AnyBuilder {
     return createBuilder(
       attachHint(this.schema, {

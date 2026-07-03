@@ -60,7 +60,9 @@ function emitNode(writer: CodeWriter, node: IRNode): void {
       writer.line("}");
       return;
     case "for":
-      writer.line(`for (let ${node.index.name} = ${emitExpr(node.from)}; ${node.index.name}-- !== 0;) {`);
+      writer.line(
+        `for (let ${node.index.name} = 0; ${node.index.name} < ${emitExpr(node.from)}; ${node.index.name}++) {`
+      );
       writer.indent(() => {
         for (const child of node.body) emitNode(writer, child);
       });
@@ -79,21 +81,54 @@ function emitMapEqual(writer: CodeWriter, node: Extract<IRNode, { readonly kind:
     writer.line("return false;");
   });
   writer.line("}");
-  writer.line(`const ${node.rightIndex.name} = __getIndex(${emitExpr(node.right)}, ${emitLiteral(node.key)});`);
-  writer.line(`for (let ${node.index.name} = ${node.length.name}; ${node.index.name}-- !== 0;) {`);
+  writer.line(`if (${node.length.name} < 64) {`);
   writer.indent(() => {
-    writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
-    writer.line(
-      `const ${node.rightItem.name} = ${node.rightIndex.name}.get(${emitPropertyAccess(node.leftItem.name, node.key)});`
-    );
-    writer.line(
-      `if (${node.rightItem.name} === undefined && !${node.rightIndex.name}.has(${emitPropertyAccess(node.leftItem.name, node.key)})) {`
-    );
+    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
     writer.indent(() => {
-      writer.line("return false;");
+      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+      writer.line("let found = false;");
+      writer.line(`for (let j = 0; j < ${node.length.name}; j++) {`);
+      writer.indent(() => {
+        writer.line(`const ${node.rightItem.name} = ${emitExpr(node.right)}[j];`);
+        writer.line(
+          `if (${emitPropertyAccess(node.rightItem.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
+        );
+        writer.indent(() => {
+          writer.line("found = true;");
+          for (const child of node.body) emitNode(writer, child);
+          writer.line("break;");
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+      writer.line("if (!found) {");
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
     });
     writer.line("}");
-    for (const child of node.body) emitNode(writer, child);
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line(`let ${node.rightIndex.name};`);
+    writer.line(`${node.rightIndex.name} = __getIndex(${emitExpr(node.right)}, ${emitLiteral(node.key)});`);
+    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
+    writer.indent(() => {
+      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+      writer.line(
+        `const ${node.rightItem.name} = ${node.rightIndex.name}.get(${emitPropertyAccess(node.leftItem.name, node.key)});`
+      );
+      writer.line(
+        `if (${node.rightItem.name} === undefined && !${node.rightIndex.name}.has(${emitPropertyAccess(node.leftItem.name, node.key)})) {`
+      );
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
+      for (const child of node.body) emitNode(writer, child);
+    });
+    writer.line("}");
   });
   writer.line("}");
 }
@@ -109,7 +144,7 @@ function emitBinarySearchEqual(
     writer.line("return false;");
   });
   writer.line("}");
-  writer.line(`for (let ${node.index.name} = ${node.length.name}; ${node.index.name}-- !== 0;) {`);
+  writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
   writer.indent(() => {
     writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
     writer.line(`let ${node.searchLow.name} = 0;`);

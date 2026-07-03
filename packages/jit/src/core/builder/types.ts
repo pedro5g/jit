@@ -31,6 +31,13 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
   pipe<TOutput>(transform: (value: InferSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
   entity(options: EntityHint<HintTarget<InferSchema<TSchema>>>): Builder<TSchema>;
+  keyed(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
+  groupBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
+  sortBy(
+    key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>,
+    direction?: OrderDirection
+  ): Builder<TSchema>;
+  uniqueBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
   indexBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
   ordered(
     key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>,

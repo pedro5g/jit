@@ -35,6 +35,23 @@ describe("JIT compiler hash", () => {
     expect(source).toContain("__hash(r)");
   });
 
+  it("should keep hash short-circuits collision-safe", () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered").schema;
+    const equalSource = Compiler.emitEqualSource(User);
+    const diffSource = Compiler.emitDiffSource(User);
+    const updateSource = Compiler.emitUpdateSource(User);
+
+    expect(Compiler.compileEqual(User)({ id: 1, name: "Ada" }, { id: 1, name: "Grace" })).toBe(false);
+    expect(Compiler.compileDiff(User)({ id: 1, name: "Ada" }, { id: 1, name: "Grace" })).toEqual([
+      { type: "update", path: ["name"], value: "Grace" },
+    ]);
+
+    expect(equalSource.indexOf("__hash(l)")).toBeLessThan(equalSource.indexOf("l.id"));
+    expect(equalSource).toContain("l.name");
+    expect(diffSource).not.toContain("__hash");
+    expect(updateSource).not.toContain("__hash");
+  });
+
   it("should expose JIT.compileHash as a public convenience API", () => {
     const hash = JIT.compileHash(JIT.object({ id: JIT.number() }).schema);
 

@@ -1,3 +1,7 @@
+export * from "./clone/index.js";
+export * from "./clone.js";
+export * from "./diff/index.js";
+export * from "./diff.js";
 export * from "./emitter/emit-equal.js";
 export * from "./equal.js";
 export * from "./hash.js";
@@ -6,6 +10,9 @@ export * from "./ir/ir.js";
 export * from "./ir/optimizer/cost/optimize-cost.js";
 export * from "./ir/optimizer/optimize-ir.js";
 export * from "./ir/scope.js";
+export * from "./object-ops.js";
 export * from "./resolvers/resolve-hints.js";
 export * from "./resolvers/resolve-wrappers.js";
 export * from "./strategy/resolve-strategy.js";
+export * from "./update/index.js";
+export * from "./update.js";

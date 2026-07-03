@@ -109,7 +109,7 @@ describe("JIT compiler", () => {
       const source = Compiler.emitEqualSource(Users);
 
       expect(source).toContain("const len = l.length;");
-      expect(source).toContain("for (let i = len; i-- !== 0;)");
+      expect(source).toContain("for (let i = 0; i < len; i++)");
       expect(source).toContain("const li = l[i];");
       expect(source).not.toContain("Object.keys");
     });
@@ -194,6 +194,8 @@ describe("JIT compiler", () => {
         )
       ).toBe(true);
       expect(equal([{ id: 1, name: "Ada" }], [{ id: 1, name: "Grace" }])).toBe(false);
+      expect(source).toContain("if (len < 64)");
+      expect(source).toContain("let rightIndex;");
       expect(source).toContain('__getIndex(r, "id")');
       expect(source).toContain(".get(li.id)");
       expect(source).not.toContain("Object.keys");
