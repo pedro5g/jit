@@ -2,7 +2,6 @@ import * as ATS from "../../../core/ats/index.js";
 import { resolveWrappers } from "../../resolvers/resolve-wrappers.js";
 import { type EqualStrategy, resolveEqualStrategy } from "../../strategy/resolve-strategy.js";
 import {
-  add,
   call,
   type IRExpr,
   type IRNode,
@@ -35,8 +34,8 @@ export function buildEqualIR(
   if (strategy.hash.type === "hash-short-circuit") {
     body.push({
       kind: "hash_compare",
-      leftHash: buildHashExpr(schema as EqualSchema, left),
-      rightHash: buildHashExpr(schema as EqualSchema, right),
+      leftHash: call(irVar("__hash"), [left]),
+      rightHash: call(irVar("__hash"), [right]),
     });
   }
 
@@ -225,26 +224,4 @@ function appendObjectCompare(body: IRNode[], schema: EqualSchema, left: IRExpr, 
 
 function orCompare(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "binary", op: "or", left, right };
-}
-
-function buildHashExpr(schema: EqualSchema, value: IRExpr): IRExpr {
-  const resolved = resolveWrappers(schema);
-  const base = resolved.base as EqualSchema;
-
-  if (base.type === ATS.TypeName.object) {
-    let expr: IRExpr = literal("object");
-    const props = base.def.props as Record<string, EqualSchema>;
-
-    for (const key of Object.keys(props)) {
-      expr = add(add(expr, literal("|")), loadProp(value, key));
-    }
-
-    return expr;
-  }
-
-  if (base.type === ATS.TypeName.array) {
-    return loadProp(value, "length");
-  }
-
-  return value;
 }

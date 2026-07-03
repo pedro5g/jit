@@ -1,9 +1,11 @@
 import type { IRProgram } from "../ir.js";
 import { optimizeCost } from "./cost/optimize-cost.js";
+import { dedupeHash } from "./passes/dedupe-hash.js";
 import { dedupeLoads } from "./passes/dedupe-loads.js";
 import { eliminateDead } from "./passes/eliminate-dead.js";
 import { flattenBlocks } from "./passes/flatten-blocks.js";
 import { hoistArrayElements } from "./passes/hoist-array-elements.js";
+import { hoistHash } from "./passes/hoist-hash.js";
 import { hoistLoads } from "./passes/hoist-loads.js";
 import { inlineVars } from "./passes/inline-vars.js";
 import { loopFusion } from "./passes/loop-fusion.js";
@@ -13,6 +15,8 @@ import { reorderCompares } from "./passes/reorder-compares.js";
 
 export const optimizeEqualIRPasses = [
   flattenBlocks,
+  hoistHash,
+  dedupeHash,
   dedupeLoads,
   hoistLoads,
   loopFusion,

@@ -1,5 +1,6 @@
 import type { IRNode, IRProgram } from "../ir/ir.js";
 import { emitPropertyAccess } from "../source/access.js";
+import { emitLiteral } from "../source/literal.js";
 import { CodeWriter } from "./code-writer.js";
 import { emitExpr } from "./emit-expr.js";
 
@@ -78,15 +79,7 @@ function emitMapEqual(writer: CodeWriter, node: Extract<IRNode, { readonly kind:
     writer.line("return false;");
   });
   writer.line("}");
-  writer.line(`const ${node.rightIndex.name} = new Map();`);
-  writer.line(`for (let ${node.index.name} = ${node.length.name}; ${node.index.name}-- !== 0;) {`);
-  writer.indent(() => {
-    writer.line(`const ${node.rightItem.name} = ${emitExpr(node.right)}[${node.index.name}];`);
-    writer.line(
-      `${node.rightIndex.name}.set(${emitPropertyAccess(node.rightItem.name, node.key)}, ${node.rightItem.name});`
-    );
-  });
-  writer.line("}");
+  writer.line(`const ${node.rightIndex.name} = __getIndex(${emitExpr(node.right)}, ${emitLiteral(node.key)});`);
   writer.line(`for (let ${node.index.name} = ${node.length.name}; ${node.index.name}-- !== 0;) {`);
   writer.indent(() => {
     writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);

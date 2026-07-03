@@ -47,6 +47,8 @@ describe("JIT compiler", () => {
     it("should expose the optimizer passes in the mandated order", () => {
       expect(Compiler.optimizeEqualIRPasses.map((pass) => pass.name)).toEqual([
         "flattenBlocks",
+        "hoistHash",
+        "dedupeHash",
         "dedupeLoads",
         "hoistLoads",
         "loopFusion",
@@ -192,7 +194,7 @@ describe("JIT compiler", () => {
         )
       ).toBe(true);
       expect(equal([{ id: 1, name: "Ada" }], [{ id: 1, name: "Grace" }])).toBe(false);
-      expect(source).toContain("new Map()");
+      expect(source).toContain('__getIndex(r, "id")');
       expect(source).toContain(".get(li.id)");
       expect(source).not.toContain("Object.keys");
       expect(source).not.toContain(".map(");
@@ -229,7 +231,8 @@ describe("JIT compiler", () => {
 
       expect(equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
       expect(equal({ id: 1, name: "Ada" }, { id: 2, name: "Ada" })).toBe(false);
-      expect(source).toContain('("object" + "|") + l.id');
+      expect(source).toContain("__hash(l)");
+      expect(source).toContain("__hash(r)");
       expect(source).toContain("return false;");
     });
   });

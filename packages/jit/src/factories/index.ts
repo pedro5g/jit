@@ -1,4 +1,5 @@
 export { compileEqual } from "../compiler/equal.js";
+export { compileHash } from "../compiler/hash.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
 export * from "./object/index.js";
