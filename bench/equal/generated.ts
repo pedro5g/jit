@@ -45,10 +45,15 @@ const generatedUser = fc.record({
 
 // Fixed seed keeps the sampled data identical across runs so results stay
 // comparable between benchmark sessions.
-const left = fc.sample(fc.array(generatedUser, { minLength: 128, maxLength: 128 }), {
+const sampled = fc.sample(fc.array(generatedUser, { minLength: 128, maxLength: 128 }), {
   numRuns: 1,
   seed: 20260704,
 })[0] as GeneratedUser[];
+
+// fast-check occasionally emits null-prototype objects as edge cases, which
+// makes constructor-checking competitors (fast-deep-equal) bail out early and
+// report a bogus win. JSON round-trip normalizes everything to plain objects.
+const left = JSON.parse(JSON.stringify(sampled)) as GeneratedUser[];
 const right = left.map((user) => ({
   id: user.id,
   name: user.name,
