@@ -91,6 +91,8 @@ function referencesVar(expr: IRExpr, name: string): boolean {
     case "sameValue":
     case "sameNumber":
       return referencesVar(expr.left, name) || referencesVar(expr.right, name);
+    case "schema_guard":
+      return referencesVar(expr.value, name);
     case "load_prop":
       return referencesVar(expr.base, name);
     case "load_index":

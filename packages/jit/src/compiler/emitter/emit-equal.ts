@@ -47,7 +47,7 @@ function emitNode(writer: CodeWriter, node: IRNode): void {
       emitBinarySearchEqual(writer, node);
       return;
     case "if":
-      writer.line(`if (${emitExpr(node.test)}) {`);
+      writer.line(`if (${emitTestExpr(node.test)}) {`);
       writer.indent(() => {
         for (const child of node.then) emitNode(writer, child);
       });
@@ -60,9 +60,7 @@ function emitNode(writer: CodeWriter, node: IRNode): void {
       writer.line("}");
       return;
     case "for":
-      writer.line(
-        `for (let ${node.index.name} = 0; ${node.index.name} < ${emitExpr(node.from)}; ${node.index.name}++) {`
-      );
+      writer.line(`for (let ${node.index.name} = ${emitExpr(node.from)}; ${node.index.name}-- !== 0;) {`);
       writer.indent(() => {
         for (const child of node.body) emitNode(writer, child);
       });
@@ -72,6 +70,37 @@ function emitNode(writer: CodeWriter, node: IRNode): void {
       writer.line(`return ${emitExpr(node.value)};`);
       return;
   }
+}
+
+function emitTestExpr(expr: Parameters<typeof emitExpr>[0]): string {
+  if (expr.kind === "binary") {
+    const left = emitExpr(expr.left);
+    const right = emitExpr(expr.right);
+
+    if (expr.op === "strictEqual") return `${left} === ${right}`;
+    if (expr.op === "notStrictEqual") return `${left} !== ${right}`;
+  }
+
+  if (expr.kind === "not") {
+    const inner = expr.expr;
+
+    if (inner.kind === "sameNumber") {
+      const left = emitExpr(inner.left);
+      const right = emitExpr(inner.right);
+
+      return `${left} !== ${right} && (${left} === ${left} || ${right} === ${right})`;
+    }
+
+    if (inner.kind === "sameValue") {
+      return `!Object.is(${emitExpr(inner.left)}, ${emitExpr(inner.right)})`;
+    }
+
+    if (inner.kind === "binary" && inner.op === "strictEqual") {
+      return `${emitExpr(inner.left)} !== ${emitExpr(inner.right)}`;
+    }
+  }
+
+  return emitExpr(expr);
 }
 
 function emitMapEqual(writer: CodeWriter, node: Extract<IRNode, { readonly kind: "map_equal" }>): void {

@@ -2,16 +2,22 @@ import { CodeWriter } from "../emitter/code-writer.js";
 import { createEmitState, type EmitState } from "../emitter/emit-state.js";
 import { emitGuardTest } from "../schema-nodes.js";
 import { emitPropertyAccess } from "../source/access.js";
-import { emitLiteral } from "../source/literal.js";
+import { emitSchemaGuard, literalDiscriminatorValue } from "../source/guard.js";
+import { emitLiteral, emitObjectKey } from "../source/literal.js";
 import type { CloneIRNode, CloneIRProgram } from "./build-clone-ir.js";
 
 export function emitClone(program: CloneIRProgram): string {
   const writer = new CodeWriter();
+  const inline = emitInlineClone(program.body, program.param);
 
   writer.line(`function clone(${program.param}) {`);
   writer.indent(() => {
-    emitCloneTo(writer, createEmitState(), program.body, program.param, "out");
-    writer.line("return out;");
+    if (inline) {
+      writer.line(`return ${inline};`);
+    } else {
+      emitCloneTo(writer, createEmitState(), program.body, program.param, "out");
+      writer.line("return out;");
+    }
   });
   writer.line("}");
 
@@ -20,9 +26,14 @@ export function emitClone(program: CloneIRProgram): string {
 
 export function emitCloneBody(program: CloneIRProgram): string {
   const writer = new CodeWriter();
+  const inline = emitInlineClone(program.body, program.param);
 
-  emitCloneTo(writer, createEmitState(), program.body, program.param, "out");
-  writer.line("return out;");
+  if (inline) {
+    writer.line(`return ${inline};`);
+  } else {
+    emitCloneTo(writer, createEmitState(), program.body, program.param, "out");
+    writer.line("return out;");
+  }
 
   return writer.toString();
 }
@@ -54,6 +65,15 @@ function emitCloneTo(writer: CodeWriter, state: EmitState, node: CloneIRNode, so
     case "guard":
       emitGuardClone(writer, state, node, source, target);
       return;
+    case "union":
+      emitUnionClone(writer, state, node, source, target);
+      return;
+    case "intersection":
+      emitIntersectionClone(writer, state, node, source, target);
+      return;
+    case "discriminatedUnion":
+      emitDiscriminatedUnionClone(writer, state, node, source, target);
+      return;
     case "object":
       emitObjectClone(writer, state, node, source, target);
       return;
@@ -78,6 +98,9 @@ function emitInlineClone(node: CloneIRNode, source: string): string | undefined 
     case "set":
     case "map":
     case "guard":
+    case "union":
+    case "intersection":
+    case "discriminatedUnion":
       return undefined;
   }
 }
@@ -95,7 +118,7 @@ function emitInlineObjectClone(
       return undefined;
     }
 
-    props.push(`${emitLiteral(prop.key)}: ${cloned}`);
+    props.push(`${emitObjectKey(prop.key)}: ${cloned}`);
   }
 
   return `{ ${props.join(", ")} }`;
@@ -134,7 +157,7 @@ function emitObjectClone(
     const inline = emitInlineClone(prop.value, propSource);
 
     if (inline) {
-      entries.push(`${emitLiteral(prop.key)}: ${inline}`);
+      entries.push(`${emitObjectKey(prop.key)}: ${inline}`);
       continue;
     }
 
@@ -284,4 +307,74 @@ function emitGuardClone(
     writer.line(`${target} = ${inner};`);
   });
   writer.line("}");
+}
+
+function emitUnionClone(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<CloneIRNode, { readonly kind: "union" }>,
+  source: string,
+  target: string
+): void {
+  writer.line(`let ${target};`);
+
+  for (let index = 0; index < node.options.length; index++) {
+    const option = node.options[index];
+    const keyword = index === 0 ? "if" : "else if";
+
+    writer.line(`${keyword} (${emitSchemaGuard(option.schema, source)}) {`);
+    writer.indent(() => {
+      const optionTarget = state.nextVar(`${target}_${index}`);
+      emitCloneTo(writer, state, option.node, source, optionTarget);
+      writer.line(`${target} = ${optionTarget};`);
+    });
+    writer.line("}");
+  }
+}
+
+function emitIntersectionClone(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<CloneIRNode, { readonly kind: "intersection" }>,
+  source: string,
+  target: string
+): void {
+  const parts: string[] = [];
+
+  for (let index = 0; index < node.options.length; index++) {
+    const optionTarget = state.nextVar(`${target}_${index}`);
+    emitCloneTo(writer, state, node.options[index], source, optionTarget);
+    parts.push(optionTarget);
+  }
+
+  writer.line(`const ${target} = Object.assign({}, ${parts.join(", ")});`);
+}
+
+function emitDiscriminatedUnionClone(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<CloneIRNode, { readonly kind: "discriminatedUnion" }>,
+  source: string,
+  target: string
+): void {
+  const tag = emitPropertyAccess(source, node.discriminator);
+
+  writer.line(`let ${target};`);
+
+  for (let index = 0; index < node.options.length; index++) {
+    const option = node.options[index];
+    const value = literalDiscriminatorValue(option.schema, node.discriminator);
+
+    if (value === undefined) continue;
+
+    const keyword = index === 0 ? "if" : "else if";
+
+    writer.line(`${keyword} (${tag} === ${emitLiteral(value)}) {`);
+    writer.indent(() => {
+      const optionTarget = state.nextVar(`${target}_${index}`);
+      emitCloneTo(writer, state, option.node, source, optionTarget);
+      writer.line(`${target} = ${optionTarget};`);
+    });
+    writer.line("}");
+  }
 }

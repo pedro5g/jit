@@ -13,3 +13,7 @@ export function emitLiteral(value: IRLiteralValue): string {
       return String(value);
   }
 }
+
+export function emitObjectKey(key: string): string {
+  return Parse.parseKey(key);
+}

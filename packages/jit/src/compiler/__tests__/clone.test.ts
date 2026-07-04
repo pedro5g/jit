@@ -121,8 +121,7 @@ describe("JIT compiler clone", () => {
 
     expect(Compiler.emitCloneSource(schema)).toMatchInlineSnapshot(`
       "function clone(value) {
-        const out = { "id": value.id, "profile": { "name": value.profile.name } };
-        return out;
+        return { id: value.id, profile: { name: value.profile.name } };
       }"
     `);
   });
@@ -143,5 +142,66 @@ describe("JIT compiler clone", () => {
     expect(source).not.toContain(".map(");
     expect(source).not.toContain(".filter(");
     expect(source).not.toContain(".reduce(");
+  });
+
+  it("should clone primitive unions", () => {
+    const clone = Compiler.compileClone(JIT.union(JIT.number(), JIT.string()).schema);
+
+    expect(clone(1)).toBe(1);
+    expect(clone("jit")).toBe("jit");
+  });
+
+  it("should clone generic object unions with schema guards", () => {
+    const Cat = JIT.object({ kind: JIT.literal("cat"), profile: JIT.object({ lives: JIT.number() }) });
+    const Dog = JIT.object({ kind: JIT.literal("dog"), profile: JIT.object({ bark: JIT.boolean() }) });
+    const schema = JIT.union(Cat, Dog).schema;
+    const clone = Compiler.compileClone(schema);
+    const source = Compiler.emitCloneSource(schema);
+    const cat = { kind: "cat", profile: { lives: 9 } } as const;
+    const dog = { kind: "dog", profile: { bark: true } } as const;
+    const clonedCat = clone(cat);
+    const clonedDog = clone(dog);
+
+    expect(clonedCat).toEqual(cat);
+    expect(clonedCat).not.toBe(cat);
+    expect(clonedCat.profile).not.toBe(cat.profile);
+    expect(clonedDog).toEqual(dog);
+    expect(clonedDog).not.toBe(dog);
+    expect(clonedDog.profile).not.toBe(dog.profile);
+    expect(source).toContain('value.kind === "cat"');
+    expect(source).toContain('value.kind === "dog"');
+  });
+
+  it("should clone discriminated object unions", () => {
+    const Cat = JIT.object({ kind: JIT.literal("cat"), profile: JIT.object({ lives: JIT.number() }) });
+    const Dog = JIT.object({ kind: JIT.literal("dog"), profile: JIT.object({ bark: JIT.boolean() }) });
+    const schema = JIT.discriminatedUnion("kind", [Cat, Dog]).schema;
+    const clone = Compiler.compileClone(schema);
+    const cat = { kind: "cat", profile: { lives: 9 } } as const;
+    const dog = { kind: "dog", profile: { bark: true } } as const;
+    const clonedCat = clone(cat);
+    const clonedDog = clone(dog);
+
+    expect(clonedCat).toEqual(cat);
+    expect(clonedCat).not.toBe(cat);
+    expect(clonedCat.profile).not.toBe(cat.profile);
+    expect(clonedDog).toEqual(dog);
+    expect(clonedDog).not.toBe(dog);
+    expect(clonedDog.profile).not.toBe(dog.profile);
+  });
+
+  it("should clone object intersections by merging member clones", () => {
+    const schema = JIT.intersection(
+      JIT.object({ id: JIT.number(), left: JIT.object({ value: JIT.string() }) }),
+      JIT.object({ name: JIT.string(), right: JIT.object({ value: JIT.number() }) })
+    ).schema;
+    const clone = Compiler.compileClone(schema);
+    const input = { id: 1, name: "Ada", left: { value: "x" }, right: { value: 1 } };
+    const output = clone(input);
+
+    expect(output).toEqual(input);
+    expect(output).not.toBe(input);
+    expect(output.left).not.toBe(input.left);
+    expect(output.right).not.toBe(input.right);
   });
 });

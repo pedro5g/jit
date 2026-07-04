@@ -72,6 +72,8 @@ function hasCall(expr: IRExpr): boolean {
     case "sameValue":
     case "sameNumber":
       return hasCall(expr.left) || hasCall(expr.right);
+    case "schema_guard":
+      return hasCall(expr.value);
     case "load_prop":
       return hasCall(expr.base);
     case "load_index":
@@ -92,6 +94,8 @@ function exprKey(expr: IRExpr): string {
       return `${exprKey(expr.base)}.${expr.key}`;
     case "load_index":
       return `${exprKey(expr.base)}[${exprKey(expr.index)}]`;
+    case "schema_guard":
+      return `guard(${exprKey(expr.value)})`;
     default:
       return expr.kind;
   }

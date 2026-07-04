@@ -83,6 +83,13 @@ describe("JIT compiler", () => {
       }>();
     });
 
+    it("should keep NaN equal for root number schemas", () => {
+      const equal = Compiler.compileEqual(JIT.number().schema);
+
+      expect(equal(Number.NaN, Number.NaN)).toBe(true);
+      expect(equal(Number.NaN, 1)).toBe(false);
+    });
+
     it("should compile array equality with hoisted length and index loads", () => {
       const Users = JIT.array(
         JIT.object({
@@ -109,7 +116,7 @@ describe("JIT compiler", () => {
       const source = Compiler.emitEqualSource(Users);
 
       expect(source).toContain("const len = l.length;");
-      expect(source).toContain("for (let i = 0; i < len; i++)");
+      expect(source).toContain("for (let i = len; i-- !== 0;)");
       expect(source).toContain("const li = l[i];");
       expect(source).not.toContain("Object.keys");
     });
@@ -136,15 +143,13 @@ describe("JIT compiler", () => {
 
       expect(Compiler.emitEqualSource(schema)).toMatchInlineSnapshot(`
         "function equal(l, r) {
-          if (Object.is(l, r)) {
+          if (l === r) {
             return true;
           }
-          const l_id = l.id;
-          const r_id = r.id;
-          if (!((l_id === r_id || (l_id !== l_id && r_id !== r_id)))) {
+          if (l.id !== r.id && (l.id === l.id || r.id === r.id)) {
             return false;
           }
-          if (!((l.name === r.name))) {
+          if (l.name !== r.name) {
             return false;
           }
           return true;
@@ -163,7 +168,7 @@ describe("JIT compiler", () => {
 
       expect(source).toContain("const l_profile = l.profile;");
       expect(source).toContain("const r_profile = r.profile;");
-      expect(source).toContain("if (!((l_profile.name === r_profile.name)))");
+      expect(source).toContain("if (l_profile.name !== r_profile.name)");
       expect(source).not.toContain("Object.keys");
       expect(source).not.toContain(".map(");
     });
@@ -243,6 +248,59 @@ describe("JIT compiler", () => {
       expect(source).toContain("__hash(l)");
       expect(source).toContain("__hash(r)");
       expect(source).toContain("return false;");
+    });
+
+    it("should compile primitive unions", () => {
+      const schema = JIT.union(JIT.number(), JIT.string()).schema;
+      const equal = Compiler.compileEqual(schema);
+      const source = Compiler.emitEqualSource(schema);
+
+      expect(equal(1, 1)).toBe(true);
+      expect(equal(Number.NaN, Number.NaN)).toBe(true);
+      expect(equal("jit", "jit")).toBe(true);
+      expect(equal(1, "1")).toBe(false);
+      expect(equal("jit", "codex")).toBe(false);
+      expect(source).toContain("l !== r && (l === l || r === r)");
+      expect(source).not.toContain("typeof l");
+    });
+
+    it("should compile generic object unions with schema guards", () => {
+      const Cat = JIT.object({ kind: JIT.literal("cat"), lives: JIT.number() });
+      const Dog = JIT.object({ kind: JIT.literal("dog"), bark: JIT.boolean() });
+      const schema = JIT.union(Cat, Dog).schema;
+      const equal = Compiler.compileEqual(schema);
+      const source = Compiler.emitEqualSource(schema);
+
+      expect(equal({ kind: "cat", lives: 9 }, { kind: "cat", lives: 9 })).toBe(true);
+      expect(equal({ kind: "cat", lives: 9 }, { kind: "dog", bark: true })).toBe(false);
+      expect(equal({ kind: "dog", bark: true }, { kind: "dog", bark: true })).toBe(true);
+      expect(source).toContain('l.kind === "cat"');
+      expect(source).toContain('r.kind === "cat"');
+      expect(source).toContain('l.kind === "dog"');
+    });
+
+    it("should compile discriminated object unions", () => {
+      const Cat = JIT.object({ kind: JIT.literal("cat"), lives: JIT.number() });
+      const Dog = JIT.object({ kind: JIT.literal("dog"), bark: JIT.boolean() });
+      const schema = JIT.discriminatedUnion("kind", [Cat, Dog]).schema;
+      const equal = Compiler.compileEqual(schema);
+      const source = Compiler.emitEqualSource(schema);
+
+      expect(equal({ kind: "cat", lives: 9 }, { kind: "cat", lives: 9 })).toBe(true);
+      expect(equal({ kind: "cat", lives: 9 }, { kind: "cat", lives: 8 })).toBe(false);
+      expect(equal({ kind: "cat", lives: 9 }, { kind: "dog", bark: true })).toBe(false);
+      expect(equal({ kind: "dog", bark: true }, { kind: "dog", bark: true })).toBe(true);
+      expect(source).toContain('l.kind === "cat"');
+      expect(source).toContain('l.kind === "dog"');
+    });
+
+    it("should compile intersections by comparing every member", () => {
+      const schema = JIT.intersection(JIT.object({ id: JIT.number() }), JIT.object({ name: JIT.string() })).schema;
+      const equal = Compiler.compileEqual(schema);
+
+      expect(equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
+      expect(equal({ id: 1, name: "Ada" }, { id: 2, name: "Ada" })).toBe(false);
+      expect(equal({ id: 1, name: "Ada" }, { id: 1, name: "Grace" })).toBe(false);
     });
   });
 });

@@ -72,6 +72,8 @@ function isPureExpr(expr: IRExpr): boolean {
     case "sameValue":
     case "sameNumber":
       return isPureExpr(expr.left) && isPureExpr(expr.right);
+    case "schema_guard":
+      return isPureExpr(expr.value);
     case "load_prop":
       return isPureExpr(expr.base);
     case "load_index":
@@ -99,6 +101,8 @@ function exprCost(expr: IRExpr): number {
     case "sameValue":
     case "sameNumber":
       return 1 + exprCost(expr.left) + exprCost(expr.right);
+    case "schema_guard":
+      return 10 + exprCost(expr.value);
     case "call":
       return 100;
   }

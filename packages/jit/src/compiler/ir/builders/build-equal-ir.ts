@@ -1,5 +1,7 @@
 import * as ATS from "../../../core/ats/index.js";
 import { resolveWrappers } from "../../resolvers/resolve-wrappers.js";
+import { isPrimitiveLikeSchema } from "../../schema-nodes.js";
+import { literalDiscriminatorValue } from "../../source/guard.js";
 import { type EqualStrategy, resolveEqualStrategy } from "../../strategy/resolve-strategy.js";
 import {
   call,
@@ -14,6 +16,7 @@ import {
   notStrictEqual,
   sameNumber,
   sameValue,
+  schemaGuard,
   strictEqual,
 } from "../ir.js";
 import { Scope } from "../scope.js";
@@ -28,7 +31,7 @@ export function buildEqualIR(
   const left = irVar("l");
   const right = irVar("r");
   const body: IRNode[] = [
-    { kind: "if", test: sameValue(left, right), then: [{ kind: "return", value: literal(true) }] },
+    { kind: "if", test: strictEqual(left, right), then: [{ kind: "return", value: literal(true) }] },
   ];
 
   if (strategy.hash.type === "hash-short-circuit") {
@@ -97,6 +100,15 @@ function appendSchemaCompare(
       return;
     case ATS.TypeName.object:
       appendObjectCompare(body, base, left, right, scope);
+      return;
+    case ATS.TypeName.union:
+      appendUnionCompare(body, base, left, right, scope, strategy);
+      return;
+    case ATS.TypeName.intersection:
+      appendIntersectionCompare(body, base, left, right, scope, strategy);
+      return;
+    case ATS.TypeName.discriminatedUnion:
+      appendDiscriminatedUnionCompare(body, base, left, right, scope, strategy);
       return;
     default:
       throw new Error(`[JIT] Unimplemented compiler equal IR for type: ${base.type}`);
@@ -207,19 +219,116 @@ function appendObjectCompare(body: IRNode[], schema: EqualSchema, left: IRExpr, 
   const props = schema.def.props as Record<string, EqualSchema>;
 
   for (const key of Object.keys(props)) {
-    const leftValue = scope.createVar(`l_${key}`);
-    const rightValue = scope.createVar(`r_${key}`);
+    const prop = props[key];
+    const leftProp = loadProp(left, key);
+    const rightProp = loadProp(right, key);
+    let leftValue = leftProp;
+    let rightValue = rightProp;
 
-    body.push(
-      { kind: "assign", target: leftValue, expr: loadProp(left, key) },
-      { kind: "assign", target: rightValue, expr: loadProp(right, key) }
-    );
-    appendSchemaCompare(body, props[key], leftValue, rightValue, scope, {
+    if (shouldHoistObjectProp(prop)) {
+      const leftVar = scope.createVar(`l_${key}`);
+      const rightVar = scope.createVar(`r_${key}`);
+
+      body.push(
+        { kind: "assign", target: leftVar, expr: leftProp },
+        { kind: "assign", target: rightVar, expr: rightProp }
+      );
+      leftValue = leftVar;
+      rightValue = rightVar;
+    }
+
+    appendSchemaCompare(body, prop, leftValue, rightValue, scope, {
       type: "equal",
       array: { type: "loop" },
       hash: { type: "none" },
     });
   }
+}
+
+function shouldHoistObjectProp(schema: EqualSchema): boolean {
+  const resolved = resolveWrappers(schema).base;
+
+  return resolved.type === ATS.TypeName.object || resolved.type === ATS.TypeName.array;
+}
+
+function appendUnionCompare(
+  body: IRNode[],
+  schema: EqualSchema,
+  left: IRExpr,
+  right: IRExpr,
+  scope: Scope,
+  strategy: EqualStrategy
+): void {
+  const options = schema.def.options as EqualSchema[];
+  const branches: IRNode[] = [];
+
+  if (options.every(isAtomicEqualSchema)) {
+    appendCompareOrFail(body, sameNumber(left, right));
+    return;
+  }
+
+  for (const option of options) {
+    const then: IRNode[] = [
+      { kind: "if", test: not(schemaGuard(option, right)), then: [{ kind: "return", value: literal(false) }] },
+    ];
+
+    appendSchemaCompare(then, option, left, right, scope, strategy);
+    then.push({ kind: "return", value: literal(true) });
+    branches.push({ kind: "if", test: schemaGuard(option, left), then });
+  }
+
+  body.push(...branches, { kind: "return", value: literal(false) });
+}
+
+function isAtomicEqualSchema(schema: EqualSchema): boolean {
+  const base = resolveWrappers(schema).base as EqualSchema;
+
+  return isPrimitiveLikeSchema(base) && base.type !== ATS.TypeName.regex && base.type !== ATS.TypeName.instanceof;
+}
+
+function appendIntersectionCompare(
+  body: IRNode[],
+  schema: EqualSchema,
+  left: IRExpr,
+  right: IRExpr,
+  scope: Scope,
+  strategy: EqualStrategy
+): void {
+  const options = schema.def.options as EqualSchema[];
+
+  for (const option of options) {
+    appendSchemaCompare(body, option, left, right, scope, strategy);
+  }
+}
+
+function appendDiscriminatedUnionCompare(
+  body: IRNode[],
+  schema: EqualSchema,
+  left: IRExpr,
+  right: IRExpr,
+  scope: Scope,
+  strategy: EqualStrategy
+): void {
+  const discriminator = schema.def.discriminator as string;
+  const leftTag = loadProp(left, discriminator);
+  const rightTag = loadProp(right, discriminator);
+  const options = schema.def.options as EqualSchema[];
+
+  for (const option of options) {
+    const tag = literalDiscriminatorValue(option, discriminator);
+
+    if (tag === undefined) continue;
+
+    const then: IRNode[] = [
+      { kind: "if", test: notStrictEqual(rightTag, literal(tag)), then: [{ kind: "return", value: literal(false) }] },
+    ];
+
+    appendSchemaCompare(then, option, left, right, scope, strategy);
+    then.push({ kind: "return", value: literal(true) });
+    body.push({ kind: "if", test: strictEqual(leftTag, literal(tag)), then });
+  }
+
+  body.push({ kind: "return", value: literal(false) });
 }
 
 function orCompare(left: IRExpr, right: IRExpr): IRExpr {

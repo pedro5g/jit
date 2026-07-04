@@ -1,3 +1,5 @@
+import type * as ATS from "../../core/ats/index.js";
+
 export interface IRVar {
   readonly kind: "var";
   readonly name: string;
@@ -17,6 +19,7 @@ export type IRExpr =
     }
   | { readonly kind: "sameValue"; readonly left: IRExpr; readonly right: IRExpr }
   | { readonly kind: "sameNumber"; readonly left: IRExpr; readonly right: IRExpr }
+  | { readonly kind: "schema_guard"; readonly schema: ATS.AnyTypeSchema; readonly value: IRExpr }
   | { readonly kind: "load_prop"; readonly base: IRExpr; readonly key: string }
   | { readonly kind: "load_index"; readonly base: IRExpr; readonly index: IRExpr }
   | { readonly kind: "call"; readonly callee: IRExpr; readonly args: readonly IRExpr[] };
@@ -102,6 +105,10 @@ export function sameValue(left: IRExpr, right: IRExpr): IRExpr {
 
 export function sameNumber(left: IRExpr, right: IRExpr): IRExpr {
   return { kind: "sameNumber", left, right };
+}
+
+export function schemaGuard(schema: ATS.AnyTypeSchema, value: IRExpr): IRExpr {
+  return { kind: "schema_guard", schema, value };
 }
 
 export function loadProp(base: IRExpr, key: string): IRExpr {

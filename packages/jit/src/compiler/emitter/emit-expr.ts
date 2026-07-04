@@ -1,5 +1,6 @@
 import type { IRExpr } from "../ir/ir.js";
 import { emitIndexAccess, emitPropertyAccess } from "../source/access.js";
+import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
 
 export function emitExpr(expr: IRExpr): string {
@@ -22,6 +23,8 @@ export function emitExpr(expr: IRExpr): string {
       const right = emitExpr(expr.right);
       return `(${left} === ${right} || (${left} !== ${left} && ${right} !== ${right}))`;
     }
+    case "schema_guard":
+      return emitSchemaGuard(expr.schema, emitExpr(expr.value));
     case "load_prop":
       return emitPropertyAccess(emitExpr(expr.base), expr.key);
     case "load_index":
