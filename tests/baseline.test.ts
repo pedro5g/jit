@@ -1,7 +1,21 @@
+import * as jit from "jit";
 import { describe, expect, it } from "vitest";
 
-describe("vitest baseline sanity check", () => {
-  it("should confirm the test runner is available and working", () => {
-    expect(true).toBe(true);
+describe("public surface smoke test", () => {
+  it("exposes every public namespace", () => {
+    expect(Object.keys(jit).sort()).toEqual(
+      ["AST", "Builder", "Compiler", "Errors", "JIT", "PipelineAST", "Transform"].sort()
+    );
+  });
+
+  it("compiles and runs a minimal end-to-end equality check", () => {
+    const User = jit.JIT.object({
+      id: jit.JIT.number(),
+      name: jit.JIT.string(),
+    });
+    const equal = jit.JIT.compileEqual(User.schema);
+
+    expect(equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
+    expect(equal({ id: 1, name: "Ada" }, { id: 2, name: "Ada" })).toBe(false);
   });
 });
