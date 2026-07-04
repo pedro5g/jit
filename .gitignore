@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Internal agent docs and bench results (never pushed)
+docs/internal/
+bench/results/

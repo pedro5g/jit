@@ -4,6 +4,8 @@ This repository contains **JIT**, a TypeScript library for describing data struc
 
 Read [docs/architecture.md](docs/architecture.md) before substantial architecture or migration work. It contains the full project context, target architecture, migration plan, performance principles, and definition of done for the initial typed operator-chain work.
 
+If `docs/internal/STATUS.md` exists, read it first — it is a local-only (gitignored) snapshot of current project state and pending work.
+
 ## Workflow
 
 - Use `pnpm`.
