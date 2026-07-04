@@ -1,6 +1,7 @@
 import type {
   AnyTypeSchema,
   BrandSchema,
+  CoerceSchema,
   DefaultSchema,
   InferSchema,
   MergeShape,
@@ -14,8 +15,11 @@ import type {
   PipeSchema,
   PromiseSchema,
   ReadonlySchema,
+  RefineSchema,
   RequiredShape,
   SchemaShape,
+  TransformSchema,
+  TransformSpec,
 } from "../ats/index.js";
 import type { EntityHint, HashStrategy, OrderDirection, PropertySelector } from "../hints/index.js";
 import type { SchemaInput } from "./unwrap-schema.js";
@@ -30,6 +34,8 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   default(defaultValue: InferSchema<TSchema> | (() => InferSchema<TSchema>)): Builder<DefaultSchema<TSchema>>;
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
   pipe<TOutput>(transform: (value: InferSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
+  refine(predicate: (value: InferSchema<TSchema>) => boolean): Builder<RefineSchema<TSchema>>;
+  coerce(coercer: (value: unknown) => InferSchema<TSchema>): Builder<CoerceSchema<TSchema>>;
   entity(options: EntityHint<HintTarget<InferSchema<TSchema>>>): Builder<TSchema>;
   keyed(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
   groupBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
@@ -51,6 +57,9 @@ type HintTarget<T> = T extends readonly (infer TElement)[] ? TElement : T;
 export interface ObjectOperators<TShape extends SchemaShape> {
   partial(): ObjectBuilder<PartialShape<TShape>>;
   required(): ObjectBuilder<RequiredShape<TShape>>;
+  transform<const TSpec extends TransformSpec<InferSchema<ObjectSchema<TShape>>>>(
+    transforms: TSpec
+  ): Builder<TransformSchema<ObjectSchema<TShape>, TSpec>>;
   pick<const TKeys extends readonly (keyof TShape)[]>(keys: TKeys): ObjectBuilder<PickShape<TShape, TKeys[number]>>;
   omit<const TKeys extends readonly (keyof TShape)[]>(keys: TKeys): ObjectBuilder<OmitShape<TShape, TKeys[number]>>;
   extend<const TExtension extends Record<string, SchemaInput>>(

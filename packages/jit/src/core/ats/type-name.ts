@@ -33,6 +33,7 @@ export const TypeName = {
   default: "default",
   brand: "brand",
   lazy: "lazy",
+  transform: "transform",
   pipe: "pipe",
   refine: "refine",
   coerce: "coerce",

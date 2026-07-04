@@ -307,6 +307,24 @@ describe("JIT AST builders", () => {
       expect(factory_piped.def.transform).toBe(transformer);
       expectTypeOf(factory_piped._type).toEqualTypeOf<number>();
 
+      const transformed = JIT.object({ id: JIT.number(), name: JIT.string() }).transform({
+        name: (value) => value.toUpperCase(),
+      }).schema;
+      expect(transformed.type).toBe(AST.TypeName.transform);
+      expect(transformed.def.innerType.type).toBe(AST.TypeName.object);
+      expectTypeOf(transformed._type).toEqualTypeOf<{
+        readonly id: number;
+        readonly name: string;
+      }>();
+
+      const refined = JIT.refine(JIT.string(), (value) => value.length > 0).schema;
+      expect(refined.type).toBe(AST.TypeName.refine);
+      expectTypeOf(refined._type).toEqualTypeOf<string>();
+
+      const coerced = JIT.coerce(JIT.number(), (value) => Number(value)).schema;
+      expect(coerced.type).toBe(AST.TypeName.coerce);
+      expectTypeOf(coerced._type).toEqualTypeOf<number>();
+
       const lazyString = JIT.lazy(() => JIT.string()).schema;
       expect(lazyString.type).toBe(AST.TypeName.lazy);
       expect(lazyString.def.getter().type).toBe(AST.TypeName.string);

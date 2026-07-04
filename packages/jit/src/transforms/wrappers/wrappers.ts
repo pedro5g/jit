@@ -1,5 +1,6 @@
 import type {
   BrandSchema,
+  CoerceSchema,
   DefaultSchema,
   InferSchema,
   NullableSchema,
@@ -8,6 +9,9 @@ import type {
   PipeSchema,
   PromiseSchema,
   ReadonlySchema,
+  RefineSchema,
+  TransformSchema,
+  TransformSpec,
 } from "../../core/ats/index.js";
 import { type AnyTypeSchema, createSchema, TypeName } from "../../core/ats/index.js";
 
@@ -100,6 +104,48 @@ export function pipe<TSchema extends AnyTypeSchema, TOutput>(
     {
       innerType: schema,
       transform,
+    },
+    schema.annotations
+  );
+}
+
+export function transform<TSchema extends AnyTypeSchema, const TSpec extends TransformSpec<InferSchema<TSchema>>>(
+  schema: TSchema,
+  transforms: TSpec
+): TransformSchema<TSchema, TSpec> {
+  return /* @__PURE__ */ createSchema(
+    TypeName.transform,
+    {
+      innerType: schema,
+      transforms,
+    },
+    schema.annotations
+  );
+}
+
+export function refine<TSchema extends AnyTypeSchema>(
+  schema: TSchema,
+  predicate: (value: InferSchema<TSchema>) => boolean
+): RefineSchema<TSchema> {
+  return /* @__PURE__ */ createSchema(
+    TypeName.refine,
+    {
+      innerType: schema,
+      predicate,
+    },
+    schema.annotations
+  );
+}
+
+export function coerce<TSchema extends AnyTypeSchema>(
+  schema: TSchema,
+  coercer: (value: unknown) => InferSchema<TSchema>
+): CoerceSchema<TSchema> {
+  return /* @__PURE__ */ createSchema(
+    TypeName.coerce,
+    {
+      innerType: schema,
+      coercer,
     },
     schema.annotations
   );

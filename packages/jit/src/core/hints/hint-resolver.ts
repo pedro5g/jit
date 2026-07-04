@@ -33,6 +33,7 @@ function innerSchema(schema: AnyTypeSchema): AnyTypeSchema | undefined {
     schema.type === "promise" ||
     schema.type === "default" ||
     schema.type === "brand" ||
+    schema.type === "transform" ||
     schema.type === "pipe" ||
     schema.type === "refine" ||
     schema.type === "coerce"

@@ -216,6 +216,7 @@ export type AnyWrapperSchema =
   | PromiseSchema
   | DefaultSchema
   | BrandSchema
+  | TransformSchema
   | PipeSchema
   | LazySchema;
 
@@ -271,6 +272,28 @@ export type BrandSchema<TInner extends AnyTypeSchema = AnyTypeSchema, TBrand ext
   "brand",
   BrandDef<TInner, TBrand>
 >;
+
+export type TransformSpec<TInput> = {
+  readonly [TKey in keyof TInput]?: (value: TInput[TKey], source: TInput) => unknown;
+};
+
+export type TransformOutput<TInput, TSpec extends TransformSpec<TInput>> = {
+  readonly [TKey in keyof TInput]: TKey extends keyof TSpec
+    ? TSpec[TKey] extends (...args: never[]) => infer TOutput
+      ? TOutput
+      : TInput[TKey]
+    : TInput[TKey];
+};
+
+export interface TransformDef<TInner extends AnyTypeSchema = AnyTypeSchema, TSpec = unknown>
+  extends InnerTypeDef<TInner> {
+  readonly transforms: TSpec;
+}
+
+export type TransformSchema<
+  TInner extends AnyTypeSchema = AnyTypeSchema,
+  TSpec extends TransformSpec<InferSchema<TInner>> = TransformSpec<InferSchema<TInner>>,
+> = BaseSchema<TransformOutput<InferSchema<TInner>, TSpec>, "transform", TransformDef<TInner, TSpec>>;
 
 export interface PipeDef<TInner extends AnyTypeSchema = AnyTypeSchema, TOutput = unknown> extends InnerTypeDef<TInner> {
   readonly transform: (value: InferSchema<TInner>) => TOutput;

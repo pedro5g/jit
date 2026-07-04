@@ -1,6 +1,7 @@
 import type {
   AnyTypeSchema,
   BrandSchema,
+  CoerceSchema,
   DefaultSchema,
   InferSchema,
   NullableSchema,
@@ -9,6 +10,9 @@ import type {
   PipeSchema,
   PromiseSchema,
   ReadonlySchema,
+  RefineSchema,
+  TransformSchema,
+  TransformSpec,
 } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
@@ -61,4 +65,25 @@ export function pipe<TSchema extends AnyTypeSchema, TOutput>(
   transform: (value: InferSchema<TSchema>) => TOutput
 ): Builder<PipeSchema<TSchema, TOutput>> {
   return /* @__PURE__ */ createBuilder(Transform.pipe(unwrapSchema(schema), transform));
+}
+
+export function transform<TSchema extends AnyTypeSchema, const TSpec extends TransformSpec<InferSchema<TSchema>>>(
+  schema: SchemaInput<TSchema>,
+  transforms: TSpec
+): Builder<TransformSchema<TSchema, TSpec>> {
+  return /* @__PURE__ */ createBuilder(Transform.transform(unwrapSchema(schema), transforms));
+}
+
+export function refine<TSchema extends AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  predicate: (value: InferSchema<TSchema>) => boolean
+): Builder<RefineSchema<TSchema>> {
+  return /* @__PURE__ */ createBuilder(Transform.refine(unwrapSchema(schema), predicate));
+}
+
+export function coerce<TSchema extends AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  coercer: (value: unknown) => InferSchema<TSchema>
+): Builder<CoerceSchema<TSchema>> {
+  return /* @__PURE__ */ createBuilder(Transform.coerce(unwrapSchema(schema), coercer));
 }

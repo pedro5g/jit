@@ -1,0 +1,173 @@
+import { compileUpdate, type UpdatePatch } from "../compiler/update.js";
+import type { AnyTypeSchema, InferSchema, InnerTypeDef, LazyDef } from "../core/ats/index.js";
+import { TypeName } from "../core/ats/index.js";
+import type { SchemaInput } from "../core/builder/index.js";
+import { unwrapSchema } from "../core/builder/index.js";
+import { JITError } from "../errors/index.js";
+
+export type Draft<T> = T extends readonly (infer TItem)[]
+  ? Draft<TItem>[]
+  : T extends Date
+    ? T
+    : T extends Set<unknown>
+      ? T
+      : T extends Map<unknown, unknown>
+        ? T
+        : T extends object
+          ? { -readonly [TKey in keyof T]: Draft<T[TKey]> }
+          : T;
+
+export type UpdateRecipe<T> = (draft: Draft<T>) => void;
+export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
+export type RuntimeUpdate<T> = (value: T, input: UpdateInput<T>) => T;
+
+export function update<TSchema extends AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): RuntimeUpdate<InferSchema<TSchema>>;
+export function update<TSchema extends AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  value: InferSchema<TSchema>,
+  input: UpdateInput<InferSchema<TSchema>>
+): InferSchema<TSchema>;
+export function update<TSchema extends AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: [] | [value: InferSchema<TSchema>, input: UpdateInput<InferSchema<TSchema>>]
+): RuntimeUpdate<InferSchema<TSchema>> | InferSchema<TSchema> {
+  const unwrapped = unwrapSchema(schema);
+
+  assertUpdateable(unwrapped);
+
+  const compiled = compileUpdate(unwrapped);
+  const run = (current: InferSchema<TSchema>, updateInput: UpdateInput<InferSchema<TSchema>>) => {
+    const patch =
+      typeof updateInput === "function"
+        ? captureDraftPatch(updateInput as UpdateRecipe<InferSchema<TSchema>>)
+        : updateInput;
+
+    return compiled(current, patch);
+  };
+
+  if (args.length === 0) return run;
+
+  return run(args[0], args[1]);
+}
+
+function captureDraftPatch<T>(recipe: UpdateRecipe<T>): UpdatePatch<T> {
+  const writes: Array<{ readonly path: readonly PropertyKey[]; readonly value: unknown }> = [];
+  const proxies = new Map<string, unknown>();
+
+  const createDraft = (path: readonly PropertyKey[]): unknown => {
+    const cacheKey = path.map(String).join("\u0000");
+    const cached = proxies.get(cacheKey);
+
+    if (cached) return cached;
+
+    const draft = new Proxy(
+      {},
+      {
+        get(_target, key) {
+          if (typeof key === "symbol") return undefined;
+          return createDraft([...path, key]);
+        },
+        set(_target, key, value) {
+          if (typeof key === "symbol") {
+            throw new JITError("INVALID_UPDATE", "Draft updates do not support symbol keys");
+          }
+
+          writes[writes.length] = { path: [...path, key], value };
+          return true;
+        },
+      }
+    );
+
+    proxies.set(cacheKey, draft);
+    return draft;
+  };
+
+  recipe(createDraft([]) as Draft<T>);
+
+  return materializePatch(writes) as UpdatePatch<T>;
+}
+
+function materializePatch(writes: Array<{ readonly path: readonly PropertyKey[]; readonly value: unknown }>): unknown {
+  const root: Record<string, unknown> = {};
+
+  for (const write of writes) {
+    let current: Record<string, unknown> | unknown[] = root;
+
+    for (let index = 0; index < write.path.length; index++) {
+      const segment = write.path[index];
+      const key = normalizeKey(segment);
+      const isLast = index === write.path.length - 1;
+
+      if (isLast) {
+        current[key as never] = write.value as never;
+        continue;
+      }
+
+      const nextSegment = write.path[index + 1];
+      const existing = current[key as never] as Record<string, unknown> | unknown[] | undefined;
+
+      if (existing === undefined) {
+        const next = isArrayKey(nextSegment) ? [] : {};
+        current[key as never] = next as never;
+        current = next;
+      } else {
+        current = existing;
+      }
+    }
+  }
+
+  return root;
+}
+
+function normalizeKey(key: PropertyKey): string | number {
+  if (typeof key === "number") return key;
+  if (typeof key === "string" && key !== "" && String(Number(key)) === key) return Number(key);
+  return String(key);
+}
+
+function isArrayKey(key: PropertyKey | undefined): boolean {
+  return typeof key === "number" || (typeof key === "string" && key !== "" && String(Number(key)) === key);
+}
+
+function assertUpdateable(schema: AnyTypeSchema): void {
+  if (schema.type === TypeName.readonly) {
+    throw new JITError("READONLY_FIELD", "Cannot compile updates for readonly schemas");
+  }
+
+  if (schema.type === TypeName.lazy) {
+    assertUpdateable((schema.def as LazyDef<AnyTypeSchema>).getter());
+    return;
+  }
+
+  if (hasInnerType(schema)) {
+    assertUpdateable((schema.def as InnerTypeDef<AnyTypeSchema>).innerType);
+    return;
+  }
+
+  if (schema.type === TypeName.object) {
+    const objectSchema = schema as import("../core/ats/index.js").ObjectSchema<
+      import("../core/ats/index.js").SchemaShape
+    >;
+
+    for (const child of Object.values(objectSchema.def.props)) {
+      assertUpdateable(child);
+    }
+  }
+}
+
+function hasInnerType(schema: AnyTypeSchema): boolean {
+  return (
+    schema.type === TypeName.optional ||
+    schema.type === TypeName.nullable ||
+    schema.type === TypeName.nullish ||
+    schema.type === TypeName.default ||
+    schema.type === TypeName.brand ||
+    schema.type === TypeName.transform ||
+    schema.type === TypeName.pipe ||
+    schema.type === TypeName.refine ||
+    schema.type === TypeName.coerce ||
+    schema.type === TypeName.promise
+  );
+}

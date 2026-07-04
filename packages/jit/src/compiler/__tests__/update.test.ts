@@ -200,6 +200,37 @@ describe("JIT compiler update", () => {
     expect(update(input, { id: 2 })).toEqual({ id: 2 });
   });
 
+  it("should expose JIT.update with patch and draft recipe modes", () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      profile: JIT.object({
+        name: JIT.string(),
+        age: JIT.number(),
+      }),
+    });
+    const update = JIT.update(User);
+    const input = { id: 1, profile: { name: "Ada", age: 37 } };
+
+    expect(update(input, { profile: { name: "Ada" } })).toBe(input);
+
+    const patched = update(input, { profile: { age: 38 } });
+    const drafted = update(input, (draft) => {
+      draft.profile.age = 38;
+    });
+
+    expect(patched).toEqual({ id: 1, profile: { name: "Ada", age: 38 } });
+    expect(drafted).toEqual(patched);
+    expect(drafted).not.toBe(input);
+    expect(drafted.profile).not.toBe(input.profile);
+  });
+
+  it("should reject updates for readonly schemas", () => {
+    const User = JIT.object({ id: JIT.number() }).readonly().schema;
+
+    expect(() => Compiler.compileUpdate(User)).toThrow("readonly");
+    expect(() => JIT.update(User)).toThrow("readonly");
+  });
+
   it("should keep generated array source allocation-conscious", () => {
     const source = Compiler.emitUpdateSource(JIT.array(JIT.object({ id: JIT.number() })).schema);
 

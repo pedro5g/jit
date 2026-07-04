@@ -120,6 +120,7 @@ function emitHashInto(lines: string[], schema: HashSchema, value: string, target
     case "readonly":
     case "default":
     case "brand":
+    case "transform":
     case "pipe":
     case "coerce":
     case "refine":

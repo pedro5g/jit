@@ -37,6 +37,7 @@ export function resolveWrappers(schema: ATS.AnyTypeSchema): ResolvedWrappers {
     if (
       current.type === ATS.TypeName.default ||
       current.type === ATS.TypeName.brand ||
+      current.type === ATS.TypeName.transform ||
       current.type === ATS.TypeName.pipe ||
       current.type === ATS.TypeName.readonly ||
       current.type === ATS.TypeName.refine ||

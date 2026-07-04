@@ -84,9 +84,37 @@ describe("Builder chain", () => {
       const assertInvalidNumberBuilder = (builder: ReturnType<typeof JIT.number>) => {
         // @ts-expect-error number builders do not expose object operators
         builder.partial();
+        // @ts-expect-error number builders do not expose object field transforms
+        builder.transform({});
       };
 
       expect(assertInvalidNumberBuilder).toBeTypeOf("function");
+    });
+
+    it("wraps transform, refine, and coerce operators without mutating inputs", () => {
+      const User = JIT.object({
+        id: JIT.number(),
+        name: JIT.string(),
+      });
+      const TransformedUser = User.transform({
+        name: (value) => value.toUpperCase(),
+      });
+      const RefinedName = JIT.string().refine((value) => value.length > 0);
+      const CoercedNumber = JIT.number().coerce((value) => Number(value));
+
+      expect(TransformedUser.schema.type).toBe(AST.TypeName.transform);
+      expect(TransformedUser.schema.def.innerType).toBe(User.schema);
+      expect(User.schema.type).toBe(AST.TypeName.object);
+      expect(RefinedName.schema.type).toBe(AST.TypeName.refine);
+      expect(CoercedNumber.schema.type).toBe(AST.TypeName.coerce);
+      expect(Object.keys(TransformedUser.schema)).toEqual(["type", "_type", "def", "annotations"]);
+
+      expectTypeOf<AST.Infer<typeof TransformedUser>>().toEqualTypeOf<{
+        readonly id: number;
+        readonly name: string;
+      }>();
+      expectTypeOf<AST.Infer<typeof RefinedName>>().toEqualTypeOf<string>();
+      expectTypeOf<AST.Infer<typeof CoercedNumber>>().toEqualTypeOf<number>();
     });
   });
 });

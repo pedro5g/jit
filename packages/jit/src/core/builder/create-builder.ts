@@ -41,6 +41,14 @@ const baseBuilderPrototype = {
     return createBuilder(Transform.pipe(this.schema, transform));
   },
 
+  refine(this: RuntimeBuilder, predicate: (value: unknown) => boolean): AnyBuilder {
+    return createBuilder(Transform.refine(this.schema, predicate));
+  },
+
+  coerce(this: RuntimeBuilder, coercer: (value: unknown) => unknown): AnyBuilder {
+    return createBuilder(Transform.coerce(this.schema, coercer));
+  },
+
   entity(this: RuntimeBuilder, options: EntityHint<unknown>): AnyBuilder {
     return createBuilder(
       attachHint(this.schema, {
@@ -170,6 +178,13 @@ const objectBuilderPrototype = {
 
   required(this: RuntimeBuilder): ObjectBuilder<SchemaShape> {
     return createBuilder(Transform.required(this.schema as ObjectSchema<SchemaShape>));
+  },
+
+  transform(
+    this: RuntimeBuilder,
+    transforms: Record<string, (value: unknown, source: unknown) => unknown>
+  ): AnyBuilder {
+    return createBuilder(Transform.transform(this.schema as ObjectSchema<SchemaShape>, transforms));
   },
 
   pick(this: RuntimeBuilder, keys: readonly string[]): ObjectBuilder<SchemaShape> {

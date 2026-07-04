@@ -28,9 +28,14 @@ export const SameValue: <T>(l: T, r: T) => boolean = globalThis.Object.is;
 
 type T = null | undefined | symbol | boolean | number | bigint | string | readonly unknown[] | { [x: string]: unknown };
 
-export { deepEquals as deep };
+export { deepEquals as deep, deepEquals as deepEqual };
 
-/** @private  */
+/**
+ * Deeply compares plain JavaScript values.
+ *
+ * This is the generic runtime fallback. Prefer `JIT.equal(schema)` when a schema
+ * is available, because schema-aware equality is compiled into specialized code.
+ */
 export function deepEquals<T>(x: T, y: T): boolean;
 export function deepEquals(x: T, y: T): boolean;
 export function deepEquals(x: T, y: T): boolean {

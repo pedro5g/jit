@@ -72,6 +72,7 @@ export function buildSchemaNode<TNode>(
       return { kind: "guard", optional: true, nullable: true, inner: buildNode(innerType(schema)) };
     case ATS.TypeName.default:
     case ATS.TypeName.brand:
+    case ATS.TypeName.transform:
     case ATS.TypeName.pipe:
     case ATS.TypeName.readonly:
     case ATS.TypeName.refine:
