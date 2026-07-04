@@ -2,7 +2,8 @@ import { zx } from "@traversable/zod";
 import fc from "fast-check";
 import { JIT } from "jit";
 import { z } from "zod";
-import { registerEqualScenario } from "./shared.js";
+import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
+import { registerScenario } from "../shared/scenario.js";
 
 const GeneratedUser = JIT.object({
   id: JIT.number(),
@@ -42,6 +43,8 @@ const generatedUser = fc.record({
   }),
 });
 
+// Fixed seed keeps the sampled data identical across runs so results stay
+// comparable between benchmark sessions.
 const left = fc.sample(fc.array(generatedUser, { minLength: 128, maxLength: 128 }), {
   numRuns: 1,
   seed: 20260704,
@@ -59,19 +62,27 @@ const right = left.map((user) => ({
 const earlyFail = right.map((user, index) => (index === 0 ? { ...user, id: user.id + 1 } : user));
 
 export function registerGeneratedObjects(): void {
-  registerEqualScenario({
+  registerScenario({
+    op: "equal",
     name: "fast-check generated users[128]",
-    left,
-    right,
-    jitEqual: equal,
-    extra: [{ name: "traversable/zod deepEqual", equal: traversableEqual }],
+    args: [left, right],
+    jit: equal,
+    competitors: [
+      { name: "fast-deep-equal", fn: fastEqual },
+      { name: "lodash.isEqual", fn: lodashIsEqual },
+      { name: "traversable/zod deepEqual", fn: traversableEqual },
+    ],
   });
 
-  registerEqualScenario({
+  registerScenario({
+    op: "equal",
     name: "fast-check generated users[128] early fail",
-    left,
-    right: earlyFail,
-    jitEqual: equal,
-    extra: [{ name: "traversable/zod deepEqual", equal: traversableEqual }],
+    args: [left, earlyFail],
+    jit: equal,
+    competitors: [
+      { name: "fast-deep-equal", fn: fastEqual },
+      { name: "lodash.isEqual", fn: lodashIsEqual },
+      { name: "traversable/zod deepEqual", fn: traversableEqual },
+    ],
   });
 }

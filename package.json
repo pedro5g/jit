@@ -25,6 +25,7 @@
     "bench:diff": "tsx --conditions @jit/source bench/diff/index.ts",
     "bench:ops": "tsx --conditions @jit/source bench/object-ops/index.ts",
     "bench:all": "pnpm bench:equal && pnpm bench:clone && pnpm bench:update && pnpm bench:diff && pnpm bench:ops",
+    "bench:report": "tsx bench/report.ts",
     "test:watch": "vitest",
     "test": "vitest run",
     "prepublishOnly": "pnpm run test && pnpm run build",

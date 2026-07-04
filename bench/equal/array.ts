@@ -1,5 +1,7 @@
 import { JIT } from "jit";
-import { range, registerEqualScenario } from "./shared.js";
+import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
+import { range } from "../shared/data.js";
+import { registerScenario } from "../shared/scenario.js";
 
 const User = JIT.object({
   id: JIT.number(),
@@ -14,14 +16,15 @@ function createUsers(length: number): { readonly id: number; readonly name: stri
 
 export function registerArrayScenarios(): void {
   for (const size of [10_000, 50_000, 100_000]) {
-    const left = createUsers(size);
-    const right = createUsers(size);
-
-    registerEqualScenario({
+    registerScenario({
+      op: "equal",
       name: `large array ${size}`,
-      left,
-      right,
-      jitEqual: equal,
+      args: [createUsers(size), createUsers(size)],
+      jit: equal,
+      competitors: [
+        { name: "fast-deep-equal", fn: fastEqual },
+        { name: "lodash.isEqual", fn: lodashIsEqual },
+      ],
     });
   }
 }

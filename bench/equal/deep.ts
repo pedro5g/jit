@@ -1,5 +1,6 @@
 import { JIT } from "jit";
-import { registerEqualScenario } from "./shared.js";
+import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
+import { registerScenario } from "../shared/scenario.js";
 
 const Node10 = JIT.object({
   value: JIT.number(),
@@ -34,42 +35,27 @@ const Node10 = JIT.object({
 
 const equal = JIT.compileEqual(Node10.schema);
 
-const left = {
-  value: 0,
-  next: {
-    value: 1,
-    next: {
-      value: 2,
-      next: {
-        value: 3,
-        next: {
-          value: 4,
-          next: {
-            value: 5,
-            next: {
-              value: 6,
-              next: {
-                value: 7,
-                next: {
-                  value: 8,
-                  next: {
-                    value: 9,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-};
+interface DeepNode {
+  readonly value: number;
+  readonly next?: DeepNode;
+}
+
+function createDeepNode(depth: number, value = 0): DeepNode {
+  if (depth === 1) return { value };
+  return { value, next: createDeepNode(depth - 1, value + 1) };
+}
+
+const left = createDeepNode(10);
 
 export function registerDeepObject(): void {
-  registerEqualScenario({
+  registerScenario({
+    op: "equal",
     name: "deep nested",
-    left,
-    right: structuredClone(left),
-    jitEqual: equal,
+    args: [left, structuredClone(left)],
+    jit: equal as (left: DeepNode, right: DeepNode) => boolean,
+    competitors: [
+      { name: "fast-deep-equal", fn: fastEqual },
+      { name: "lodash.isEqual", fn: lodashIsEqual },
+    ],
   });
 }

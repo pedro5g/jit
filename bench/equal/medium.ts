@@ -1,7 +1,8 @@
 import { zx } from "@traversable/zod";
 import { JIT } from "jit";
 import { z } from "zod";
-import { registerEqualScenario } from "./shared.js";
+import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
+import { registerScenario } from "../shared/scenario.js";
 
 const User = JIT.object({
   id: JIT.number(),
@@ -24,11 +25,18 @@ const TraversableUser = z.object({
 const traversableEqual = zx.deepEqual(TraversableUser);
 
 export function registerMediumObject(): void {
-  registerEqualScenario({
+  registerScenario({
+    op: "equal",
     name: "medium object",
-    left: { id: 1, name: "Ada", profile: { age: 37, email: "ada@example.com" } },
-    right: { id: 1, name: "Ada", profile: { age: 37, email: "ada@example.com" } },
-    jitEqual: equal,
-    extra: [{ name: "traversable/zod deepEqual", equal: traversableEqual }],
+    args: [
+      { id: 1, name: "Ada", profile: { age: 37, email: "ada@example.com" } },
+      { id: 1, name: "Ada", profile: { age: 37, email: "ada@example.com" } },
+    ],
+    jit: equal,
+    competitors: [
+      { name: "fast-deep-equal", fn: fastEqual },
+      { name: "lodash.isEqual", fn: lodashIsEqual },
+      { name: "traversable/zod deepEqual", fn: traversableEqual },
+    ],
   });
 }

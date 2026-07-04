@@ -1,4 +1,4 @@
-import { run } from "mitata";
+import { runSuite } from "../shared/persist.js";
 import { registerArrayScenarios } from "./array.js";
 import { registerDeepObject } from "./deep.js";
 import { registerGeneratedObjects } from "./generated.js";
@@ -15,4 +15,4 @@ registerArrayScenarios();
 registerWorstCase();
 registerEntityIndex();
 
-await run();
+await runSuite("equal");

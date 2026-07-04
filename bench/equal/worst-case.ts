@@ -1,5 +1,7 @@
 import { JIT } from "jit";
-import { range, registerEqualScenario } from "./shared.js";
+import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
+import { range } from "../shared/data.js";
+import { registerScenario } from "../shared/scenario.js";
 
 const RecordLike = JIT.object({
   id: JIT.number(),
@@ -18,10 +20,14 @@ const left = range(25_000).map((id) => ({
 }));
 
 export function registerWorstCase(): void {
-  registerEqualScenario({
+  registerScenario({
+    op: "equal",
     name: "worst-case equal",
-    left,
-    right: structuredClone(left),
-    jitEqual: equal,
+    args: [left, structuredClone(left)],
+    jit: equal,
+    competitors: [
+      { name: "fast-deep-equal", fn: fastEqual },
+      { name: "lodash.isEqual", fn: lodashIsEqual },
+    ],
   });
 }
