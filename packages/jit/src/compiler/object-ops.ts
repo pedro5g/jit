@@ -10,6 +10,12 @@ import { emitLiteral } from "./source/literal.js";
 type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 type ArraySchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
 
+/**
+ * The deep-partial patch accepted by a compiled merge. Dates, arrays, Sets,
+ * and Maps are replaced wholesale; plain objects merge key by key.
+ *
+ * @template T - The value type being merged into.
+ */
 export type MergeInput<T> = T extends Date
   ? T | undefined
   : T extends readonly unknown[]
@@ -22,9 +28,40 @@ export type MergeInput<T> = T extends Date
           ? { readonly [TKey in keyof T]?: MergeInput<T[TKey]> }
           : T | undefined;
 
+/**
+ * A compiled structural merge. Returns `left` itself when nothing changed
+ * (identity-preserving), a new object otherwise.
+ *
+ * @template T - The value type described by the schema.
+ * @param left - The existing value.
+ * @param right - The merge patch.
+ * @returns `left` when no field changes, otherwise a merged value.
+ */
 export type Merge<T = unknown> = (left: T, right: MergeInput<T>) => T;
+/**
+ * A compiled pick: copies only the configured keys.
+ *
+ * @template T - The source object type.
+ * @template TKeys - The keys kept by the compiled function.
+ * @param value - The source object.
+ * @returns An object containing only `TKeys`.
+ */
 export type PickCompiled<T, TKeys extends keyof T> = (value: T) => Pick<T, TKeys>;
+/**
+ * A compiled omit: copies everything except the configured keys.
+ *
+ * @template T - The source object type.
+ * @template TKeys - The keys dropped by the compiled function.
+ * @param value - The source object.
+ * @returns An object without `TKeys`.
+ */
 export type OmitCompiled<T, TKeys extends keyof T> = (value: T) => Omit<T, TKeys>;
+/**
+ * Per-field transform callbacks. Each callback receives the field value and
+ * the whole source object.
+ *
+ * @template T - The source object type.
+ */
 export type TransformSpec<T> = { readonly [TKey in keyof T]?: (value: T[TKey], source: T) => unknown };
 export type TransformOutput<T, TSpec extends TransformSpec<T>> = {
   readonly [TKey in keyof T]: TKey extends keyof TSpec
@@ -33,7 +70,21 @@ export type TransformOutput<T, TSpec extends TransformSpec<T>> = {
       : T[TKey]
     : T[TKey];
 };
+/**
+ * A compiled per-field object transform.
+ *
+ * @template T - The source object type.
+ * @template TSpec - The transform spec, whose return types drive the output type.
+ * @param value - The source object.
+ * @returns The transformed object.
+ */
 export type Transform<T, TSpec extends TransformSpec<T>> = (value: T) => TransformOutput<T, TSpec>;
+/**
+ * The `{ byId, ids }` shape produced by a compiled normalize.
+ *
+ * @template TEntity - The collection element type.
+ * @template TKey - The key property used as the id.
+ */
 export interface Normalized<TEntity, TKey extends keyof TEntity> {
   readonly byId: Record<Extract<TEntity[TKey], PropertyKey>, TEntity>;
   readonly ids: Extract<TEntity[TKey], PropertyKey>[];
@@ -49,6 +100,12 @@ export type UniqueBy<TValue> = (value: TValue) => ElementOf<TValue>[];
 
 type ElementOf<TValue> = TValue extends readonly (infer TElement)[] ? TElement : never;
 
+/**
+ * Emits the JavaScript source of a compiled merge.
+ *
+ * @param schema - The object schema used to emit merge source.
+ * @returns The generated merge source.
+ */
 export function emitMergeSource(schema: ATS.AnyTypeSchema): string {
   const writer = new CodeWriter();
   const objectSchema = expectObjectSchema(schema, "compileMerge");
@@ -63,10 +120,32 @@ export function emitMergeSource(schema: ATS.AnyTypeSchema): string {
   return writer.toString();
 }
 
+/**
+ * Compiles an identity-preserving deep merge for the schema's object shape.
+ *
+ * @template TSchema - The object schema driving codegen and inference.
+ * @param schema - The object schema used to compile the merge function.
+ * @returns A specialized merge function.
+ *
+ * @example
+ * ```ts
+ * const merge = compileMerge(User.schema);
+ * merge(user, {});                          // === user (nothing changed)
+ * merge(user, { profile: { score: 1 } });   // new object, other keys shared
+ * ```
+ */
 export function compileMerge<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Merge<ATS.Infer<TSchema>> {
   return globalThis.Function(`return ${emitMergeSource(schema)};`)() as Merge<ATS.Infer<TSchema>>;
 }
 
+/**
+ * Emits the JavaScript source of a compiled pick projection.
+ *
+ * @template TSchema - The object schema driving source generation.
+ * @param schema - The object schema used to validate selected keys.
+ * @param keys - The keys to keep.
+ * @returns The generated pick source.
+ */
 export function emitPickSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   keys: readonly (keyof ATS.Infer<TSchema> & string)[]
@@ -77,6 +156,16 @@ export function emitPickSource<TSchema extends ATS.AnyTypeSchema>(
   return emitProjectSource("pick", selectedKeys);
 }
 
+/**
+ * Compiles a pick projection: the generated code builds the result with a
+ * single object literal over the selected keys (no key loops, no Set checks).
+ *
+ * @template TSchema - The object schema driving codegen and inference.
+ * @template TKeys - The keys to keep, validated against the schema at compile time.
+ * @param schema - The object schema used to compile the pick function.
+ * @param keys - The keys to keep.
+ * @returns A specialized pick projection.
+ */
 export function compilePick<
   TSchema extends ATS.AnyTypeSchema,
   const TKeys extends readonly (keyof ATS.Infer<TSchema> & string)[],
@@ -87,6 +176,14 @@ export function compilePick<
   >;
 }
 
+/**
+ * Emits the JavaScript source of a compiled omit projection.
+ *
+ * @template TSchema - The object schema driving source generation.
+ * @param schema - The object schema used to validate omitted keys.
+ * @param keys - The keys to drop.
+ * @returns The generated omit source.
+ */
 export function emitOmitSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   keys: readonly (keyof ATS.Infer<TSchema> & string)[]
@@ -98,6 +195,16 @@ export function emitOmitSource<TSchema extends ATS.AnyTypeSchema>(
   return emitProjectSource("omit", selectedKeys);
 }
 
+/**
+ * Compiles an omit projection. The kept-key set is resolved at compile time,
+ * so the generated code is a plain object literal. Omit costs the same as pick.
+ *
+ * @template TSchema - The object schema driving codegen and inference.
+ * @template TKeys - The keys to drop, validated against the schema at compile time.
+ * @param schema - The object schema used to compile the omit function.
+ * @param keys - The keys to drop.
+ * @returns A specialized omit projection.
+ */
 export function compileOmit<
   TSchema extends ATS.AnyTypeSchema,
   const TKeys extends readonly (keyof ATS.Infer<TSchema> & string)[],
@@ -108,6 +215,15 @@ export function compileOmit<
   >;
 }
 
+/**
+ * Emits the JavaScript source of a compiled per-field transform.
+ *
+ * @template TSchema - The object schema driving source generation.
+ * @template TSpec - The transform spec whose callbacks become external bindings.
+ * @param schema - The object schema used to compile the transform.
+ * @param transforms - Per-field callbacks.
+ * @returns The generated transform source.
+ */
 export function emitTransformSource<TSchema extends ATS.AnyTypeSchema, TSpec extends TransformSpec<ATS.Infer<TSchema>>>(
   schema: TSchema,
   transforms: TSpec
@@ -131,6 +247,17 @@ export function emitTransformSource<TSchema extends ATS.AnyTypeSchema, TSpec ext
   return writer.toString();
 }
 
+/**
+ * Compiles a per-field transform. Fields without a callback are copied
+ * directly; callbacks are external bindings called inline in the object
+ * literal, so there is no per-field dispatch at runtime.
+ *
+ * @template TSchema - The object schema driving codegen and inference.
+ * @template TSpec - The transform spec; its return types shape the output type.
+ * @param schema - The object schema used to compile the transform.
+ * @param transforms - Per-field callbacks.
+ * @returns A specialized transform function.
+ */
 export function compileTransform<
   TSchema extends ATS.AnyTypeSchema,
   const TSpec extends TransformSpec<ATS.Infer<TSchema>>,
@@ -145,6 +272,14 @@ export function compileTransform<
   )(...bindings) as Transform<ATS.Infer<TSchema>, TSpec>;
 }
 
+/**
+ * Emits the JavaScript source of a compiled entity normalizer.
+ *
+ * @template TSchema - The array-of-objects schema driving source generation.
+ * @param schema - The collection schema used to resolve the id key.
+ * @param key - Optional explicit id key; defaults to the schema's keyed hint.
+ * @returns The generated normalize source.
+ */
 export function emitNormalizeSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   key?: keyof ElementOf<ATS.Infer<TSchema>> & string
@@ -193,6 +328,16 @@ export function emitNormalizeSource<TSchema extends ATS.AnyTypeSchema>(
   return writer.toString();
 }
 
+/**
+ * Compiles an entity normalizer producing `{ byId, ids }` in one pass.
+ * The key comes from the schema's `keyed()` hint unless passed explicitly.
+ *
+ * @template TSchema - The array-of-objects schema driving codegen.
+ * @template TKey - The element property used as the id.
+ * @param schema - The collection schema used to compile the normalizer.
+ * @param key - Optional explicit id key; defaults to the schema's keyed hint.
+ * @returns A specialized normalizer.
+ */
 export function compileNormalize<
   TSchema extends ATS.AnyTypeSchema,
   TKey extends keyof ElementOf<ATS.Infer<TSchema>> & string,
@@ -200,6 +345,14 @@ export function compileNormalize<
   return globalThis.Function(`return ${emitNormalizeSource(schema, key)};`)() as Normalize<ATS.Infer<TSchema>, TKey>;
 }
 
+/**
+ * Emits the JavaScript source of a compiled groupBy operation.
+ *
+ * @template TSchema - The array-of-objects schema driving source generation.
+ * @param schema - The collection schema used to resolve the group key.
+ * @param key - Optional explicit group key; defaults to the schema's groupBy hint.
+ * @returns The generated groupBy source.
+ */
 export function emitGroupBySource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   key?: keyof ElementOf<ATS.Infer<TSchema>> & string
@@ -234,6 +387,16 @@ export function emitGroupBySource<TSchema extends ATS.AnyTypeSchema>(
   return writer.toString();
 }
 
+/**
+ * Compiles a single-pass groupBy keyed by the schema's `groupBy()` hint
+ * (or an explicit key).
+ *
+ * @template TSchema - The array-of-objects schema driving codegen.
+ * @template TKey - The element property used as the group key.
+ * @param schema - The collection schema used to compile groupBy.
+ * @param key - Optional explicit group key; defaults to the schema's groupBy hint.
+ * @returns A specialized groupBy function.
+ */
 export function compileGroupBy<
   TSchema extends ATS.AnyTypeSchema,
   TKey extends keyof ElementOf<ATS.Infer<TSchema>> & string,
@@ -241,6 +404,15 @@ export function compileGroupBy<
   return globalThis.Function(`return ${emitGroupBySource(schema, key)};`)() as GroupBy<ATS.Infer<TSchema>, TKey>;
 }
 
+/**
+ * Emits the JavaScript source of a compiled non-mutating sort.
+ *
+ * @template TSchema - The array-of-objects schema driving source generation.
+ * @param schema - The collection schema used to resolve the sort key.
+ * @param key - Optional explicit sort key; defaults to the schema's sortBy hint.
+ * @param direction - Sort direction, defaulting to ascending.
+ * @returns The generated sort source.
+ */
 export function emitSortBySource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   key?: keyof ElementOf<ATS.Infer<TSchema>> & string,
@@ -284,6 +456,16 @@ export function emitSortBySource<TSchema extends ATS.AnyTypeSchema>(
   return writer.toString();
 }
 
+/**
+ * Compiles a non-mutating sort specialized for the schema's `sortBy()` hint:
+ * the comparator is inlined for the known key and direction.
+ *
+ * @template TSchema - The array-of-objects schema carrying the order hint.
+ * @param schema - The collection schema used to compile sortBy.
+ * @param key - Optional explicit sort key; defaults to the schema's sortBy hint.
+ * @param direction - Sort direction, defaulting to ascending.
+ * @returns A specialized non-mutating sort function.
+ */
 export function compileSortBy<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   key?: keyof ElementOf<ATS.Infer<TSchema>> & string,
@@ -292,6 +474,14 @@ export function compileSortBy<TSchema extends ATS.AnyTypeSchema>(
   return globalThis.Function(`return ${emitSortBySource(schema, key, direction)};`)() as SortBy<ATS.Infer<TSchema>>;
 }
 
+/**
+ * Emits the JavaScript source of a compiled uniqueBy operation.
+ *
+ * @template TSchema - The array-of-objects schema driving source generation.
+ * @param schema - The collection schema used to resolve the unique key.
+ * @param key - Optional explicit unique key; defaults to the schema's uniqueBy hint.
+ * @returns The generated uniqueBy source.
+ */
 export function emitUniqueBySource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   key?: keyof ElementOf<ATS.Infer<TSchema>> & string
@@ -326,6 +516,15 @@ export function emitUniqueBySource<TSchema extends ATS.AnyTypeSchema>(
   return writer.toString();
 }
 
+/**
+ * Compiles a single-pass uniqueBy: first occurrence of each key wins.
+ *
+ * @template TSchema - The array-of-objects schema carrying the uniqueBy hint.
+ * @template TKey - The element property used for deduplication.
+ * @param schema - The collection schema used to compile uniqueBy.
+ * @param key - Optional explicit unique key; defaults to the schema's uniqueBy hint.
+ * @returns A specialized uniqueBy function.
+ */
 export function compileUniqueBy<
   TSchema extends ATS.AnyTypeSchema,
   TKey extends keyof ElementOf<ATS.Infer<TSchema>> & string,

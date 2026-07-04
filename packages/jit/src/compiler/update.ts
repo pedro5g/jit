@@ -4,6 +4,14 @@ import { JITError } from "../errors/index.js";
 import { buildUpdateIR } from "./update/build-update-ir.js";
 import { emitUpdate, emitUpdateBody } from "./update/emit-update.js";
 
+/**
+ * The deep-partial patch shape accepted by a compiled update function.
+ *
+ * Arrays are patched positionally (sparse entries mean "unchanged"); Dates,
+ * Sets, and Maps are replaced wholesale rather than merged.
+ *
+ * @template T - The value type being patched.
+ */
 export type UpdatePatch<T> = T extends readonly (infer TItem)[]
   ? (UpdatePatch<TItem> | undefined)[]
   : T extends Date
@@ -16,13 +24,50 @@ export type UpdatePatch<T> = T extends readonly (infer TItem)[]
           ? { readonly [TKey in keyof T]?: UpdatePatch<T[TKey]> }
           : T | undefined;
 
+/**
+ * A compiled immutable update function: returns a new value with the patch
+ * applied, sharing unchanged substructure with the input.
+ *
+ * @template T - The value type described by the schema the update was compiled from.
+ * @param value - The value to update.
+ * @param patch - The structural patch to apply.
+ * @returns The updated value, sharing unchanged substructure with `value`.
+ */
 export type Update<T = unknown> = (value: T, patch: UpdatePatch<T>) => T;
 
+/**
+ * Emits the JavaScript source of a schema-aware immutable update function.
+ *
+ * @param schema - The schema used to build the update IR.
+ * @returns The complete JavaScript source for the generated update function.
+ *
+ * @throws JITError with code `READONLY_FIELD` when the schema (or any nested
+ * schema) is marked readonly.
+ */
 export function emitUpdateSource(schema: ATS.AnyTypeSchema): string {
   assertUpdateable(schema);
   return emitUpdate(buildUpdateIR(schema));
 }
 
+/**
+ * Compiles a schema-aware immutable update function (structural sharing, like
+ * Immer's `produce`, but without proxies or draft bookkeeping).
+ *
+ * @template TSchema - The schema driving both codegen and the inferred value type.
+ * @param schema - The schema used to compile the update function.
+ * @returns A specialized immutable update function for values inferred from `schema`.
+ *
+ * @throws JITError with code `READONLY_FIELD` when the schema (or any nested
+ * schema) is marked readonly.
+ *
+ * @example
+ * ```ts
+ * const update = compileUpdate(User.schema);
+ * const next = update(user, { profile: { score: 10 } });
+ * next !== user;                 // changed path is new
+ * next.other === user.other;     // untouched paths keep identity
+ * ```
+ */
 export function compileUpdate<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Update<ATS.InferSchema<TSchema>> {
   assertUpdateable(schema);
   const program = buildUpdateIR(schema);

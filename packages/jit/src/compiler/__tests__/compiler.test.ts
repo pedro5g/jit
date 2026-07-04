@@ -175,13 +175,11 @@ describe("JIT compiler", () => {
       expect(equal({ id: 1 }, { id: 2 })).toBe(false);
     });
 
-    it("should expose ergonomic equal and deepEqual APIs", () => {
+    it("should expose JIT.equal as the ergonomic schema-aware equality API", () => {
       const equal = JIT.equal(JIT.object({ id: JIT.number() }).schema);
 
       expect(equal({ id: 1 }, { id: 1 })).toBe(true);
       expect(equal({ id: 1 }, { id: 2 })).toBe(false);
-      expect(JIT.deepEqual({ id: 1, tags: ["jit"] }, { id: 1, tags: ["jit"] })).toBe(true);
-      expect(JIT.deepEqual({ id: 1, tags: ["jit"] }, { id: 1, tags: ["dsl"] })).toBe(false);
     });
 
     it("should compile entity index hints into a map strategy", () => {

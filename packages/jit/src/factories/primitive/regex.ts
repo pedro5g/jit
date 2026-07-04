@@ -3,6 +3,11 @@ import type { Builder } from "../../core/builder/index.js";
 import { createBuilder } from "../../core/builder/index.js";
 import { emptyDef } from "./empty-def.js";
 
+/**
+ * Creates a `RegExp` schema builder.
+ *
+ * @returns A builder wrapping a RegExp schema.
+ */
 export function regex(): Builder<RegexSchema> {
   return /* @__PURE__ */ createBuilder(createSchema<RegExp, "regex", EmptyDef>(TypeName.regex, emptyDef));
 }

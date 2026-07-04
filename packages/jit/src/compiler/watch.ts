@@ -19,6 +19,11 @@ type CollectionElement<TValue> = TValue extends readonly (infer TElement)[]
       ? TElement
       : never;
 
+/**
+ * The outcome of one keyed collection comparison.
+ *
+ * @template TItem - The element type of the watched collection.
+ */
 export interface WatchResult<TItem> {
   readonly currentItems: TItem[];
   readonly initialItems: TItem[];
@@ -28,6 +33,12 @@ export interface WatchResult<TItem> {
   readonly isChanged: boolean;
 }
 
+/**
+ * Options for a compiled watch function. `key` identifies items across the two
+ * snapshots; the optional callbacks fire per detected change.
+ *
+ * @template TItem - The element type of the watched collection.
+ */
 export interface WatchOptions<TItem> {
   readonly key: Extract<keyof TItem, string>;
   readonly onAdd?: (item: TItem) => void;
@@ -35,6 +46,14 @@ export interface WatchOptions<TItem> {
   readonly onUpdate?: (previous: TItem, current: TItem) => void;
 }
 
+/**
+ * A compiled keyed diff over two snapshots of a collection.
+ *
+ * @template TValue - The collection type (array, Set, or Map of objects).
+ * @param previous - The previous collection snapshot.
+ * @param current - The current collection snapshot.
+ * @returns Added, removed, updated, and change-summary information.
+ */
 export type Watch<TValue> = (previous: TValue, current: TValue) => WatchResult<CollectionElement<TValue>>;
 
 interface WatchTarget {
@@ -47,6 +66,14 @@ interface WatchProgram {
   readonly bindings: readonly unknown[];
 }
 
+/**
+ * Emits the JavaScript source of a compiled watch function.
+ *
+ * @template TSchema - The collection schema used to type the watch options.
+ * @param schema - The collection schema the watcher runs against.
+ * @param options - The key and optional change callbacks.
+ * @returns The generated watch source.
+ */
 export function emitWatchSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options: WatchOptions<CollectionElement<ATS.InferSchema<TSchema>>>
@@ -54,6 +81,23 @@ export function emitWatchSource<TSchema extends ATS.AnyTypeSchema>(
   return emitWatchProgram(schema, options).source;
 }
 
+/**
+ * Compiles a keyed collection watcher: given a previous and a current
+ * snapshot, it reports added, removed, and updated items in O(n) using a
+ * key-indexed map, and invokes the `onAdd`/`onRemove`/`onUpdate` callbacks.
+ *
+ * @template TSchema - The collection schema (array/Set/Map of objects).
+ * @param schema - The collection schema the watcher runs against.
+ * @param options - The key and optional change callbacks.
+ * @returns A compiled keyed collection watcher.
+ *
+ * @example
+ * ```ts
+ * const watch = compileWatch(Users.schema, { key: "id" });
+ * const result = watch(previousUsers, currentUsers);
+ * result.newItems; result.removedItems; result.updatedItems;
+ * ```
+ */
 export function compileWatch<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options: WatchOptions<CollectionElement<ATS.InferSchema<TSchema>>>

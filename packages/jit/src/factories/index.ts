@@ -14,7 +14,6 @@ export {
 } from "../compiler/object-ops.js";
 export { compilePipeline } from "../compiler/pipeline.js";
 export { compileUpdate } from "../compiler/update.js";
-export { deepEqual } from "../shared/equals.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
 export * from "./object/index.js";

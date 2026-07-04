@@ -37,8 +37,20 @@ interface QueryTarget {
   readonly objectSchema: ObjectSchema;
 }
 
+/**
+ * A compiled query over a collection.
+ *
+ * @template TValue - The input collection type (array, Set, or Map of objects).
+ * @template TOutput - The query result shape (list, Map, or grouped record).
+ * @param value - The collection to query.
+ * @returns The query result.
+ */
 export type QueryCompiled<TValue, TOutput> = (value: TValue) => TOutput;
 
+/**
+ * A data-first query description: AST nodes plus the runtime values they
+ * reference. Values travel as external bindings, never as interpolated source.
+ */
 export interface QueryProgram {
   readonly nodes: readonly QueryNode[];
   readonly bindings: readonly unknown[];
@@ -62,6 +74,16 @@ interface OptimizedQueryPlan {
   readonly mutation: QueryMutationNode | undefined;
 }
 
+/**
+ * Emits the JavaScript source of a compiled query.
+ *
+ * @param schema - The collection schema the query runs against.
+ * @param program - The query AST nodes and external bindings.
+ * @returns The generated query source.
+ *
+ * @throws JITError with code `INVALID_QUERY` when a node references a field
+ * the schema does not declare.
+ */
 export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram): string {
   const target = expectCollectionObjectSchema(schema, "emitQuerySource");
   const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
@@ -71,6 +93,23 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
   return emitQueryPlan(target, plan);
 }
 
+/**
+ * Compiles a query plan (filters, select, unique, keyed/groupBy, orderBy,
+ * delete/update) into a single specialized function with one fused pass over
+ * the collection, with no intermediate arrays between steps.
+ *
+ * Prefer the typed `JIT.query(schema)` builder; this is the low-level entry
+ * point it delegates to.
+ *
+ * @template TSchema - The collection schema the query runs against.
+ * @template TOutput - The result shape produced by the plan's collector.
+ * @param schema - The collection schema the query runs against.
+ * @param program - The query AST nodes and external bindings.
+ * @returns A compiled query function.
+ *
+ * @throws JITError with code `INVALID_QUERY` when a node references a field
+ * the schema does not declare.
+ */
 export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = ElementOf<ATS.InferSchema<TSchema>>[]>(
   schema: TSchema,
   program: QueryProgram

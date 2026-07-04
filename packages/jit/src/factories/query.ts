@@ -34,6 +34,11 @@ type QuerySelectResult<TResult, TSelected> =
       ? Record<TKey, TSelected[]>
       : TSelected[];
 
+/**
+ * Type-safe condition factory passed to `query().filter()`.
+ *
+ * @template TElement - The collection element type being filtered.
+ */
 export interface QueryConditionBuilder<TElement> {
   eq<TKey extends Extract<keyof TElement, string>>(key: TKey, value: TElement[TKey]): QueryCompareNode;
   neq<TKey extends Extract<keyof TElement, string>>(key: TKey, value: TElement[TKey]): QueryCompareNode;
@@ -46,6 +51,13 @@ export interface QueryConditionBuilder<TElement> {
   not(inner: QueryConditionNode): QueryConditionNode;
 }
 
+/**
+ * Fluent builder for compiled collection queries.
+ *
+ * @template TSchema - The collection schema type.
+ * @template TOutput - The current element/result item type.
+ * @template TResult - The final query result type.
+ */
 export interface QueryBuilder<TSchema extends ATS.AnyTypeSchema, TOutput, TResult = TOutput[]> {
   filter(
     predicate: (query: QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>) => QueryConditionNode
@@ -73,6 +85,13 @@ export interface QueryBuilder<TSchema extends ATS.AnyTypeSchema, TOutput, TResul
   compile(): (value: ATS.InferSchema<TSchema>) => TResult;
 }
 
+/**
+ * Creates a typed query builder for a collection schema.
+ *
+ * @template TSchema - The collection schema type.
+ * @param schema - The schema or builder the query runs against.
+ * @returns A fluent query builder that compiles to specialized JavaScript.
+ */
 export function query<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): QueryBuilder<

@@ -1,6 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
 import { getIndex } from "../runtime/index/index.js";
-import type { Equal } from "../shared/index.js";
 import { emitEqual, emitEqualBody } from "./emitter/emit-equal.js";
 import { compileHash } from "./hash.js";
 import { buildEqualIR } from "./ir/builders/build-equal-ir.js";
@@ -8,7 +7,20 @@ import { optimizeIR } from "./ir/optimizer/optimize-ir.js";
 import { resolveEqualStrategy } from "./strategy/resolve-strategy.js";
 
 /**
+ * A compiled schema-aware equality function.
+ *
+ * @template T - The value type described by the schema.
+ * @param left - The first value to compare.
+ * @param right - The second value to compare.
+ * @returns `true` when both values are equal according to the compiled schema.
+ */
+export type Equal<T = unknown> = (left: T, right: T) => boolean;
+
+/**
  * Emits the optimized JavaScript source for a schema-aware equality function.
+ *
+ * @param schema - The schema used to build and optimize the equality IR.
+ * @returns The complete JavaScript source for the generated equality function.
  */
 export function emitEqualSource(schema: ATS.AnyTypeSchema): string {
   const strategy = resolveEqualStrategy(schema);
@@ -20,6 +32,10 @@ export function emitEqualSource(schema: ATS.AnyTypeSchema): string {
  *
  * The returned function is specialized for the supplied schema and avoids
  * interpreting schema nodes while comparing values.
+ *
+ * @template TSchema - The schema driving code generation and type inference.
+ * @param schema - The schema used to compile the equality function.
+ * @returns A specialized equality function for values inferred from `schema`.
  */
 export function compileEqual<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Equal<ATS.Infer<TSchema>> {
   const strategy = resolveEqualStrategy(schema);
@@ -36,5 +52,8 @@ export function compileEqual<TSchema extends ATS.AnyTypeSchema>(schema: TSchema)
 
 /**
  * Public ergonomic alias for `compileEqual`.
+ *
+ * @param schema - The schema used to compile the equality function.
+ * @returns A specialized equality function for values inferred from `schema`.
  */
 export const equal = compileEqual;

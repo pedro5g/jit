@@ -17,6 +17,14 @@ function isOptionalSchema(schema: AnyTypeSchema): schema is OptionalSchema<AnyTy
   return schema.type === TypeName.optional;
 }
 
+/**
+ * Returns a new object schema with every prop wrapped in `optional`.
+ * The input schema is not mutated.
+ *
+ * @template TShape - The object schema's property shape.
+ * @param schema - The object schema to transform.
+ * @returns A new object schema with every property wrapped in `optional`.
+ */
 export function partial<TShape extends SchemaShape>(schema: ObjectSchema<TShape>): ObjectSchema<PartialShape<TShape>> {
   const props: Record<string, AnyTypeSchema> = {};
 
@@ -35,6 +43,16 @@ export function partial<TShape extends SchemaShape>(schema: ObjectSchema<TShape>
   );
 }
 
+/**
+ * Returns a new object schema keeping only the selected props. Prop schemas
+ * are reused by reference; the input schema is not mutated.
+ *
+ * @template TShape - The object schema's property shape.
+ * @template TKeys - The keys to keep.
+ * @param schema - The object schema to transform.
+ * @param keys - The property keys to keep.
+ * @returns A new object schema containing only `keys`.
+ */
 export function pick<TShape extends SchemaShape, const TKeys extends readonly (keyof TShape)[]>(
   schema: ObjectSchema<TShape>,
   keys: TKeys
@@ -56,6 +74,16 @@ export function pick<TShape extends SchemaShape, const TKeys extends readonly (k
   );
 }
 
+/**
+ * Returns a new object schema without the selected props.
+ * The input schema is not mutated.
+ *
+ * @template TShape - The object schema's property shape.
+ * @template TKeys - The keys to drop.
+ * @param schema - The object schema to transform.
+ * @param keys - The property keys to drop.
+ * @returns A new object schema without `keys`.
+ */
 export function omit<TShape extends SchemaShape, const TKeys extends readonly (keyof TShape)[]>(
   schema: ObjectSchema<TShape>,
   keys: TKeys
@@ -80,6 +108,16 @@ export function omit<TShape extends SchemaShape, const TKeys extends readonly (k
   );
 }
 
+/**
+ * Returns a new object schema with the extension's props added; colliding
+ * keys are overridden by the extension.
+ *
+ * @template TShape - The base object schema's property shape.
+ * @template TExtension - The props being added.
+ * @param schema - The object schema to extend.
+ * @param extension - The props to add or override.
+ * @returns A new object schema with the extension applied.
+ */
 export function extend<TShape extends SchemaShape, TExtension extends SchemaShape>(
   schema: ObjectSchema<TShape>,
   extension: TExtension
@@ -98,6 +136,16 @@ export function extend<TShape extends SchemaShape, TExtension extends SchemaShap
   );
 }
 
+/**
+ * Merges two object schemas: right-hand props/unknownKeys/annotations win,
+ * checks are concatenated.
+ *
+ * @template TLeft - The left object schema's shape.
+ * @template TRight - The right object schema's shape (wins on collision).
+ * @param left - The base object schema.
+ * @param right - The object schema whose props win on collision.
+ * @returns A new merged object schema.
+ */
 export function merge<TLeft extends SchemaShape, TRight extends SchemaShape>(
   left: ObjectSchema<TLeft>,
   right: ObjectSchema<TRight>
@@ -116,6 +164,14 @@ export function merge<TLeft extends SchemaShape, TRight extends SchemaShape>(
   );
 }
 
+/**
+ * Returns a new object schema with `optional` wrappers unwrapped; props that
+ * are already required are reused by reference.
+ *
+ * @template TShape - The object schema's property shape.
+ * @param schema - The object schema to transform.
+ * @returns A new object schema with top-level `optional` wrappers removed.
+ */
 export function required<TShape extends SchemaShape>(
   schema: ObjectSchema<TShape>
 ): ObjectSchema<RequiredShape<TShape>> {

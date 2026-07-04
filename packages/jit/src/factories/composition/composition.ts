@@ -9,6 +9,13 @@ import {
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
 
+/**
+ * Creates a union schema builder.
+ *
+ * @template TOptions - The option schema inputs.
+ * @param options - The schemas or builders accepted by the union.
+ * @returns A builder wrapping a union schema.
+ */
 export function union<const TOptions extends readonly SchemaInput[]>(
   ...options: TOptions
 ): Builder<UnionSchema<UnwrapOptions<TOptions>>> {
@@ -19,6 +26,13 @@ export function union<const TOptions extends readonly SchemaInput[]>(
   );
 }
 
+/**
+ * Creates an intersection schema builder.
+ *
+ * @template TOptions - The option schema inputs.
+ * @param options - The schemas or builders intersected by the schema.
+ * @returns A builder wrapping an intersection schema.
+ */
 export function intersection<const TOptions extends readonly SchemaInput[]>(
   ...options: TOptions
 ): Builder<IntersectionSchema<UnwrapOptions<TOptions>>> {
@@ -29,6 +43,15 @@ export function intersection<const TOptions extends readonly SchemaInput[]>(
   );
 }
 
+/**
+ * Creates a discriminated-union schema builder.
+ *
+ * @template TDiscriminator - The discriminator property name.
+ * @template TOptions - The option schema inputs.
+ * @param discriminator - The property used to discriminate options.
+ * @param options - The schemas or builders accepted by the union.
+ * @returns A builder wrapping a discriminated-union schema.
+ */
 export function discriminatedUnion<const TDiscriminator extends string, const TOptions extends readonly SchemaInput[]>(
   discriminator: TDiscriminator,
   options: TOptions

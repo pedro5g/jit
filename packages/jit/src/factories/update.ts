@@ -5,6 +5,11 @@ import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 
+/**
+ * Mutable draft shape accepted by update recipes.
+ *
+ * @template T - The value type being updated.
+ */
 export type Draft<T> = T extends readonly (infer TItem)[]
   ? Draft<TItem>[]
   : T extends Date
@@ -17,13 +22,49 @@ export type Draft<T> = T extends readonly (infer TItem)[]
           ? { -readonly [TKey in keyof T]: Draft<T[TKey]> }
           : T;
 
+/**
+ * Recipe callback that records writes against a draft proxy.
+ *
+ * @template T - The value type being updated.
+ * @param draft - The mutable draft proxy.
+ * @returns Nothing; writes are captured as an update patch.
+ */
 export type UpdateRecipe<T> = (draft: Draft<T>) => void;
+/**
+ * Runtime update input: either a structural patch or a draft recipe.
+ *
+ * @template T - The value type being updated.
+ */
 export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
+/**
+ * Runtime update function returned by `JIT.update(schema)`.
+ *
+ * @template T - The value type being updated.
+ * @param value - The value to update.
+ * @param input - A structural patch or draft recipe.
+ * @returns The updated value.
+ */
 export type RuntimeUpdate<T> = (value: T, input: UpdateInput<T>) => T;
 
+/**
+ * Compiles a runtime update function for a schema.
+ *
+ * @template TSchema - The schema type used for inference.
+ * @param schema - The schema or builder used to compile updates.
+ * @returns A reusable runtime update function.
+ */
 export function update<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeUpdate<InferSchema<TSchema>>;
+/**
+ * Applies an update immediately using a schema.
+ *
+ * @template TSchema - The schema type used for inference.
+ * @param schema - The schema or builder used to compile updates.
+ * @param value - The value to update.
+ * @param input - A structural patch or draft recipe.
+ * @returns The updated value.
+ */
 export function update<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   value: InferSchema<TSchema>,

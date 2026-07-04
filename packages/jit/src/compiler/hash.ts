@@ -11,6 +11,14 @@ import {
 } from "../runtime/hash/index.js";
 import { emitPropertyAccess } from "./source/access.js";
 
+/**
+ * A compiled structural hash function. Values that compare equal under the
+ * schema's compiled equality always produce the same hash.
+ *
+ * @template T - The value type described by the schema the hash was compiled from.
+ * @param value - The value to hash.
+ * @returns A deterministic numeric hash.
+ */
 export type Hash<T = unknown> = (value: T) => number;
 
 interface HashSchema {
@@ -18,10 +26,27 @@ interface HashSchema {
   readonly def: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * Emits the JavaScript source of a schema-aware hash function.
+ *
+ * @param schema - The schema used to emit hash source.
+ * @returns The complete JavaScript source for the generated hash function.
+ */
 export function emitHashSource(schema: ATS.AnyTypeSchema): string {
   return `function hash(value) {\n${emitHashBody(schema)}\n}`;
 }
 
+/**
+ * Compiles a schema-aware structural hash function.
+ *
+ * Hashes for cacheable (object) values are memoized in a WeakMap-backed cache,
+ * so hashing the same object twice is O(1). This is what makes hash-based
+ * equality short-circuiting profitable.
+ *
+ * @template TSchema - The schema driving both codegen and the inferred value type.
+ * @param schema - The schema used to compile the hash function.
+ * @returns A specialized hash function for values inferred from `schema`.
+ */
 export function compileHash<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Hash<ATS.Infer<TSchema>> {
   const compute = globalThis.Function(
     "__combineHash",

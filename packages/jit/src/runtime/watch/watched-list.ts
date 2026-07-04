@@ -1,10 +1,18 @@
-/** A reference-level update detected by a watched list. */
+/**
+ * A reference-level update detected by a watched list.
+ *
+ * @template TItem - The watched item type.
+ */
 export interface WatchedListUpdate<TItem> {
   readonly previous: TItem;
   readonly current: TItem;
 }
 
-/** Immutable-by-convention snapshot of the current watched-list state. */
+/**
+ * Immutable-by-convention snapshot of the current watched-list state.
+ *
+ * @template TItem - The watched item type.
+ */
 export interface WatchedListSnapshot<TItem> {
   readonly currentItems: TItem[];
   readonly initialItems: TItem[];
@@ -14,7 +22,11 @@ export interface WatchedListSnapshot<TItem> {
   readonly isChanged: boolean;
 }
 
-/** Options used to decide item identity inside a watched list. */
+/**
+ * Options used to decide item identity inside a watched list.
+ *
+ * @template TItem - The watched item type.
+ */
 export interface WatchedListOptions<TItem> {
   readonly key?: Extract<keyof TItem, string>;
   readonly compare?: (left: TItem, right: TItem) => boolean;
@@ -32,6 +44,8 @@ type Indexed<TItem> = {
  * for primitive/Object.is identity. When a schema key is known, prefer
  * `JIT.watchedList(schema, items, { key })`, which returns the indexed
  * implementation automatically.
+ *
+ * @template TItem - The watched item type.
  */
 export class WatchedList<TItem> {
   protected currentItems: TItem[];
@@ -42,6 +56,12 @@ export class WatchedList<TItem> {
   protected readonly key: Extract<keyof TItem, string> | undefined;
   private readonly compare: ((left: TItem, right: TItem) => boolean) | undefined;
 
+  /**
+   * Creates a watched list from an initial item snapshot.
+   *
+   * @param initialItems - The initial collection items.
+   * @param options - Identity and comparison options.
+   */
   public constructor(initialItems: readonly TItem[] = [], options: WatchedListOptions<TItem> = {}) {
     this.currentItems = [...initialItems];
     this.initialItems = [...initialItems];
@@ -223,6 +243,8 @@ export class WatchedList<TItem> {
  *
  * Maintains internal indexes for current, initial, new, and removed items so
  * common aggregate operations avoid repeated scans.
+ *
+ * @template TItem - The watched item type.
  */
 export class KeyedWatchedList<TItem> extends WatchedList<TItem> {
   private readonly currentIndex = new Map<unknown, Indexed<TItem>>();
@@ -230,6 +252,12 @@ export class KeyedWatchedList<TItem> extends WatchedList<TItem> {
   private readonly newIndex = new Map<unknown, Indexed<TItem>>();
   private readonly removedIndex = new Map<unknown, Indexed<TItem>>();
 
+  /**
+   * Creates an indexed watched list using a required identity key.
+   *
+   * @param initialItems - The initial collection items.
+   * @param options - Identity key and comparison options.
+   */
   public constructor(
     initialItems: readonly TItem[] = [],
     options: WatchedListOptions<TItem> & { readonly key: Extract<keyof TItem, string> }

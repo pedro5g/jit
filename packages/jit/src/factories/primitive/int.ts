@@ -3,6 +3,11 @@ import type { Builder } from "../../core/builder/index.js";
 import { createBuilder } from "../../core/builder/index.js";
 import { emptyDef } from "./empty-def.js";
 
+/**
+ * Creates an integer-number schema builder.
+ *
+ * @returns A builder wrapping an int schema.
+ */
 export function int(): Builder<IntSchema> {
   return /* @__PURE__ */ createBuilder(createSchema<number, "int", EmptyDef>(TypeName.int, emptyDef));
 }

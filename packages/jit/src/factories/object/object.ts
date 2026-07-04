@@ -8,6 +8,13 @@ type BuilderShape<TShape extends Record<string, SchemaInput>> = {
     : never;
 };
 
+/**
+ * Creates an object schema builder from a property shape.
+ *
+ * @template TShape - The schema-input shape used to infer object properties.
+ * @param shape - Object properties mapped to schemas or builders.
+ * @returns A builder wrapping an object schema.
+ */
 export function object<const TShape extends Record<string, SchemaInput>>(
   shape: TShape
 ): ObjectBuilder<BuilderShape<TShape>> {
