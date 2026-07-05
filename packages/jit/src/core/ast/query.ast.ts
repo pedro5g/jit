@@ -71,6 +71,15 @@ export interface QueryOrderByNode {
   readonly direction: "asc" | "desc";
 }
 
+export type QueryAggregateOperator = "sum" | "count" | "avg" | "min" | "max";
+
+export interface QueryAggregateNode {
+  readonly kind: "aggregate";
+  readonly op: QueryAggregateOperator;
+  /** Field accumulated by the aggregate; absent for `count`. */
+  readonly key?: string;
+}
+
 export interface QueryDeleteNode {
   readonly kind: "delete";
 }
@@ -90,4 +99,5 @@ export type QueryNode =
   | QueryUniqueNode
   | QueryCollectorNode
   | QueryOrderByNode
+  | QueryAggregateNode
   | QueryMutationNode;

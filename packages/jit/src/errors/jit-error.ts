@@ -3,7 +3,14 @@ import type { Path } from "../core/ast/index.js";
 /**
  * Stable error codes thrown by compiled JIT operations.
  */
-export type JITErrorCode = "INVALID_QUERY" | "INVALID_UPDATE" | "READONLY_FIELD" | "REFINE_FAILED";
+export type JITErrorCode =
+  | "INVALID_QUERY"
+  | "INVALID_UPDATE"
+  | "INVALID_MAPPER"
+  | "INVALID_OPERATION"
+  | "UNSUPPORTED_SCHEMA"
+  | "READONLY_FIELD"
+  | "REFINE_FAILED";
 
 /**
  * Optional structured details attached to a `JITError`.

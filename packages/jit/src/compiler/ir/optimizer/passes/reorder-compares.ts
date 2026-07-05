@@ -72,6 +72,8 @@ function isPureExpr(expr: IRExpr): boolean {
     case "sameValue":
     case "sameNumber":
       return isPureExpr(expr.left) && isPureExpr(expr.right);
+    case "nary":
+      return expr.operands.every(isPureExpr);
     case "schema_guard":
       return isPureExpr(expr.value);
     case "load_prop":
@@ -79,6 +81,9 @@ function isPureExpr(expr: IRExpr): boolean {
     case "load_index":
       return isPureExpr(expr.base) && isPureExpr(expr.index);
     case "call":
+    case "object_literal":
+    case "array_literal":
+    case "construct":
       return false;
   }
 }
@@ -101,9 +106,15 @@ function exprCost(expr: IRExpr): number {
     case "sameValue":
     case "sameNumber":
       return 1 + exprCost(expr.left) + exprCost(expr.right);
+    case "nary":
+      return 1 + expr.operands.reduce((total, operand) => total + exprCost(operand), 0);
     case "schema_guard":
       return 10 + exprCost(expr.value);
     case "call":
       return 100;
+    case "object_literal":
+    case "array_literal":
+    case "construct":
+      return 50;
   }
 }

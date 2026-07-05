@@ -24,6 +24,9 @@ type QueryGroupKey<TValue, TKey extends QueryCollectionKey<TValue>> = Extract<Qu
 type QueryUpdatePatch<TValue> = {
   readonly [TKey in QueryCollectionKey<TValue>]?: CollectionElementOf<TValue>[TKey];
 };
+type NumericQueryKey<TValue> = {
+  [TKey in QueryCollectionKey<TValue>]: CollectionElementOf<TValue>[TKey] extends number ? TKey : never;
+}[QueryCollectionKey<TValue>];
 type QueryPick<TValue, TKey extends keyof TValue> = {
   readonly [TField in TKey]: TValue[TField];
 };
@@ -82,6 +85,22 @@ export interface QueryBuilder<TSchema extends ATS.AnyTypeSchema, TOutput, TResul
   ): QueryBuilder<TSchema, TOutput, TResult>;
   delete(): QueryBuilder<TSchema, TOutput, ATS.InferSchema<TSchema>>;
   update(patch: QueryUpdatePatch<ATS.InferSchema<TSchema>>): QueryBuilder<TSchema, TOutput, ATS.InferSchema<TSchema>>;
+  /** Sums a numeric field over the (filtered, unique) items; `0` when empty. */
+  sum<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(key: TKey): QueryBuilder<TSchema, TOutput, number>;
+  /** Counts the (filtered, unique) items; `0` when empty. */
+  count(): QueryBuilder<TSchema, TOutput, number>;
+  /** Averages a numeric field; `undefined` when no item matches. */
+  avg<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(
+    key: TKey
+  ): QueryBuilder<TSchema, TOutput, number | undefined>;
+  /** Minimum of a numeric field; `undefined` when no item matches. */
+  min<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(
+    key: TKey
+  ): QueryBuilder<TSchema, TOutput, number | undefined>;
+  /** Maximum of a numeric field; `undefined` when no item matches. */
+  max<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(
+    key: TKey
+  ): QueryBuilder<TSchema, TOutput, number | undefined>;
   compile(): (value: ATS.InferSchema<TSchema>) => TResult;
 }
 
@@ -149,6 +168,26 @@ function createQueryBuilder<TSchema extends ATS.AnyTypeSchema, TOutput, TResult>
         [...nodes, { kind: "update", patch: state.patch }],
         [...bindings, ...state.bindings]
       );
+    },
+
+    sum(key) {
+      return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "sum", key }], bindings);
+    },
+
+    count() {
+      return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "count" }], bindings);
+    },
+
+    avg(key) {
+      return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "avg", key }], bindings);
+    },
+
+    min(key) {
+      return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "min", key }], bindings);
+    },
+
+    max(key) {
+      return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "max", key }], bindings);
     },
 
     compile() {

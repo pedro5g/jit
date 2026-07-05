@@ -99,6 +99,14 @@ function referencesVar(expr: IRExpr, name: string): boolean {
       return referencesVar(expr.base, name) || referencesVar(expr.index, name);
     case "call":
       return referencesVar(expr.callee, name) || expr.args.some((arg) => referencesVar(arg, name));
+    case "nary":
+      return expr.operands.some((operand) => referencesVar(operand, name));
+    case "object_literal":
+      return expr.entries.some((entry) => referencesVar(entry.value, name));
+    case "array_literal":
+      return expr.elements.some((element) => referencesVar(element, name));
+    case "construct":
+      return expr.args.some((arg) => referencesVar(arg, name));
     case "literal":
       return false;
   }

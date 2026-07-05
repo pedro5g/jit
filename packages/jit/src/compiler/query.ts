@@ -1,4 +1,5 @@
 import type {
+  QueryAggregateNode,
   QueryCollectorNode,
   QueryConditionNode,
   QueryFilterNode,
@@ -12,17 +13,19 @@ import type {
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
-import { CodeWriter } from "./emitter/code-writer.js";
+import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
+import { emitQuery } from "./emitter/emit-query.js";
+import { buildQueryIR } from "./ir/builders/build-query-ir.js";
+import { optimizeQueryIR } from "./ir/optimizer/optimize-ir.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
-import { emitPropertyAccess } from "./source/access.js";
-import { emitLiteral } from "./source/literal.js";
 
 type ArraySchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
 type SetSchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
 type MapSchema = ATS.AnyTypeSchema & { readonly def: ATS.KeyValueDef };
-type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
-type SafeQueryLiteral = string | number | bigint | boolean | null | undefined;
 type QueryCollectionKind = "array" | "set" | "map";
+
+/** Object schema of the collection element a query runs against. @internal */
+export type QueryObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 
 type ElementOf<T> = T extends readonly (infer TElement)[]
   ? TElement
@@ -32,9 +35,10 @@ type ElementOf<T> = T extends readonly (infer TElement)[]
       ? TElement
       : never;
 
-interface QueryTarget {
+/** Resolved query input collection: kind plus element schema. @internal */
+export interface QueryTarget {
   readonly kind: QueryCollectionKind;
-  readonly objectSchema: ObjectSchema;
+  readonly objectSchema: QueryObjectSchema;
 }
 
 /**
@@ -62,15 +66,18 @@ interface QueryPlan {
   readonly uniques: readonly QueryUniqueNode[];
   readonly collectors: readonly QueryCollectorNode[];
   readonly orderBys: readonly QueryOrderByNode[];
+  readonly aggregates: readonly QueryAggregateNode[];
   readonly mutations: readonly QueryMutationNode[];
 }
 
-interface OptimizedQueryPlan {
+/** Deduplicated query plan lowered to IR by `buildQueryIR`. @internal */
+export interface OptimizedQueryPlan {
   readonly filters: readonly QueryFilterNode[];
   readonly select: QuerySelectFieldsNode | undefined;
   readonly unique: QueryUniqueNode | undefined;
   readonly collector: QueryCollectorNode | undefined;
   readonly orderBy: QueryOrderByNode | undefined;
+  readonly aggregate: QueryAggregateNode | undefined;
   readonly mutation: QueryMutationNode | undefined;
 }
 
@@ -90,7 +97,7 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
 
   validateQueryPlan(target.objectSchema, plan);
 
-  return emitQueryPlan(target, plan);
+  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan)));
 }
 
 /**
@@ -112,14 +119,75 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
  */
 export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = ElementOf<ATS.InferSchema<TSchema>>[]>(
   schema: TSchema,
-  program: QueryProgram
+  program: QueryProgram,
+  options?: CompileCacheOptions
 ): QueryCompiled<ATS.InferSchema<TSchema>, TOutput> {
   const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  // Bindings are user values, so only the pure source template is cached;
+  // every compile re-applies its own bindings to a fresh closure.
+  const template = getCompileCached(
+    schema,
+    `query:${serializeQueryNodes(program.nodes)}`,
+    () => globalThis.Function(...bindingNames, `return ${emitQuerySource(schema, program)};`),
+    options
+  );
 
-  return globalThis.Function(
-    ...bindingNames,
-    `return ${emitQuerySource(schema, program)};`
-  )(...program.bindings) as QueryCompiled<ATS.InferSchema<TSchema>, TOutput>;
+  return template(...program.bindings) as QueryCompiled<ATS.InferSchema<TSchema>, TOutput>;
+}
+
+/**
+ * Deterministic structural key for a query plan. Binding names participate
+ * (they are part of the emitted source); binding values do not.
+ */
+function serializeQueryNodes(nodes: readonly QueryNode[]): string {
+  return nodes.map(serializeQueryNode).join(";");
+}
+
+function serializeQueryNode(node: QueryNode): string {
+  switch (node.kind) {
+    case "filter":
+      return `f(${serializeCondition(node.condition)})`;
+    case "select:fields":
+      return `s(${node.fields.join(",")})`;
+    case "unique":
+      return `u(${node.key})`;
+    case "keyed":
+      return `k(${node.key})`;
+    case "groupBy":
+      return `g(${node.key})`;
+    case "orderBy":
+      return `o(${node.key},${node.direction})`;
+    case "aggregate":
+      return `a(${node.op},${node.key ?? ""})`;
+    case "delete":
+      return "d()";
+    case "update":
+      return `m(${Object.keys(node.patch)
+        .map((key) => `${key}=${node.patch[key]?.name}`)
+        .join(",")})`;
+  }
+}
+
+function serializeCondition(condition: QueryConditionNode): string {
+  switch (condition.kind) {
+    case "compare":
+      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
+    case "logical":
+      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
+    case "not":
+      return `not(${serializeCondition(condition.inner)})`;
+  }
+}
+
+function serializeValue(value: QueryValueNode): string {
+  switch (value.kind) {
+    case "field":
+      return `.${value.key}`;
+    case "binding":
+      return `$${value.name}`;
+    case "literal":
+      return `#${typeof value.value}:${String(value.value)}`;
+  }
 }
 
 function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
@@ -128,6 +196,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
   const uniques: QueryUniqueNode[] = [];
   const collectors: QueryCollectorNode[] = [];
   const orderBys: QueryOrderByNode[] = [];
+  const aggregates: QueryAggregateNode[] = [];
   const mutations: QueryMutationNode[] = [];
 
   for (const node of nodes) {
@@ -148,6 +217,9 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
       case "orderBy":
         orderBys[orderBys.length] = node;
         break;
+      case "aggregate":
+        aggregates[aggregates.length] = node;
+        break;
       case "delete":
       case "update":
         mutations[mutations.length] = node;
@@ -155,7 +227,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
     }
   }
 
-  return { filters, selects, uniques, collectors, orderBys, mutations };
+  return { filters, selects, uniques, collectors, orderBys, aggregates, mutations };
 }
 
 function optimizeQueryPlan(plan: QueryPlan): OptimizedQueryPlan {
@@ -165,264 +237,12 @@ function optimizeQueryPlan(plan: QueryPlan): OptimizedQueryPlan {
     unique: last(plan.uniques),
     collector: last(plan.collectors),
     orderBy: last(plan.orderBys),
+    aggregate: last(plan.aggregates),
     mutation: last(plan.mutations),
   };
 }
 
-function emitQueryPlan(target: QueryTarget, plan: OptimizedQueryPlan): string {
-  const writer = new CodeWriter();
-
-  writer.line("function query(value) {");
-  writer.indent(() => {
-    if (plan.mutation) {
-      emitMutationQuery(writer, target, plan);
-    } else if (plan.collector) {
-      emitCollectedQuery(writer, target, plan);
-    } else {
-      emitArrayQuery(writer, target, plan);
-    }
-  });
-  writer.line("}");
-
-  return writer.toString();
-}
-
-function emitArrayQuery(writer: CodeWriter, target: QueryTarget, plan: OptimizedQueryPlan): void {
-  if (shouldProjectAfterOrder(plan)) {
-    emitArrayQueryWithPostOrderProjection(writer, target, plan);
-    return;
-  }
-
-  const selected = emitProjection("item", plan.select);
-
-  emitLoopHeader(writer, target, plan, "new Array(len)");
-  writer.line("let j = 0;");
-  emitInputLoop(writer, target, () => {
-    emitGuardedBody(writer, plan, () => {
-      writer.line(`out[j++] = ${selected};`);
-    });
-  });
-  writer.line("out.length = j;");
-  emitOrderBy(writer, plan.orderBy);
-  writer.line("return out;");
-}
-
-function emitArrayQueryWithPostOrderProjection(
-  writer: CodeWriter,
-  target: QueryTarget,
-  plan: OptimizedQueryPlan
-): void {
-  const selected = emitProjection("item", plan.select);
-
-  emitLoopHeader(writer, target, plan, "new Array(len)");
-  writer.line("let j = 0;");
-  emitInputLoop(writer, target, () => {
-    emitGuardedBody(writer, plan, () => {
-      writer.line("out[j++] = item;");
-    });
-  });
-  writer.line("out.length = j;");
-  emitOrderBy(writer, plan.orderBy);
-  writer.line("const projected = new Array(j);");
-  writer.line("for (let i = 0; i < j; i++) {");
-  writer.indent(() => {
-    writer.line("const item = out[i];");
-    writer.line(`projected[i] = ${selected};`);
-  });
-  writer.line("}");
-  writer.line("return projected;");
-}
-
-function emitCollectedQuery(writer: CodeWriter, target: QueryTarget, plan: OptimizedQueryPlan): void {
-  const collector = plan.collector;
-
-  if (!collector) return;
-
-  if (plan.orderBy) {
-    throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
-  }
-
-  const selected = emitProjection("item", plan.select);
-  const keyAccess = emitPropertyAccess("item", collector.key);
-
-  emitLoopHeader(writer, target, plan, collector.kind === "keyed" ? "new Map()" : "Object.create(null)");
-  emitInputLoop(writer, target, () => {
-    emitGuardedBody(writer, plan, () => {
-      writer.line(`const collectKey = ${keyAccess};`);
-      if (collector.kind === "keyed") {
-        writer.line(`out.set(collectKey, ${selected});`);
-      } else {
-        writer.line("let group = out[collectKey];");
-        writer.line("if (group === undefined) {");
-        writer.indent(() => {
-          writer.line("group = [];");
-          writer.line("out[collectKey] = group;");
-        });
-        writer.line("}");
-        writer.line(`group[group.length] = ${selected};`);
-      }
-    });
-  });
-  writer.line("return out;");
-}
-
-function emitMutationQuery(writer: CodeWriter, target: QueryTarget, plan: OptimizedQueryPlan): void {
-  const mutation = plan.mutation;
-
-  if (!mutation) return;
-
-  emitLoopHeader(
-    writer,
-    target,
-    plan,
-    target.kind === "array" ? "new Array(len)" : target.kind === "set" ? "new Set()" : "new Map()"
-  );
-  if (target.kind === "array") writer.line("let j = 0;");
-  emitInputLoop(writer, target, () => {
-    const condition = emitFilters(plan.filters);
-    const test = condition ? `(${condition})` : "false";
-
-    if (mutation.kind === "delete") {
-      writer.line(`if (!${test}) {`);
-      writer.indent(() => emitMutationKeep(writer, target, "item"));
-      writer.line("}");
-      return;
-    }
-
-    writer.line(`if (${test}) {`);
-    writer.indent(() => emitMutationKeep(writer, target, emitPatchObject("item", target.objectSchema, mutation)));
-    writer.line("} else {");
-    writer.indent(() => emitMutationKeep(writer, target, "item"));
-    writer.line("}");
-  });
-  if (target.kind === "array") writer.line("out.length = j;");
-  writer.line("return out;");
-}
-
-function emitMutationKeep(writer: CodeWriter, target: QueryTarget, value: string): void {
-  switch (target.kind) {
-    case "array":
-      writer.line(`out[j++] = ${value};`);
-      return;
-    case "set":
-      writer.line(`out.add(${value});`);
-      return;
-    case "map":
-      writer.line(`out.set(entry[0], ${value});`);
-      return;
-  }
-}
-
-function emitPatchObject(base: string, schema: ObjectSchema, mutation: QueryMutationNode): string {
-  if (mutation.kind !== "update") return base;
-
-  const entries = Object.keys(schema.def.props).map((key) => {
-    const value = mutation.patch[key]?.name ?? emitPropertyAccess(base, key);
-
-    return `${emitLiteral(key)}: ${value}`;
-  });
-
-  return `{ ${entries.join(", ")} }`;
-}
-
-function emitLoopHeader(
-  writer: CodeWriter,
-  target: QueryTarget,
-  plan: OptimizedQueryPlan,
-  outInitializer: string
-): void {
-  writer.line(`const len = ${target.kind === "array" ? "value.length" : "value.size"};`);
-  if (plan.unique) writer.line("const seen = new Set();");
-  writer.line(`const out = ${outInitializer};`);
-}
-
-function emitInputLoop(writer: CodeWriter, target: QueryTarget, body: () => void): void {
-  switch (target.kind) {
-    case "array":
-      writer.line("for (let i = 0; i < len; i++) {");
-      writer.indent(() => {
-        writer.line("const item = value[i];");
-        body();
-      });
-      writer.line("}");
-      return;
-    case "set":
-      writer.line("for (const item of value) {");
-      writer.indent(body);
-      writer.line("}");
-      return;
-    case "map":
-      writer.line("for (const entry of value) {");
-      writer.indent(() => {
-        writer.line("const item = entry[1];");
-        body();
-      });
-      writer.line("}");
-      return;
-  }
-}
-
-function emitGuardedBody(writer: CodeWriter, plan: OptimizedQueryPlan, emitAccepted: () => void): void {
-  const condition = emitFilters(plan.filters);
-
-  if (condition) {
-    writer.line(`if (${condition}) {`);
-    writer.indent(() => emitUniqueOrAccepted(writer, plan, emitAccepted));
-    writer.line("}");
-    return;
-  }
-
-  emitUniqueOrAccepted(writer, plan, emitAccepted);
-}
-
-function emitUniqueOrAccepted(writer: CodeWriter, plan: OptimizedQueryPlan, emitAccepted: () => void): void {
-  if (!plan.unique) {
-    emitAccepted();
-    return;
-  }
-
-  const keyAccess = emitPropertyAccess("item", plan.unique.key);
-
-  writer.line(`const uniqueKey = ${keyAccess};`);
-  writer.line("if (!seen.has(uniqueKey)) {");
-  writer.indent(() => {
-    writer.line("seen.add(uniqueKey);");
-    emitAccepted();
-  });
-  writer.line("}");
-}
-
-function emitOrderBy(writer: CodeWriter, orderBy: QueryOrderByNode | undefined): void {
-  if (!orderBy) return;
-
-  const leftAccess = emitPropertyAccess("left", orderBy.key);
-  const rightAccess = emitPropertyAccess("right", orderBy.key);
-
-  writer.line("out.sort((left, right) => {");
-  writer.indent(() => {
-    writer.line(`const leftValue = ${leftAccess};`);
-    writer.line(`const rightValue = ${rightAccess};`);
-    writer.line("if (leftValue === rightValue) return 0;");
-    if (orderBy.direction === "desc") {
-      writer.line("return leftValue < rightValue ? 1 : -1;");
-    } else {
-      writer.line("return leftValue < rightValue ? -1 : 1;");
-    }
-  });
-  writer.line("});");
-}
-
-function shouldProjectAfterOrder(plan: OptimizedQueryPlan): boolean {
-  return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
-}
-
-function emitFilters(filters: readonly QueryFilterNode[]): string | undefined {
-  if (filters.length === 0) return undefined;
-
-  return filters.map((filter) => `(${emitCondition(filter.condition, "item")})`).join(" && ");
-}
-
-function validateQueryPlan(schema: ObjectSchema, plan: OptimizedQueryPlan): void {
+function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan): void {
   for (const filter of plan.filters) {
     validateCondition(schema, filter.condition);
   }
@@ -434,6 +254,23 @@ function validateQueryPlan(schema: ObjectSchema, plan: OptimizedQueryPlan): void
 
   if (plan.collector && plan.orderBy) {
     throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
+  }
+
+  if (plan.aggregate) {
+    if (plan.select || plan.collector || plan.orderBy || plan.mutation) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query aggregate cannot be combined with select/keyed/groupBy/orderBy/delete/update in v1"
+      );
+    }
+
+    if (plan.aggregate.op !== "count") {
+      if (plan.aggregate.key === undefined) {
+        throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
+      }
+
+      validateObjectKeys(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
   }
 
   if (plan.mutation) {
@@ -470,10 +307,10 @@ function expectCollectionObjectSchema(schema: ATS.AnyTypeSchema, compilerName: s
     throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
   }
 
-  return { kind: resolved.type as QueryCollectionKind, objectSchema: element as ObjectSchema };
+  return { kind: resolved.type as QueryCollectionKind, objectSchema: element as QueryObjectSchema };
 }
 
-function validateObjectKeys(schema: ObjectSchema, keys: readonly string[], compilerName: string): void {
+function validateObjectKeys(schema: QueryObjectSchema, keys: readonly string[], compilerName: string): void {
   const props = schema.def.props;
 
   for (const key of keys) {
@@ -485,7 +322,7 @@ function validateObjectKeys(schema: ObjectSchema, keys: readonly string[], compi
   }
 }
 
-function validateCondition(schema: ObjectSchema, condition: QueryConditionNode): void {
+function validateCondition(schema: QueryObjectSchema, condition: QueryConditionNode): void {
   switch (condition.kind) {
     case "compare":
       validateValue(schema, condition.left);
@@ -501,79 +338,10 @@ function validateCondition(schema: ObjectSchema, condition: QueryConditionNode):
   }
 }
 
-function validateValue(schema: ObjectSchema, value: QueryValueNode): void {
+function validateValue(schema: QueryObjectSchema, value: QueryValueNode): void {
   if (value.kind === "field") {
     validateObjectKeys(schema, [value.key], "query");
   }
-}
-
-function emitCondition(condition: QueryConditionNode, base: string): string {
-  switch (condition.kind) {
-    case "compare": {
-      const left = emitValue(condition.left, base);
-      const right = emitValue(condition.right, base);
-
-      switch (condition.op) {
-        case "eq":
-          return `${left} === ${right}`;
-        case "neq":
-          return `${left} !== ${right}`;
-        case "gt":
-          return `${left} > ${right}`;
-        case "gte":
-          return `${left} >= ${right}`;
-        case "lt":
-          return `${left} < ${right}`;
-        case "lte":
-          return `${left} <= ${right}`;
-      }
-
-      throw new JITError("INVALID_QUERY", "Unsupported comparison operator");
-    }
-    case "logical": {
-      const left = emitCondition(condition.left, base);
-      const right = emitCondition(condition.right, base);
-      const op = condition.op === "and" ? "&&" : "||";
-
-      return `(${left} ${op} ${right})`;
-    }
-    case "not":
-      return `!(${emitCondition(condition.inner, base)})`;
-  }
-}
-
-function emitValue(value: QueryValueNode, base: string): string {
-  switch (value.kind) {
-    case "field":
-      return emitPropertyAccess(base, value.key);
-    case "binding":
-      return value.name;
-    case "literal":
-      return emitSafeLiteral(value.value);
-  }
-}
-
-function emitSafeLiteral(value: unknown): string {
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "bigint" ||
-    typeof value === "boolean" ||
-    value === null ||
-    value === undefined
-  ) {
-    return emitLiteral(value as SafeQueryLiteral);
-  }
-
-  throw new JITError("INVALID_QUERY", "query literal values must be primitive compiler literals");
-}
-
-function emitProjection(base: string, select: QuerySelectFieldsNode | undefined): string {
-  if (!select) return base;
-
-  const entries = select.fields.map((field) => `${emitLiteral(field)}: ${emitPropertyAccess(base, field)}`);
-
-  return `{ ${entries.join(", ")} }`;
 }
 
 function last<TValue>(values: readonly TValue[]): TValue | undefined {

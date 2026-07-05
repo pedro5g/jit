@@ -11,14 +11,28 @@ describe("JITError", () => {
   });
 
   it("carries the machine-readable code", () => {
-    const codes = ["INVALID_QUERY", "INVALID_UPDATE", "READONLY_FIELD", "REFINE_FAILED"] as const;
+    const codes = [
+      "INVALID_QUERY",
+      "INVALID_UPDATE",
+      "INVALID_MAPPER",
+      "INVALID_OPERATION",
+      "UNSUPPORTED_SCHEMA",
+      "READONLY_FIELD",
+      "REFINE_FAILED",
+    ] as const;
 
     for (const code of codes) {
       expect(new Errors.JITError(code, "msg").code).toBe(code);
     }
 
     expectTypeOf<Errors.JITErrorCode>().toEqualTypeOf<
-      "INVALID_QUERY" | "INVALID_UPDATE" | "READONLY_FIELD" | "REFINE_FAILED"
+      | "INVALID_QUERY"
+      | "INVALID_UPDATE"
+      | "INVALID_MAPPER"
+      | "INVALID_OPERATION"
+      | "UNSUPPORTED_SCHEMA"
+      | "READONLY_FIELD"
+      | "REFINE_FAILED"
     >();
   });
 

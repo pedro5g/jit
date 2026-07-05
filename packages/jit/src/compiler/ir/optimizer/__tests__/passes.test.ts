@@ -1,10 +1,8 @@
 import type { IRNode, IRProgram } from "../../ir.js";
 import { irVar, literal, loadProp, not, notStrictEqual, strictEqual } from "../../ir.js";
-import { dedupeHash } from "../passes/dedupe-hash.js";
 import { dedupeLoads } from "../passes/dedupe-loads.js";
 import { eliminateDead } from "../passes/eliminate-dead.js";
 import { flattenBlocks } from "../passes/flatten-blocks.js";
-import { hoistHash } from "../passes/hoist-hash.js";
 import { inlineVars } from "../passes/inline-vars.js";
 import { loopSimplify } from "../passes/loop-simplify.js";
 import { reorderCompares } from "../passes/reorder-compares.js";
@@ -184,15 +182,6 @@ describe("IR optimizer passes", () => {
       const output = reorderCompares(program([impure, pure, returnTrue]));
 
       expect(output.body).toEqual([impure, pure, returnTrue]);
-    });
-  });
-
-  describe("identity placeholders", () => {
-    it("dedupeHash and hoistHash currently return the program unchanged", () => {
-      const input = program([returnTrue]);
-
-      expect(dedupeHash(input)).toBe(input);
-      expect(hoistHash(input)).toBe(input);
     });
   });
 });

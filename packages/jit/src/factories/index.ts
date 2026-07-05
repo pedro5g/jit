@@ -16,6 +16,8 @@ export { compilePipeline } from "../compiler/pipeline.js";
 export { compileUpdate } from "../compiler/update.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
+export type { MapperOverride, MapperOverrides } from "./mapper.js";
+export { mapper } from "./mapper.js";
 export * from "./object/index.js";
 export * from "./primitive/index.js";
 export type { QueryBuilder, QueryConditionBuilder } from "./query.js";

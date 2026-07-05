@@ -1,5 +1,6 @@
 import type * as ATS from "../../core/ats/index.js";
 import type { HashStrategy, OrderDirection } from "../../core/hints/index.js";
+import { JITError } from "../../errors/index.js";
 import { resolveCompilerHints, resolveHintKey } from "../resolvers/resolve-hints.js";
 
 export type ArrayEqualStrategy =
@@ -23,7 +24,7 @@ export function resolveEqualStrategy(schema: ATS.AnyTypeSchema): EqualStrategy {
   const ordered = hints.order ?? hints.collection?.ordered;
 
   if (ordered && !key) {
-    throw new Error("[JIT] ordered() requires a string key for compiler strategies");
+    throw new JITError("INVALID_OPERATION", "ordered() requires a string key for compiler strategies");
   }
 
   return {

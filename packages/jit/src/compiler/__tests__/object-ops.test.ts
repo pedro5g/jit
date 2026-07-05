@@ -1,4 +1,4 @@
-import { Compiler, JIT } from "../../index.js";
+import { Compiler, Errors, JIT } from "../../index.js";
 
 describe("JIT compiler object operations", () => {
   const User = JIT.object({
@@ -218,5 +218,26 @@ describe("JIT compiler object operations", () => {
     expect(source).toContain("out[out.length] = item;");
     expect(source).not.toContain(".push(");
     expectTypeOf(uniqueBy([first, duplicate, second])).toMatchTypeOf<(typeof first)[]>();
+  });
+
+  it("should throw JITError with INVALID_OPERATION on schema misuse", () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+
+    const cases = [
+      () => Compiler.compileNormalize(User.schema),
+      () => Compiler.compileGroupBy(JIT.array(User).schema),
+      () => Compiler.compilePick(JIT.array(User).schema as never, ["id"] as never),
+      () => Compiler.compilePick(User.schema, ["missing"] as unknown as ["id"]),
+    ];
+
+    for (const compile of cases) {
+      try {
+        compile();
+        expect.unreachable();
+      } catch (error) {
+        expect(error).toBeInstanceOf(Errors.JITError);
+        expect((error as Errors.JITError).code).toBe("INVALID_OPERATION");
+      }
+    }
   });
 });

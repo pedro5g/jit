@@ -136,6 +136,18 @@ function collectExprUsages(expr: IRExpr, usages: Map<string, number>): void {
       collectExprUsages(expr.callee, usages);
       for (const arg of expr.args) collectExprUsages(arg, usages);
       return;
+    case "nary":
+      for (const operand of expr.operands) collectExprUsages(operand, usages);
+      return;
+    case "object_literal":
+      for (const entry of expr.entries) collectExprUsages(entry.value, usages);
+      return;
+    case "array_literal":
+      for (const element of expr.elements) collectExprUsages(element, usages);
+      return;
+    case "construct":
+      for (const arg of expr.args) collectExprUsages(arg, usages);
+      return;
     case "literal":
       return;
   }
@@ -163,6 +175,17 @@ function replaceExpr(expr: IRExpr, replacements: ReadonlyMap<string, IRExpr>): I
         callee: replaceExpr(expr.callee, replacements),
         args: expr.args.map((arg) => replaceExpr(arg, replacements)),
       };
+    case "nary":
+      return { ...expr, operands: expr.operands.map((operand) => replaceExpr(operand, replacements)) };
+    case "object_literal":
+      return {
+        ...expr,
+        entries: expr.entries.map((entry) => ({ ...entry, value: replaceExpr(entry.value, replacements) })),
+      };
+    case "array_literal":
+      return { ...expr, elements: expr.elements.map((element) => replaceExpr(element, replacements)) };
+    case "construct":
+      return { ...expr, args: expr.args.map((arg) => replaceExpr(arg, replacements)) };
     case "literal":
       return expr;
   }
@@ -183,9 +206,14 @@ function isInlineSafe(expr: IRExpr): boolean {
     case "sameValue":
     case "sameNumber":
       return isInlineSafe(expr.left) && isInlineSafe(expr.right);
+    case "nary":
+      return expr.operands.every(isInlineSafe);
     case "schema_guard":
       return isInlineSafe(expr.value);
     case "call":
+    case "object_literal":
+    case "array_literal":
+    case "construct":
       return false;
   }
 }

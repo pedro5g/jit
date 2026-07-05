@@ -1,3 +1,4 @@
+export { type CompileCacheOptions, clearCompileCache } from "../runtime/cache/compile-cache.js";
 export * from "./clone/index.js";
 export * from "./clone.js";
 export * from "./diff/index.js";
@@ -10,6 +11,8 @@ export * from "./ir/ir.js";
 export * from "./ir/optimizer/cost/optimize-cost.js";
 export * from "./ir/optimizer/optimize-ir.js";
 export * from "./ir/scope.js";
+export * from "./mapper/build-mapper-plan.js";
+export * from "./mapper.js";
 export * from "./object-ops.js";
 export * from "./pipeline.js";
 export * from "./query.js";

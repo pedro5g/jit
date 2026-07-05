@@ -47,8 +47,6 @@ describe("JIT compiler", () => {
     it("should expose the optimizer passes in the mandated order", () => {
       expect(Compiler.optimizeEqualIRPasses.map((pass) => pass.name)).toEqual([
         "flattenBlocks",
-        "hoistHash",
-        "dedupeHash",
         "dedupeLoads",
         "hoistLoads",
         "loopFusion",

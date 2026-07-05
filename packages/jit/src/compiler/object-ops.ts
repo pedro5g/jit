@@ -1,6 +1,7 @@
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { resolveHints } from "../core/hints/index.js";
+import { JITError } from "../errors/index.js";
 import { CodeWriter } from "./emitter/code-writer.js";
 import { createEmitState, type EmitState } from "./emitter/emit-state.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
@@ -287,20 +288,20 @@ export function emitNormalizeSource<TSchema extends ATS.AnyTypeSchema>(
   const resolved = resolveWrappers(schema).base;
 
   if (resolved.type !== TypeName.array) {
-    throw new TypeError("compileNormalize expects an array schema");
+    throw new JITError("INVALID_OPERATION", "compileNormalize expects an array schema");
   }
 
   const element = resolveWrappers((resolved as ArraySchema).def.element).base;
 
   if (element.type !== TypeName.object) {
-    throw new TypeError("compileNormalize expects an array of object schema");
+    throw new JITError("INVALID_OPERATION", "compileNormalize expects an array of object schema");
   }
 
   const objectSchema = element as ObjectSchema;
   const normalizeKey = key ?? resolveNormalizeKey(schema);
 
   if (!normalizeKey) {
-    throw new TypeError("compileNormalize requires a key or a .keyed()/index/entity hint");
+    throw new JITError("INVALID_OPERATION", "compileNormalize requires a key or a .keyed()/index/entity hint");
   }
 
   validateObjectKeys(objectSchema, [normalizeKey], "compileNormalize");
@@ -423,7 +424,7 @@ export function emitSortBySource<TSchema extends ATS.AnyTypeSchema>(
   const sortKey = key ?? hintKey;
 
   if (!sortKey) {
-    throw new TypeError("compileSortBy requires a key or a .ordered()/.keyed()/index/entity hint");
+    throw new JITError("INVALID_OPERATION", "compileSortBy requires a key or a .ordered()/.keyed()/index/entity hint");
   }
 
   const { objectSchema } = expectArrayObjectKey(schema, sortKey, "compileSortBy", () => sortKey);
@@ -609,7 +610,7 @@ function expectObjectSchema(schema: ATS.AnyTypeSchema, compilerName: string): Ob
   const resolved = resolveWrappers(schema).base;
 
   if (resolved.type !== TypeName.object) {
-    throw new TypeError(`${compilerName} expects an object schema`);
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an object schema`);
   }
 
   return resolved as ObjectSchema;
@@ -620,7 +621,9 @@ function validateObjectKeys(schema: ObjectSchema, keys: readonly string[], compi
 
   for (const key of keys) {
     if (!(key in props)) {
-      throw new TypeError(`${compilerName} received unknown key ${JSON.stringify(key)}`);
+      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+        path: [key],
+      });
     }
   }
 
@@ -650,19 +653,19 @@ function expectArrayObjectKey(
   const resolved = resolveWrappers(schema).base;
 
   if (resolved.type !== TypeName.array) {
-    throw new TypeError(`${compilerName} expects an array schema`);
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array schema`);
   }
 
   const element = resolveWrappers((resolved as ArraySchema).def.element).base;
 
   if (element.type !== TypeName.object) {
-    throw new TypeError(`${compilerName} expects an array of object schema`);
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array of object schema`);
   }
 
   const resolvedKey = key ?? resolveKey(schema);
 
   if (!resolvedKey) {
-    throw new TypeError(`${compilerName} requires a key or a compatible array hint`);
+    throw new JITError("INVALID_OPERATION", `${compilerName} requires a key or a compatible array hint`);
   }
 
   return { objectSchema: element as ObjectSchema, key: resolvedKey };

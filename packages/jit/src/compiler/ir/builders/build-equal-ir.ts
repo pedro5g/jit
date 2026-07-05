@@ -1,4 +1,5 @@
 import * as ATS from "../../../core/ats/index.js";
+import { JITError } from "../../../errors/index.js";
 import { resolveWrappers } from "../../resolvers/resolve-wrappers.js";
 import { isPrimitiveLikeSchema } from "../../schema-nodes.js";
 import { literalDiscriminatorValue } from "../../source/guard.js";
@@ -111,7 +112,7 @@ function appendSchemaCompare(
       appendDiscriminatedUnionCompare(body, base, left, right, scope, strategy);
       return;
     default:
-      throw new Error(`[JIT] Unimplemented compiler equal IR for type: ${base.type}`);
+      throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler equal IR for type: ${base.type}`);
   }
 }
 

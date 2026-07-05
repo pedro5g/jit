@@ -1,4 +1,5 @@
 import * as ATS from "../../core/ats/index.js";
+import { JITError } from "../../errors/index.js";
 import {
   type ArrayNode,
   buildSchemaNode,
@@ -55,7 +56,7 @@ function buildCloneNode(schema: ATS.AnyTypeSchema): CloneIRNode {
   if (node) return node;
   if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
 
-  throw new Error(`[JIT] Unimplemented compiler clone IR for type: ${schema.type}`);
+  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler clone IR for type: ${schema.type}`);
 }
 
 function buildUnionNode(schema: ATS.UnionSchema): CloneIRNode {

@@ -1,6 +1,7 @@
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
+import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { buildUpdateIR } from "./update/build-update-ir.js";
 import { emitUpdate, emitUpdateBody } from "./update/emit-update.js";
 
@@ -68,14 +69,24 @@ export function emitUpdateSource(schema: ATS.AnyTypeSchema): string {
  * next.other === user.other;     // untouched paths keep identity
  * ```
  */
-export function compileUpdate<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Update<ATS.InferSchema<TSchema>> {
+export function compileUpdate<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): Update<ATS.InferSchema<TSchema>> {
   assertUpdateable(schema);
-  const program = buildUpdateIR(schema);
-  const body = emitUpdateBody(program);
+  return getCompileCached(
+    schema,
+    "update",
+    () => {
+      const program = buildUpdateIR(schema);
+      const body = emitUpdateBody(program);
 
-  return globalThis.Function(`return function update(value, patch) {\n${body}\n};`)() as Update<
-    ATS.InferSchema<TSchema>
-  >;
+      return globalThis.Function(`return function update(value, patch) {\n${body}\n};`)() as Update<
+        ATS.InferSchema<TSchema>
+      >;
+    },
+    options
+  );
 }
 
 function assertUpdateable(schema: ATS.AnyTypeSchema): void {

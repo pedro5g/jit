@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { buildCloneIR } from "./clone/build-clone-ir.js";
 import { emitClone, emitCloneBody } from "./clone/emit-clone.js";
 
@@ -39,9 +40,19 @@ export function emitCloneSource(schema: ATS.AnyTypeSchema): string {
  * const copy = clone(user); // deep copy, new identity at every level
  * ```
  */
-export function compileClone<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Clone<ATS.Infer<TSchema>> {
-  const program = buildCloneIR(schema);
-  const body = emitCloneBody(program);
+export function compileClone<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): Clone<ATS.Infer<TSchema>> {
+  return getCompileCached(
+    schema,
+    "clone",
+    () => {
+      const program = buildCloneIR(schema);
+      const body = emitCloneBody(program);
 
-  return globalThis.Function(`return function clone(value) {\n${body}\n};`)() as Clone<ATS.Infer<TSchema>>;
+      return globalThis.Function(`return function clone(value) {\n${body}\n};`)() as Clone<ATS.Infer<TSchema>>;
+    },
+    options
+  );
 }

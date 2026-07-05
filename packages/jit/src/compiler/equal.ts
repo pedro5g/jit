@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { getIndex } from "../runtime/index/index.js";
 import { emitEqual, emitEqualBody } from "./emitter/emit-equal.js";
 import { compileHash } from "./hash.js";
@@ -37,17 +38,27 @@ export function emitEqualSource(schema: ATS.AnyTypeSchema): string {
  * @param schema - The schema used to compile the equality function.
  * @returns A specialized equality function for values inferred from `schema`.
  */
-export function compileEqual<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Equal<ATS.Infer<TSchema>> {
-  const strategy = resolveEqualStrategy(schema);
-  const program = optimizeIR(buildEqualIR(schema, strategy));
-  const body = emitEqualBody(program);
-  const hash = strategy.hash.type === "hash-short-circuit" ? compileHash(schema) : undefined;
+export function compileEqual<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): Equal<ATS.Infer<TSchema>> {
+  return getCompileCached(
+    schema,
+    "equal",
+    () => {
+      const strategy = resolveEqualStrategy(schema);
+      const program = optimizeIR(buildEqualIR(schema, strategy));
+      const body = emitEqualBody(program);
+      const hash = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : undefined;
 
-  return globalThis.Function(
-    "__hash",
-    "__getIndex",
-    `return function equal(l, r) {\n${body}\n};`
-  )(hash, getIndex) as Equal<ATS.Infer<TSchema>>;
+      return globalThis.Function(
+        "__hash",
+        "__getIndex",
+        `return function equal(l, r) {\n${body}\n};`
+      )(hash, getIndex) as Equal<ATS.Infer<TSchema>>;
+    },
+    options
+  );
 }
 
 /**

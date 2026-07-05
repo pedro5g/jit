@@ -78,6 +78,14 @@ function hasCall(expr: IRExpr): boolean {
       return hasCall(expr.base);
     case "load_index":
       return hasCall(expr.base) || hasCall(expr.index);
+    case "nary":
+      return expr.operands.some(hasCall);
+    case "object_literal":
+      return expr.entries.some((entry) => hasCall(entry.value));
+    case "array_literal":
+      return expr.elements.some(hasCall);
+    case "construct":
+      return expr.args.some(hasCall);
     case "literal":
     case "var":
       return false;

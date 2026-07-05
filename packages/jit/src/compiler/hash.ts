@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import {
   combineHash,
   getHash,
@@ -47,24 +48,34 @@ export function emitHashSource(schema: ATS.AnyTypeSchema): string {
  * @param schema - The schema used to compile the hash function.
  * @returns A specialized hash function for values inferred from `schema`.
  */
-export function compileHash<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Hash<ATS.Infer<TSchema>> {
-  const compute = globalThis.Function(
-    "__combineHash",
-    "__hashNumber",
-    "__hashString",
-    "__hashBoolean",
-    "__hashBigInt",
-    "__hashUnknown",
-    `return function computeHash(value) {\n${emitHashBody(schema)}\n};`
-  )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Infer<TSchema>>;
+export function compileHash<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): Hash<ATS.Infer<TSchema>> {
+  return getCompileCached(
+    schema,
+    "hash",
+    () => {
+      const compute = globalThis.Function(
+        "__combineHash",
+        "__hashNumber",
+        "__hashString",
+        "__hashBoolean",
+        "__hashBigInt",
+        "__hashUnknown",
+        `return function computeHash(value) {\n${emitHashBody(schema)}\n};`
+      )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Infer<TSchema>>;
 
-  return ((value: ATS.Infer<TSchema>) => {
-    if (isHashCacheable(value)) {
-      return getHash(value, compute as (value: object) => number);
-    }
+      return ((value: ATS.Infer<TSchema>) => {
+        if (isHashCacheable(value)) {
+          return getHash(value, compute as (value: object) => number);
+        }
 
-    return compute(value);
-  }) as Hash<ATS.Infer<TSchema>>;
+        return compute(value);
+      }) as Hash<ATS.Infer<TSchema>>;
+    },
+    options
+  );
 }
 
 function emitHashBody(schema: ATS.AnyTypeSchema): string {

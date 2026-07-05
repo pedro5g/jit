@@ -220,7 +220,7 @@ function expectWatchTarget(schema: ATS.AnyTypeSchema, compilerName: string): Wat
   const resolved = resolveWrappers(schema).base;
 
   if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects an array, set, or map schema`);
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array, set, or map schema`);
   }
 
   const element =
@@ -229,7 +229,7 @@ function expectWatchTarget(schema: ATS.AnyTypeSchema, compilerName: string): Wat
       : resolveWrappers((resolved as ArraySchema | SetSchema).def.element).base;
 
   if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects a collection of object schema`);
   }
 
   return { kind: resolved.type as WatchCollectionKind, objectSchema: element as ObjectSchema };
@@ -240,7 +240,7 @@ function validateObjectKeys(schema: ObjectSchema, keys: readonly string[], compi
 
   for (const key of keys) {
     if (!(key in props)) {
-      throw new JITError("INVALID_QUERY", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
         path: [key],
       });
     }
