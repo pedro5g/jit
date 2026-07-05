@@ -67,12 +67,12 @@ describe("JIT AOT generate", () => {
     }).refine(() => true);
 
     const result = AOT.generate({ schemas: { Event }, outDir });
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
 
     expect(source).not.toContain('from "jit"');
     expect(result.skipped.map((skip) => skip.operation)).toContain("validator");
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
       Event: {
         equal: (left: unknown, right: unknown) => boolean;
         clone: <T>(value: T) => T;
@@ -107,7 +107,7 @@ describe("JIT AOT generate", () => {
     });
 
     const result = AOT.generate({ schemas: { User }, outDir, packageName: "@acme/models" });
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
     const manifest = JSON.parse(readFileSync(join(outDir, "package.json"), "utf8")) as { name: string; type: string };
 
@@ -117,7 +117,8 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("function safeParse(value)");
     expect(source).toContain("class JITValidationError extends Error");
     expect(source).not.toContain("import ");
-    expect(source).toContain("export const User = Object.freeze({");
+    expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(source).toContain("const User_is = User_validator.is;");
 
     expect(types).toContain("export type User =");
     expect(types).toContain("readonly id: number");
@@ -141,20 +142,20 @@ describe("JIT AOT generate", () => {
     expect(operations).toContain("Weird.validator");
     expect(operations).toContain("Weird.stringify");
     expect(operations).toContain("Weird.codec");
-    expect(result.files).toHaveLength(3);
+    expect(result.files).toHaveLength(5);
   });
 
   it("should generate hash and hash-short-circuit equal with zero imports", async () => {
     const Hashed = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered");
     const result = AOT.generate({ schemas: { Hashed }, outDir });
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
 
     expect(result.skipped.filter((skip) => skip.operation === "equal")).toHaveLength(0);
     expect(source).toContain("const Hashed_hash");
     expect(source).toContain("((__hash) => (");
     expect(source).not.toContain("import ");
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
       Hashed: {
         equal: (left: unknown, right: unknown) => boolean;
         hash: (value: unknown) => number;

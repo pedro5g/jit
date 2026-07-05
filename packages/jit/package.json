@@ -71,5 +71,13 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.0"
+  },
+  "peerDependencies": {
+    "jiti": ">=2"
+  },
+  "peerDependenciesMeta": {
+    "jiti": {
+      "optional": true
+    }
   }
 }

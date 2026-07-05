@@ -2,7 +2,7 @@
 // of each operation. No engine, no schema construction, no compilation.
 const start = process.hrtime.bigint();
 
-const { User } = await import("./.generated/index.js");
+const { User } = await import("./.generated/index.mjs");
 
 const user = {
   id: 42,

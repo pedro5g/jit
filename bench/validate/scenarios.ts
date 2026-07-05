@@ -94,7 +94,7 @@ async function loadAotUser(): Promise<AotUserModule> {
   const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
 
   AOT.generate({ schemas: { User: UserSchema }, outDir });
-  return (await import(pathToFileURL(join(outDir, "index.js")).href)) as AotUserModule;
+  return (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as AotUserModule;
 }
 
 export async function registerValidateScenarios(): Promise<void> {

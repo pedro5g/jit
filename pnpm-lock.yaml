@@ -88,6 +88,10 @@ importers:
         version: 0.7.3(typescript@6.0.3)
 
   packages/jit:
+    dependencies:
+      jiti:
+        specifier: '>=2'
+        version: 2.6.1
     devDependencies:
       '@types/node':
         specifier: ^26.1.0

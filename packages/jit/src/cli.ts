@@ -1,75 +1,149 @@
 #!/usr/bin/env node
 /**
- * jit CLI — Prisma-style code generation.
+ * jit CLI — Prisma-style code generation with schema discovery.
  *
  * Usage:
- *   jit generate <schemas-file> [--out <dir>] [--name <package-name>]
+ *   jit generate [files...] [--out <dir>] [--name <package-name>] [--watch]
  *
- * Loads the given module, collects every exported schema/builder, and
- * writes plain optimized `.js` + `.d.ts` (default: `node_modules/@jit/generated`).
- * Point `<schemas-file>` at a `.js`/`.mjs` module (or run through a TS
- * loader such as tsx for `.ts` files).
+ * With no files, resolution order is:
+ *   1. `jit.config.{ts,mts,js,mjs,cjs}` in the current directory
+ *      (`schemas`, `outDir`, `packageName`);
+ *   2. convention scan — every `*.jit.{ts,mts,js,mjs,cjs}` under the
+ *      current directory (node_modules and dot-dirs excluded).
+ *
+ * Output is a self-contained dual-format package (`index.mjs` +
+ * `index.cjs` + `.d.ts`/`.d.cts`), default `node_modules/@jit/generated`.
+ * TypeScript schema files load natively on runtimes that strip types, or
+ * through `jiti` when installed. `--watch` regenerates on file change.
  */
+import { watch } from "node:fs";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { collectSchemas, discoverSchemaFiles, findConfigFile, type JitConfig, loadModule } from "./aot/discover.js";
 import { generate } from "./aot/generate.js";
-import type { SchemaInput } from "./core/builder/index.js";
 
 interface CliArguments {
-  readonly file: string;
-  readonly outDir: string;
+  readonly files: readonly string[];
+  readonly outDir: string | undefined;
   readonly packageName: string | undefined;
+  readonly watch: boolean;
 }
 
 async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
 
-  if (command !== "generate" || rest.length === 0) {
-    process.stderr.write("Usage: jit generate <schemas-file> [--out <dir>] [--name <package-name>]\n");
+  if (command !== "generate") {
+    process.stderr.write("Usage: jit generate [files...] [--out <dir>] [--name <package-name>] [--watch]\n");
     return 1;
   }
 
   const parsed = parseArguments(rest);
-  const moduleUrl = pathToFileURL(resolve(parsed.file)).href;
-  const loaded = (await import(moduleUrl)) as Record<string, unknown>;
-  const schemas: Record<string, SchemaInput> = {};
+  let files = parsed.files;
+  let outDir = parsed.outDir;
+  let packageName = parsed.packageName;
 
-  for (const name of Object.keys(loaded)) {
-    if (isSchemaInput(loaded[name])) schemas[name] = loaded[name] as SchemaInput;
+  if (files.length === 0) {
+    const configFile = findConfigFile(process.cwd());
+
+    if (configFile) {
+      const loaded = await loadModule(configFile);
+      const config = (loaded.default ?? loaded) as JitConfig;
+
+      files = expandConfigSchemas(config.schemas);
+      outDir = outDir ?? (config.outDir ? resolve(config.outDir) : undefined);
+      packageName = packageName ?? config.packageName;
+      process.stdout.write(`using ${configFile}\n`);
+    }
+
+    if (files.length === 0) files = discoverSchemaFiles(process.cwd());
   }
 
-  if (Object.keys(schemas).length === 0) {
-    process.stderr.write(`No exported schemas found in ${parsed.file}\n`);
+  if (files.length === 0) {
+    process.stderr.write("No schema files found: pass files, add jit.config.*, or create *.jit.ts modules\n");
     return 1;
   }
 
-  const result = generate({
-    schemas,
-    outDir: parsed.outDir,
-    ...(parsed.packageName ? { packageName: parsed.packageName } : {}),
+  const resolvedOut = outDir ?? resolve("node_modules/@jit/generated");
+  const runOnce = async (): Promise<number> => {
+    const { schemas } = await collectSchemas(files);
+
+    if (Object.keys(schemas).length === 0) {
+      process.stderr.write(`No exported schemas found in: ${files.join(", ")}\n`);
+      return 1;
+    }
+
+    const result = generate({
+      schemas,
+      outDir: resolvedOut,
+      ...(packageName ? { packageName } : {}),
+    });
+
+    for (const file of result.files) {
+      process.stdout.write(`generated ${file}\n`);
+    }
+
+    for (const skip of result.skipped) {
+      process.stdout.write(`skipped ${skip.schema}.${skip.operation}: ${skip.reason}\n`);
+    }
+
+    return 0;
+  };
+
+  const code = await runOnce();
+
+  if (!parsed.watch) return code;
+
+  process.stdout.write(`watching ${files.length} schema file(s) — ctrl+c to stop\n`);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  for (const file of files) {
+    watch(file, () => {
+      // Debounce editor double-writes into one regeneration.
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        runOnce().catch((error: unknown) => {
+          process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        });
+      }, 100);
+    });
+  }
+
+  return new Promise<number>(() => {
+    // watch mode runs until interrupted
   });
+}
 
-  for (const file of result.files) {
-    process.stdout.write(`generated ${file}\n`);
+function expandConfigSchemas(entries: readonly string[] | undefined): string[] {
+  if (!entries || entries.length === 0) return [];
+
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const absolute = resolve(entry);
+
+    if (/\.(ts|mts|cts|js|mjs|cjs)$/.test(absolute)) {
+      files.push(absolute);
+    } else {
+      files.push(...discoverSchemaFiles(absolute));
+    }
   }
 
-  for (const skip of result.skipped) {
-    process.stdout.write(`skipped ${skip.schema}.${skip.operation}: ${skip.reason}\n`);
-  }
-
-  return 0;
+  return files;
 }
 
 function parseArguments(rest: readonly string[]): CliArguments {
-  let file = "";
-  let outDir = resolve("node_modules/@jit/generated");
+  const files: string[] = [];
+  let outDir: string | undefined;
   let packageName: string | undefined;
+  let watchMode = false;
 
   for (let index = 0; index < rest.length; index++) {
     const argument = rest[index];
 
     if (argument === "--out") {
-      outDir = resolve(rest[++index] ?? outDir);
+      const value = rest[++index];
+
+      if (value) outDir = resolve(value);
       continue;
     }
 
@@ -78,19 +152,15 @@ function parseArguments(rest: readonly string[]): CliArguments {
       continue;
     }
 
-    if (!argument.startsWith("--")) file = argument;
+    if (argument === "--watch") {
+      watchMode = true;
+      continue;
+    }
+
+    if (!argument.startsWith("--")) files.push(resolve(argument));
   }
 
-  return { file, outDir, packageName };
-}
-
-function isSchemaInput(candidate: unknown): boolean {
-  if (candidate === null || typeof candidate !== "object") return false;
-
-  const value = candidate as { schema?: { type?: unknown }; type?: unknown; def?: unknown };
-
-  if (value.schema && typeof value.schema === "object" && typeof value.schema.type === "string") return true;
-  return typeof value.type === "string" && value.def !== undefined;
+  return { files, outDir, packageName, watch: watchMode };
 }
 
 main(process.argv.slice(2)).then(

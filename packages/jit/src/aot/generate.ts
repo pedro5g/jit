@@ -52,6 +52,7 @@ export function generate(options: GenerateOptions): GenerateResult {
   const skipped: SkippedOperation[] = [];
   const js: string[] = [];
   const dts: string[] = [];
+  const exportNames: string[] = [];
   let needsRuntimeGetIndex = false;
   let needsValidationError = false;
   let needsHashHelpers = false;
@@ -61,8 +62,7 @@ export function generate(options: GenerateOptions): GenerateResult {
 
   for (const name of Object.keys(options.schemas)) {
     const schema = unwrapSchema(options.schemas[name] as SchemaInput<ATS.AnyTypeSchema>);
-    const operations: string[] = [];
-    const operationTypes: string[] = [];
+    const operations: { readonly prop: string; readonly type: string }[] = [];
     const valueType = emitTypeScriptType(schema);
 
     dts.push(`export type ${name} = ${valueType};`);
@@ -85,15 +85,18 @@ export function generate(options: GenerateOptions): GenerateResult {
         js.push(...inlined.map((line) => `  ${line}`));
         js.push(...indentBlock(validator.source));
         js.push("})();");
-        operations.push(
-          `is: ${name}_validator.is`,
-          `safeParse: ${name}_validator.safeParse`,
-          `parse: (value) => { const r = ${name}_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); }`
+        js.push(`const ${name}_is = ${name}_validator.is;`);
+        js.push(`const ${name}_safeParse = ${name}_validator.safeParse;`);
+        js.push(
+          `const ${name}_parse = (value) => { const r = ${name}_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
-        operationTypes.push(
-          `readonly is: (value: unknown) => value is ${name}`,
-          `readonly safeParse: (value: unknown) => { readonly success: true; readonly data: ${name} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`,
-          `readonly parse: (value: unknown) => ${name}`
+        operations.push(
+          { prop: "is", type: `(value: unknown) => value is ${name}` },
+          {
+            prop: "safeParse",
+            type: `(value: unknown) => { readonly success: true; readonly data: ${name} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`,
+          },
+          { prop: "parse", type: `(value: unknown) => ${name}` }
         );
       }
     }
@@ -116,8 +119,7 @@ export function generate(options: GenerateOptions): GenerateResult {
       js.push("    return compute(value);");
       js.push("  };");
       js.push("})();");
-      operations.push(`hash: ${name}_hash`);
-      operationTypes.push(`readonly hash: (value: ${name}) => number`);
+      operations.push({ prop: "hash", type: `(value: ${name}) => number` });
     }
 
     // equal
@@ -136,8 +138,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         } else {
           js.push(`const ${name}_equal = (${equalSource});`);
         }
-        operations.push(`equal: ${name}_equal`);
-        operationTypes.push(`readonly equal: (left: ${name}, right: ${name}) => boolean`);
+        operations.push({ prop: "equal", type: `(left: ${name}, right: ${name}) => boolean` });
       }
     }
 
@@ -146,8 +147,7 @@ export function generate(options: GenerateOptions): GenerateResult {
 
     if (cloneSource) {
       js.push(`const ${name}_clone = (${cloneSource});`);
-      operations.push(`clone: ${name}_clone`);
-      operationTypes.push(`readonly clone: (value: ${name}) => ${name}`);
+      operations.push({ prop: "clone", type: `(value: ${name}) => ${name}` });
     }
 
     // stringify
@@ -155,8 +155,7 @@ export function generate(options: GenerateOptions): GenerateResult {
 
     if (serializeSource) {
       js.push(`const ${name}_stringify = (${serializeSource});`);
-      operations.push(`stringify: ${name}_stringify`);
-      operationTypes.push(`readonly stringify: (value: ${name}) => string`);
+      operations.push({ prop: "stringify", type: `(value: ${name}) => string` });
     }
 
     // mask
@@ -164,8 +163,7 @@ export function generate(options: GenerateOptions): GenerateResult {
 
     if (maskSource) {
       js.push(`const ${name}_mask = (${maskSource});`);
-      operations.push(`mask: ${name}_mask`);
-      operationTypes.push(`readonly mask: (value: ${name}) => ${name}`);
+      operations.push({ prop: "mask", type: `(value: ${name}) => ${name}` });
     }
 
     // sanitize
@@ -180,8 +178,7 @@ export function generate(options: GenerateOptions): GenerateResult {
       js.push(...regexConsts.map((line) => `  ${line}`));
       js.push(...indentBlock(`return (${sanitizeSource});`));
       js.push("})();");
-      operations.push(`sanitize: ${name}_sanitize`);
-      operationTypes.push(`readonly sanitize: (value: ${name}) => ${name}`);
+      operations.push({ prop: "sanitize", type: `(value: ${name}) => ${name}` });
     }
 
     // codec
@@ -197,20 +194,28 @@ export function generate(options: GenerateOptions): GenerateResult {
         js.push(...inlined.map((line) => `  ${line}`));
         js.push(...indentBlock(codec.source));
         js.push("})();");
-        operations.push(`codec: ${name}_codec`);
-        operationTypes.push(
-          `readonly codec: { readonly encode: (value: ${name}) => Uint8Array; readonly encodeInto: (value: ${name}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${name} }`
-        );
+        operations.push({
+          prop: "codec",
+          type: `{ readonly encode: (value: ${name}) => Uint8Array; readonly encodeInto: (value: ${name}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${name} }`,
+        });
       }
     }
 
-    js.push(`export const ${name} = Object.freeze({`);
-    js.push(...operations.map((operation) => `  ${operation},`));
+    // Flat exports make each operation independently tree-shakable; the
+    // namespace is a pure aggregation bundlers can drop when unused.
+    js.push(`const ${name} = /*#__PURE__*/ Object.freeze({`);
+    js.push(...operations.map((operation) => `  ${operation.prop}: ${name}_${operation.prop},`));
     js.push("});");
     js.push("");
 
+    for (const operation of operations) {
+      exportNames.push(`${name}_${operation.prop}`);
+      dts.push(`export declare const ${name}_${operation.prop}: ${operation.type};`);
+    }
+    exportNames.push(name);
+
     dts.push(`export declare const ${name}: {`);
-    dts.push(...operationTypes.map((type) => `  ${type};`));
+    dts.push(...operations.map((operation) => `  readonly ${operation.prop}: typeof ${name}_${operation.prop};`));
     dts.push("};");
     dts.push("");
   }
@@ -277,9 +282,17 @@ export function generate(options: GenerateOptions): GenerateResult {
 
   mkdirSync(options.outDir, { recursive: true });
 
+  const body = js.join("\n");
+  const exportList = exportNames.join(", ");
+  const esm = `${body}\nexport { ${exportList} };\n`;
+  const cjs = `${body}\nmodule.exports = { ${exportList} };\n`;
+  const types = `${dts.join("\n")}\n`;
+
   const files = [
-    writeFile(options.outDir, "index.js", `${js.join("\n")}\n`),
-    writeFile(options.outDir, "index.d.ts", `${dts.join("\n")}\n`),
+    writeFile(options.outDir, "index.mjs", esm),
+    writeFile(options.outDir, "index.cjs", cjs),
+    writeFile(options.outDir, "index.d.ts", types),
+    writeFile(options.outDir, "index.d.cts", types),
     writeFile(
       options.outDir,
       "package.json",
@@ -288,8 +301,17 @@ export function generate(options: GenerateOptions): GenerateResult {
           name: packageName,
           version: "0.0.0",
           type: "module",
-          main: "./index.js",
+          main: "./index.cjs",
+          module: "./index.mjs",
           types: "./index.d.ts",
+          exports: {
+            "./package.json": "./package.json",
+            ".": {
+              types: "./index.d.ts",
+              import: "./index.mjs",
+              require: "./index.cjs",
+            },
+          },
           sideEffects: false,
         },
         null,
