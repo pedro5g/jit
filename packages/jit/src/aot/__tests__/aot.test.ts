@@ -144,6 +144,30 @@ describe("JIT AOT generate", () => {
     expect(result.files).toHaveLength(3);
   });
 
+  it("should generate hash and hash-short-circuit equal with zero imports", async () => {
+    const Hashed = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered");
+    const result = AOT.generate({ schemas: { Hashed }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+
+    expect(result.skipped.filter((skip) => skip.operation === "equal")).toHaveLength(0);
+    expect(source).toContain("const Hashed_hash");
+    expect(source).toContain("((__hash) => (");
+    expect(source).not.toContain("import ");
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      Hashed: {
+        equal: (left: unknown, right: unknown) => boolean;
+        hash: (value: unknown) => number;
+      };
+    };
+    const ada = { id: 1, name: "Ada" };
+
+    expect(generated.Hashed.equal(ada, { ...ada })).toBe(true);
+    expect(generated.Hashed.equal(ada, { ...ada, name: "Grace" })).toBe(false);
+    expect(generated.Hashed.hash(ada)).toBe(generated.Hashed.hash({ ...ada }));
+    expect(generated.Hashed.hash(ada)).not.toBe(generated.Hashed.hash({ ...ada, name: "Grace" }));
+  });
+
   it("should emit TypeScript types for nested and wrapped schemas", () => {
     const type = AOT.emitTypeScriptType(
       JIT.object({

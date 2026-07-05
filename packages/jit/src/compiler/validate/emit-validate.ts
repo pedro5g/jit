@@ -591,6 +591,11 @@ class ValidatorEmitter {
   private emitTuple(schema: AnySchema, value: string, path: PathRef): string {
     const items = (schema.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
     const rest = schema.def.rest as ATS.AnyTypeSchema | undefined;
+    const build =
+      this.mode === "parse" && (items.some((item) => needsBuild(item)) || (rest !== undefined && needsBuild(rest)));
+    const out = build ? this.nextVar("b") : value;
+
+    if (build) this.writer.line(`let ${out};`);
 
     this.typeGate(
       `!Array.isArray(${value})`,
@@ -609,8 +614,12 @@ class ValidatorEmitter {
           rest ? `expected at least ${items.length} items` : `expected exactly ${items.length} items`
         );
 
+        if (build) this.writer.line(`${out} = new Array(${value}.length);`);
+
         items.forEach((item, position) => {
-          this.emitNode(item, `${value}[${position}]`, staticChild(path, `[${position}]`));
+          const itemOut = this.emitNode(item, `${value}[${position}]`, staticChild(path, `[${position}]`));
+
+          if (build) this.writer.line(`${out}[${position}] = ${itemOut};`);
         });
 
         if (rest) {
@@ -618,7 +627,9 @@ class ValidatorEmitter {
 
           this.writer.line(`for (let ${index} = ${items.length}; ${index} < ${value}.length; ${index}++) {`);
           this.writer.indent(() => {
-            this.emitNode(rest, `${value}[${index}]`, dynamicChild(path, index));
+            const restOut = this.emitNode(rest, `${value}[${index}]`, dynamicChild(path, index));
+
+            if (build) this.writer.line(`${out}[${index}] = ${restOut};`);
           });
           this.writer.line("}");
         }
@@ -626,11 +637,16 @@ class ValidatorEmitter {
       `typeof ${value}`
     );
 
-    return value;
+    if (build) this.writer.line(`if (${out} === undefined) { ${out} = ${value}; }`);
+    return out;
   }
 
   private emitSet(schema: AnySchema, value: string, path: PathRef): string {
     const element = schema.def.element as ATS.AnyTypeSchema;
+    const build = this.mode === "parse" && needsBuild(element);
+    const out = build ? this.nextVar("b") : value;
+
+    if (build) this.writer.line(`let ${out};`);
 
     this.typeGate(
       `!(${value} instanceof Set)`,
@@ -641,21 +657,29 @@ class ValidatorEmitter {
       () => {
         const item = this.nextVar("e");
 
+        if (build) this.writer.line(`${out} = new Set();`);
         this.writer.line(`for (const ${item} of ${value}) {`);
         this.writer.indent(() => {
-          this.emitNode(element, item, staticChild(path, "[element]"));
+          const elementOut = this.emitNode(element, item, staticChild(path, "[element]"));
+
+          if (build) this.writer.line(`${out}.add(${elementOut});`);
         });
         this.writer.line("}");
       },
       `typeof ${value}`
     );
 
-    return value;
+    if (build) this.writer.line(`if (${out} === undefined) { ${out} = ${value}; }`);
+    return out;
   }
 
   private emitMap(schema: AnySchema, value: string, path: PathRef): string {
     const keySchema = schema.def.key as ATS.AnyTypeSchema;
     const valueSchema = schema.def.value as ATS.AnyTypeSchema;
+    const build = this.mode === "parse" && (needsBuild(keySchema) || needsBuild(valueSchema));
+    const out = build ? this.nextVar("b") : value;
+
+    if (build) this.writer.line(`let ${out};`);
 
     this.typeGate(
       `!(${value} instanceof Map)`,
@@ -666,21 +690,29 @@ class ValidatorEmitter {
       () => {
         const entry = this.nextVar("e");
 
+        if (build) this.writer.line(`${out} = new Map();`);
         this.writer.line(`for (const ${entry} of ${value}) {`);
         this.writer.indent(() => {
-          this.emitNode(keySchema, `${entry}[0]`, staticChild(path, "[key]"));
-          this.emitNode(valueSchema, `${entry}[1]`, staticChild(path, "[value]"));
+          const keyOut = this.emitNode(keySchema, `${entry}[0]`, staticChild(path, "[key]"));
+          const valueOut = this.emitNode(valueSchema, `${entry}[1]`, staticChild(path, "[value]"));
+
+          if (build) this.writer.line(`${out}.set(${keyOut}, ${valueOut});`);
         });
         this.writer.line("}");
       },
       `typeof ${value}`
     );
 
-    return value;
+    if (build) this.writer.line(`if (${out} === undefined) { ${out} = ${value}; }`);
+    return out;
   }
 
   private emitRecord(schema: AnySchema, value: string, path: PathRef): string {
     const valueSchema = schema.def.value as ATS.AnyTypeSchema;
+    const build = this.mode === "parse" && needsBuild(valueSchema);
+    const out = build ? this.nextVar("b") : value;
+
+    if (build) this.writer.line(`let ${out};`);
 
     this.typeGate(
       `${value} === null || typeof ${value} !== "object" || Array.isArray(${value})`,
@@ -692,17 +724,25 @@ class ValidatorEmitter {
         const keys = this.nextVar("k");
         const index = this.nextVar("i");
 
+        if (build) this.writer.line(`${out} = {};`);
         this.writer.line(`const ${keys} = Object.keys(${value});`);
         this.writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
         this.writer.indent(() => {
-          this.emitNode(valueSchema, `${value}[${keys}[${index}]]`, dynamicKeyChild(path, `${keys}[${index}]`));
+          const valueOut = this.emitNode(
+            valueSchema,
+            `${value}[${keys}[${index}]]`,
+            dynamicKeyChild(path, `${keys}[${index}]`)
+          );
+
+          if (build) this.writer.line(`${out}[${keys}[${index}]] = ${valueOut};`);
         });
         this.writer.line("}");
       },
       `typeof ${value}`
     );
 
-    return value;
+    if (build) this.writer.line(`if (${out} === undefined) { ${out} = ${value}; }`);
+    return out;
   }
 
   private emitObject(
@@ -1114,7 +1154,10 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
       );
     }
     case TypeName.array:
+    case TypeName.set:
       return needsBuild(current.def.element as ATS.AnyTypeSchema);
+    case TypeName.map:
+      return needsBuild(current.def.key as ATS.AnyTypeSchema) || needsBuild(current.def.value as ATS.AnyTypeSchema);
     case TypeName.union:
     case TypeName.discriminatedUnion:
     case TypeName.intersection:

@@ -252,6 +252,56 @@ describe("JIT compiler validator", () => {
     if (result.success && result.data.kind === "msg") expect(result.data.text).toBe("hi");
   });
 
+  it("should rebuild tuple, set, map, and record outputs under transforms", () => {
+    const Payload = JIT.object({
+      pair: JIT.tuple(JIT.string().trim(), JIT.number()),
+      tags: JIT.set(JIT.string().lowercase()),
+      meta: JIT.map(JIT.string().trim(), JIT.number()),
+      counts: JIT.record(
+        JIT.string(),
+        JIT.number().pipe((value) => value * 2)
+      ),
+    });
+    const validate = JIT.validator(Payload);
+    const input = {
+      pair: ["  Ada  ", 1] as [string, number],
+      tags: new Set(["MATH", "Poetry"]),
+      meta: new Map([[" key ", 7]]),
+      counts: { a: 2, b: 3 },
+    };
+    const result = validate.safeParse(input);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.pair).toEqual(["Ada", 1]);
+      expect(result.data.tags).toEqual(new Set(["math", "poetry"]));
+      expect(result.data.meta).toEqual(new Map([["key", 7]]));
+      expect(result.data.counts).toEqual({ a: 4, b: 6 });
+      // The input containers stay untouched — structural sharing only when
+      // nothing transforms.
+      expect(input.tags).toEqual(new Set(["MATH", "Poetry"]));
+      expect(input.pair[0]).toBe("  Ada  ");
+    }
+  });
+
+  it("should keep untransformed collections by reference", () => {
+    const Plain = JIT.object({
+      tags: JIT.set(JIT.string()),
+      meta: JIT.map(JIT.string(), JIT.number()),
+      pair: JIT.tuple(JIT.string(), JIT.number()),
+    });
+    const validate = JIT.validator(Plain);
+    const input = {
+      tags: new Set(["a"]),
+      meta: new Map([["k", 1]]),
+      pair: ["x", 2] as [string, number],
+    };
+    const result = validate.safeParse(input);
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toBe(input);
+  });
+
   it("should enforce strict objects and validate int schemas", () => {
     const Strict = JIT.object({ id: JIT.number() }).schema;
     const strictSchema = { ...Strict, def: { ...Strict.def, unknownKeys: "strict" as const } };
