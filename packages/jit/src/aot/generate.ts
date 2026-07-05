@@ -72,6 +72,17 @@ export function generate(options: GenerateOptions): GenerateResult {
     const schema = unwrapSchema(options.schemas[name] as SchemaInput<ATS.AnyTypeSchema>);
     const operations: { readonly prop: string; readonly type: string }[] = [];
     const sourceFile = options.sources?.get(name);
+    // JIT.compile(schema, ops) markers restrict generation to the chosen ops.
+    const requested = readRequestedOps(options.schemas[name]);
+    const wants = (op: string): boolean => requested === undefined || requested.includes(op);
+
+    if (requested) {
+      for (const op of requested) {
+        if (!AOT_OPS.has(op)) {
+          skipped.push({ schema: name, operation: op, reason: "runtime-only operation (not generated ahead of time)" });
+        }
+      }
+    }
 
     if (sourceFile) {
       const specifier = typeImportSpecifier(options.outDir, sourceFile);
@@ -84,7 +95,8 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // is / parse / safeParse
-    const validator = tryEmit(name, "validator", skipped, () => emitValidator(schema));
+    const wantsValidator = wants("is") || wants("parse") || wants("safeParse");
+    const validator = wantsValidator ? tryEmit(name, "validator", skipped, () => emitValidator(schema)) : undefined;
 
     if (validator) {
       const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
@@ -96,29 +108,38 @@ export function generate(options: GenerateOptions): GenerateResult {
           reason: "refine/transform/default callbacks cannot be serialized ahead of time",
         });
       } else {
-        needsValidationError = true;
         js.push(`const ${name}_validator = (() => {`);
         js.push(...inlined.map((line) => `  ${line}`));
         js.push(...indentBlock(validator.source));
         js.push("})();");
-        js.push(`const ${name}_is = ${name}_validator.is;`);
-        js.push(`const ${name}_safeParse = ${name}_validator.safeParse;`);
-        js.push(
-          `const ${name}_parse = (value) => { const r = ${name}_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-        );
-        operations.push(
-          { prop: "is", type: `(value: unknown) => value is ${name}` },
-          {
+        if (wants("is")) {
+          js.push(`const ${name}_is = ${name}_validator.is;`);
+          operations.push({ prop: "is", type: `(value: unknown) => value is ${name}` });
+        }
+        if (wants("safeParse")) {
+          js.push(`const ${name}_safeParse = ${name}_validator.safeParse;`);
+          operations.push({
             prop: "safeParse",
             type: `(value: unknown) => { readonly success: true; readonly data: ${name} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`,
-          },
-          { prop: "parse", type: `(value: unknown) => ${name}` }
-        );
+          });
+        }
+        if (wants("parse")) {
+          needsValidationError = true;
+          js.push(
+            `const ${name}_parse = (value) => { const r = ${name}_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+          );
+          operations.push({ prop: "parse", type: `(value: unknown) => ${name}` });
+        }
       }
     }
 
+    // equal source first: it decides whether hash helpers are required.
+    const equalSource = wants("equal") ? tryEmit(name, "equal", skipped, () => emitEqualSource(schema)) : undefined;
+    const equalNeedsHash = equalSource !== undefined && equalSource.includes("__hash");
+
     // hash (also powers hash-short-circuit equal)
-    const hashSource = tryEmit(name, "hash", skipped, () => emitHashSource(schema));
+    const hashSource =
+      wants("hash") || equalNeedsHash ? tryEmit(name, "hash", skipped, () => emitHashSource(schema)) : undefined;
 
     if (hashSource) {
       needsHashHelpers = true;
@@ -135,12 +156,10 @@ export function generate(options: GenerateOptions): GenerateResult {
       js.push("    return compute(value);");
       js.push("  };");
       js.push("})();");
-      operations.push({ prop: "hash", type: `(value: ${name}) => number` });
+      if (wants("hash")) operations.push({ prop: "hash", type: `(value: ${name}) => number` });
     }
 
     // equal
-    const equalSource = tryEmit(name, "equal", skipped, () => emitEqualSource(schema));
-
     if (equalSource) {
       const needsHash = equalSource.includes("__hash");
       const needsIndex = equalSource.includes("__getIndex");
@@ -159,7 +178,7 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // clone
-    const cloneSource = tryEmit(name, "clone", skipped, () => emitCloneSource(schema));
+    const cloneSource = wants("clone") ? tryEmit(name, "clone", skipped, () => emitCloneSource(schema)) : undefined;
 
     if (cloneSource) {
       js.push(`const ${name}_clone = (${cloneSource});`);
@@ -167,7 +186,9 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // stringify
-    const serializeSource = tryEmit(name, "stringify", skipped, () => emitSerialize(schema));
+    const serializeSource = wants("stringify")
+      ? tryEmit(name, "stringify", skipped, () => emitSerialize(schema))
+      : undefined;
 
     if (serializeSource) {
       js.push(`const ${name}_stringify = (${serializeSource});`);
@@ -175,7 +196,7 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // mask
-    const maskSource = tryEmit(name, "mask", skipped, () => emitMaskSource(schema));
+    const maskSource = wants("mask") ? tryEmit(name, "mask", skipped, () => emitMaskSource(schema)) : undefined;
 
     if (maskSource) {
       js.push(`const ${name}_mask = (${maskSource});`);
@@ -183,7 +204,9 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // sanitize
-    const sanitizeSource = tryEmit(name, "sanitize", skipped, () => emitSanitizeSource(schema));
+    const sanitizeSource = wants("sanitize")
+      ? tryEmit(name, "sanitize", skipped, () => emitSanitizeSource(schema))
+      : undefined;
 
     if (sanitizeSource) {
       const regexConsts = sanitizeChainBindings.names.map(
@@ -198,7 +221,7 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // codec
-    const codec = tryEmit(name, "codec", skipped, () => emitCodec(schema));
+    const codec = wants("codec") ? tryEmit(name, "codec", skipped, () => emitCodec(schema)) : undefined;
 
     if (codec) {
       const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
@@ -428,6 +451,30 @@ function typeImportSpecifier(outDir: string, sourceFile: string): string {
     .replace(/\.ts$/, ".js");
 
   return mapped.startsWith(".") ? mapped : `./${mapped}`;
+}
+
+const AOT_OPS = new Set([
+  "is",
+  "parse",
+  "safeParse",
+  "hash",
+  "equal",
+  "clone",
+  "stringify",
+  "mask",
+  "sanitize",
+  "codec",
+]);
+
+/** Reads the ops allowlist from a `JIT.compile(schema, ops)` marker input. */
+function readRequestedOps(input: SchemaInput): readonly string[] | undefined {
+  const candidate = (input as { readonly ops?: unknown }).ops;
+
+  if (Array.isArray(candidate) && candidate.every((op) => typeof op === "string")) {
+    return candidate as readonly string[];
+  }
+
+  return undefined;
 }
 
 function indentBlock(source: string): string[] {

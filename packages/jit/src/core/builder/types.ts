@@ -1,3 +1,4 @@
+import type { Regexes } from "../../shared/index.js";
 import type {
   AnyTypeSchema,
   BrandSchema,
@@ -90,8 +91,12 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   max(length: number, message?: string): Builder<TSchema>;
   length(length: number, message?: string): Builder<TSchema>;
   regex(pattern: RegExp, message?: string): Builder<TSchema>;
+  /** Email format; pass a RegExp to override the default pattern (e.g. `JIT.regexes.rfc5322Email`). */
   email(message?: string): Builder<TSchema>;
+  email(pattern: RegExp, message?: string): Builder<TSchema>;
+  /** RFC 9562/4122 UUID; pass a version (1-8) to pin it. */
   uuid(message?: string): Builder<TSchema>;
+  uuid(version: number, message?: string): Builder<TSchema>;
   url(message?: string): Builder<TSchema>;
   trim(): Builder<TSchema>;
   lowercase(): Builder<TSchema>;
@@ -101,6 +106,31 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
    * `JIT.sanitize` and inside compiled `parse`/`safeParse` output.
    */
   sanitize(): Builder<TSchema>;
+  guid(message?: string): Builder<TSchema>;
+  cuid(message?: string): Builder<TSchema>;
+  cuid2(message?: string): Builder<TSchema>;
+  ulid(message?: string): Builder<TSchema>;
+  xid(message?: string): Builder<TSchema>;
+  ksuid(message?: string): Builder<TSchema>;
+  nanoid(message?: string): Builder<TSchema>;
+  duration(message?: string): Builder<TSchema>;
+  emoji(message?: string): Builder<TSchema>;
+  ipv4(message?: string): Builder<TSchema>;
+  ipv6(message?: string): Builder<TSchema>;
+  cidrv4(message?: string): Builder<TSchema>;
+  cidrv6(message?: string): Builder<TSchema>;
+  base64(message?: string): Builder<TSchema>;
+  base64url(message?: string): Builder<TSchema>;
+  hostname(message?: string): Builder<TSchema>;
+  domain(message?: string): Builder<TSchema>;
+  e164(message?: string): Builder<TSchema>;
+  hex(message?: string): Builder<TSchema>;
+  date(message?: string): Builder<TSchema>;
+  mac(delimiter?: string, message?: string): Builder<TSchema>;
+  time(options?: Regexes.TimeOptions, message?: string): Builder<TSchema>;
+  datetime(options?: Regexes.DatetimeOptions, message?: string): Builder<TSchema>;
+  /** Hash digest format, e.g. `.digest("sha256", "base64url")`. */
+  digest(algorithm: Regexes.HashAlgorithm, encoding?: Regexes.HashEncoding, message?: string): Builder<TSchema>;
 }
 
 /** Numeric constraint methods; every call returns the same builder type. */

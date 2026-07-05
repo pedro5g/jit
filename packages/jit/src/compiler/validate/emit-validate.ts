@@ -1,5 +1,6 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
+import { Regexes } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { sanitizeChainBindings } from "../sanitize.js";
 import { emitPropertyAccess } from "../source/access.js";
@@ -37,8 +38,8 @@ export interface ValidatorBindings {
   readonly values: readonly unknown[];
 }
 
-const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const EMAIL_REGEX = Regexes.email;
+const UUID_REGEX = /*@__PURE__*/ Regexes.uuid();
 
 class ValidatorEmitter {
   writer = new CodeWriter();
@@ -424,7 +425,7 @@ class ValidatorEmitter {
               break;
             case "email":
               this.failIf(
-                `!${this.bind(EMAIL_REGEX)}.test(${value})`,
+                `!${this.bind(check.value instanceof RegExp ? check.value : EMAIL_REGEX)}.test(${value})`,
                 path,
                 "invalid_format",
                 "email",
@@ -433,7 +434,7 @@ class ValidatorEmitter {
               break;
             case "uuid":
               this.failIf(
-                `!${this.bind(UUID_REGEX)}.test(${value})`,
+                `!${this.bind(check.value instanceof RegExp ? check.value : UUID_REGEX)}.test(${value})`,
                 path,
                 "invalid_format",
                 "uuid",
@@ -449,6 +450,17 @@ class ValidatorEmitter {
               break;
             }
             default:
+              // Named formats (cuid2, ulid, ipv4, datetime, digest, ...) are
+              // all a single compiled regex test carrying their kind.
+              if (check.value instanceof RegExp) {
+                this.failIf(
+                  `!${this.bind(check.value)}.test(${value})`,
+                  path,
+                  "invalid_format",
+                  check.kind,
+                  check.message ?? `expected a valid ${check.kind}`
+                );
+              }
               break;
           }
         }

@@ -46,18 +46,46 @@ export interface SchemaCheck<TKind extends string = string, TValue = unknown> {
   readonly message?: string;
 }
 
+/** String format check kinds validated by a single compiled regex test. */
+export type StringFormatKind =
+  | "guid"
+  | "cuid"
+  | "cuid2"
+  | "ulid"
+  | "xid"
+  | "ksuid"
+  | "nanoid"
+  | "duration"
+  | "emoji"
+  | "ipv4"
+  | "ipv6"
+  | "cidrv4"
+  | "cidrv6"
+  | "mac"
+  | "base64"
+  | "base64url"
+  | "hostname"
+  | "domain"
+  | "e164"
+  | "hex"
+  | "date"
+  | "time"
+  | "datetime"
+  | "digest";
+
 export type StringCheck =
   | SchemaCheck<"min", number>
   | SchemaCheck<"max", number>
   | SchemaCheck<"length", number>
   | SchemaCheck<"regex", RegExp>
-  | SchemaCheck<"email">
-  | SchemaCheck<"uuid">
+  | SchemaCheck<"email", RegExp>
+  | SchemaCheck<"uuid", RegExp>
   | SchemaCheck<"url">
   | SchemaCheck<"trim">
   | SchemaCheck<"lowercase">
   | SchemaCheck<"uppercase">
-  | SchemaCheck<"sanitize">;
+  | SchemaCheck<"sanitize">
+  | SchemaCheck<StringFormatKind, RegExp>;
 
 export type NumberCheck =
   | SchemaCheck<"min", number>

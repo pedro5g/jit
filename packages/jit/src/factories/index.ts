@@ -19,7 +19,11 @@ export { compileUpdate } from "../compiler/update.js";
  * Infers the TypeScript type of a schema or builder — `JIT.infer<typeof User>`.
  */
 export type { Infer as infer } from "../core/ats/infer.js";
+/** Format regexes behind the string checks — reusable and overridable. */
+export * as regexes from "../shared/regexes.js";
 export * from "./collection/index.js";
+export type { CompiledSelection, CompileOp } from "./compile.js";
+export { COMPILE_OPS, compile } from "./compile.js";
 export * from "./composition/index.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export { mapper } from "./mapper.js";
