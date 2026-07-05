@@ -13,6 +13,7 @@ export {
   compileUniqueBy,
 } from "../compiler/object-ops.js";
 export { compilePipeline } from "../compiler/pipeline.js";
+export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
 export { compileUpdate } from "../compiler/update.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
@@ -28,6 +29,7 @@ export { mask, sanitize } from "./security.js";
 export type { CompiledSerializer } from "./serialize.js";
 export { codec, serializer } from "./serialize.js";
 export * from "./special/index.js";
+export { stream } from "./stream.js";
 export type { Draft, RuntimeUpdate, UpdateInput, UpdateRecipe } from "./update.js";
 export { update } from "./update.js";
 export { validator } from "./validate.js";

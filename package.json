@@ -28,7 +28,7 @@
     "bench:mapper": "tsx --conditions @jit/source bench/mapper/index.ts",
     "bench:validate": "tsx --conditions @jit/source bench/validate/index.ts",
     "bench:serialize": "tsx --conditions @jit/source bench/serialize/index.ts",
-    "bench:all": "pnpm bench:equal && pnpm bench:clone && pnpm bench:update && pnpm bench:diff && pnpm bench:ops && pnpm bench:query && pnpm bench:mapper && pnpm bench:validate && pnpm bench:serialize && pnpm bench:coldstart",
+    "bench:all": "pnpm bench:equal && pnpm bench:clone && pnpm bench:update && pnpm bench:diff && pnpm bench:ops && pnpm bench:query && pnpm bench:mapper && pnpm bench:validate && pnpm bench:serialize && pnpm bench:stream && pnpm bench:coldstart",
     "bench:report": "tsx bench/report.ts",
     "test:watch": "vitest",
     "test": "vitest run",
@@ -37,7 +37,8 @@
     "dev:watch": "tsx --conditions @jit/source --watch",
     "prepare": "husky",
     "check:semver": "tsx scripts/check-semver.ts",
-    "bench:coldstart": "pnpm build && tsx bench/coldstart/index.ts"
+    "bench:coldstart": "pnpm build && tsx bench/coldstart/index.ts",
+    "bench:stream": "tsx --conditions @jit/source bench/stream/index.ts"
   },
   "lint-staged": {
     "packages/*/src/**/*.ts": [

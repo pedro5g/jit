@@ -23,6 +23,7 @@ export * from "./resolvers/resolve-wrappers.js";
 export * from "./sanitize.js";
 export * from "./serialize.js";
 export * from "./strategy/resolve-strategy.js";
+export * from "./stream.js";
 export * from "./update/index.js";
 export * from "./update.js";
 export * from "./validate.js";
