@@ -23,6 +23,8 @@ export * from "./primitive/index.js";
 export type { QueryBuilder, QueryConditionBuilder } from "./query.js";
 export { query } from "./query.js";
 export { mask, sanitize } from "./security.js";
+export type { CompiledSerializer } from "./serialize.js";
+export { codec, serializer } from "./serialize.js";
 export * from "./special/index.js";
 export type { Draft, RuntimeUpdate, UpdateInput, UpdateRecipe } from "./update.js";
 export { update } from "./update.js";

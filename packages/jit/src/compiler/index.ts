@@ -1,6 +1,7 @@
 export { type CompileCacheOptions, clearCompileCache } from "../runtime/cache/compile-cache.js";
 export * from "./clone/index.js";
 export * from "./clone.js";
+export * from "./codec.js";
 export * from "./diff/index.js";
 export * from "./diff.js";
 export * from "./emitter/emit-equal.js";
@@ -20,6 +21,7 @@ export * from "./query.js";
 export * from "./resolvers/resolve-hints.js";
 export * from "./resolvers/resolve-wrappers.js";
 export * from "./sanitize.js";
+export * from "./serialize.js";
 export * from "./strategy/resolve-strategy.js";
 export * from "./update/index.js";
 export * from "./update.js";
