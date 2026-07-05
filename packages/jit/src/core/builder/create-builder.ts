@@ -235,6 +235,17 @@ const baseBuilderPrototype = {
   nonEmpty(this: RuntimeBuilder): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "nonEmpty" }));
   },
+
+  sanitize(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "sanitize" }));
+  },
+
+  pii(this: RuntimeBuilder, strategy: "redact" | "mask" | "hash" = "redact"): AnyBuilder {
+    return createBuilder({
+      ...this.schema,
+      def: { ...(this.schema.def as object), pii: strategy },
+    } as AnyTypeSchema);
+  },
 };
 
 function appendCheck(schema: AnyTypeSchema, check: { readonly kind: string; readonly value?: unknown }): AnyTypeSchema {

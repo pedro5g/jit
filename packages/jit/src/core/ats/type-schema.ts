@@ -54,7 +54,8 @@ export type StringCheck =
   | SchemaCheck<"url">
   | SchemaCheck<"trim">
   | SchemaCheck<"lowercase">
-  | SchemaCheck<"uppercase">;
+  | SchemaCheck<"uppercase">
+  | SchemaCheck<"sanitize">;
 
 export type NumberCheck =
   | SchemaCheck<"min", number>

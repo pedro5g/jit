@@ -1,6 +1,7 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { sanitizeChainBindings } from "../sanitize.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
@@ -349,6 +350,13 @@ class ValidatorEmitter {
           if (check.kind === "trim") this.writer.line(`${value} = ${value}.trim();`);
           if (check.kind === "lowercase") this.writer.line(`${value} = ${value}.toLowerCase();`);
           if (check.kind === "uppercase") this.writer.line(`${value} = ${value}.toUpperCase();`);
+          if (check.kind === "sanitize") {
+            const [scriptBlocks, htmlTags, lt, gt] = sanitizeChainBindings.values.map((regex) => this.bind(regex));
+
+            this.writer.line(
+              `${value} = ${value}.replace(${scriptBlocks}, "").replace(${htmlTags}, "").replace(${lt}, "&lt;").replace(${gt}, "&gt;");`
+            );
+          }
         }
 
         for (const check of checks) {
@@ -976,7 +984,10 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
     case TypeName.string: {
       const checks = (current.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
 
-      return checks.some((check) => check.kind === "trim" || check.kind === "lowercase" || check.kind === "uppercase");
+      return checks.some(
+        (check) =>
+          check.kind === "trim" || check.kind === "lowercase" || check.kind === "uppercase" || check.kind === "sanitize"
+      );
     }
     case TypeName.array:
       return needsBuild(current.def.element as ATS.AnyTypeSchema);

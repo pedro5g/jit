@@ -50,6 +50,12 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
     direction?: OrderDirection
   ): Builder<TSchema>;
   hash(strategy?: HashStrategy): Builder<TSchema>;
+  /**
+   * Marks this field as personally identifiable information. `JIT.mask`
+   * replaces marked fields: `"redact"` → `"***"` / `0`, `"mask"` → keeps the
+   * last characters, `"hash"` → inline FNV-1a hash.
+   */
+  pii(strategy?: "redact" | "mask" | "hash"): Builder<TSchema>;
 }
 
 type HintTarget<T> = T extends readonly (infer TElement)[] ? TElement : T;
@@ -90,6 +96,11 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   trim(): Builder<TSchema>;
   lowercase(): Builder<TSchema>;
   uppercase(): Builder<TSchema>;
+  /**
+   * Strips HTML/script content and escapes stray angle brackets. Applied by
+   * `JIT.sanitize` and inside compiled `parse`/`safeParse` output.
+   */
+  sanitize(): Builder<TSchema>;
 }
 
 /** Numeric constraint methods; every call returns the same builder type. */
