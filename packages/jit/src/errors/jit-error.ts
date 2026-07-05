@@ -10,7 +10,8 @@ export type JITErrorCode =
   | "INVALID_OPERATION"
   | "UNSUPPORTED_SCHEMA"
   | "READONLY_FIELD"
-  | "REFINE_FAILED";
+  | "REFINE_FAILED"
+  | "VALIDATION_FAILED";
 
 /**
  * Optional structured details attached to a `JITError`.

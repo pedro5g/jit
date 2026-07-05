@@ -22,7 +22,7 @@ export function array<TElement extends AnyTypeSchema>(element: SchemaInput<TElem
   return /* @__PURE__ */ createBuilder(
     createSchema(TypeName.array, {
       element: unwrapSchema(element),
-    })
+    }) as ArraySchema<TElement>
   );
 }
 

@@ -38,6 +38,45 @@ export type MutableInferShape<TShape extends SchemaShape> = {
 
 export interface EmptyDef {}
 
+/** A single declarative constraint attached to a schema (`min`, `email`, ...). */
+export interface SchemaCheck<TKind extends string = string, TValue = unknown> {
+  readonly kind: TKind;
+  readonly value?: TValue;
+}
+
+export type StringCheck =
+  | SchemaCheck<"min", number>
+  | SchemaCheck<"max", number>
+  | SchemaCheck<"length", number>
+  | SchemaCheck<"regex", RegExp>
+  | SchemaCheck<"email">
+  | SchemaCheck<"uuid">
+  | SchemaCheck<"url">
+  | SchemaCheck<"trim">
+  | SchemaCheck<"lowercase">
+  | SchemaCheck<"uppercase">;
+
+export type NumberCheck =
+  | SchemaCheck<"min", number>
+  | SchemaCheck<"max", number>
+  | SchemaCheck<"positive">
+  | SchemaCheck<"negative">
+  | SchemaCheck<"multipleOf", number>
+  | SchemaCheck<"finite">
+  | SchemaCheck<"safe">
+  | SchemaCheck<"integer">;
+
+export type ArrayCheck =
+  | SchemaCheck<"min", number>
+  | SchemaCheck<"max", number>
+  | SchemaCheck<"length", number>
+  | SchemaCheck<"nonEmpty">;
+
+/** Def mixin holding a schema's declarative constraints. */
+export interface ChecksDef<TCheck extends SchemaCheck = SchemaCheck> {
+  readonly checks?: readonly TCheck[];
+}
+
 export type PrimitiveTypeName =
   | "any"
   | "unknown"
@@ -78,9 +117,9 @@ export type AnyValueSchema = BaseSchema<any, "any", EmptyDef>;
 export type UnknownSchema = BaseSchema<unknown, "unknown", EmptyDef>;
 export type NeverSchema = BaseSchema<never, "never", EmptyDef>;
 export type VoidSchema = BaseSchema<void, "void", EmptyDef>;
-export type StringSchema = BaseSchema<string, "string", EmptyDef>;
-export type NumberSchema = BaseSchema<number, "number", EmptyDef>;
-export type IntSchema = BaseSchema<number, "int", EmptyDef>;
+export type StringSchema = BaseSchema<string, "string", ChecksDef<StringCheck>>;
+export type NumberSchema = BaseSchema<number, "number", ChecksDef<NumberCheck>>;
+export type IntSchema = BaseSchema<number, "int", ChecksDef<NumberCheck>>;
 export type NanSchema = BaseSchema<number, "nan", EmptyDef>;
 export type NullSchema = BaseSchema<null, "null", EmptyDef>;
 export type BooleanSchema = BaseSchema<boolean, "boolean", EmptyDef>;
@@ -119,7 +158,7 @@ export type AnyCollectionSchema = ArraySchema | SetSchema | MapSchema | RecordSc
 export type ArraySchema<TElement extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
   InferSchema<TElement>[],
   "array",
-  ElementDef<TElement>
+  ElementDef<TElement> & ChecksDef<ArrayCheck>
 >;
 
 export type SetSchema<TElement extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<

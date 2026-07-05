@@ -25,6 +25,7 @@ export { query } from "./query.js";
 export * from "./special/index.js";
 export type { Draft, RuntimeUpdate, UpdateInput, UpdateRecipe } from "./update.js";
 export { update } from "./update.js";
+export { validator } from "./validate.js";
 export type {
   RuntimeWatch,
   WatchedListOptions,

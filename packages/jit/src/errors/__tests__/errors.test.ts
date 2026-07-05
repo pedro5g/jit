@@ -19,6 +19,7 @@ describe("JITError", () => {
       "UNSUPPORTED_SCHEMA",
       "READONLY_FIELD",
       "REFINE_FAILED",
+      "VALIDATION_FAILED",
     ] as const;
 
     for (const code of codes) {
@@ -33,6 +34,7 @@ describe("JITError", () => {
       | "UNSUPPORTED_SCHEMA"
       | "READONLY_FIELD"
       | "REFINE_FAILED"
+      | "VALIDATION_FAILED"
     >();
   });
 

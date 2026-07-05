@@ -167,7 +167,85 @@ const baseBuilderPrototype = {
       })
     );
   },
+
+  min(this: RuntimeBuilder, value: number): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "min", value }));
+  },
+
+  max(this: RuntimeBuilder, value: number): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "max", value }));
+  },
+
+  length(this: RuntimeBuilder, value: number): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "length", value }));
+  },
+
+  regex(this: RuntimeBuilder, value: RegExp): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "regex", value }));
+  },
+
+  email(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "email" }));
+  },
+
+  uuid(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "uuid" }));
+  },
+
+  url(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "url" }));
+  },
+
+  trim(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "trim" }));
+  },
+
+  lowercase(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "lowercase" }));
+  },
+
+  uppercase(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "uppercase" }));
+  },
+
+  positive(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "positive" }));
+  },
+
+  negative(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "negative" }));
+  },
+
+  multipleOf(this: RuntimeBuilder, value: number): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "multipleOf", value }));
+  },
+
+  finite(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "finite" }));
+  },
+
+  safe(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "safe" }));
+  },
+
+  int(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "integer" }));
+  },
+
+  nonEmpty(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "nonEmpty" }));
+  },
 };
+
+function appendCheck(schema: AnyTypeSchema, check: { readonly kind: string; readonly value?: unknown }): AnyTypeSchema {
+  const def = schema.def as { readonly checks?: readonly unknown[] };
+  const checks = def.checks ? [...def.checks, check] : [check];
+
+  return {
+    ...schema,
+    def: { ...(schema.def as object), checks },
+  } as AnyTypeSchema;
+}
 
 const objectBuilderPrototype = {
   ...baseBuilderPrototype,

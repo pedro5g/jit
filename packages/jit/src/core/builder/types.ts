@@ -78,9 +78,51 @@ export type UnwrapBuilderShape<TShape extends Record<string, SchemaInput>> = {
 
 export type BaseBuilder<TSchema extends AnyTypeSchema> = BuilderCore<TSchema>;
 
+/** String constraint methods; every call returns the same builder type. */
+export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
+  min(length: number): Builder<TSchema>;
+  max(length: number): Builder<TSchema>;
+  length(length: number): Builder<TSchema>;
+  regex(pattern: RegExp): Builder<TSchema>;
+  email(): Builder<TSchema>;
+  uuid(): Builder<TSchema>;
+  url(): Builder<TSchema>;
+  trim(): Builder<TSchema>;
+  lowercase(): Builder<TSchema>;
+  uppercase(): Builder<TSchema>;
+}
+
+/** Numeric constraint methods; every call returns the same builder type. */
+export interface NumberCheckMethods<TSchema extends AnyTypeSchema> {
+  min(value: number): Builder<TSchema>;
+  max(value: number): Builder<TSchema>;
+  positive(): Builder<TSchema>;
+  negative(): Builder<TSchema>;
+  multipleOf(value: number): Builder<TSchema>;
+  finite(): Builder<TSchema>;
+  safe(): Builder<TSchema>;
+  int(): Builder<TSchema>;
+}
+
+/** Array length constraint methods; every call returns the same builder type. */
+export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
+  min(length: number): Builder<TSchema>;
+  max(length: number): Builder<TSchema>;
+  length(length: number): Builder<TSchema>;
+  nonEmpty(): Builder<TSchema>;
+}
+
+type CheckMethods<TSchema extends AnyTypeSchema> = TSchema extends { readonly type: "string" }
+  ? StringCheckMethods<TSchema>
+  : TSchema extends { readonly type: "number" | "int" }
+    ? NumberCheckMethods<TSchema>
+    : TSchema extends { readonly type: "array" }
+      ? ArrayCheckMethods<TSchema>
+      : unknown;
+
 export type ObjectBuilder<TShape extends SchemaShape> = BuilderCore<ObjectSchema<TShape>> & ObjectOperators<TShape>;
 
 export type Builder<TSchema extends AnyTypeSchema> =
-  TSchema extends ObjectSchema<infer TShape> ? ObjectBuilder<TShape> : BaseBuilder<TSchema>;
+  TSchema extends ObjectSchema<infer TShape> ? ObjectBuilder<TShape> : BaseBuilder<TSchema> & CheckMethods<TSchema>;
 
 export type AnyBuilder = Builder<AnyTypeSchema>;
