@@ -68,6 +68,56 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
   });
 });
 
+describe("JIT AOT inference-anchored types", () => {
+  let outDir: string;
+
+  beforeEach(() => {
+    outDir = mkdtempSync(join(tmpdir(), "jit-aot-infer-"));
+  });
+
+  afterEach(() => {
+    rmSync(outDir, { recursive: true, force: true });
+  });
+
+  it('should derive .d.ts types from the dev schema file via import("jit").Infer', () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const generated = join(outDir, "generated");
+    const schemaFile = join(outDir, "src", "user.jit.ts");
+
+    AOT.generate({
+      schemas: { User },
+      sources: new Map([["User", schemaFile]]),
+      outDir: generated,
+    });
+
+    const types = readFileSync(join(generated, "index.d.ts"), "utf8");
+
+    expect(types).toContain('export type User = import("jit").Infer<typeof import("../src/user.jit.js").User>;');
+    // No hand-emitted structural type when the source anchors the inference.
+    expect(types).not.toContain("readonly id: number");
+  });
+
+  it("should fall back to structural types for programmatic schemas without sources", () => {
+    const User = JIT.object({ id: JIT.number() });
+
+    AOT.generate({ schemas: { User }, outDir });
+
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+
+    expect(types).toContain("export type User = { readonly id: number };");
+  });
+
+  it("should expose JIT.infer for builders and schemas", () => {
+    const User = JIT.object({ id: JIT.number(), tags: JIT.array(JIT.string()) });
+
+    expectTypeOf<JIT.infer<typeof User>>().toEqualTypeOf<{
+      readonly id: number;
+      readonly tags: string[];
+    }>();
+    expectTypeOf<JIT.infer<typeof User.schema>>().toEqualTypeOf<JIT.infer<typeof User>>();
+  });
+});
+
 describe("JIT AOT schema discovery", () => {
   let projectDir: string;
 

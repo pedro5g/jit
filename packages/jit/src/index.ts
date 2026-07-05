@@ -26,6 +26,11 @@ export * as Compiler from "./compiler/index.js";
 export * as PipelineAST from "./core/ast/index.js";
 /** Schema AST: node factories, `TypeName`, and the `Infer` type helpers. */
 export * as AST from "./core/ats/index.js";
+/**
+ * Infers the TypeScript type of a schema or builder. Root-level export so
+ * generated `.d.ts` files can reference it as `import("jit").Infer<...>`.
+ */
+export type { Infer } from "./core/ats/infer.js";
 /** Fluent builder chain internals (`createBuilder`, builder types). */
 export * as Builder from "./core/builder/index.js";
 /** Typed error classes thrown by compiled functions (`JITError`). */

@@ -41,8 +41,8 @@ const baseBuilderPrototype = {
     return createBuilder(Transform.pipe(this.schema, transform));
   },
 
-  refine(this: RuntimeBuilder, predicate: (value: unknown) => boolean): AnyBuilder {
-    return createBuilder(Transform.refine(this.schema, predicate));
+  refine(this: RuntimeBuilder, predicate: (value: unknown) => boolean, message?: string): AnyBuilder {
+    return createBuilder(Transform.refine(this.schema, predicate, message));
   },
 
   coerce(this: RuntimeBuilder, coercer: (value: unknown) => unknown): AnyBuilder {
@@ -168,32 +168,32 @@ const baseBuilderPrototype = {
     );
   },
 
-  min(this: RuntimeBuilder, value: number): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "min", value }));
+  min(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "min", value, message }));
   },
 
-  max(this: RuntimeBuilder, value: number): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "max", value }));
+  max(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "max", value, message }));
   },
 
-  length(this: RuntimeBuilder, value: number): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "length", value }));
+  length(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "length", value, message }));
   },
 
-  regex(this: RuntimeBuilder, value: RegExp): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "regex", value }));
+  regex(this: RuntimeBuilder, value: RegExp, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "regex", value, message }));
   },
 
-  email(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "email" }));
+  email(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "email", message }));
   },
 
-  uuid(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "uuid" }));
+  uuid(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "uuid", message }));
   },
 
-  url(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "url" }));
+  url(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "url", message }));
   },
 
   trim(this: RuntimeBuilder): AnyBuilder {
@@ -208,32 +208,32 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "uppercase" }));
   },
 
-  positive(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "positive" }));
+  positive(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "positive", message }));
   },
 
-  negative(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "negative" }));
+  negative(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "negative", message }));
   },
 
-  multipleOf(this: RuntimeBuilder, value: number): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "multipleOf", value }));
+  multipleOf(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "multipleOf", value, message }));
   },
 
-  finite(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "finite" }));
+  finite(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "finite", message }));
   },
 
-  safe(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "safe" }));
+  safe(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "safe", message }));
   },
 
-  int(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "integer" }));
+  int(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "integer", message }));
   },
 
-  nonEmpty(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "nonEmpty" }));
+  nonEmpty(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "nonEmpty", message }));
   },
 
   sanitize(this: RuntimeBuilder): AnyBuilder {
@@ -248,9 +248,17 @@ const baseBuilderPrototype = {
   },
 };
 
-function appendCheck(schema: AnyTypeSchema, check: { readonly kind: string; readonly value?: unknown }): AnyTypeSchema {
+function appendCheck(
+  schema: AnyTypeSchema,
+  check: { readonly kind: string; readonly value?: unknown; readonly message?: string | undefined }
+): AnyTypeSchema {
   const def = schema.def as { readonly checks?: readonly unknown[] };
-  const checks = def.checks ? [...def.checks, check] : [check];
+  const entry = {
+    kind: check.kind,
+    ...(check.value !== undefined ? { value: check.value } : {}),
+    ...(check.message !== undefined ? { message: check.message } : {}),
+  };
+  const checks = def.checks ? [...def.checks, entry] : [entry];
 
   return {
     ...schema,

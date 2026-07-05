@@ -209,13 +209,15 @@ export function transform<TSchema extends AnyTypeSchema, const TSpec extends Tra
  */
 export function refine<TSchema extends AnyTypeSchema>(
   schema: TSchema,
-  predicate: (value: InferSchema<TSchema>) => boolean
+  predicate: (value: InferSchema<TSchema>) => boolean,
+  message?: string
 ): RefineSchema<TSchema> {
   return /* @__PURE__ */ createSchema(
     TypeName.refine,
     {
       innerType: schema,
       predicate,
+      ...(message !== undefined ? { message } : {}),
     },
     schema.annotations
   );

@@ -42,6 +42,8 @@ export interface EmptyDef {}
 export interface SchemaCheck<TKind extends string = string, TValue = unknown> {
   readonly kind: TKind;
   readonly value?: TValue;
+  /** Custom issue message reported when the check fails. */
+  readonly message?: string;
 }
 
 export type StringCheck =
@@ -393,6 +395,8 @@ export type InstanceOfSchema<
 
 export interface RefineDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
   readonly predicate: (value: InferSchema<TInner>) => boolean;
+  /** Custom issue message reported when the refinement rejects the value. */
+  readonly message?: string;
 }
 
 export type RefineSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<

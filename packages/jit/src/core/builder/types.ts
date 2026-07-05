@@ -34,7 +34,7 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   default(defaultValue: InferSchema<TSchema> | (() => InferSchema<TSchema>)): Builder<DefaultSchema<TSchema>>;
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
   pipe<TOutput>(transform: (value: InferSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
-  refine(predicate: (value: InferSchema<TSchema>) => boolean): Builder<RefineSchema<TSchema>>;
+  refine(predicate: (value: InferSchema<TSchema>) => boolean, message?: string): Builder<RefineSchema<TSchema>>;
   coerce(coercer: (value: unknown) => InferSchema<TSchema>): Builder<CoerceSchema<TSchema>>;
   entity(options: EntityHint<HintTarget<InferSchema<TSchema>>>): Builder<TSchema>;
   keyed(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
@@ -86,13 +86,13 @@ export type BaseBuilder<TSchema extends AnyTypeSchema> = BuilderCore<TSchema>;
 
 /** String constraint methods; every call returns the same builder type. */
 export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
-  min(length: number): Builder<TSchema>;
-  max(length: number): Builder<TSchema>;
-  length(length: number): Builder<TSchema>;
-  regex(pattern: RegExp): Builder<TSchema>;
-  email(): Builder<TSchema>;
-  uuid(): Builder<TSchema>;
-  url(): Builder<TSchema>;
+  min(length: number, message?: string): Builder<TSchema>;
+  max(length: number, message?: string): Builder<TSchema>;
+  length(length: number, message?: string): Builder<TSchema>;
+  regex(pattern: RegExp, message?: string): Builder<TSchema>;
+  email(message?: string): Builder<TSchema>;
+  uuid(message?: string): Builder<TSchema>;
+  url(message?: string): Builder<TSchema>;
   trim(): Builder<TSchema>;
   lowercase(): Builder<TSchema>;
   uppercase(): Builder<TSchema>;
@@ -105,22 +105,22 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
 
 /** Numeric constraint methods; every call returns the same builder type. */
 export interface NumberCheckMethods<TSchema extends AnyTypeSchema> {
-  min(value: number): Builder<TSchema>;
-  max(value: number): Builder<TSchema>;
-  positive(): Builder<TSchema>;
-  negative(): Builder<TSchema>;
-  multipleOf(value: number): Builder<TSchema>;
-  finite(): Builder<TSchema>;
-  safe(): Builder<TSchema>;
-  int(): Builder<TSchema>;
+  min(value: number, message?: string): Builder<TSchema>;
+  max(value: number, message?: string): Builder<TSchema>;
+  positive(message?: string): Builder<TSchema>;
+  negative(message?: string): Builder<TSchema>;
+  multipleOf(value: number, message?: string): Builder<TSchema>;
+  finite(message?: string): Builder<TSchema>;
+  safe(message?: string): Builder<TSchema>;
+  int(message?: string): Builder<TSchema>;
 }
 
 /** Array length constraint methods; every call returns the same builder type. */
 export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
-  min(length: number): Builder<TSchema>;
-  max(length: number): Builder<TSchema>;
-  length(length: number): Builder<TSchema>;
-  nonEmpty(): Builder<TSchema>;
+  min(length: number, message?: string): Builder<TSchema>;
+  max(length: number, message?: string): Builder<TSchema>;
+  length(length: number, message?: string): Builder<TSchema>;
+  nonEmpty(message?: string): Builder<TSchema>;
 }
 
 type CheckMethods<TSchema extends AnyTypeSchema> = TSchema extends { readonly type: "string" }

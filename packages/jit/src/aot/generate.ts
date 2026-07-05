@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
 import { emitEqualSource } from "../compiler/equal.js";
@@ -27,6 +27,14 @@ export interface GenerateOptions {
   readonly outDir: string;
   /** Generated package name; defaults to `@jit/generated`. */
   readonly packageName?: string;
+  /**
+   * Schema name → source file it was loaded from. When present, the
+   * generated `.d.ts` derives the value type from the dev's own schema via
+   * `import("jit").Infer<typeof import("<file>").Name>` — the single source
+   * of truth for typing — instead of re-emitting a structural type by hand.
+   * Type-only imports erase at runtime, so tree-shaking is unaffected.
+   */
+  readonly sources?: ReadonlyMap<string, string>;
 }
 
 export interface GenerateResult {
@@ -63,9 +71,17 @@ export function generate(options: GenerateOptions): GenerateResult {
   for (const name of Object.keys(options.schemas)) {
     const schema = unwrapSchema(options.schemas[name] as SchemaInput<ATS.AnyTypeSchema>);
     const operations: { readonly prop: string; readonly type: string }[] = [];
-    const valueType = emitTypeScriptType(schema);
+    const sourceFile = options.sources?.get(name);
 
-    dts.push(`export type ${name} = ${valueType};`);
+    if (sourceFile) {
+      const specifier = typeImportSpecifier(options.outDir, sourceFile);
+
+      dts.push(`export type ${name} = import("jit").Infer<typeof import(${JSON.stringify(specifier)}).${name}>;`);
+    } else {
+      // No source file to anchor to (programmatic generate): fall back to a
+      // structural type emitted from the schema tree.
+      dts.push(`export type ${name} = ${emitTypeScriptType(schema)};`);
+    }
 
     // is / parse / safeParse
     const validator = tryEmit(name, "validator", skipped, () => emitValidator(schema));
@@ -397,6 +413,21 @@ function serializeBindingValue(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Relative type-import path from the generated package to the dev's schema
+ * file: POSIX separators, TS extensions mapped to their emitted JS forms
+ * (nodenext resolves them back to the source at typecheck time).
+ */
+function typeImportSpecifier(outDir: string, sourceFile: string): string {
+  const relativePath = relative(resolve(outDir), resolve(sourceFile)).split("\\").join("/");
+  const mapped = relativePath
+    .replace(/\.mts$/, ".mjs")
+    .replace(/\.cts$/, ".cjs")
+    .replace(/\.ts$/, ".js");
+
+  return mapped.startsWith(".") ? mapped : `./${mapped}`;
 }
 
 function indentBlock(source: string): string[] {

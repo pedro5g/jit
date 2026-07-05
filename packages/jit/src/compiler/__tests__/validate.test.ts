@@ -316,6 +316,96 @@ describe("JIT compiler validator", () => {
     if (!result.success) expect(result.issues[0].code).toBe("unknown_key");
   });
 
+  it("should report custom messages from checks and refines", () => {
+    const Signup = JIT.object({
+      name: JIT.string().min(2, "nome muito curto"),
+      email: JIT.string().email("e-mail inválido"),
+      handle: JIT.string().regex(/^[a-z0-9_]+$/, "apenas minúsculas, números e _"),
+      age: JIT.number().int("idade deve ser inteira").positive("idade deve ser positiva"),
+      invite: JIT.string().refine((value) => value.startsWith("inv_"), "convite deve começar com inv_"),
+    });
+    const validate = JIT.validator(Signup);
+    const result = validate.safeParse({
+      name: "A",
+      email: "nope",
+      handle: "Não!",
+      age: -1.5,
+      invite: "x",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const byPath = new Map(result.issues.map((issue) => [`${issue.path}:${issue.code}`, issue.message]));
+
+      expect(byPath.get("name:too_small")).toBe("nome muito curto");
+      expect(byPath.get("email:invalid_format")).toBe("e-mail inválido");
+      expect(byPath.get("handle:invalid_format")).toBe("apenas minúsculas, números e _");
+      expect(byPath.get("age:not_integer")).toBe("idade deve ser inteira");
+      expect(byPath.get("age:not_positive")).toBe("idade deve ser positiva");
+      expect(byPath.get("invite:custom")).toBe("convite deve começar com inv_");
+    }
+  });
+
+  it("should keep default messages when no custom message is given", () => {
+    const Plain = JIT.object({ name: JIT.string().min(2) });
+    const result = JIT.validator(Plain).safeParse({ name: "A" });
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.issues[0].message).toBe("expected at least 2 characters");
+  });
+
+  it("should validate promise wrappers as thenables", () => {
+    const Job = JIT.object({ result: JIT.string().promise() });
+    const validate = JIT.validator(Job);
+
+    expect(validate.is({ result: Promise.resolve("ok") })).toBe(true);
+    expect(validate.is({ result: "not a promise" })).toBe(false);
+
+    const bad = validate.safeParse({ result: 7 });
+
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.issues[0].expected).toBe("Promise");
+  });
+
+  it("should apply transforms inside intersections on parse", () => {
+    const Person = JIT.object({ name: JIT.string().trim() });
+    const Audit = JIT.object({ createdBy: JIT.string().lowercase() });
+    const Full = JIT.intersection(Person, Audit);
+    const validate = JIT.validator(Full);
+    const result = validate.safeParse({ name: "  Ada  ", createdBy: "ROOT" });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ name: "Ada", createdBy: "root" });
+    }
+
+    // Reference is preserved when nothing inside the intersection rebuilds.
+    const Static = JIT.intersection(JIT.object({ a: JIT.number() }), JIT.object({ b: JIT.number() }));
+    const value = { a: 1, b: 2 };
+    const kept = JIT.validator(Static).safeParse(value);
+
+    expect(kept.success).toBe(true);
+    if (kept.success) expect(kept.data).toBe(value);
+  });
+
+  it("should validate schemas built with merge, pick, omit, and partial", () => {
+    const Base = JIT.object({
+      id: JIT.number().int().positive(),
+      name: JIT.string().min(2, "nome muito curto"),
+      secret: JIT.string(),
+    });
+    const Public = Base.omit(["secret"]).merge(JIT.object({ tag: JIT.string() }));
+    const validate = JIT.validator(Public);
+
+    expect(validate.is({ id: 1, name: "Ada", tag: "x" })).toBe(true);
+    expect(validate.is({ id: 1, name: "Ada", secret: "s", tag: "x" })).toBe(true);
+
+    const bad = validate.safeParse({ id: 1, name: "A", tag: "x" });
+
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.issues[0].message).toBe("nome muito curto");
+  });
+
   it("should share one cached validator per schema", () => {
     expect(JIT.validator(User)).toBe(JIT.validator(User));
     expect(JIT.validator(User, { cache: false })).not.toBe(JIT.validator(User));

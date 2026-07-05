@@ -15,6 +15,10 @@ export {
 export { compilePipeline } from "../compiler/pipeline.js";
 export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
 export { compileUpdate } from "../compiler/update.js";
+/**
+ * Infers the TypeScript type of a schema or builder — `JIT.infer<typeof User>`.
+ */
+export type { Infer as infer } from "../core/ats/infer.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";

@@ -11,6 +11,7 @@ type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 interface SchemaCheckRecord {
   readonly kind: string;
   readonly value?: unknown;
+  readonly message?: string;
 }
 
 /** Wrapper pipeline resolved outside-in for one schema node. */
@@ -20,7 +21,7 @@ interface UnwrappedSchema {
   readonly nullable: boolean;
   readonly defaultValue: { readonly binding: string; readonly isFactory: boolean } | undefined;
   readonly coerce: string | undefined;
-  readonly refines: readonly string[];
+  readonly refines: readonly { readonly binding: string; readonly message?: string }[];
   readonly pipes: readonly string[];
   readonly fieldTransforms: Readonly<Record<string, string>> | undefined;
 }
@@ -103,7 +104,13 @@ class ValidatorEmitter {
 
       // Refinements run after the base type is proven, innermost first.
       for (const refine of unwrapped.refines) {
-        this.failIf(`!${refine}(${holder})`, path, "custom", "refinement", "refinement rejected the value");
+        this.failIf(
+          `!${refine.binding}(${holder})`,
+          path,
+          "custom",
+          "refinement",
+          refine.message ?? "refinement rejected the value"
+        );
       }
 
       if (this.mode === "parse") {
@@ -275,11 +282,17 @@ class ValidatorEmitter {
         return this.emitDiscriminatedUnion(schema, value, path);
       case TypeName.intersection: {
         const options = schema.def.options as ATS.AnyTypeSchema[];
+        const rebuild = this.mode === "parse" && options.some((option) => needsBuild(option));
+        const outputs = options.map((option) => this.emitNode(option, value, path));
 
-        for (const option of options) {
-          this.emitNode(option, value, path);
-        }
-        return value;
+        if (!rebuild) return value;
+
+        // Some option rebuilds (defaults/transforms/string mutations):
+        // merge the per-option outputs, later options winning shared keys.
+        const merged = this.nextVar("o");
+
+        this.writer.line(`const ${merged} = Object.assign({}, ${outputs.join(", ")});`);
+        return merged;
       }
       case TypeName.instanceof: {
         const guard = emitSchemaGuard(schema, value);
@@ -372,7 +385,7 @@ class ValidatorEmitter {
                 path,
                 "too_small",
                 `length >= ${check.value}`,
-                `expected at least ${check.value} characters`
+                check.message ?? `expected at least ${check.value} characters`
               );
               break;
             case "max":
@@ -381,7 +394,7 @@ class ValidatorEmitter {
                 path,
                 "too_big",
                 `length <= ${check.value}`,
-                `expected at most ${check.value} characters`
+                check.message ?? `expected at most ${check.value} characters`
               );
               break;
             case "length":
@@ -390,7 +403,7 @@ class ValidatorEmitter {
                 path,
                 "invalid_length",
                 `length === ${check.value}`,
-                `expected exactly ${check.value} characters`
+                check.message ?? `expected exactly ${check.value} characters`
               );
               break;
             default:
@@ -406,7 +419,7 @@ class ValidatorEmitter {
                 path,
                 "invalid_format",
                 "regex",
-                "expected the value to match the pattern"
+                check.message ?? "expected the value to match the pattern"
               );
               break;
             case "email":
@@ -415,7 +428,7 @@ class ValidatorEmitter {
                 path,
                 "invalid_format",
                 "email",
-                "expected a valid email"
+                check.message ?? "expected a valid email"
               );
               break;
             case "uuid":
@@ -424,7 +437,7 @@ class ValidatorEmitter {
                 path,
                 "invalid_format",
                 "uuid",
-                "expected a valid uuid"
+                check.message ?? "expected a valid uuid"
               );
               break;
             case "url": {
@@ -432,7 +445,7 @@ class ValidatorEmitter {
 
               this.writer.line(`let ${holder} = true;`);
               this.writer.line(`try { new URL(${value}); } catch { ${holder} = false; }`);
-              this.failIf(`!${holder}`, path, "invalid_format", "url", "expected a valid URL");
+              this.failIf(`!${holder}`, path, "invalid_format", "url", check.message ?? "expected a valid URL");
               break;
             }
             default:
@@ -457,7 +470,15 @@ class ValidatorEmitter {
       "expected number",
       () => {
         if (forceInteger || checks.some((check) => check.kind === "integer")) {
-          this.failIf(`!Number.isInteger(${value})`, path, "not_integer", "integer", "expected an integer");
+          const integerMessage = checks.find((check) => check.kind === "integer")?.message;
+
+          this.failIf(
+            `!Number.isInteger(${value})`,
+            path,
+            "not_integer",
+            "integer",
+            integerMessage ?? "expected an integer"
+          );
         }
 
         for (const check of checks) {
@@ -468,7 +489,7 @@ class ValidatorEmitter {
                 path,
                 "too_small",
                 `>= ${check.value}`,
-                `expected a number >= ${check.value}`
+                check.message ?? `expected a number >= ${check.value}`
               );
               break;
             case "max":
@@ -477,17 +498,23 @@ class ValidatorEmitter {
                 path,
                 "too_big",
                 `<= ${check.value}`,
-                `expected a number <= ${check.value}`
+                check.message ?? `expected a number <= ${check.value}`
               );
               break;
             case "positive":
-              this.failIf(`${value} <= 0`, path, "not_positive", "> 0", "expected a positive number");
+              this.failIf(`${value} <= 0`, path, "not_positive", "> 0", check.message ?? "expected a positive number");
               break;
             case "negative":
-              this.failIf(`${value} >= 0`, path, "not_negative", "< 0", "expected a negative number");
+              this.failIf(`${value} >= 0`, path, "not_negative", "< 0", check.message ?? "expected a negative number");
               break;
             case "finite":
-              this.failIf(`!Number.isFinite(${value})`, path, "not_finite", "finite", "expected a finite number");
+              this.failIf(
+                `!Number.isFinite(${value})`,
+                path,
+                "not_finite",
+                "finite",
+                check.message ?? "expected a finite number"
+              );
               break;
             case "safe":
               this.failIf(
@@ -495,7 +522,7 @@ class ValidatorEmitter {
                 path,
                 "not_safe",
                 "safe integer",
-                "expected a safe integer"
+                check.message ?? "expected a safe integer"
               );
               break;
             case "multipleOf":
@@ -504,7 +531,7 @@ class ValidatorEmitter {
                 path,
                 "not_multiple_of",
                 `multiple of ${check.value}`,
-                `expected a multiple of ${check.value}`
+                check.message ?? `expected a multiple of ${check.value}`
               );
               break;
             default:
@@ -541,7 +568,7 @@ class ValidatorEmitter {
                 path,
                 "too_small",
                 `length >= ${check.value}`,
-                `expected at least ${check.value} items`
+                check.message ?? `expected at least ${check.value} items`
               );
               break;
             case "max":
@@ -550,7 +577,7 @@ class ValidatorEmitter {
                 path,
                 "too_big",
                 `length <= ${check.value}`,
-                `expected at most ${check.value} items`
+                check.message ?? `expected at most ${check.value} items`
               );
               break;
             case "length":
@@ -559,11 +586,17 @@ class ValidatorEmitter {
                 path,
                 "invalid_length",
                 `length === ${check.value}`,
-                `expected exactly ${check.value} items`
+                check.message ?? `expected exactly ${check.value} items`
               );
               break;
             case "nonEmpty":
-              this.failIf(`${value}.length === 0`, path, "too_small", "length >= 1", "expected a non-empty array");
+              this.failIf(
+                `${value}.length === 0`,
+                path,
+                "too_small",
+                "length >= 1",
+                check.message ?? "expected a non-empty array"
+              );
               break;
             default:
               break;
@@ -1043,7 +1076,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
   let nullable = false;
   let defaultValue: UnwrappedSchema["defaultValue"];
   let coerce: string | undefined;
-  const refines: string[] = [];
+  const refines: { readonly binding: string; readonly message?: string }[] = [];
   const pipes: string[] = [];
   let fieldTransforms: Record<string, string> | undefined;
 
@@ -1085,7 +1118,10 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
 
     if (current.type === TypeName.refine) {
       // Outer refines run last: collected outside-in, executed inner-first.
-      refines.unshift(emitter.bind(current.def.predicate));
+      refines.unshift({
+        binding: emitter.bind(current.def.predicate),
+        ...(typeof current.def.message === "string" ? { message: current.def.message } : {}),
+      });
       current = current.def.innerType as AnySchema;
       continue;
     }

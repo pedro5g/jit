@@ -64,7 +64,7 @@ async function main(argv: readonly string[]): Promise<number> {
 
   const resolvedOut = outDir ?? resolve("node_modules/@jit/generated");
   const runOnce = async (): Promise<number> => {
-    const { schemas } = await collectSchemas(files);
+    const { schemas, sources } = await collectSchemas(files);
 
     if (Object.keys(schemas).length === 0) {
       process.stderr.write(`No exported schemas found in: ${files.join(", ")}\n`);
@@ -73,6 +73,7 @@ async function main(argv: readonly string[]): Promise<number> {
 
     const result = generate({
       schemas,
+      sources,
       outDir: resolvedOut,
       ...(packageName ? { packageName } : {}),
     });
