@@ -18,6 +18,8 @@
  * ```
  */
 
+/** Prisma-style AOT generator: writes pure `.js` + `.d.ts` modules for schemas. */
+export * as AOT from "./aot/index.js";
 /** Low-level compilers and IR utilities (`compileEqual`, `emitEqualSource`, IR builders/optimizer). */
 export * as Compiler from "./compiler/index.js";
 /** Data-first AST nodes consumed by the query/update/transform compilers. */
@@ -30,5 +32,7 @@ export * as Builder from "./core/builder/index.js";
 export * as Errors from "./errors/index.js";
 /** The main public API: schema factories plus every `compile*` entry point. */
 export * as JIT from "./factories/index.js";
+/** Runtime helpers referenced by generated (AOT) code (`getIndex`, hash primitives). */
+export * as Runtime from "./runtime/runtime.js";
 /** Pure schema-to-schema transforms (`partial`, `pick`, `omit`, wrappers). */
 export * as Transform from "./transforms/index.js";

@@ -1,0 +1,157 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { AOT, JIT } from "../../index.js";
+
+describe("JIT model namespace", () => {
+  const User = JIT.model(
+    JIT.object({
+      id: JIT.number().int().positive(),
+      name: JIT.string().min(2),
+      email: JIT.string().pii("mask"),
+      tags: JIT.array(JIT.string()),
+    })
+  );
+
+  const ada = { id: 1, name: "Ada", email: "ada@math.org", tags: ["math"] };
+
+  it("should expose every compiled operation lazily from one namespace", () => {
+    expect(User.is(ada)).toBe(true);
+    expect(User.is({ ...ada, id: 0 })).toBe(false);
+    expect(User.parse(ada)).toBe(ada);
+    expect(User.safeParse({ ...ada, name: "A" }).success).toBe(false);
+    expect(User.equal(ada, { ...ada })).toBe(true);
+    expect(User.clone(ada)).toEqual(ada);
+    expect(User.clone(ada)).not.toBe(ada);
+    expect(User.diff(ada, { ...ada, name: "Grace" })).toHaveLength(1);
+    expect(User.hash(ada)).toBe(User.hash({ ...ada }));
+    expect(User.update(ada, { name: "Ada L." }).name).toBe("Ada L.");
+    expect(User.stringify(ada)).toBe(JSON.stringify(ada));
+    expect(User.fromJSON(JSON.stringify(ada))).toEqual(ada);
+    expect(User.mask(ada).email).toBe("***.org");
+    expect(User.codec.decode(User.codec.encode(ada))).toEqual(ada);
+    expect(User.schema.type).toBe("object");
+  });
+
+  it("should only throw for unsupported operations when accessed", () => {
+    const WithMap = JIT.model(JIT.object({ meta: JIT.map(JIT.string(), JIT.number()) }));
+
+    expect(WithMap.mask).toBeTypeOf("function");
+    expect(() => WithMap.codec).toThrow(/codec/);
+  });
+});
+
+describe("JIT AOT generate", () => {
+  let outDir: string;
+
+  beforeEach(() => {
+    outDir = mkdtempSync(join(tmpdir(), "jit-aot-"));
+  });
+
+  afterEach(() => {
+    rmSync(outDir, { recursive: true, force: true });
+  });
+
+  it("should generate a standalone runnable module for callback-free operations", async () => {
+    // A refine callback skips the validator, keeping the module import-free.
+    const Event = JIT.object({
+      id: JIT.number(),
+      kind: JIT.literal("click"),
+      target: JIT.string().pii(),
+      body: JIT.string().sanitize(),
+      at: JIT.date(),
+    }).refine(() => true);
+
+    const result = AOT.generate({ schemas: { Event }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+
+    expect(source).not.toContain('from "jit"');
+    expect(result.skipped.map((skip) => skip.operation)).toContain("validator");
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      Event: {
+        equal: (left: unknown, right: unknown) => boolean;
+        clone: <T>(value: T) => T;
+        stringify: (value: unknown) => string;
+        mask: <T>(value: T) => T;
+        sanitize: <T>(value: T) => T;
+        codec: { encode: (value: unknown) => Uint8Array; decode: (bytes: Uint8Array) => unknown };
+      };
+    };
+
+    const event = {
+      id: 7,
+      kind: "click" as const,
+      target: "secret-target",
+      body: "<script>x()</script>hello",
+      at: new Date("2026-07-05T00:00:00.000Z"),
+    };
+
+    expect(generated.Event.equal(event, { ...event })).toBe(true);
+    expect(generated.Event.clone(event)).toEqual(event);
+    expect(generated.Event.stringify(event)).toBe(JSON.stringify(event));
+    expect(generated.Event.mask(event).target).toBe("***");
+    expect(generated.Event.sanitize(event).body).toBe("hello");
+    expect(generated.Event.codec.decode(generated.Event.codec.encode(event))).toEqual(event);
+  });
+
+  it("should generate validator namespaces with inlined regex bindings", () => {
+    const User = JIT.object({
+      id: JIT.number().int(),
+      email: JIT.string().email(),
+      plan: JIT.string().default("free"),
+    });
+
+    const result = AOT.generate({ schemas: { User }, outDir, packageName: "@acme/models" });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const manifest = JSON.parse(readFileSync(join(outDir, "package.json"), "utf8")) as { name: string; type: string };
+
+    expect(result.skipped.filter((skip) => skip.operation === "validator")).toHaveLength(0);
+    expect(source).toContain("const User_validator = (() => {");
+    expect(source).toContain("function is(value)");
+    expect(source).toContain("function safeParse(value)");
+    expect(source).toContain("Errors.JITValidationError");
+    expect(source).toContain('import { Errors } from "jit";');
+    expect(source).toContain("export const User = Object.freeze({");
+
+    expect(types).toContain("export type User =");
+    expect(types).toContain("readonly id: number");
+    expect(types).toContain("readonly plan?: string");
+    expect(types).toContain("value is User");
+
+    expect(manifest.name).toBe("@acme/models");
+    expect(manifest.type).toBe("module");
+  });
+
+  it("should report skipped operations with reasons instead of failing", () => {
+    const Weird = JIT.object({
+      meta: JIT.map(JIT.string(), JIT.number()),
+      hook: JIT.string().refine((value) => value.length > 0),
+    });
+
+    const result = AOT.generate({ schemas: { Weird }, outDir });
+    const operations = result.skipped.map((skip) => `${skip.schema}.${skip.operation}`);
+
+    expect(operations).toContain("Weird.validator");
+    expect(operations).toContain("Weird.stringify");
+    expect(operations).toContain("Weird.codec");
+    expect(result.files).toHaveLength(3);
+  });
+
+  it("should emit TypeScript types for nested and wrapped schemas", () => {
+    const type = AOT.emitTypeScriptType(
+      JIT.object({
+        id: JIT.number(),
+        nick: JIT.optional(JIT.string()),
+        role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+        items: JIT.array(JIT.object({ sku: JIT.string() })),
+      }).schema
+    );
+
+    expect(type).toBe(
+      '{ readonly id: number; readonly nick?: string | undefined; readonly role: "admin" | "user"; readonly items: { readonly sku: string }[] }'
+    );
+  });
+});

@@ -18,6 +18,8 @@ export * from "./collection/index.js";
 export * from "./composition/index.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export { mapper } from "./mapper.js";
+export type { CompiledModel } from "./model.js";
+export { model } from "./model.js";
 export * from "./object/index.js";
 export * from "./primitive/index.js";
 export type { QueryBuilder, QueryConditionBuilder } from "./query.js";
