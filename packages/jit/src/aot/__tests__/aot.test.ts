@@ -38,7 +38,10 @@ describe("JIT model namespace", () => {
     const WithMap = JIT.model(JIT.object({ meta: JIT.map(JIT.string(), JIT.number()) }));
 
     expect(WithMap.mask).toBeTypeOf("function");
-    expect(() => WithMap.codec).toThrow(/codec/);
+    expect(WithMap.codec.decode(WithMap.codec.encode({ meta: new Map([["a", 1]]) }))).toEqual({
+      meta: new Map([["a", 1]]),
+    });
+    expect(() => WithMap.stringify).toThrow(/serialize/);
   });
 });
 
@@ -129,6 +132,7 @@ describe("JIT AOT generate", () => {
     const Weird = JIT.object({
       meta: JIT.map(JIT.string(), JIT.number()),
       hook: JIT.string().refine((value) => value.length > 0),
+      open: JIT.any(),
     });
 
     const result = AOT.generate({ schemas: { Weird }, outDir });

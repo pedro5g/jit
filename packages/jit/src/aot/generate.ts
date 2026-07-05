@@ -172,7 +172,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         js.push("})();");
         operations.push(`codec: ${name}_codec`);
         operationTypes.push(
-          `readonly codec: { readonly encode: (value: ${name}) => Uint8Array; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${name} }`
+          `readonly codec: { readonly encode: (value: ${name}) => Uint8Array; readonly encodeInto: (value: ${name}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${name} }`
         );
       }
     }

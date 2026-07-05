@@ -187,7 +187,8 @@ describe("JIT compiler serialize + codec", () => {
       const binary = codec.encode(value).byteLength;
       const json = JSON.stringify(value).length;
 
-      expect(binary).toBe(4 + 100 * 16);
+      // 1 version byte + u32 count + 100 * two float64s.
+      expect(binary).toBe(1 + 4 + 100 * 16);
       expect(binary).toBeLessThan(json);
       expect(codec.decode(codec.encode(value))).toEqual(value);
     });
@@ -211,12 +212,14 @@ describe("JIT compiler serialize + codec", () => {
       const codec = JIT.codec(Tagged);
       const bytes = codec.encode({ kind: "ping", seq: 1 });
 
-      expect(bytes.byteLength).toBe(8);
+      // 1 version byte + float64; the literal costs nothing.
+      expect(bytes.byteLength).toBe(9);
       expect(codec.decode(bytes)).toEqual({ kind: "ping", seq: 1 });
     });
 
-    it("should reject unsupported wire types", () => {
-      expect(() => JIT.codec(JIT.object({ meta: JIT.map(JIT.string(), JIT.number()) }))).toThrow(Errors.JITError);
+    it("should reject dynamically-typed schemas", () => {
+      expect(() => JIT.codec(JIT.object({ meta: JIT.any() }))).toThrow(Errors.JITError);
+      expect(() => JIT.codec(JIT.object({ meta: JIT.unknown() }))).toThrow(/rigid/);
     });
   });
 });

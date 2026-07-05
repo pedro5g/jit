@@ -1,4 +1,4 @@
-import { type CompiledCodec, compileCodec } from "../compiler/codec.js";
+import { type CodecCompileOptions, type CompiledCodec, compileCodec } from "../compiler/codec.js";
 import { compileSerialize, type Serialize } from "../compiler/serialize.js";
 import { compileValidator } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
@@ -41,19 +41,20 @@ export function serializer<TSchema extends ATS.AnyTypeSchema>(
 }
 
 /**
- * Compiles a schema-driven binary codec (`encode` / `decode`).
+ * Compiles a schema-driven binary codec (`encode` / `encodeInto` / `decode`).
  *
  * @example
  * ```ts
- * const Events = JIT.codec(Event);
+ * const Events = JIT.codec(Event, { version: 2 });
  *
  * socket.send(Events.encode(event));           // compact, no field names
+ * const written = Events.encodeInto(event, scratchBuffer);
  * const event = Events.decode(message.data);   // exact reconstruction
  * ```
  */
 export function codec<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  options?: CompileCacheOptions
+  options?: CodecCompileOptions
 ): CompiledCodec<ATS.InferSchema<TSchema>> {
   return compileCodec(unwrapSchema(schema), options);
 }
