@@ -58,9 +58,18 @@
       "types": "./index.d.cts",
       "import": "./index.js",
       "require": "./index.cjs"
+    },
+    "./cli": {
+      "@jit/source": "./src/cli.ts",
+      "types": "./cli.d.cts",
+      "import": "./cli.js",
+      "require": "./cli.cjs"
     }
   },
   "bin": {
     "jit": "./cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0"
   }
 }

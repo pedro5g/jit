@@ -112,8 +112,8 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const User_validator = (() => {");
     expect(source).toContain("function is(value)");
     expect(source).toContain("function safeParse(value)");
-    expect(source).toContain("Errors.JITValidationError");
-    expect(source).toContain('import { Errors } from "jit";');
+    expect(source).toContain("class JITValidationError extends Error");
+    expect(source).not.toContain("import ");
     expect(source).toContain("export const User = Object.freeze({");
 
     expect(types).toContain("export type User =");

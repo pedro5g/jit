@@ -1,5 +1,6 @@
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
+import { Parse } from "../shared/index.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 
@@ -53,7 +54,7 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
       const entries = Object.keys(props).map((key) => {
         const prop = props[key] as AnySchema;
         const optional = isOptional(prop);
-        const safeKey = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+        const safeKey = Parse.isValidIdentifier(key) ? key : JSON.stringify(key);
 
         return `readonly ${safeKey}${optional ? "?" : ""}: ${emitTypeScriptType(prop)}`;
       });

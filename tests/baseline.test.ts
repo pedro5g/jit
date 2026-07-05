@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 describe("public surface smoke test", () => {
   it("exposes every public namespace", () => {
     expect(Object.keys(jit).sort()).toEqual(
-      ["AST", "Builder", "Compiler", "Errors", "JIT", "PipelineAST", "Transform"].sort()
+      ["AOT", "AST", "Builder", "Compiler", "Errors", "JIT", "PipelineAST", "Runtime", "Transform"].sort()
     );
   });
 

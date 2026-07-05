@@ -36,8 +36,10 @@ export interface GenerateResult {
 /**
  * Prisma-style AOT generation: turns schemas into plain, optimized `.js`
  * plus `.d.ts`, written to a directory the app imports directly. The
- * generated module has zero dependency on the compiler — only tiny runtime
- * helpers are imported from `jit` when a strategy needs them.
+ * generated module is fully self-contained — the few tiny runtime helpers
+ * a strategy may need (validation error class, keyed-index cache) are
+ * inlined into the file, so it has zero imports: no engine weight, no
+ * module graph to load on cold start, CSP-safe.
  *
  * Each schema becomes a namespace constant (`export const User = { is,
  * parse, safeParse, equal, clone, stringify, mask, sanitize, codec }`);
@@ -84,7 +86,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         operations.push(
           `is: ${name}_validator.is`,
           `safeParse: ${name}_validator.safeParse`,
-          `parse: (value) => { const r = ${name}_validator.safeParse(value); if (r.success) return r.data; throw new Errors.JITValidationError(r.issues); }`
+          `parse: (value) => { const r = ${name}_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); }`
         );
         operationTypes.push(
           `readonly is: (value: unknown) => value is ${name}`,
@@ -102,7 +104,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         skipped.push({ schema: name, operation: "equal", reason: "hash short-circuit hints require runtime hashing" });
       } else if (equalSource.includes("__getIndex")) {
         needsRuntimeGetIndex = true;
-        js.push(`const ${name}_equal = ((__getIndex) => (${equalSource}))(Runtime.getIndex);`);
+        js.push(`const ${name}_equal = (${equalSource});`);
         operations.push(`equal: ${name}_equal`);
         operationTypes.push(`readonly equal: (left: ${name}, right: ${name}) => boolean`);
       } else {
@@ -186,11 +188,37 @@ export function generate(options: GenerateOptions): GenerateResult {
     dts.push("");
   }
 
-  const imports: string[] = [];
+  // Inlined runtime helpers keep the module import-free: nothing from the
+  // engine is loaded in production, and cold start pays only this file.
+  const helpers: string[] = [];
 
-  if (needsRuntimeGetIndex) imports.push('import { Runtime } from "jit";');
-  if (needsValidationError) imports.push('import { Errors } from "jit";');
-  if (imports.length > 0) js.splice(1, 0, ...imports);
+  if (needsValidationError) {
+    helpers.push(
+      "class JITValidationError extends Error {",
+      "  constructor(issues) {",
+      "    const first = issues[0];",
+      '    super(first ? (first.path ? first.path + ": " : "") + first.message : "validation failed");',
+      '    this.name = "JITValidationError";',
+      '    this.code = "VALIDATION_FAILED";',
+      "    this.issues = issues;",
+      "  }",
+      "}"
+    );
+  }
+  if (needsRuntimeGetIndex) {
+    helpers.push(
+      "const __indexCache = new WeakMap();",
+      "function __getIndex(items, key) {",
+      "  const cached = __indexCache.get(items);",
+      "  if (cached !== undefined && cached.key === key) return cached.map;",
+      "  const map = new Map();",
+      "  for (let i = 0, len = items.length; i < len; i++) map.set(items[i][key], items[i]);",
+      "  __indexCache.set(items, { key: key, map: map });",
+      "  return map;",
+      "}"
+    );
+  }
+  if (helpers.length > 0) js.splice(1, 0, ...helpers);
 
   mkdirSync(options.outDir, { recursive: true });
 

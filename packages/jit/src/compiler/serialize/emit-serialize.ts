@@ -1,6 +1,7 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
+import { Parse } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { emitPropertyAccess } from "../source/access.js";
 
@@ -13,23 +14,112 @@ interface SerializeContext {
 
 /**
  * Emits a shape-specialized `stringify(value)`: static JSON key prefixes are
- * baked into the source, only leaf values are read at runtime, and native
- * `JSON.stringify` is used solely for string escaping. Classic indexed
- * loops, no `Object.keys` on known shapes, no closures.
+ * baked into the source, only leaf values are read at runtime. String
+ * escaping goes through a hoisted fast path (charCode scan on short strings,
+ * regex probe on long ones — the fast-json-stringify technique) that only
+ * falls back to native `JSON.stringify` when an escapable character exists.
+ * Classic indexed loops, no `Object.keys` on known shapes, no closures.
  */
 export function emitSerialize(schema: ATS.AnyTypeSchema): string {
   const writer = new CodeWriter();
   const context: SerializeContext = { writer, varCounter: 0 };
+  const needsStringHelper = hasStringLeaf(schema, new Set());
 
-  writer.line("function stringify(value) {");
+  writer.line("(function () {");
   writer.indent(() => {
-    writer.line('let s = "";');
-    emitAppend(context, schema, "value");
-    writer.line("return s;");
+    if (needsStringHelper) emitStringHelper(writer);
+    writer.line("function stringify(value) {");
+    writer.indent(() => {
+      writer.line('let s = "";');
+      emitAppend(context, schema, "value");
+      writer.line("return s;");
+    });
+    writer.line("}");
+    writer.line("return stringify;");
   });
-  writer.line("}");
+  writer.line("})()");
 
   return writer.toString();
+}
+
+/**
+ * Hoisted escape fast path: clean strings (the overwhelming majority in
+ * real payloads) are emitted as raw `'"' + value + '"'` concatenation;
+ * native JSON.stringify runs only when a control char, quote, backslash,
+ * or surrogate is present. Short strings use a charCode scan (cheaper than
+ * regex startup), long ones a single regex probe.
+ */
+function emitStringHelper(writer: CodeWriter): void {
+  writer.line("const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;");
+  writer.line("function str(value) {");
+  writer.indent(() => {
+    writer.line("const len = value.length;");
+    writer.line("if (len < 42) {");
+    writer.indent(() => {
+      writer.line("for (let i = 0; i < len; i++) {");
+      writer.indent(() => {
+        writer.line("const code = value.charCodeAt(i);");
+        writer.line("if (code < 32 || code === 34 || code === 92 || (code > 55295 && code < 57344)) {");
+        writer.indent(() => {
+          writer.line("return JSON.stringify(value);");
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+      writer.line("return '\"' + value + '\"';");
+    });
+    writer.line("}");
+    writer.line("if (__se.test(value)) return JSON.stringify(value);");
+    writer.line("return '\"' + value + '\"';");
+  });
+  writer.line("}");
+}
+
+/** True when the emitted code will serialize at least one string value. */
+function hasStringLeaf(schema: ATS.AnyTypeSchema, seen: Set<ATS.AnyTypeSchema>): boolean {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+
+  const current = schema as AnySchema;
+
+  switch (current.type) {
+    case TypeName.string:
+      return true;
+    case TypeName.enum:
+      return Object.values(current.def.values as Record<string, string | number>).some(
+        (value) => typeof value === "string"
+      );
+    case TypeName.record:
+      // Record keys always go through the string fast path.
+      return true;
+    case TypeName.object: {
+      const props = current.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
+
+      return Object.keys(props).some((key) => hasStringLeaf(props[key], seen));
+    }
+    case TypeName.array:
+      return hasStringLeaf(current.def.element as ATS.AnyTypeSchema, seen);
+    case TypeName.tuple: {
+      const items = (current.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
+
+      return items.some((item) => hasStringLeaf(item, seen));
+    }
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+      return hasStringLeaf(current.def.innerType as ATS.AnyTypeSchema, seen);
+    case TypeName.lazy:
+      return hasStringLeaf((current.def.getter as () => ATS.AnyTypeSchema)(), seen);
+    default:
+      return false;
+  }
 }
 
 function nextVar(context: SerializeContext, prefix: string): string {
@@ -63,7 +153,7 @@ function emitBaseAppend(context: SerializeContext, schema: AnySchema, valueExpr:
 
   switch (schema.type) {
     case TypeName.string:
-      writer.line(`s += JSON.stringify(${valueExpr});`);
+      writer.line(`s += str(${valueExpr});`);
       return;
     case TypeName.number:
     case TypeName.int:
@@ -85,9 +175,16 @@ function emitBaseAppend(context: SerializeContext, schema: AnySchema, valueExpr:
       writer.line(`s += ${JSON.stringify(JSON.stringify(literalValue) ?? "null")};`);
       return;
     }
-    case TypeName.enum:
-      writer.line(`s += JSON.stringify(${valueExpr});`);
+    case TypeName.enum: {
+      const values = Object.values(schema.def.values as Record<string, string | number>);
+
+      if (values.every((entry) => typeof entry === "string")) {
+        writer.line(`s += str(${valueExpr});`);
+      } else {
+        writer.line(`s += JSON.stringify(${valueExpr});`);
+      }
       return;
+    }
     case TypeName.object:
       emitObjectAppend(context, schema, valueExpr);
       return;
@@ -132,7 +229,7 @@ function emitBaseAppend(context: SerializeContext, schema: AnySchema, valueExpr:
       writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
       writer.indent(() => {
         writer.line(`if (${index} !== 0) s += ",";`);
-        writer.line(`s += JSON.stringify(${keys}[${index}]) + ":";`);
+        writer.line(`s += str(${keys}[${index}]) + ":";`);
         writer.line(`const ${item} = ${holder}[${keys}[${index}]];`);
         emitAppend(context, valueSchema, item);
       });
@@ -225,7 +322,7 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
 }
 
 function hoist(context: SerializeContext, expr: string): string {
-  if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(expr)) return expr;
+  if (Parse.isValidIdentifier(expr)) return expr;
 
   const holder = nextVar(context, "v");
 

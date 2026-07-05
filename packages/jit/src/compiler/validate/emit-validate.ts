@@ -40,16 +40,26 @@ const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 class ValidatorEmitter {
-  readonly writer = new CodeWriter();
+  writer = new CodeWriter();
+  private readonly rootMode: "is" | "parse";
   private readonly bindingNames: string[] = [];
   private readonly bindingValues: unknown[] = [];
   private readonly bindingIds = new Map<unknown, string>();
+  private readonly helperSources: string[] = [];
+  private readonly predicateNames = new Map<ATS.AnyTypeSchema, string>();
+  private helperCounter = 0;
   private varCounter = 0;
 
-  constructor(private readonly mode: "is" | "parse") {}
+  constructor(private mode: "is" | "parse") {
+    this.rootMode = mode;
+  }
 
   bindings(): ValidatorBindings {
     return { names: this.bindingNames, values: this.bindingValues };
+  }
+
+  helpers(): readonly string[] {
+    return this.helperSources;
   }
 
   bind(value: unknown): string {
@@ -259,13 +269,8 @@ class ValidatorEmitter {
         return this.emitRecord(schema, value, path);
       case TypeName.object:
         return this.emitObject(schema, value, path, unwrapped.fieldTransforms);
-      case TypeName.union: {
-        const options = schema.def.options as ATS.AnyTypeSchema[];
-        const guard = options.map((option) => emitSchemaGuard(option, value)).join(" || ");
-
-        this.failIf(`!(${guard})`, path, "invalid_union", "union", "value matched no union option");
-        return value;
-      }
+      case TypeName.union:
+        return this.emitUnion(schema, value, path);
       case TypeName.discriminatedUnion:
         return this.emitDiscriminatedUnion(schema, value, path);
       case TypeName.intersection: {
@@ -764,12 +769,90 @@ class ValidatorEmitter {
     return out;
   }
 
+  /**
+   * Deep union validation: every option becomes a hoisted boolean predicate
+   * (same Function scope, so `__v*` bindings stay reachable) running the full
+   * is-mode pipeline — inner checks and refines included. Parse mode selects
+   * the branch with the predicate and re-runs parse only for options that
+   * rebuild their output (defaults/transforms/string mutations); coercions
+   * inside union options do not participate in branch selection.
+   */
+  private emitUnion(schema: AnySchema, value: string, path: PathRef): string {
+    const options = schema.def.options as ATS.AnyTypeSchema[];
+    // Shallow options (literal/enum/primitive without checks) stay inline —
+    // their guard already is the complete validation, no call overhead.
+    const tests = options.map((option) =>
+      isShallowOption(option) ? `(${emitSchemaGuard(option, value)})` : `${this.emitOptionPredicate(option)}(${value})`
+    );
+    const matchTest = tests.join(" || ");
+
+    if (this.mode === "is" || options.every((option) => !needsBuild(option))) {
+      this.failIf(
+        options.length === 0 ? "true" : `!(${matchTest})`,
+        path,
+        "invalid_union",
+        "union",
+        "value matched no union option"
+      );
+      return value;
+    }
+
+    const out = this.nextVar("o");
+
+    this.writer.line(`let ${out} = ${value};`);
+    options.forEach((option, position) => {
+      this.writer.line(`${position === 0 ? "if" : "} else if"} (${tests[position]}) {`);
+      this.writer.indent(() => {
+        if (needsBuild(option)) {
+          const branchOut = this.emitNode(option, value, path);
+
+          this.writer.line(`${out} = ${branchOut};`);
+        }
+      });
+    });
+    this.writer.line("} else {");
+    this.writer.indent(() => {
+      this.emitFail(path, "invalid_union", "union", "value matched no union option");
+    });
+    this.writer.line("}");
+    return out;
+  }
+
+  /** Emits (once per option schema) a hoisted `function iuN(value)` deep check. */
+  private emitOptionPredicate(option: ATS.AnyTypeSchema): string {
+    const existing = this.predicateNames.get(option);
+
+    if (existing) return existing;
+
+    const name = `${this.rootMode === "is" ? "iu" : "pu"}${++this.helperCounter}`;
+    const savedWriter = this.writer;
+    const savedMode = this.mode;
+
+    this.predicateNames.set(option, name);
+    this.writer = new CodeWriter();
+    this.mode = "is";
+    this.writer.line(`function ${name}(value) {`);
+    this.writer.indent(() => {
+      this.emitNode(option, "value", { kind: "static", source: "" });
+      this.writer.line("return true;");
+    });
+    this.writer.line("}");
+    this.helperSources.push(this.writer.toString());
+    this.writer = savedWriter;
+    this.mode = savedMode;
+    return name;
+  }
+
   private emitDiscriminatedUnion(schema: AnySchema, value: string, path: PathRef): string {
     const discriminator = schema.def.discriminator as string;
     const options = schema.def.options as ATS.AnyTypeSchema[];
     const tagged = options
       .map((option) => ({ option, tag: literalTag(option, discriminator) }))
       .filter((entry): entry is { option: ATS.AnyTypeSchema; tag: string | number } => entry.tag !== undefined);
+    const build = this.mode === "parse" && tagged.some((entry) => needsBuild(entry.option));
+    const out = build ? this.nextVar("o") : value;
+
+    if (build) this.writer.line(`let ${out} = ${value};`);
 
     this.typeGate(
       `${value} === null || typeof ${value} !== "object"`,
@@ -790,7 +873,9 @@ class ValidatorEmitter {
         tagged.forEach((entry, position) => {
           this.writer.line(`${position === 0 ? "if" : "} else if"} (${tag} === ${emitLiteral(entry.tag)}) {`);
           this.writer.indent(() => {
-            this.emitNode(entry.option, value, path);
+            const branchOut = this.emitNode(entry.option, value, path);
+
+            if (build) this.writer.line(`${out} = ${branchOut};`);
           });
         });
         this.writer.line("} else {");
@@ -802,7 +887,46 @@ class ValidatorEmitter {
       `typeof ${value}`
     );
 
-    return value;
+    return out;
+  }
+}
+
+/**
+ * True when the shallow schema guard is already the complete validation for
+ * a union option — no checks, refines, defaults, coercions, or transforms.
+ */
+function isShallowOption(schema: ATS.AnyTypeSchema): boolean {
+  let current = schema as AnySchema;
+
+  while (
+    current.type === TypeName.optional ||
+    current.type === TypeName.nullable ||
+    current.type === TypeName.nullish ||
+    current.type === TypeName.brand ||
+    current.type === TypeName.readonly ||
+    current.type === TypeName.lazy
+  ) {
+    current =
+      current.type === TypeName.lazy ? (current.def.getter as () => AnySchema)() : (current.def.innerType as AnySchema);
+  }
+
+  switch (current.type) {
+    case TypeName.any:
+    case TypeName.unknown:
+    case TypeName.void:
+    case TypeName.undefined:
+    case TypeName.null:
+    case TypeName.boolean:
+    case TypeName.bigint:
+    case TypeName.symbol:
+    case TypeName.literal:
+    case TypeName.enum:
+      return true;
+    case TypeName.string:
+    case TypeName.number:
+      return (((current.def as Record<string, unknown>).checks as readonly unknown[] | undefined) ?? []).length === 0;
+    default:
+      return false;
   }
 }
 
@@ -991,6 +1115,18 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
     }
     case TypeName.array:
       return needsBuild(current.def.element as ATS.AnyTypeSchema);
+    case TypeName.union:
+    case TypeName.discriminatedUnion:
+    case TypeName.intersection:
+      return (current.def.options as readonly ATS.AnyTypeSchema[]).some(needsBuild);
+    case TypeName.tuple: {
+      const items = (current.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
+      const rest = current.def.rest as ATS.AnyTypeSchema | undefined;
+
+      return items.some(needsBuild) || (rest !== undefined && needsBuild(rest));
+    }
+    case TypeName.record:
+      return needsBuild(current.def.value as ATS.AnyTypeSchema);
     case TypeName.object: {
       const props = current.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
 
@@ -1043,7 +1179,9 @@ export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
   });
   isEmitter.writer.line("}");
 
-  const source = `${isEmitter.writer.toString()}\n${parseEmitter.writer.toString()}\nreturn { is: is, safeParse: safeParse };`;
+  const helperBlocks = [...isEmitter.helpers(), ...parseEmitter.helpers()];
+  const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}\n` : "";
+  const source = `${helperSource}${isEmitter.writer.toString()}\n${parseEmitter.writer.toString()}\nreturn { is: is, safeParse: safeParse };`;
 
   return { source, bindings: isEmitter.bindings() };
 }

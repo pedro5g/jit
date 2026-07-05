@@ -38,9 +38,43 @@ describe("JIT compiler serialize + codec", () => {
         items: JIT.array(JIT.number()),
       });
       const stringify = Compiler.compileSerialize(Edge.schema);
-      const edge = { value: Number.NaN, when: new Date("2026-07-05T00:00:00.000Z"), kind: "event" as const, items: [] };
+      const edge = {
+        value: Number.NaN,
+        when: new Date("2026-07-05T00:00:00.000Z"),
+        kind: "event" as const,
+        items: [],
+      };
 
       expect(stringify(edge)).toBe(JSON.stringify(edge));
+    });
+
+    it("should escape strings identically to JSON.stringify through the fast path", () => {
+      const Text = JIT.object({ body: JIT.string() });
+      const stringify = Compiler.compileSerialize(Text.schema);
+      const samples = [
+        "plain",
+        "",
+        'with "quotes" inside',
+        "back\\slash",
+        "line\nbreak\tandbell",
+        "emoji 🚀 and accents àéî",
+        "\ud800", // lone surrogate
+        "a".repeat(41), // last char-scan length
+        "b".repeat(42), // first regex-probe length
+        `${"c".repeat(100)}"quote at the end`,
+        "d".repeat(4096),
+      ];
+
+      for (const body of samples) {
+        expect(stringify({ body })).toBe(JSON.stringify({ body }));
+      }
+    });
+
+    it("should skip the string helper for stringless shapes", () => {
+      const Numbers = JIT.object({ a: JIT.number(), b: JIT.boolean() });
+      const source = Compiler.emitSerializeSource(Numbers.schema);
+
+      expect(source).not.toContain("function str(");
     });
 
     it("should bake static keys into the source without reflection", () => {
@@ -58,7 +92,10 @@ describe("JIT compiler serialize + codec", () => {
         pair: JIT.tuple(JIT.string(), JIT.number()),
       });
       const stringify = Compiler.compileSerialize(Data.schema);
-      const value = { counts: { a: 1, b: 2 }, pair: ["x", 7] as [string, number] };
+      const value = {
+        counts: { a: 1, b: 2 },
+        pair: ["x", 7] as [string, number],
+      };
 
       expect(stringify(value)).toBe(JSON.stringify(value));
     });
@@ -71,7 +108,10 @@ describe("JIT compiler serialize + codec", () => {
     });
 
     it("should expose stringify and validated parse through JIT.serializer", () => {
-      const Simple = JIT.object({ id: JIT.number(), email: JIT.string().email() });
+      const Simple = JIT.object({
+        id: JIT.number(),
+        email: JIT.string().email(),
+      });
       const json = JIT.serializer(Simple);
       const value = { id: 1, email: "ada@math.org" };
 
@@ -123,8 +163,14 @@ describe("JIT compiler serialize + codec", () => {
       });
       const codec = JIT.codec(Maybe);
 
-      expect(codec.decode(codec.encode({ a: undefined, b: null }))).toEqual({ a: undefined, b: null });
-      expect(codec.decode(codec.encode({ a: 7, b: 8 }))).toEqual({ a: 7, b: 8 });
+      expect(codec.decode(codec.encode({ a: undefined, b: null }))).toEqual({
+        a: undefined,
+        b: null,
+      });
+      expect(codec.decode(codec.encode({ a: 7, b: 8 }))).toEqual({
+        a: 7,
+        b: 8,
+      });
     });
 
     it("should carry no field names on the wire", () => {
@@ -132,7 +178,10 @@ describe("JIT compiler serialize + codec", () => {
       const Points = JIT.object({ items: JIT.array(Point) });
       const codec = JIT.codec(Points);
       const value = {
-        items: Array.from({ length: 100 }, (_, index) => ({ x: index + 0.123456789, y: index * 2.987654321 })),
+        items: Array.from({ length: 100 }, (_, index) => ({
+          x: index + 0.123456789,
+          y: index * 2.987654321,
+        })),
       };
 
       const binary = codec.encode(value).byteLength;
@@ -148,12 +197,17 @@ describe("JIT compiler serialize + codec", () => {
       const codec = JIT.codec(Simple);
       const bytes = codec.encode({ id: 5 });
 
-      expect(codec.decode(bytes.buffer.slice(0) as ArrayBuffer)).toEqual({ id: 5 });
+      expect(codec.decode(bytes.buffer.slice(0) as ArrayBuffer)).toEqual({
+        id: 5,
+      });
       expect(codec.decode(new Uint8Array(bytes))).toEqual({ id: 5 });
     });
 
     it("should encode literals as zero bytes", () => {
-      const Tagged = JIT.object({ kind: JIT.literal("ping"), seq: JIT.number() });
+      const Tagged = JIT.object({
+        kind: JIT.literal("ping"),
+        seq: JIT.number(),
+      });
       const codec = JIT.codec(Tagged);
       const bytes = codec.encode({ kind: "ping", seq: 1 });
 

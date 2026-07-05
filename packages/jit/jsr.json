@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "exports": {
     "./package.json": "./package.json",
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
   },
   "publish": {
     "include": [

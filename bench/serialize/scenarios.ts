@@ -1,3 +1,4 @@
+import fastJson from "fast-json-stringify";
 import { JIT } from "jit";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -41,6 +42,56 @@ const event = {
   batch: Array.from({ length: 50 }, (_, index) => ({ x: index * 1.5, y: index * 2.5 })),
 };
 
+const fjsUser = fastJson({
+  type: "object",
+  properties: {
+    id: { type: "number" },
+    name: { type: "string" },
+    active: { type: "boolean" },
+    tags: { type: "array", items: { type: "string" } },
+    profile: {
+      type: "object",
+      properties: { age: { type: "number" }, score: { type: "number" }, city: { type: "string" } },
+      required: ["age", "score", "city"],
+    },
+  },
+  required: ["id", "name", "active", "tags", "profile"],
+});
+
+const ArticleSchema = JIT.object({
+  title: JIT.string(),
+  body: JIT.string(),
+  comments: JIT.array(JIT.object({ author: JIT.string(), text: JIT.string() })),
+});
+
+const article = {
+  title: "On the Analytical Engine and the compilation of specialized code",
+  body: "The Analytical Engine weaves algebraic patterns just as the Jacquard loom weaves flowers and leaves. ".repeat(
+    8
+  ),
+  comments: Array.from({ length: 12 }, (_, index) => ({
+    author: `commenter-${index}`,
+    text: "Fascinating read, thanks for sharing! Detailed enough to be realistic comment content.",
+  })),
+};
+
+const fjsArticle = fastJson({
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    body: { type: "string" },
+    comments: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { author: { type: "string" }, text: { type: "string" } },
+        required: ["author", "text"],
+      },
+    },
+  },
+  required: ["title", "body", "comments"],
+});
+
 export function registerSerializeScenarios(): void {
   const stringify = JIT.serializer(UserSchema).stringify;
 
@@ -49,7 +100,23 @@ export function registerSerializeScenarios(): void {
     name: "medium user",
     args: [user],
     jit: stringify,
-    competitors: [{ name: "native JSON.stringify", fn: (value: BenchUser) => JSON.stringify(value) }],
+    competitors: [
+      { name: "fast-json-stringify", fn: fjsUser },
+      { name: "native JSON.stringify", fn: (value: BenchUser) => JSON.stringify(value) },
+    ],
+  });
+
+  const stringifyArticle = JIT.serializer(ArticleSchema).stringify;
+
+  registerScenario({
+    op: "serialize stringify",
+    name: "text-heavy article",
+    args: [article],
+    jit: stringifyArticle,
+    competitors: [
+      { name: "fast-json-stringify", fn: fjsArticle },
+      { name: "native JSON.stringify", fn: (value: typeof article) => JSON.stringify(value) },
+    ],
   });
 
   const codec = JIT.codec(EventSchema);

@@ -28,7 +28,7 @@
     "bench:mapper": "tsx --conditions @jit/source bench/mapper/index.ts",
     "bench:validate": "tsx --conditions @jit/source bench/validate/index.ts",
     "bench:serialize": "tsx --conditions @jit/source bench/serialize/index.ts",
-    "bench:all": "pnpm bench:equal && pnpm bench:clone && pnpm bench:update && pnpm bench:diff && pnpm bench:ops && pnpm bench:query && pnpm bench:mapper && pnpm bench:validate && pnpm bench:serialize",
+    "bench:all": "pnpm bench:equal && pnpm bench:clone && pnpm bench:update && pnpm bench:diff && pnpm bench:ops && pnpm bench:query && pnpm bench:mapper && pnpm bench:validate && pnpm bench:serialize && pnpm bench:coldstart",
     "bench:report": "tsx bench/report.ts",
     "test:watch": "vitest",
     "test": "vitest run",
@@ -36,7 +36,8 @@
     "dev": "tsx --conditions @jit/source",
     "dev:watch": "tsx --conditions @jit/source --watch",
     "prepare": "husky",
-    "check:semver": "tsx scripts/check-semver.ts"
+    "check:semver": "tsx scripts/check-semver.ts",
+    "bench:coldstart": "pnpm build && tsx bench/coldstart/index.ts"
   },
   "lint-staged": {
     "packages/*/src/**/*.ts": [
@@ -60,6 +61,7 @@
     "@types/semver": "^7.7.1",
     "fast-check": "^4.8.0",
     "fast-deep-equal": "^3.1.3",
+    "fast-json-stringify": "^7.0.0",
     "husky": "^9.1.7",
     "immer": "^11.1.9",
     "jit": "workspace:*",
@@ -73,6 +75,7 @@
     "semver": "^7.8.5",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
+    "typia": "^12.1.1",
     "vitest": "^4.1.9",
     "zod": "^4.4.3",
     "zshy": "^0.7.3"

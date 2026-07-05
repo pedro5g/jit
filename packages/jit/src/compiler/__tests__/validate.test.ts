@@ -183,6 +183,75 @@ describe("JIT compiler validator", () => {
     }
   });
 
+  it("should run inner checks and refines of union options (deep union)", () => {
+    const Handle = JIT.union(
+      JIT.string().min(3).max(20),
+      JIT.number()
+        .int()
+        .positive()
+        .refine((value) => value % 2 === 0)
+    );
+    const validate = JIT.validator(Handle);
+
+    expect(validate.is("ada")).toBe(true);
+    expect(validate.is(4)).toBe(true);
+    expect(validate.is("ab")).toBe(false);
+    expect(validate.is(3)).toBe(false);
+    expect(validate.is(-2)).toBe(false);
+    expect(validate.is(1.5)).toBe(false);
+
+    const bad = validate.safeParse("ab");
+
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.issues[0].code).toBe("invalid_union");
+  });
+
+  it("should deep-validate object options inside unions", () => {
+    const Contact = JIT.union(JIT.object({ email: JIT.string().email() }), JIT.object({ phone: JIT.string().min(8) }));
+    const validate = JIT.validator(Contact);
+
+    expect(validate.is({ email: "ada@math.org" })).toBe(true);
+    expect(validate.is({ phone: "11999998888" })).toBe(true);
+    expect(validate.is({ email: "broken" })).toBe(false);
+    expect(validate.is({ phone: "123" })).toBe(false);
+    expect(validate.is({})).toBe(false);
+  });
+
+  it("should keep trivial union options inline without predicate calls", () => {
+    const source = Compiler.emitValidatorSource(User.schema);
+
+    // literal-only unions stay as inline comparisons, no hoisted helpers.
+    expect(source).not.toContain("function iu");
+    expect(source).not.toContain("function pu");
+  });
+
+  it("should apply transforms from the matched union branch in parse", () => {
+    const Input = JIT.object({
+      value: JIT.union(JIT.string().trim().min(1), JIT.number().int()),
+    });
+    const validate = JIT.validator(Input);
+    const parsedString = validate.safeParse({ value: "  ada  " });
+    const parsedNumber = validate.safeParse({ value: 7 });
+
+    expect(parsedString.success).toBe(true);
+    if (parsedString.success) expect(parsedString.data.value).toBe("ada");
+
+    expect(parsedNumber.success).toBe(true);
+    if (parsedNumber.success) expect(parsedNumber.data.value).toBe(7);
+  });
+
+  it("should propagate transforms through discriminated union branches", () => {
+    const Event = JIT.discriminatedUnion("kind", [
+      JIT.object({ kind: JIT.literal("msg"), text: JIT.string().trim().min(1) }),
+      JIT.object({ kind: JIT.literal("ping") }),
+    ]);
+    const validate = JIT.validator(Event);
+    const result = validate.safeParse({ kind: "msg", text: "  hi  " });
+
+    expect(result.success).toBe(true);
+    if (result.success && result.data.kind === "msg") expect(result.data.text).toBe("hi");
+  });
+
   it("should enforce strict objects and validate int schemas", () => {
     const Strict = JIT.object({ id: JIT.number() }).schema;
     const strictSchema = { ...Strict, def: { ...Strict.def, unknownKeys: "strict" as const } };

@@ -1,6 +1,9 @@
-import { JIT } from "jit";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { AOT, JIT } from "jit";
 import { z } from "zod";
 import { registerScenario } from "../shared/scenario.js";
+import { isUser as typiaIs, validateUser as typiaValidate } from "./typia-gen/user.js";
 
 const GENERIC_BIAS = "handwritten generic baseline, not a published library";
 
@@ -75,8 +78,28 @@ function handwrittenIs(value: unknown): boolean {
   return true;
 }
 
-export function registerValidateScenarios(): void {
+interface AotUserModule {
+  readonly User: {
+    readonly is: (value: unknown) => boolean;
+    readonly safeParse: (value: unknown) => unknown;
+  };
+}
+
+/**
+ * Generates the pure AOT module for UserSchema so the typia comparison is
+ * AOT-vs-AOT: both sides are pregenerated plain JavaScript with zero engine
+ * involvement at call time.
+ */
+async function loadAotUser(): Promise<AotUserModule> {
+  const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
+
+  AOT.generate({ schemas: { User: UserSchema }, outDir });
+  return (await import(pathToFileURL(join(outDir, "index.js")).href)) as AotUserModule;
+}
+
+export async function registerValidateScenarios(): Promise<void> {
   const validate = JIT.validator(UserSchema);
+  const aot = await loadAotUser();
 
   registerScenario({
     op: "validate is",
@@ -84,6 +107,8 @@ export function registerValidateScenarios(): void {
     args: [validUser],
     jit: validate.is,
     competitors: [
+      { name: "jit aot is", fn: aot.User.is },
+      { name: "typia is", fn: typiaIs },
       { name: "handwritten guard", fn: handwrittenIs, biased: GENERIC_BIAS },
       { name: "zod safeParse.success", fn: (value: unknown) => zodUser.safeParse(value).success },
     ],
@@ -95,6 +120,8 @@ export function registerValidateScenarios(): void {
     args: [invalidUser],
     jit: validate.is,
     competitors: [
+      { name: "jit aot is", fn: aot.User.is },
+      { name: "typia is", fn: typiaIs },
       { name: "handwritten guard", fn: handwrittenIs, biased: GENERIC_BIAS },
       { name: "zod safeParse.success", fn: (value: unknown) => zodUser.safeParse(value).success },
     ],
@@ -105,7 +132,11 @@ export function registerValidateScenarios(): void {
     name: "valid user",
     args: [validUser],
     jit: validate.safeParse,
-    competitors: [{ name: "zod safeParse", fn: (value: unknown) => zodUser.safeParse(value) }],
+    competitors: [
+      { name: "jit aot safeParse", fn: aot.User.safeParse },
+      { name: "typia validate", fn: typiaValidate },
+      { name: "zod safeParse", fn: (value: unknown) => zodUser.safeParse(value) },
+    ],
   });
 
   registerScenario({
@@ -113,6 +144,10 @@ export function registerValidateScenarios(): void {
     name: "invalid user (7 issues)",
     args: [invalidUser],
     jit: validate.safeParse,
-    competitors: [{ name: "zod safeParse", fn: (value: unknown) => zodUser.safeParse(value) }],
+    competitors: [
+      { name: "jit aot safeParse", fn: aot.User.safeParse },
+      { name: "typia validate", fn: typiaValidate },
+      { name: "zod safeParse", fn: (value: unknown) => zodUser.safeParse(value) },
+    ],
   });
 }

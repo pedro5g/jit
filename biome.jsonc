@@ -78,7 +78,9 @@
       "!node_modules",
       "!.next",
       "!packages/treeshake",
-      "!.source"
+      "!.source",
+      "!bench/validate/typia-gen",
+      "!**/.generated"
     ]
   }
 }
