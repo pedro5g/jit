@@ -1,4 +1,4 @@
-import * as jit from "jit";
+import * as jit from "../packages/jit/src/index.js";
 import { describe, expect, it } from "vitest";
 
 describe("public surface smoke test", () => {
