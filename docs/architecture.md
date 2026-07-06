@@ -1,200 +1,158 @@
-# JIT Architecture
+# jit Architecture
 
-JIT is a TypeScript library for describing data structures once and compiling
-specialized JavaScript operations over those structures.
+jit is a compiled data engine: a schema described once becomes specialized
+JavaScript for every operation over that shape. This document describes the
+project flow end to end and the rules every part follows.
 
-The core execution model is:
+## The pipeline
 
 ```text
-schema construction
-  -> schema transforms
-  -> operation-specific compilation
-  -> specialized JavaScript function
-  -> repeated runtime execution
+DSL (JIT.* builders)
+  -> Schema AST (core/ats: TypeName + defs + annotations + hints)
+  -> per-operation plan / IR (compiler/ir, query plans, mapper plans)
+  -> optimizer passes (equal and query only — separate cost models)
+  -> codegen (one emitter per operation)
+  -> globalThis.Function (runtime JIT)  |  pure .mjs/.cjs/.d.ts (AOT)
 ```
 
-The runtime function should not interpret a schema tree on every call. Schema
-traversal, wrapper resolution, hint resolution, IR construction, optimization,
-and source emission belong in the compilation path.
+Everything expensive — schema traversal, wrapper resolution, hint
+resolution, IR construction, optimization, source emission — happens once,
+in the compilation path. The emitted function interprets nothing.
 
-## Current Public Shape
+## Module map (`packages/jit/src`)
 
-The package root exposes namespace-oriented exports:
-
-```ts
-export * as Compiler from "./compiler/index.js";
-export * as PipelineAST from "./core/ast/index.js";
-export * as AST from "./core/ats/index.js";
-export * as Builder from "./core/builder/index.js";
-export * as Errors from "./errors/index.js";
-export * as JIT from "./factories/index.js";
-export * as Transform from "./transforms/index.js";
-```
-
-`JIT` is the main ergonomic namespace. It exposes schema factories, wrapper
-operators, object transforms, and compiler entry points such as `compileEqual`,
-`equal`, `compileClone`, `compileHash`, `compileDiff`, `compileUpdate`,
-`compilePipeline`, query APIs, watch APIs, and object operations.
-
-The generic `shared/equals` fallback and `JIT.deepEqual` API have been removed.
-Schema-aware equality is compiled through `JIT.equal(schema)` or
-`JIT.compileEqual(schema)`.
+| Area | Responsibility |
+|---|---|
+| `core/ats` | schema AST: `TypeName`, def shapes, `ChecksDef`, `Infer` type helpers |
+| `core/builder` | fluent chain (`.min()`, `.email()`, wrappers, hints); check methods are type-gated per schema kind |
+| `core/hints` | manual strategy hints (`entity`, `indexBy`, `hash`, `ordered`, ...) |
+| `transforms` | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers) |
+| `compiler` | one emitter per operation; shared IR (`ir/ir.ts`) + optimizer passes for equal and query; string emitters (validate/serialize/codec/scrub/stream) follow the same codegen rules |
+| `runtime` | compile cache, keyed-index cache, hash primitives, boundary scanner (stream), artifact registry |
+| `factories` | the public `JIT.*` namespace: schema factories + every `compile*` entry point + `model`/`compile` aggregations |
+| `aot` | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary |
+| `shared` | source-emission helpers (`parse.ts`: escaping, identifiers, key access) and the `regexes` format library |
+| `errors` | typed `JITError` / `JITValidationError` |
 
 ## Schema AST
 
-Every schema node must keep this stable runtime shape and property order:
+Every schema node keeps this stable runtime shape and property order:
 
 ```ts
-{
-  type,
-  _type,
-  def,
-  annotations,
-}
+{ type, _type, def, annotations }
 ```
 
-Rules:
+- `_type` is a TypeScript phantom output type, always `null` at runtime;
+  the assertion is centralized in schema construction.
+- Definitions live in `def`; prefer stable def shapes over conditionally
+  added properties.
+- Checks (`min`, `email`, formats, ...) are declarative entries in
+  `def.checks` with optional custom `message`; `JIT.coerce.*` is a `coerce`
+  flag on the base def (zod semantics — not a wrapper).
+- Transforms (`partial`, `pick`, `merge`, ...) return transformed schemas,
+  not new AST node kinds.
 
-- `_type` is a TypeScript phantom output type.
-- `_type` is always `null` at runtime.
-- The assertion that makes `_type` typed while storing `null` is centralized in
-  schema construction.
-- Definitions live in `def`.
-- Prefer stable definition shapes over conditionally added properties.
-- Transforms such as `partial`, `required`, `pick`, `omit`, `extend`, and
-  `merge` return transformed schemas, not new AST node kinds.
+## Codegen rules (non-negotiable, every emitter)
 
-## Builders And Transforms
+1. Runtime values ALWAYS travel as external bindings to `Function`
+   (`__q0`, `__v0`, `__m0`, `__c0`) — never interpolated into source. AOT
+   may inline ONLY RegExp and JSON-primitive values.
+2. Static keys only — no `for...in` / `Object.keys` on known shapes;
+   classic indexed loops; no closures inside generated functions; no
+   `push` (use `out[j++]`); checks ordered cheapest-first
+   (`typeof` → null → numeric → length → regex).
+3. Never invert `>` / `>=` / `<` / `<=` under `not` — NaN breaks the
+   equivalence (De Morgan over and/or only; eq↔neq inversion is fine).
+4. Large functions are split so V8 TurboFan can inline them; helper
+   functions live at the top level of the compiled scope (typia-style
+   `iu1`/`pu1` union predicates), never per-call closures.
+5. Generated source is deterministic: `query.test.ts` asserts byte-exact
+   goldens (fixed var names `value/len/out/j/i/item/entry/seen`, no Scope
+   allocator) and `generated-source-snapshots.test.ts` locks composed
+   scenarios behind snapshot review.
 
-The fluent builder chain is separate from the schema AST and from compiler code
-generation.
+## Compile cache
 
-Builder rules:
+`runtime/cache/compile-cache.ts` has two tiers:
 
-- Do not use `Proxy` for schema builders.
-- Builder instances should stay small and stable, ideally `{ schema }`.
-- Share behavior through prototypes, classes, or another allocation-conscious
-  mechanism.
-- Invalid operators should be rejected by TypeScript and should not be exposed
-  accidentally at runtime.
+- **Tier A** — `WeakMap schema → applied function` for operations whose
+  bindings derive from the schema alone (equal, clone, diff, update, hash,
+  validator, mask, sanitize, serialize, codec-per-version).
+- **Tier B** — cached `{ source, create }` template, re-applying user
+  bindings per compile (query, mapper). User values must never be cached
+  into a shared closure.
 
-Transform rules:
+Tier B templates also feed the **artifact registry**
+(`runtime/artifact-registry.ts`): every compiled query/mapper remembers its
+source + bindings so `jit generate` can re-emit dev-defined functions
+aggregated via `JIT.compile(schema, ops, extras)`.
 
-- Keep pure schema transforms in `src/transforms`.
-- Reuse existing schema nodes and wrapper nodes.
-- Do not mutate the input schema.
-- Preserve annotations and definition fields according to the transform's
-  documented semantics.
+## Validation engine
 
-## Compilers
+`compiler/validate/emit-validate.ts` emits up to three functions sharing
+one binding list: `is` (early-return boolean), `safeParse` (issue vector +
+single-pass output rebuild), and — when the schema contains promise
+wrappers — `async safeParseAsync` (settles promises, validates resolved
+values). Unions validate deeply through hoisted sync predicates;
+discriminated unions dispatch on the literal tag. Output is returned by
+reference when nothing rebuilds (`needsBuild` gates every allocation).
 
-Compilers produce readable, deterministic, engine-friendly JavaScript.
+## Wire formats (breaking-change surface)
 
-Current compiler families include:
+- **Binary codec v2** (`compiler/codec/emit-codec.ts`): byte 0 is the
+  schema version; object optionals are a 2-bit-per-field bitmask; ints are
+  guarded int32; strings length-prefixed UTF-8 written via
+  `TextEncoder.encodeInto`. Changing any layout detail is a breaking wire
+  change — bump the version byte semantics deliberately.
+- **Streaming** (`compiler/stream.ts` + `runtime/stream/boundary-scanner.ts`):
+  the boundary FSM must survive tokens cut across chunks, including inside
+  UTF-8 sequences.
 
-- equality;
-- clone;
-- hash;
-- diff;
-- immutable update;
-- pipeline wrappers;
-- query;
-- watch;
-- object operations such as merge, pick, omit, transform, normalize, groupBy,
-  sortBy, and uniqueBy.
+## AOT generator
 
-Compiler rules:
+`aot/generate.ts` writes a fully self-contained dual package:
 
-- `new Function` belongs only in compilation paths.
-- Never interpolate untrusted runtime values into generated source.
-- Use external bindings for callbacks, predicates, transforms, constructors,
-  regular expressions, custom comparators, and unsafe literals.
-- Centralize source helpers for identifier validation, string escaping, property
-  access, literal emission, path emission, and binding allocation.
-- Generated source must be deterministic enough for exact-source tests.
-- Generated hot paths should avoid generic reflection, generic callbacks,
-  temporary arrays, and unnecessary helper calls.
+- `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
+  (exports map, `sideEffects: false`);
+- zero imports — the validation error class and runtime helpers
+  (keyed-index cache, hash primitives) are inlined;
+- flat per-operation exports (`User_is`) plus a `/*#__PURE__*/` namespace
+  aggregation; accessors are pure calls, not property reads, so bundlers
+  drop unused operations (proven by an esbuild bundle in
+  `aot/__tests__/treeshake.test.ts`);
+- `.d.ts` types anchor on the dev's schema file via
+  `import("jit").Infer<typeof import("./user.jit.js").User>` — inference is
+  the single source of truth (`aot/emit-type.ts` is only the fallback for
+  programmatic generation without a source file);
+- `JIT.compile` markers restrict generation to the requested ops and add
+  dev-defined extras from the artifact registry; anything whose bindings
+  hold callbacks is skipped with a reported reason, never miscompiled.
 
-## Runtime
+Discovery (`aot/discover.ts`): `jit.config.*` → convention scan for
+`*.jit.{ts,mts,cts,js,mjs,cjs}` (skipping `node_modules`, dot-dirs, build
+output). TypeScript schema files load natively on runtimes that strip
+types, falling back to `jiti` when installed.
 
-Runtime modules provide small, operation-specific support primitives:
+## Optimizer boundaries
 
-- hash primitives and hash caches;
-- keyed collection indexes;
-- watched-list implementations.
+Equal-only passes (inline-vars, optimize-cost, reorder-compares, ...) must
+NOT run on query IR; query has its own `normalize-logic` +
+`reorder-conditions` passes. Their cost tables intentionally differ — do
+not unify without re-benchmarking.
 
-Runtime helpers should live with the subsystem that owns their semantics. Avoid
-adding broad utility modules unless at least two real consumers share the exact
-same behavior.
+## Conventions
 
-`shared/parse.ts` and `shared/utils.ts` currently remain as compatibility
-owners for source helpers and selected intrinsics. They should not grow into a
-general dumping ground.
+- ESM; local imports use emitted `.js` extensions; `import type` for
+  type-only edges; named exports preferred; no package-root imports inside
+  the package.
+- No new `any` outside deliberate boundaries; `// @ts-expect-error` (never
+  `@ts-ignore`) for intentional invalid-API tests.
+- Tests colocated under `__tests__`; typed APIs pair runtime assertions
+  with `expectTypeOf`; benchmarks (mitata) live in `bench/` with results
+  gitignored.
 
-## Imports And Modules
-
-The project is ESM.
-
-Rules:
-
-- Use `pnpm`.
-- Local TypeScript imports must use emitted `.js` extensions.
-- Use `import type` for type-only dependencies.
-- Do not import from the package root inside the same package.
-- Preserve namespace exports where they improve navigation and compatibility.
-- Avoid turning namespace barrels into dependency-cycle hubs.
-- Named exports are preferred.
-
-## Typing
-
-Avoid new `any`.
-
-Use `unknown`, precise generics, conditional types, mapped types, and
-discriminated unions. Any new `any` must be a deliberate compatibility boundary,
-external-library boundary, or isolated implementation signature hidden behind
-precise public types.
-
-Use `// @ts-expect-error` for intentional invalid API tests. Do not use
-`@ts-ignore`.
-
-## Performance Principles
-
-1. Avoid work.
-2. Specialize when schema information is known.
-3. Preserve stable object shapes.
-4. Avoid unnecessary allocation and indirection.
-5. Avoid generic callbacks in hot loops.
-6. Prefer direct property access for known paths.
-7. Use direct loops and read stable lengths once.
-8. Keep generated functions monomorphic when possible.
-9. Distinguish compile-time cost from execution-time cost.
-10. Benchmark before accepting complexity.
-
-## Tests
-
-Use Vitest and colocate tests under `__tests__` directories.
-
-Tests for typed APIs should pair runtime assertions with `expectTypeOf`
-inference assertions. Generated-source tests should verify deterministic source
-and behavior. Compatibility tests are only required for active compatibility
-surfaces; removed legacy APIs should have their old tests removed or replaced by
-tests for the new public API.
-
-Required verification commands:
+Verification:
 
 ```bash
-pnpm format:check
-pnpm lint:check
-pnpm test
-pnpm build
+pnpm format:check && pnpm lint:check && pnpm test && pnpm build
 ```
-
-Write commands:
-
-```bash
-pnpm format
-pnpm lint
-pnpm fix
-```
-
-Use write commands deliberately and inspect the resulting diff.

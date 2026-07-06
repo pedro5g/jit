@@ -148,3 +148,6 @@ bench/results/
 
 # AOT modules generated at bench time
 bench/**/.generated/
+
+# Local agent instructions (machine-specific)
+CLAUDE.md

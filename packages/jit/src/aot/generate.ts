@@ -80,7 +80,11 @@ export function generate(options: GenerateOptions): GenerateResult {
     if (requested) {
       for (const op of requested) {
         if (!AOT_OPS.has(op)) {
-          skipped.push({ schema: name, operation: op, reason: "runtime-only operation (not generated ahead of time)" });
+          skipped.push({
+            schema: name,
+            operation: op,
+            reason: "runtime-only operation (not generated ahead of time)",
+          });
         }
       }
     }
@@ -109,16 +113,21 @@ export function generate(options: GenerateOptions): GenerateResult {
           reason: "refine/transform/default callbacks cannot be serialized ahead of time",
         });
       } else {
-        js.push(`const ${name}_validator = (() => {`);
+        js.push(`const ${name}_validator = /*#__PURE__*/ (() => {`);
         js.push(...inlined.map((line) => `  ${line}`));
         js.push(...indentBlock(validator.source));
         js.push("})();");
         if (wants("is")) {
-          js.push(`const ${name}_is = ${name}_validator.is;`);
-          operations.push({ prop: "is", type: `(value: unknown) => value is ${name}` });
+          // Pure-call accessors (not property reads) so bundlers can drop
+          // each function — and the validator itself — when unused.
+          js.push(`const ${name}_is = /*#__PURE__*/ ((v) => v.is)(${name}_validator);`);
+          operations.push({
+            prop: "is",
+            type: `(value: unknown) => value is ${name}`,
+          });
         }
         if (wants("safeParse")) {
-          js.push(`const ${name}_safeParse = ${name}_validator.safeParse;`);
+          js.push(`const ${name}_safeParse = /*#__PURE__*/ ((v) => v.safeParse)(${name}_validator);`);
           operations.push({
             prop: "safeParse",
             type: `(value: unknown) => { readonly success: true; readonly data: ${name} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`,
@@ -127,16 +136,19 @@ export function generate(options: GenerateOptions): GenerateResult {
         if (wants("parse")) {
           needsValidationError = true;
           js.push(
-            `const ${name}_parse = (value) => { const r = ${name}_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+            `const ${name}_parse = /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${name}_validator);`
           );
-          operations.push({ prop: "parse", type: `(value: unknown) => ${name}` });
+          operations.push({
+            prop: "parse",
+            type: `(value: unknown) => ${name}`,
+          });
         }
       }
     }
 
     // equal source first: it decides whether hash helpers are required.
     const equalSource = wants("equal") ? tryEmit(name, "equal", skipped, () => emitEqualSource(schema)) : undefined;
-    const equalNeedsHash = equalSource !== undefined && equalSource.includes("__hash");
+    const equalNeedsHash = equalSource?.includes("__hash");
 
     // hash (also powers hash-short-circuit equal)
     const hashSource =
@@ -144,7 +156,7 @@ export function generate(options: GenerateOptions): GenerateResult {
 
     if (hashSource) {
       needsHashHelpers = true;
-      js.push(`const ${name}_hash = (() => {`);
+      js.push(`const ${name}_hash = /*#__PURE__*/ (() => {`);
       js.push(...indentBlock(`const compute = (${hashSource});`));
       js.push("  return (value) => {");
       js.push('    if ((typeof value === "object" && value !== null) || typeof value === "function") {');
@@ -166,15 +178,22 @@ export function generate(options: GenerateOptions): GenerateResult {
       const needsIndex = equalSource.includes("__getIndex");
 
       if (needsHash && !hashSource) {
-        skipped.push({ schema: name, operation: "equal", reason: "hash short-circuit hints need an emittable hash" });
+        skipped.push({
+          schema: name,
+          operation: "equal",
+          reason: "hash short-circuit hints need an emittable hash",
+        });
       } else {
         if (needsIndex) needsRuntimeGetIndex = true;
         if (needsHash) {
-          js.push(`const ${name}_equal = ((__hash) => (${equalSource}))(${name}_hash);`);
+          js.push(`const ${name}_equal = /*#__PURE__*/ ((__hash) => (${equalSource}))(${name}_hash);`);
         } else {
           js.push(`const ${name}_equal = (${equalSource});`);
         }
-        operations.push({ prop: "equal", type: `(left: ${name}, right: ${name}) => boolean` });
+        operations.push({
+          prop: "equal",
+          type: `(left: ${name}, right: ${name}) => boolean`,
+        });
       }
     }
 
@@ -193,7 +212,10 @@ export function generate(options: GenerateOptions): GenerateResult {
 
     if (serializeSource) {
       js.push(`const ${name}_stringify = (${serializeSource});`);
-      operations.push({ prop: "stringify", type: `(value: ${name}) => string` });
+      operations.push({
+        prop: "stringify",
+        type: `(value: ${name}) => string`,
+      });
     }
 
     // mask
@@ -214,11 +236,14 @@ export function generate(options: GenerateOptions): GenerateResult {
         (bindingName, position) => `const ${bindingName} = ${String(sanitizeChainBindings.values[position])};`
       );
 
-      js.push(`const ${name}_sanitize = (() => {`);
+      js.push(`const ${name}_sanitize = /*#__PURE__*/ (() => {`);
       js.push(...regexConsts.map((line) => `  ${line}`));
       js.push(...indentBlock(`return (${sanitizeSource});`));
       js.push("})();");
-      operations.push({ prop: "sanitize", type: `(value: ${name}) => ${name}` });
+      operations.push({
+        prop: "sanitize",
+        type: `(value: ${name}) => ${name}`,
+      });
     }
 
     // codec
@@ -228,9 +253,13 @@ export function generate(options: GenerateOptions): GenerateResult {
       const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
 
       if (inlined === undefined) {
-        skipped.push({ schema: name, operation: "codec", reason: "codec bindings cannot be serialized" });
+        skipped.push({
+          schema: name,
+          operation: "codec",
+          reason: "codec bindings cannot be serialized",
+        });
       } else {
-        js.push(`const ${name}_codec = (() => {`);
+        js.push(`const ${name}_codec = /*#__PURE__*/ (() => {`);
         js.push(...inlined.map((line) => `  ${line}`));
         js.push(...indentBlock(codec.source));
         js.push("})();");
@@ -266,7 +295,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         continue;
       }
 
-      js.push(`const ${name}_${extraName} = (() => {`);
+      js.push(`const ${name}_${extraName} = /*#__PURE__*/ (() => {`);
       js.push(...inlined.map((line) => `  ${line}`));
       js.push(`  return (${artifact.source});`);
       js.push("})();");
@@ -409,7 +438,11 @@ function tryEmit<TValue>(
   try {
     return emit();
   } catch (error) {
-    skipped.push({ schema, operation, reason: error instanceof Error ? error.message : String(error) });
+    skipped.push({
+      schema,
+      operation,
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return undefined;
   }
 }

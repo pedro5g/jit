@@ -29,6 +29,14 @@ export interface CompiledValidator<T> {
   readonly safeParse: (value: unknown) => SafeParseResult<T>;
   /** Like `safeParse` but throws `JITValidationError` (with `.issues`) on failure. */
   readonly parse: (value: unknown) => T;
+  /**
+   * Awaited variant: promise wrappers are settled (`await`) and their
+   * resolved values validated against the inner schema. Schemas without
+   * promises resolve to the synchronous result.
+   */
+  readonly safeParseAsync: (value: unknown) => Promise<SafeParseResult<T>>;
+  /** Like `safeParseAsync` but throws `JITValidationError` on failure. */
+  readonly parseAsync: (value: unknown) => Promise<T>;
 }
 
 /**
@@ -73,6 +81,7 @@ export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values) as {
         readonly is: (value: unknown) => value is TValue;
         readonly safeParse: (value: unknown) => SafeParseResult<TValue>;
+        readonly safeParseAsync?: (value: unknown) => Promise<SafeParseResult<TValue>>;
       };
       const parse = (value: unknown): TValue => {
         const result = compiled.safeParse(value);
@@ -81,8 +90,19 @@ export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
 
         throw new JITValidationError(result.issues);
       };
+      // Promise-free schemas share the sync path behind an async signature.
+      const safeParseAsync =
+        compiled.safeParseAsync ??
+        (async (value: unknown): Promise<SafeParseResult<TValue>> => compiled.safeParse(value));
+      const parseAsync = async (value: unknown): Promise<TValue> => {
+        const result = await safeParseAsync(value);
 
-      return { is: compiled.is, safeParse: compiled.safeParse, parse };
+        if (result.success) return result.data;
+
+        throw new JITValidationError(result.issues);
+      };
+
+      return { is: compiled.is, safeParse: compiled.safeParse, parse, safeParseAsync, parseAsync };
     },
     options
   );

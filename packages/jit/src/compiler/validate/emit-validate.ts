@@ -52,7 +52,10 @@ class ValidatorEmitter {
   private helperCounter = 0;
   private varCounter = 0;
 
-  constructor(private mode: "is" | "parse") {
+  constructor(
+    private mode: "is" | "parse",
+    private awaited = false
+  ) {
     this.rootMode = mode;
   }
 
@@ -328,7 +331,14 @@ class ValidatorEmitter {
         this.failIf(`!(${guard})`, path, "invalid_type", "instance", "expected a class instance");
         return value;
       }
-      case TypeName.promise:
+      case TypeName.promise: {
+        if (this.awaited) {
+          // Async mode: settle the value, then validate the resolved inner
+          // type in place (zod parseAsync semantics; plain values pass).
+          this.writer.line(`${value} = await ${value};`);
+          return this.emitNode(schema.def.innerType as ATS.AnyTypeSchema, value, path);
+        }
+
         this.failIf(
           `!(${value} !== null && typeof ${value} === "object" && typeof ${value}.then === "function")`,
           path,
@@ -337,6 +347,7 @@ class ValidatorEmitter {
           "expected a thenable"
         );
         return value;
+      }
       default:
         return value;
     }
@@ -939,10 +950,13 @@ class ValidatorEmitter {
     const name = `${this.rootMode === "is" ? "iu" : "pu"}${++this.helperCounter}`;
     const savedWriter = this.writer;
     const savedMode = this.mode;
+    const savedAwaited = this.awaited;
 
     this.predicateNames.set(option, name);
     this.writer = new CodeWriter();
     this.mode = "is";
+    // Predicates are plain sync functions — `await` may not appear inside.
+    this.awaited = false;
     this.writer.line(`function ${name}(value) {`);
     this.writer.indent(() => {
       this.emitNode(option, "value", { kind: "static", source: "" });
@@ -952,6 +966,7 @@ class ValidatorEmitter {
     this.helperSources.push(this.writer.toString());
     this.writer = savedWriter;
     this.mode = savedMode;
+    this.awaited = savedAwaited;
     return name;
   }
 
@@ -1212,6 +1227,8 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
     case TypeName.coerce:
     case TypeName.pipe:
     case TypeName.transform:
+    // parseAsync settles promise wrappers, so the output always differs.
+    case TypeName.promise:
       return true;
     case TypeName.optional:
     case TypeName.nullable:
@@ -1274,6 +1291,46 @@ export interface EmittedValidator {
  * static path and returns `{ success, data | issues }`, rebuilding the
  * output only when defaults/coercions/transforms require it.
  */
+/** True when the subtree contains a promise wrapper (drives safeParseAsync). */
+function containsPromise(schema: ATS.AnyTypeSchema, seen = new Set<ATS.AnyTypeSchema>()): boolean {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+
+  const current = schema as AnySchema & { readonly schema?: ATS.AnyTypeSchema };
+
+  // Builder inputs ({ schema }) may appear on unvisited edges.
+  if (current.def === undefined) {
+    return current.schema !== undefined && containsPromise(current.schema, seen);
+  }
+
+  if (current.type === TypeName.promise) return true;
+
+  const def = current.def as {
+    innerType?: ATS.AnyTypeSchema;
+    element?: ATS.AnyTypeSchema;
+    key?: ATS.AnyTypeSchema;
+    value?: ATS.AnyTypeSchema;
+    items?: readonly ATS.AnyTypeSchema[];
+    rest?: ATS.AnyTypeSchema;
+    options?: readonly ATS.AnyTypeSchema[];
+    props?: Readonly<Record<string, ATS.AnyTypeSchema>>;
+  };
+
+  if (def.innerType && containsPromise(def.innerType, seen)) return true;
+  if (def.element && containsPromise(def.element, seen)) return true;
+  if (def.key && containsPromise(def.key, seen)) return true;
+  if (def.value && containsPromise(def.value, seen)) return true;
+  if (def.rest && containsPromise(def.rest, seen)) return true;
+  if (def.items?.some((item) => containsPromise(item, seen))) return true;
+  if (def.options?.some((option) => containsPromise(option, seen))) return true;
+  if (def.props) {
+    const props = def.props;
+
+    if (Object.keys(props).some((key) => containsPromise(props[key], seen))) return true;
+  }
+  return false;
+}
+
 export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
   const parseEmitter = new ValidatorEmitter("parse");
 
@@ -1291,11 +1348,36 @@ export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
   });
   parseEmitter.writer.line("}");
 
+  // Promise-bearing schemas also get an awaited variant: same pipeline,
+  // but promise wrappers settle (`await`) and validate the resolved value.
+  let asyncEmitter: ValidatorEmitter | undefined;
+
+  if (containsPromise(schema)) {
+    const emitter = new ValidatorEmitter("parse", true);
+
+    asyncEmitter = emitter;
+    for (const value of parseEmitter.bindings().values) emitter.bind(value);
+
+    emitter.writer.line("async function safeParseAsync(value) {");
+    emitter.writer.indent(() => {
+      emitter.writer.line("const issues = [];");
+      const output = emitter.emitNode(schema, "value", { kind: "static", source: "" });
+
+      emitter.writer.line("if (issues.length !== 0) {");
+      emitter.writer.indent(() => {
+        emitter.writer.line("return { success: false, issues: issues };");
+      });
+      emitter.writer.line("}");
+      emitter.writer.line(`return { success: true, data: ${output} };`);
+    });
+    emitter.writer.line("}");
+  }
+
   const isEmitter = new ValidatorEmitter("is");
 
-  // Bind the same values in the same order so both functions can share one
+  // Bind the same values in the same order so every function can share one
   // Function parameter list; extras from either emitter are appended after.
-  for (const value of parseEmitter.bindings().values) isEmitter.bind(value);
+  for (const value of (asyncEmitter ?? parseEmitter).bindings().values) isEmitter.bind(value);
 
   isEmitter.writer.line("function is(value) {");
   isEmitter.writer.indent(() => {
@@ -1304,9 +1386,13 @@ export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
   });
   isEmitter.writer.line("}");
 
-  const helperBlocks = [...isEmitter.helpers(), ...parseEmitter.helpers()];
+  const helperBlocks = [...isEmitter.helpers(), ...parseEmitter.helpers(), ...(asyncEmitter?.helpers() ?? [])];
   const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}\n` : "";
-  const source = `${helperSource}${isEmitter.writer.toString()}\n${parseEmitter.writer.toString()}\nreturn { is: is, safeParse: safeParse };`;
+  const asyncSource = asyncEmitter ? `${asyncEmitter.writer.toString()}\n` : "";
+  const returned = asyncEmitter
+    ? "return { is: is, safeParse: safeParse, safeParseAsync: safeParseAsync };"
+    : "return { is: is, safeParse: safeParse };";
+  const source = `${helperSource}${isEmitter.writer.toString()}\n${parseEmitter.writer.toString()}\n${asyncSource}${returned}`;
 
   return { source, bindings: isEmitter.bindings() };
 }

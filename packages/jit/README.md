@@ -1,58 +1,510 @@
-# jit
+<p align="center">
+  <img src="../../jit-logo.png" alt="jit — the compiled data engine" width="420" />
+</p>
 
-Describe a data structure once and compile specialized JavaScript operations
-over it.
+# jit — the compiled data engine
+
+Describe a data shape **once**, and jit compiles specialized JavaScript for
+**every** operation over it: validation, equality, cloning, diffing, hashing,
+immutable updates, in-memory queries, DTO mapping, PII masking, XSS
+sanitizing, JSON serialization, a versioned binary codec, and progressive
+streaming validation.
+
+Two execution modes, same generated code:
+
+- **JIT (runtime)** — operations compile on first use via
+  `globalThis.Function` and are cached per schema.
+- **AOT (build time, Prisma-style)** — `jit generate` writes pure `.mjs` +
+  `.cjs` + `.d.ts` modules with **zero imports**: the engine never ships to
+  production, cold start pays only the generated file (~80x faster than
+  runtime compilation), and every operation is independently tree-shakable.
 
 ```ts
 import { JIT } from "jit";
 
 const User = JIT.object({
-  id: JIT.number(),
-  name: JIT.string(),
-  tags: JIT.array(JIT.string()),
+  id: JIT.number().int().positive(),
+  name: JIT.string().min(2, "name is too short"),
+  email: JIT.string().email().pii("mask"),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+  tags: JIT.array(JIT.string()).max(8),
 });
 
-const equal = JIT.equal(User.schema);
-const clone = JIT.compileClone(User.schema);
+type User = JIT.infer<typeof User>;
 
-equal(
-  { id: 1, name: "Ada", tags: ["compiler"] },
-  { id: 1, name: "Ada", tags: ["compiler"] },
-); // true
+const Users = JIT.validator(User);
 
-clone({ id: 1, name: "Ada", tags: ["compiler"] }); // deep copy
+Users.is(input); // pure boolean guard — ~35ns, beats typia
+Users.parse(input); // throws JITValidationError with every issue
+Users.safeParse(input); // { success, data | issues } — no exceptions
 ```
 
-JIT compiles operations from schemas instead of interpreting schemas on every
-call. Current compiler entry points include equality, clone, hash, diff,
-immutable update, pipeline wrappers, query, watch, and object operations such as
-merge, pick, omit, transform, normalize, groupBy, sortBy, and uniqueBy.
+## Why compiled?
 
-## Schema Builders
+Generic libraries interpret your schema on every call — walk the tree, branch
+on types, allocate intermediates. jit walks the schema **once, at compile
+time**, and emits the exact monomorphic code a performance engineer would
+write by hand: static property access only (never `for...in` / `Object.keys`
+on known shapes), checks ordered cheapest-first (`typeof` → null → numeric →
+length → regex), classic indexed loops, no closures, early returns. Runtime
+values (regexes, refinement callbacks, query arguments) travel as external
+bindings — never interpolated into source.
+
+Measured on this repo's benchmark suite (mitata, Node 24, WSL2 — run
+`pnpm bench:all` for your numbers):
+
+| Operation                       | jit        | best competitor            | native / generic             |
+| ------------------------------- | ---------- | -------------------------- | ---------------------------- |
+| `is()` valid object             | **35 ns**  | typia 60 ns                | zod 981 ns                   |
+| `is()` invalid object           | **2.8 ns** | typia 5.7 ns               | zod 30 µs                    |
+| `safeParse` invalid (7 issues)  | **113 ns** | typia 1.39 µs              | zod 26 µs                    |
+| `stringify` (medium object)     | **225 ns** | fast-json-stringify 269 ns | `JSON.stringify` 430 ns      |
+| binary `encode` (50-item batch) | **943 ns** | —                          | `JSON.stringify` 7.2 µs      |
+| binary `decode`                 | **571 ns** | —                          | `JSON.parse` + revive 7.9 µs |
+| mapper `.map` (entity → DTO)    | **7 ns**   | hand-written 9 ns          | reflective ~131 ns           |
+| cold start (AOT vs runtime)     | **1.2 ms** | —                          | 98 ms (80x)                  |
+
+## Install
+
+```sh
+pnpm add jit          # or npm i / yarn add
+```
+
+---
+
+## Schemas
+
+zod-like builders; every schema carries its inferred type
+(`JIT.infer<typeof X>` works on builders and raw schemas).
 
 ```ts
-const User = JIT.object({
-  id: JIT.number(),
-  name: JIT.string(),
-})
-  .partial()
-  .required()
-  .readonly();
+// primitives
+JIT.string()  JIT.number()  JIT.int()  JIT.boolean()  JIT.bigint()
+JIT.date()    JIT.literal("click")  JIT.enum({ A: "a", B: "b" })
+JIT.null()    JIT.undefined()  JIT.any()  JIT.unknown()  JIT.never()
 
-User.schema; // stable AST shape: { type, _type, def, annotations }
+// collections
+JIT.array(T)  JIT.set(T)  JIT.map(K, V)  JIT.record(K, V)
+JIT.tuple(A, B)  JIT.object({ ... })
+
+// composition
+JIT.union(A, B, C)                       // variadic
+JIT.discriminatedUnion("kind", [A, B])   // tagged, O(1) dispatch
+JIT.intersection(A, B)
+
+// wrappers (chainable on any builder)
+.optional() .nullable() .nullish() .readonly() .promise()
+.default(value | () => value) .brand("UserId")
+.refine((v) => v.ok, "custom message") .pipe((v) => transform(v))
 ```
 
-`_type` is `null` at runtime and carries the inferred TypeScript output type at
-compile time.
+### Checks and custom messages
 
-## Equality
-
-Use schema-aware equality:
+Every failing check accepts a custom message as its last argument:
 
 ```ts
-const equalUser = JIT.compileEqual(User.schema);
-
-equalUser(left, right);
+JIT.string()
+  .min(2, "too short")
+  .max(64)
+  .regex(/^[a-z]+$/, "lowercase only");
+JIT.number().int("must be an integer").positive().multipleOf(5);
+JIT.array(JIT.string()).nonEmpty("pick at least one tag");
 ```
 
-`JIT.equal(schema)` is the ergonomic alias for `JIT.compileEqual(schema)`.
+### String formats
+
+All formats compile to a single inlined regex test. The full regex library is
+public as `JIT.regexes` — reuse it or override the defaults:
+
+```ts
+JIT.string().email(); // practical default
+JIT.string().email(JIT.regexes.rfc5322Email); // override the pattern
+JIT.string().uuid(7); // RFC 9562, pinned version
+JIT.string().cuid2().ulid().nanoid().ksuid().xid();
+JIT.string().ipv4().ipv6().cidrv4().mac("-");
+JIT.string().base64().base64url().hex();
+JIT.string().hostname().domain().e164();
+JIT.string().date().time({ precision: 0 }).datetime({ offset: true });
+JIT.string().duration().emoji();
+JIT.string().digest("sha256", "base64url"); // md5..sha512 digests
+```
+
+### Coercion (zod-style)
+
+`JIT.coerce.*` marks the base schema — checks chain naturally, and the
+conversion is emitted **inline** (`Number(v)`, `new Date(v)`, ...), so
+coerced validators survive AOT generation:
+
+```ts
+const Query = JIT.object({
+  page: JIT.coerce.number().int().positive(), // "3"  → 3
+  active: JIT.coerce.boolean(), // 1    → true
+  since: JIT.coerce.date(), // ISO  → Date
+});
+
+// custom callback form (runtime-only):
+JIT.coerce(JIT.string(), (v) => String(v).toUpperCase());
+```
+
+### Data annotations
+
+```ts
+JIT.string().pii("mask")       // for JIT.mask: "redact" | "mask" | "hash"
+JIT.string().sanitize()        // XSS stripping, fused into parse
+JIT.object({...}).entity({ key: "id" }).indexBy("id")  // strategy hints
+JIT.object({...}).hash("ordered")                      // equal short-circuit
+```
+
+### Object algebra
+
+```ts
+Base.pick(["id", "name"])  Base.omit(["secret"])  Base.partial()
+Base.extend({ tag: JIT.string() })  Base.merge(Other)
+```
+
+---
+
+## Validation
+
+```ts
+const Users = JIT.validator(User);
+
+Users.is(x); // (x: unknown) => x is User — zero allocation
+Users.safeParse(x); // { success: true, data } | { success: false, issues }
+Users.parse(x); // data or throws JITValidationError
+
+// async: settles promise wrappers, then validates the resolved value
+const Job = JIT.object({ result: JIT.string().min(3).promise() });
+await JIT.validator(Job).parseAsync({ result: fetchResult() });
+```
+
+Issues are consumable vectors — path, machine code, expectation, message:
+
+```ts
+[
+  { path: "profile.age", code: "too_big", expected: "<= 150", message: "..." },
+  {
+    path: "items[2].sku",
+    code: "expected_string",
+    expected: "string",
+    received: "number",
+    message: "...",
+  },
+];
+```
+
+Unions validate **deeply** (inner checks and refinements run per option);
+discriminated unions dispatch on the tag in O(1). `parse` applies defaults,
+coercions, trims/case mutations, and transforms in the same pass — and
+returns the input **by reference** when nothing changes.
+
+---
+
+## Data operations
+
+```ts
+const User = JIT.model(schema); // lazy: compiles each op on first access
+
+User.equal(a, b); // schema-aware deep equality with strategies
+User.clone(a); // static-literal deep clone
+User.diff(a, b); // structural diff entries
+User.hash(a); // inline FNV-1a — no JSON.stringify
+User.update(a, { name: "Ada" }); // immutable surgical update (no Proxy)
+User.stringify(a); // compiled JSON — beats native
+User.fromJSON(json); // JSON.parse + compiled validation
+User.mask(a); // PII-safe copy for logs
+User.sanitize(a); // XSS-stripped copy
+User.codec.encode(a); // binary wire format
+```
+
+## Query DSL
+
+Fused single-loop pipelines over collections — no intermediate arrays:
+
+```ts
+const admins = JIT.query(UserList)
+  .filter((q) => q.and(q.not(q.eq("role", "blocked")), q.gt("id", 100)))
+  .select("id", "name", "role")
+  .unique("id")
+  .orderBy("name", "asc")
+  .compile();
+
+admins(users); // one pass, out[j++] writes, zero allocation waste
+
+// terminals
+JIT.query(UserList)
+  .filter((q) => q.eq("role", "user"))
+  .avg("id")
+  .compile();
+// sum / count / avg / min / max — empty: sum/count → 0, others → undefined
+
+// keyed collections, grouping, and mutations
+JIT.query(UserList).groupBy("role").compile();
+JIT.query(UserList)
+  .filter((q) => q.lt("score", 0))
+  .delete()
+  .compile();
+JIT.query(UserList)
+  .filter((q) => q.eq("id", 7))
+  .update({ active: false })
+  .compile();
+```
+
+## DTO mapper
+
+Whitelist by construction — only target-schema fields can exist in the
+output, so accidental `passwordHash` leaks are impossible:
+
+```ts
+const toDTO = JIT.mapper(UserEntity, PublicUser, {
+  name: { from: "fullName" }, // rename
+  label: (user) => `${user.name}#${user.id}`, // computed
+});
+
+toDTO.map(entity); // ~7ns — faster than a hand-written literal
+toDTO.many(entities); // fused indexed loop over the list
+```
+
+## Security
+
+```ts
+const mask = JIT.mask(User); // .pii() fields → "***" / last-4 / FNV hash
+logger.info(mask(user)); // LGPD/GDPR-safe structured logs
+
+const clean = JIT.sanitize(Form); // strips <script>/<style>/tags, escapes <>
+```
+
+Both are surgical: only paths containing marked fields are rebuilt, untouched
+subtrees are shared by reference. Sanitization also runs **inside**
+`parse`/`safeParse` for `.sanitize()` fields — validation + cleanup in one pass.
+
+## Serialization
+
+### JSON
+
+```ts
+const json = JIT.serializer(User);
+
+json.stringify(user); // static keys baked in; escape fast path
+json.parse(body); // JSON.parse + compiled validation
+```
+
+### Binary codec (wire format v2)
+
+Schema-driven binary layout — both sides share the schema, so the wire
+carries **no field names**:
+
+```ts
+const codec = JIT.codec(Event, { version: 2 });
+
+socket.send(codec.encode(event)); // one sizing pass, one allocation
+const n = codec.encodeInto(event, scratch); // straight into your buffer
+const event = codec.decode(message.data); // exact reconstruction
+```
+
+- byte 0 = schema version — decoding under a drifted schema **fails loudly**
+- `int` schemas → guarded int32 (overflow throws, never corrupts);
+  `bigint` → int64; numbers/dates → float64 LE
+- strings → u32 length + UTF-8 via `TextEncoder.encodeInto`
+- object optionals → 2-bit bitmask block (absent/null/present), 4 fields/byte
+- unions → 1 tag byte; discriminated unions dispatch on the literal (0 bytes);
+  intersections encode field-by-field
+- arrays/sets/maps/records → u32 count + entries; `any`/`unknown` rejected
+
+### Streaming validation
+
+Progressive validation while the payload is still arriving; an internal
+boundary FSM survives tokens cut anywhere — mid-string, mid-number, even
+mid-UTF-8:
+
+```ts
+const stream = JIT.stream(JIT.array(Event), {
+  onItem: (event) => queue.push(event), // validated element-by-element
+});
+
+socket.on("data", (chunk) => stream.write(chunk)); // throws on first bad item
+socket.on("end", () => stream.end());
+
+JIT.stream(Event, { format: "ndjson", onItem }); // one document per line
+```
+
+---
+
+## Explicit compilation — `JIT.compile`
+
+The opt-in aggregation: only what you list is compiled, typed, and shipped.
+Your own compiled queries and mappers join the same object:
+
+```ts
+export const Users = JIT.compile(User, ["is", "equal", "stringify"], {
+  findAdmins: JIT.query(UserList)
+    .filter((q) => q.eq("role", "admin"))
+    .compile(),
+  toDTO: JIT.mapper(User, PublicUser),
+});
+
+Users.is(input);
+Users.findAdmins(users); // your query, no prefixes, fully typed
+Users.toDTO.many(users);
+Users.clone(x); // ✗ does not exist — not requested, not compiled
+```
+
+## AOT — `jit generate`
+
+The same object doubles as the **generation marker**: exported from a schema
+file, `jit generate` emits exactly those operations (plus your extras) as
+pure code.
+
+```ts
+// src/user.jit.ts — discovered by convention (*.jit.{ts,mts,js,mjs,cjs})
+import { JIT } from "jit";
+
+export const User = JIT.object({ ... });
+export const Users = JIT.compile(User, ["is", "parse", "stringify"], {
+  findAdmins: JIT.query(JIT.array(User)).filter((q) => q.eq("role", "admin")).compile(),
+});
+```
+
+```ts
+// jit.config.ts (optional — convention scan works without it)
+import { AOT } from "jit";
+
+export default AOT.defineConfig({
+  schemas: ["src/models"], // files or directories
+  outDir: "node_modules/@jit/generated", // default
+  packageName: "@jit/generated",
+});
+```
+
+```sh
+npx jit generate                 # config → convention scan fallback
+npx jit generate src/user.jit.ts --out generated --name @acme/models
+npx jit generate --watch         # regenerate on change
+```
+
+Output: `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
+(exports map, `sideEffects: false`). The module is **fully self-contained** —
+error class and runtime helpers are inlined, zero imports.
+
+```ts
+import { Users } from "@jit/generated"; // aggregated namespace
+import { Users_is } from "@jit/generated"; // flat, per-op tree-shaking
+```
+
+Types are **derived from your schema file**, never re-emitted by hand:
+
+```ts
+// generated index.d.ts
+export type Users = import("jit").Infer<
+  typeof import("../src/user.jit.js").Users
+>;
+export declare const Users_is: (value: unknown) => value is Users;
+```
+
+Tree-shaking is proven by a real bundler in the test suite: importing only
+`User_is` produces a bundle with **no serializer, no codec, no error class,
+no namespace object** — operations whose bindings hold user callbacks
+(`refine`, computed mapper fields) are skipped with a reported reason instead
+of silently miscompiling.
+
+---
+
+## Optimization playbook
+
+Every emitter follows the same set of strategies — this is where the numbers
+come from, and every one of them is locked by golden-source or snapshot tests:
+
+**Generated-code shape (V8-friendly by construction)**
+
+- **Monomorphic code only** — static property access on known shapes, never
+  `for...in` / `Object.keys`; object literals with a stable key order so V8
+  keeps one hidden class per shape.
+- **Cheapest checks first** — `typeof` → null → numeric comparisons → length
+  window → regex. An invalid `is()` exits in ~3 ns because the first failing
+  gate returns immediately.
+- **Classic indexed loops, no closures, no `push`** — `for (let i = 0; ...)`
+  with `out[j++]` writes; callbacks never appear inside generated hot paths.
+- **Function splitting for TurboFan** — large validators split into hoisted
+  helper functions (typia-style `iu1`/`pu1` union predicates) that live at
+  the top of the compiled scope, so V8 can inline each piece.
+- **NaN-safe logic normalization** — the optimizer flattens n-ary and/or,
+  applies De Morgan, folds literal comparisons, and reorders conditions by a
+  cost table — but never inverts `>`/`>=`/`<`/`<=` under `not`, because NaN
+  breaks that equivalence. Equal and query keep **separate cost models**.
+
+**Do the work once**
+
+- **External bindings, never interpolation** — runtime values (regexes,
+  callbacks, query arguments) are `Function` parameters (`__q0`, `__v0`),
+  so a compiled template is pure and cacheable.
+- **Two-tier compile cache** — Tier A caches applied functions per schema
+  (equal/clone/validator/...); Tier B caches the source template and rebinds
+  user values per compile (query/mapper). The second `.compile()` of an
+  identical plan is a map lookup.
+- **AOT ahead of everything** — generation moves compilation to build time:
+  self-contained zero-import modules, ~80x faster cold start, and
+  `/*#__PURE__*/` pure-call accessors so bundlers drop every unused
+  operation (proven with esbuild in the test suite).
+
+**Allocate only when the data changes**
+
+- **Structural sharing everywhere** — `parse` returns the input reference
+  when nothing rebuilds; `update` copies only the touched path; `mask` and
+  `sanitize` rebuild only subtrees containing marked fields.
+- **Loop fusion** — a query pipeline (`filter → select → unique → orderBy`)
+  is one loop with zero intermediate arrays; `mapper.many` fuses mapping
+  into a single preallocated pass.
+- **Inline hashing** — FNV-1a with `Math.imul` and bitwise mixing emitted
+  directly into the function (no `JSON.stringify`), plus a WeakMap hash
+  cache powering the equal short-circuit strategy.
+- **Strategy hints** — `.entity({ key })`, `.indexBy()`, `.ordered()`,
+  `.hash()` switch equality and lookups to keyed-index / binary-search /
+  hash-short-circuit code paths.
+
+**Serialization-specific**
+
+- **String escape fast path** — short strings are char-scanned, long ones
+  regex-probed; clean strings concatenate raw (`'"' + s + '"'`), and
+  `JSON.stringify` runs only when escaping is actually needed. Static JSON
+  key prefixes (`,"name":`) are baked into the source.
+- **Single-allocation binary encode** — worst-case sizing pass, one
+  `ArrayBuffer`, one write pass via `TextEncoder.encodeInto` straight into
+  the buffer, exact `subarray` out; optionals packed as 2-bit bitmasks so
+  absent fields never shift the layout.
+- **Native coercions inlined** — `JIT.coerce.*` emits `Number(v)` /
+  `new Date(v)` in place of a callback binding, keeping coerced validators
+  serializable ahead of time.
+
+---
+
+## Errors
+
+Everything throws typed `JITError`s (`code`, `message`, `meta`):
+`VALIDATION_FAILED` (as `JITValidationError` with `.issues`),
+`UNSUPPORTED_SCHEMA`, `INVALID_OPERATION`, `INVALID_MAPPER`, ...
+
+## Package layout
+
+```
+jit
+├── JIT        schema factories + every compile* entry point (main API)
+├── AOT        generate(), defineConfig(), discovery, CLI backing
+├── AST        schema AST: TypeName, defs, Infer helpers
+├── Compiler   low-level emitters (emit*Source) and IR utilities
+├── Errors     JITError / JITValidationError
+├── Runtime    helpers referenced by generated code (getIndex, hashing)
+└── Transform  pure schema-to-schema transforms
+```
+
+See [docs/architecture.md](../../docs/architecture.md) for the full pipeline
+(`DSL → AST → IR → optimizer → codegen`) and the codegen rules every emitter
+follows.
+
+## Development
+
+```sh
+pnpm test            # vitest + typecheck + golden sources + snapshots
+pnpm bench:all       # mitata suites (equal/clone/query/validate/serialize/...)
+pnpm bench:coldstart # fresh-process AOT vs runtime compile
+pnpm format          # biome
+```

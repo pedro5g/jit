@@ -19,6 +19,8 @@ export const COMPILE_OPS = [
   "is",
   "parse",
   "safeParse",
+  "parseAsync",
+  "safeParseAsync",
   "equal",
   "clone",
   "diff",
@@ -98,6 +100,12 @@ export function compile<
         break;
       case "safeParse":
         selection.safeParse = getValidator().safeParse;
+        break;
+      case "parseAsync":
+        selection.parseAsync = getValidator().parseAsync;
+        break;
+      case "safeParseAsync":
+        selection.safeParseAsync = getValidator().safeParseAsync;
         break;
       case "fromJSON": {
         const parse = getValidator().parse;

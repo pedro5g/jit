@@ -26,6 +26,8 @@ export interface CompiledModel<T> {
   readonly is: (value: unknown) => value is T;
   readonly parse: (value: unknown) => T;
   readonly safeParse: (value: unknown) => SafeParseResult<T>;
+  readonly safeParseAsync: (value: unknown) => Promise<SafeParseResult<T>>;
+  readonly parseAsync: (value: unknown) => Promise<T>;
   readonly equal: Equal<T>;
   readonly clone: Clone<T>;
   readonly diff: Diff<T>;
@@ -72,6 +74,12 @@ export function model<TSchema extends ATS.AnyTypeSchema>(
     },
     get safeParse() {
       return compileValidator<TSchema>(unwrapped as TSchema).safeParse;
+    },
+    get safeParseAsync() {
+      return compileValidator<TSchema>(unwrapped as TSchema).safeParseAsync;
+    },
+    get parseAsync() {
+      return compileValidator<TSchema>(unwrapped as TSchema).parseAsync;
     },
     get equal() {
       return compileEqual(unwrapped) as Equal<TValue>;

@@ -9,7 +9,9 @@ describe("JIT streaming validation", () => {
   describe("array roots (progressive)", () => {
     it("should validate elements as chunks arrive, surviving tokens cut in half", () => {
       const seen: unknown[] = [];
-      const stream = JIT.stream(JIT.array(Event), { onItem: (item) => seen.push(item) });
+      const stream = JIT.stream(JIT.array(Event), {
+        onItem: (item) => seen.push(item),
+      });
 
       stream.write('[{"id": 1, "name": "Andr');
       expect(seen).toHaveLength(0); // fragment stays buffered
@@ -81,7 +83,7 @@ describe("JIT streaming validation", () => {
       const stream = JIT.stream(JIT.array(Event));
 
       // Split inside the multi-byte "ç".
-      const cut = bytes.findIndex((byte) => byte === 0xc3);
+      const cut = bytes.indexOf(0xc3);
 
       stream.write(bytes.subarray(0, cut + 1));
       stream.write(bytes.subarray(cut + 1));
@@ -145,7 +147,9 @@ describe("JIT streaming validation", () => {
     });
 
     it("should apply parse transforms on end", () => {
-      const Signup = JIT.object({ email: JIT.string().trim().lowercase().email() });
+      const Signup = JIT.object({
+        email: JIT.string().trim().lowercase().email(),
+      });
       const stream = JIT.stream(Signup);
 
       stream.write('{"email": "  Ada@Math.org  "}');

@@ -112,13 +112,13 @@ describe("JIT AOT generate", () => {
     const manifest = JSON.parse(readFileSync(join(outDir, "package.json"), "utf8")) as { name: string; type: string };
 
     expect(result.skipped.filter((skip) => skip.operation === "validator")).toHaveLength(0);
-    expect(source).toContain("const User_validator = (() => {");
+    expect(source).toContain("const User_validator = /*#__PURE__*/ (() => {");
     expect(source).toContain("function is(value)");
     expect(source).toContain("function safeParse(value)");
     expect(source).toContain("class JITValidationError extends Error");
     expect(source).not.toContain("import ");
     expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
-    expect(source).toContain("const User_is = User_validator.is;");
+    expect(source).toContain("const User_is = /*#__PURE__*/ ((v) => v.is)(User_validator);");
 
     expect(types).toContain("export type User =");
     expect(types).toContain("readonly id: number");
