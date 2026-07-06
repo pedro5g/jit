@@ -11,6 +11,7 @@ import { emitValidator } from "../compiler/validate/emit-validate.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import { getArtifact } from "../runtime/artifact-registry.js";
 import { emitTypeScriptType } from "./emit-type.js";
 
 /** One schema operation skipped by the generator and why. */
@@ -240,6 +241,43 @@ export function generate(options: GenerateOptions): GenerateResult {
       }
     }
 
+    // Dev-defined extras (compiled queries/mappers aggregated via
+    // JIT.compile): re-emitted from their registered source + bindings.
+    for (const extraName of readExtraNames(options.schemas[name])) {
+      const artifact = getArtifact((options.schemas[name] as Record<string, unknown>)[extraName]);
+
+      if (!artifact) {
+        skipped.push({
+          schema: name,
+          operation: extraName,
+          reason: "extra is not a registered compiled artifact (query/mapper)",
+        });
+        continue;
+      }
+
+      const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
+
+      if (inlined === undefined) {
+        skipped.push({
+          schema: name,
+          operation: extraName,
+          reason: `${artifact.kind} bindings hold callbacks that cannot be serialized ahead of time`,
+        });
+        continue;
+      }
+
+      js.push(`const ${name}_${extraName} = (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(`  return (${artifact.source});`);
+      js.push("})();");
+
+      const extraType = sourceFile
+        ? `typeof import(${JSON.stringify(typeImportSpecifier(options.outDir, sourceFile))}).${name}[${JSON.stringify(extraName)}]`
+        : "unknown";
+
+      operations.push({ prop: extraName, type: extraType });
+    }
+
     // Flat exports make each operation independently tree-shakable; the
     // namespace is a pure aggregation bundlers can drop when unused.
     js.push(`const ${name} = /*#__PURE__*/ Object.freeze({`);
@@ -465,6 +503,17 @@ const AOT_OPS = new Set([
   "sanitize",
   "codec",
 ]);
+
+/** Reads the extras key list from a `JIT.compile(schema, ops, extras)` marker. */
+function readExtraNames(input: SchemaInput): readonly string[] {
+  const candidate = (input as { readonly extras?: unknown }).extras;
+
+  if (Array.isArray(candidate) && candidate.every((key) => typeof key === "string")) {
+    return candidate as readonly string[];
+  }
+
+  return [];
+}
 
 /** Reads the ops allowlist from a `JIT.compile(schema, ops)` marker input. */
 function readRequestedOps(input: SchemaInput): readonly string[] | undefined {

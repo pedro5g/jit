@@ -37,10 +37,16 @@ export type CompileOp = (typeof COMPILE_OPS)[number];
  * The explicit aggregation: only the requested operations exist on the
  * object — nothing else is compiled, typed, or shipped.
  */
-export type CompiledSelection<T, TOps extends readonly CompileOp[]> = {
+export type CompiledSelection<
+  T,
+  TOps extends readonly CompileOp[],
+  TExtras extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+> = {
   readonly schema: ATS.AnyTypeSchema;
   readonly ops: TOps;
-} & Pick<CompiledModel<T>, TOps[number]>;
+  readonly extras: readonly Extract<keyof TExtras, string>[];
+} & Pick<CompiledModel<T>, TOps[number]> &
+  Readonly<TExtras>;
 
 /**
  * Explicitly compiles a chosen set of operations for a schema and
@@ -53,16 +59,26 @@ export type CompiledSelection<T, TOps extends readonly CompileOp[]> = {
  *
  * @example
  * ```ts
- * export const Users = JIT.compile(User, ["is", "equal", "stringify"]);
+ * export const Users = JIT.compile(User, ["is", "equal", "stringify"], {
+ *   findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")).compile(),
+ *   toDTO: JIT.mapper(User, UserDTO),
+ * });
  *
  * Users.is(input);
- * Users.equal(a, b);        // Users.clone does not exist — not compiled
+ * Users.equal(a, b);            // Users.clone does not exist — not compiled
+ * Users.findAdmins(list);       // dev-defined extras live on the same object
+ * Users.toDTO.many(list);
  * ```
  */
-export function compile<TSchema extends ATS.AnyTypeSchema, const TOps extends readonly CompileOp[]>(
+export function compile<
+  TSchema extends ATS.AnyTypeSchema,
+  const TOps extends readonly CompileOp[],
+  const TExtras extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+>(
   schema: SchemaInput<TSchema>,
-  ops: TOps
-): CompiledSelection<ATS.InferSchema<TSchema>, TOps> {
+  ops: TOps,
+  extras?: TExtras
+): CompiledSelection<ATS.InferSchema<TSchema>, TOps, TExtras> {
   type TValue = ATS.InferSchema<TSchema>;
   const unwrapped = unwrapSchema(schema);
   const selection: Record<string, unknown> = { schema: unwrapped, ops: Object.freeze([...ops]) };
@@ -121,5 +137,18 @@ export function compile<TSchema extends ATS.AnyTypeSchema, const TOps extends re
     }
   }
 
-  return Object.freeze(selection) as CompiledSelection<TValue, TOps>;
+  const extraNames: string[] = [];
+
+  if (extras) {
+    for (const key of Object.keys(extras)) {
+      if (key === "schema" || key === "ops" || key === "extras" || key in selection) {
+        throw new JITError("INVALID_OPERATION", `extra "${key}" collides with a compiled operation or reserved key`);
+      }
+      selection[key] = extras[key];
+      extraNames.push(key);
+    }
+  }
+  selection.extras = Object.freeze(extraNames);
+
+  return Object.freeze(selection) as CompiledSelection<TValue, TOps, TExtras>;
 }

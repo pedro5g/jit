@@ -17,6 +17,7 @@ import type {
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
 import * as Transform from "../../transforms/index.js";
+import { nativeCoercions } from "../coerce.js";
 
 /**
  * Creates an optional schema builder from a schema input.
@@ -160,16 +161,25 @@ export function refine<TSchema extends AnyTypeSchema>(
 }
 
 /**
- * Creates a coerce schema builder.
+ * Creates a coerce schema builder from a custom callback.
  *
  * @template TSchema - The target schema type.
  * @param schema - The schema or builder after coercion.
  * @param coercer - The input coercion callback.
  * @returns A builder wrapping a coerce schema.
  */
-export function coerce<TSchema extends AnyTypeSchema>(
+function coerceWith<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   coercer: (value: unknown) => InferSchema<TSchema>
 ): Builder<CoerceSchema<TSchema>> {
   return /* @__PURE__ */ createBuilder(Transform.coerce(unwrapSchema(schema), coercer));
 }
+
+/**
+ * Input coercion, two shapes:
+ * - `JIT.coerce(schema, fn)` — custom callback (runtime-only binding);
+ * - `JIT.coerce.number()` / `.string()` / `.boolean()` / `.bigint()` /
+ *   `.date()` — zod-style native coercions, emitted inline
+ *   (`Number(v)`, `new Date(v)`, ...) and therefore AOT-safe.
+ */
+export const coerce = Object.assign(coerceWith, nativeCoercions);

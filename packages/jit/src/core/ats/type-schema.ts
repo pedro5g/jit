@@ -38,6 +38,11 @@ export type MutableInferShape<TShape extends SchemaShape> = {
 
 export interface EmptyDef {}
 
+/** Def for primitives that support the built-in coercion flag. */
+export interface CoercibleDef {
+  readonly coerce?: boolean;
+}
+
 /** A single declarative constraint attached to a schema (`min`, `email`, ...). */
 export interface SchemaCheck<TKind extends string = string, TValue = unknown> {
   readonly kind: TKind;
@@ -106,6 +111,13 @@ export type ArrayCheck =
 /** Def mixin holding a schema's declarative constraints. */
 export interface ChecksDef<TCheck extends SchemaCheck = SchemaCheck> {
   readonly checks?: readonly TCheck[];
+  /**
+   * zod-style built-in coercion flag set by `JIT.coerce.*` factories: the
+   * compiled validator converts the input with the type's native
+   * constructor (`Number(v)`, `String(v)`, ...) before the type gate.
+   * Inline in the generated source — no binding, AOT-safe.
+   */
+  readonly coerce?: boolean;
 }
 
 export type PrimitiveTypeName =
@@ -153,11 +165,11 @@ export type NumberSchema = BaseSchema<number, "number", ChecksDef<NumberCheck>>;
 export type IntSchema = BaseSchema<number, "int", ChecksDef<NumberCheck>>;
 export type NanSchema = BaseSchema<number, "nan", EmptyDef>;
 export type NullSchema = BaseSchema<null, "null", EmptyDef>;
-export type BooleanSchema = BaseSchema<boolean, "boolean", EmptyDef>;
+export type BooleanSchema = BaseSchema<boolean, "boolean", CoercibleDef>;
 export type UndefinedSchema = BaseSchema<undefined, "undefined", EmptyDef>;
 export type SymbolSchema = BaseSchema<symbol, "symbol", EmptyDef>;
-export type BigIntSchema = BaseSchema<bigint, "bigint", EmptyDef>;
-export type DateSchema = BaseSchema<Date, "date", EmptyDef>;
+export type BigIntSchema = BaseSchema<bigint, "bigint", CoercibleDef>;
+export type DateSchema = BaseSchema<Date, "date", CoercibleDef>;
 export type RegexSchema = BaseSchema<RegExp, "regex", EmptyDef>;
 export type FileSchema = BaseSchema<File, "file", EmptyDef>;
 

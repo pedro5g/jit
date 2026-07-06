@@ -13,6 +13,7 @@ import type {
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { emitQuery } from "./emitter/emit-query.js";
 import { buildQueryIR } from "./ir/builders/build-query-ir.js";
@@ -128,11 +129,26 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
   const template = getCompileCached(
     schema,
     `query:${serializeQueryNodes(program.nodes)}`,
-    () => globalThis.Function(...bindingNames, `return ${emitQuerySource(schema, program)};`),
+    () => {
+      const source = emitQuerySource(schema, program);
+
+      return {
+        source,
+        create: globalThis.Function(...bindingNames, `return ${source};`),
+      };
+    },
     options
   );
+  const compiled = template.create(...program.bindings) as QueryCompiled<ATS.InferSchema<TSchema>, TOutput>;
 
-  return template(...program.bindings) as QueryCompiled<ATS.InferSchema<TSchema>, TOutput>;
+  // Lets AOT re-emit this exact query when aggregated via JIT.compile extras.
+  registerArtifact(compiled as object, {
+    kind: "query",
+    source: template.source,
+    bindingNames,
+    bindingValues: program.bindings,
+  });
+  return compiled;
 }
 
 /**

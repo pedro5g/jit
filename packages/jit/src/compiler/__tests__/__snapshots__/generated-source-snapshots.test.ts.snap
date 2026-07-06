@@ -1,0 +1,468 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`generated source snapshots > codec v2: discriminated union, optional bitmask, and collections 1`] = `
+"function _write(value, u8, dv, o) {
+  let m1 = 0;
+  if (value.pressure === null) m1 |= 1; else if (value.pressure !== undefined) m1 |= 2;
+  if (value.trace === null) m1 |= 4; else if (value.trace !== undefined) m1 |= 8;
+  dv.setUint8(o, m1); o += 1;
+  if (value.seq !== (value.seq | 0)) {
+    throw new RangeError("jit codec: int32 overflow: " + value.seq);
+  }
+  dv.setInt32(o, value.seq, true); o += 4;
+  dv.setFloat64(o, value.at.getTime(), true); o += 8;
+  if (value.pressure != null) {
+    dv.setFloat64(o, value.pressure, true); o += 8;
+  }
+  if (value.trace != null) {
+    const w2 = __enc.encodeInto(value.trace, u8.subarray(o + 4));
+    if (w2.read !== value.trace.length) {
+      throw new RangeError("jit codec: target buffer too small");
+    }
+    dv.setUint32(o, w2.written, true); o += 4 + w2.written;
+  }
+  const v3 = value.payload;
+  const t4 = v3.kind;
+  if (t4 === "click") {
+    dv.setUint8(o, 0); o += 1;
+    dv.setFloat64(o, v3.x, true); o += 8;
+    dv.setFloat64(o, v3.y, true); o += 8;
+  } else if (t4 === "key") {
+    dv.setUint8(o, 1); o += 1;
+    const w5 = __enc.encodeInto(v3.code, u8.subarray(o + 4));
+    if (w5.read !== v3.code.length) {
+      throw new RangeError("jit codec: target buffer too small");
+    }
+    dv.setUint32(o, w5.written, true); o += 4 + w5.written;
+  } else {
+    throw new RangeError("jit codec: unknown discriminator value: " + t4);
+  }
+  const v6 = value.tags;
+  dv.setUint32(o, v6.size, true); o += 4;
+  for (const e7 of v6) {
+    const w8 = __enc.encodeInto(e7, u8.subarray(o + 4));
+    if (w8.read !== e7.length) {
+      throw new RangeError("jit codec: target buffer too small");
+    }
+    dv.setUint32(o, w8.written, true); o += 4 + w8.written;
+  }
+  return o;
+}
+function encode(value) {
+  let size = 1;
+  size += 1;
+  size += 4;
+  size += 8;
+  if (value.pressure != null) {
+    size += 8;
+  }
+  if (value.trace != null) {
+    size += 4 + value.trace.length * 3;
+  }
+  const v9 = value.payload;
+  const t10 = v9.kind;
+  size += 1;
+  if (t10 === "click") {
+    size += 8;
+    size += 8;
+  } else if (t10 === "key") {
+    size += 4 + v9.code.length * 3;
+  } else {
+    throw new RangeError("jit codec: unknown discriminator value: " + t10);
+  }
+  const v11 = value.tags;
+  size += 4;
+  for (const e12 of v11) {
+    size += 4 + e12.length * 3;
+  }
+  const buf = new ArrayBuffer(size);
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  u8[0] = 1;
+  return u8.subarray(0, _write(value, u8, dv, 1));
+}
+function encodeInto(value, target) {
+  if (!(target instanceof Uint8Array)) {
+    throw new TypeError("jit codec: encodeInto target must be a Uint8Array");
+  }
+  if (target.length < 1) throw new RangeError("jit codec: target buffer too small");
+  const dv = new DataView(target.buffer, target.byteOffset, target.byteLength);
+  target[0] = 1;
+  return _write(value, target, dv, 1);
+}
+function decode(input) {
+  const u8 = input instanceof Uint8Array ? input : new Uint8Array(input);
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  if (u8.length < 1 || u8[0] !== 1) {
+    throw new RangeError("jit codec: schema version mismatch: expected 1, got " + (u8.length < 1 ? "empty buffer" : u8[0]));
+  }
+  let o = 1;
+  const m13 = dv.getUint8(o); o += 1;
+  const n14 = dv.getInt32(o, true); o += 4;
+  const d15 = new Date(dv.getFloat64(o, true)); o += 8;
+  const s16 = (m13 >> 0) & 3;
+  let r17;
+  if (s16 === 1) {
+    r17 = null;
+  } else if (s16 === 2) {
+    const n18 = dv.getFloat64(o, true); o += 8;
+    r17 = n18;
+  }
+  const s19 = (m13 >> 2) & 3;
+  let r20;
+  if (s19 === 1) {
+    r20 = null;
+  } else if (s19 === 2) {
+    const l21 = dv.getUint32(o, true); o += 4;
+    if (o + l21 > u8.length) throw new RangeError("jit codec: truncated buffer");
+    const t22 = __dec.decode(u8.subarray(o, o + l21)); o += l21;
+    r20 = t22;
+  }
+  const t23 = dv.getUint8(o); o += 1;
+  let r24;
+  if (t23 === 0) {
+    const n25 = dv.getFloat64(o, true); o += 8;
+    const n26 = dv.getFloat64(o, true); o += 8;
+    r24 = { "kind": "click", "x": n25, "y": n26 };
+  } else if (t23 === 1) {
+    const l27 = dv.getUint32(o, true); o += 4;
+    if (o + l27 > u8.length) throw new RangeError("jit codec: truncated buffer");
+    const t28 = __dec.decode(u8.subarray(o, o + l27)); o += l27;
+    r24 = { "kind": "key", "code": t28 };
+  } else {
+    throw new RangeError("jit codec: invalid union tag: " + t23);
+  }
+  const l29 = dv.getUint32(o, true); o += 4;
+  const a30 = new Set();
+  for (let i31 = 0; i31 < l29; i31++) {
+    const l32 = dv.getUint32(o, true); o += 4;
+    if (o + l32 > u8.length) throw new RangeError("jit codec: truncated buffer");
+    const t33 = __dec.decode(u8.subarray(o, o + l32)); o += l32;
+    a30.add(t33);
+  }
+  return { "seq": n14, "at": d15, "pressure": r17, "trace": r20, "payload": r24, "tags": a30 };
+}
+return { encode: encode, encodeInto: encodeInto, decode: decode };"
+`;
+
+exports[`generated source snapshots > mapper: renames, nested objects, and fused many() 1`] = `
+"{
+  map: function map(source) {
+    return { "id": source.id, "name": source.fullName, "profile": { "age": source.profile.age, "city": source.profile.city } };
+  },
+  many: function many(list) {
+    const len = list.length;
+    const out = new Array(len);
+    for (let i = 0; i < len; i++) {
+      const source = list[i];
+      out[i] = { "id": source.id, "name": source.fullName, "profile": { "age": source.profile.age, "city": source.profile.city } };
+    }
+    return out;
+  }
+}"
+`;
+
+exports[`generated source snapshots > query: filter with nested and/or/not + select + unique + orderBy 1`] = `
+"function query(value) {
+  const len = value.length;
+  const seen = new Set();
+  const out = new Array(len);
+  let j = 0;
+  for (let i = 0; i < len; i++) {
+    const item = value[i];
+    if ((item.role !== __q0) && ((item.id > __q1 || item.role === __q2))) {
+      const uniqueKey = item.id;
+      if (!seen.has(uniqueKey)) {
+        seen.add(uniqueKey);
+        out[j++] = { "id": item.id, "name": item.name, "role": item.role };
+      }
+    }
+  }
+  out.length = j;
+  out.sort((left, right) => {
+    const leftValue = left.name;
+    const rightValue = right.name;
+    if (leftValue === rightValue) return 0;
+    return leftValue < rightValue ? -1 : 1;
+  });
+  return out;
+}"
+`;
+
+exports[`generated source snapshots > query: filtered aggregation 1`] = `
+"function query(value) {
+  const len = value.length;
+  let acc = 0;
+  let n = 0;
+  for (let i = 0; i < len; i++) {
+    const item = value[i];
+    if ((item.role === __q0)) {
+      acc = (acc + item.id);
+      n = (n + 1);
+    }
+  }
+  if (n === 0) {
+    return undefined;
+  }
+  return (acc / n);
+}"
+`;
+
+exports[`generated source snapshots > query: groupBy after filter 1`] = `
+"function query(value) {
+  const len = value.length;
+  const out = Object.create(null);
+  for (let i = 0; i < len; i++) {
+    const item = value[i];
+    if ((item.id >= __q0)) {
+      const collectKey = item.role;
+      let group = out[collectKey];
+      if (group === undefined) {
+        group = [];
+        out[collectKey] = group;
+      }
+      group[group.length] = item;
+    }
+  }
+  return out;
+}"
+`;
+
+exports[`generated source snapshots > serializer: nested objects, optionals, records, and arrays 1`] = `
+"(function () {
+  const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;
+  function str(value) {
+    const len = value.length;
+    if (len < 42) {
+      for (let i = 0; i < len; i++) {
+        const code = value.charCodeAt(i);
+        if (code < 32 || code === 34 || code === 92 || (code > 55295 && code < 57344)) {
+          return JSON.stringify(value);
+        }
+      }
+      return '"' + value + '"';
+    }
+    if (__se.test(value)) return JSON.stringify(value);
+    return '"' + value + '"';
+  }
+  function stringify(value) {
+    let s = "";
+    s += "{";
+    s += "\\"title\\":";
+    s += str(value.title);
+    s += ",\\"owner\\":";
+    const v1 = value.owner;
+    s += "{";
+    s += "\\"id\\":";
+    s += Number.isFinite(v1.id) ? "" + v1.id : "null";
+    s += ",\\"name\\":";
+    s += str(v1.name);
+    s += "}";
+    s += ",\\"counts\\":";
+    const v2 = value.counts;
+    s += "{";
+    const k3 = Object.keys(v2);
+    for (let i4 = 0; i4 < k3.length; i4++) {
+      if (i4 !== 0) s += ",";
+      s += str(k3[i4]) + ":";
+      const e5 = v2[k3[i4]];
+      s += Number.isFinite(e5) ? "" + e5 : "null";
+    }
+    s += "}";
+    if (value.note !== undefined) {
+      s += ",\\"note\\":";
+      if (value.note == null) {
+        s += "null";
+      } else {
+        s += str(value.note);
+      }
+    }
+    s += ",\\"rows\\":";
+    const v6 = value.rows;
+    s += "[";
+    for (let i7 = 0; i7 < v6.length; i7++) {
+      if (i7 !== 0) s += ",";
+      const e8 = v6[i7];
+      s += "{";
+      s += "\\"label\\":";
+      s += str(e8.label);
+      s += ",\\"value\\":";
+      s += Number.isFinite(e8.value) ? "" + e8.value : "null";
+      s += "}";
+    }
+    s += "]";
+    s += "}";
+    return s;
+  }
+  return stringify;
+})()"
+`;
+
+exports[`generated source snapshots > validator: deep unions, formats, coercion, transforms, and messages 1`] = `
+"function iu1(value) {
+  let v9 = value;
+  if (v9 === null || typeof v9 !== "object" || Array.isArray(v9)) {
+    return false;
+  }
+  let v11 = v9.kind;
+  if (v11 !== "pix") {
+    return false;
+  }
+  let v13 = v9.key;
+  if (typeof v13 !== "string") {
+    return false;
+  }
+  if (!__v1.test(v13)) {
+    return false;
+  }
+  return true;
+}
+function iu2(value) {
+  let v15 = value;
+  if (v15 === null || typeof v15 !== "object" || Array.isArray(v15)) {
+    return false;
+  }
+  let v17 = v15.kind;
+  if (v17 !== "card") {
+    return false;
+  }
+  let v19 = v15.last4;
+  if (typeof v19 !== "string") {
+    return false;
+  }
+  if (v19.length !== 4) {
+    return false;
+  }
+  return true;
+}
+function pu1(value) {
+  let v10 = value;
+  if (v10 === null || typeof v10 !== "object" || Array.isArray(v10)) {
+    return false;
+  }
+  let v12 = v10.kind;
+  if (v12 !== "pix") {
+    return false;
+  }
+  let v14 = v10.key;
+  if (typeof v14 !== "string") {
+    return false;
+  }
+  if (!__v1.test(v14)) {
+    return false;
+  }
+  return true;
+}
+function pu2(value) {
+  let v16 = value;
+  if (v16 === null || typeof v16 !== "object" || Array.isArray(v16)) {
+    return false;
+  }
+  let v18 = v16.kind;
+  if (v18 !== "card") {
+    return false;
+  }
+  let v20 = v16.last4;
+  if (typeof v20 !== "string") {
+    return false;
+  }
+  if (v20.length !== 4) {
+    return false;
+  }
+  return true;
+}
+function is(value) {
+  let v1 = value;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    return false;
+  }
+  let v3 = v1.id;
+  if (typeof v3 !== "string") {
+    return false;
+  }
+  if (!__v0.test(v3)) {
+    return false;
+  }
+  let v5 = v1.amount;
+  v5 = Number(v5);
+  if (typeof v5 !== "number") {
+    return false;
+  }
+  if (v5 <= 0) {
+    return false;
+  }
+  let v7 = v1.method;
+  if (!(iu1(v7) || iu2(v7))) {
+    return false;
+  }
+  let v21 = v1.note;
+  if (v21 !== undefined) {
+    if (typeof v21 !== "string") {
+      return false;
+    }
+    v21 = v21.trim();
+    if (v21.length > 140) {
+      return false;
+    }
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  let b3;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v4 = v1.id;
+    let o5 = v4;
+    if (typeof v4 !== "string") {
+      issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+    } else {
+      if (!__v0.test(v4)) {
+        issues[issues.length] = { path: "id", code: "invalid_format", expected: "ulid", message: "id deve ser ULID" };
+      }
+    }
+    o5 = v4;
+    let v6 = v1.amount;
+    let o7 = v6;
+    v6 = Number(v6);
+    if (typeof v6 !== "number") {
+      issues[issues.length] = { path: "amount", code: "expected_number", expected: "number", message: "expected number", received: typeof v6 };
+    } else {
+      if (v6 <= 0) {
+        issues[issues.length] = { path: "amount", code: "not_positive", expected: "> 0", message: "valor deve ser positivo" };
+      }
+    }
+    o7 = v6;
+    let v8 = v1.method;
+    let o9 = v8;
+    if (!(pu1(v8) || pu2(v8))) {
+      issues[issues.length] = { path: "method", code: "invalid_union", expected: "union", message: "value matched no union option" };
+    }
+    o9 = v8;
+    let v22 = v1.note;
+    let o23 = v22;
+    if (v22 !== undefined) {
+      if (typeof v22 !== "string") {
+        issues[issues.length] = { path: "note", code: "expected_string", expected: "string", message: "expected string", received: typeof v22 };
+      } else {
+        v22 = v22.trim();
+        if (v22.length > 140) {
+          issues[issues.length] = { path: "note", code: "too_big", expected: "length <= 140", message: "expected at most 140 characters" };
+        }
+      }
+      o23 = v22;
+    }
+    b3 = { "id": o5, "amount": o7, "method": o9, "note": o23 };
+  }
+  if (b3 === undefined) { b3 = v1; }
+  o2 = b3;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;

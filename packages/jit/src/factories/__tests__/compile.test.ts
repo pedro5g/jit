@@ -26,7 +26,7 @@ describe("JIT.compile explicit aggregation", () => {
     // Not requested → not compiled, not present, not typed.
     expect((Users as Record<string, unknown>).clone).toBeUndefined();
     expect((Users as Record<string, unknown>).parse).toBeUndefined();
-    expectTypeOf<keyof typeof Users>().toEqualTypeOf<"schema" | "ops" | "is" | "equal" | "stringify">();
+    expectTypeOf<keyof typeof Users>().toEqualTypeOf<"schema" | "ops" | "extras" | "is" | "equal" | "stringify">();
   });
 
   it("should share one validator across is/parse/safeParse/fromJSON", () => {
@@ -81,6 +81,82 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
     expect(Object.keys(generated.User).sort()).toEqual(["is", "stringify"]);
     expect(result.skipped).toHaveLength(0);
+  });
+
+  it("should aggregate and generate dev-defined query and mapper extras", async () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      name: JIT.string(),
+      role: JIT.string(),
+    });
+    const Users = JIT.array(User);
+    const PublicUser = JIT.object({ id: JIT.number(), name: JIT.string() });
+
+    const findAdmins = JIT.query(Users)
+      .filter((q) => q.eq("role", "admin"))
+      .compile();
+    const toDTO = JIT.mapper(User, PublicUser);
+    const marked = JIT.compile(User, ["is"], { findAdmins, toDTO });
+
+    const people = [
+      { id: 1, name: "Ada", role: "admin" },
+      { id: 2, name: "Grace", role: "user" },
+    ];
+
+    // Runtime aggregation: same object, no prefixes, fully typed.
+    expect(marked.findAdmins(people)).toEqual([people[0]]);
+    expect(marked.toDTO.map(people[1])).toEqual({ id: 2, name: "Grace" });
+    expect(marked.extras).toEqual(["findAdmins", "toDTO"]);
+
+    // AOT: extras are re-emitted from their registered source + bindings.
+    const result = AOT.generate({
+      schemas: { User: marked },
+      sources: new Map([["User", join(outDir, "user.jit.ts")]]),
+      outDir,
+    });
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("const User_findAdmins");
+    expect(source).toContain("const User_toDTO");
+    expect(types).toContain('export declare const User_findAdmins: typeof import("./user.jit.js").User["findAdmins"];');
+    expect(types).toContain("readonly findAdmins: typeof User_findAdmins;");
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+      User: {
+        is: (value: unknown) => boolean;
+        findAdmins: (items: unknown[]) => unknown[];
+        toDTO: { map: (value: unknown) => unknown; many: (values: unknown[]) => unknown[] };
+      };
+    };
+
+    expect(generated.User.findAdmins(people)).toEqual([people[0]]);
+    expect(generated.User.toDTO.many(people)).toEqual([
+      { id: 1, name: "Ada" },
+      { id: 2, name: "Grace" },
+    ]);
+  });
+
+  it("should skip extras whose bindings cannot be serialized", () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const PublicUser = JIT.object({ id: JIT.number(), label: JIT.string() });
+    const toLabel = JIT.mapper(User, PublicUser, {
+      label: (user) => `${user.name}#${user.id}`,
+    });
+    const marked = JIT.compile(User, ["is"], { toLabel });
+
+    const result = AOT.generate({ schemas: { User: marked }, outDir });
+    const skip = result.skipped.find((entry) => entry.operation === "toLabel");
+
+    expect(skip?.reason).toMatch(/cannot be serialized/);
+  });
+
+  it("should reject extras colliding with compiled ops", () => {
+    const User = JIT.object({ id: JIT.number() });
+
+    expect(() => JIT.compile(User, ["is"], { is: () => true })).toThrow(/collides/);
+    expect(() => JIT.compile(User, [], { schema: 1 })).toThrow(/collides/);
   });
 
   it("should report runtime-only ops instead of failing", () => {

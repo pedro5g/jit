@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { CodeWriter } from "./emitter/code-writer.js";
 import { emitNode } from "./emitter/emit-node.js";
@@ -72,11 +73,26 @@ export function compileMapper<TSource = unknown, TTarget = unknown>(
   const template = getCompileCached(
     sourceSchema,
     `mapper:${targetKey(targetSchema)}:${serializeFields(plan.fields)}`,
-    () => globalThis.Function(...plan.bindingNames, `return ${emitMapper(plan)};`),
+    () => {
+      const source = emitMapper(plan);
+
+      return {
+        source,
+        create: globalThis.Function(...plan.bindingNames, `return ${source};`),
+      };
+    },
     options
   );
+  const compiled = template.create(...plan.bindings) as CompiledMapper<TSource, TTarget>;
 
-  return template(...plan.bindings) as CompiledMapper<TSource, TTarget>;
+  // Lets AOT re-emit this mapper when aggregated via JIT.compile extras.
+  registerArtifact(compiled as object, {
+    kind: "mapper",
+    source: template.source,
+    bindingNames: plan.bindingNames,
+    bindingValues: plan.bindings,
+  });
+  return compiled;
 }
 
 function emitMapper(plan: MapperPlan): string {

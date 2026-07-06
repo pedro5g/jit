@@ -191,6 +191,33 @@ class ValidatorEmitter {
   private emitBase(unwrapped: UnwrappedSchema, value: string, path: PathRef): string {
     const schema = unwrapped.base;
 
+    // zod-style JIT.coerce.* flag: convert with the native constructor
+    // before the type gate. Inline — no binding, AOT-safe.
+    if ((schema.def as { coerce?: boolean }).coerce === true) {
+      switch (schema.type) {
+        case TypeName.string:
+          this.writer.line(`${value} = String(${value});`);
+          break;
+        case TypeName.number:
+        case TypeName.int:
+          this.writer.line(`${value} = Number(${value});`);
+          break;
+        case TypeName.boolean:
+          this.writer.line(`${value} = Boolean(${value});`);
+          break;
+        case TypeName.bigint:
+          // A bad BigInt input degrades to a type failure instead of
+          // throwing out of safeParse (kinder than zod here).
+          this.writer.line(`try { ${value} = BigInt(${value}); } catch {}`);
+          break;
+        case TypeName.date:
+          this.writer.line(`${value} = new Date(${value});`);
+          break;
+        default:
+          break;
+      }
+    }
+
     switch (schema.type) {
       case TypeName.any:
       case TypeName.unknown:
@@ -1196,11 +1223,18 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
     case TypeName.string: {
       const checks = (current.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
 
+      if ((current.def as { coerce?: boolean }).coerce === true) return true;
       return checks.some(
         (check) =>
           check.kind === "trim" || check.kind === "lowercase" || check.kind === "uppercase" || check.kind === "sanitize"
       );
     }
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.boolean:
+    case TypeName.bigint:
+    case TypeName.date:
+      return (current.def as { coerce?: boolean }).coerce === true;
     case TypeName.array:
     case TypeName.set:
       return needsBuild(current.def.element as ATS.AnyTypeSchema);
