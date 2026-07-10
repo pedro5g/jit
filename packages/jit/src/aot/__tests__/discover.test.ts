@@ -44,19 +44,33 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     const ada = { id: 1, name: "Ada" };
 
     for (const loaded of [esm, cjs]) {
-      const namespace = loaded.User as { is: (value: unknown) => boolean };
       const flat = loaded.User_is as (value: unknown) => boolean;
 
-      expect(namespace.is(ada)).toBe(true);
       expect(flat(ada)).toBe(true);
       expect(flat({ id: "x" })).toBe(false);
+      expect(loaded.User).toBeUndefined();
     }
   });
 
-  it("should expose flat per-operation exports and a pure namespace aggregation", () => {
+  it("should expose flat per-operation exports by default", () => {
     const User = JIT.object({ id: JIT.number() });
 
     AOT.generate({ schemas: { User }, outDir });
+
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+
+    expect(source).toMatch(/export \{ .*User_is.* \};/);
+    expect(source).not.toMatch(/export \{[^}]*, User \};/);
+    expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(types).toContain("export declare const User_is: (value: unknown) => value is User;");
+    expect(types).not.toContain("export declare const User: {");
+  });
+
+  it("should optionally expose flat functions plus a pure object aggregation", () => {
+    const User = JIT.object({ id: JIT.number() });
+
+    AOT.generate({ schemas: { User }, outDir, exportMode: "both" });
 
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
@@ -169,8 +183,18 @@ describe("JIT AOT schema discovery", () => {
     expect(AOT.findConfigFile(projectDir)).toBe(join(projectDir, "jit.config.mjs"));
     expect(AOT.findConfigFile(join(projectDir, "src"))).toBeUndefined();
 
-    const config = AOT.defineConfig({ schemas: ["src/models"], outDir: "generated", packageName: "@acme/models" });
+    const config = AOT.defineConfig({
+      schemas: ["src/models"],
+      outDir: "generated",
+      packageName: "@acme/models",
+      operations: ["is", "parse"],
+      exportMode: "auto",
+      clean: true,
+      emitPackageJson: true,
+    });
 
     expect(config.packageName).toBe("@acme/models");
+    expect(config.operations).toEqual(["is", "parse"]);
+    expect(config.exportMode).toBe("auto");
   });
 });

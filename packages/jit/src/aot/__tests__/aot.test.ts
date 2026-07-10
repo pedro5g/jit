@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -73,14 +73,12 @@ describe("JIT AOT generate", () => {
     expect(result.skipped.map((skip) => skip.operation)).toContain("validator");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
-      Event: {
-        equal: (left: unknown, right: unknown) => boolean;
-        clone: <T>(value: T) => T;
-        stringify: (value: unknown) => string;
-        mask: <T>(value: T) => T;
-        sanitize: <T>(value: T) => T;
-        codec: { encode: (value: unknown) => Uint8Array; decode: (bytes: Uint8Array) => unknown };
-      };
+      Event_equal: (left: unknown, right: unknown) => boolean;
+      Event_clone: <T>(value: T) => T;
+      Event_stringify: (value: unknown) => string;
+      Event_mask: <T>(value: T) => T;
+      Event_sanitize: <T>(value: T) => T;
+      Event_codec: { encode: (value: unknown) => Uint8Array; decode: (bytes: Uint8Array) => unknown };
     };
 
     const event = {
@@ -91,15 +89,15 @@ describe("JIT AOT generate", () => {
       at: new Date("2026-07-05T00:00:00.000Z"),
     };
 
-    expect(generated.Event.equal(event, { ...event })).toBe(true);
-    expect(generated.Event.clone(event)).toEqual(event);
-    expect(generated.Event.stringify(event)).toBe(JSON.stringify(event));
-    expect(generated.Event.mask(event).target).toBe("***");
-    expect(generated.Event.sanitize(event).body).toBe("hello");
-    expect(generated.Event.codec.decode(generated.Event.codec.encode(event))).toEqual(event);
+    expect(generated.Event_equal(event, { ...event })).toBe(true);
+    expect(generated.Event_clone(event)).toEqual(event);
+    expect(generated.Event_stringify(event)).toBe(JSON.stringify(event));
+    expect(generated.Event_mask(event).target).toBe("***");
+    expect(generated.Event_sanitize(event).body).toBe("hello");
+    expect(generated.Event_codec.decode(generated.Event_codec.encode(event))).toEqual(event);
   });
 
-  it("should generate validator namespaces with inlined regex bindings", () => {
+  it("should generate validator flat exports with inlined regex bindings", () => {
     const User = JIT.object({
       id: JIT.number().int(),
       email: JIT.string().email(),
@@ -117,13 +115,15 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("function safeParse(value)");
     expect(source).toContain("class JITValidationError extends Error");
     expect(source).not.toContain("import ");
-    expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
     expect(source).toContain("const User_is = /*#__PURE__*/ ((v) => v.is)(User_validator);");
+    expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
 
     expect(types).toContain("export type User =");
     expect(types).toContain("id: number");
     expect(types).toContain("plan?: string");
     expect(types).toContain("value is User");
+    expect(types).toContain("export declare const User_is");
+    expect(types).not.toContain("export declare const User: {");
 
     expect(manifest.name).toBe("@acme/models");
     expect(manifest.type).toBe("module");
@@ -145,6 +145,36 @@ describe("JIT AOT generate", () => {
     expect(result.files).toHaveLength(5);
   });
 
+  it("should honor build options that keep generated files minimal", () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+
+    writeFileSync(join(outDir, "package.json"), '{"stale":true}\n');
+
+    const result = AOT.generate({
+      schemas: { User },
+      outDir,
+      operations: ["is"],
+      exportMode: "flat",
+      emitPackageJson: false,
+    });
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+
+    expect(result.files.map((file) => file.split("/").pop()).sort()).toEqual([
+      "index.cjs",
+      "index.d.cts",
+      "index.d.ts",
+      "index.mjs",
+    ]);
+    expect(existsSync(join(outDir, "package.json"))).toBe(false);
+    expect(source).toContain("const User_is");
+    expect(source).not.toContain("User_parse");
+    expect(source).not.toContain("User_equal");
+    expect(source).not.toContain('from "jit"');
+    expect(types).toContain("export declare const User_is");
+    expect(types).not.toContain("export declare const User_parse");
+  });
+
   it("should generate hash and hash-short-circuit equal with zero imports", async () => {
     const Hashed = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered");
     const result = AOT.generate({ schemas: { Hashed }, outDir });
@@ -156,17 +186,15 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain("import ");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
-      Hashed: {
-        equal: (left: unknown, right: unknown) => boolean;
-        hash: (value: unknown) => number;
-      };
+      Hashed_equal: (left: unknown, right: unknown) => boolean;
+      Hashed_hash: (value: unknown) => number;
     };
     const ada = { id: 1, name: "Ada" };
 
-    expect(generated.Hashed.equal(ada, { ...ada })).toBe(true);
-    expect(generated.Hashed.equal(ada, { ...ada, name: "Grace" })).toBe(false);
-    expect(generated.Hashed.hash(ada)).toBe(generated.Hashed.hash({ ...ada }));
-    expect(generated.Hashed.hash(ada)).not.toBe(generated.Hashed.hash({ ...ada, name: "Grace" }));
+    expect(generated.Hashed_equal(ada, { ...ada })).toBe(true);
+    expect(generated.Hashed_equal(ada, { ...ada, name: "Grace" })).toBe(false);
+    expect(generated.Hashed_hash(ada)).toBe(generated.Hashed_hash({ ...ada }));
+    expect(generated.Hashed_hash(ada)).not.toBe(generated.Hashed_hash({ ...ada, name: "Grace" }));
   });
 
   it("should emit TypeScript types for nested and wrapped schemas", () => {

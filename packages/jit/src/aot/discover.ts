@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SchemaInput } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+import type { AotExportMode, AotOperation } from "./generate.js";
 
 /** `jit.config.*` shape — schema locations plus generation targets. */
 export interface JitConfig {
@@ -16,10 +17,26 @@ export interface JitConfig {
   readonly outDir?: string;
   /** Generated package name; defaults to `@jit/generated`. */
   readonly packageName?: string;
+  /**
+   * Fallback operation allowlist for raw schema exports. `JIT.compile`
+   * markers always win because they are explicit per schema.
+   */
+  readonly operations?: readonly AotOperation[];
+  /** Per-export operation allowlist; wins over `operations` for that schema. */
+  readonly schemaOperations?: Readonly<Record<string, readonly AotOperation[]>>;
+  /**
+   * Generated export shape. `auto` keeps object-style `JIT.compile(schema,
+   * { ... })` grouped and raw schemas flat.
+   */
+  readonly exportMode?: AotExportMode;
+  /** Remove known generated files before writing; defaults to true. */
+  readonly clean?: boolean;
+  /** Write a package.json exports map beside the JS/types; defaults to true. */
+  readonly emitPackageJson?: boolean;
 }
 
 /** Identity helper so `jit.config.ts` gets full typing. */
-export function defineConfig(config: JitConfig): JitConfig {
+export function defineConfig<const TConfig extends JitConfig>(config: TConfig): TConfig {
   return config;
 }
 

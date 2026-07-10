@@ -78,6 +78,7 @@ describe("AOT generation from JIT.compile markers", () => {
 
     expect(source).toContain("const User_is");
     expect(source).toContain("const User_stringify");
+    expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
     expect(source).not.toContain("User_clone");
     expect(source).not.toContain("User_equal");
     expect(source).not.toContain("User_codec");
@@ -90,11 +91,14 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(types).not.toContain("User_clone");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
-      User: Record<string, unknown> & { is: (value: unknown) => boolean };
+      User_is: (value: unknown) => boolean;
+      User_stringify: (value: unknown) => string;
+      User?: unknown;
     };
 
-    expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
-    expect(Object.keys(generated.User).sort()).toEqual(["is", "stringify"]);
+    expect(generated.User_is({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.User_stringify({ id: 1, name: "Ada" })).toBe(JSON.stringify({ id: 1, name: "Ada" }));
+    expect(generated.User).toBeUndefined();
     expect(result.skipped).toHaveLength(0);
   });
 
@@ -139,7 +143,8 @@ describe("AOT generation from JIT.compile markers", () => {
       .filter((q) => q.eq("role", "admin"))
       .compile();
     const toDTO = JIT.mapper(User, PublicUser);
-    const marked = JIT.compile(User, ["is"], { findAdmins, toDTO });
+    const selected = JIT.validator(User).get("is");
+    const marked = JIT.compile(User, { is: selected.is, findAdmins, toDTO });
 
     const people = [
       { id: 1, name: "Ada", role: "admin" },
@@ -163,8 +168,10 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("const User_findAdmins");
     expect(source).toContain("const User_toDTO");
-    expect(types).toContain('export declare const User_findAdmins: typeof import("./user.jit.js").User["findAdmins"];');
-    expect(types).toContain("readonly findAdmins: typeof User_findAdmins;");
+    expect(source).toMatch(/export \{ User \};/);
+    expect(source).not.toMatch(/export \{[^}]*User_findAdmins/);
+    expect(types).not.toContain("export declare const User_findAdmins");
+    expect(types).toContain('readonly findAdmins: typeof import("./user.jit.js").User["findAdmins"];');
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
       User: {
@@ -223,6 +230,6 @@ describe("AOT generation from JIT.compile markers", () => {
 
     expect(source).toContain("const Item_equal");
     expect(types).not.toContain("Item_hash:");
-    expect(source).toMatch(/export \{ Item_equal, Item \};/);
+    expect(source).toMatch(/export \{ Item_equal \};/);
   });
 });

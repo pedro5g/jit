@@ -70,8 +70,9 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
   it("should keep the namespace aggregation only when it is used", async () => {
     const User = JIT.object({ id: JIT.number() });
+    const selected = JIT.validator(User).get("is");
 
-    AOT.generate({ schemas: { User }, outDir });
+    AOT.generate({ schemas: { User: JIT.compile(User, { is: selected.is }) }, outDir });
 
     const bundled = await bundle(`import { User } from "./index.mjs";\nconsole.log(User.is({ id: 1 }));\n`);
 

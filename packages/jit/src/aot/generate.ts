@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
@@ -21,6 +21,23 @@ export interface SkippedOperation {
   readonly reason: string;
 }
 
+export const AOT_OPERATIONS = [
+  "is",
+  "parse",
+  "safeParse",
+  "hash",
+  "equal",
+  "clone",
+  "stringify",
+  "mask",
+  "sanitize",
+  "codec",
+] as const;
+
+export type AotOperation = (typeof AOT_OPERATIONS)[number];
+
+export type AotExportMode = "auto" | "flat" | "grouped" | "both";
+
 export interface GenerateOptions {
   /** Exported name → schema (or builder) to generate for. */
   readonly schemas: Readonly<Record<string, SchemaInput>>;
@@ -28,6 +45,26 @@ export interface GenerateOptions {
   readonly outDir: string;
   /** Generated package name; defaults to `@jit/generated`. */
   readonly packageName?: string;
+  /**
+   * Fallback operation allowlist for schemas that were not already marked by
+   * `JIT.compile`. When omitted, raw schemas generate every AOT-capable op.
+   */
+  readonly operations?: readonly AotOperation[];
+  /** Per-export operation allowlist; wins over `operations` for that schema. */
+  readonly schemaOperations?: Readonly<Record<string, readonly AotOperation[]>>;
+  /**
+   * Export shape:
+   * - `auto` (default): object-style `JIT.compile(schema, { ... })` emits only
+   *   `User`; raw schemas and array-style markers emit only `User_is` flats.
+   * - `grouped`: only `User`.
+   * - `flat`: only `User_is`, `User_parse`, ...
+   * - `both`: flat functions plus a pure `User` aggregation.
+   */
+  readonly exportMode?: AotExportMode;
+  /** Remove known generated files before writing; defaults to true. */
+  readonly clean?: boolean;
+  /** Write a package.json exports map beside the JS/types; defaults to true. */
+  readonly emitPackageJson?: boolean;
   /**
    * Schema name → source file it was loaded from. When present, the
    * generated `.d.ts` derives the value type from the dev's own schema via
@@ -51,10 +88,11 @@ export interface GenerateResult {
  * inlined into the file, so it has zero imports: no engine weight, no
  * module graph to load on cold start, CSP-safe.
  *
- * Each schema becomes a namespace constant (`export const User = { is,
- * parse, safeParse, equal, clone, stringify, mask, sanitize, codec }`);
- * operations whose bindings cannot be serialized (user callbacks in
- * refine/transform/default) are skipped and reported.
+ * Raw schemas emit flat pure-function exports by default (`User_is`,
+ * `User_parse`, ...). Object-style `JIT.compile(schema, { ... })` markers
+ * emit only the grouped object (`User.is`, `User.parse`, ...). Operations
+ * whose bindings cannot be serialized (user callbacks in refine/transform
+ * /default) are skipped and reported.
  */
 export function generate(options: GenerateOptions): GenerateResult {
   const packageName = options.packageName ?? "@jit/generated";
@@ -74,8 +112,11 @@ export function generate(options: GenerateOptions): GenerateResult {
     const operations: { readonly prop: string; readonly type: string }[] = [];
     const sourceFile = options.sources?.get(name);
     // JIT.compile(schema, ops) markers restrict generation to the chosen ops.
-    const requested = readRequestedOps(options.schemas[name]);
-    const groupedExport = readAotExportMode(options.schemas[name]) === "grouped";
+    // Config allowlists are the fallback for raw schemas.
+    const requested = readRequestedOps(options.schemas[name]) ?? options.schemaOperations?.[name] ?? options.operations;
+    const exportMode = resolveExportMode(options.exportMode, readAotExportMode(options.schemas[name]));
+    const flatExport = exportMode === "flat" || exportMode === "both";
+    const groupedExport = exportMode === "grouped" || exportMode === "both";
     const wants = (op: string): boolean => requested === undefined || requested.includes(op);
 
     if (requested) {
@@ -308,31 +349,33 @@ export function generate(options: GenerateOptions): GenerateResult {
       operations.push({ prop: extraName, type: extraType });
     }
 
-    // Flat exports make each operation independently tree-shakable; the
-    // namespace is a pure aggregation bundlers can drop when unused.
-    js.push(`const ${name} = /*#__PURE__*/ Object.freeze({`);
-    js.push(...operations.map((operation) => `  ${operation.prop}: ${name}_${operation.prop},`));
-    js.push("});");
-    js.push("");
-
     for (const operation of operations) {
-      if (!groupedExport) {
+      if (flatExport) {
         exportNames.push(`${name}_${operation.prop}`);
         dts.push(`export declare const ${name}_${operation.prop}: ${operation.type};`);
       }
     }
-    exportNames.push(name);
 
-    dts.push(`export declare const ${name}: {`);
-    dts.push(
-      ...operations.map((operation) =>
-        groupedExport
-          ? `  readonly ${operation.prop}: ${operation.type};`
-          : `  readonly ${operation.prop}: typeof ${name}_${operation.prop};`
-      )
-    );
-    dts.push("};");
-    dts.push("");
+    if (groupedExport) {
+      js.push(`const ${name} = /*#__PURE__*/ Object.freeze({`);
+      js.push(...operations.map((operation) => `  ${operation.prop}: ${name}_${operation.prop},`));
+      js.push("});");
+      js.push("");
+      exportNames.push(name);
+
+      dts.push(`export declare const ${name}: {`);
+      dts.push(
+        ...operations.map((operation) =>
+          flatExport
+            ? `  readonly ${operation.prop}: typeof ${name}_${operation.prop};`
+            : `  readonly ${operation.prop}: ${operation.type};`
+        )
+      );
+      dts.push("};");
+      dts.push("");
+    } else if (flatExport) {
+      dts.push("");
+    }
   }
 
   // Inlined runtime helpers keep the module import-free: nothing from the
@@ -395,12 +438,14 @@ export function generate(options: GenerateOptions): GenerateResult {
   }
   if (helpers.length > 0) js.splice(1, 0, ...helpers);
 
+  if (options.clean !== false) cleanGeneratedFiles(options.outDir);
   mkdirSync(options.outDir, { recursive: true });
 
   const body = js.join("\n");
   const exportList = exportNames.join(", ");
-  const esm = `${body}\nexport { ${exportList} };\n`;
-  const cjs = `${body}\nmodule.exports = { ${exportList} };\n`;
+  const esm = exportNames.length > 0 ? `${body}\nexport { ${exportList} };\n` : `${body}\nexport {};\n`;
+  const cjs =
+    exportNames.length > 0 ? `${body}\nmodule.exports = { ${exportList} };\n` : `${body}\nmodule.exports = {};\n`;
   const types = `${dts.join("\n")}\n`;
 
   const files = [
@@ -408,31 +453,35 @@ export function generate(options: GenerateOptions): GenerateResult {
     writeFile(options.outDir, "index.cjs", cjs),
     writeFile(options.outDir, "index.d.ts", types),
     writeFile(options.outDir, "index.d.cts", types),
-    writeFile(
-      options.outDir,
-      "package.json",
-      `${JSON.stringify(
-        {
-          name: packageName,
-          version: "0.0.0",
-          type: "module",
-          main: "./index.cjs",
-          module: "./index.mjs",
-          types: "./index.d.ts",
-          exports: {
-            "./package.json": "./package.json",
-            ".": {
-              types: "./index.d.ts",
-              import: "./index.mjs",
-              require: "./index.cjs",
-            },
-          },
-          sideEffects: false,
-        },
-        null,
-        2
-      )}\n`
-    ),
+    ...(options.emitPackageJson === false
+      ? []
+      : [
+          writeFile(
+            options.outDir,
+            "package.json",
+            `${JSON.stringify(
+              {
+                name: packageName,
+                version: "0.0.0",
+                type: "module",
+                main: "./index.cjs",
+                module: "./index.mjs",
+                types: "./index.d.ts",
+                exports: {
+                  "./package.json": "./package.json",
+                  ".": {
+                    types: "./index.d.ts",
+                    import: "./index.mjs",
+                    require: "./index.cjs",
+                  },
+                },
+                sideEffects: false,
+              },
+              null,
+              2
+            )}\n`
+          ),
+        ]),
   ];
 
   return { files, skipped };
@@ -533,18 +582,8 @@ function typeImportSpecifier(outDir: string, sourceFile: string): string {
   return mapped.startsWith(".") ? mapped : `./${mapped}`;
 }
 
-const AOT_OPS = new Set([
-  "is",
-  "parse",
-  "safeParse",
-  "hash",
-  "equal",
-  "clone",
-  "stringify",
-  "mask",
-  "sanitize",
-  "codec",
-]);
+const AOT_OPS = new Set<string>(AOT_OPERATIONS);
+const GENERATED_FILES = ["index.mjs", "index.cjs", "index.d.ts", "index.d.cts", "package.json"] as const;
 
 /** Reads the extras key list from a `JIT.compile(schema, ops, extras)` marker. */
 function readExtraNames(input: SchemaInput): readonly string[] {
@@ -574,6 +613,14 @@ function readAotExportMode(input: SchemaInput): "grouped" | undefined {
   return candidate === "grouped" ? candidate : undefined;
 }
 
+function resolveExportMode(
+  configured: AotExportMode | undefined,
+  marker: "grouped" | undefined
+): "flat" | "grouped" | "both" {
+  if (configured !== undefined && configured !== "auto") return configured;
+  return marker === "grouped" ? "grouped" : "flat";
+}
+
 function indentBlock(source: string): string[] {
   return source.split("\n").map((line) => (line.length > 0 ? `  ${line}` : line));
 }
@@ -583,4 +630,10 @@ function writeFile(dir: string, name: string, content: string): string {
 
   writeFileSync(path, content);
   return path;
+}
+
+function cleanGeneratedFiles(dir: string): void {
+  for (const file of GENERATED_FILES) {
+    rmSync(join(dir, file), { force: true });
+  }
 }

@@ -19,6 +19,7 @@
     "lint:check": "biome lint .",
     "clean": "pnpm run -r clean",
     "build": "pnpm run -r --filter jit build",
+    "jit": "tsx --conditions @jit/source packages/jit/src/cli.ts",
     "bench:equal": "tsx --conditions @jit/source bench/equal/index.ts",
     "bench:clone": "tsx --conditions @jit/source bench/clone/index.ts",
     "bench:update": "tsx --conditions @jit/source bench/update/index.ts",
