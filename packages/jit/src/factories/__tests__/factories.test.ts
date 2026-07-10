@@ -430,6 +430,20 @@ describe("JIT AST builders", () => {
       expectTypeOf(PlainDate._type).toEqualTypeOf<Temporal.PlainDate>();
       expectTypeOf(Duration._type).toEqualTypeOf<Temporal.Duration>();
     });
+
+    it("should construct bidirectional value codecs", () => {
+      const StringToDate = JIT.codec(JIT.string().datetime(), JIT.date(), {
+        decode: (iso) => new Date(iso),
+        encode: (date) => date.toISOString(),
+      });
+
+      expect(StringToDate.schema.type).toBe(AST.TypeName.codec);
+      expect(StringToDate.schema.def.input.type).toBe(AST.TypeName.string);
+      expect(StringToDate.schema.def.output.type).toBe(AST.TypeName.date);
+      expectTypeOf<AST.Infer<typeof StringToDate>>().toEqualTypeOf<Date>();
+      expectTypeOf(StringToDate.decode("2020-01-01T00:00:00.000Z")).toEqualTypeOf<Date>();
+      expectTypeOf(StringToDate.encode(new Date("2020-01-01T00:00:00.000Z"))).toEqualTypeOf<string>();
+    });
   });
 
   describe("object operators", () => {

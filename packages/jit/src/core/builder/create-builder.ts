@@ -3,6 +3,7 @@ import { Regexes } from "../../shared/index.js";
 import * as Transform from "../../transforms/index.js";
 import {
   type AnyTypeSchema,
+  type CodecSchema,
   type FunctionSchema,
   type ObjectSchema,
   type SchemaShape,
@@ -477,7 +478,24 @@ const functionBuilderPrototype = {
   },
 };
 
+const codecBuilderPrototype = {
+  ...baseBuilderPrototype,
+
+  decode(this: RuntimeBuilder, value: unknown): unknown {
+    return compileValidator(this.schema as RuntimeCodecSchema).parse(value);
+  },
+
+  encode(this: RuntimeBuilder, value: unknown): unknown {
+    const schema = this.schema as RuntimeCodecSchema;
+    const output = compileValidator(schema.def.output).parse(value);
+    const encoded = schema.def.encode(output);
+
+    return compileValidator(schema.def.input).parse(encoded);
+  },
+};
+
 type RuntimeFunctionSchema = FunctionSchema<readonly AnyTypeSchema[], AnyTypeSchema | undefined>;
+type RuntimeCodecSchema = CodecSchema<AnyTypeSchema, AnyTypeSchema>;
 
 function compileFunctionValidators(schema: RuntimeFunctionSchema) {
   return {
@@ -496,7 +514,9 @@ export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): B
       ? objectBuilderPrototype
       : schema.type === TypeName.function
         ? functionBuilderPrototype
-        : baseBuilderPrototype;
+        : schema.type === TypeName.codec
+          ? codecBuilderPrototype
+          : baseBuilderPrototype;
   const builder = Object.create(prototype) as RuntimeBuilder;
   builder.schema = schema;
   return builder as Builder<TSchema>;

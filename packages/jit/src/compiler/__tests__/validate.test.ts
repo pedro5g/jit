@@ -530,6 +530,28 @@ describe("JIT compiler validator", () => {
     }
   });
 
+  it("should decode and encode bidirectional value codecs", () => {
+    const StringToDate = JIT.codec(JIT.string().datetime(), JIT.date(), {
+      decode: (iso) => new Date(iso),
+      encode: (date) => date.toISOString(),
+    });
+    const iso = "2020-01-01T00:00:00.000Z";
+    const date = new Date(iso);
+    const validate = JIT.validator(StringToDate);
+    const parsed = validate.parse(iso);
+    const bad = validate.safeParse("not-a-date");
+
+    expect(StringToDate.decode(iso)).toEqual(date);
+    expect(StringToDate.encode(date)).toBe(iso);
+    expect(parsed).toEqual(date);
+    expect(validate.is(iso)).toBe(true);
+    expect(validate.is(date)).toBe(false);
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.issues[0].code).toBe("invalid_format");
+    expect(() => StringToDate.encode(new Date("invalid"))).toThrow(Errors.JITValidationError);
+    expect(Compiler.emitValidatorSource(StringToDate.schema)).not.toContain("new Date(iso)");
+  });
+
   it("should apply transforms inside intersections on parse", () => {
     const Person = JIT.object({ name: JIT.string().trim() });
     const Audit = JIT.object({ createdBy: JIT.string().lowercase() });

@@ -58,6 +58,8 @@ function emitBaseGuard(schema: GuardSchema, value: string): string {
       return `typeof ${value} === "function"`;
     case TypeName.temporal:
       return emitTemporalGuard(schema, value);
+    case TypeName.codec:
+      return emitSchemaGuard(schema.def.input as ATS.AnyTypeSchema, value);
     case TypeName.literal:
       return emitLiteralGuard(schema, value);
     case TypeName.enum:

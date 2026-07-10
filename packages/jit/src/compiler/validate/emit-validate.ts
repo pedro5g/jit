@@ -284,6 +284,8 @@ class ValidatorEmitter {
         return value;
       case TypeName.temporal:
         return this.emitTemporal(schema, value, path);
+      case TypeName.codec:
+        return this.emitCodec(schema, value, path);
       case TypeName.literal: {
         const literalSource = emitLiteral(schema.def.value as never);
         const literalText = String(schema.def.value);
@@ -467,6 +469,27 @@ class ValidatorEmitter {
       `expected ${expected}`
     );
     return value;
+  }
+
+  private emitCodec(schema: AnySchema, value: string, path: PathRef): string {
+    const input = schema.def.input as ATS.AnyTypeSchema;
+    const inputOut = this.emitNode(input, value, path);
+
+    if (this.mode === "is") return value;
+
+    const decoded = this.nextVar("c");
+
+    this.writer.line(`let ${decoded};`);
+    this.writer.line("try {");
+    this.writer.indent(() => {
+      this.writer.line(`${decoded} = ${this.bind(schema.def.decode)}(${inputOut});`);
+    });
+    this.writer.line("} catch {");
+    this.writer.indent(() => {
+      this.emitFail(path, "invalid_codec", "codec decode", "codec decode failed");
+    });
+    this.writer.line("}");
+    return this.emitNode(schema.def.output as ATS.AnyTypeSchema, decoded, path);
   }
 
   private emitJsonPredicate(): string {
@@ -1449,6 +1472,7 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
     case TypeName.transform:
     // parseAsync settles promise wrappers, so the output always differs.
     case TypeName.promise:
+    case TypeName.codec:
       return true;
     case TypeName.optional:
     case TypeName.nullable:
@@ -1538,6 +1562,8 @@ function containsPromise(schema: ATS.AnyTypeSchema, seen = new Set<ATS.AnyTypeSc
     element?: ATS.AnyTypeSchema;
     key?: ATS.AnyTypeSchema;
     value?: ATS.AnyTypeSchema;
+    input?: ATS.AnyTypeSchema;
+    output?: ATS.AnyTypeSchema;
     items?: readonly ATS.AnyTypeSchema[];
     rest?: ATS.AnyTypeSchema;
     options?: readonly ATS.AnyTypeSchema[];
@@ -1548,6 +1574,8 @@ function containsPromise(schema: ATS.AnyTypeSchema, seen = new Set<ATS.AnyTypeSc
   if (def.element && containsPromise(def.element, seen)) return true;
   if (def.key && containsPromise(def.key, seen)) return true;
   if (def.value && containsPromise(def.value, seen)) return true;
+  if (def.input && containsPromise(def.input, seen)) return true;
+  if (def.output && containsPromise(def.output, seen)) return true;
   if (def.rest && containsPromise(def.rest, seen)) return true;
   if (def.items?.some((item) => containsPromise(item, seen))) return true;
   if (def.options?.some((option) => containsPromise(option, seen))) return true;

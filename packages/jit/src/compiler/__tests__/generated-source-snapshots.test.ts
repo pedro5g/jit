@@ -99,6 +99,15 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitValidatorSource(Event.schema)).toMatchSnapshot();
   });
 
+  it("validator: bidirectional value codec", () => {
+    const StringToDate = JIT.codec(JIT.string().datetime(), JIT.date(), {
+      decode: (iso) => new Date(iso),
+      encode: (date) => date.toISOString(),
+    });
+
+    expect(Compiler.emitValidatorSource(StringToDate.schema)).toMatchSnapshot();
+  });
+
   it("serializer: nested objects, optionals, records, and arrays", () => {
     const Report = JIT.object({
       title: JIT.string(),

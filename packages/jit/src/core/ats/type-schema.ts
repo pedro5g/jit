@@ -442,7 +442,8 @@ export type AnySpecialSchema =
   | CustomSchema
   | TemplateLiteralSchema
   | FunctionSchema
-  | TemporalSchema;
+  | TemporalSchema
+  | CodecSchema;
 
 export interface LiteralDef<TValue = unknown> {
   readonly value: TValue;
@@ -591,6 +592,18 @@ export type TemporalSchema<TKind extends TemporalKind = TemporalKind> = BaseSche
   "temporal",
   TemporalDef<TKind>
 >;
+
+export interface CodecDef<TInput extends AnyTypeSchema = AnyTypeSchema, TOutput extends AnyTypeSchema = AnyTypeSchema> {
+  readonly input: TInput;
+  readonly output: TOutput;
+  readonly decode: (value: InferSchema<TInput>) => InferSchema<TOutput>;
+  readonly encode: (value: InferSchema<TOutput>) => InferSchema<TInput>;
+}
+
+export type CodecSchema<
+  TInput extends AnyTypeSchema = AnyTypeSchema,
+  TOutput extends AnyTypeSchema = AnyTypeSchema,
+> = BaseSchema<InferSchema<TOutput>, "codec", CodecDef<TInput, TOutput>>;
 
 export interface RefineDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
   readonly predicate: (value: InferSchema<TInner>) => boolean;

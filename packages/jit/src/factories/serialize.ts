@@ -2,8 +2,9 @@ import { type CodecCompileOptions, type CompiledCodec, compileCodec } from "../c
 import { compileSerialize, type Serialize } from "../compiler/serialize.js";
 import { compileValidator } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
-import type { SchemaInput } from "../core/builder/index.js";
-import { unwrapSchema } from "../core/builder/index.js";
+import { createSchema, TypeName } from "../core/ats/index.js";
+import type { Builder, SchemaInput } from "../core/builder/index.js";
+import { createBuilder, unwrapSchema } from "../core/builder/index.js";
 import type { CompileCacheOptions } from "../runtime/cache/compile-cache.js";
 
 /**
@@ -52,9 +53,44 @@ export function serializer<TSchema extends ATS.AnyTypeSchema>(
  * const event = Events.decode(message.data);   // exact reconstruction
  * ```
  */
+export interface ValueCodecOptions<TInput extends ATS.AnyTypeSchema, TOutput extends ATS.AnyTypeSchema> {
+  readonly decode: (value: ATS.InferSchema<TInput>) => ATS.InferSchema<TOutput>;
+  readonly encode: (value: ATS.InferSchema<TOutput>) => ATS.InferSchema<TInput>;
+}
+
+export function codec<TInput extends ATS.AnyTypeSchema, TOutput extends ATS.AnyTypeSchema>(
+  input: SchemaInput<TInput>,
+  output: SchemaInput<TOutput>,
+  options: ValueCodecOptions<TInput, TOutput>
+): Builder<ATS.CodecSchema<TInput, TOutput>>;
+
 export function codec<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options?: CodecCompileOptions
-): CompiledCodec<ATS.InferSchema<TSchema>> {
-  return compileCodec(unwrapSchema(schema), options);
+): CompiledCodec<ATS.InferSchema<TSchema>>;
+
+export function codec<TSchema extends ATS.AnyTypeSchema, TOutput extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  outputOrOptions?: SchemaInput<TOutput> | CodecCompileOptions,
+  valueCodecOptions?: ValueCodecOptions<TSchema, TOutput>
+): CompiledCodec<ATS.InferSchema<TSchema>> | Builder<ATS.CodecSchema<TSchema, TOutput>> {
+  if (valueCodecOptions !== undefined && outputOrOptions !== undefined && isSchemaInput(outputOrOptions)) {
+    const input = unwrapSchema(schema);
+    const output = unwrapSchema(outputOrOptions);
+
+    return createBuilder(
+      createSchema(TypeName.codec, {
+        input,
+        output,
+        decode: valueCodecOptions.decode,
+        encode: valueCodecOptions.encode,
+      }) as ATS.CodecSchema<TSchema, TOutput>
+    );
+  }
+
+  return compileCodec(unwrapSchema(schema), outputOrOptions as CodecCompileOptions | undefined);
+}
+
+function isSchemaInput(value: unknown): value is SchemaInput {
+  return typeof value === "object" && value !== null && ("schema" in value || "type" in value);
 }

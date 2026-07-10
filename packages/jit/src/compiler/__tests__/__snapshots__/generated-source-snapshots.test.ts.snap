@@ -353,6 +353,53 @@ function safeParse(value) {
 return { is: is, safeParse: safeParse };"
 `;
 
+exports[`generated source snapshots > validator: bidirectional value codec 1`] = `
+"function is(value) {
+  let v1 = value;
+  let v3 = v1;
+  if (typeof v3 !== "string") {
+    return false;
+  }
+  if (!__v0.test(v3)) {
+    return false;
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  let v3 = v1;
+  let o4 = v3;
+  if (typeof v3 !== "string") {
+    issues[issues.length] = { path: "", code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+  } else {
+    if (!__v0.test(v3)) {
+      issues[issues.length] = { path: "", code: "invalid_format", expected: "datetime", message: "expected a valid datetime" };
+    }
+  }
+  o4 = v3;
+  let c5;
+  try {
+    c5 = __v1(o4);
+  } catch {
+    issues[issues.length] = { path: "", code: "invalid_codec", expected: "codec decode", message: "codec decode failed" };
+  }
+  let v6 = c5;
+  let o7 = v6;
+  if (!(v6 instanceof Date) || v6.getTime() !== v6.getTime()) {
+    issues[issues.length] = { path: "", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+  }
+  o7 = v6;
+  o2 = o7;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;
+
 exports[`generated source snapshots > validator: deep unions, formats, coercion, transforms, and messages 1`] = `
 "function iu1(value) {
   let v9 = value;

@@ -2,6 +2,7 @@ import type { Regexes } from "../../shared/index.js";
 import type {
   AnyTypeSchema,
   BrandSchema,
+  CodecSchema,
   CoerceSchema,
   DefaultSchema,
   EnumSchema,
@@ -127,6 +128,11 @@ export interface FunctionOperators<
   ): (...args: FunctionArgs<TInput>) => Promise<Awaited<ReturnType<TImplementation>>>;
 }
 
+export interface CodecOperators<TInput extends AnyTypeSchema, TOutput extends AnyTypeSchema> {
+  decode(value: InferSchema<TInput>): InferSchema<TOutput>;
+  encode(value: InferSchema<TOutput>): InferSchema<TInput>;
+}
+
 /** String constraint methods; every call returns the same builder type. */
 export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   min(length: number, message?: string): Builder<TSchema>;
@@ -214,11 +220,18 @@ export type FunctionBuilder<
   TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
 > = BuilderCore<FunctionSchema<TInput, TOutput>> & FunctionOperators<TInput, TOutput>;
 
+export type CodecBuilder<TInput extends AnyTypeSchema, TOutput extends AnyTypeSchema> = BuilderCore<
+  CodecSchema<TInput, TOutput>
+> &
+  CodecOperators<TInput, TOutput>;
+
 export type Builder<TSchema extends AnyTypeSchema> =
   TSchema extends ObjectSchema<infer TShape, infer TUnknownKeys, infer TCatchall>
     ? ObjectBuilder<TShape, TUnknownKeys, TCatchall>
     : TSchema extends FunctionSchema<infer TInput, infer TOutput>
       ? FunctionBuilder<TInput, TOutput>
-      : BaseBuilder<TSchema> & CheckMethods<TSchema>;
+      : TSchema extends CodecSchema<infer TInput, infer TOutput>
+        ? CodecBuilder<TInput, TOutput>
+        : BaseBuilder<TSchema> & CheckMethods<TSchema>;
 
 export type AnyBuilder = Builder<AnyTypeSchema>;
