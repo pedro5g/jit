@@ -98,6 +98,8 @@ class ValidatorEmitter {
     writer.line(`let ${holder} = ${valueExpr};`);
     if (this.mode === "parse") writer.line(`let ${output} = ${holder};`);
 
+    const finish = () => (this.mode === "parse" ? output : holder);
+
     const emitValidated = () => {
       if (unwrapped.coerce) {
         writer.line(`${holder} = ${unwrapped.coerce}(${holder});`);
@@ -144,7 +146,7 @@ class ValidatorEmitter {
         writer.indent(emitValidated);
         writer.line("}");
       }
-      return this.mode === "parse" ? output : holder;
+      return finish();
     }
 
     const guards: string[] = [];
@@ -156,11 +158,11 @@ class ValidatorEmitter {
       writer.line(`if (${guards.join(" && ")}) {`);
       writer.indent(emitValidated);
       writer.line("}");
-      return this.mode === "parse" ? output : holder;
+      return finish();
     }
 
     emitValidated();
-    return this.mode === "parse" ? output : holder;
+    return finish();
   }
 
   /** Emits `if (<failCondition>) { fail }` — early return or issue push. */
@@ -1331,7 +1333,39 @@ function containsPromise(schema: ATS.AnyTypeSchema, seen = new Set<ATS.AnyTypeSc
   return false;
 }
 
+function rootHasReadonly(schema: ATS.AnyTypeSchema, seen = new Set<ATS.AnyTypeSchema>()): boolean {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+
+  const current = schema as AnySchema;
+
+  if (current.type === TypeName.readonly) return true;
+  if (current.type === TypeName.lazy) return rootHasReadonly((current.def.getter as () => ATS.AnyTypeSchema)(), seen);
+
+  switch (current.type) {
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+      return rootHasReadonly(current.def.innerType as ATS.AnyTypeSchema, seen);
+    default:
+      return false;
+  }
+}
+
+function emitFreezeOutput(writer: CodeWriter, output: string): void {
+  writer.line(
+    `if (${output} !== null && (typeof ${output} === "object" || typeof ${output} === "function")) { ${output} = Object.freeze(${output}); }`
+  );
+}
+
 export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
+  const freezesOutput = rootHasReadonly(schema);
   const parseEmitter = new ValidatorEmitter("parse");
 
   parseEmitter.writer.line("function safeParse(value) {");
@@ -1344,6 +1378,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
       parseEmitter.writer.line("return { success: false, issues: issues };");
     });
     parseEmitter.writer.line("}");
+    if (freezesOutput) emitFreezeOutput(parseEmitter.writer, output);
     parseEmitter.writer.line(`return { success: true, data: ${output} };`);
   });
   parseEmitter.writer.line("}");
@@ -1368,6 +1403,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
         emitter.writer.line("return { success: false, issues: issues };");
       });
       emitter.writer.line("}");
+      if (freezesOutput) emitFreezeOutput(emitter.writer, output);
       emitter.writer.line(`return { success: true, data: ${output} };`);
     });
     emitter.writer.line("}");

@@ -27,8 +27,8 @@ describe("Builder chain", () => {
       expect(Object.keys(User.schema)).toEqual(["type", "_type", "def", "annotations"]);
 
       expectTypeOf<AST.Infer<typeof User>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
+        id: number;
+        name: string;
       }>();
     });
   });
@@ -53,16 +53,16 @@ describe("Builder chain", () => {
       expect(PartialUser.schema).not.toBe(RequiredUser.schema);
 
       expectTypeOf<AST.Infer<typeof PartialUser>>().toEqualTypeOf<{
-        readonly id: number | undefined;
+        id: number | undefined;
       }>();
 
       expectTypeOf<AST.Infer<typeof RequiredUser>>().toEqualTypeOf<{
-        readonly id: number;
+        id: number;
       }>();
 
       expectTypeOf<AST.Infer<typeof ReadonlyUser>>().toEqualTypeOf<
         Readonly<{
-          readonly id: number;
+          id: number;
         }>
       >();
     });
@@ -110,8 +110,8 @@ describe("Builder chain", () => {
       expect(Object.keys(TransformedUser.schema)).toEqual(["type", "_type", "def", "annotations"]);
 
       expectTypeOf<AST.Infer<typeof TransformedUser>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
+        id: number;
+        name: string;
       }>();
       expectTypeOf<AST.Infer<typeof RefinedName>>().toEqualTypeOf<string>();
       expectTypeOf<AST.Infer<typeof CoercedNumber>>().toEqualTypeOf<number>();

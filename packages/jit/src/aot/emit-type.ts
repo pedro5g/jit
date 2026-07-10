@@ -56,7 +56,7 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
         const optional = isOptional(prop);
         const safeKey = Parse.isValidIdentifier(key) ? key : JSON.stringify(key);
 
-        return `readonly ${safeKey}${optional ? "?" : ""}: ${emitTypeScriptType(prop)}`;
+        return `${safeKey}${optional ? "?" : ""}: ${emitTypeScriptType(prop)}`;
       });
 
       return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
@@ -93,18 +93,39 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
       return `${emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema)} | null | undefined`;
     case TypeName.default:
     case TypeName.brand:
-    case TypeName.readonly:
     case TypeName.refine:
     case TypeName.coerce:
     case TypeName.pipe:
     case TypeName.transform:
       return emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema);
+    case TypeName.readonly:
+      return emitReadonlyType(current.def.innerType as ATS.AnyTypeSchema);
     case TypeName.lazy:
       return emitTypeScriptType((current.def.getter as () => ATS.AnyTypeSchema)());
     case TypeName.promise:
       return `Promise<${emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema)}>`;
     default:
       return "unknown";
+  }
+}
+
+function emitReadonlyType(schema: ATS.AnyTypeSchema): string {
+  const current = schema as AnySchema;
+
+  switch (current.type) {
+    case TypeName.array:
+      return `readonly ${wrapForSuffix(emitTypeScriptType(current.def.element as ATS.AnyTypeSchema))}[]`;
+    case TypeName.tuple: {
+      const items = (current.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
+
+      return `readonly [${items.map(emitTypeScriptType).join(", ")}]`;
+    }
+    case TypeName.set:
+      return `ReadonlySet<${emitTypeScriptType(current.def.element as ATS.AnyTypeSchema)}>`;
+    case TypeName.map:
+      return `ReadonlyMap<${emitTypeScriptType(current.def.key as ATS.AnyTypeSchema)}, ${emitTypeScriptType(current.def.value as ATS.AnyTypeSchema)}>`;
+    default:
+      return `Readonly<${emitTypeScriptType(schema)}>`;
   }
 }
 

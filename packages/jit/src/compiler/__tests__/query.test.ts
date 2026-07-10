@@ -41,10 +41,10 @@ describe("JIT compiler query", () => {
     expectNoInterpretedArrayOps(source);
     expectTypeOf(result).toEqualTypeOf<
       {
-        readonly id: number;
-        readonly name: string;
-        readonly age: number;
-        readonly role: string;
+        id: number;
+        name: string;
+        age: number;
+        role: string;
       }[]
     >();
   });

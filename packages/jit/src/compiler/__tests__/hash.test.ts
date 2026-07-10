@@ -9,8 +9,8 @@ describe("JIT compiler hash", () => {
     expect(hash({ id: 1, name: "Ada" })).not.toBe(hash({ id: 2, name: "Ada" }));
 
     expectTypeOf(hash).parameter(0).toEqualTypeOf<{
-      readonly id: number;
-      readonly name: string;
+      id: number;
+      name: string;
     }>();
   });
 

@@ -121,8 +121,8 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const User_is = /*#__PURE__*/ ((v) => v.is)(User_validator);");
 
     expect(types).toContain("export type User =");
-    expect(types).toContain("readonly id: number");
-    expect(types).toContain("readonly plan?: string");
+    expect(types).toContain("id: number");
+    expect(types).toContain("plan?: string");
     expect(types).toContain("value is User");
 
     expect(manifest.name).toBe("@acme/models");
@@ -179,8 +179,8 @@ describe("JIT AOT generate", () => {
       }).schema
     );
 
-    expect(type).toBe(
-      '{ readonly id: number; readonly nick?: string | undefined; readonly role: "admin" | "user"; readonly items: { readonly sku: string }[] }'
-    );
+    expect(type).toBe('{ id: number; nick?: string | undefined; role: "admin" | "user"; items: { sku: string }[] }');
+
+    expect(AOT.emitTypeScriptType(JIT.object({ id: JIT.number() }).readonly().schema)).toBe("Readonly<{ id: number }>");
   });
 });

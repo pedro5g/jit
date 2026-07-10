@@ -29,7 +29,7 @@ export type SchemaShape = Readonly<Record<string, AnyTypeSchema>>;
 export type InferSchema<TSchema extends AnyTypeSchema> = TSchema["_type"];
 
 export type InferShape<TShape extends SchemaShape> = {
-  readonly [TKey in keyof TShape]: InferSchema<TShape[TKey]>;
+  -readonly [TKey in keyof TShape]: InferSchema<TShape[TKey]>;
 };
 
 export type MutableInferShape<TShape extends SchemaShape> = {
@@ -320,8 +320,19 @@ export type NullishSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSc
   InnerTypeDef<TInner>
 >;
 
+export type ReadonlyOutput<TValue> =
+  TValue extends Map<infer TKey, infer TValueItem>
+    ? ReadonlyMap<TKey, TValueItem>
+    : TValue extends Set<infer TItem>
+      ? ReadonlySet<TItem>
+      : TValue extends readonly unknown[]
+        ? Readonly<TValue>
+        : TValue extends object
+          ? Readonly<TValue>
+          : TValue;
+
 export type ReadonlySchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  Readonly<InferSchema<TInner>>,
+  ReadonlyOutput<InferSchema<TInner>>,
   "readonly",
   InnerTypeDef<TInner>
 >;
@@ -360,7 +371,7 @@ export type TransformSpec<TInput> = {
 };
 
 export type TransformOutput<TInput, TSpec extends TransformSpec<TInput>> = {
-  readonly [TKey in keyof TInput]: TKey extends keyof TSpec
+  -readonly [TKey in keyof TInput]: TKey extends keyof TSpec
     ? TSpec[TKey] extends (...args: never[]) => infer TOutput
       ? TOutput
       : TInput[TKey]

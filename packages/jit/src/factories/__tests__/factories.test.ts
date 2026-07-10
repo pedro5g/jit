@@ -119,9 +119,9 @@ describe("JIT AST builders", () => {
       expect(object_schema.def.props.name.type).toBe(AST.TypeName.string);
       expect(object_schema.def.props.isActive.type).toBe(AST.TypeName.boolean);
       expectTypeOf(object_schema._type).toEqualTypeOf<{
-        readonly id: string;
-        readonly name: string;
-        readonly isActive: boolean;
+        id: string;
+        name: string;
+        isActive: boolean;
       }>();
     });
 
@@ -139,9 +139,9 @@ describe("JIT AST builders", () => {
       expect(intersection_schema.def.options).toHaveLength(2);
       expectTypeOf(intersection_schema._type).toEqualTypeOf<
         {
-          readonly a: string;
+          a: string;
         } & {
-          readonly b: number;
+          b: number;
         }
       >();
     });
@@ -157,12 +157,12 @@ describe("JIT AST builders", () => {
       expect(schema.def.options).toHaveLength(2);
       expectTypeOf(schema._type).toEqualTypeOf<
         | {
-            readonly type: "user";
-            readonly name: string;
+            type: "user";
+            name: string;
           }
         | {
-            readonly type: "org";
-            readonly members: number;
+            type: "org";
+            members: number;
           }
       >();
     });
@@ -227,8 +227,17 @@ describe("JIT AST builders", () => {
       expect(readonly_schema.type).toBe(AST.TypeName.readonly);
       expectTypeOf(readonly_schema._type).toEqualTypeOf<
         Readonly<{
-          readonly id: number;
+          id: number;
         }>
+      >();
+
+      expectTypeOf(JIT.array(JIT.string()).readonly().schema._type).toEqualTypeOf<readonly string[]>();
+      expectTypeOf(JIT.tuple(JIT.string(), JIT.number()).readonly().schema._type).toEqualTypeOf<
+        readonly [string, number]
+      >();
+      expectTypeOf(JIT.set(JIT.string()).readonly().schema._type).toEqualTypeOf<ReadonlySet<string>>();
+      expectTypeOf(JIT.map(JIT.string(), JIT.number()).readonly().schema._type).toEqualTypeOf<
+        ReadonlyMap<string, number>
       >();
 
       const promise_schema = JIT.string().promise().schema;
@@ -288,8 +297,8 @@ describe("JIT AST builders", () => {
 
       expectTypeOf(schema._type).toEqualTypeOf<
         {
-          readonly id: number;
-          readonly name: string;
+          id: number;
+          name: string;
         }[]
       >();
     });
@@ -313,8 +322,8 @@ describe("JIT AST builders", () => {
       expect(transformed.type).toBe(AST.TypeName.transform);
       expect(transformed.def.innerType.type).toBe(AST.TypeName.object);
       expectTypeOf(transformed._type).toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
+        id: number;
+        name: string;
       }>();
 
       const refined = JIT.refine(JIT.string(), (value) => value.length > 0).schema;
@@ -373,13 +382,13 @@ describe("JIT AST builders", () => {
       expect(PartialUser.schema).not.toBe(RequiredUser.schema);
 
       expectTypeOf<AST.Infer<typeof PartialUser>>().toEqualTypeOf<{
-        readonly id: number | undefined;
-        readonly name: string | undefined;
+        id: number | undefined;
+        name: string | undefined;
       }>();
 
       expectTypeOf<AST.Infer<typeof RequiredUser>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
+        id: number;
+        name: string;
       }>();
     });
 
@@ -392,13 +401,13 @@ describe("JIT AST builders", () => {
       const Picked = User.pick(["id"]);
       expect(Object.keys(Picked.schema.def.props)).toEqual(["id"]);
       expectTypeOf<AST.Infer<typeof Picked>>().toEqualTypeOf<{
-        readonly id: number;
+        id: number;
       }>();
 
       const Omitted = User.omit(["name"]);
       expect(Object.keys(Omitted.schema.def.props)).toEqual(["id"]);
       expectTypeOf<AST.Infer<typeof Omitted>>().toEqualTypeOf<{
-        readonly id: number;
+        id: number;
       }>();
 
       const Extended = User.extend({
@@ -406,9 +415,9 @@ describe("JIT AST builders", () => {
       });
       expect(Extended.schema.def.props.active.type).toBe(AST.TypeName.boolean);
       expectTypeOf<AST.Infer<typeof Extended>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
-        readonly active: boolean;
+        id: number;
+        name: string;
+        active: boolean;
       }>();
 
       const Merged = User.merge(
@@ -418,9 +427,9 @@ describe("JIT AST builders", () => {
       );
       expect(Merged.schema.def.props.age.type).toBe(AST.TypeName.number);
       expectTypeOf<AST.Infer<typeof Merged>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
-        readonly age: number;
+        id: number;
+        name: string;
+        age: number;
       }>();
     });
 

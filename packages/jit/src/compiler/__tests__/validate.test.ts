@@ -39,11 +39,11 @@ describe("JIT compiler validator", () => {
 
     if (Users.is(value)) {
       expectTypeOf(value).toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
-        readonly email: string;
-        readonly role: "admin" | "user";
-        readonly tags: string[];
+        id: number;
+        name: string;
+        email: string;
+        role: "admin" | "user";
+        tags: string[];
       }>();
     }
   });
@@ -93,6 +93,27 @@ describe("JIT compiler validator", () => {
 
     expect(result.success).toBe(true);
     if (result.success) expect(result.data).toBe(ada);
+  });
+
+  it("should freeze successful parse output only for readonly schemas", () => {
+    const MutableUser = JIT.object({ id: JIT.number() });
+    const ReadonlyUser = MutableUser.readonly();
+    const validate = JIT.validator(ReadonlyUser);
+    const parsed = validate.parse({ id: 1 });
+    const safe = validate.safeParse({ id: 2 });
+    const failedInput = { id: "nope" };
+    const failed = validate.safeParse(failedInput);
+
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(safe.success).toBe(true);
+    if (safe.success) expect(Object.isFrozen(safe.data)).toBe(true);
+    expect(failed.success).toBe(false);
+    expect(Object.isFrozen(failedInput)).toBe(false);
+    expect(Compiler.emitValidatorSource(MutableUser.schema)).not.toContain("Object.freeze");
+    expect(Compiler.emitValidatorSource(ReadonlyUser.schema)).toContain("Object.freeze");
+
+    expectTypeOf<JIT.infer<typeof MutableUser>>().toEqualTypeOf<{ id: number }>();
+    expectTypeOf<JIT.infer<typeof ReadonlyUser>>().toEqualTypeOf<Readonly<{ id: number }>>();
   });
 
   it("should apply defaults, trims, and pipes to parse output", () => {

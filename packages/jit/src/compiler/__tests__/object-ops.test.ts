@@ -66,11 +66,11 @@ describe("JIT compiler object operations", () => {
     expect(omitSource).toContain('return { "id": value.id, "name": value.name, "role": value.role };');
     expect(pickSource).not.toContain("for (");
     expect(omitSource).not.toContain("Object.keys");
-    expectTypeOf(pick(input)).toEqualTypeOf<{ readonly id: number; readonly name: string }>();
+    expectTypeOf(pick(input)).toEqualTypeOf<{ id: number; name: string }>();
     expectTypeOf(omit(input)).toEqualTypeOf<{
-      readonly id: number;
-      readonly name: string;
-      readonly role: string;
+      id: number;
+      name: string;
+      role: string;
     }>();
   });
 
@@ -98,12 +98,12 @@ describe("JIT compiler object operations", () => {
     expect(source).toContain("__t0(value.name, value)");
     expect(source).not.toContain("toUpperCase");
     expectTypeOf(output).toEqualTypeOf<{
-      readonly id: number;
-      readonly name: string;
-      readonly role: string;
-      readonly profile: {
-        readonly score: number;
-        readonly city: string;
+      id: number;
+      name: string;
+      role: string;
+      profile: {
+        score: number;
+        city: string;
       };
     }>();
   });

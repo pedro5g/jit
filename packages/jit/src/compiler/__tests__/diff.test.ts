@@ -16,9 +16,9 @@ describe("JIT compiler diff", () => {
     ]);
 
     expectTypeOf(diff).parameter(0).toEqualTypeOf<{
-      readonly id: number;
-      readonly name: string;
-      readonly active: boolean;
+      id: number;
+      name: string;
+      active: boolean;
     }>();
   });
 

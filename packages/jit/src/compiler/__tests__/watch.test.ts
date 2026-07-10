@@ -69,14 +69,14 @@ describe("JIT compiler watch", () => {
     expectTypeOf(result.updatedItems).toEqualTypeOf<
       {
         readonly previous: {
-          readonly id: number;
-          readonly name: string;
-          readonly role: string;
+          id: number;
+          name: string;
+          role: string;
         };
         readonly current: {
-          readonly id: number;
-          readonly name: string;
-          readonly role: string;
+          id: number;
+          name: string;
+          role: string;
         };
       }[]
     >();

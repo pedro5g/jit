@@ -91,8 +91,8 @@ describe("JIT WatchedList", () => {
     expect(list.exists({ id: 1, name: "Ada v2" })).toBe(true);
     expectTypeOf(list.getItems()).toEqualTypeOf<
       {
-        readonly id: number;
-        readonly name: string;
+        id: number;
+        name: string;
       }[]
     >();
   });

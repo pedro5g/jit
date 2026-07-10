@@ -75,9 +75,9 @@ describe("JIT compiler", () => {
       expect(equal({ id: 1, name: "Ada", active: true }, { id: 1, name: "Grace", active: true })).toBe(false);
 
       expectTypeOf(equal).parameter(0).toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
-        readonly active: boolean;
+        id: number;
+        name: string;
+        active: boolean;
       }>();
     });
 

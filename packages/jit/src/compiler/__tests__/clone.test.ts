@@ -24,9 +24,9 @@ describe("JIT compiler clone", () => {
     expect(output.createdAt).not.toBe(createdAt);
     expect(output.createdAt.getTime()).toBe(createdAt.getTime());
     expectTypeOf(output).toEqualTypeOf<{
-      readonly id: number;
-      readonly name: string;
-      readonly createdAt: Date;
+      id: number;
+      name: string;
+      createdAt: Date;
     }>();
   });
 

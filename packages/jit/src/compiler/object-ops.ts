@@ -65,7 +65,7 @@ export type OmitCompiled<T, TKeys extends keyof T> = (value: T) => Omit<T, TKeys
  */
 export type TransformSpec<T> = { readonly [TKey in keyof T]?: (value: T[TKey], source: T) => unknown };
 export type TransformOutput<T, TSpec extends TransformSpec<T>> = {
-  readonly [TKey in keyof T]: TKey extends keyof TSpec
+  -readonly [TKey in keyof T]: TKey extends keyof TSpec
     ? TSpec[TKey] extends (...args: never[]) => infer TOutput
       ? TOutput
       : T[TKey]

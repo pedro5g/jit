@@ -20,8 +20,8 @@ describe("Transform object operators", () => {
       expect(User.def.props.name.type).toBe(AST.TypeName.string);
 
       expectTypeOf<AST.Infer<typeof PartialUser>>().toEqualTypeOf<{
-        readonly id: number | undefined;
-        readonly name: string | undefined;
+        id: number | undefined;
+        name: string | undefined;
       }>();
     });
 
@@ -43,8 +43,8 @@ describe("Transform object operators", () => {
       expect(RequiredUser.def.props.id).toBe(User.def.props.id);
 
       expectTypeOf<AST.Infer<typeof RequiredUser>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
+        id: number;
+        name: string;
       }>();
     });
 
@@ -64,7 +64,7 @@ describe("Transform object operators", () => {
       expect(IdOnly.def.props.id).toBe(User.def.props.id);
 
       expectTypeOf<AST.Infer<typeof IdOnly>>().toEqualTypeOf<{
-        readonly id: number;
+        id: number;
       }>();
     });
 
@@ -86,7 +86,7 @@ describe("Transform object operators", () => {
       expect(NameOnly.def.props.name).toBe(User.def.props.name);
 
       expectTypeOf<AST.Infer<typeof NameOnly>>().toEqualTypeOf<{
-        readonly name: string;
+        name: string;
       }>();
     });
   });
@@ -105,9 +105,9 @@ describe("Transform object operators", () => {
       expect(User.def.props.id.type).toBe(AST.TypeName.number);
 
       expectTypeOf<AST.Infer<typeof Extended>>().toEqualTypeOf<{
-        readonly id: string;
-        readonly name: string;
-        readonly active: boolean;
+        id: string;
+        name: string;
+        active: boolean;
       }>();
     });
   });
@@ -125,9 +125,9 @@ describe("Transform object operators", () => {
       expect(Merged.def.props.role).toBe(Role.def.props.role);
 
       expectTypeOf<AST.Infer<typeof Merged>>().toEqualTypeOf<{
-        readonly id: string;
-        readonly name: string;
-        readonly role: string;
+        id: string;
+        name: string;
+        role: string;
       }>();
     });
 

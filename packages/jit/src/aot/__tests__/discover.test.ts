@@ -104,15 +104,15 @@ describe("JIT AOT inference-anchored types", () => {
 
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
-    expect(types).toContain("export type User = { readonly id: number };");
+    expect(types).toContain("export type User = { id: number };");
   });
 
   it("should expose JIT.infer for builders and schemas", () => {
     const User = JIT.object({ id: JIT.number(), tags: JIT.array(JIT.string()) });
 
     expectTypeOf<JIT.infer<typeof User>>().toEqualTypeOf<{
-      readonly id: number;
-      readonly tags: string[];
+      id: number;
+      tags: string[];
     }>();
     expectTypeOf<JIT.infer<typeof User.schema>>().toEqualTypeOf<JIT.infer<typeof User>>();
   });

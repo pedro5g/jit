@@ -27,8 +27,8 @@ describe("Core ATS type foundations", () => {
       expectTypeOf<InferSchema<StringSchema>>().toEqualTypeOf<string>();
       expectTypeOf<InferSchema<NullishSchema<StringSchema>>>().toEqualTypeOf<string | null | undefined>();
       expectTypeOf<Infer<UserSchema>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
+        id: number;
+        name: string;
       }>();
     });
   });
@@ -42,15 +42,15 @@ describe("Core ATS type foundations", () => {
       };
 
       expectTypeOf<InferShape<PartialShape<Shape>>>().toEqualTypeOf<{
-        readonly id: number | undefined;
-        readonly name: string | undefined;
-        readonly nickname: string | undefined;
+        id: number | undefined;
+        name: string | undefined;
+        nickname: string | undefined;
       }>();
 
       expectTypeOf<InferShape<RequiredShape<Shape>>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string;
-        readonly nickname: string;
+        id: number;
+        name: string;
+        nickname: string;
       }>();
     });
 
@@ -65,16 +65,16 @@ describe("Core ATS type foundations", () => {
       };
 
       expectTypeOf<InferShape<PickShape<BaseShape, "id">>>().toEqualTypeOf<{
-        readonly id: number;
+        id: number;
       }>();
 
       expectTypeOf<InferShape<OmitShape<BaseShape, "name">>>().toEqualTypeOf<{
-        readonly id: number;
+        id: number;
       }>();
 
       expectTypeOf<InferShape<MergeShape<BaseShape, ExtensionShape>>>().toEqualTypeOf<{
-        readonly id: number;
-        readonly name: string | undefined;
+        id: number;
+        name: string | undefined;
       }>();
     });
   });

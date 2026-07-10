@@ -35,9 +35,9 @@ describe("JIT compiler mapper", () => {
 
     expect(dto).toEqual({ id: 1, fullName: "Ada Lovelace", email: "ada@math.org" });
     expectTypeOf(dto).toEqualTypeOf<{
-      readonly id: number;
-      readonly fullName: string;
-      readonly email: string;
+      id: number;
+      fullName: string;
+      email: string;
     }>();
   });
 
