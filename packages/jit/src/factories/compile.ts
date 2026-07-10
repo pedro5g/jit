@@ -7,7 +7,7 @@ import { compileMask } from "../compiler/mask.js";
 import { compileSanitize } from "../compiler/sanitize.js";
 import { compileSerialize } from "../compiler/serialize.js";
 import { compileUpdate } from "../compiler/update.js";
-import { compileValidator } from "../compiler/validate.js";
+import { compileValidatorSelection, type ValidatorOp } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
@@ -84,9 +84,10 @@ export function compile<
   type TValue = ATS.InferSchema<TSchema>;
   const unwrapped = unwrapSchema(schema);
   const selection: Record<string, unknown> = { schema: unwrapped, ops: Object.freeze([...ops]) };
-  let validator: ReturnType<typeof compileValidator<TSchema>> | undefined;
+  const validatorOps = collectValidatorOps(ops);
+  let validator: ReturnType<typeof compileValidatorSelection<TSchema, readonly ValidatorOp[]>> | undefined;
   const getValidator = () => {
-    validator = validator ?? compileValidator<TSchema>(unwrapped as TSchema);
+    validator = validator ?? compileValidatorSelection(unwrapped as TSchema, validatorOps);
     return validator;
   };
 
@@ -159,4 +160,16 @@ export function compile<
   selection.extras = Object.freeze(extraNames);
 
   return Object.freeze(selection) as CompiledSelection<TValue, TOps, TExtras>;
+}
+
+function collectValidatorOps(ops: readonly CompileOp[]): readonly ValidatorOp[] {
+  const validatorOps = new Set<ValidatorOp>();
+
+  for (const op of ops) {
+    if (op === "is" || op === "parse" || op === "safeParse" || op === "parseAsync" || op === "safeParseAsync") {
+      validatorOps.add(op);
+    }
+    if (op === "fromJSON") validatorOps.add("parse");
+  }
+  return [...validatorOps];
 }

@@ -585,4 +585,24 @@ describe("JIT compiler validator", () => {
     expect(source).not.toContain("tok_");
     expect(source).toContain("__v");
   });
+
+  it("should compile only selected validator functions", () => {
+    const isOnlySource = Compiler.emitValidatorSource(User.schema, { ops: ["is"] });
+    const parseOnlySource = Compiler.emitValidatorSource(User.schema, { ops: ["parse"] });
+    const selected = JIT.validator(User, { is: true, parse: true });
+    const fromGet = JIT.validator(User).get("is", "parse");
+
+    expect(isOnlySource).toContain("function is(value)");
+    expect(isOnlySource).not.toContain("function safeParse(value)");
+    expect(parseOnlySource).toContain("function safeParse(value)");
+    expect(parseOnlySource).not.toContain("function is(value)");
+
+    expect(selected.is(ada)).toBe(true);
+    expect(selected.parse(ada)).toBe(ada);
+    expect((selected as unknown as Record<string, unknown>).safeParse).toBeUndefined();
+    expect(fromGet.is(ada)).toBe(true);
+    expect(fromGet.parse(ada)).toBe(ada);
+    expect((fromGet as unknown as Record<string, unknown>).safeParse).toBeUndefined();
+    expectTypeOf<keyof typeof fromGet>().toEqualTypeOf<"is" | "parse">();
+  });
 });

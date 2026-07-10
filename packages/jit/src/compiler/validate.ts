@@ -3,6 +3,10 @@ import { JITValidationError, type ValidationIssue } from "../errors/index.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { emitValidator } from "./validate/emit-validate.js";
 
+export const VALIDATOR_OPS = ["is", "parse", "safeParse", "parseAsync", "safeParseAsync"] as const;
+
+export type ValidatorOp = (typeof VALIDATOR_OPS)[number];
+
 /** Successful `safeParse` result carrying the (possibly transformed) data. */
 export interface SafeParseSuccess<T> {
   readonly success: true;
@@ -39,14 +43,26 @@ export interface CompiledValidator<T> {
   readonly parseAsync: (value: unknown) => Promise<T>;
 }
 
+export type CompiledValidatorSelection<T, TOps extends readonly ValidatorOp[]> = Pick<
+  CompiledValidator<T>,
+  TOps[number]
+>;
+
+type MutableCompiledValidatorSelection<T> = {
+  -readonly [TKey in keyof CompiledValidator<T>]?: CompiledValidator<T>[TKey];
+};
+
 /**
  * Emits the JavaScript source of a compiled validator (`is` + `safeParse`).
  *
  * @param schema - The schema to validate against.
  * @returns The generated validator source.
  */
-export function emitValidatorSource(schema: ATS.AnyTypeSchema): string {
-  return emitValidator(schema).source;
+export function emitValidatorSource(
+  schema: ATS.AnyTypeSchema,
+  options?: { readonly ops?: readonly ValidatorOp[] }
+): string {
+  return emitValidator(schema, emitOptionsForValidatorOps(options?.ops ?? VALIDATOR_OPS)).source;
 }
 
 /**
@@ -71,20 +87,33 @@ export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
 ): CompiledValidator<ATS.InferSchema<TSchema>> {
+  return compileValidatorSelection(schema, VALIDATOR_OPS, options) as CompiledValidator<ATS.InferSchema<TSchema>>;
+}
+
+export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, const TOps extends readonly ValidatorOp[]>(
+  schema: TSchema,
+  ops: TOps,
+  options?: CompileCacheOptions
+): CompiledValidatorSelection<ATS.InferSchema<TSchema>, TOps> {
   type TValue = ATS.InferSchema<TSchema>;
+  const normalizedOps = normalizeValidatorOps(ops);
+  const cacheKey = `validator:${normalizedOps.join(",")}`;
 
   return getCompileCached(
     schema,
-    "validator",
+    cacheKey,
     () => {
-      const emitted = emitValidator(schema);
+      const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps));
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values) as {
-        readonly is: (value: unknown) => value is TValue;
-        readonly safeParse: (value: unknown) => SafeParseResult<TValue>;
+        readonly is?: (value: unknown) => value is TValue;
+        readonly safeParse?: (value: unknown) => SafeParseResult<TValue>;
         readonly safeParseAsync?: (value: unknown) => Promise<SafeParseResult<TValue>>;
       };
+      const selection: MutableCompiledValidatorSelection<TValue> = {};
+      const safeParse = compiled.safeParse;
       const parse = (value: unknown): TValue => {
-        const result = compiled.safeParse(value);
+        if (!safeParse) throw new Error("parse requires safeParse generation");
+        const result = safeParse(value);
 
         if (result.success) return result.data;
 
@@ -93,8 +122,9 @@ export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
       // Promise-free schemas share the sync path behind an async signature.
       const safeParseAsync =
         compiled.safeParseAsync ??
-        (async (value: unknown): Promise<SafeParseResult<TValue>> => compiled.safeParse(value));
+        (safeParse ? async (value: unknown): Promise<SafeParseResult<TValue>> => safeParse(value) : undefined);
       const parseAsync = async (value: unknown): Promise<TValue> => {
+        if (!safeParseAsync) throw new Error("parseAsync requires async validation generation");
         const result = await safeParseAsync(value);
 
         if (result.success) return result.data;
@@ -102,8 +132,35 @@ export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
         throw new JITValidationError(result.issues);
       };
 
-      return { is: compiled.is, safeParse: compiled.safeParse, parse, safeParseAsync, parseAsync };
+      if (normalizedOps.includes("is") && compiled.is) selection.is = compiled.is;
+      if (normalizedOps.includes("safeParse") && safeParse) selection.safeParse = safeParse;
+      if (normalizedOps.includes("parse")) selection.parse = parse;
+      if (normalizedOps.includes("safeParseAsync") && safeParseAsync) selection.safeParseAsync = safeParseAsync;
+      if (normalizedOps.includes("parseAsync")) selection.parseAsync = parseAsync;
+
+      return selection as CompiledValidatorSelection<TValue, TOps>;
     },
     options
   );
+}
+
+function normalizeValidatorOps(ops: readonly ValidatorOp[]): readonly ValidatorOp[] {
+  const normalized: ValidatorOp[] = [];
+
+  for (const op of VALIDATOR_OPS) {
+    if (ops.includes(op)) normalized.push(op);
+  }
+  return normalized;
+}
+
+function emitOptionsForValidatorOps(ops: readonly ValidatorOp[]) {
+  return {
+    is: ops.includes("is"),
+    safeParse:
+      ops.includes("safeParse") ||
+      ops.includes("parse") ||
+      ops.includes("safeParseAsync") ||
+      ops.includes("parseAsync"),
+    safeParseAsync: ops.includes("safeParseAsync") || ops.includes("parseAsync"),
+  };
 }

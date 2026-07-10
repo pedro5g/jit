@@ -1507,6 +1507,12 @@ export interface EmittedValidator {
   readonly bindings: ValidatorBindings;
 }
 
+export interface EmitValidatorOptions {
+  readonly is?: boolean;
+  readonly safeParse?: boolean;
+  readonly safeParseAsync?: boolean;
+}
+
 /**
  * Emits `{ is, safeParse }` source for a schema. `is` is a pure boolean
  * type check with early returns; `safeParse` collects every issue with its
@@ -1584,34 +1590,42 @@ function emitFreezeOutput(writer: CodeWriter, output: string): void {
   );
 }
 
-export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
+export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorOptions = {}): EmittedValidator {
+  const emitIs = options.is ?? true;
+  const emitSafeParse = options.safeParse ?? true;
+  const emitSafeParseAsync = options.safeParseAsync ?? true;
   const freezesOutput = rootHasReadonly(schema);
-  const parseEmitter = new ValidatorEmitter("parse");
+  let parseEmitter: ValidatorEmitter | undefined;
 
-  parseEmitter.writer.line("function safeParse(value) {");
-  parseEmitter.writer.indent(() => {
-    parseEmitter.writer.line("const issues = [];");
-    const output = parseEmitter.emitNode(schema, "value", { kind: "static", source: "" });
+  if (emitSafeParse) {
+    const emitter = new ValidatorEmitter("parse");
 
-    parseEmitter.writer.line("if (issues.length !== 0) {");
-    parseEmitter.writer.indent(() => {
-      parseEmitter.writer.line("return { success: false, issues: issues };");
+    parseEmitter = emitter;
+    emitter.writer.line("function safeParse(value) {");
+    emitter.writer.indent(() => {
+      emitter.writer.line("const issues = [];");
+      const output = emitter.emitNode(schema, "value", { kind: "static", source: "" });
+
+      emitter.writer.line("if (issues.length !== 0) {");
+      emitter.writer.indent(() => {
+        emitter.writer.line("return { success: false, issues: issues };");
+      });
+      emitter.writer.line("}");
+      if (freezesOutput) emitFreezeOutput(emitter.writer, output);
+      emitter.writer.line(`return { success: true, data: ${output} };`);
     });
-    parseEmitter.writer.line("}");
-    if (freezesOutput) emitFreezeOutput(parseEmitter.writer, output);
-    parseEmitter.writer.line(`return { success: true, data: ${output} };`);
-  });
-  parseEmitter.writer.line("}");
+    emitter.writer.line("}");
+  }
 
   // Promise-bearing schemas also get an awaited variant: same pipeline,
   // but promise wrappers settle (`await`) and validate the resolved value.
   let asyncEmitter: ValidatorEmitter | undefined;
 
-  if (containsPromise(schema)) {
+  if (emitSafeParseAsync && containsPromise(schema)) {
     const emitter = new ValidatorEmitter("parse", true);
 
     asyncEmitter = emitter;
-    for (const value of parseEmitter.bindings().values) emitter.bind(value);
+    for (const value of parseEmitter?.bindings().values ?? []) emitter.bind(value);
 
     emitter.writer.line("async function safeParseAsync(value) {");
     emitter.writer.indent(() => {
@@ -1629,26 +1643,38 @@ export function emitValidator(schema: ATS.AnyTypeSchema): EmittedValidator {
     emitter.writer.line("}");
   }
 
-  const isEmitter = new ValidatorEmitter("is");
+  let isEmitter: ValidatorEmitter | undefined;
 
   // Bind the same values in the same order so every function can share one
   // Function parameter list; extras from either emitter are appended after.
-  for (const value of (asyncEmitter ?? parseEmitter).bindings().values) isEmitter.bind(value);
+  if (emitIs) {
+    const emitter = new ValidatorEmitter("is");
 
-  isEmitter.writer.line("function is(value) {");
-  isEmitter.writer.indent(() => {
-    isEmitter.emitNode(schema, "value", { kind: "static", source: "" });
-    isEmitter.writer.line("return true;");
-  });
-  isEmitter.writer.line("}");
+    isEmitter = emitter;
+    for (const value of (asyncEmitter ?? parseEmitter)?.bindings().values ?? []) emitter.bind(value);
 
-  const helperBlocks = [...isEmitter.helpers(), ...parseEmitter.helpers(), ...(asyncEmitter?.helpers() ?? [])];
+    emitter.writer.line("function is(value) {");
+    emitter.writer.indent(() => {
+      emitter.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter.writer.line("return true;");
+    });
+    emitter.writer.line("}");
+  }
+
+  const emitters = [isEmitter, parseEmitter, asyncEmitter].filter((emitter): emitter is ValidatorEmitter =>
+    Boolean(emitter)
+  );
+  const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? { names: [], values: [] };
+  const helperBlocks = emitters.flatMap((emitter) => emitter.helpers());
   const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}\n` : "";
-  const asyncSource = asyncEmitter ? `${asyncEmitter.writer.toString()}\n` : "";
-  const returned = asyncEmitter
-    ? "return { is: is, safeParse: safeParse, safeParseAsync: safeParseAsync };"
-    : "return { is: is, safeParse: safeParse };";
-  const source = `${helperSource}${isEmitter.writer.toString()}\n${parseEmitter.writer.toString()}\n${asyncSource}${returned}`;
+  const functionSource = emitters.map((emitter) => emitter.writer.toString()).join("\n");
+  const returnedEntries = [
+    ...(isEmitter ? ["is: is"] : []),
+    ...(parseEmitter ? ["safeParse: safeParse"] : []),
+    ...(asyncEmitter ? ["safeParseAsync: safeParseAsync"] : []),
+  ];
+  const returned = `return { ${returnedEntries.join(", ")} };`;
+  const source = `${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`;
 
-  return { source, bindings: isEmitter.bindings() };
+  return { source, bindings };
 }
