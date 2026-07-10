@@ -56,6 +56,8 @@ function emitBaseGuard(schema: GuardSchema, value: string): string {
       return `typeof ${value} === "string"`;
     case TypeName.function:
       return `typeof ${value} === "function"`;
+    case TypeName.temporal:
+      return emitTemporalGuard(schema, value);
     case TypeName.literal:
       return emitLiteralGuard(schema, value);
     case TypeName.enum:
@@ -129,6 +131,33 @@ function emitInstanceOfGuard(schema: GuardSchema, value: string): string {
   if (!name) return `${value} !== null && typeof ${value} === "object"`;
 
   return `(typeof ${name} !== "undefined" && ${value} instanceof ${name})`;
+}
+
+function emitTemporalGuard(schema: GuardSchema, value: string): string {
+  const ctor = temporalConstructorName(schema.def.kind as ATS.TemporalKind);
+
+  return `(globalThis.Temporal !== undefined && ${value} instanceof globalThis.Temporal.${ctor})`;
+}
+
+function temporalConstructorName(kind: ATS.TemporalKind): string {
+  switch (kind) {
+    case "instant":
+      return "Instant";
+    case "plainDate":
+      return "PlainDate";
+    case "plainTime":
+      return "PlainTime";
+    case "plainDateTime":
+      return "PlainDateTime";
+    case "zonedDateTime":
+      return "ZonedDateTime";
+    case "plainYearMonth":
+      return "PlainYearMonth";
+    case "plainMonthDay":
+      return "PlainMonthDay";
+    case "duration":
+      return "Duration";
+  }
 }
 
 export function literalDiscriminatorValue(

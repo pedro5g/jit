@@ -45,6 +45,7 @@ export const TypeName = {
   custom: "custom",
   templateLiteral: "templateLiteral",
   function: "function",
+  temporal: "temporal",
 } as const;
 
 export type AnyTypeName = TypeName[keyof TypeName];

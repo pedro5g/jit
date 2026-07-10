@@ -89,6 +89,16 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitValidatorSource(Payload.schema)).toMatchSnapshot();
   });
 
+  it("validator: Temporal API schemas", () => {
+    const Event = JIT.object({
+      at: JIT.temporal.instant(),
+      date: JIT.temporal.plainDate(),
+      duration: JIT.temporal.duration(),
+    });
+
+    expect(Compiler.emitValidatorSource(Event.schema)).toMatchSnapshot();
+  });
+
   it("serializer: nested objects, optionals, records, and arrays", () => {
     const Report = JIT.object({
       title: JIT.string(),

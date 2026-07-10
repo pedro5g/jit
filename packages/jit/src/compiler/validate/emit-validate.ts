@@ -282,6 +282,8 @@ class ValidatorEmitter {
       case TypeName.function:
         this.failIf(`typeof ${value} !== "function"`, path, "expected_function", "function", "expected function");
         return value;
+      case TypeName.temporal:
+        return this.emitTemporal(schema, value, path);
       case TypeName.literal: {
         const literalSource = emitLiteral(schema.def.value as never);
         const literalText = String(schema.def.value);
@@ -448,6 +450,21 @@ class ValidatorEmitter {
         );
       },
       `typeof ${value}`
+    );
+    return value;
+  }
+
+  private emitTemporal(schema: AnySchema, value: string, path: PathRef): string {
+    const kind = schema.def.kind as ATS.TemporalKind;
+    const ctor = temporalConstructorName(kind);
+    const expected = `Temporal.${ctor}`;
+
+    this.failIf(
+      `!(globalThis.Temporal !== undefined && ${value} instanceof globalThis.Temporal.${ctor})`,
+      path,
+      "invalid_temporal",
+      expected,
+      `expected ${expected}`
     );
     return value;
   }
@@ -1179,6 +1196,27 @@ function isShallowOption(schema: ATS.AnyTypeSchema): boolean {
 
 function buildTemplateLiteralRegex(parts: readonly (string | ATS.AnyTypeSchema)[]): RegExp {
   return new RegExp(`^${parts.map(templateLiteralPartSource).join("")}$`, "u");
+}
+
+function temporalConstructorName(kind: ATS.TemporalKind): string {
+  switch (kind) {
+    case "instant":
+      return "Instant";
+    case "plainDate":
+      return "PlainDate";
+    case "plainTime":
+      return "PlainTime";
+    case "plainDateTime":
+      return "PlainDateTime";
+    case "zonedDateTime":
+      return "ZonedDateTime";
+    case "plainYearMonth":
+      return "PlainYearMonth";
+    case "plainMonthDay":
+      return "PlainMonthDay";
+    case "duration":
+      return "Duration";
+  }
 }
 
 function templateLiteralPartSource(part: string | ATS.AnyTypeSchema): string {

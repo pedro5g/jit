@@ -12,6 +12,8 @@ import {
   type LiteralSchema,
   type TemplateLiteralInputPart,
   type TemplateLiteralSchema,
+  type TemporalKind,
+  type TemporalSchema,
   type TupleSchema,
   TypeName,
 } from "../../core/ats/index.js";
@@ -161,3 +163,22 @@ function functionSchema<
 }
 
 export { functionSchema as function, templateLiteral as templateLiterals };
+
+function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<TemporalSchema<TKind>> {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.temporal, {
+      kind,
+    })
+  );
+}
+
+export const temporal = {
+  instant: () => temporalSchema("instant"),
+  plainDate: () => temporalSchema("plainDate"),
+  plainTime: () => temporalSchema("plainTime"),
+  plainDateTime: () => temporalSchema("plainDateTime"),
+  zonedDateTime: () => temporalSchema("zonedDateTime"),
+  plainYearMonth: () => temporalSchema("plainYearMonth"),
+  plainMonthDay: () => temporalSchema("plainMonthDay"),
+  duration: () => temporalSchema("duration"),
+} as const;

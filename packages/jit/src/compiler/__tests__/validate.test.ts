@@ -1,4 +1,4 @@
-import { Compiler, Errors, JIT } from "../../index.js";
+import { type AST, Compiler, Errors, JIT } from "../../index.js";
 
 describe("JIT compiler validator", () => {
   const User = JIT.object({
@@ -496,6 +496,38 @@ describe("JIT compiler validator", () => {
 
     expect(JIT.validator(MyFunction).is(computeTrimmedLength)).toBe(true);
     expect(JIT.validator(MyFunction).is(42)).toBe(false);
+  });
+
+  it("should validate Temporal API values when Temporal is available", () => {
+    const cases = [
+      [JIT.temporal.instant(), Temporal.Instant.from("2020-01-01T00:00:00Z"), "Temporal.Instant"],
+      [JIT.temporal.plainDate(), Temporal.PlainDate.from("2020-01-01"), "Temporal.PlainDate"],
+      [JIT.temporal.plainTime(), Temporal.PlainTime.from("12:34:56"), "Temporal.PlainTime"],
+      [JIT.temporal.plainDateTime(), Temporal.PlainDateTime.from("2020-01-01T12:34:56"), "Temporal.PlainDateTime"],
+      [
+        JIT.temporal.zonedDateTime(),
+        Temporal.ZonedDateTime.from("2020-01-01T12:34:56+00:00[UTC]"),
+        "Temporal.ZonedDateTime",
+      ],
+      [JIT.temporal.plainYearMonth(), Temporal.PlainYearMonth.from("2020-01"), "Temporal.PlainYearMonth"],
+      [JIT.temporal.plainMonthDay(), Temporal.PlainMonthDay.from("--01-31"), "Temporal.PlainMonthDay"],
+      [JIT.temporal.duration(), Temporal.Duration.from("P1DT2H"), "Temporal.Duration"],
+    ] as const;
+
+    for (const [schema, value, expected] of cases) {
+      const temporalSchema = schema.schema as AST.AnyTypeSchema;
+      const validate = JIT.validator(temporalSchema);
+      const source = Compiler.emitValidatorSource(temporalSchema);
+
+      expect(validate.is(value)).toBe(true);
+      expect(validate.is(value.toString())).toBe(false);
+      expect(source).toContain(`globalThis.Temporal.${expected.slice("Temporal.".length)}`);
+
+      const failed = validate.safeParse(value.toString());
+
+      expect(failed.success).toBe(false);
+      if (!failed.success) expect(failed.issues[0].expected).toBe(expected);
+    }
   });
 
   it("should apply transforms inside intersections on parse", () => {

@@ -298,6 +298,61 @@ exports[`generated source snapshots > serializer: nested objects, optionals, rec
 })()"
 `;
 
+exports[`generated source snapshots > validator: Temporal API schemas 1`] = `
+"function is(value) {
+  let v1 = value;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    return false;
+  }
+  let v3 = v1.at;
+  if (!(globalThis.Temporal !== undefined && v3 instanceof globalThis.Temporal.Instant)) {
+    return false;
+  }
+  let v5 = v1.date;
+  if (!(globalThis.Temporal !== undefined && v5 instanceof globalThis.Temporal.PlainDate)) {
+    return false;
+  }
+  let v7 = v1.duration;
+  if (!(globalThis.Temporal !== undefined && v7 instanceof globalThis.Temporal.Duration)) {
+    return false;
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v3 = v1.at;
+    let o4 = v3;
+    if (!(globalThis.Temporal !== undefined && v3 instanceof globalThis.Temporal.Instant)) {
+      issues[issues.length] = { path: "at", code: "invalid_temporal", expected: "Temporal.Instant", message: "expected Temporal.Instant" };
+    }
+    o4 = v3;
+    let v5 = v1.date;
+    let o6 = v5;
+    if (!(globalThis.Temporal !== undefined && v5 instanceof globalThis.Temporal.PlainDate)) {
+      issues[issues.length] = { path: "date", code: "invalid_temporal", expected: "Temporal.PlainDate", message: "expected Temporal.PlainDate" };
+    }
+    o6 = v5;
+    let v7 = v1.duration;
+    let o8 = v7;
+    if (!(globalThis.Temporal !== undefined && v7 instanceof globalThis.Temporal.Duration)) {
+      issues[issues.length] = { path: "duration", code: "invalid_temporal", expected: "Temporal.Duration", message: "expected Temporal.Duration" };
+    }
+    o8 = v7;
+  }
+  o2 = v1;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;
+
 exports[`generated source snapshots > validator: deep unions, formats, coercion, transforms, and messages 1`] = `
 "function iu1(value) {
   let v9 = value;

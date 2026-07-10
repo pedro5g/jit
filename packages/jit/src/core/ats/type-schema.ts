@@ -441,7 +441,8 @@ export type AnySpecialSchema =
   | CoerceSchema
   | CustomSchema
   | TemplateLiteralSchema
-  | FunctionSchema;
+  | FunctionSchema
+  | TemporalSchema;
 
 export interface LiteralDef<TValue = unknown> {
   readonly value: TValue;
@@ -554,6 +555,42 @@ export type FunctionSchema<
   TInput extends FunctionInputSchemas = FunctionInputSchemas,
   TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
 > = BaseSchema<(...args: FunctionArgs<TInput>) => FunctionReturn<TOutput>, "function", FunctionDef<TInput, TOutput>>;
+
+export type TemporalKind =
+  | "instant"
+  | "plainDate"
+  | "plainTime"
+  | "plainDateTime"
+  | "zonedDateTime"
+  | "plainYearMonth"
+  | "plainMonthDay"
+  | "duration";
+
+export interface TemporalDef<TKind extends TemporalKind = TemporalKind> {
+  readonly kind: TKind;
+}
+
+export type TemporalOutput<TKind extends TemporalKind> = TKind extends "instant"
+  ? Temporal.Instant
+  : TKind extends "plainDate"
+    ? Temporal.PlainDate
+    : TKind extends "plainTime"
+      ? Temporal.PlainTime
+      : TKind extends "plainDateTime"
+        ? Temporal.PlainDateTime
+        : TKind extends "zonedDateTime"
+          ? Temporal.ZonedDateTime
+          : TKind extends "plainYearMonth"
+            ? Temporal.PlainYearMonth
+            : TKind extends "plainMonthDay"
+              ? Temporal.PlainMonthDay
+              : Temporal.Duration;
+
+export type TemporalSchema<TKind extends TemporalKind = TemporalKind> = BaseSchema<
+  TemporalOutput<TKind>,
+  "temporal",
+  TemporalDef<TKind>
+>;
 
 export interface RefineDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
   readonly predicate: (value: InferSchema<TInner>) => boolean;

@@ -415,6 +415,21 @@ describe("JIT AST builders", () => {
       ]);
       expectTypeOf(schema._type).toEqualTypeOf<number | null>();
     });
+
+    it("should construct Temporal schemas", () => {
+      const Instant = JIT.temporal.instant().schema;
+      const PlainDate = JIT.temporal.plainDate().schema;
+      const Duration = JIT.temporal.duration().schema;
+
+      expect(Instant.type).toBe(AST.TypeName.temporal);
+      expect(Instant.def.kind).toBe("instant");
+      expect(PlainDate.def.kind).toBe("plainDate");
+      expect(Duration.def.kind).toBe("duration");
+
+      expectTypeOf(Instant._type).toEqualTypeOf<Temporal.Instant>();
+      expectTypeOf(PlainDate._type).toEqualTypeOf<Temporal.PlainDate>();
+      expectTypeOf(Duration._type).toEqualTypeOf<Temporal.Duration>();
+    });
   });
 
   describe("object operators", () => {
