@@ -139,4 +139,44 @@ describe("Transform object operators", () => {
       expect(Merged.def.checks).toEqual([...Left.def.checks, ...Right.def.checks]);
     });
   });
+
+  describe("unknown keys", () => {
+    it("sets strict and loose policies without mutating the original schema", () => {
+      const Strict = Transform.strict(User);
+      const Loose = Transform.loose(User);
+
+      expect(Strict.def.unknownKeys).toBe("strict");
+      expect(Loose.def.unknownKeys).toBe("passthrough");
+      expect(User.def.unknownKeys).toBeUndefined();
+      expect(Strict.def.props).toBe(User.def.props);
+      expect(Loose.def.props).toBe(User.def.props);
+    });
+
+    it("attaches a catchall schema and preserves it through shape transforms", () => {
+      const Extra = JIT.string().schema;
+      const Catchall = Transform.catchall(User, Extra);
+      const Picked = Transform.pick(Catchall, ["id"]);
+      const Extended = Transform.extend(Catchall, { active: JIT.boolean().schema });
+
+      expect(Catchall.def.unknownKeys).toBe("passthrough");
+      expect(Catchall.def.catchall).toBe(Extra);
+      expect(Picked.def.catchall).toBe(Extra);
+      expect(Extended.def.catchall).toBe(Extra);
+
+      expectTypeOf<AST.Infer<typeof Catchall>>().toEqualTypeOf<
+        {
+          id: number;
+          name: string;
+        } & Record<string, string | number>
+      >();
+    });
+
+    it("creates enum schemas from object keys", () => {
+      const Keys = Transform.keyof(User);
+
+      expect(Keys.type).toBe(AST.TypeName.enum);
+      expect(Keys.def.values).toEqual({ id: "id", name: "name" });
+      expectTypeOf<AST.Infer<typeof Keys>>().toEqualTypeOf<"id" | "name">();
+    });
+  });
 });

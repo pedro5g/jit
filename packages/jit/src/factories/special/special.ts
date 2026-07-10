@@ -2,6 +2,7 @@ import {
   type AnyTypeSchema,
   createSchema,
   type EnumSchema,
+  type EnumValuesInput,
   type InstanceOfSchema,
   type LazySchema,
   type LiteralSchema,
@@ -32,9 +33,7 @@ export function literal<const TValue>(value: TValue): Builder<LiteralSchema<TVal
  * @param values - An object whose values are strings or numbers.
  * @returns A builder wrapping an enum schema.
  */
-function nativeEnum<const TValues extends Readonly<Record<string, string | number>>>(
-  values: TValues
-): Builder<EnumSchema<TValues>> {
+function nativeEnum<const TValues extends EnumValuesInput>(values: TValues): Builder<EnumSchema<TValues>> {
   return /* @__PURE__ */ createBuilder(
     createSchema(TypeName.enum, {
       values,

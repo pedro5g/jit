@@ -190,9 +190,16 @@ export interface TupleDef<
   readonly rest: TRest;
 }
 
-export interface ObjectDef<TShape extends SchemaShape = SchemaShape> {
+export type ObjectUnknownKeys = "strip" | "passthrough" | "strict" | undefined;
+
+export interface ObjectDef<
+  TShape extends SchemaShape = SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys = ObjectUnknownKeys,
+  TCatchall extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
+> {
   readonly props: TShape;
-  readonly unknownKeys: "strip" | "passthrough" | "strict" | undefined;
+  readonly unknownKeys: TUnknownKeys;
+  readonly catchall: TCatchall;
   readonly checks: readonly unknown[];
 }
 
@@ -240,11 +247,24 @@ export type TupleSchema<
   TRest extends AnyTypeSchema | undefined = undefined,
 > = BaseSchema<TupleOutput<TItems, TRest>, "tuple", TupleDef<TItems, TRest>>;
 
-export type ObjectSchema<TShape extends SchemaShape = SchemaShape> = BaseSchema<
-  InferShape<TShape>,
-  "object",
-  ObjectDef<TShape>
->;
+export type ObjectOutput<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys = undefined,
+  TCatchall extends AnyTypeSchema | undefined = undefined,
+> = InferShape<TShape> &
+  (TCatchall extends AnyTypeSchema
+    ? Record<string, InferSchema<TCatchall> | KnownObjectValue<TShape>>
+    : TUnknownKeys extends "passthrough"
+      ? Record<string, unknown>
+      : unknown);
+
+type KnownObjectValue<TShape extends SchemaShape> = InferShape<TShape>[keyof InferShape<TShape>];
+
+export type ObjectSchema<
+  TShape extends SchemaShape = SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys = undefined,
+  TCatchall extends AnyTypeSchema | undefined = undefined,
+> = BaseSchema<ObjectOutput<TShape, TUnknownKeys, TCatchall>, "object", ObjectDef<TShape, TUnknownKeys, TCatchall>>;
 
 export interface OptionsDef<TOptions extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[]> {
   readonly options: TOptions;
@@ -416,15 +436,23 @@ export interface LiteralDef<TValue = unknown> {
 
 export type LiteralSchema<TValue = unknown> = BaseSchema<TValue, "literal", LiteralDef<TValue>>;
 
-export interface EnumDef<
-  TValues extends Readonly<Record<string, string | number>> = Readonly<Record<string, string | number>>,
-> {
+export type EnumValuesInput = readonly (string | number)[] | Readonly<Record<string, string | number>>;
+
+export type EnumOutput<TValues extends EnumValuesInput> = TValues extends readonly (infer TItem extends
+  | string
+  | number)[]
+  ? TItem
+  : TValues[keyof TValues];
+
+export interface EnumDef<TValues extends EnumValuesInput = Readonly<Record<string, string | number>>> {
   readonly values: TValues;
 }
 
-export type EnumSchema<
-  TValues extends Readonly<Record<string, string | number>> = Readonly<Record<string, string | number>>,
-> = BaseSchema<TValues[keyof TValues], "enum", EnumDef<TValues>>;
+export type EnumSchema<TValues extends EnumValuesInput = Readonly<Record<string, string | number>>> = BaseSchema<
+  EnumOutput<TValues>,
+  "enum",
+  EnumDef<TValues>
+>;
 
 export interface InstanceOfDef<
   TCtor extends abstract new (

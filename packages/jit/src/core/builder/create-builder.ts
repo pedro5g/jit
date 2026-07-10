@@ -383,12 +383,28 @@ function appendCheck(
 const objectBuilderPrototype = {
   ...baseBuilderPrototype,
 
-  partial(this: RuntimeBuilder): ObjectBuilder<SchemaShape> {
+  partial(this: RuntimeBuilder): AnyBuilder {
     return createBuilder(Transform.partial(this.schema as ObjectSchema<SchemaShape>));
   },
 
-  required(this: RuntimeBuilder): ObjectBuilder<SchemaShape> {
+  required(this: RuntimeBuilder): AnyBuilder {
     return createBuilder(Transform.required(this.schema as ObjectSchema<SchemaShape>));
+  },
+
+  strict(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(Transform.strict(this.schema as ObjectSchema<SchemaShape>));
+  },
+
+  loose(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(Transform.loose(this.schema as ObjectSchema<SchemaShape>));
+  },
+
+  catchall(this: RuntimeBuilder, schema: SchemaInput): AnyBuilder {
+    return createBuilder(Transform.catchall(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(schema)));
+  },
+
+  keyof(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(Transform.keyof(this.schema as ObjectSchema<SchemaShape>));
   },
 
   transform(
@@ -398,15 +414,15 @@ const objectBuilderPrototype = {
     return createBuilder(Transform.transform(this.schema as ObjectSchema<SchemaShape>, transforms));
   },
 
-  pick(this: RuntimeBuilder, keys: readonly string[]): ObjectBuilder<SchemaShape> {
-    return createBuilder(Transform.pick(this.schema as ObjectSchema<SchemaShape>, keys));
+  pick(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    return createBuilder(Transform.pick(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
   },
 
-  omit(this: RuntimeBuilder, keys: readonly string[]): ObjectBuilder<SchemaShape> {
-    return createBuilder(Transform.omit(this.schema as ObjectSchema<SchemaShape>, keys));
+  omit(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    return createBuilder(Transform.omit(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
   },
 
-  extend(this: RuntimeBuilder, extension: Record<string, SchemaInput>): ObjectBuilder<SchemaShape> {
+  extend(this: RuntimeBuilder, extension: Record<string, SchemaInput>): AnyBuilder {
     const props: Record<string, AnyTypeSchema> = {};
 
     for (const key in extension) {
@@ -416,13 +432,14 @@ const objectBuilderPrototype = {
     return createBuilder(Transform.extend(this.schema as ObjectSchema<SchemaShape>, props));
   },
 
-  merge(
-    this: RuntimeBuilder,
-    right: ObjectBuilder<SchemaShape> | ObjectSchema<SchemaShape>
-  ): ObjectBuilder<SchemaShape> {
+  merge(this: RuntimeBuilder, right: ObjectBuilder<SchemaShape> | ObjectSchema<SchemaShape>): AnyBuilder {
     return createBuilder(Transform.merge(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(right)));
   },
 };
+
+function normalizeKeys(first: readonly string[] | string, rest: readonly string[]): readonly string[] {
+  return typeof first === "string" ? [first, ...rest] : first;
+}
 
 export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): Builder<TSchema> {
   const prototype = schema.type === TypeName.object ? objectBuilderPrototype : baseBuilderPrototype;

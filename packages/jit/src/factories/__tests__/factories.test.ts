@@ -199,6 +199,14 @@ describe("JIT AST builders", () => {
       });
       expectTypeOf(enum_schema._type).toEqualTypeOf<"pending" | "success" | "failed">();
     });
+
+    it("should construct and infer enum schemas from readonly arrays", () => {
+      const fish_schema = JIT.enum(["Salmon", "Tuna", "Trout"] as const).schema;
+
+      expect(fish_schema.type).toBe(AST.TypeName.enum);
+      expect(fish_schema.def.values).toEqual(["Salmon", "Tuna", "Trout"]);
+      expectTypeOf(fish_schema._type).toEqualTypeOf<"Salmon" | "Tuna" | "Trout">();
+    });
   });
 
   describe("modifiers and chains", () => {
@@ -399,13 +407,21 @@ describe("JIT AST builders", () => {
       });
 
       const Picked = User.pick(["id"]);
+      const VarargPicked = User.pick("id", "name");
       expect(Object.keys(Picked.schema.def.props)).toEqual(["id"]);
+      expect(Object.keys(VarargPicked.schema.def.props)).toEqual(["id", "name"]);
       expectTypeOf<AST.Infer<typeof Picked>>().toEqualTypeOf<{
         id: number;
       }>();
+      expectTypeOf<AST.Infer<typeof VarargPicked>>().toEqualTypeOf<{
+        id: number;
+        name: string;
+      }>();
 
       const Omitted = User.omit(["name"]);
+      const VarargOmitted = User.omit("name");
       expect(Object.keys(Omitted.schema.def.props)).toEqual(["id"]);
+      expect(Object.keys(VarargOmitted.schema.def.props)).toEqual(["id"]);
       expectTypeOf<AST.Infer<typeof Omitted>>().toEqualTypeOf<{
         id: number;
       }>();
@@ -431,6 +447,44 @@ describe("JIT AST builders", () => {
         name: string;
         age: number;
       }>();
+    });
+
+    it("should configure object unknown key policies, catchalls, and keyof schemas", () => {
+      const User = JIT.object({
+        id: JIT.number(),
+        name: JIT.string(),
+      });
+      const Extra = JIT.string();
+      const Strict = User.strict();
+      const Loose = User.loose();
+      const Catchall = User.catchall(Extra);
+      const Keys = User.keyof();
+
+      expect(Strict.schema.def.unknownKeys).toBe("strict");
+      expect(Strict.schema.def.catchall).toBeUndefined();
+      expect(Loose.schema.def.unknownKeys).toBe("passthrough");
+      expect(Catchall.schema.def.unknownKeys).toBe("passthrough");
+      expect(Catchall.schema.def.catchall).toBe(Extra.schema);
+      expect(Keys.schema.type).toBe(AST.TypeName.enum);
+      expect(Keys.schema.def.values).toEqual({ id: "id", name: "name" });
+
+      expectTypeOf<AST.Infer<typeof Strict>>().toEqualTypeOf<{
+        id: number;
+        name: string;
+      }>();
+      expectTypeOf<AST.Infer<typeof Loose>>().toEqualTypeOf<
+        {
+          id: number;
+          name: string;
+        } & Record<string, unknown>
+      >();
+      expectTypeOf<AST.Infer<typeof Catchall>>().toEqualTypeOf<
+        {
+          id: number;
+          name: string;
+        } & Record<string, string | number>
+      >();
+      expectTypeOf<AST.Infer<typeof Keys>>().toEqualTypeOf<"id" | "name">();
     });
 
     it("should reject object-only operators on primitive builders", () => {

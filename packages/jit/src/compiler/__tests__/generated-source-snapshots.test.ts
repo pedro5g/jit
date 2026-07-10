@@ -68,6 +68,15 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitValidatorSource(Payment.schema)).toMatchSnapshot();
   });
 
+  it("validator: strict known keys and catchall transforms", () => {
+    const Payload = JIT.object({
+      id: JIT.number().int(),
+      meta: JIT.object({ owner: JIT.string().trim() }).catchall(JIT.string().trim()),
+    }).strict();
+
+    expect(Compiler.emitValidatorSource(Payload.schema)).toMatchSnapshot();
+  });
+
   it("serializer: nested objects, optionals, records, and arrays", () => {
     const Report = JIT.object({
       title: JIT.string(),

@@ -2,9 +2,11 @@ import type { OptionalSchema, SchemaShape } from "../../core/ats/index.js";
 import {
   type AnyTypeSchema,
   createSchema,
+  type EnumSchema,
   type ExtendShape,
   type MergeShape,
   type ObjectSchema,
+  type ObjectUnknownKeys,
   type OmitShape,
   type PartialShape,
   type PickShape,
@@ -25,7 +27,11 @@ function isOptionalSchema(schema: AnyTypeSchema): schema is OptionalSchema<AnyTy
  * @param schema - The object schema to transform.
  * @returns A new object schema with every property wrapped in `optional`.
  */
-export function partial<TShape extends SchemaShape>(schema: ObjectSchema<TShape>): ObjectSchema<PartialShape<TShape>> {
+export function partial<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys,
+  TCatchall extends AnyTypeSchema | undefined,
+>(schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>): ObjectSchema<PartialShape<TShape>, TUnknownKeys, TCatchall> {
   const props: Record<string, AnyTypeSchema> = {};
 
   for (const key in schema.def.props) {
@@ -37,6 +43,7 @@ export function partial<TShape extends SchemaShape>(schema: ObjectSchema<TShape>
     {
       props: props as PartialShape<TShape>,
       unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
       checks: schema.def.checks,
     },
     schema.annotations
@@ -53,10 +60,15 @@ export function partial<TShape extends SchemaShape>(schema: ObjectSchema<TShape>
  * @param keys - The property keys to keep.
  * @returns A new object schema containing only `keys`.
  */
-export function pick<TShape extends SchemaShape, const TKeys extends readonly (keyof TShape)[]>(
-  schema: ObjectSchema<TShape>,
+export function pick<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys,
+  TCatchall extends AnyTypeSchema | undefined,
+  const TKeys extends readonly (keyof TShape)[],
+>(
+  schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>,
   keys: TKeys
-): ObjectSchema<PickShape<TShape, TKeys[number]>> {
+): ObjectSchema<PickShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall> {
   const props: Record<string, AnyTypeSchema> = {};
 
   for (const key of keys) {
@@ -68,6 +80,7 @@ export function pick<TShape extends SchemaShape, const TKeys extends readonly (k
     {
       props: props as PickShape<TShape, TKeys[number]>,
       unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
       checks: schema.def.checks,
     },
     schema.annotations
@@ -84,10 +97,15 @@ export function pick<TShape extends SchemaShape, const TKeys extends readonly (k
  * @param keys - The property keys to drop.
  * @returns A new object schema without `keys`.
  */
-export function omit<TShape extends SchemaShape, const TKeys extends readonly (keyof TShape)[]>(
-  schema: ObjectSchema<TShape>,
+export function omit<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys,
+  TCatchall extends AnyTypeSchema | undefined,
+  const TKeys extends readonly (keyof TShape)[],
+>(
+  schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>,
   keys: TKeys
-): ObjectSchema<OmitShape<TShape, TKeys[number]>> {
+): ObjectSchema<OmitShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall> {
   const props: Record<string, AnyTypeSchema> = {};
   const omitted = new Set<PropertyKey>(keys);
 
@@ -102,6 +120,7 @@ export function omit<TShape extends SchemaShape, const TKeys extends readonly (k
     {
       props: props as OmitShape<TShape, TKeys[number]>,
       unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
       checks: schema.def.checks,
     },
     schema.annotations
@@ -118,10 +137,15 @@ export function omit<TShape extends SchemaShape, const TKeys extends readonly (k
  * @param extension - The props to add or override.
  * @returns A new object schema with the extension applied.
  */
-export function extend<TShape extends SchemaShape, TExtension extends SchemaShape>(
-  schema: ObjectSchema<TShape>,
+export function extend<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys,
+  TCatchall extends AnyTypeSchema | undefined,
+  TExtension extends SchemaShape,
+>(
+  schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>,
   extension: TExtension
-): ObjectSchema<ExtendShape<TShape, TExtension>> {
+): ObjectSchema<ExtendShape<TShape, TExtension>, TUnknownKeys, TCatchall> {
   return /* @__PURE__ */ createSchema(
     TypeName.object,
     {
@@ -130,6 +154,7 @@ export function extend<TShape extends SchemaShape, TExtension extends SchemaShap
         ...extension,
       } as ExtendShape<TShape, TExtension>,
       unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
       checks: schema.def.checks,
     },
     schema.annotations
@@ -146,10 +171,27 @@ export function extend<TShape extends SchemaShape, TExtension extends SchemaShap
  * @param right - The object schema whose props win on collision.
  * @returns A new merged object schema.
  */
-export function merge<TLeft extends SchemaShape, TRight extends SchemaShape>(
-  left: ObjectSchema<TLeft>,
-  right: ObjectSchema<TRight>
-): ObjectSchema<MergeShape<TLeft, TRight>> {
+export function merge<
+  TLeft extends SchemaShape,
+  TRight extends SchemaShape,
+  TLeftUnknownKeys extends ObjectUnknownKeys,
+  TRightUnknownKeys extends ObjectUnknownKeys,
+  TLeftCatchall extends AnyTypeSchema | undefined,
+  TRightCatchall extends AnyTypeSchema | undefined,
+>(
+  left: ObjectSchema<TLeft, TLeftUnknownKeys, TLeftCatchall>,
+  right: ObjectSchema<TRight, TRightUnknownKeys, TRightCatchall>
+): ObjectSchema<
+  MergeShape<TLeft, TRight>,
+  MergeUnknownKeys<TLeftUnknownKeys, TRightUnknownKeys>,
+  MergeCatchall<TLeftCatchall, TRightCatchall>
+> {
+  const unknownKeys = (right.def.unknownKeys ?? left.def.unknownKeys) as MergeUnknownKeys<
+    TLeftUnknownKeys,
+    TRightUnknownKeys
+  >;
+  const catchall = (right.def.catchall ?? left.def.catchall) as MergeCatchall<TLeftCatchall, TRightCatchall>;
+
   return /* @__PURE__ */ createSchema(
     TypeName.object,
     {
@@ -157,7 +199,8 @@ export function merge<TLeft extends SchemaShape, TRight extends SchemaShape>(
         ...left.def.props,
         ...right.def.props,
       } as MergeShape<TLeft, TRight>,
-      unknownKeys: right.def.unknownKeys ?? left.def.unknownKeys,
+      unknownKeys,
+      catchall,
       checks: [...left.def.checks, ...right.def.checks],
     },
     right.annotations ?? left.annotations
@@ -172,9 +215,11 @@ export function merge<TLeft extends SchemaShape, TRight extends SchemaShape>(
  * @param schema - The object schema to transform.
  * @returns A new object schema with top-level `optional` wrappers removed.
  */
-export function required<TShape extends SchemaShape>(
-  schema: ObjectSchema<TShape>
-): ObjectSchema<RequiredShape<TShape>> {
+export function required<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys,
+  TCatchall extends AnyTypeSchema | undefined,
+>(schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>): ObjectSchema<RequiredShape<TShape>, TUnknownKeys, TCatchall> {
   const props: Record<string, AnyTypeSchema> = {};
 
   for (const key in schema.def.props) {
@@ -187,6 +232,85 @@ export function required<TShape extends SchemaShape>(
     {
       props: props as RequiredShape<TShape>,
       unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
+      checks: schema.def.checks,
+    },
+    schema.annotations
+  );
+}
+
+export function strict<TShape extends SchemaShape, TCatchall extends AnyTypeSchema | undefined>(
+  schema: ObjectSchema<TShape, ObjectUnknownKeys, TCatchall>
+): ObjectSchema<TShape, "strict", TCatchall> {
+  return withUnknownKeys(schema, "strict");
+}
+
+export function loose<TShape extends SchemaShape, TCatchall extends AnyTypeSchema | undefined>(
+  schema: ObjectSchema<TShape, ObjectUnknownKeys, TCatchall>
+): ObjectSchema<TShape, "passthrough", TCatchall> {
+  return withUnknownKeys(schema, "passthrough");
+}
+
+export function catchall<TShape extends SchemaShape, TCatchall extends AnyTypeSchema>(
+  schema: ObjectSchema<TShape, ObjectUnknownKeys, AnyTypeSchema | undefined>,
+  catchallSchema: TCatchall
+): ObjectSchema<TShape, "passthrough", TCatchall> {
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props: schema.def.props,
+      unknownKeys: "passthrough",
+      catchall: catchallSchema,
+      checks: schema.def.checks,
+    },
+    schema.annotations
+  );
+}
+
+function keyOf<TShape extends SchemaShape>(
+  schema: ObjectSchema<TShape, ObjectUnknownKeys, AnyTypeSchema | undefined>
+): EnumSchema<KeyOfValues<TShape>> {
+  const values: Record<string, string> = {};
+
+  for (const key in schema.def.props) {
+    values[key] = key;
+  }
+
+  return /* @__PURE__ */ createSchema(TypeName.enum, {
+    values: values as KeyOfValues<TShape>,
+  });
+}
+
+export { keyOf as keyof };
+
+type KeyOfValues<TShape extends SchemaShape> = {
+  readonly [TKey in Extract<keyof TShape, string>]: TKey;
+};
+
+type MergeUnknownKeys<
+  TLeftUnknownKeys extends ObjectUnknownKeys,
+  TRightUnknownKeys extends ObjectUnknownKeys,
+> = TRightUnknownKeys extends undefined ? TLeftUnknownKeys : TRightUnknownKeys;
+
+type MergeCatchall<
+  TLeftCatchall extends AnyTypeSchema | undefined,
+  TRightCatchall extends AnyTypeSchema | undefined,
+> = TRightCatchall extends undefined ? TLeftCatchall : TRightCatchall;
+
+function withUnknownKeys<
+  TShape extends SchemaShape,
+  TCatchall extends AnyTypeSchema | undefined,
+  TUnknownKeys extends Exclude<ObjectUnknownKeys, undefined>,
+>(
+  schema: ObjectSchema<TShape, ObjectUnknownKeys, TCatchall>,
+  unknownKeys: TUnknownKeys
+): ObjectSchema<TShape, TUnknownKeys, TCatchall> {
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props: schema.def.props,
+      unknownKeys,
+      catchall: schema.def.catchall,
       checks: schema.def.checks,
     },
     schema.annotations

@@ -324,17 +324,57 @@ describe("JIT compiler validator", () => {
   });
 
   it("should enforce strict objects and validate int schemas", () => {
-    const Strict = JIT.object({ id: JIT.number() }).schema;
-    const strictSchema = { ...Strict, def: { ...Strict.def, unknownKeys: "strict" as const } };
-    const validate = Compiler.compileValidator(strictSchema);
+    const Strict = JIT.object({ id: JIT.number() }).strict();
+    const validate = JIT.validator(Strict);
+    const source = Compiler.emitValidatorSource(Strict.schema);
 
     expect(validate.is({ id: 1 })).toBe(true);
     expect(validate.is({ id: 1, extra: true })).toBe(false);
+    expect(source).toContain("Object.keys");
 
     const result = validate.safeParse({ id: 1, extra: true });
 
     expect(result.success).toBe(false);
-    if (!result.success) expect(result.issues[0].code).toBe("unknown_key");
+    if (!result.success) {
+      expect(result.issues[0].path).toBe("extra");
+      expect(result.issues[0].code).toBe("unknown_key");
+    }
+  });
+
+  it("should preserve loose object extras while rebuilding transformed known fields", () => {
+    const Loose = JIT.object({ name: JIT.string().trim() }).loose();
+    const validate = JIT.validator(Loose);
+    const input = { name: "  Ada  ", extra: 1 };
+    const result = validate.safeParse(input);
+    const source = Compiler.emitValidatorSource(Loose.schema);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ name: "Ada", extra: 1 });
+      expect(result.data).not.toBe(input);
+    }
+    expect(source).toContain("Object.assign");
+    expect(source).not.toContain(".map(");
+    expect(source).not.toContain(".forEach(");
+  });
+
+  it("should validate and transform unknown keys through catchall schemas", () => {
+    const WithExtras = JIT.object({ id: JIT.number() }).catchall(JIT.string().trim());
+    const validate = JIT.validator(WithExtras);
+    const result = validate.safeParse({ id: 1, tag: "  ok  " });
+    const failed = validate.safeParse({ id: 1, tag: 7 });
+
+    expect(validate.is({ id: 1, tag: "ok" })).toBe(true);
+    expect(validate.is({ id: 1, tag: 7 })).toBe(false);
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ id: 1, tag: "ok" });
+
+    expect(failed.success).toBe(false);
+    if (!failed.success) {
+      expect(failed.issues[0].path).toBe("tag");
+      expect(failed.issues[0].code).toBe("expected_string");
+    }
   });
 
   it("should report custom messages from checks and refines", () => {

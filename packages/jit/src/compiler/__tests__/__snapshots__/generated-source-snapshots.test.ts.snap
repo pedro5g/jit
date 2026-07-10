@@ -466,3 +466,112 @@ function safeParse(value) {
 }
 return { is: is, safeParse: safeParse };"
 `;
+
+exports[`generated source snapshots > validator: strict known keys and catchall transforms 1`] = `
+"function is(value) {
+  let v1 = value;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    return false;
+  }
+  let v3 = v1.id;
+  if (typeof v3 !== "number") {
+    return false;
+  }
+  if (!Number.isInteger(v3)) {
+    return false;
+  }
+  let v5 = v1.meta;
+  if (v5 === null || typeof v5 !== "object" || Array.isArray(v5)) {
+    return false;
+  }
+  let v7 = v5.owner;
+  if (typeof v7 !== "string") {
+    return false;
+  }
+  v7 = v7.trim();
+  const k9 = Object.keys(v5);
+  for (let i10 = 0; i10 < k9.length; i10++) {
+    if (k9[i10] !== "owner") {
+      let v11 = v5[k9[i10]];
+      if (typeof v11 !== "string") {
+        return false;
+      }
+      v11 = v11.trim();
+    }
+  }
+  const k13 = Object.keys(v1);
+  for (let i14 = 0; i14 < k13.length; i14++) {
+    if (k13[i14] !== "id" && k13[i14] !== "meta") {
+      return false;
+    }
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  let b3;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v4 = v1.id;
+    let o5 = v4;
+    if (typeof v4 !== "number") {
+      issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v4 };
+    } else {
+      if (!Number.isInteger(v4)) {
+        issues[issues.length] = { path: "id", code: "not_integer", expected: "integer", message: "expected an integer" };
+      }
+    }
+    o5 = v4;
+    let v6 = v1.meta;
+    let o7 = v6;
+    let b8;
+    if (v6 === null || typeof v6 !== "object" || Array.isArray(v6)) {
+      issues[issues.length] = { path: "meta", code: "expected_object", expected: "object", message: "expected object", received: typeof v6 };
+    } else {
+      let v9 = v6.owner;
+      let o10 = v9;
+      if (typeof v9 !== "string") {
+        issues[issues.length] = { path: "meta.owner", code: "expected_string", expected: "string", message: "expected string", received: typeof v9 };
+      } else {
+        v9 = v9.trim();
+      }
+      o10 = v9;
+      b8 = Object.assign({}, v6);
+      const k11 = Object.keys(v6);
+      for (let i12 = 0; i12 < k11.length; i12++) {
+        if (k11[i12] !== "owner") {
+          let v13 = v6[k11[i12]];
+          let o14 = v13;
+          if (typeof v13 !== "string") {
+            issues[issues.length] = { path: "meta." + k11[i12], code: "expected_string", expected: "string", message: "expected string", received: typeof v13 };
+          } else {
+            v13 = v13.trim();
+          }
+          o14 = v13;
+          b8[k11[i12]] = o14;
+        }
+      }
+      b8.owner = o10;
+    }
+    if (b8 === undefined) { b8 = v6; }
+    o7 = b8;
+    const k15 = Object.keys(v1);
+    for (let i16 = 0; i16 < k15.length; i16++) {
+      if (k15[i16] !== "id" && k15[i16] !== "meta") {
+        issues[issues.length] = { path: "" + k15[i16], code: "unknown_key", expected: "known keys only", message: "object contains unknown keys" };
+      }
+    }
+    b3 = { "id": o5, "meta": o7 };
+  }
+  if (b3 === undefined) { b3 = v1; }
+  o2 = b3;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;

@@ -28,6 +28,7 @@ export function object<const TShape extends Record<string, SchemaInput>>(
     createSchema(TypeName.object, {
       props: props as BuilderShape<TShape> & SchemaShape,
       unknownKeys: undefined,
+      catchall: undefined,
       checks: [],
     })
   ) as ObjectBuilder<BuilderShape<TShape>>;

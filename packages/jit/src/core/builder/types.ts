@@ -4,11 +4,13 @@ import type {
   BrandSchema,
   CoerceSchema,
   DefaultSchema,
+  EnumSchema,
   InferSchema,
   MergeShape,
   NullableSchema,
   NullishSchema,
   ObjectSchema,
+  ObjectUnknownKeys,
   OmitShape,
   OptionalSchema,
   PartialShape,
@@ -61,21 +63,45 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
 
 type HintTarget<T> = T extends readonly (infer TElement)[] ? TElement : T;
 
-export interface ObjectOperators<TShape extends SchemaShape> {
-  partial(): ObjectBuilder<PartialShape<TShape>>;
-  required(): ObjectBuilder<RequiredShape<TShape>>;
-  transform<const TSpec extends TransformSpec<InferSchema<ObjectSchema<TShape>>>>(
+export interface ObjectOperators<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys = undefined,
+  TCatchall extends AnyTypeSchema | undefined = undefined,
+> {
+  partial(): ObjectBuilder<PartialShape<TShape>, TUnknownKeys, TCatchall>;
+  required(): ObjectBuilder<RequiredShape<TShape>, TUnknownKeys, TCatchall>;
+  strict(): ObjectBuilder<TShape, "strict", TCatchall>;
+  loose(): ObjectBuilder<TShape, "passthrough", TCatchall>;
+  catchall<TCatchallNext extends AnyTypeSchema>(
+    schema: SchemaInput<TCatchallNext>
+  ): ObjectBuilder<TShape, "passthrough", TCatchallNext>;
+  keyof(): Builder<EnumSchema<KeyOfValues<TShape>>>;
+  transform<const TSpec extends TransformSpec<InferSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>>>>(
     transforms: TSpec
-  ): Builder<TransformSchema<ObjectSchema<TShape>, TSpec>>;
-  pick<const TKeys extends readonly (keyof TShape)[]>(keys: TKeys): ObjectBuilder<PickShape<TShape, TKeys[number]>>;
-  omit<const TKeys extends readonly (keyof TShape)[]>(keys: TKeys): ObjectBuilder<OmitShape<TShape, TKeys[number]>>;
+  ): Builder<TransformSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>, TSpec>>;
+  pick<const TKeys extends readonly (keyof TShape)[]>(
+    keys: TKeys
+  ): ObjectBuilder<PickShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  pick<const TKeys extends readonly (keyof TShape)[]>(
+    ...keys: TKeys
+  ): ObjectBuilder<PickShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  omit<const TKeys extends readonly (keyof TShape)[]>(
+    keys: TKeys
+  ): ObjectBuilder<OmitShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  omit<const TKeys extends readonly (keyof TShape)[]>(
+    ...keys: TKeys
+  ): ObjectBuilder<OmitShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
   extend<const TExtension extends Record<string, SchemaInput>>(
     extension: TExtension
-  ): ObjectBuilder<MergeShape<TShape, UnwrapBuilderShape<TExtension>>>;
+  ): ObjectBuilder<MergeShape<TShape, UnwrapBuilderShape<TExtension>>, TUnknownKeys, TCatchall>;
   merge<TRight extends SchemaShape>(
-    right: ObjectBuilder<TRight> | ObjectSchema<TRight>
-  ): ObjectBuilder<MergeShape<TShape, TRight>>;
+    right: ObjectBuilder<TRight, ObjectUnknownKeys, AnyTypeSchema | undefined> | ObjectSchema<TRight>
+  ): ObjectBuilder<MergeShape<TShape, TRight>, TUnknownKeys, TCatchall>;
 }
+
+export type KeyOfValues<TShape extends SchemaShape> = {
+  readonly [TKey in Extract<keyof TShape, string>]: TKey;
+};
 
 export type UnwrapBuilderShape<TShape extends Record<string, SchemaInput>> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema extends AnyTypeSchema>
@@ -161,9 +187,15 @@ type CheckMethods<TSchema extends AnyTypeSchema> = TSchema extends { readonly ty
       ? ArrayCheckMethods<TSchema>
       : unknown;
 
-export type ObjectBuilder<TShape extends SchemaShape> = BuilderCore<ObjectSchema<TShape>> & ObjectOperators<TShape>;
+export type ObjectBuilder<
+  TShape extends SchemaShape,
+  TUnknownKeys extends ObjectUnknownKeys = undefined,
+  TCatchall extends AnyTypeSchema | undefined = undefined,
+> = BuilderCore<ObjectSchema<TShape, TUnknownKeys, TCatchall>> & ObjectOperators<TShape, TUnknownKeys, TCatchall>;
 
 export type Builder<TSchema extends AnyTypeSchema> =
-  TSchema extends ObjectSchema<infer TShape> ? ObjectBuilder<TShape> : BaseBuilder<TSchema> & CheckMethods<TSchema>;
+  TSchema extends ObjectSchema<infer TShape, infer TUnknownKeys, infer TCatchall>
+    ? ObjectBuilder<TShape, TUnknownKeys, TCatchall>
+    : BaseBuilder<TSchema> & CheckMethods<TSchema>;
 
 export type AnyBuilder = Builder<AnyTypeSchema>;

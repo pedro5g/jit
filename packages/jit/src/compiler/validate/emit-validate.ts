@@ -838,10 +838,16 @@ class ValidatorEmitter {
   ): string {
     const props = schema.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
     const unknownKeys = schema.def.unknownKeys as "strip" | "passthrough" | "strict" | undefined;
+    const catchall = schema.def.catchall as ATS.AnyTypeSchema | undefined;
     const keys = Object.keys(props);
+    const catchallBuild = catchall !== undefined && needsBuild(catchall);
+    const preserveUnknownKeys = unknownKeys === "passthrough" || catchall !== undefined;
     const build =
       this.mode === "parse" &&
-      (fieldTransforms !== undefined || unknownKeys === "strip" || keys.some((key) => needsBuild(props[key])));
+      (fieldTransforms !== undefined ||
+        unknownKeys === "strip" ||
+        catchallBuild ||
+        keys.some((key) => needsBuild(props[key])));
     const out = build ? this.nextVar("b") : value;
 
     if (build) this.writer.line(`let ${out};`);
@@ -862,29 +868,57 @@ class ValidatorEmitter {
           outputs.push({ key, expr: transform ? `${transform}(${propOut}, ${value})` : propOut });
         }
 
-        if (unknownKeys === "strict") {
+        if (build && preserveUnknownKeys) {
+          this.writer.line(`${out} = Object.assign({}, ${value});`);
+        }
+
+        if (unknownKeys === "strict" || catchall !== undefined) {
           const known = this.nextVar("k");
           const index = this.nextVar("i");
           const keyTest = keys.map((key) => `${known}[${index}] !== ${emitLiteral(key)}`).join(" && ");
+          const unknownTest = keys.length === 0 ? "true" : keyTest;
 
           this.writer.line(`const ${known} = Object.keys(${value});`);
           this.writer.line(`for (let ${index} = 0; ${index} < ${known}.length; ${index}++) {`);
           this.writer.indent(() => {
-            this.failIf(
-              keys.length === 0 ? "true" : keyTest,
-              path,
-              "unknown_key",
-              "known keys only",
-              "object contains unknown keys"
-            );
+            if (unknownKeys === "strict") {
+              this.failIf(
+                unknownTest,
+                dynamicKeyChild(path, `${known}[${index}]`),
+                "unknown_key",
+                "known keys only",
+                "object contains unknown keys"
+              );
+              return;
+            }
+
+            if (catchall !== undefined) {
+              this.writer.line(`if (${unknownTest}) {`);
+              this.writer.indent(() => {
+                const catchallOut = this.emitNode(
+                  catchall,
+                  `${value}[${known}[${index}]]`,
+                  dynamicKeyChild(path, `${known}[${index}]`)
+                );
+
+                if (build && catchallBuild) this.writer.line(`${out}[${known}[${index}]] = ${catchallOut};`);
+              });
+              this.writer.line("}");
+            }
           });
           this.writer.line("}");
         }
 
         if (build) {
-          const entries = outputs.map((entry) => `${emitLiteral(entry.key)}: ${entry.expr}`).join(", ");
+          if (!preserveUnknownKeys) {
+            const entries = outputs.map((entry) => `${emitLiteral(entry.key)}: ${entry.expr}`).join(", ");
 
-          this.writer.line(`${out} = { ${entries} };`);
+            this.writer.line(`${out} = { ${entries} };`);
+          } else {
+            for (const entry of outputs) {
+              this.writer.line(`${emitPropertyAccess(out, entry.key)} = ${entry.expr};`);
+            }
+          }
         }
       },
       `typeof ${value}`
@@ -1273,8 +1307,10 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
       return needsBuild(current.def.value as ATS.AnyTypeSchema);
     case TypeName.object: {
       const props = current.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
+      const catchall = current.def.catchall as ATS.AnyTypeSchema | undefined;
 
       if ((current.def.unknownKeys as string | undefined) === "strip") return true;
+      if (catchall !== undefined && needsBuild(catchall)) return true;
       return Object.keys(props).some((key) => needsBuild(props[key]));
     }
     default:
