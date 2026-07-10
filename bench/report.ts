@@ -13,8 +13,10 @@ interface ScenarioReport {
   readonly suite: string;
   readonly scenario: string;
   readonly jitAvg: number;
+  readonly jitHeap: number | undefined;
   readonly bestName: string;
   readonly bestAvg: number;
+  readonly bestHeap: number | undefined;
   readonly ratio: number;
   readonly biasedOnly: boolean;
 }
@@ -23,6 +25,12 @@ function formatNs(ns: number): string {
   if (ns < 1_000) return `${ns.toFixed(2)} ns`;
   if (ns < 1_000_000) return `${(ns / 1_000).toFixed(2)} µs`;
   return `${(ns / 1_000_000).toFixed(2)} ms`;
+}
+
+function formatBytes(bytes: number | undefined): string {
+  if (bytes === undefined) return "n/a";
+  if (bytes < 1_000) return `${bytes.toFixed(2)} b`;
+  return `${(bytes / 1_000).toFixed(2)} kb`;
 }
 
 function splitName(name: string): { impl: string; scenario: string } {
@@ -66,8 +74,10 @@ function buildReports(suite: PersistedSuite): ScenarioReport[] {
       suite: suite.suite,
       scenario,
       jitAvg: jitRun.stats.avg,
+      jitHeap: jitRun.stats.heap?.avg,
       bestName: splitName(best.name).impl,
       bestAvg: best.stats.avg,
+      bestHeap: best.stats.heap?.avg,
       ratio: jitRun.stats.avg / best.stats.avg,
       biasedOnly: honest.length === 0,
     });
@@ -79,12 +89,12 @@ function buildReports(suite: PersistedSuite): ScenarioReport[] {
 function renderTable(reports: readonly ScenarioReport[]): string {
   const rows = reports.map((report) => {
     const flag = report.biasedOnly ? " ⚠ biased-only" : "";
-    return `| ${report.suite} | ${report.scenario} | ${formatNs(report.jitAvg)} | ${report.bestName}${flag} | ${formatNs(report.bestAvg)} | ${report.ratio.toFixed(2)}× |`;
+    return `| ${report.suite} | ${report.scenario} | ${formatNs(report.jitAvg)} | ${formatBytes(report.jitHeap)} | ${report.bestName}${flag} | ${formatNs(report.bestAvg)} | ${formatBytes(report.bestHeap)} | ${report.ratio.toFixed(2)}× |`;
   });
 
   return [
-    "| Suite | Scenario | JIT avg | Best competitor | Their avg | JIT/them |",
-    "|---|---|---|---|---|---|",
+    "| Suite | Scenario | JIT avg | JIT heap/op | Best competitor | Their avg | Their heap/op | JIT/them |",
+    "|---|---|---|---|---|---|---|---|",
     ...rows,
   ].join("\n");
 }

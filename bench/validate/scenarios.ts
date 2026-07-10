@@ -79,10 +79,8 @@ function handwrittenIs(value: unknown): boolean {
 }
 
 interface AotUserModule {
-  readonly User: {
-    readonly is: (value: unknown) => boolean;
-    readonly safeParse: (value: unknown) => unknown;
-  };
+  readonly User_is: (value: unknown) => boolean;
+  readonly User_safeParse: (value: unknown) => unknown;
 }
 
 /**
@@ -93,7 +91,7 @@ interface AotUserModule {
 async function loadAotUser(): Promise<AotUserModule> {
   const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
 
-  AOT.generate({ schemas: { User: UserSchema }, outDir });
+  AOT.generate({ schemas: { User: UserSchema }, outDir, operations: ["is", "safeParse"] });
   return (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as AotUserModule;
 }
 
@@ -107,7 +105,7 @@ export async function registerValidateScenarios(): Promise<void> {
     args: [validUser],
     jit: validate.is,
     competitors: [
-      { name: "jit aot is", fn: aot.User.is },
+      { name: "jit aot is", fn: aot.User_is },
       { name: "typia is", fn: typiaIs },
       { name: "handwritten guard", fn: handwrittenIs, biased: GENERIC_BIAS },
       { name: "zod safeParse.success", fn: (value: unknown) => zodUser.safeParse(value).success },
@@ -120,7 +118,7 @@ export async function registerValidateScenarios(): Promise<void> {
     args: [invalidUser],
     jit: validate.is,
     competitors: [
-      { name: "jit aot is", fn: aot.User.is },
+      { name: "jit aot is", fn: aot.User_is },
       { name: "typia is", fn: typiaIs },
       { name: "handwritten guard", fn: handwrittenIs, biased: GENERIC_BIAS },
       { name: "zod safeParse.success", fn: (value: unknown) => zodUser.safeParse(value).success },
@@ -133,7 +131,7 @@ export async function registerValidateScenarios(): Promise<void> {
     args: [validUser],
     jit: validate.safeParse,
     competitors: [
-      { name: "jit aot safeParse", fn: aot.User.safeParse },
+      { name: "jit aot safeParse", fn: aot.User_safeParse },
       { name: "typia validate", fn: typiaValidate },
       { name: "zod safeParse", fn: (value: unknown) => zodUser.safeParse(value) },
     ],
@@ -145,7 +143,7 @@ export async function registerValidateScenarios(): Promise<void> {
     args: [invalidUser],
     jit: validate.safeParse,
     competitors: [
-      { name: "jit aot safeParse", fn: aot.User.safeParse },
+      { name: "jit aot safeParse", fn: aot.User_safeParse },
       { name: "typia validate", fn: typiaValidate },
       { name: "zod safeParse", fn: (value: unknown) => zodUser.safeParse(value) },
     ],

@@ -14,10 +14,10 @@ Two execution modes, same generated code:
 
 - **JIT (runtime)** — operations compile on first use via
   `globalThis.Function` and are cached per schema.
-- **AOT (build time, Prisma-style)** — `jit generate` writes pure `.mjs` +
-  `.cjs` + `.d.ts` modules with **zero imports**: the engine never ships to
-  production, cold start pays only the generated file (~80x faster than
-  runtime compilation), and every operation is independently tree-shakable.
+- **AOT (build time, Prisma-style)** — `pnpm jit init` writes config and
+  `jit generate` writes pure `.mjs` + `.cjs` + `.d.ts` modules with **zero
+  imports**: the engine never ships to production, and the final bundle keeps
+  only the generated low-level functions the app actually imports.
 
 ```ts
 import { JIT } from "jit";
@@ -34,7 +34,7 @@ type User = JIT.infer<typeof User>;
 
 const Users = JIT.validator(User);
 
-Users.is(input); // pure boolean guard — ~35ns, beats typia
+Users.is(input); // pure boolean guard — compiled specialized code
 Users.parse(input); // throws JITValidationError with every issue
 Users.safeParse(input); // { success, data | issues } — no exceptions
 ```
@@ -50,24 +50,21 @@ length → regex), classic indexed loops, no closures, early returns. Runtime
 values (regexes, refinement callbacks, query arguments) travel as external
 bindings — never interpolated into source.
 
-Measured on this repo's benchmark suite (mitata, Node 24, WSL2 — run
-`pnpm bench:all` for your numbers):
+Measured on this repo's validation benchmark (mitata, Node 22.17.1,
+linux-x64, AMD Ryzen 7 5800H, Zod 4.4.3 — run `pnpm bench:validate` for your
+machine):
 
-| Operation                       | jit        | best competitor            | native / generic             |
-| ------------------------------- | ---------- | -------------------------- | ---------------------------- |
-| `is()` valid object             | **35 ns**  | typia 60 ns                | zod 981 ns                   |
-| `is()` invalid object           | **2.8 ns** | typia 5.7 ns               | zod 30 µs                    |
-| `safeParse` invalid (7 issues)  | **113 ns** | typia 1.39 µs              | zod 26 µs                    |
-| `stringify` (medium object)     | **225 ns** | fast-json-stringify 269 ns | `JSON.stringify` 430 ns      |
-| binary `encode` (50-item batch) | **943 ns** | —                          | `JSON.stringify` 7.2 µs      |
-| binary `decode`                 | **571 ns** | —                          | `JSON.parse` + revive 7.9 µs |
-| mapper `.map` (entity → DTO)    | **7 ns**   | hand-written 9 ns          | reflective ~131 ns           |
-| cold start (AOT vs runtime)     | **1.2 ms** | —                          | 98 ms (80x)                  |
+| Scenario                      | JIT runtime   | JIT AOT      | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
+| ----------------------------- | ------------- | ------------ | --------- | ----------- | ----------- | ----------- |
+| `is()` valid object           | 60.48 ns      | **58.53 ns** | 916.02 ns | 0.28 b      | 2.34 kb     | **15.7x**   |
+| `is()` invalid object         | 2.87 ns       | **2.73 ns**  | 29.12 µs  | 0.03 b      | 16.56 kb    | **10,669x** |
+| `safeParse` valid object      | **66.13 ns**  | 68.37 ns     | 807.75 ns | 40.23 b     | 2.00 kb     | **11.8x**   |
+| `safeParse` invalid, 7 issues | **116.81 ns** | 124.18 ns    | 25.40 µs  | 624.41 b    | 5.45 kb     | **204.5x**  |
 
 ## Install
 
 ```sh
-pnpm add jit          # or npm i / yarn add
+pnpm add jit
 ```
 
 ---
@@ -80,7 +77,8 @@ zod-like builders; every schema carries its inferred type
 ```ts
 // primitives
 JIT.string()  JIT.number()  JIT.int()  JIT.boolean()  JIT.bigint()
-JIT.date()    JIT.literal("click")  JIT.enum({ A: "a", B: "b" })
+JIT.date()    JIT.literal("click")
+JIT.enum({ A: "a", B: "b" })  JIT.enum(["admin", "user"] as const)
 JIT.null()    JIT.undefined()  JIT.any()  JIT.unknown()  JIT.never()
 
 // collections
@@ -96,6 +94,71 @@ JIT.intersection(A, B)
 .optional() .nullable() .nullish() .readonly() .promise()
 .default(value | () => value) .brand("UserId")
 .refine((v) => v.ok, "custom message") .pipe((v) => transform(v))
+```
+
+Objects are mutable by default for normal TypeScript ergonomics. Use
+`.readonly()` when the parsed output must be frozen at the root.
+
+### Advanced schemas
+
+```ts
+JIT.json(); // any JSON-encodable value
+JIT.custom<Decimal>((value) => Decimal.isDecimal(value), "expected Decimal");
+JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const);
+// inferred type: `hello, ${string}!`
+
+const MyFunction = JIT.function({
+  input: [JIT.string()],
+  output: JIT.number(),
+});
+
+const computeTrimmedLength = MyFunction.implement((input) => {
+  return input.trim().length;
+});
+
+const computeTrimmedLengthAsync = MyFunction.implementAsync(async (input) => {
+  return input.trim().length;
+});
+```
+
+Every builder supports `.apply()` for reusable schema decorators:
+
+```ts
+function commonNumberChecks<T extends ReturnType<typeof JIT.number>>(
+  schema: T,
+) {
+  return schema.min(0).max(100);
+}
+
+const Percent = JIT.number().apply(commonNumberChecks).nullable();
+```
+
+Temporal validates the native `globalThis.Temporal` objects. Tests use
+`@js-temporal/polyfill`; production code can bring the same polyfill or run
+on a runtime with Temporal enabled.
+
+```ts
+JIT.temporal.instant();
+JIT.temporal.plainDate();
+JIT.temporal.plainTime();
+JIT.temporal.plainDateTime();
+JIT.temporal.zonedDateTime();
+JIT.temporal.plainYearMonth();
+JIT.temporal.plainMonthDay();
+JIT.temporal.duration();
+```
+
+Value codecs are bidirectional transforms, separate from the binary wire
+codec:
+
+```ts
+const stringToDate = JIT.codec(JIT.string().datetime(), JIT.date(), {
+  decode: (iso) => new Date(iso),
+  encode: (date) => date.toISOString(),
+});
+
+stringToDate.decode("2026-07-10T00:00:00.000Z"); // Date
+stringToDate.encode(new Date("2026-07-10T00:00:00.000Z")); // ISO string
 ```
 
 ### Checks and custom messages
@@ -158,8 +221,13 @@ JIT.object({...}).hash("ordered")                      // equal short-circuit
 ### Object algebra
 
 ```ts
-Base.pick(["id", "name"])  Base.omit(["secret"])  Base.partial()
+Base.pick("id", "name")  Base.omit("secret")  Base.partial()
 Base.extend({ tag: JIT.string() })  Base.merge(Other)
+
+const Strict = Base.strict(); // reject unknown keys
+const Loose = Base.loose(); // preserve unknown keys
+const WithFlags = Base.catchall(JIT.boolean()); // validate/transform extras
+const BaseKeys = Base.keyof(); // enum of known object keys
 ```
 
 ---
@@ -176,6 +244,18 @@ Users.parse(x); // data or throws JITValidationError
 // async: settles promise wrappers, then validates the resolved value
 const Job = JIT.object({ result: JIT.string().min(3).promise() });
 await JIT.validator(Job).parseAsync({ result: fetchResult() });
+```
+
+Validators can be compiled selectively. The compiler emits only the requested
+surface plus the minimum shared internals needed by that surface:
+
+```ts
+const Selected = JIT.validator(User, { is: true, parse: true });
+Selected.is(input);
+Selected.parse(input);
+Selected.safeParse; // ✗ not compiled
+
+const { is, parse } = JIT.validator(User).get("is", "parse");
 ```
 
 Issues are consumable vectors — path, machine code, expectation, message:
@@ -332,78 +412,139 @@ JIT.stream(Event, { format: "ndjson", onItem }); // one document per line
 
 ## Explicit compilation — `JIT.compile`
 
-The opt-in aggregation: only what you list is compiled, typed, and shipped.
-Your own compiled queries and mappers join the same object:
+The opt-in aggregation: pass already-compiled functions and extras in one
+object. Only those properties exist at runtime, in types, and in AOT output.
+This is the preferred shape when you want `User.is()` style imports.
 
 ```ts
-export const Users = JIT.compile(User, ["is", "equal", "stringify"], {
+const UserSchema = JIT.object({
+  id: JIT.number(),
+  name: JIT.string(),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+});
+
+const selected = JIT.validator(UserSchema).get("is", "parse");
+
+export const User = JIT.compile(UserSchema, {
+  is: selected.is,
+  parse: selected.parse,
   findAdmins: JIT.query(UserList)
     .filter((q) => q.eq("role", "admin"))
     .compile(),
-  toDTO: JIT.mapper(User, PublicUser),
+  toDTO: JIT.mapper(UserSchema, PublicUser),
 });
 
-Users.is(input);
-Users.findAdmins(users); // your query, no prefixes, fully typed
-Users.toDTO.many(users);
-Users.clone(x); // ✗ does not exist — not requested, not compiled
+User.is(input);
+User.findAdmins(users); // your query, no prefixes, fully typed
+User.toDTO.many(users);
+User.clone(x); // ✗ does not exist — not requested, not compiled
 ```
 
 ## AOT — `jit generate`
 
-The same object doubles as the **generation marker**: exported from a schema
-file, `jit generate` emits exactly those operations (plus your extras) as
-pure code.
+Create the config in the project root:
+
+```sh
+pnpm jit init
+```
+
+Generated `jit.config.ts`:
+
+```ts
+import { AOT } from "jit";
+
+export default AOT.defineConfig({
+  schemas: ["src"], // files or directories scanned for *.jit.*
+  outDir: "node_modules/@jit/generated",
+  packageName: "@jit/generated",
+  operations: ["is", "parse", "safeParse"], // fallback for raw schemas
+  exportMode: "auto",
+  clean: true, // delete only jit's known generated files before writing
+  emitPackageJson: true,
+});
+```
+
+`exportMode: "auto"` follows the project rule:
+
+- export a raw schema and AOT emits flat functions: `User_is`, `User_parse`;
+- export `JIT.compile(schema, { ... })` and AOT emits one grouped object:
+  `User.is`, `User.parse`;
+- `exportMode: "flat" | "grouped" | "both"` can force the shape globally.
 
 ```ts
 // src/user.jit.ts — discovered by convention (*.jit.{ts,mts,js,mjs,cjs})
 import { JIT } from "jit";
 
-export const User = JIT.object({ ... });
-export const Users = JIT.compile(User, ["is", "parse", "stringify"], {
-  findAdmins: JIT.query(JIT.array(User)).filter((q) => q.eq("role", "admin")).compile(),
+const UserSchema = JIT.object({
+  id: JIT.number(),
+  name: JIT.string(),
+  role: JIT.string(),
+});
+
+const selected = JIT.validator(UserSchema).get("is", "parse");
+
+export const User = JIT.compile(UserSchema, {
+  is: selected.is,
+  parse: selected.parse,
+  findAdmins: JIT.query(JIT.array(UserSchema))
+    .filter((q) => q.eq("role", "admin"))
+    .compile(),
 });
 ```
 
 ```ts
-// jit.config.ts (optional — convention scan works without it)
-import { AOT } from "jit";
+import { User } from "@jit/generated";
 
-export default AOT.defineConfig({
-  schemas: ["src/models"], // files or directories
-  outDir: "node_modules/@jit/generated", // default
-  packageName: "@jit/generated",
-});
+User.is(input);
+User.findAdmins(users);
 ```
 
+Raw schema export:
+
+```ts
+// src/user.jit.ts
+export const User = UserSchema;
+```
+
+```ts
+import { User_is, User_parse } from "@jit/generated";
+```
+
+Run generation:
+
 ```sh
-npx jit generate                 # config → convention scan fallback
-npx jit generate src/user.jit.ts --out generated --name @acme/models
-npx jit generate --watch         # regenerate on change
+pnpm jit generate
+pnpm jit generate src/user.jit.ts --out generated --name @acme/models
+pnpm jit generate --ops is,parse --export flat
+pnpm jit generate --watch
 ```
 
 Output: `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
-(exports map, `sideEffects: false`). The module is **fully self-contained** —
-error class and runtime helpers are inlined, zero imports.
+(exports map, `sideEffects: false`). The module is **fully self-contained**:
+compiled functions, tiny error class, hash/index helpers, and codec helpers
+are inlined. There is no `import "jit"` in generated runtime code, so the
+final app bundle carries only the low-level specialized functions it imports.
+
+Types are derived from your schema file, never re-emitted by hand:
 
 ```ts
-import { Users } from "@jit/generated"; // aggregated namespace
-import { Users_is } from "@jit/generated"; // flat, per-op tree-shaking
-```
-
-Types are **derived from your schema file**, never re-emitted by hand:
-
-```ts
-// generated index.d.ts
-export type Users = import("jit").Infer<
-  typeof import("../src/user.jit.js").Users
+// grouped marker
+export type User = import("jit").Infer<
+  typeof import("../src/user.jit.js").User
 >;
-export declare const Users_is: (value: unknown) => value is Users;
+export declare const User: {
+  readonly is: (value: unknown) => value is User;
+  readonly parse: (value: unknown) => User;
+};
+
+// flat raw schema
+export declare const User_is: (value: unknown) => value is User;
 ```
 
 Tree-shaking is proven by a real bundler in the test suite: importing only
 `User_is` produces a bundle with **no serializer, no codec, no error class,
-no namespace object** — operations whose bindings hold user callbacks
+no namespace object**. Object-style markers export only the object; flat mode
+exports only functions. Operations whose bindings hold user callbacks
 (`refine`, computed mapper fields) are skipped with a reported reason instead
 of silently miscompiling.
 
@@ -442,9 +583,9 @@ come from, and every one of them is locked by golden-source or snapshot tests:
   user values per compile (query/mapper). The second `.compile()` of an
   identical plan is a map lookup.
 - **AOT ahead of everything** — generation moves compilation to build time:
-  self-contained zero-import modules, ~80x faster cold start, and
-  `/*#__PURE__*/` pure-call accessors so bundlers drop every unused
-  operation (proven with esbuild in the test suite).
+  self-contained zero-import modules, flat pure-function exports for raw
+  schemas, and grouped objects only for object-style `JIT.compile` markers
+  (proven with esbuild in the test suite).
 
 **Allocate only when the data changes**
 
@@ -503,8 +644,12 @@ follows.
 ## Development
 
 ```sh
+pnpm jit init        # create jit.config.ts in the current project root
+pnpm jit generate    # generate the configured AOT package
 pnpm test            # vitest + typecheck + golden sources + snapshots
-pnpm bench:all       # mitata suites (equal/clone/query/validate/serialize/...)
+pnpm bench:validate  # Zod 4 / typia / JIT runtime / JIT AOT validation bench
+pnpm bench:all       # all mitata suites (equal/clone/query/validate/serialize/...)
+pnpm bench:report    # regenerate docs/internal/BENCH.md from latest results
 pnpm bench:coldstart # fresh-process AOT vs runtime compile
 pnpm format          # biome
 ```

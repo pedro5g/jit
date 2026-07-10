@@ -21,25 +21,27 @@ in the compilation path. The emitted function interprets nothing.
 
 ## Module map (`packages/jit/src`)
 
-| Area | Responsibility |
-|---|---|
-| `core/ats` | schema AST: `TypeName`, def shapes, `ChecksDef`, `Infer` type helpers |
-| `core/builder` | fluent chain (`.min()`, `.email()`, wrappers, hints); check methods are type-gated per schema kind |
-| `core/hints` | manual strategy hints (`entity`, `indexBy`, `hash`, `ordered`, ...) |
-| `transforms` | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers) |
-| `compiler` | one emitter per operation; shared IR (`ir/ir.ts`) + optimizer passes for equal and query; string emitters (validate/serialize/codec/scrub/stream) follow the same codegen rules |
-| `runtime` | compile cache, keyed-index cache, hash primitives, boundary scanner (stream), artifact registry |
-| `factories` | the public `JIT.*` namespace: schema factories + every `compile*` entry point + `model`/`compile` aggregations |
-| `aot` | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary |
-| `shared` | source-emission helpers (`parse.ts`: escaping, identifiers, key access) and the `regexes` format library |
-| `errors` | typed `JITError` / `JITValidationError` |
+| Area           | Responsibility                                                                                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/ats`     | schema AST: `TypeName`, def shapes, `ChecksDef`, `Infer` type helpers                                                                                                           |
+| `core/builder` | fluent chain (`.min()`, `.email()`, wrappers, hints); check methods are type-gated per schema kind                                                                              |
+| `core/hints`   | manual strategy hints (`entity`, `indexBy`, `hash`, `ordered`, ...)                                                                                                             |
+| `transforms`   | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers)                                                                                                    |
+| `compiler`     | one emitter per operation; shared IR (`ir/ir.ts`) + optimizer passes for equal and query; string emitters (validate/serialize/codec/scrub/stream) follow the same codegen rules |
+| `runtime`      | compile cache, keyed-index cache, hash primitives, boundary scanner (stream), artifact registry                                                                                 |
+| `factories`    | the public `JIT.*` namespace: schema factories + every `compile*` entry point + `model`/`compile` aggregations                                                                  |
+| `aot`          | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary                                                                              |
+| `shared`       | source-emission helpers (`parse.ts`: escaping, identifiers, key access) and the `regexes` format library                                                                        |
+| `errors`       | typed `JITError` / `JITValidationError`                                                                                                                                         |
 
 ## Schema AST
 
 Every schema node keeps this stable runtime shape and property order:
 
 ```ts
-{ type, _type, def, annotations }
+{
+  (type, _type, def, annotations);
+}
 ```
 
 - `_type` is a TypeScript phantom output type, always `null` at runtime;
@@ -116,10 +118,14 @@ reference when nothing rebuilds (`needsBuild` gates every allocation).
   (exports map, `sideEffects: false`);
 - zero imports — the validation error class and runtime helpers
   (keyed-index cache, hash primitives) are inlined;
-- flat per-operation exports (`User_is`) plus a `/*#__PURE__*/` namespace
-  aggregation; accessors are pure calls, not property reads, so bundlers
-  drop unused operations (proven by an esbuild bundle in
-  `aot/__tests__/treeshake.test.ts`);
+- export shape is explicit and bundle-oriented: `auto` emits flat
+  per-operation functions (`User_is`, `User_parse`) for raw schemas and
+  array-style markers, and emits only the grouped object (`User.is`) for
+  object-style `JIT.compile(schema, { ... })` markers; `flat`, `grouped`,
+  and `both` can be forced by config;
+- operation allowlists come from `JIT.compile` markers first, then
+  `schemaOperations`, then global `operations`; the generator never emits
+  an operation outside that selected surface;
 - `.d.ts` types anchor on the dev's schema file via
   `import("jit").Infer<typeof import("./user.jit.js").User>` — inference is
   the single source of truth (`aot/emit-type.ts` is only the fallback for
@@ -128,10 +134,11 @@ reference when nothing rebuilds (`needsBuild` gates every allocation).
   dev-defined extras from the artifact registry; anything whose bindings
   hold callbacks is skipped with a reported reason, never miscompiled.
 
-Discovery (`aot/discover.ts`): `jit.config.*` → convention scan for
+CLI/config: `jit init` writes a typed `jit.config.*` in the current project
+root. `jit generate` resolves config first, then convention scans
 `*.jit.{ts,mts,cts,js,mjs,cjs}` (skipping `node_modules`, dot-dirs, build
-output). TypeScript schema files load natively on runtimes that strip
-types, falling back to `jiti` when installed.
+output). TypeScript schema files load natively on runtimes that strip types,
+falling back to `jiti` when installed.
 
 ## Optimizer boundaries
 
