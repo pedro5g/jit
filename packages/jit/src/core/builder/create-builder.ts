@@ -1,6 +1,13 @@
+import { compileValidator } from "../../compiler/validate.js";
 import { Regexes } from "../../shared/index.js";
 import * as Transform from "../../transforms/index.js";
-import { type AnyTypeSchema, type ObjectSchema, type SchemaShape, TypeName } from "../ats/index.js";
+import {
+  type AnyTypeSchema,
+  type FunctionSchema,
+  type ObjectSchema,
+  type SchemaShape,
+  TypeName,
+} from "../ats/index.js";
 import { attachHint, type EntityHint, type HashStrategy, type OrderDirection } from "../hints/index.js";
 import type { AnyBuilder, Builder, ObjectBuilder } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
@@ -48,6 +55,10 @@ const baseBuilderPrototype = {
 
   coerce(this: RuntimeBuilder, coercer: (value: unknown) => unknown): AnyBuilder {
     return createBuilder(Transform.coerce(this.schema, coercer));
+  },
+
+  apply(this: RuntimeBuilder, fn: (builder: AnyBuilder) => unknown): unknown {
+    return fn(this as unknown as AnyBuilder);
   },
 
   entity(this: RuntimeBuilder, options: EntityHint<unknown>): AnyBuilder {
@@ -437,12 +448,55 @@ const objectBuilderPrototype = {
   },
 };
 
+const functionBuilderPrototype = {
+  ...baseBuilderPrototype,
+
+  implement(this: RuntimeBuilder, implementation: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
+    const { args, output } = compileFunctionValidators(this.schema as RuntimeFunctionSchema);
+
+    return (...rawArgs: unknown[]) => {
+      const parsedArgs = args.parse(rawArgs) as unknown[];
+      const result = implementation(...parsedArgs);
+
+      return output ? output.parse(result) : result;
+    };
+  },
+
+  implementAsync(
+    this: RuntimeBuilder,
+    implementation: (...args: unknown[]) => PromiseLike<unknown>
+  ): (...args: unknown[]) => Promise<unknown> {
+    const { args, output } = compileFunctionValidators(this.schema as RuntimeFunctionSchema);
+
+    return async (...rawArgs: unknown[]) => {
+      const parsedArgs = args.parse(rawArgs) as unknown[];
+      const result = await implementation(...parsedArgs);
+
+      return output ? output.parseAsync(result) : result;
+    };
+  },
+};
+
+type RuntimeFunctionSchema = FunctionSchema<readonly AnyTypeSchema[], AnyTypeSchema | undefined>;
+
+function compileFunctionValidators(schema: RuntimeFunctionSchema) {
+  return {
+    args: compileValidator(schema.def.args),
+    output: schema.def.output ? compileValidator(schema.def.output) : undefined,
+  };
+}
+
 function normalizeKeys(first: readonly string[] | string, rest: readonly string[]): readonly string[] {
   return typeof first === "string" ? [first, ...rest] : first;
 }
 
 export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): Builder<TSchema> {
-  const prototype = schema.type === TypeName.object ? objectBuilderPrototype : baseBuilderPrototype;
+  const prototype =
+    schema.type === TypeName.object
+      ? objectBuilderPrototype
+      : schema.type === TypeName.function
+        ? functionBuilderPrototype
+        : baseBuilderPrototype;
   const builder = Object.create(prototype) as RuntimeBuilder;
   builder.schema = schema;
   return builder as Builder<TSchema>;

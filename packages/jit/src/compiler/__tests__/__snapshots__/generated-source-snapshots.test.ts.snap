@@ -467,6 +467,108 @@ function safeParse(value) {
 return { is: is, safeParse: safeParse };"
 `;
 
+exports[`generated source snapshots > validator: json, custom, and template literal schemas 1`] = `
+"function ij1(value) {
+  if (value === null) return true;
+  const type = typeof value;
+  if (type === "string" || type === "boolean") return true;
+  if (type === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (!ij1(value[i])) return false;
+    }
+    return true;
+  }
+  if (type !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++) {
+    if (!ij1(value[keys[i]])) return false;
+  }
+  return true;
+}
+function pj1(value) {
+  if (value === null) return true;
+  const type = typeof value;
+  if (type === "string" || type === "boolean") return true;
+  if (type === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (!pj1(value[i])) return false;
+    }
+    return true;
+  }
+  if (type !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++) {
+    if (!pj1(value[keys[i]])) return false;
+  }
+  return true;
+}
+function is(value) {
+  let v1 = value;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    return false;
+  }
+  let v3 = v1.data;
+  if (!ij1(v3)) {
+    return false;
+  }
+  let v5 = v1.external;
+  if (!__v0(v5)) {
+    return false;
+  }
+  let v7 = v1.greeting;
+  if (typeof v7 !== "string") {
+    return false;
+  }
+  if (!__v2.test(v7)) {
+    return false;
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v3 = v1.data;
+    let o4 = v3;
+    if (!pj1(v3)) {
+      issues[issues.length] = { path: "data", code: "invalid_json", expected: "JSON value", message: "expected a JSON-encodable value" };
+    }
+    o4 = v3;
+    let v5 = v1.external;
+    let o6 = v5;
+    if (!__v0(v5)) {
+      issues[issues.length] = { path: "external", code: "custom", expected: "custom", message: "custom predicate rejected the value" };
+    }
+    o6 = v5;
+    let v7 = v1.greeting;
+    let o8 = v7;
+    if (typeof v7 !== "string") {
+      issues[issues.length] = { path: "greeting", code: "expected_string", expected: "string", message: "expected string", received: typeof v7 };
+    } else {
+      if (!__v1.test(v7)) {
+        issues[issues.length] = { path: "greeting", code: "invalid_template_literal", expected: "template literal", message: "expected a matching template literal string" };
+      }
+    }
+    o8 = v7;
+  }
+  o2 = v1;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;
+
 exports[`generated source snapshots > validator: strict known keys and catchall transforms 1`] = `
 "function is(value) {
   let v1 = value;

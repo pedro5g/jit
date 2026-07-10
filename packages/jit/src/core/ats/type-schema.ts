@@ -154,7 +154,8 @@ export type AnyPrimitiveSchema =
   | BigIntSchema
   | DateSchema
   | RegexSchema
-  | FileSchema;
+  | FileSchema
+  | JsonSchema;
 
 export type AnyValueSchema = BaseSchema<any, "any", EmptyDef>;
 export type UnknownSchema = BaseSchema<unknown, "unknown", EmptyDef>;
@@ -172,6 +173,10 @@ export type BigIntSchema = BaseSchema<bigint, "bigint", CoercibleDef>;
 export type DateSchema = BaseSchema<Date, "date", CoercibleDef>;
 export type RegexSchema = BaseSchema<RegExp, "regex", EmptyDef>;
 export type FileSchema = BaseSchema<File, "file", EmptyDef>;
+
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | { [key: string]: JsonValue } | JsonValue[];
+export type JsonSchema = BaseSchema<JsonValue, "json", EmptyDef>;
 
 export interface ElementDef<TElement extends AnyTypeSchema = AnyTypeSchema> {
   readonly element: TElement;
@@ -428,7 +433,15 @@ export type LazySchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchem
   LazyDef<TInner>
 >;
 
-export type AnySpecialSchema = LiteralSchema | EnumSchema | InstanceOfSchema | RefineSchema | CoerceSchema;
+export type AnySpecialSchema =
+  | LiteralSchema
+  | EnumSchema
+  | InstanceOfSchema
+  | RefineSchema
+  | CoerceSchema
+  | CustomSchema
+  | TemplateLiteralSchema
+  | FunctionSchema;
 
 export interface LiteralDef<TValue = unknown> {
   readonly value: TValue;
@@ -471,6 +484,76 @@ export type InstanceOfSchema<
     ...args: any[]
   ) => unknown,
 > = BaseSchema<InstanceType<TCtor>, "instanceof", InstanceOfDef<TCtor>>;
+
+export interface CustomDef<TOutput = unknown> {
+  readonly predicate: ((value: unknown) => value is TOutput) | ((value: unknown) => boolean) | undefined;
+  readonly message: string | undefined;
+}
+
+export type CustomSchema<TOutput = unknown> = BaseSchema<TOutput, "custom", CustomDef<TOutput>>;
+
+export type TemplateLiteralInputPart = string | AnyTypeSchema | { readonly schema: AnyTypeSchema };
+
+export interface TemplateLiteralDef<
+  TParts extends readonly (string | AnyTypeSchema)[] = readonly (string | AnyTypeSchema)[],
+> {
+  readonly parts: TParts;
+}
+
+export type TemplateLiteralSchema<
+  TParts extends readonly TemplateLiteralInputPart[] = readonly TemplateLiteralInputPart[],
+> = BaseSchema<
+  TemplateLiteralOutput<TParts>,
+  "templateLiteral",
+  TemplateLiteralDef<TemplateLiteralRuntimeParts<TParts>>
+>;
+
+export type TemplateLiteralRuntimeParts<TParts extends readonly TemplateLiteralInputPart[]> = {
+  readonly [TKey in keyof TParts]: TParts[TKey] extends string ? TParts[TKey] : SchemaFromInputPart<TParts[TKey]>;
+};
+
+export type TemplateLiteralOutput<TParts extends readonly TemplateLiteralInputPart[]> = TParts extends readonly [
+  infer THead extends TemplateLiteralInputPart,
+  ...infer TTail extends readonly TemplateLiteralInputPart[],
+]
+  ? `${TemplateLiteralPartOutput<THead>}${TemplateLiteralOutput<TTail>}`
+  : "";
+
+type TemplateLiteralPartOutput<TPart extends TemplateLiteralInputPart> = TPart extends string
+  ? TPart
+  : SchemaStringValue<InferSchema<SchemaFromInputPart<TPart>>>;
+
+type SchemaFromInputPart<TPart extends TemplateLiteralInputPart> = TPart extends { readonly schema: infer TSchema }
+  ? TSchema extends AnyTypeSchema
+    ? TSchema
+    : never
+  : TPart extends AnyTypeSchema
+    ? TPart
+    : never;
+
+type SchemaStringValue<TValue> = Extract<TValue, string | number | bigint | boolean | null | undefined>;
+
+export type FunctionInputSchemas = readonly AnyTypeSchema[];
+
+export interface FunctionDef<
+  TInput extends FunctionInputSchemas = FunctionInputSchemas,
+  TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
+> {
+  readonly input: TInput;
+  readonly output: TOutput;
+  readonly args: TupleSchema<TInput>;
+}
+
+export type FunctionArgs<TInput extends FunctionInputSchemas> = TupleOutput<TInput>;
+
+export type FunctionReturn<TOutput extends AnyTypeSchema | undefined> = TOutput extends AnyTypeSchema
+  ? InferSchema<TOutput>
+  : unknown;
+
+export type FunctionSchema<
+  TInput extends FunctionInputSchemas = FunctionInputSchemas,
+  TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
+> = BaseSchema<(...args: FunctionArgs<TInput>) => FunctionReturn<TOutput>, "function", FunctionDef<TInput, TOutput>>;
 
 export interface RefineDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
   readonly predicate: (value: InferSchema<TInner>) => boolean;

@@ -1,11 +1,18 @@
 import {
   type AnyTypeSchema,
+  type CustomSchema,
   createSchema,
   type EnumSchema,
   type EnumValuesInput,
+  type FunctionInputSchemas,
+  type FunctionSchema,
   type InstanceOfSchema,
+  type JsonSchema,
   type LazySchema,
   type LiteralSchema,
+  type TemplateLiteralInputPart,
+  type TemplateLiteralSchema,
+  type TupleSchema,
   TypeName,
 } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
@@ -74,3 +81,83 @@ export function instanceOf<TCtor extends abstract new (...args: any[]) => unknow
     })
   );
 }
+
+/** Creates a schema that accepts JSON-encodable values. */
+export function json(): Builder<JsonSchema> {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, {}));
+}
+
+/**
+ * Creates a custom schema backed by an external predicate. Omitting the
+ * predicate intentionally accepts any value while preserving `TOutput`.
+ */
+export function custom<TOutput = unknown>(
+  predicate?: ((value: unknown) => value is TOutput) | ((value: unknown) => boolean),
+  message?: string
+): Builder<CustomSchema<TOutput>> {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.custom, {
+      predicate,
+      message,
+    })
+  );
+}
+
+export type TemplateLiteralFactoryPart = string | SchemaInput;
+
+/** Creates a template-literal string schema from literal and schema parts. */
+export function templateLiteral<const TParts extends readonly TemplateLiteralFactoryPart[]>(
+  parts: TParts
+): Builder<TemplateLiteralSchema<TParts>> {
+  const normalized = parts.map((part) => (typeof part === "string" ? part : unwrapSchema(part))) as unknown as TParts;
+
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.templateLiteral, {
+      parts: normalized as readonly TemplateLiteralInputPart[],
+    }) as TemplateLiteralSchema<TParts>
+  );
+}
+
+export interface FunctionSchemaOptions<
+  TInput extends readonly SchemaInput[],
+  TOutput extends SchemaInput | undefined = undefined,
+> {
+  readonly input: TInput;
+  readonly output?: TOutput;
+}
+
+type UnwrapFunctionInputs<TInput extends readonly SchemaInput[]> = {
+  readonly [TKey in keyof TInput]: TInput[TKey] extends SchemaInput<infer TSchema> ? TSchema : never;
+} extends infer TInputs extends FunctionInputSchemas
+  ? TInputs
+  : never;
+
+type UnwrapFunctionOutput<TOutput extends SchemaInput | undefined> =
+  TOutput extends SchemaInput<infer TSchema> ? TSchema : undefined;
+
+/** Creates a function schema with input/output validation wrappers. */
+function functionSchema<
+  const TInput extends readonly SchemaInput[],
+  TOutput extends SchemaInput | undefined = undefined,
+>(
+  options: FunctionSchemaOptions<TInput, TOutput>
+): Builder<FunctionSchema<UnwrapFunctionInputs<TInput>, UnwrapFunctionOutput<TOutput>>> {
+  const input = options.input.map((item) => unwrapSchema(item)) as unknown as UnwrapFunctionInputs<TInput>;
+  const output = (
+    options.output === undefined ? undefined : unwrapSchema(options.output)
+  ) as UnwrapFunctionOutput<TOutput>;
+  const args = createSchema(TypeName.tuple, {
+    items: input,
+    rest: undefined,
+  }) as TupleSchema<UnwrapFunctionInputs<TInput>>;
+
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.function, {
+      input,
+      output,
+      args,
+    }) as FunctionSchema<UnwrapFunctionInputs<TInput>, UnwrapFunctionOutput<TOutput>>
+  );
+}
+
+export { functionSchema as function, templateLiteral as templateLiterals };

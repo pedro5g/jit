@@ -371,6 +371,50 @@ describe("JIT AST builders", () => {
       expect(schema.def.ctor).toBe(User);
       expectTypeOf(schema._type).toEqualTypeOf<User>();
     });
+
+    it("should construct json, custom, template literal, and function schemas", () => {
+      const Json = JIT.json().schema;
+      const Custom = JIT.custom<{ cents: number }>((value) => typeof value === "object" && value !== null).schema;
+      const Greeting = JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const).schema;
+      const MyFunction = JIT.function({
+        input: [JIT.string()],
+        output: JIT.number(),
+      });
+      const computeTrimmedLength = MyFunction.implement((input) => input.trim().length);
+      const InputOnly = JIT.function({ input: [JIT.string()] });
+      const returnsBoolean = InputOnly.implement((input) => input.length > 0);
+
+      expect(Json.type).toBe(AST.TypeName.json);
+      expect(Custom.type).toBe(AST.TypeName.custom);
+      expect(Greeting.type).toBe(AST.TypeName.templateLiteral);
+      expect(Greeting.def.parts[0]).toBe("hello, ");
+      expect(Greeting.def.parts[1].type).toBe(AST.TypeName.string);
+      expect(MyFunction.schema.type).toBe(AST.TypeName.function);
+      expect(MyFunction.schema.def.input[0].type).toBe(AST.TypeName.string);
+      expect(MyFunction.schema.def.output?.type).toBe(AST.TypeName.number);
+
+      expectTypeOf(Json._type).toEqualTypeOf<AST.JsonValue>();
+      expectTypeOf(Custom._type).toEqualTypeOf<{ cents: number }>();
+      expectTypeOf(Greeting._type).toEqualTypeOf<`hello, ${string}!`>();
+      expectTypeOf<AST.Infer<typeof MyFunction>>().toEqualTypeOf<(input: string) => number>();
+      expectTypeOf(computeTrimmedLength).toEqualTypeOf<(input: string) => number>();
+      expectTypeOf(returnsBoolean).toEqualTypeOf<(input: string) => boolean>();
+    });
+
+    it("should apply external builder functions inside chains", () => {
+      function setCommonNumberChecks<TSchema extends ReturnType<typeof JIT.number>>(schema: TSchema) {
+        return schema.min(0).max(100);
+      }
+
+      const schema = JIT.number().apply(setCommonNumberChecks).nullable().schema;
+
+      expect(schema.type).toBe(AST.TypeName.nullable);
+      expect(schema.def.innerType.def.checks).toEqual([
+        { kind: "min", value: 0 },
+        { kind: "max", value: 100 },
+      ]);
+      expectTypeOf(schema._type).toEqualTypeOf<number | null>();
+    });
   });
 
   describe("object operators", () => {

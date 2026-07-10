@@ -273,6 +273,15 @@ class ValidatorEmitter {
           "expected a File"
         );
         return value;
+      case TypeName.json:
+        return this.emitJson(value, path);
+      case TypeName.custom:
+        return this.emitCustom(schema, value, path);
+      case TypeName.templateLiteral:
+        return this.emitTemplateLiteral(schema, value, path);
+      case TypeName.function:
+        this.failIf(`typeof ${value} !== "function"`, path, "expected_function", "function", "expected function");
+        return value;
       case TypeName.literal: {
         const literalSource = emitLiteral(schema.def.value as never);
         const literalText = String(schema.def.value);
@@ -392,6 +401,81 @@ class ValidatorEmitter {
   private emitTypeofLeaf(value: string, path: PathRef, expected: string): string {
     this.failIf(`typeof ${value} !== "${expected}"`, path, `expected_${expected}`, expected, `expected ${expected}`);
     return value;
+  }
+
+  private emitJson(value: string, path: PathRef): string {
+    this.failIf(
+      `!${this.emitJsonPredicate()}(${value})`,
+      path,
+      "invalid_json",
+      "JSON value",
+      "expected a JSON-encodable value"
+    );
+    return value;
+  }
+
+  private emitCustom(schema: AnySchema, value: string, path: PathRef): string {
+    const predicate = schema.def.predicate as ((value: unknown) => boolean) | undefined;
+
+    if (predicate) {
+      this.failIf(
+        `!${this.bind(predicate)}(${value})`,
+        path,
+        "custom",
+        "custom",
+        (schema.def.message as string | undefined) ?? "custom predicate rejected the value"
+      );
+    }
+    return value;
+  }
+
+  private emitTemplateLiteral(schema: AnySchema, value: string, path: PathRef): string {
+    const regex = buildTemplateLiteralRegex(schema.def.parts as readonly (string | ATS.AnyTypeSchema)[]);
+
+    this.typeGate(
+      `typeof ${value} !== "string"`,
+      path,
+      "expected_string",
+      "string",
+      "expected string",
+      () => {
+        this.failIf(
+          `!${this.bind(regex)}.test(${value})`,
+          path,
+          "invalid_template_literal",
+          "template literal",
+          "expected a matching template literal string"
+        );
+      },
+      `typeof ${value}`
+    );
+    return value;
+  }
+
+  private emitJsonPredicate(): string {
+    const name = `${this.rootMode === "is" ? "ij" : "pj"}${++this.helperCounter}`;
+
+    this.helperSources.push(`function ${name}(value) {
+  if (value === null) return true;
+  const type = typeof value;
+  if (type === "string" || type === "boolean") return true;
+  if (type === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (!${name}(value[i])) return false;
+    }
+    return true;
+  }
+  if (type !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++) {
+    if (!${name}(value[keys[i]])) return false;
+  }
+  return true;
+}`);
+    return name;
   }
 
   private emitString(schema: AnySchema, value: string, path: PathRef): string {
@@ -1091,6 +1175,68 @@ function isShallowOption(schema: ATS.AnyTypeSchema): boolean {
     default:
       return false;
   }
+}
+
+function buildTemplateLiteralRegex(parts: readonly (string | ATS.AnyTypeSchema)[]): RegExp {
+  return new RegExp(`^${parts.map(templateLiteralPartSource).join("")}$`, "u");
+}
+
+function templateLiteralPartSource(part: string | ATS.AnyTypeSchema): string {
+  return typeof part === "string" ? escapeRegExp(part) : templateLiteralSchemaSource(part);
+}
+
+function templateLiteralSchemaSource(schema: ATS.AnyTypeSchema): string {
+  const current = schema as AnySchema;
+
+  switch (current.type) {
+    case TypeName.string:
+      return "[\\s\\S]*";
+    case TypeName.number:
+      return "-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?";
+    case TypeName.int:
+      return "-?(?:0|[1-9]\\d*)";
+    case TypeName.boolean:
+      return "(?:true|false)";
+    case TypeName.bigint:
+      return "-?(?:0|[1-9]\\d*)";
+    case TypeName.null:
+      return "null";
+    case TypeName.undefined:
+      return "undefined";
+    case TypeName.literal:
+      return escapeRegExp(String(current.def.value));
+    case TypeName.enum: {
+      const values = Object.values(current.def.values as Record<string, string | number>);
+
+      return values.length === 0 ? "(?!)" : `(?:${values.map((value) => escapeRegExp(String(value))).join("|")})`;
+    }
+    case TypeName.union:
+      return `(?:${(current.def.options as readonly ATS.AnyTypeSchema[])
+        .map((option) => templateLiteralSchemaSource(option))
+        .join("|")})`;
+    case TypeName.optional:
+      return `(?:${templateLiteralSchemaSource(current.def.innerType as ATS.AnyTypeSchema)}|undefined)`;
+    case TypeName.nullable:
+      return `(?:${templateLiteralSchemaSource(current.def.innerType as ATS.AnyTypeSchema)}|null)`;
+    case TypeName.nullish:
+      return `(?:${templateLiteralSchemaSource(current.def.innerType as ATS.AnyTypeSchema)}|null|undefined)`;
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+      return templateLiteralSchemaSource(current.def.innerType as ATS.AnyTypeSchema);
+    case TypeName.lazy:
+      return templateLiteralSchemaSource((current.def.getter as () => ATS.AnyTypeSchema)());
+    default:
+      throw new Error(`templateLiteral cannot compile ${current.type} parts`);
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
 function staticChild(path: PathRef, segment: string): PathRef {

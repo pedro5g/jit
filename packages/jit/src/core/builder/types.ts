@@ -5,6 +5,9 @@ import type {
   CoerceSchema,
   DefaultSchema,
   EnumSchema,
+  FunctionArgs,
+  FunctionReturn,
+  FunctionSchema,
   InferSchema,
   MergeShape,
   NullableSchema,
@@ -39,6 +42,7 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   pipe<TOutput>(transform: (value: InferSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
   refine(predicate: (value: InferSchema<TSchema>) => boolean, message?: string): Builder<RefineSchema<TSchema>>;
   coerce(coercer: (value: unknown) => InferSchema<TSchema>): Builder<CoerceSchema<TSchema>>;
+  apply<TNext>(fn: (builder: Builder<TSchema>) => TNext): TNext;
   entity(options: EntityHint<HintTarget<InferSchema<TSchema>>>): Builder<TSchema>;
   keyed(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
   groupBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
@@ -110,6 +114,18 @@ export type UnwrapBuilderShape<TShape extends Record<string, SchemaInput>> = {
 };
 
 export type BaseBuilder<TSchema extends AnyTypeSchema> = BuilderCore<TSchema>;
+
+export interface FunctionOperators<
+  TInput extends readonly AnyTypeSchema[],
+  TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
+> {
+  implement<TImplementation extends (...args: FunctionArgs<TInput>) => FunctionReturn<TOutput>>(
+    implementation: TImplementation
+  ): (...args: FunctionArgs<TInput>) => ReturnType<TImplementation>;
+  implementAsync<TImplementation extends (...args: FunctionArgs<TInput>) => PromiseLike<FunctionReturn<TOutput>>>(
+    implementation: TImplementation
+  ): (...args: FunctionArgs<TInput>) => Promise<Awaited<ReturnType<TImplementation>>>;
+}
 
 /** String constraint methods; every call returns the same builder type. */
 export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
@@ -193,9 +209,16 @@ export type ObjectBuilder<
   TCatchall extends AnyTypeSchema | undefined = undefined,
 > = BuilderCore<ObjectSchema<TShape, TUnknownKeys, TCatchall>> & ObjectOperators<TShape, TUnknownKeys, TCatchall>;
 
+export type FunctionBuilder<
+  TInput extends readonly AnyTypeSchema[],
+  TOutput extends AnyTypeSchema | undefined = AnyTypeSchema | undefined,
+> = BuilderCore<FunctionSchema<TInput, TOutput>> & FunctionOperators<TInput, TOutput>;
+
 export type Builder<TSchema extends AnyTypeSchema> =
   TSchema extends ObjectSchema<infer TShape, infer TUnknownKeys, infer TCatchall>
     ? ObjectBuilder<TShape, TUnknownKeys, TCatchall>
-    : BaseBuilder<TSchema> & CheckMethods<TSchema>;
+    : TSchema extends FunctionSchema<infer TInput, infer TOutput>
+      ? FunctionBuilder<TInput, TOutput>
+      : BaseBuilder<TSchema> & CheckMethods<TSchema>;
 
 export type AnyBuilder = Builder<AnyTypeSchema>;

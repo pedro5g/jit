@@ -77,6 +77,18 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitValidatorSource(Payload.schema)).toMatchSnapshot();
   });
 
+  it("validator: json, custom, and template literal schemas", () => {
+    const Payload = JIT.object({
+      data: JIT.json(),
+      external: JIT.custom<{ id: string }>(
+        (value): value is { id: string } => typeof value === "object" && value !== null && "id" in value
+      ),
+      greeting: JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const),
+    });
+
+    expect(Compiler.emitValidatorSource(Payload.schema)).toMatchSnapshot();
+  });
+
   it("serializer: nested objects, optionals, records, and arrays", () => {
     const Report = JIT.object({
       title: JIT.string(),

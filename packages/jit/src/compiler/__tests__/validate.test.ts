@@ -428,6 +428,76 @@ describe("JIT compiler validator", () => {
     if (!bad.success) expect(bad.issues[0].expected).toBe("Promise");
   });
 
+  it("should validate JSON-encodable values recursively", () => {
+    const Json = JIT.json();
+    const validate = JIT.validator(Json);
+
+    expect(validate.is({ user: "Ada", scores: [1, true, null] })).toBe(true);
+    expect(validate.is({ nope: undefined })).toBe(false);
+    expect(validate.is(Number.NaN)).toBe(false);
+    expect(validate.is(new Date())).toBe(false);
+
+    const bad = validate.safeParse({ nested: [1, undefined] });
+
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.issues[0].code).toBe("invalid_json");
+  });
+
+  it("should validate custom schemas through external predicates", () => {
+    const DecimalLike = JIT.custom<{ toString(): string }>(
+      (value): value is { toString(): string } =>
+        typeof value === "object" && value !== null && typeof value.toString === "function",
+      "expected decimal-like value"
+    );
+    const AnythingTyped = JIT.custom<{ id: string }>();
+    const validate = JIT.validator(DecimalLike);
+
+    expect(validate.is({ toString: () => "1.5" })).toBe(true);
+    expect(validate.is("1.5")).toBe(false);
+    expect(JIT.validator(AnythingTyped).parse({ id: 1 })).toEqual({ id: 1 });
+
+    const bad = validate.safeParse("1.5");
+
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.issues[0].message).toBe("expected decimal-like value");
+    expect(Compiler.emitValidatorSource(DecimalLike.schema)).not.toContain("expected decimal-like value() =>");
+  });
+
+  it("should validate template literal schemas with compiled regex bindings", () => {
+    const Greeting = JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const);
+    const Status = JIT.templateLiteral(["status:", JIT.enum(["ok", "failed"] as const), ":", JIT.int()] as const);
+    const greeting = JIT.validator(Greeting);
+    const status = JIT.validator(Status);
+    const source = Compiler.emitValidatorSource(Status.schema);
+
+    expect(greeting.is("hello, Ada!")).toBe(true);
+    expect(greeting.is("goodbye, Ada!")).toBe(false);
+    expect(status.is("status:ok:42")).toBe(true);
+    expect(status.is("status:failed:-7")).toBe(true);
+    expect(status.is("status:ok:1.5")).toBe(false);
+    expect(source).toContain("__v");
+    expect(source).not.toContain("status:ok");
+  });
+
+  it("should implement validated sync and async functions", async () => {
+    const MyFunction = JIT.function({
+      input: [JIT.string().trim()],
+      output: JIT.number().int(),
+    });
+    const computeTrimmedLength = MyFunction.implement((input) => input.length);
+    const badOutput = MyFunction.implement(() => 1.5);
+    const computeAsync = MyFunction.implementAsync(async (input) => input.length);
+
+    expect(computeTrimmedLength(" sandwich ")).toBe(8);
+    expect(await computeAsync(" asdf ")).toBe(4);
+    expect(() => computeTrimmedLength(42 as never)).toThrow(Errors.JITValidationError);
+    expect(() => badOutput("ok")).toThrow(Errors.JITValidationError);
+    await expect(computeAsync(42 as never)).rejects.toBeInstanceOf(Errors.JITValidationError);
+
+    expect(JIT.validator(MyFunction).is(computeTrimmedLength)).toBe(true);
+    expect(JIT.validator(MyFunction).is(42)).toBe(false);
+  });
+
   it("should apply transforms inside intersections on parse", () => {
     const Person = JIT.object({ name: JIT.string().trim() });
     const Audit = JIT.object({ createdBy: JIT.string().lowercase() });

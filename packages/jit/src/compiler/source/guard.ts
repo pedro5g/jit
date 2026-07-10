@@ -48,6 +48,14 @@ function emitBaseGuard(schema: GuardSchema, value: string): string {
       return `${value} instanceof RegExp`;
     case TypeName.file:
       return `(typeof File !== "undefined" && ${value} instanceof File)`;
+    case TypeName.json:
+      return "true";
+    case TypeName.custom:
+      return "true";
+    case TypeName.templateLiteral:
+      return `typeof ${value} === "string"`;
+    case TypeName.function:
+      return `typeof ${value} === "function"`;
     case TypeName.literal:
       return emitLiteralGuard(schema, value);
     case TypeName.enum:

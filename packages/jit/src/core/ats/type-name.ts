@@ -41,6 +41,10 @@ export const TypeName = {
   promise: "promise",
   instanceof: "instanceof",
   discriminatedUnion: "discriminatedUnion",
+  json: "json",
+  custom: "custom",
+  templateLiteral: "templateLiteral",
+  function: "function",
 } as const;
 
 export type AnyTypeName = TypeName[keyof TypeName];
