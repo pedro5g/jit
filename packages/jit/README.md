@@ -557,6 +557,33 @@ with a reported reason instead of silently miscompiling.
 
 ---
 
+## MCP server — `jit-mcp`
+
+jit ships a small MCP stdio server for coding agents working inside a project.
+It speaks newline-delimited JSON-RPC over stdin/stdout and exposes three tools:
+
+- `jit_project_context` — summarizes package metadata, branch, commands, and
+  docs.
+- `jit_aot_inspect` — discovers `.jit.ts` declarations and reports buildable
+  grouped objects / standalone functions.
+- `jit_aot_generate` — runs the same explicit AOT generation contract as
+  `jit generate`.
+
+Example client config:
+
+```json
+{
+  "mcpServers": {
+    "jit": {
+      "command": "pnpm",
+      "args": ["exec", "jit-mcp"]
+    }
+  }
+}
+```
+
+---
+
 ## Optimization playbook
 
 Every emitter follows the same set of strategies — this is where the numbers

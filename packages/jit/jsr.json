@@ -4,7 +4,8 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./cli": "./src/cli.ts"
+    "./cli": "./src/cli.ts",
+    "./mcp": "./src/mcp.ts"
   },
   "publish": {
     "include": [
