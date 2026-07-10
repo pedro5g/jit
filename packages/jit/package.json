@@ -31,7 +31,8 @@
     "exports": {
       "./package.json": "./package.json",
       ".": "./src/index.ts",
-      "./cli": "./src/cli.ts"
+      "./cli": "./src/cli.ts",
+      "./mcp": "./src/mcp.ts"
     },
     "conditions": {
       "@jit/source": "src"
@@ -64,10 +65,17 @@
       "types": "./cli.d.cts",
       "import": "./cli.js",
       "require": "./cli.cjs"
+    },
+    "./mcp": {
+      "@jit/source": "./src/mcp.ts",
+      "types": "./mcp.d.cts",
+      "import": "./mcp.js",
+      "require": "./mcp.cjs"
     }
   },
   "bin": {
-    "jit": "./cli.js"
+    "jit": "./cli.js",
+    "jit-mcp": "./mcp.js"
   },
   "devDependencies": {
     "@types/node": "^26.1.0"
