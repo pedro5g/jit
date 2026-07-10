@@ -40,6 +40,21 @@ describe("JIT.compile explicit aggregation", () => {
   it("should reject unknown ops loudly", () => {
     expect(() => JIT.compile(User, ["is", "teleport" as never])).toThrow(/unknown compile op/);
   });
+
+  it("should aggregate explicitly supplied compiled functions", () => {
+    const selected = JIT.validator(User).get("is", "parse");
+    const Users = JIT.compile(User, {
+      is: selected.is,
+      parse: selected.parse,
+    });
+
+    expect(Users.is(ada)).toBe(true);
+    expect(Users.parse(ada)).toBe(ada);
+    expect(Users.ops).toEqual(["is", "parse"]);
+    expect(Users.extras).toEqual([]);
+    expect(Object.keys(Users).sort()).toEqual(["extras", "is", "ops", "parse", "schema"]);
+    expectTypeOf<keyof typeof Users>().toEqualTypeOf<"schema" | "ops" | "extras" | "is" | "parse">();
+  });
 });
 
 describe("AOT generation from JIT.compile markers", () => {
@@ -81,6 +96,34 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
     expect(Object.keys(generated.User).sort()).toEqual(["is", "stringify"]);
     expect(result.skipped).toHaveLength(0);
+  });
+
+  it("should export only the grouped object for object-style compile markers", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const ada = { id: 1, name: "Ada" };
+    const selected = JIT.validator(User).get("is", "parse");
+    const marked = JIT.compile(User, { is: selected.is, parse: selected.parse });
+
+    AOT.generate({ schemas: { User: marked }, outDir });
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+
+    expect(source).toContain("const User_is");
+    expect(source).toContain("const User_parse");
+    expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(source).toMatch(/export \{ User \};/);
+    expect(source).not.toMatch(/export \{[^}]*User_is/);
+    expect(types).not.toContain("export declare const User_is");
+    expect(types).toContain("readonly is: (value: unknown) => value is User;");
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+      User: { is: (value: unknown) => boolean; parse: (value: unknown) => typeof ada };
+      User_is?: unknown;
+    };
+
+    expect(generated.User.is(ada)).toBe(true);
+    expect(generated.User.parse(ada)).toEqual(ada);
+    expect(generated.User_is).toBeUndefined();
   });
 
   it("should aggregate and generate dev-defined query and mapper extras", async () => {

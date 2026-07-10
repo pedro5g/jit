@@ -50,6 +50,17 @@ export type CompiledSelection<
 } & Pick<CompiledModel<T>, TOps[number]> &
   Readonly<TExtras>;
 
+export type CompiledObjectSelection<
+  T,
+  TCompiled extends Readonly<Record<string, unknown>>,
+  TOps extends CompileOp = Extract<keyof TCompiled, CompileOp>,
+> = {
+  readonly schema: ATS.AnyTypeSchema;
+  readonly ops: readonly TOps[];
+  readonly extras: readonly Exclude<Extract<keyof TCompiled, string>, CompileOp>[];
+} & Pick<CompiledModel<T>, TOps> &
+  Readonly<Omit<TCompiled, CompileOp>>;
+
 /**
  * Explicitly compiles a chosen set of operations for a schema and
  * aggregates them into one hot object — the opt-in counterpart of the lazy
@@ -80,9 +91,31 @@ export function compile<
   schema: SchemaInput<TSchema>,
   ops: TOps,
   extras?: TExtras
-): CompiledSelection<ATS.InferSchema<TSchema>, TOps, TExtras> {
+): CompiledSelection<ATS.InferSchema<TSchema>, TOps, TExtras>;
+
+export function compile<TSchema extends ATS.AnyTypeSchema, const TCompiled extends Readonly<Record<string, unknown>>>(
+  schema: SchemaInput<TSchema>,
+  compiled: TCompiled
+): CompiledObjectSelection<ATS.InferSchema<TSchema>, TCompiled>;
+
+export function compile<
+  TSchema extends ATS.AnyTypeSchema,
+  const TOps extends readonly CompileOp[],
+  const TExtras extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+>(
+  schema: SchemaInput<TSchema>,
+  opsOrCompiled: TOps | TExtras,
+  extras?: TExtras
+):
+  | CompiledSelection<ATS.InferSchema<TSchema>, TOps, TExtras>
+  | CompiledObjectSelection<ATS.InferSchema<TSchema>, TExtras> {
   type TValue = ATS.InferSchema<TSchema>;
   const unwrapped = unwrapSchema(schema);
+  if (!Array.isArray(opsOrCompiled)) {
+    return compileObjectSelection<TSchema, TExtras>(unwrapped as TSchema, opsOrCompiled as TExtras);
+  }
+
+  const ops = opsOrCompiled;
   const selection: Record<string, unknown> = { schema: unwrapped, ops: Object.freeze([...ops]) };
   const validatorOps = collectValidatorOps(ops);
   let validator: ReturnType<typeof compileValidatorSelection<TSchema, readonly ValidatorOp[]>> | undefined;
@@ -160,6 +193,36 @@ export function compile<
   selection.extras = Object.freeze(extraNames);
 
   return Object.freeze(selection) as CompiledSelection<TValue, TOps, TExtras>;
+}
+
+function compileObjectSelection<
+  TSchema extends ATS.AnyTypeSchema,
+  const TCompiled extends Readonly<Record<string, unknown>>,
+>(schema: TSchema, compiled: TCompiled): CompiledObjectSelection<ATS.InferSchema<TSchema>, TCompiled> {
+  const selection: Record<string, unknown> = { schema, ops: Object.freeze([]), extras: Object.freeze([]) };
+  const ops: string[] = [];
+  const extras: string[] = [];
+
+  for (const key of Object.keys(compiled)) {
+    if (key === "schema" || key === "ops" || key === "extras") {
+      throw new JITError("INVALID_OPERATION", `compiled key "${key}" is reserved`);
+    }
+    selection[key] = compiled[key];
+    if (isCompileOp(key)) ops.push(key);
+    else extras.push(key);
+  }
+
+  selection.ops = Object.freeze(ops);
+  selection.extras = Object.freeze(extras);
+  Object.defineProperty(selection, "__jitAot", {
+    enumerable: false,
+    value: "grouped",
+  });
+  return Object.freeze(selection) as CompiledObjectSelection<ATS.InferSchema<TSchema>, TCompiled>;
+}
+
+function isCompileOp(value: string): value is CompileOp {
+  return (COMPILE_OPS as readonly string[]).includes(value);
 }
 
 function collectValidatorOps(ops: readonly CompileOp[]): readonly ValidatorOp[] {

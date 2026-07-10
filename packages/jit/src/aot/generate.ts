@@ -75,6 +75,7 @@ export function generate(options: GenerateOptions): GenerateResult {
     const sourceFile = options.sources?.get(name);
     // JIT.compile(schema, ops) markers restrict generation to the chosen ops.
     const requested = readRequestedOps(options.schemas[name]);
+    const groupedExport = readAotExportMode(options.schemas[name]) === "grouped";
     const wants = (op: string): boolean => requested === undefined || requested.includes(op);
 
     if (requested) {
@@ -315,13 +316,21 @@ export function generate(options: GenerateOptions): GenerateResult {
     js.push("");
 
     for (const operation of operations) {
-      exportNames.push(`${name}_${operation.prop}`);
-      dts.push(`export declare const ${name}_${operation.prop}: ${operation.type};`);
+      if (!groupedExport) {
+        exportNames.push(`${name}_${operation.prop}`);
+        dts.push(`export declare const ${name}_${operation.prop}: ${operation.type};`);
+      }
     }
     exportNames.push(name);
 
     dts.push(`export declare const ${name}: {`);
-    dts.push(...operations.map((operation) => `  readonly ${operation.prop}: typeof ${name}_${operation.prop};`));
+    dts.push(
+      ...operations.map((operation) =>
+        groupedExport
+          ? `  readonly ${operation.prop}: ${operation.type};`
+          : `  readonly ${operation.prop}: typeof ${name}_${operation.prop};`
+      )
+    );
     dts.push("};");
     dts.push("");
   }
@@ -557,6 +566,12 @@ function readRequestedOps(input: SchemaInput): readonly string[] | undefined {
   }
 
   return undefined;
+}
+
+function readAotExportMode(input: SchemaInput): "grouped" | undefined {
+  const candidate = (input as { readonly __jitAot?: unknown }).__jitAot;
+
+  return candidate === "grouped" ? candidate : undefined;
 }
 
 function indentBlock(source: string): string[] {
