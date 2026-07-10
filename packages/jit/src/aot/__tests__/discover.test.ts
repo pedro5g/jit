@@ -112,6 +112,9 @@ describe("JIT AOT inference-anchored types", () => {
     const types = readFileSync(join(generated, "index.d.ts"), "utf8");
 
     expect(types).toContain('export type User = import("jit").Infer<typeof import("../src/user.jit.js").User>;');
+    expect(types).toContain(
+      'export type UserStrict<TValue> = import("jit").Strict<typeof import("../src/user.jit.js").User, TValue>;'
+    );
     // No hand-emitted structural type when the source anchors the inference.
     expect(types).not.toContain("readonly id: number");
   });
@@ -125,6 +128,7 @@ describe("JIT AOT inference-anchored types", () => {
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
     expect(types).toContain("export type User = { id: number };");
+    expect(types).toContain("export type UserStrict<TValue> = TValue;");
   });
 
   it("should expose JIT.infer for builders and schemas", () => {

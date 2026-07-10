@@ -10,7 +10,7 @@ import {
   TypeName,
 } from "../ats/index.js";
 import { attachHint, type EntityHint, type HashStrategy, type OrderDirection } from "../hints/index.js";
-import type { AnyBuilder, Builder, ObjectBuilder } from "./types.js";
+import type { AnyBuilder, Builder, ObjectBuilder, StandardSchemaIssue, StandardSchemaProps } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
 
 type RuntimeBuilder = {
@@ -18,7 +18,31 @@ type RuntimeBuilder = {
 };
 
 const baseBuilderPrototype = {
+  is(this: RuntimeBuilder, value: unknown): boolean {
+    return compileValidator(this.schema).is(value);
+  },
+
+  safeParse(this: RuntimeBuilder, value: unknown): unknown {
+    return compileValidator(this.schema).safeParse(value);
+  },
+
+  parse(this: RuntimeBuilder, value: unknown): unknown {
+    return compileValidator(this.schema).parse(value);
+  },
+
+  safeParseAsync(this: RuntimeBuilder, value: unknown): Promise<unknown> {
+    return compileValidator(this.schema).safeParseAsync(value);
+  },
+
+  parseAsync(this: RuntimeBuilder, value: unknown): Promise<unknown> {
+    return compileValidator(this.schema).parseAsync(value);
+  },
+
   optional(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(Transform.optional(this.schema));
+  },
+
+  notRequired(this: RuntimeBuilder): AnyBuilder {
     return createBuilder(Transform.optional(this.schema));
   },
 
@@ -50,8 +74,18 @@ const baseBuilderPrototype = {
     return createBuilder(Transform.pipe(this.schema, transform));
   },
 
-  refine(this: RuntimeBuilder, predicate: (value: unknown) => boolean, message?: string): AnyBuilder {
-    return createBuilder(Transform.refine(this.schema, predicate, message));
+  refine(
+    this: RuntimeBuilder,
+    predicate: (value: unknown) => boolean,
+    options?:
+      | string
+      | {
+          readonly message?: string;
+          readonly path?: readonly (string | number)[];
+          readonly when?: (payload: { readonly value: unknown }) => boolean;
+        }
+  ): AnyBuilder {
+    return createBuilder(Transform.refine(this.schema, predicate, options));
   },
 
   coerce(this: RuntimeBuilder, coercer: (value: unknown) => unknown): AnyBuilder {
@@ -193,6 +227,10 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "length", value, message }));
   },
 
+  oneOf(this: RuntimeBuilder, value: readonly (string | number)[], message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "oneOf", value, message }));
+  },
+
   regex(this: RuntimeBuilder, value: RegExp, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "regex", value, message }));
   },
@@ -217,6 +255,10 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "url", message }));
   },
 
+  noEmpty(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "noEmpty" }));
+  },
+
   trim(this: RuntimeBuilder): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "trim" }));
   },
@@ -237,6 +279,14 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "negative", message }));
   },
 
+  moreThan(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "moreThan", value, message }));
+  },
+
+  lessThan(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "lessThan", value, message }));
+  },
+
   multipleOf(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "multipleOf", value, message }));
   },
@@ -251,6 +301,18 @@ const baseBuilderPrototype = {
 
   int(this: RuntimeBuilder, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "integer", message }));
+  },
+
+  int32(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "int32", message }));
+  },
+
+  float32(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "float32", message }));
+  },
+
+  float64(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "float64", message }));
   },
 
   nonEmpty(this: RuntimeBuilder, message?: string): AnyBuilder {
@@ -366,6 +428,45 @@ const baseBuilderPrototype = {
     );
   },
 
+  format(
+    this: RuntimeBuilder,
+    pattern: string,
+    options?: { readonly stripNonDigits?: boolean },
+    message?: string
+  ): AnyBuilder {
+    return createBuilder(
+      appendCheck(this.schema, {
+        kind: "format",
+        value: { pattern, stripNonDigits: options?.stripNonDigits ?? true },
+        message,
+      })
+    );
+  },
+
+  cpf(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(
+      appendCheck(this.schema, {
+        kind: "format",
+        value: { pattern: "###.###.###-##", stripNonDigits: true },
+        message,
+      })
+    );
+  },
+
+  cnpj(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(
+      appendCheck(this.schema, {
+        kind: "format",
+        value: { pattern: "##.###.###/####-##", stripNonDigits: true },
+        message,
+      })
+    );
+  },
+
+  phoneBR(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "phoneBR", message }));
+  },
+
   pii(this: RuntimeBuilder, strategy: "redact" | "mask" | "hash" = "redact"): AnyBuilder {
     return createBuilder({
       ...this.schema,
@@ -373,6 +474,14 @@ const baseBuilderPrototype = {
     } as AnyTypeSchema);
   },
 };
+
+Object.defineProperty(baseBuilderPrototype, "~standard", {
+  enumerable: false,
+  configurable: false,
+  get(this: RuntimeBuilder): StandardSchemaProps<unknown> {
+    return createStandardSchema(this.schema);
+  },
+});
 
 function appendCheck(
   schema: AnyTypeSchema,
@@ -426,11 +535,19 @@ const objectBuilderPrototype = {
     return createBuilder(Transform.transform(this.schema as ObjectSchema<SchemaShape>, transforms));
   },
 
-  pick(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+  pick(
+    this: RuntimeBuilder,
+    first: readonly string[] | string | Record<string, boolean>,
+    ...rest: readonly string[]
+  ): AnyBuilder {
     return createBuilder(Transform.pick(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
   },
 
-  omit(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+  omit(
+    this: RuntimeBuilder,
+    first: readonly string[] | string | Record<string, boolean>,
+    ...rest: readonly string[]
+  ): AnyBuilder {
     return createBuilder(Transform.omit(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
   },
 
@@ -494,6 +611,10 @@ const codecBuilderPrototype = {
   },
 };
 
+attachStandardSchemaGetter(objectBuilderPrototype);
+attachStandardSchemaGetter(functionBuilderPrototype);
+attachStandardSchemaGetter(codecBuilderPrototype);
+
 type RuntimeFunctionSchema = FunctionSchema<readonly AnyTypeSchema[], AnyTypeSchema | undefined>;
 type RuntimeCodecSchema = CodecSchema<AnyTypeSchema, AnyTypeSchema>;
 
@@ -504,8 +625,62 @@ function compileFunctionValidators(schema: RuntimeFunctionSchema) {
   };
 }
 
-function normalizeKeys(first: readonly string[] | string, rest: readonly string[]): readonly string[] {
-  return typeof first === "string" ? [first, ...rest] : first;
+function normalizeKeys(
+  first: readonly string[] | string | Record<string, boolean>,
+  rest: readonly string[]
+): readonly string[] {
+  if (typeof first === "string") return [first, ...rest];
+  if (Array.isArray(first)) return first;
+  const mask = first as Record<string, boolean>;
+
+  return Object.keys(mask).filter((key) => mask[key] === true);
+}
+
+function createStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknown> {
+  return {
+    version: 1,
+    vendor: "jit",
+    validate(value: unknown) {
+      const result = compileValidator(schema).safeParse(value);
+
+      if (result.success) return { value: result.data };
+
+      return { issues: result.issues.map(toStandardIssue) };
+    },
+  };
+}
+
+function toStandardIssue(issue: { readonly message: string; readonly path: string }): StandardSchemaIssue {
+  const path = parseIssuePath(issue.path);
+
+  return path.length === 0 ? { message: issue.message } : { message: issue.message, path };
+}
+
+function parseIssuePath(path: string): readonly (string | number)[] {
+  if (path === "") return [];
+
+  const segments: (string | number)[] = [];
+  const regex = /([^.[\]]+)|\[(\d+)\]/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(path)) !== null) {
+    if (match[1] !== undefined) {
+      segments.push(match[1]);
+    } else if (match[2] !== undefined) {
+      segments.push(Number(match[2]));
+    }
+  }
+  return segments;
+}
+
+function attachStandardSchemaGetter(prototype: object): void {
+  Object.defineProperty(prototype, "~standard", {
+    enumerable: false,
+    configurable: false,
+    get(this: RuntimeBuilder): StandardSchemaProps<unknown> {
+      return createStandardSchema(this.schema);
+    },
+  });
 }
 
 export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): Builder<TSchema> {

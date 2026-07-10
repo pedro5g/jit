@@ -147,6 +147,143 @@ describe("JIT compiler validator", () => {
     if (!failed.success) expect(failed.issues[0].code).toBe("custom");
   });
 
+  it("should run conditional refinements with custom issue paths", () => {
+    const BaseSignup = JIT.object({
+      password: JIT.string().min(8),
+      confirmPassword: JIT.string().min(8),
+    });
+    const Signup = BaseSignup.refine((value) => value.password === value.confirmPassword, {
+      message: "Passwords do not match",
+      path: ["confirmPassword"],
+      when(payload) {
+        return BaseSignup.pick({ password: true, confirmPassword: true }).safeParse(payload.value).success;
+      },
+    });
+    const validate = JIT.validator(Signup);
+    const mismatch = validate.safeParse({ password: "supersecret", confirmPassword: "otherpass" });
+    const invalidBase = validate.safeParse({ password: "short", confirmPassword: "nope" });
+
+    expect(mismatch.success).toBe(false);
+    if (!mismatch.success) {
+      expect(mismatch.issues).toHaveLength(1);
+      expect(mismatch.issues[0].path).toBe("confirmPassword");
+      expect(mismatch.issues[0].message).toBe("Passwords do not match");
+    }
+
+    expect(invalidBase.success).toBe(false);
+    if (!invalidBase.success) {
+      expect(invalidBase.issues.map((issue) => issue.path)).toEqual(["password", "confirmPassword"]);
+      expect(invalidBase.issues.some((issue) => issue.code === "custom")).toBe(false);
+    }
+  });
+
+  it("should validate oneOf and strict numeric bounds", () => {
+    const Metric = JIT.object({
+      status: JIT.string().oneOf(["open", "closed"] as const),
+      score: JIT.number()
+        .moreThan(0)
+        .lessThan(10)
+        .oneOf([1, 3, 5, 7, 9] as const),
+      int32: JIT.number().int32(),
+      sample: JIT.number().float32(),
+      finite: JIT.number().float64(),
+    });
+    const validate = JIT.validator(Metric);
+
+    expect(validate.is({ status: "open", score: 3, int32: 2147483647, sample: Math.fround(1.5), finite: 1.2 })).toBe(
+      true
+    );
+
+    const result = validate.safeParse({
+      status: "pending",
+      score: 10,
+      int32: 2147483648,
+      sample: 0.1,
+      finite: Number.POSITIVE_INFINITY,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.issues.map((issue) => issue.code)).toEqual([
+        "invalid_enum",
+        "too_big",
+        "invalid_enum",
+        "not_int32",
+        "not_float32",
+        "not_float64",
+      ]);
+    }
+  });
+
+  it("should treat empty strings as undefined before optional/default guards", () => {
+    const Search = JIT.object({
+      query: JIT.string().noEmpty().notRequired(),
+      locale: JIT.string().noEmpty().default("pt-BR"),
+      required: JIT.string().noEmpty(),
+    });
+    const validate = JIT.validator(Search);
+    const parsed = validate.safeParse({ query: "", locale: "", required: "ok" });
+    const failed = validate.safeParse({ query: "", locale: "", required: "" });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({ query: undefined, locale: "pt-BR", required: "ok" });
+
+    expect(failed.success).toBe(false);
+    if (!failed.success) {
+      expect(failed.issues).toHaveLength(1);
+      expect(failed.issues[0].path).toBe("required");
+      expect(failed.issues[0].code).toBe("expected_string");
+    }
+  });
+
+  it("should format document and phone masks while parsing", () => {
+    const Contact = JIT.object({
+      cpf: JIT.string().cpf(),
+      cnpj: JIT.string().cnpj(),
+      phone: JIT.string().phoneBR(),
+      custom: JIT.string().format("##-##"),
+    });
+    const validate = JIT.validator(Contact);
+    const parsed = validate.safeParse({
+      cpf: "12345678901",
+      cnpj: "11222333000181",
+      phone: "11987654321",
+      custom: "1234",
+    });
+    const failed = validate.safeParse({
+      cpf: "123",
+      cnpj: "11222333000181",
+      phone: "123",
+      custom: "123",
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).toEqual({
+        cpf: "123.456.789-01",
+        cnpj: "11.222.333/0001-81",
+        phone: "(11) 98765-4321",
+        custom: "12-34",
+      });
+    }
+
+    expect(failed.success).toBe(false);
+    if (!failed.success) expect(failed.issues.map((issue) => issue.path)).toEqual(["cpf", "phone", "custom"]);
+  });
+
+  it("should expose a lazy optional Standard Schema facade", () => {
+    const standard = User["~standard"];
+    const success = standard.validate(ada);
+    const failure = standard.validate({ ...ada, email: "broken" });
+
+    expect(standard.version).toBe(1);
+    expect(standard.vendor).toBe("jit");
+    expect(success).toEqual({ value: ada });
+    expect(failure).toEqual({
+      issues: [{ message: "expected a valid email", path: ["email"] }],
+    });
+  });
+
   it("should throw JITValidationError with issues on parse", () => {
     const Users = JIT.validator(User);
 

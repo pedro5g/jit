@@ -164,6 +164,7 @@ describe("JIT AOT generate", () => {
     });
 
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
       User: { is: (value: unknown) => boolean };
       User_is: (value: unknown) => boolean;
@@ -172,6 +173,7 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const User_is_1");
     expect(source).toContain("is: User_is_1");
     expect(source).toContain("const User_is =");
+    expect(types).toContain("export type UserStrict<TValue> = TValue;");
     expect(generated.User.is({ id: 1 })).toBe(true);
     expect(generated.User_is({ id: 1 })).toBe(true);
   });
@@ -257,11 +259,15 @@ describe("JIT AOT generate", () => {
         id: JIT.number(),
         nick: JIT.optional(JIT.string()),
         role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+        status: JIT.string().oneOf(["active", "blocked"] as const),
+        level: JIT.number().oneOf([1, 2, 3] as const),
         items: JIT.array(JIT.object({ sku: JIT.string() })),
       }).schema
     );
 
-    expect(type).toBe('{ id: number; nick?: string | undefined; role: "admin" | "user"; items: { sku: string }[] }');
+    expect(type).toBe(
+      '{ id: number; nick?: string | undefined; role: "admin" | "user"; status: "active" | "blocked"; level: 1 | 2 | 3; items: { sku: string }[] }'
+    );
 
     expect(AOT.emitTypeScriptType(JIT.object({ id: JIT.number() }).readonly().schema)).toBe("Readonly<{ id: number }>");
   });

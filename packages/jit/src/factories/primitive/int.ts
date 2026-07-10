@@ -1,4 +1,4 @@
-import { createSchema, type EmptyDef, type IntSchema, TypeName } from "../../core/ats/index.js";
+import { type ChecksDef, createSchema, type IntSchema, type NumberCheck, TypeName } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder } from "../../core/builder/index.js";
 import { emptyDef } from "./empty-def.js";
@@ -8,6 +8,6 @@ import { emptyDef } from "./empty-def.js";
  *
  * @returns A builder wrapping an int schema.
  */
-export function int(): Builder<IntSchema> {
-  return /* @__PURE__ */ createBuilder(createSchema<number, "int", EmptyDef>(TypeName.int, emptyDef));
+export function int(): Builder<IntSchema<[]>> {
+  return /* @__PURE__ */ createBuilder(createSchema<number, "int", ChecksDef<NumberCheck, []>>(TypeName.int, emptyDef));
 }

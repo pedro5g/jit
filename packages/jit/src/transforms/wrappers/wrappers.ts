@@ -9,6 +9,7 @@ import type {
   PipeSchema,
   PromiseSchema,
   ReadonlySchema,
+  RefineOptions,
   RefineSchema,
   TransformSchema,
   TransformSpec,
@@ -210,14 +211,18 @@ export function transform<TSchema extends AnyTypeSchema, const TSpec extends Tra
 export function refine<TSchema extends AnyTypeSchema>(
   schema: TSchema,
   predicate: (value: InferSchema<TSchema>) => boolean,
-  message?: string
+  options?: string | RefineOptions<InferSchema<TSchema>>
 ): RefineSchema<TSchema> {
+  const normalized = typeof options === "string" ? { message: options } : options;
+
   return /* @__PURE__ */ createSchema(
     TypeName.refine,
     {
       innerType: schema,
       predicate,
-      ...(message !== undefined ? { message } : {}),
+      ...(normalized?.message !== undefined ? { message: normalized.message } : {}),
+      ...(normalized?.path !== undefined ? { path: normalized.path } : {}),
+      ...(normalized?.when !== undefined ? { when: normalized.when } : {}),
     },
     schema.annotations
   );

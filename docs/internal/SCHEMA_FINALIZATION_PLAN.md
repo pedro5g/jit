@@ -340,6 +340,54 @@ Definition of done:
 - AOT emits only keys present in the aggregated object.
 - Non-serializable bindings are skipped with clear reasons.
 
+## 2026-07-10 Implementation Update
+
+Implemented in this stage:
+
+- `refine(predicate, { message, path, when })` with conditional execution and
+  relative issue paths.
+- Builder validator conveniences: `.is`, `.safeParse`, `.parse`,
+  `.safeParseAsync`, `.parseAsync`.
+- Yup-compatible `.notRequired()` alias for `.optional()`.
+- Object `.pick({ field: true })` mask overload for conditional validation
+  helpers.
+- String checks/transforms:
+  - `.oneOf([...])`
+  - `.noEmpty()` before optional/default guards
+  - `.format("##-##")`
+  - `.cpf()`
+  - `.cnpj()`
+  - `.phoneBR()`
+- Number checks:
+  - `.moreThan(n)`
+  - `.lessThan(n)`
+  - `.oneOf([...])`
+  - `.int32()`
+  - `.float32()`
+  - `.float64()`
+- Compile-time literal default validation for statically visible checks:
+  string `min/max/length/oneOf/noEmpty`, basic email shape, number
+  `min/max/moreThan/lessThan/oneOf/positive/negative/integer/int32`, literals,
+  enums, and nested object defaults.
+- Optional Standard Schema v1 facade at `builder["~standard"]`; this is lazy,
+  not stored in the schema AST, and not emitted in AOT generated runtime code.
+- AOT `.d.ts` precision:
+  - structural `oneOf` emits literal unions when source inference is not
+    available;
+  - source-anchored grouped exports now also emit `NameStrict<TValue>` using
+    `import("jit").Strict<...>`.
+- Generated-source snapshot covering strict checks, masks, `noEmpty`, and
+  conditional refinement.
+
+TypeScript limitation:
+
+- A normal alias like `type User = { name: string }` cannot reject a concrete
+  assignment solely because `name` should be min length 5; TypeScript does not
+  represent "all strings of length >= 5" as an assignable primitive type.
+  JIT therefore keeps runtime output types ergonomic and uses generic
+  positions (`.default(...)`, `Strict<SchemaLike, Value>`, generated
+  `UserStrict<T>`) for strict literal checking.
+
 ## Testing Strategy
 
 For every phase:

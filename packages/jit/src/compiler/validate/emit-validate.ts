@@ -15,14 +15,22 @@ interface SchemaCheckRecord {
   readonly message?: string;
 }
 
+interface RefineRecord {
+  readonly binding: string;
+  readonly message?: string;
+  readonly path?: readonly ATS.IssuePathSegment[];
+  readonly when?: string;
+}
+
 /** Wrapper pipeline resolved outside-in for one schema node. */
 interface UnwrappedSchema {
   readonly base: AnySchema;
   readonly optional: boolean;
   readonly nullable: boolean;
   readonly defaultValue: { readonly binding: string; readonly isFactory: boolean } | undefined;
+  readonly emptyAsUndefined: boolean;
   readonly coerce: string | undefined;
-  readonly refines: readonly { readonly binding: string; readonly message?: string }[];
+  readonly refines: readonly RefineRecord[];
   readonly pipes: readonly string[];
   readonly fieldTransforms: Readonly<Record<string, string>> | undefined;
 }
@@ -100,6 +108,15 @@ class ValidatorEmitter {
 
     const finish = () => (this.mode === "parse" ? output : holder);
 
+    if (unwrapped.emptyAsUndefined) {
+      writer.line(`if (${holder} === "") {`);
+      writer.indent(() => {
+        writer.line(`${holder} = undefined;`);
+        if (this.mode === "parse") writer.line(`${output} = ${holder};`);
+      });
+      writer.line("}");
+    }
+
     const emitValidated = () => {
       if (unwrapped.coerce) {
         writer.line(`${holder} = ${unwrapped.coerce}(${holder});`);
@@ -110,13 +127,24 @@ class ValidatorEmitter {
 
       // Refinements run after the base type is proven, innermost first.
       for (const refine of unwrapped.refines) {
-        this.failIf(
-          `!${refine.binding}(${holder})`,
-          path,
-          "custom",
-          "refinement",
-          refine.message ?? "refinement rejected the value"
-        );
+        const refinePath = appendIssuePath(path, refine.path);
+        const emitRefine = () => {
+          this.failIf(
+            `!${refine.binding}(${holder})`,
+            refinePath,
+            "custom",
+            "refinement",
+            refine.message ?? "refinement rejected the value"
+          );
+        };
+
+        if (refine.when) {
+          writer.line(`if (${refine.when}({ value: ${holder} })) {`);
+          writer.indent(emitRefine);
+          writer.line("}");
+        } else {
+          emitRefine();
+        }
       }
 
       if (this.mode === "parse") {
@@ -540,6 +568,43 @@ class ValidatorEmitter {
               `${value} = ${value}.replace(${scriptBlocks}, "").replace(${htmlTags}, "").replace(${lt}, "&lt;").replace(${gt}, "&gt;");`
             );
           }
+          if (check.kind === "format") {
+            const spec = check.value as { readonly pattern: string; readonly stripNonDigits: boolean };
+            const length = countFormatPlaceholders(spec.pattern);
+
+            if (spec.stripNonDigits) this.writer.line(`${value} = ${value}.replace(/\\D+/g, "");`);
+            this.failIf(
+              `${value}.length !== ${emitLiteral(length)}`,
+              path,
+              "invalid_format",
+              `length === ${length}`,
+              check.message ?? `expected ${length} characters before formatting`
+            );
+            this.writer.line(`if (${value}.length === ${emitLiteral(length)}) {`);
+            this.writer.indent(() => {
+              this.writer.line(`${value} = ${formatMaskExpression(value, spec.pattern)};`);
+            });
+            this.writer.line("}");
+          }
+          if (check.kind === "phoneBR") {
+            this.writer.line(`${value} = ${value}.replace(/\\D+/g, "");`);
+            this.failIf(
+              `${value}.length !== 10 && ${value}.length !== 11`,
+              path,
+              "invalid_format",
+              "Brazilian phone with 10 or 11 digits",
+              check.message ?? "expected a Brazilian phone number"
+            );
+            this.writer.line(`if (${value}.length === 10) {`);
+            this.writer.indent(() => {
+              this.writer.line(`${value} = ${formatMaskExpression(value, "(##) ####-####")};`);
+            });
+            this.writer.line(`} else if (${value}.length === 11) {`);
+            this.writer.indent(() => {
+              this.writer.line(`${value} = ${formatMaskExpression(value, "(##) #####-####")};`);
+            });
+            this.writer.line("}");
+          }
         }
 
         for (const check of checks) {
@@ -571,6 +636,32 @@ class ValidatorEmitter {
                 check.message ?? `expected exactly ${check.value} characters`
               );
               break;
+            case "oneOf": {
+              const values = (check.value as readonly string[] | undefined) ?? [];
+              const test = values.map((option) => `${value} !== ${emitLiteral(option)}`).join(" && ");
+
+              this.failIf(
+                values.length === 0 ? "true" : test,
+                path,
+                "invalid_enum",
+                values.join(" | "),
+                check.message ?? "expected one of the allowed values"
+              );
+              break;
+            }
+            case "digitsLength": {
+              const lengths = Array.isArray(check.value) ? (check.value as readonly number[]) : [check.value as number];
+              const test = lengths.map((length) => `${value}.length !== ${emitLiteral(length)}`).join(" && ");
+
+              this.failIf(
+                lengths.length === 0 ? "true" : test,
+                path,
+                "invalid_length",
+                lengths.map((length) => `length === ${length}`).join(" | "),
+                check.message ?? `expected ${lengths.join(" or ")} digits`
+              );
+              break;
+            }
             default:
               break;
           }
@@ -677,6 +768,37 @@ class ValidatorEmitter {
                 check.message ?? `expected a number <= ${check.value}`
               );
               break;
+            case "moreThan":
+              this.failIf(
+                `${value} <= ${emitLiteral(check.value as number)}`,
+                path,
+                "too_small",
+                `> ${check.value}`,
+                check.message ?? `expected a number > ${check.value}`
+              );
+              break;
+            case "lessThan":
+              this.failIf(
+                `${value} >= ${emitLiteral(check.value as number)}`,
+                path,
+                "too_big",
+                `< ${check.value}`,
+                check.message ?? `expected a number < ${check.value}`
+              );
+              break;
+            case "oneOf": {
+              const values = (check.value as readonly number[] | undefined) ?? [];
+              const test = values.map((option) => `${value} !== ${emitLiteral(option)}`).join(" && ");
+
+              this.failIf(
+                values.length === 0 ? "true" : test,
+                path,
+                "invalid_enum",
+                values.map((option) => String(option)).join(" | "),
+                check.message ?? "expected one of the allowed values"
+              );
+              break;
+            }
             case "positive":
               this.failIf(`${value} <= 0`, path, "not_positive", "> 0", check.message ?? "expected a positive number");
               break;
@@ -699,6 +821,33 @@ class ValidatorEmitter {
                 "not_safe",
                 "safe integer",
                 check.message ?? "expected a safe integer"
+              );
+              break;
+            case "int32":
+              this.failIf(
+                `!Number.isInteger(${value}) || ${value} < -2147483648 || ${value} > 2147483647`,
+                path,
+                "not_int32",
+                "int32",
+                check.message ?? "expected a 32-bit signed integer"
+              );
+              break;
+            case "float32":
+              this.failIf(
+                `!Number.isFinite(${value}) || Math.fround(${value}) !== ${value}`,
+                path,
+                "not_float32",
+                "float32",
+                check.message ?? "expected a float32-representable number"
+              );
+              break;
+            case "float64":
+              this.failIf(
+                `!Number.isFinite(${value})`,
+                path,
+                "not_float64",
+                "float64",
+                check.message ?? "expected a finite float64 number"
               );
               break;
             case "multipleOf":
@@ -1300,6 +1449,27 @@ function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
+function countFormatPlaceholders(pattern: string): number {
+  let count = 0;
+
+  for (let index = 0; index < pattern.length; index++) {
+    if (pattern[index] === "#") count++;
+  }
+  return count;
+}
+
+function formatMaskExpression(value: string, pattern: string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+
+  for (let index = 0; index < pattern.length; index++) {
+    const char = pattern[index];
+
+    parts.push(char === "#" ? `${value}[${cursor++}]` : emitLiteral(char));
+  }
+  return parts.length === 0 ? '""' : parts.join(" + ");
+}
+
 function staticChild(path: PathRef, segment: string): PathRef {
   const joiner = segment.startsWith("[") ? "" : path.source === "" ? "" : ".";
 
@@ -1321,6 +1491,35 @@ function dynamicKeyChild(path: PathRef, keyExpr: string): PathRef {
     path.kind === "static" ? emitLiteral(path.source === "" ? "" : `${path.source}.`) : `${path.source} + "."`;
 
   return { kind: "dynamic", source: `${prefix} + ${keyExpr}` };
+}
+
+function appendIssuePath(path: PathRef, segments: readonly ATS.IssuePathSegment[] | undefined): PathRef {
+  if (!segments || segments.length === 0) return path;
+
+  const suffix = issuePathSuffix(segments, path.source !== "");
+
+  if (path.kind === "static") {
+    return { kind: "static", source: `${path.source}${suffix}` };
+  }
+
+  return { kind: "dynamic", source: `${path.source} + ${emitLiteral(suffix)}` };
+}
+
+function issuePathSuffix(segments: readonly ATS.IssuePathSegment[], hasBase: boolean): string {
+  let suffix = "";
+  let base = hasBase;
+
+  for (const segment of segments) {
+    if (typeof segment === "number") {
+      suffix += `[${segment}]`;
+      base = true;
+      continue;
+    }
+
+    suffix += `${base ? "." : ""}${segment}`;
+    base = true;
+  }
+  return suffix;
 }
 
 function literalTag(option: ATS.AnyTypeSchema, discriminator: string): string | number | undefined {
@@ -1373,7 +1572,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
   let nullable = false;
   let defaultValue: UnwrappedSchema["defaultValue"];
   let coerce: string | undefined;
-  const refines: { readonly binding: string; readonly message?: string }[] = [];
+  const refines: RefineRecord[] = [];
   const pipes: string[] = [];
   let fieldTransforms: Record<string, string> | undefined;
 
@@ -1418,6 +1617,8 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
       refines.unshift({
         binding: emitter.bind(current.def.predicate),
         ...(typeof current.def.message === "string" ? { message: current.def.message } : {}),
+        ...(Array.isArray(current.def.path) ? { path: current.def.path as readonly ATS.IssuePathSegment[] } : {}),
+        ...(typeof current.def.when === "function" ? { when: emitter.bind(current.def.when) } : {}),
       });
       current = current.def.innerType as AnySchema;
       continue;
@@ -1448,7 +1649,17 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     break;
   }
 
-  return { base: current, optional, nullable, defaultValue, coerce, refines, pipes, fieldTransforms };
+  return {
+    base: current,
+    optional,
+    nullable,
+    defaultValue,
+    emptyAsUndefined: hasNoEmptyCheck(current),
+    coerce,
+    refines,
+    pipes,
+    fieldTransforms,
+  };
 }
 
 function bindFieldTransforms(spec: unknown, emitter: ValidatorEmitter): Record<string, string> {
@@ -1459,6 +1670,14 @@ function bindFieldTransforms(spec: unknown, emitter: ValidatorEmitter): Record<s
   }
 
   return bindings;
+}
+
+function hasNoEmptyCheck(schema: AnySchema): boolean {
+  if (schema.type !== TypeName.string) return false;
+
+  const checks = (schema.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
+
+  return checks.some((check) => check.kind === "noEmpty");
 }
 
 /** True when parse output can differ from the input for this subtree. */
@@ -1487,7 +1706,13 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
       if ((current.def as { coerce?: boolean }).coerce === true) return true;
       return checks.some(
         (check) =>
-          check.kind === "trim" || check.kind === "lowercase" || check.kind === "uppercase" || check.kind === "sanitize"
+          check.kind === "trim" ||
+          check.kind === "lowercase" ||
+          check.kind === "uppercase" ||
+          check.kind === "sanitize" ||
+          check.kind === "noEmpty" ||
+          check.kind === "format" ||
+          check.kind === "phoneBR"
       );
     }
     case TypeName.number:

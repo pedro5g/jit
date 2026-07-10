@@ -82,25 +82,36 @@ export type StringCheck =
   | SchemaCheck<"min", number>
   | SchemaCheck<"max", number>
   | SchemaCheck<"length", number>
+  | SchemaCheck<"oneOf", readonly string[]>
   | SchemaCheck<"regex", RegExp>
   | SchemaCheck<"email", RegExp>
   | SchemaCheck<"uuid", RegExp>
   | SchemaCheck<"url">
+  | SchemaCheck<"noEmpty">
   | SchemaCheck<"trim">
   | SchemaCheck<"lowercase">
   | SchemaCheck<"uppercase">
   | SchemaCheck<"sanitize">
+  | SchemaCheck<"digitsLength", number | readonly number[]>
+  | SchemaCheck<"format", { readonly pattern: string; readonly stripNonDigits: boolean }>
+  | SchemaCheck<"phoneBR">
   | SchemaCheck<StringFormatKind, RegExp>;
 
 export type NumberCheck =
   | SchemaCheck<"min", number>
   | SchemaCheck<"max", number>
+  | SchemaCheck<"moreThan", number>
+  | SchemaCheck<"lessThan", number>
+  | SchemaCheck<"oneOf", readonly number[]>
   | SchemaCheck<"positive">
   | SchemaCheck<"negative">
   | SchemaCheck<"multipleOf", number>
   | SchemaCheck<"finite">
   | SchemaCheck<"safe">
-  | SchemaCheck<"integer">;
+  | SchemaCheck<"integer">
+  | SchemaCheck<"int32">
+  | SchemaCheck<"float32">
+  | SchemaCheck<"float64">;
 
 export type ArrayCheck =
   | SchemaCheck<"min", number>
@@ -108,9 +119,24 @@ export type ArrayCheck =
   | SchemaCheck<"length", number>
   | SchemaCheck<"nonEmpty">;
 
+export type IssuePathSegment = string | number;
+
+export interface RefineWhenPayload<TValue = unknown> {
+  readonly value: TValue;
+}
+
+export interface RefineOptions<TValue = unknown> {
+  readonly message?: string;
+  readonly path?: readonly IssuePathSegment[];
+  readonly when?: (payload: RefineWhenPayload<TValue>) => boolean;
+}
+
 /** Def mixin holding a schema's declarative constraints. */
-export interface ChecksDef<TCheck extends SchemaCheck = SchemaCheck> {
-  readonly checks?: readonly TCheck[];
+export interface ChecksDef<
+  TCheck extends SchemaCheck = SchemaCheck,
+  TChecks extends readonly TCheck[] = readonly TCheck[],
+> {
+  readonly checks?: TChecks;
   /**
    * zod-style built-in coercion flag set by `JIT.coerce.*` factories: the
    * compiled validator converts the input with the type's native
@@ -161,9 +187,21 @@ export type AnyValueSchema = BaseSchema<any, "any", EmptyDef>;
 export type UnknownSchema = BaseSchema<unknown, "unknown", EmptyDef>;
 export type NeverSchema = BaseSchema<never, "never", EmptyDef>;
 export type VoidSchema = BaseSchema<void, "void", EmptyDef>;
-export type StringSchema = BaseSchema<string, "string", ChecksDef<StringCheck>>;
-export type NumberSchema = BaseSchema<number, "number", ChecksDef<NumberCheck>>;
-export type IntSchema = BaseSchema<number, "int", ChecksDef<NumberCheck>>;
+export type StringSchema<TChecks extends readonly StringCheck[] = readonly StringCheck[]> = BaseSchema<
+  string,
+  "string",
+  ChecksDef<StringCheck, TChecks>
+>;
+export type NumberSchema<TChecks extends readonly NumberCheck[] = readonly NumberCheck[]> = BaseSchema<
+  number,
+  "number",
+  ChecksDef<NumberCheck, TChecks>
+>;
+export type IntSchema<TChecks extends readonly NumberCheck[] = readonly NumberCheck[]> = BaseSchema<
+  number,
+  "int",
+  ChecksDef<NumberCheck, TChecks>
+>;
 export type NanSchema = BaseSchema<number, "nan", EmptyDef>;
 export type NullSchema = BaseSchema<null, "null", EmptyDef>;
 export type BooleanSchema = BaseSchema<boolean, "boolean", CoercibleDef>;
@@ -609,6 +647,10 @@ export interface RefineDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends
   readonly predicate: (value: InferSchema<TInner>) => boolean;
   /** Custom issue message reported when the refinement rejects the value. */
   readonly message?: string;
+  /** Optional issue path, relative to the refined value. */
+  readonly path?: readonly IssuePathSegment[];
+  /** Optional guard that decides if the refinement should run. */
+  readonly when?: (payload: RefineWhenPayload<InferSchema<TInner>>) => boolean;
 }
 
 export type RefineSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<

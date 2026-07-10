@@ -1,4 +1,4 @@
-import { AST, JIT } from "../../../index.js";
+import { AST, type Builder, JIT } from "../../../index.js";
 
 describe("Builder chain", () => {
   describe("minimal JIT factories", () => {
@@ -115,6 +115,36 @@ describe("Builder chain", () => {
       }>();
       expectTypeOf<AST.Infer<typeof RefinedName>>().toEqualTypeOf<string>();
       expectTypeOf<AST.Infer<typeof CoercedNumber>>().toEqualTypeOf<number>();
+    });
+
+    it("rejects statically invalid literal defaults", () => {
+      const ValidStringDefault = JIT.string().min(5).max(10).default("hello");
+      const ValidObjectDefault = JIT.object({
+        name: JIT.string().min(5),
+        role: JIT.string().oneOf(["admin", "user"] as const),
+      }).default({ name: "Pedro", role: "admin" });
+
+      const assertInvalidDefaults = () => {
+        // @ts-expect-error literal is shorter than the declared min length
+        JIT.string().min(5).default("oi");
+        JIT.string()
+          .oneOf(["admin", "user"] as const)
+          // @ts-expect-error literal is not one of the declared string options
+          .default("root");
+        // @ts-expect-error numeric literal is outside the declared max
+        JIT.number().max(10).default(11);
+        // @ts-expect-error object literal field violates nested constraints
+        JIT.object({ name: JIT.string().min(5) }).default({ name: "Ana" });
+      };
+
+      expect(ValidStringDefault.schema.type).toBe(AST.TypeName.default);
+      expect(ValidObjectDefault.schema.type).toBe(AST.TypeName.default);
+      expectTypeOf<Builder.Strict<typeof ValidObjectDefault, { name: "Pedro"; role: "admin" }>>().toEqualTypeOf<{
+        name: "Pedro";
+        role: "admin";
+      }>();
+      expectTypeOf<Builder.Strict<typeof ValidObjectDefault, { name: "Ana"; role: "admin" }>>().toEqualTypeOf<never>();
+      expect(assertInvalidDefaults).toBeTypeOf("function");
     });
   });
 });

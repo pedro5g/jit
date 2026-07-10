@@ -68,6 +68,29 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitValidatorSource(Payment.schema)).toMatchSnapshot();
   });
 
+  it("validator: strict checks, masks, noEmpty, and conditional refine", () => {
+    const Credentials = JIT.object({
+      password: JIT.string().min(8),
+      confirmPassword: JIT.string().min(8),
+    });
+    const Signup = JIT.object({
+      kind: JIT.string().oneOf(["admin", "user"] as const),
+      age: JIT.number().moreThan(17).lessThan(130).int32(),
+      cpf: JIT.string().cpf(),
+      phone: JIT.string().phoneBR(),
+      invite: JIT.string().noEmpty().notRequired(),
+      credentials: Credentials.refine((value) => value.password === value.confirmPassword, {
+        message: "passwords must match",
+        path: ["confirmPassword"],
+        when(payload) {
+          return Credentials.safeParse(payload.value).success;
+        },
+      }),
+    });
+
+    expect(Compiler.emitValidatorSource(Signup.schema)).toMatchSnapshot();
+  });
+
   it("validator: strict known keys and catchall transforms", () => {
     const Payload = JIT.object({
       id: JIT.number().int(),
