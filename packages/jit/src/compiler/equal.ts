@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { getIndex } from "../runtime/index/index.js";
 import { emitEqual, emitEqualBody } from "./emitter/emit-equal.js";
@@ -51,11 +52,14 @@ export function compileEqual<TSchema extends ATS.AnyTypeSchema>(
       const body = emitEqualBody(program);
       const hash = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : undefined;
 
-      return globalThis.Function(
+      const compiled = globalThis.Function(
         "__hash",
         "__getIndex",
         `return function equal(l, r) {\n${body}\n};`
       )(hash, getIndex) as Equal<ATS.Infer<TSchema>>;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "equal" });
+      return compiled;
     },
     options
   );

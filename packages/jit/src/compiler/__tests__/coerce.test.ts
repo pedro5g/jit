@@ -75,12 +75,23 @@ describe("JIT.coerce zod-style native coercions", () => {
     try {
       const Native = JIT.object({ page: JIT.coerce.number().int() });
       const Callback = JIT.object({ page: JIT.coerce(JIT.number(), (value) => Number(value)) });
+      const nativeSelected = JIT.validator(Native).get("safeParse");
+      const callbackSelected = JIT.validator(Callback).get("safeParse");
 
-      const result = AOT.generate({ schemas: { Native, Callback }, outDir });
+      const result = AOT.generate({
+        schemas: {},
+        functions: {
+          Native_safeParse: nativeSelected.safeParse,
+          Callback_safeParse: callbackSelected.safeParse,
+        },
+        outDir,
+      });
       const source = readFileSync(join(outDir, "index.mjs"), "utf8");
 
       expect(source).toContain("const Native_safeParse");
-      expect(result.skipped.map((skip) => `${skip.schema}.${skip.operation}`)).toContain("Callback.validator");
+      expect(result.skipped.map((skip) => `${skip.schema}.${skip.operation}`)).toContain(
+        "Callback_safeParse.safeParse"
+      );
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }

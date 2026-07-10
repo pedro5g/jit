@@ -1,26 +1,31 @@
 #!/usr/bin/env node
 /**
- * jit CLI — Prisma-style code generation with schema discovery.
+ * jit CLI — Prisma-style code generation with declaration discovery.
  *
  * Usage:
- *   jit init [--force] [--format ts|mts|mjs|cjs] [--schemas <path>]
- *   jit generate [files...] [--out <dir>] [--name <package-name>] [--watch]
+ *   jit init [--force] [--format ts|mts|mjs|cjs] [--schemas <path-or-glob>] [--pattern <glob>]
+ *   jit generate [files...] [--out <dir>] [--name <package-name>] [--watch] [--pattern <glob>]
  *
  * `init` writes a typed `jit.config.*` in the current project root.
- * `generate` resolves config first, then falls back to `*.jit.*` discovery.
+ * `generate` resolves config first, then falls back to pattern discovery.
  */
 import { existsSync, watch, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { collectSchemas, discoverSchemaFiles, findConfigFile, type JitConfig, loadModule } from "./aot/discover.js";
-import { AOT_OPERATIONS, type AotExportMode, type AotOperation, generate } from "./aot/generate.js";
+import {
+  collectSchemas,
+  DEFAULT_SCHEMA_PATTERNS,
+  discoverSchemaFiles,
+  expandSchemaEntries,
+  findConfigFile,
+  type JitConfig,
+  loadModule,
+} from "./aot/discover.js";
+import { generate } from "./aot/generate.js";
 
 const DEFAULT_OUT_DIR = "node_modules/@jit/generated";
 const DEFAULT_PACKAGE_NAME = "@jit/generated";
-const DEFAULT_SCHEMAS = ["src"] as const;
-const DEFAULT_OPERATIONS = ["is", "parse", "safeParse"] as const satisfies readonly AotOperation[];
 const CONFIG_FORMATS = ["ts", "mts", "mjs", "cjs"] as const;
-const EXPORT_MODES = ["auto", "flat", "grouped", "both"] as const satisfies readonly AotExportMode[];
 
 export interface CliRuntime {
   readonly cwd?: string;
@@ -33,8 +38,7 @@ interface GenerateArguments {
   readonly outDir: string | undefined;
   readonly packageName: string | undefined;
   readonly watch: boolean;
-  readonly operations: readonly AotOperation[] | undefined;
-  readonly exportMode: AotExportMode | undefined;
+  readonly patterns: readonly string[] | undefined;
   readonly clean: boolean | undefined;
   readonly emitPackageJson: boolean | undefined;
 }
@@ -42,18 +46,17 @@ interface GenerateArguments {
 export interface InitArguments {
   readonly format: ConfigFormat;
   readonly force: boolean;
-  readonly schemas: readonly string[];
+  readonly schemas: readonly string[] | undefined;
   readonly outDir: string;
   readonly packageName: string;
-  readonly operations: readonly AotOperation[];
-  readonly exportMode: AotExportMode;
+  readonly patterns: readonly string[];
 }
 
 export type ConfigFormat = (typeof CONFIG_FORMATS)[number];
 
 const USAGE = `Usage:
-  jit init [--force] [--format ts|mts|mjs|cjs] [--schemas <path>] [--out <dir>] [--name <package>] [--ops is,parse] [--export auto|flat|grouped|both]
-  jit generate [files...] [--out <dir>] [--name <package>] [--watch] [--ops is,parse] [--export auto|flat|grouped|both] [--no-clean] [--no-package-json]
+  jit init [--force] [--format ts|mts|mjs|cjs] [--schemas <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
+  jit generate [files...] [--out <dir>] [--name <package>] [--watch] [--pattern <glob>] [--no-clean] [--no-package-json]
 `;
 
 export async function main(argv: readonly string[], runtime: CliRuntime = {}): Promise<number> {
@@ -105,9 +108,7 @@ async function runGenerate(
   let files = [...parsed.files];
   let outDir = parsed.outDir;
   let packageName = parsed.packageName;
-  let operations = parsed.operations;
-  let schemaOperations: JitConfig["schemaOperations"];
-  let exportMode = parsed.exportMode;
+  let patterns = parsed.patterns;
   let clean = parsed.clean;
   let emitPackageJson = parsed.emitPackageJson;
 
@@ -119,52 +120,55 @@ async function runGenerate(
       const config = (loaded.default ?? loaded) as JitConfig;
       const configDir = dirname(configFile);
 
-      files = expandConfigSchemas(config.schemas, configDir);
+      patterns = patterns ?? config.patterns;
+      files = expandSchemaEntries(config.schemas, configDir, patterns);
       outDir = outDir ?? (config.outDir ? resolve(configDir, config.outDir) : undefined);
       packageName = packageName ?? config.packageName;
-      operations = operations ?? config.operations;
-      schemaOperations = config.schemaOperations;
-      exportMode = exportMode ?? config.exportMode;
       clean = clean ?? config.clean;
       emitPackageJson = emitPackageJson ?? config.emitPackageJson;
       stdout(`using ${configFile}\n`);
     }
 
-    if (files.length === 0) files = discoverSchemaFiles(cwd);
+    if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
   }
 
   if (files.length === 0) {
-    stderr("No schema files found: pass files, add jit.config.*, or create *.jit.ts modules\n");
+    stderr("No declaration files found: pass files, add jit.config.*, or create *.jit.ts modules\n");
     return 1;
   }
 
   const resolvedOut = outDir ?? resolve(cwd, DEFAULT_OUT_DIR);
   const runOnce = async (): Promise<number> => {
-    const { schemas, sources } = await collectSchemas(files);
+    const { schemas, functions, sources } = await collectSchemas(files);
 
-    if (Object.keys(schemas).length === 0) {
-      stderr(`No exported schemas found in: ${files.join(", ")}\n`);
+    if (Object.keys(schemas).length === 0 && Object.keys(functions).length === 0) {
+      stderr(
+        `No AOT functions found in: ${files.join(", ")}. Export standalone compiled functions or JIT.compile(schema, { ... }) objects.\n`
+      );
       return 1;
     }
 
     const result = generate({
       schemas,
+      functions,
       sources,
       outDir: resolvedOut,
       ...(packageName ? { packageName } : {}),
-      ...(operations ? { operations } : {}),
-      ...(schemaOperations ? { schemaOperations } : {}),
-      ...(exportMode ? { exportMode } : {}),
       ...(clean !== undefined ? { clean } : {}),
       ...(emitPackageJson !== undefined ? { emitPackageJson } : {}),
     });
 
-    for (const file of result.files) {
-      stdout(`generated ${file}\n`);
-    }
-
     for (const skip of result.skipped) {
       stdout(`skipped ${skip.schema}.${skip.operation}: ${skip.reason}\n`);
+    }
+
+    if (result.files.length === 0) {
+      stderr("No AOT functions could be generated. Check skipped entries above for details.\n");
+      return 1;
+    }
+
+    for (const file of result.files) {
+      stdout(`generated ${file}\n`);
     }
 
     return 0;
@@ -174,7 +178,7 @@ async function runGenerate(
 
   if (!parsed.watch) return code;
 
-  stdout(`watching ${files.length} schema file(s) — ctrl+c to stop\n`);
+  stdout(`watching ${files.length} declaration file(s) — ctrl+c to stop\n`);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -195,31 +199,12 @@ async function runGenerate(
   });
 }
 
-function expandConfigSchemas(entries: readonly string[] | undefined, baseDir: string): string[] {
-  if (!entries || entries.length === 0) return [];
-
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const absolute = resolve(baseDir, entry);
-
-    if (/\.(ts|mts|cts|js|mjs|cjs)$/.test(absolute)) {
-      files.push(absolute);
-    } else {
-      files.push(...discoverSchemaFiles(absolute));
-    }
-  }
-
-  return files;
-}
-
 function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateArguments {
   const files: string[] = [];
   let outDir: string | undefined;
   let packageName: string | undefined;
   let watchMode = false;
-  let operations: readonly AotOperation[] | undefined;
-  let exportMode: AotExportMode | undefined;
+  let patterns: string[] | undefined;
   let clean: boolean | undefined;
   let emitPackageJson: boolean | undefined;
 
@@ -241,13 +226,8 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
       continue;
     }
 
-    if (argument === "--ops") {
-      operations = parseOperations(readValue(rest, ++index, "--ops"));
-      continue;
-    }
-
-    if (argument === "--export") {
-      exportMode = parseExportMode(readValue(rest, ++index, "--export"));
+    if (argument === "--pattern") {
+      patterns = [...(patterns ?? []), readValue(rest, ++index, "--pattern")];
       continue;
     }
 
@@ -274,7 +254,7 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
     if (!argument.startsWith("--")) files.push(resolve(cwd, argument));
   }
 
-  return { files, outDir, packageName, watch: watchMode, operations, exportMode, clean, emitPackageJson };
+  return { files, outDir, packageName, watch: watchMode, patterns, clean, emitPackageJson };
 }
 
 function parseInitArguments(rest: readonly string[]): InitArguments {
@@ -283,8 +263,7 @@ function parseInitArguments(rest: readonly string[]): InitArguments {
   let schemas: string[] | undefined;
   let outDir = DEFAULT_OUT_DIR;
   let packageName = DEFAULT_PACKAGE_NAME;
-  let operations: readonly AotOperation[] = DEFAULT_OPERATIONS;
-  let exportMode: AotExportMode = "auto";
+  let patterns: string[] = [...DEFAULT_SCHEMA_PATTERNS];
 
   for (let index = 0; index < rest.length; index++) {
     const argument = rest[index];
@@ -316,41 +295,29 @@ function parseInitArguments(rest: readonly string[]): InitArguments {
       continue;
     }
 
-    if (argument === "--ops") {
-      operations = parseOperations(readValue(rest, ++index, "--ops"));
-      continue;
-    }
-
-    if (argument === "--export") {
-      exportMode = parseExportMode(readValue(rest, ++index, "--export"));
+    if (argument === "--pattern") {
+      patterns = [readValue(rest, ++index, "--pattern")];
     }
   }
 
-  return {
-    format,
-    force,
-    schemas: schemas ?? DEFAULT_SCHEMAS,
-    outDir,
-    packageName,
-    operations,
-    exportMode,
-  };
+  return { format, force, schemas, outDir, packageName, patterns };
 }
 
 export function createConfigSource(options: InitArguments): string {
   const lines = [
-    "  // Files or directories scanned for *.jit.{ts,mts,cts,js,mjs,cjs}.",
-    `  schemas: ${formatStringArray(options.schemas)},`,
+    "  // Omit schemas to scan from the project root. Entries can be files, directories, or globs.",
+    ...(options.schemas
+      ? [`  schemas: ${formatStringArray(options.schemas)},`]
+      : ['  // schemas: ["src/schemas/**/*.ts"],']),
+    "  // Default discovery is **/*.jit.ts; change or add patterns when your declarations use another shape.",
+    `  patterns: ${formatStringArray(options.patterns)},`,
     "  // Generated files are importable directly from your app.",
     `  outDir: ${JSON.stringify(options.outDir)},`,
     `  packageName: ${JSON.stringify(options.packageName)},`,
-    "  // Raw schemas use this allowlist; JIT.compile markers stay explicit per schema.",
-    `  operations: ${formatStringArray(options.operations)},`,
-    "  // auto: JIT.compile(schema, { ... }) => User object; raw schemas => User_is flats.",
-    `  exportMode: ${JSON.stringify(options.exportMode)},`,
+    "  // Use false when generating into a project source folder instead of node_modules/@jit/generated.",
+    "  emitPackageJson: true,",
     "  // Delete only jit's known generated files before writing fresh output.",
     "  clean: true,",
-    "  emitPackageJson: true,",
   ];
 
   if (options.format === "cjs") {
@@ -370,26 +337,6 @@ function readValue(values: readonly string[], index: number, flag: string): stri
 function parseFormat(value: string): ConfigFormat {
   if ((CONFIG_FORMATS as readonly string[]).includes(value)) return value as ConfigFormat;
   throw new Error(`unknown config format "${value}"`);
-}
-
-function parseExportMode(value: string): AotExportMode {
-  if ((EXPORT_MODES as readonly string[]).includes(value)) return value as AotExportMode;
-  throw new Error(`unknown export mode "${value}"`);
-}
-
-function parseOperations(value: string): readonly AotOperation[] {
-  const operations = value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-
-  for (const operation of operations) {
-    if (!(AOT_OPERATIONS as readonly string[]).includes(operation)) {
-      throw new Error(`unknown AOT operation "${operation}"`);
-    }
-  }
-
-  return operations as readonly AotOperation[];
 }
 
 function formatStringArray(values: readonly string[]): string {

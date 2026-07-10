@@ -80,13 +80,14 @@ re-emit selected mapper functions when bindings are serializable.
 
 ### Aggregated Compile API
 
-The old marker shape:
+The runtime compile helper can still accept array selections for in-memory
+compatibility:
 
 ```ts
 JIT.compile(User, ["is", "parse"], extras);
 ```
 
-is replaced by object aggregation:
+For AOT markers, the project uses object aggregation:
 
 ```ts
 const validator = JIT.validator(User).get("is", "parse");
@@ -102,9 +103,10 @@ export const UserCompiled = JIT.compile(User, {
 
 - `schema`
 - an internal operation-key list for AOT
+- an internal grouped marker for discovery
 - the exact provided compiled functions/objects
 
-Reserved public keys: `schema`.
+Reserved public keys: `schema`, `ops`, `extras`.
 
 ### AOT Export Rules
 
@@ -121,13 +123,25 @@ User.parse(input);
 Generated operation functions may exist as internal `const`s, but must not be
 exported as `User_is`, `User_parse`, etc. for aggregated markers.
 
-If a schema is provided to AOT without an aggregated `JIT.compile` marker, AOT
-may support a separate explicit mode for loose function exports. That mode is
-not the default for this stage.
+Standalone AOT exports are allowed only when the developer explicitly exports a
+registered compiled function/object:
+
+```ts
+const selected = JIT.validator(User).get("is", "parse");
+
+export const User_is = selected.is;
+export const User_parse = selected.parse;
+```
+
+The generated package preserves those export names exactly. Raw schemas and
+array-style `JIT.compile(schema, ["is"])` markers do not generate fallback
+functions. If discovery finds no buildable exports, the CLI warns and writes
+nothing.
 
 Tree-shaking is achieved by selection before generation: AOT emits only keys
-present in the aggregated object. Property-level dead-code elimination inside a
-selected object is not part of the contract.
+present in the aggregated object or standalone functions explicitly exported
+from `.jit.ts` modules. Property-level dead-code elimination inside a selected
+object is not part of the contract.
 
 ## Feature Phases
 
@@ -312,12 +326,17 @@ Tasks:
   selections, queries, and codecs where feasible.
 - Make AOT read aggregated marker keys.
 - Generate grouped object exports only for aggregated markers.
+- Generate standalone exact-name exports only for explicit registered
+  functions.
+- Ignore raw schemas and array-style compile markers in AOT.
 - Preserve zero-import AOT output.
 
 Definition of done:
 
 - `import { User } from "@jit/generated"; User.is(...)` works.
 - Aggregated AOT output does not export `User_is`.
+- `import { User_is } from "@jit/generated"` works only when the declaration
+  file exported `User_is` explicitly.
 - AOT emits only keys present in the aggregated object.
 - Non-serializable bindings are skipped with clear reasons.
 

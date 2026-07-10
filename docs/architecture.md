@@ -85,9 +85,11 @@ Every schema node keeps this stable runtime shape and property order:
   into a shared closure.
 
 Tier B templates also feed the **artifact registry**
-(`runtime/artifact-registry.ts`): every compiled query/mapper remembers its
-source + bindings so `jit generate` can re-emit dev-defined functions
-aggregated via `JIT.compile(schema, ops, extras)`.
+(`runtime/artifact-registry.ts`): compiled query/mapper artifacts remember
+their source + bindings, while validator and operation artifacts remember the
+schema/op pair. `jit generate` uses that metadata to re-emit explicitly
+exported standalone functions and dev-defined extras aggregated via
+`JIT.compile(schema, { ... })`.
 
 ## Validation engine
 
@@ -118,14 +120,15 @@ reference when nothing rebuilds (`needsBuild` gates every allocation).
   (exports map, `sideEffects: false`);
 - zero imports — the validation error class and runtime helpers
   (keyed-index cache, hash primitives) are inlined;
-- export shape is explicit and bundle-oriented: `auto` emits flat
-  per-operation functions (`User_is`, `User_parse`) for raw schemas and
-  array-style markers, and emits only the grouped object (`User.is`) for
-  object-style `JIT.compile(schema, { ... })` markers; `flat`, `grouped`,
-  and `both` can be forced by config;
-- operation allowlists come from `JIT.compile` markers first, then
-  `schemaOperations`, then global `operations`; the generator never emits
-  an operation outside that selected surface;
+- export shape is explicit and bundle-oriented: standalone compiled functions
+  are emitted with the exact export name the developer declared
+  (`export const User_is = selected.is` -> `User_is`); object-style
+  `JIT.compile(schema, { ... })` markers emit only the grouped object
+  (`User.is`). Raw schemas and array-style compile markers do not emit AOT
+  output;
+- the generator never emits an operation outside the selected surface: object
+  markers use only the keys present in the compiled object; standalone output
+  uses only exported registered functions;
 - `.d.ts` types anchor on the dev's schema file via
   `import("jit").Infer<typeof import("./user.jit.js").User>` — inference is
   the single source of truth (`aot/emit-type.ts` is only the fallback for
@@ -135,10 +138,13 @@ reference when nothing rebuilds (`needsBuild` gates every allocation).
   hold callbacks is skipped with a reported reason, never miscompiled.
 
 CLI/config: `jit init` writes a typed `jit.config.*` in the current project
-root. `jit generate` resolves config first, then convention scans
-`*.jit.{ts,mts,cts,js,mjs,cjs}` (skipping `node_modules`, dot-dirs, build
-output). TypeScript schema files load natively on runtimes that strip types,
-falling back to `jiti` when installed.
+root. `schemas` is optional; when omitted, `jit generate` scans from the
+project root. `schemas` accepts files, directories, and globs, while
+`patterns` controls directory scans (default `**/*.jit.ts`). The scanner skips
+`node_modules`, dot-dirs, and build output. If no buildable exported
+functions/objects are found, the CLI warns and writes nothing. TypeScript
+schema files load natively on runtimes that strip types, falling back to
+`jiti` when installed.
 
 ## Optimizer boundaries
 

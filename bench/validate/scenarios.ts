@@ -90,8 +90,9 @@ interface AotUserModule {
  */
 async function loadAotUser(): Promise<AotUserModule> {
   const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
+  const selected = JIT.validator(UserSchema).get("is", "safeParse");
 
-  AOT.generate({ schemas: { User: UserSchema }, outDir, operations: ["is", "safeParse"] });
+  AOT.generate({ schemas: {}, functions: { User_is: selected.is, User_safeParse: selected.safeParse }, outDir });
   return (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as AotUserModule;
 }
 

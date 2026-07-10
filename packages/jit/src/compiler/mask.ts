@@ -1,6 +1,7 @@
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { emitScrub, type ScrubAction } from "./security/emit-scrub.js";
 
@@ -49,9 +50,12 @@ export function compileMask<TSchema extends ATS.AnyTypeSchema>(
     () => {
       const emitted = emitScrub(schema, selectPii);
 
-      return globalThis.Function(`return ${emitted.source.replace("function scrub", "function mask")};`)() as Mask<
-        ATS.InferSchema<TSchema>
-      >;
+      const compiled = globalThis.Function(
+        `return ${emitted.source.replace("function scrub", "function mask")};`
+      )() as Mask<ATS.InferSchema<TSchema>>;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "mask" });
+      return compiled;
     },
     options
   );

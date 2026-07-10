@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import {
   combineHash,
@@ -66,13 +67,16 @@ export function compileHash<TSchema extends ATS.AnyTypeSchema>(
         `return function computeHash(value) {\n${emitHashBody(schema)}\n};`
       )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Infer<TSchema>>;
 
-      return ((value: ATS.Infer<TSchema>) => {
+      const compiled = ((value: ATS.Infer<TSchema>) => {
         if (isHashCacheable(value)) {
           return getHash(value, compute as (value: object) => number);
         }
 
         return compute(value);
       }) as Hash<ATS.Infer<TSchema>>;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "hash" });
+      return compiled;
     },
     options
   );

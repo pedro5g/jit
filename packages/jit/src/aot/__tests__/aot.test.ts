@@ -57,20 +57,31 @@ describe("JIT AOT generate", () => {
   });
 
   it("should generate a standalone runnable module for callback-free operations", async () => {
-    // A refine callback skips the validator, keeping the module import-free.
     const Event = JIT.object({
       id: JIT.number(),
       kind: JIT.literal("click"),
       target: JIT.string().pii(),
       body: JIT.string().sanitize(),
       at: JIT.date(),
-    }).refine(() => true);
+    });
+    const selected = JIT.compile(Event, ["equal", "clone", "stringify"]);
 
-    const result = AOT.generate({ schemas: { Event }, outDir });
+    const result = AOT.generate({
+      schemas: {},
+      functions: {
+        Event_equal: selected.equal,
+        Event_clone: selected.clone,
+        Event_stringify: selected.stringify,
+        Event_mask: JIT.mask(Event),
+        Event_sanitize: JIT.sanitize(Event),
+        Event_codec: JIT.codec(Event),
+      },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
 
     expect(source).not.toContain('from "jit"');
-    expect(result.skipped.map((skip) => skip.operation)).toContain("validator");
+    expect(result.skipped).toHaveLength(0);
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
       Event_equal: (left: unknown, right: unknown) => boolean;
@@ -104,32 +115,68 @@ describe("JIT AOT generate", () => {
       plan: JIT.string().default("free"),
     });
 
-    const result = AOT.generate({ schemas: { User }, outDir, packageName: "@acme/models" });
+    const selected = JIT.validator(User).get("is", "parse", "safeParse");
+    const result = AOT.generate({
+      schemas: {},
+      functions: {
+        User_is: selected.is,
+        User_parse: selected.parse,
+        User_safeParse: selected.safeParse,
+      },
+      outDir,
+      packageName: "@acme/models",
+    });
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
     const manifest = JSON.parse(readFileSync(join(outDir, "package.json"), "utf8")) as { name: string; type: string };
 
-    expect(result.skipped.filter((skip) => skip.operation === "validator")).toHaveLength(0);
-    expect(source).toContain("const User_validator = /*#__PURE__*/ (() => {");
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("const User_is_validator = /*#__PURE__*/ (() => {");
+    expect(source).toContain("const User_parse_validator = /*#__PURE__*/ (() => {");
+    expect(source).toContain("const User_safeParse_validator = /*#__PURE__*/ (() => {");
     expect(source).toContain("function is(value)");
     expect(source).toContain("function safeParse(value)");
     expect(source).toContain("class JITValidationError extends Error");
     expect(source).not.toContain("import ");
-    expect(source).toContain("const User_is = /*#__PURE__*/ ((v) => v.is)(User_validator);");
+    expect(source).toContain("const User_is = /*#__PURE__*/ ((v) => v.is)(User_is_validator);");
     expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
 
-    expect(types).toContain("export type User =");
+    expect(types).not.toContain("export type User =");
     expect(types).toContain("id: number");
     expect(types).toContain("plan?: string");
-    expect(types).toContain("value is User");
     expect(types).toContain("export declare const User_is");
+    expect(types).toContain("export declare const User_parse");
+    expect(types).toContain("export declare const User_safeParse");
     expect(types).not.toContain("export declare const User: {");
 
     expect(manifest.name).toBe("@acme/models");
     expect(manifest.type).toBe("module");
   });
 
-  it("should report skipped operations with reasons instead of failing", () => {
+  it("should preserve standalone export names when grouped internals would collide", async () => {
+    const UserSchema = JIT.object({ id: JIT.number() });
+    const selected = JIT.validator(UserSchema).get("is");
+
+    AOT.generate({
+      schemas: { User: JIT.compile(UserSchema, { is: selected.is }) },
+      functions: { User_is: selected.is },
+      outDir,
+    });
+
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+      User: { is: (value: unknown) => boolean };
+      User_is: (value: unknown) => boolean;
+    };
+
+    expect(source).toContain("const User_is_1");
+    expect(source).toContain("is: User_is_1");
+    expect(source).toContain("const User_is =");
+    expect(generated.User.is({ id: 1 })).toBe(true);
+    expect(generated.User_is({ id: 1 })).toBe(true);
+  });
+
+  it("should report raw schemas as skipped instead of generating fallback functions", () => {
     const Weird = JIT.object({
       meta: JIT.map(JIT.string(), JIT.number()),
       hook: JIT.string().refine((value) => value.length > 0),
@@ -139,22 +186,20 @@ describe("JIT AOT generate", () => {
     const result = AOT.generate({ schemas: { Weird }, outDir });
     const operations = result.skipped.map((skip) => `${skip.schema}.${skip.operation}`);
 
-    expect(operations).toContain("Weird.validator");
-    expect(operations).toContain("Weird.stringify");
-    expect(operations).toContain("Weird.codec");
-    expect(result.files).toHaveLength(5);
+    expect(operations).toContain("Weird.schema");
+    expect(result.files).toHaveLength(0);
   });
 
   it("should honor build options that keep generated files minimal", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
 
     writeFileSync(join(outDir, "package.json"), '{"stale":true}\n');
+    const selected = JIT.validator(User).get("is");
 
     const result = AOT.generate({
-      schemas: { User },
+      schemas: {},
+      functions: { User_is: selected.is },
       outDir,
-      operations: ["is"],
-      exportMode: "flat",
       emitPackageJson: false,
     });
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
@@ -177,11 +222,20 @@ describe("JIT AOT generate", () => {
 
   it("should generate hash and hash-short-circuit equal with zero imports", async () => {
     const Hashed = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered");
-    const result = AOT.generate({ schemas: { Hashed }, outDir });
+    const selected = JIT.compile(Hashed, ["equal", "hash"]);
+    const result = AOT.generate({
+      schemas: {},
+      functions: {
+        Hashed_equal: selected.equal,
+        Hashed_hash: selected.hash,
+      },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
 
     expect(result.skipped.filter((skip) => skip.operation === "equal")).toHaveLength(0);
     expect(source).toContain("const Hashed_hash");
+    expect(source).toContain("const Hashed_equal_hash");
     expect(source).toContain("((__hash) => (");
     expect(source).not.toContain("import ");
 

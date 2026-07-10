@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { type CodecEmitOptions, emitCodec } from "./codec/emit-codec.js";
 
@@ -63,9 +64,13 @@ export function compileCodec<TSchema extends ATS.AnyTypeSchema>(
     () => {
       const emitted = emitCodec(schema, { version });
 
-      return globalThis.Function(...emitted.bindingNames, emitted.source)(...emitted.bindingValues) as CompiledCodec<
-        ATS.InferSchema<TSchema>
-      >;
+      const compiled = globalThis.Function(
+        ...emitted.bindingNames,
+        emitted.source
+      )(...emitted.bindingValues) as CompiledCodec<ATS.InferSchema<TSchema>>;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "codec" });
+      return compiled;
     },
     options
   );

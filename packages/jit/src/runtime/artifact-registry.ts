@@ -1,17 +1,31 @@
 /**
- * Registry linking compiled artifacts (query functions, mapper objects) back
- * to the source and bindings that produced them. `JIT.compile` extras use it
- * so `jit generate` can re-emit dev-defined functions (`findById`, `getADM`,
- * `toDTO`, ...) as pure AOT code when their bindings are serializable.
+ * Registry linking compiled artifacts back to the source/schema metadata that
+ * produced them. `jit generate` uses it for object-style `JIT.compile` extras
+ * and for explicitly exported standalone functions.
  */
+import type * as ATS from "../core/ats/index.js";
 
-export interface CompiledArtifact {
+interface SourceArtifact {
   readonly kind: "query" | "mapper";
   /** Expression source: evaluates to the compiled function/object. */
   readonly source: string;
   readonly bindingNames: readonly string[];
   readonly bindingValues: readonly unknown[];
 }
+
+interface ValidatorArtifact {
+  readonly kind: "validator";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly op: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync";
+}
+
+interface OperationArtifact {
+  readonly kind: "operation";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly op: "hash" | "equal" | "clone" | "stringify" | "mask" | "sanitize" | "codec";
+}
+
+export type CompiledArtifact = SourceArtifact | ValidatorArtifact | OperationArtifact;
 
 const REGISTRY = new WeakMap<object, CompiledArtifact>();
 

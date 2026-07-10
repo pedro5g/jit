@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createConfigSource, main } from "../cli.js";
 
 describe("jit CLI", () => {
@@ -39,9 +40,11 @@ describe("jit CLI", () => {
     expect(stdout.join("")).toContain("created");
     expect(stderr.join("")).toBe("");
     expect(source).toContain('import { AOT } from "jit";');
-    expect(source).toContain('schemas: ["src"]');
-    expect(source).toContain('operations: ["is", "parse", "safeParse"]');
-    expect(source).toContain('exportMode: "auto"');
+    expect(source).toContain('// schemas: ["src/schemas/**/*.ts"]');
+    expect(source).toContain('patterns: ["**/*.jit.ts"]');
+    expect(source).not.toContain("operations:");
+    expect(source).not.toContain("exportMode:");
+    expect(source).toContain("Use false when generating into a project source folder");
   });
 
   it("should refuse to overwrite an existing config unless forced", async () => {
@@ -52,12 +55,15 @@ describe("jit CLI", () => {
     expect(await main(["init"], runtime)).toBe(1);
     expect(stderr.join("")).toContain("--force");
 
-    expect(await main(["init", "--force", "--format", "mjs", "--schemas", "models", "--ops", "is"], runtime)).toBe(0);
+    expect(
+      await main(["init", "--force", "--format", "mjs", "--schemas", "models/**/*.ts", "--pattern", "**/*.ts"], runtime)
+    ).toBe(0);
     expect(existsSync(join(projectDir, "jit.config.mjs"))).toBe(true);
-    expect(readFileSync(join(projectDir, "jit.config.mjs"), "utf8")).toContain('operations: ["is"]');
+    expect(readFileSync(join(projectDir, "jit.config.mjs"), "utf8")).toContain('schemas: ["models/**/*.ts"]');
+    expect(readFileSync(join(projectDir, "jit.config.mjs"), "utf8")).toContain('patterns: ["**/*.ts"]');
   });
 
-  it("should generate minimal flat AOT output from config", async () => {
+  it("should generate standalone AOT functions from explicit exports", async () => {
     const { runtime, stdout, stderr } = createRuntime();
 
     mkdirSync(join(projectDir, "src"), { recursive: true });
@@ -66,12 +72,14 @@ describe("jit CLI", () => {
     writeFileSync(
       join(projectDir, "src", "user.jit.ts"),
       [
-        'import { JIT } from "jit";',
+        `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
         "",
         "export const User = JIT.object({",
         "  id: JIT.number(),",
         "  name: JIT.string(),",
         "});",
+        "const selected = JIT.validator(User).get('is');",
+        "export const User_is = selected.is;",
         "",
       ].join("\n")
     );
@@ -83,8 +91,7 @@ describe("jit CLI", () => {
         schemas: ["src"],
         outDir: "generated",
         packageName: "@acme/generated",
-        operations: ["is"],
-        exportMode: "flat",
+        patterns: ["**/*.jit.ts"],
       })
     );
 
@@ -98,7 +105,17 @@ describe("jit CLI", () => {
     expect(source).toContain("const User_is");
     expect(source).not.toContain("const User_parse");
     expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
-    expect(types).toContain("export declare const User_is");
+    expect(types).toContain('export declare const User_is: typeof import("../src/user.jit.js").User_is;');
     expect(types).not.toContain("export declare const User: {");
+  });
+
+  it("should warn when declaration files contain no buildable exports", async () => {
+    const { runtime, stderr } = createRuntime();
+
+    mkdirSync(join(projectDir, "src"), { recursive: true });
+    writeFileSync(join(projectDir, "src", "user.jit.ts"), "export const User = { type: 'object', def: {} };\n");
+
+    expect(await main(["generate", "src/user.jit.ts"], runtime)).toBe(1);
+    expect(stderr.join("")).toContain("No AOT functions found");
   });
 });

@@ -1,5 +1,6 @@
 import type * as ATS from "../core/ats/index.js";
 import { JITValidationError, type ValidationIssue } from "../errors/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { emitValidator } from "./validate/emit-validate.js";
 
@@ -132,16 +133,39 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
         throw new JITValidationError(result.issues);
       };
 
-      if (normalizedOps.includes("is") && compiled.is) selection.is = compiled.is;
-      if (normalizedOps.includes("safeParse") && safeParse) selection.safeParse = safeParse;
-      if (normalizedOps.includes("parse")) selection.parse = parse;
-      if (normalizedOps.includes("safeParseAsync") && safeParseAsync) selection.safeParseAsync = safeParseAsync;
-      if (normalizedOps.includes("parseAsync")) selection.parseAsync = parseAsync;
+      if (normalizedOps.includes("is") && compiled.is) {
+        selection.is = compiled.is;
+        registerValidatorArtifact(compiled.is, schema, "is");
+      }
+      if (normalizedOps.includes("safeParse") && safeParse) {
+        selection.safeParse = safeParse;
+        registerValidatorArtifact(safeParse, schema, "safeParse");
+      }
+      if (normalizedOps.includes("parse")) {
+        selection.parse = parse;
+        registerValidatorArtifact(parse, schema, "parse");
+      }
+      if (normalizedOps.includes("safeParseAsync") && safeParseAsync) {
+        selection.safeParseAsync = safeParseAsync;
+        registerValidatorArtifact(safeParseAsync, schema, "safeParseAsync");
+      }
+      if (normalizedOps.includes("parseAsync")) {
+        selection.parseAsync = parseAsync;
+        registerValidatorArtifact(parseAsync, schema, "parseAsync");
+      }
 
       return selection as CompiledValidatorSelection<TValue, TOps>;
     },
     options
   );
+}
+
+function registerValidatorArtifact<TSchema extends ATS.AnyTypeSchema>(
+  fn: object,
+  schema: TSchema,
+  op: ValidatorOp
+): void {
+  registerArtifact(fn, { kind: "validator", schema, op });
 }
 
 function normalizeValidatorOps(ops: readonly ValidatorOp[]): readonly ValidatorOp[] {

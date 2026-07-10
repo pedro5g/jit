@@ -70,7 +70,11 @@ describe("AOT generation from JIT.compile markers", () => {
 
   it("should generate only the ops the dev selected", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const marked = JIT.compile(User, ["is", "stringify"]);
+    const selected = JIT.compile(User, ["is", "stringify"]);
+    const marked = JIT.compile(User, {
+      is: selected.is,
+      stringify: selected.stringify,
+    });
 
     const result = AOT.generate({ schemas: { User: marked }, outDir });
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
@@ -78,7 +82,9 @@ describe("AOT generation from JIT.compile markers", () => {
 
     expect(source).toContain("const User_is");
     expect(source).toContain("const User_stringify");
-    expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(source).toMatch(/export \{ User \};/);
+    expect(source).not.toMatch(/export \{[^}]*User_is/);
     expect(source).not.toContain("User_clone");
     expect(source).not.toContain("User_equal");
     expect(source).not.toContain("User_codec");
@@ -87,19 +93,32 @@ describe("AOT generation from JIT.compile markers", () => {
     // parse not requested → no error class needed → still zero-import.
     expect(source).not.toContain("class JITValidationError");
 
-    expect(types).toContain("User_is");
+    expect(types).toContain("readonly is");
+    expect(types).toContain("readonly stringify");
     expect(types).not.toContain("User_clone");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
-      User_is: (value: unknown) => boolean;
-      User_stringify: (value: unknown) => string;
-      User?: unknown;
+      User: {
+        is: (value: unknown) => boolean;
+        stringify: (value: unknown) => string;
+      };
+      User_is?: unknown;
     };
 
-    expect(generated.User_is({ id: 1, name: "Ada" })).toBe(true);
-    expect(generated.User_stringify({ id: 1, name: "Ada" })).toBe(JSON.stringify({ id: 1, name: "Ada" }));
-    expect(generated.User).toBeUndefined();
+    expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.User.stringify({ id: 1, name: "Ada" })).toBe(JSON.stringify({ id: 1, name: "Ada" }));
+    expect(generated.User_is).toBeUndefined();
     expect(result.skipped).toHaveLength(0);
+  });
+
+  it("should skip array-style compile markers in AOT", () => {
+    const User = JIT.object({ id: JIT.number() });
+    const marked = JIT.compile(User, ["is"]);
+
+    const result = AOT.generate({ schemas: { User: marked }, outDir });
+
+    expect(result.files).toHaveLength(0);
+    expect(result.skipped[0]?.reason).toMatch(/array-style compile markers do not emit/);
   });
 
   it("should export only the grouped object for object-style compile markers", async () => {
@@ -194,7 +213,8 @@ describe("AOT generation from JIT.compile markers", () => {
     const toLabel = JIT.mapper(User, PublicUser, {
       label: (user) => `${user.name}#${user.id}`,
     });
-    const marked = JIT.compile(User, ["is"], { toLabel });
+    const selected = JIT.validator(User).get("is");
+    const marked = JIT.compile(User, { is: selected.is, toLabel });
 
     const result = AOT.generate({ schemas: { User: marked }, outDir });
     const skip = result.skipped.find((entry) => entry.operation === "toLabel");
@@ -211,17 +231,20 @@ describe("AOT generation from JIT.compile markers", () => {
 
   it("should report runtime-only ops instead of failing", () => {
     const User = JIT.object({ id: JIT.number() });
-    const marked = JIT.compile(User, ["is", "update"]);
+    const selected = JIT.compile(User, ["update"]);
+    const marked = JIT.compile(User, { update: selected.update });
 
     const result = AOT.generate({ schemas: { User: marked }, outDir });
     const skipped = result.skipped.map((skip) => `${skip.operation}: ${skip.reason}`);
 
     expect(skipped.some((entry) => entry.startsWith("update: runtime-only"))).toBe(true);
+    expect(result.files).toHaveLength(0);
   });
 
   it("should keep hash internal when only equal needs it", () => {
     const Item = JIT.object({ id: JIT.number(), tags: JIT.array(JIT.string()) }).hash();
-    const marked = JIT.compile(Item, ["equal"]);
+    const selected = JIT.compile(Item, ["equal"]);
+    const marked = JIT.compile(Item, { equal: selected.equal });
 
     AOT.generate({ schemas: { Item: marked }, outDir });
 
@@ -230,6 +253,7 @@ describe("AOT generation from JIT.compile markers", () => {
 
     expect(source).toContain("const Item_equal");
     expect(types).not.toContain("Item_hash:");
-    expect(source).toMatch(/export \{ Item_equal \};/);
+    expect(source).toMatch(/export \{ Item \};/);
+    expect(source).not.toMatch(/export \{[^}]*Item_equal/);
   });
 });

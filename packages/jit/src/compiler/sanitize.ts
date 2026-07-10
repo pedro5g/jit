@@ -1,5 +1,6 @@
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { emitScrub, type ScrubAction } from "./security/emit-scrub.js";
 
@@ -68,10 +69,13 @@ export function compileSanitize<TSchema extends ATS.AnyTypeSchema>(
     () => {
       const emitted = emitScrub(schema, selectSanitize);
 
-      return globalThis.Function(
+      const compiled = globalThis.Function(
         ...SANITIZE_BINDINGS,
         `return ${emitted.source.replace("function scrub", "function sanitize")};`
       )(...SANITIZE_VALUES) as Sanitize<ATS.InferSchema<TSchema>>;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "sanitize" });
+      return compiled;
     },
     options
   );

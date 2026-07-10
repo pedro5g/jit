@@ -72,7 +72,13 @@ export type CompiledObjectSelection<
  *
  * @example
  * ```ts
- * export const Users = JIT.compile(User, ["is", "equal", "stringify"], {
+ * const selected = JIT.validator(User).get("is");
+ * const ops = JIT.compile(User, ["equal", "stringify"]);
+ *
+ * export const Users = JIT.compile(User, {
+ *   is: selected.is,
+ *   equal: ops.equal,
+ *   stringify: ops.stringify,
  *   findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")).compile(),
  *   toDTO: JIT.mapper(User, UserDTO),
  * });

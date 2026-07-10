@@ -10,7 +10,7 @@ import { getArtifact } from "../../runtime/artifact-registry.js";
 function sourceOf(compiled: object): string {
   const artifact = getArtifact(compiled);
 
-  if (!artifact) throw new Error("compiled artifact not registered");
+  if (!artifact || !("source" in artifact)) throw new Error("compiled source artifact not registered");
   return artifact.source;
 }
 

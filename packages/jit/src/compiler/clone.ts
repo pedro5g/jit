@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { buildCloneIR } from "./clone/build-clone-ir.js";
 import { emitClone, emitCloneBody } from "./clone/emit-clone.js";
@@ -51,7 +52,12 @@ export function compileClone<TSchema extends ATS.AnyTypeSchema>(
       const program = buildCloneIR(schema);
       const body = emitCloneBody(program);
 
-      return globalThis.Function(`return function clone(value) {\n${body}\n};`)() as Clone<ATS.Infer<TSchema>>;
+      const compiled = globalThis.Function(`return function clone(value) {\n${body}\n};`)() as Clone<
+        ATS.Infer<TSchema>
+      >;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "clone" });
+      return compiled;
     },
     options
   );

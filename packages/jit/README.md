@@ -54,12 +54,12 @@ Measured on this repo's validation benchmark (mitata, Node 22.17.1,
 linux-x64, AMD Ryzen 7 5800H, Zod 4.4.3 — run `pnpm bench:validate` for your
 machine):
 
-| Scenario                      | JIT runtime   | JIT AOT      | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
-| ----------------------------- | ------------- | ------------ | --------- | ----------- | ----------- | ----------- |
-| `is()` valid object           | 60.48 ns      | **58.53 ns** | 916.02 ns | 0.28 b      | 2.34 kb     | **15.7x**   |
-| `is()` invalid object         | 2.87 ns       | **2.73 ns**  | 29.12 µs  | 0.03 b      | 16.56 kb    | **10,669x** |
-| `safeParse` valid object      | **66.13 ns**  | 68.37 ns     | 807.75 ns | 40.23 b     | 2.00 kb     | **11.8x**   |
-| `safeParse` invalid, 7 issues | **116.81 ns** | 124.18 ns    | 25.40 µs  | 624.41 b    | 5.45 kb     | **204.5x**  |
+| Scenario                      | JIT runtime  | JIT AOT       | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
+| ----------------------------- | ------------ | ------------- | --------- | ----------- | ----------- | ----------- |
+| `is()` valid object           | **57.72 ns** | 58.82 ns      | 894.07 ns | 0.28 b      | 2.29 kb     | **15.2x**   |
+| `is()` invalid object         | **2.68 ns**  | 2.70 ns       | 29.60 µs  | 0.03 b      | 16.16 kb    | **10,963x** |
+| `safeParse` valid object      | 68.95 ns     | **67.74 ns**  | 810.21 ns | 40.24 b     | 1.92 kb     | **12.0x**   |
+| `safeParse` invalid, 7 issues | 126.18 ns    | **120.70 ns** | 25.14 µs  | 624.11 b    | 5.25 kb     | **208.3x**  |
 
 ## Install
 
@@ -454,25 +454,36 @@ Generated `jit.config.ts`:
 import { AOT } from "jit";
 
 export default AOT.defineConfig({
-  schemas: ["src"], // files or directories scanned for *.jit.*
+  // Omit schemas to scan from the project root. Entries can be files,
+  // directories, or globs.
+  // schemas: ["src/schemas/**/*.ts"],
+  // Default discovery is **/*.jit.ts; change or add patterns when your
+  // declarations use another shape.
+  patterns: ["**/*.jit.ts"],
+  // Generated files are importable directly from your app.
   outDir: "node_modules/@jit/generated",
   packageName: "@jit/generated",
-  operations: ["is", "parse", "safeParse"], // fallback for raw schemas
-  exportMode: "auto",
-  clean: true, // delete only jit's known generated files before writing
+  // Use false when generating into a project source folder instead of
+  // node_modules/@jit/generated.
   emitPackageJson: true,
+  // Delete only jit's known generated files before writing fresh output.
+  clean: true,
 });
 ```
 
-`exportMode: "auto"` follows the project rule:
+Discovery rules are intentionally boring:
 
-- export a raw schema and AOT emits flat functions: `User_is`, `User_parse`;
-- export `JIT.compile(schema, { ... })` and AOT emits one grouped object:
-  `User.is`, `User.parse`;
-- `exportMode: "flat" | "grouped" | "both"` can force the shape globally.
+- if `schemas` is omitted, `jit generate` scans from the project root;
+- `schemas` accepts files, directories, and globs like
+  `src/schemas/**/*.ts`;
+- `patterns` controls directory scans; the default is `**/*.jit.ts`;
+- if no buildable functions are exported, the CLI prints a warning and writes
+  nothing.
+
+There is no raw-schema fallback. AOT builds only what you explicitly export.
 
 ```ts
-// src/user.jit.ts — discovered by convention (*.jit.{ts,mts,js,mjs,cjs})
+// src/user.jit.ts — discovered by convention (**/*.jit.ts)
 import { JIT } from "jit";
 
 const UserSchema = JIT.object({
@@ -483,6 +494,11 @@ const UserSchema = JIT.object({
 
 const selected = JIT.validator(UserSchema).get("is", "parse");
 
+// Standalone functions keep their declared export names exactly.
+export const User_is = selected.is;
+export const User_parse = selected.parse;
+
+// Object-style aggregation exports one object: User.is, User.parse, ...
 export const User = JIT.compile(UserSchema, {
   is: selected.is,
   parse: selected.parse,
@@ -493,21 +509,12 @@ export const User = JIT.compile(UserSchema, {
 ```
 
 ```ts
-import { User } from "@jit/generated";
+import { User, User_is, User_parse } from "@jit/generated";
 
 User.is(input);
 User.findAdmins(users);
-```
-
-Raw schema export:
-
-```ts
-// src/user.jit.ts
-export const User = UserSchema;
-```
-
-```ts
-import { User_is, User_parse } from "@jit/generated";
+User_is(input);
+User_parse(input);
 ```
 
 Run generation:
@@ -515,7 +522,7 @@ Run generation:
 ```sh
 pnpm jit generate
 pnpm jit generate src/user.jit.ts --out generated --name @acme/models
-pnpm jit generate --ops is,parse --export flat
+pnpm jit generate --pattern "src/schemas/**/*.ts"
 pnpm jit generate --watch
 ```
 
@@ -537,16 +544,16 @@ export declare const User: {
   readonly parse: (value: unknown) => User;
 };
 
-// flat raw schema
-export declare const User_is: (value: unknown) => value is User;
+// standalone explicit export
+export declare const User_is: typeof import("../src/user.jit.js").User_is;
 ```
 
 Tree-shaking is proven by a real bundler in the test suite: importing only
 `User_is` produces a bundle with **no serializer, no codec, no error class,
-no namespace object**. Object-style markers export only the object; flat mode
-exports only functions. Operations whose bindings hold user callbacks
-(`refine`, computed mapper fields) are skipped with a reported reason instead
-of silently miscompiling.
+no namespace object**. Object-style markers export only the object;
+standalone explicit functions export only those functions. Operations whose
+bindings hold user callbacks (`refine`, computed mapper fields) are skipped
+with a reported reason instead of silently miscompiling.
 
 ---
 
@@ -583,9 +590,9 @@ come from, and every one of them is locked by golden-source or snapshot tests:
   user values per compile (query/mapper). The second `.compile()` of an
   identical plan is a map lookup.
 - **AOT ahead of everything** — generation moves compilation to build time:
-  self-contained zero-import modules, flat pure-function exports for raw
-  schemas, and grouped objects only for object-style `JIT.compile` markers
-  (proven with esbuild in the test suite).
+  self-contained zero-import modules, exact-name standalone exports for
+  explicit compiled functions, and grouped objects only for object-style
+  `JIT.compile` markers (proven with esbuild in the test suite).
 
 **Allocate only when the data changes**
 

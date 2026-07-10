@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { emitSerialize } from "./serialize/emit-serialize.js";
 
@@ -39,7 +40,12 @@ export function compileSerialize<TSchema extends ATS.AnyTypeSchema>(
   return getCompileCached(
     schema,
     "serialize",
-    () => globalThis.Function(`return ${emitSerialize(schema)};`)() as Serialize<ATS.InferSchema<TSchema>>,
+    () => {
+      const compiled = globalThis.Function(`return ${emitSerialize(schema)};`)() as Serialize<ATS.InferSchema<TSchema>>;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "stringify" });
+      return compiled;
+    },
     options
   );
 }

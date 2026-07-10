@@ -38,8 +38,9 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
       name: JIT.string(),
       email: JIT.string().email(),
     });
+    const selected = JIT.validator(User).get("is");
 
-    AOT.generate({ schemas: { User }, outDir });
+    AOT.generate({ schemas: {}, functions: { User_is: selected.is }, outDir });
 
     const bundled = await bundle(
       `import { User_is } from "./index.mjs";\nconsole.log(User_is({ id: 1, name: "Ada", email: "ada@math.org" }));\n`
@@ -57,8 +58,17 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
   it("should drop entire schemas that are never imported", async () => {
     const User = JIT.object({ id: JIT.number() });
     const Order = JIT.object({ sku: JIT.string() });
+    const users = JIT.compile(User, ["equal"]);
+    const orders = JIT.compile(Order, ["equal"]);
 
-    AOT.generate({ schemas: { User, Order }, outDir });
+    AOT.generate({
+      schemas: {},
+      functions: {
+        User_equal: users.equal,
+        Order_equal: orders.equal,
+      },
+      outDir,
+    });
 
     const bundled = await bundle(
       `import { User_equal } from "./index.mjs";\nconsole.log(User_equal({ id: 1 }, { id: 1 }));\n`
