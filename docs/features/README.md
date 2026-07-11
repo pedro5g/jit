@@ -45,7 +45,8 @@ JIT is fast because expensive work moves from hot calls to compile time:
 - loops are classic indexed loops;
 - checks are ordered cheapest-first;
 - query and mapper pipelines are fused;
-- binary rowsets scan compact `ArrayBuffer` rows by fixed offsets;
+- binary rowsets scan compact `ArrayBuffer` rows by fixed offsets, selecting
+  packed `DataView` or aligned typed-array access from the compiled layout;
 - optional cache helpers are emitted only when a strategy needs them;
 - AOT output is plain JS with zero imports from the JIT engine.
 
