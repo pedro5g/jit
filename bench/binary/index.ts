@@ -54,6 +54,22 @@ for (const size of SIZES) {
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score")
     .compile();
+  const byteCount = JIT.query(rowset)
+    .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
+    .count()
+    .compile();
+  const regularCount = JIT.query(Users)
+    .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
+    .count()
+    .compile();
+  const byteSum = JIT.query(rowset)
+    .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
+    .sum("score")
+    .compile();
+  const regularSum = JIT.query(Users)
+    .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
+    .sum("score")
+    .compile();
   const exactPipeline = JIT.process(User)
     .binary({ strategy: "exact" })
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
@@ -73,6 +89,28 @@ for (const size of SIZES) {
     competitors: [
       { name: "JIT query over JS array", fn: () => regularQuery(users) },
       { name: "handwritten JS filter/map", fn: () => handwritten(users), biased: GENERIC_BIAS },
+    ],
+  });
+
+  registerScenario({
+    op: "binary count scan",
+    name: `${size} users`,
+    args: [rowset],
+    jit: byteCount,
+    competitors: [
+      { name: "JIT count over JS array", fn: () => regularCount(users) },
+      { name: "handwritten JS count", fn: () => handwrittenCount(users), biased: GENERIC_BIAS },
+    ],
+  });
+
+  registerScenario({
+    op: "binary sum scan",
+    name: `${size} users`,
+    args: [rowset],
+    jit: byteSum,
+    competitors: [
+      { name: "JIT sum over JS array", fn: () => regularSum(users) },
+      { name: "handwritten JS sum", fn: () => handwrittenSum(users), biased: GENERIC_BIAS },
     ],
   });
 
@@ -119,6 +157,28 @@ function handwritten(input: readonly User[]): PublicUser[] {
   }
   out.length = cursor;
   return out;
+}
+
+function handwrittenCount(input: readonly User[]): number {
+  let count = 0;
+
+  for (let index = 0; index < input.length; index++) {
+    const user = input[index];
+
+    if (user.role === "admin" && user.active === true && user.score > 500) count++;
+  }
+  return count;
+}
+
+function handwrittenSum(input: readonly User[]): number {
+  let total = 0;
+
+  for (let index = 0; index < input.length; index++) {
+    const user = input[index];
+
+    if (user.active === true && user.score > 500) total += user.score;
+  }
+  return total;
 }
 
 function zodFlow(input: readonly User[]): PublicUser[] {
