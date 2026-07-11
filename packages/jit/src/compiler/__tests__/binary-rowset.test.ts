@@ -73,7 +73,8 @@ describe("binary rowsets", () => {
       })
     );
     const binary = Events.binary({ strategy: "exact", memoryLayout: "aligned" });
-    const rowset = binary.load([{ present: true, sequence: 7, createdAt: new Date(1_700_000_000_000), total: 42n }]);
+    const eventRows = [{ present: true, sequence: 7, createdAt: new Date(1_700_000_000_000), total: 42n }];
+    const rowset = binary.load(eventRows);
 
     expect(binary.layout.fields.map((field) => [field.key, field.offset])).toEqual([
       ["present", 1],
@@ -88,11 +89,97 @@ describe("binary rowsets", () => {
       { present: true, sequence: 7, createdAt: new Date(1_700_000_000_000), total: 42n },
     ]);
 
+    const columnar = Events.binary({ strategy: "exact", memoryLayout: "columnar" }).load(eventRows);
+
+    expect(columnar.float64).toBeInstanceOf(Float64Array);
+    expect(columnar.bigint64).toBeInstanceOf(BigInt64Array);
+    expect(columnar.hydrate()).toEqual(eventRows);
+
     const misaligned = new Uint8Array(new ArrayBuffer(128), 1, 96);
 
     expect(() => Events.binary({ strategy: "static", memoryLayout: "aligned", buffer: misaligned })).toThrow(
       /aligned to 8 bytes/
     );
+  });
+
+  it("keeps multi-byte optional masks contiguous in columnar storage", () => {
+    const Sparse = JIT.array(
+      JIT.object({
+        a: JIT.number().int32().optional(),
+        b: JIT.number().int32().optional(),
+        c: JIT.number().int32().nullish(),
+        d: JIT.number().int32().optional(),
+        e: JIT.number().int32().optional(),
+      })
+    );
+    const binary = Sparse.binary({ strategy: "exact", memoryLayout: "columnar" });
+    const values = [
+      { a: 1, b: undefined, c: null, d: 4, e: 5 },
+      { a: undefined, b: 2, c: 3, d: undefined, e: undefined },
+    ];
+    const rowset = binary.load(values);
+
+    expect(binary.layout.maskBytes).toBe(2);
+    expect([...rowset.bytes.subarray(0, 4)]).toEqual([146, 2, 40, 0]);
+    expect(rowset.hydrate()).toEqual(values);
+    expect(Compiler.emitBinaryHydrateSource(binary.layout)).toContain("i * 2 + 1");
+  });
+
+  it("loads, hydrates, and queries contiguous typed columns", () => {
+    const binary = Users.binary({ strategy: "exact", memoryLayout: "columnar" });
+    const rowset = binary.load(rows);
+    const findAdmins = JIT.query(rowset)
+      .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
+      .select("id", "name", "score")
+      .compile();
+
+    expect(binary.layout).toMatchObject({
+      rowSize: 19,
+      maskBytes: 1,
+      alignment: 4,
+      paddingBytes: 0,
+      memoryLayout: "columnar",
+    });
+    expect(binary.layout.fields.map((field) => [field.key, field.columnIndex])).toEqual([
+      ["id", 2],
+      ["name", 3],
+      ["role", 0],
+      ["active", 1],
+      ["score", 4],
+      ["note", 5],
+    ]);
+    expect([...rowset.offsets]).toEqual([4, 8, 3, 7, 11, 15]);
+    expect(rowset.bytes.byteLength).toBe(Compiler.getBinaryRowSetByteLength(binary.layout, rows.length));
+    expect(binary.load(rows.slice(0, 1)).bytes.byteLength).toBe(20);
+    expect(rowset.hydrate()).toEqual(rows);
+    expect(findAdmins(rowset)).toEqual([
+      { id: 1, name: "Ada", score: 9.5 },
+      { id: 4, name: "Margaret", score: 8.75 },
+    ]);
+
+    const source = Compiler.emitBinaryQuerySource(binary.layout, {
+      nodes: [
+        {
+          kind: "filter",
+          condition: {
+            kind: "compare",
+            op: "eq",
+            left: { kind: "field", key: "role" },
+            right: { kind: "literal", value: "admin" },
+          },
+        },
+        { kind: "select:fields", fields: ["id", "score"] },
+      ],
+      bindings: [],
+    });
+
+    expect(source).toContain("const offsets = rowset.offsets;");
+    expect(source).toContain("u8[b0 + i]");
+    expect(source).toContain("int32[b2 + i]");
+    expect(source).toContain("float32[b4 + i]");
+    expect(source).not.toContain("b3 =");
+    expect(source).not.toContain("b5 =");
+    expect(source).not.toContain("rowset.view");
   });
 
   it("supports dynamic, static, and exact allocation strategies", () => {
@@ -120,6 +207,22 @@ describe("binary rowsets", () => {
     expect(Object.keys(first)).toEqual(shape);
     expect(first.bytes.byteLength).toBe(0);
     expect(first.int32.byteLength).toBe(0);
+
+    const columnar = Users.binary({ strategy: "static", memoryLayout: "columnar", capacity: 2 });
+
+    expect(columnar.load(rows.slice(0, 2)).capacity).toBe(2);
+    expect(() => columnar.load(rows)).toThrow(RangeError);
+
+    const callerMemory = new Uint8Array(128);
+    callerMemory.fill(255);
+    const callerDynamic = Users.binary({
+      strategy: "dynamic",
+      memoryLayout: "columnar",
+      buffer: callerMemory.subarray(8),
+    });
+
+    expect(callerDynamic.load(rows).hydrate()).toEqual(rows);
+    expect([...callerMemory.subarray(0, 8)]).toEqual(new Array(8).fill(255));
   });
 
   it("queries rowsets directly from byte offsets", () => {

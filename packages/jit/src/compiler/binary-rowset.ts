@@ -21,7 +21,7 @@ type ArraySchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
 type ScalarDictionaryValue = string | number;
 
 export type BinaryRowSetStrategy = "dynamic" | "static" | "exact";
-export type BinaryMemoryLayout = "auto" | "packed" | "aligned";
+export type BinaryMemoryLayout = "auto" | "packed" | "aligned" | "columnar";
 
 export interface BinaryRowSetOptions {
   /**
@@ -30,7 +30,10 @@ export interface BinaryRowSetOptions {
    * current batch.
    */
   readonly strategy?: BinaryRowSetStrategy;
-  /** `auto` keeps compact rows unless every wide field is naturally aligned. */
+  /**
+   * `auto` keeps compact rows unless already aligned. `columnar` stores each
+   * field contiguously for repeated scans and aggregates.
+   */
   readonly memoryLayout?: BinaryMemoryLayout;
   /** Initial byte size for dynamic rowsets. Defaults to 8 MiB. */
   readonly initialBytes?: number;
@@ -57,6 +60,7 @@ export type BinaryFieldKind =
 export interface BinaryFieldGuard {
   readonly maskOffset: number;
   readonly shift: number;
+  readonly maskStride: number;
 }
 
 export interface BinaryFieldLayout {
@@ -65,6 +69,7 @@ export interface BinaryFieldLayout {
   readonly offset: number;
   readonly size: number;
   readonly access: "none" | "byte" | "dataView" | "int32" | "uint32" | "float32" | "float64" | "bigint64";
+  readonly columnIndex?: number;
   readonly guard?: BinaryFieldGuard;
   readonly dictionaryIndex?: number;
   readonly dictionaryMode?: "dynamic" | "fixed";
@@ -89,6 +94,7 @@ export interface BinaryRowLayout {
   readonly memoryLayout: Exclude<BinaryMemoryLayout, "auto">;
   readonly views: BinaryRowViewUsage;
   readonly fields: readonly BinaryFieldLayout[];
+  readonly columns: readonly BinaryFieldLayout[];
 }
 
 export interface BinaryDictionary {
@@ -107,6 +113,8 @@ export interface BinaryRowSet<TElement = unknown> {
   float32: Float32Array;
   float64: Float64Array;
   bigint64: BigInt64Array;
+  /** Element bases for columnar fields; empty for row-oriented layouts. */
+  offsets: Uint32Array;
   /** Compatibility view. Compiled rowset hot paths use the typed views above. */
   view: DataView;
   count: number;
@@ -143,6 +151,7 @@ interface BinaryRowTarget {
   readonly float32: Float32Array;
   readonly float64: Float64Array;
   readonly bigint64: BigInt64Array;
+  readonly offsets: Uint32Array;
   readonly view: DataView;
   readonly capacity: number;
 }
@@ -179,6 +188,7 @@ const EMPTY_UINT32 = new Uint32Array(EMPTY_BUFFER);
 const EMPTY_FLOAT32 = new Float32Array(EMPTY_BUFFER);
 const EMPTY_FLOAT64 = new Float64Array(EMPTY_BUFFER);
 const EMPTY_BIGINT64 = new BigInt64Array(EMPTY_BUFFER);
+const EMPTY_OFFSETS = new Uint32Array(EMPTY_BUFFER);
 
 export function isBinaryRowSet(value: unknown): value is BinaryRowSet<unknown> {
   return (
@@ -249,13 +259,15 @@ export function emitBinaryRowSetWriterSource(layout: BinaryRowLayout): string {
   writer.indent(() => {
     emitRowViewBindings(writer, layout.fields, "target");
     emitDictionaryBindings(writer, layout.fields);
-    emitRowCursorDeclarations(writer, layout.fields);
+    emitRowCursorDeclarations(writer, layout, layout.fields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
       writer.line("const item = input[i];");
       for (let mask = 0; mask < layout.maskBytes; mask++) writer.line(`let m${mask} = 0;`);
       emitGuardMasks(writer, layout);
-      for (let mask = 0; mask < layout.maskBytes; mask++) writer.line(`u8[o + ${mask}] = m${mask};`);
+      for (let mask = 0; mask < layout.maskBytes; mask++) {
+        writer.line(`u8[${emitMaskIndex(layout, mask)}] = m${mask};`);
+      }
       for (const field of layout.fields) emitWriteField(writer, field);
       emitRowCursorAdvance(writer, layout, layout.fields);
     });
@@ -277,7 +289,7 @@ export function emitBinaryHydrateSource(layout: BinaryRowLayout): string {
     emitDictionaryBindings(writer, layout.fields);
     writer.line("const len = rowset.count;");
     writer.line("const out = new Array(len);");
-    emitRowCursorDeclarations(writer, layout.fields);
+    emitRowCursorDeclarations(writer, layout, layout.fields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
       writer.line(`out[i] = ${emitObjectExpression(layout.fields)};`);
@@ -338,7 +350,7 @@ export function compileBinaryQuery<
   const layout = target.layout;
   const schema = target.schema;
   const bindingNames = program.bindings.map((_, index) => `__q${index}`);
-  const cacheKey = `binary-query:${serializeQueryNodes(program.nodes)}`;
+  const cacheKey = `binary-query:${serializeBinaryLayout(layout)}:${serializeQueryNodes(program.nodes)}`;
   const template = getCompileCached(
     schema,
     cacheKey,
@@ -383,6 +395,56 @@ function compileRowHydrator<TElement>(layout: BinaryRowLayout): (rowset: BinaryR
   return globalThis.Function(emitBinaryHydrateSource(layout))() as (rowset: BinaryRowSet<TElement>) => TElement[];
 }
 
+/** Returns the exact backing-buffer bytes required for a compiled layout. */
+export function getBinaryRowSetByteLength(layout: BinaryRowLayout, count: number): number {
+  if (!Number.isInteger(count) || count < 0) {
+    throw new RangeError(`jit binary rowset: count must be a non-negative integer, got ${count}`);
+  }
+  if (layout.memoryLayout !== "columnar") return count * layout.rowSize;
+
+  let byteLength = layout.maskBytes * count;
+
+  for (const field of layout.columns) {
+    byteLength = alignTo(byteLength, alignmentForSize(field.size));
+    byteLength += field.size * count;
+  }
+  return alignTo(byteLength, layout.alignment);
+}
+
+function createColumnOffsets(layout: BinaryRowLayout, count: number): Uint32Array {
+  if (layout.memoryLayout !== "columnar") return EMPTY_OFFSETS;
+
+  const offsets = new Uint32Array(layout.columns.length);
+  let byteOffset = layout.maskBytes * count;
+
+  for (const field of layout.columns) {
+    if (field.columnIndex === undefined) {
+      throw new JITError("INVALID_OPERATION", `binary column ${field.key} is missing its physical index`);
+    }
+    byteOffset = alignTo(byteOffset, alignmentForSize(field.size));
+    offsets[field.columnIndex] = byteOffset / field.size;
+    byteOffset += field.size * count;
+  }
+  return offsets;
+}
+
+function capacityForByteLength(layout: BinaryRowLayout, available: number): number {
+  if (layout.memoryLayout !== "columnar") {
+    return layout.rowSize === 0 ? Number.MAX_SAFE_INTEGER : Math.floor(available / layout.rowSize);
+  }
+
+  let low = 0;
+  let high = Math.floor(available / Math.max(layout.rowSize, 1));
+
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+
+    if (getBinaryRowSetByteLength(layout, middle) <= available) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
 function createBinaryArrayState(
   layout: BinaryRowLayout,
   strategy: BinaryRowSetStrategy,
@@ -412,14 +474,14 @@ function createBinaryArrayState(
     buffer:
       buffer ??
       (strategy === "static" && options.capacity !== undefined
-        ? new ArrayBuffer(options.capacity * layout.rowSize)
+        ? new ArrayBuffer(getBinaryRowSetByteLength(layout, options.capacity))
         : undefined),
     bufferOffset,
     byteLength:
       buffer !== undefined
         ? byteLength
         : strategy === "static" && options.capacity !== undefined
-          ? options.capacity * layout.rowSize
+          ? getBinaryRowSetByteLength(layout, options.capacity)
           : 0,
   };
 }
@@ -431,13 +493,13 @@ function allocateRowBuffer(
   options: BinaryRowSetOptions,
   count: number
 ): BinaryRowTarget {
-  const needed = count * layout.rowSize;
+  const needed = getBinaryRowSetByteLength(layout, count);
 
   if (strategy === "exact") {
     const buffer = new ArrayBuffer(needed);
     const bytes = new Uint8Array(buffer);
 
-    return createRowTarget(layout, bytes, count);
+    return createRowTarget(layout, bytes, count, count);
   }
 
   if (strategy === "static") {
@@ -450,7 +512,7 @@ function allocateRowBuffer(
     const buffer = state.buffer ?? EMPTY_BUFFER;
     const bytes = new Uint8Array(buffer, state.bufferOffset, needed);
 
-    return createRowTarget(layout, bytes, Math.floor(available / layout.rowSize));
+    return createRowTarget(layout, bytes, capacityForByteLength(layout, available), count);
   }
 
   const minBytes = Math.max(options.initialBytes ?? DEFAULT_DYNAMIC_BYTES, needed);
@@ -464,12 +526,12 @@ function allocateRowBuffer(
     state.byteLength = nextSize;
   }
 
-  const bytes = new Uint8Array(state.buffer, 0, needed);
+  const bytes = new Uint8Array(state.buffer, state.bufferOffset, needed);
 
-  return createRowTarget(layout, bytes, Math.floor(state.byteLength / layout.rowSize));
+  return createRowTarget(layout, bytes, capacityForByteLength(layout, state.byteLength), count);
 }
 
-function createRowTarget(layout: BinaryRowLayout, bytes: Uint8Array, capacity: number): BinaryRowTarget {
+function createRowTarget(layout: BinaryRowLayout, bytes: Uint8Array, capacity: number, count: number): BinaryRowTarget {
   const elements4 = bytes.byteLength / 4;
   const elements8 = bytes.byteLength / 8;
 
@@ -480,6 +542,7 @@ function createRowTarget(layout: BinaryRowLayout, bytes: Uint8Array, capacity: n
     float32: layout.views.float32 ? new Float32Array(bytes.buffer, bytes.byteOffset, elements4) : EMPTY_FLOAT32,
     float64: layout.views.float64 ? new Float64Array(bytes.buffer, bytes.byteOffset, elements8) : EMPTY_FLOAT64,
     bigint64: layout.views.bigint64 ? new BigInt64Array(bytes.buffer, bytes.byteOffset, elements8) : EMPTY_BIGINT64,
+    offsets: createColumnOffsets(layout, count),
     view: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     capacity,
   };
@@ -505,6 +568,7 @@ function createRowSet<TElement>(
     float32: target.float32,
     float64: target.float64,
     bigint64: target.bigint64,
+    offsets: target.offsets,
     view: target.view,
     count,
     capacity: target.capacity,
@@ -521,6 +585,7 @@ function createRowSet<TElement>(
       rowset.float32 = EMPTY_FLOAT32;
       rowset.float64 = EMPTY_FLOAT64;
       rowset.bigint64 = EMPTY_BIGINT64;
+      rowset.offsets = EMPTY_OFFSETS;
       rowset.view = new DataView(EMPTY_BUFFER);
       rowset.count = 0;
       rowset.capacity = 0;
@@ -608,7 +673,7 @@ export function createBinaryRowLayout(
     if (fieldAlignment > alignment) alignment = fieldAlignment;
     const guard =
       resolved.optional || resolved.nullable
-        ? { maskOffset: guardIndex >> 2, shift: (guardIndex++ & 3) * 2 }
+        ? { maskOffset: guardIndex >> 2, shift: (guardIndex++ & 3) * 2, maskStride: 0 }
         : undefined;
 
     entries[entries.length] = {
@@ -636,6 +701,7 @@ export function createBinaryRowLayout(
     });
   const memoryLayout = requestedLayout === "auto" ? (naturallyAligned ? "aligned" : "packed") : requestedLayout;
   const offsets = memoryLayout === "packed" ? packedOffsets : new Map<string, number>();
+  const columnIndexes = new Map<string, number>();
   let nextOffset = memoryLayout === "packed" ? packedRowSize : maskBytes;
 
   if (memoryLayout === "aligned") {
@@ -652,31 +718,68 @@ export function createBinaryRowLayout(
     }
   }
 
-  const rowSize = memoryLayout === "aligned" ? alignTo(nextOffset, alignment) : nextOffset;
-  const requiredAlignment = memoryLayout === "aligned" ? alignment : 1;
+  if (memoryLayout === "columnar") {
+    let columnIndex = 0;
 
-  const fields: BinaryFieldLayout[] = entries.map((entry) => ({
-    key: entry.key,
-    kind: entry.descriptor.kind,
-    offset: offsets.get(entry.key) ?? nextOffset,
-    size: entry.descriptor.size,
-    access: fieldAccess(entry.descriptor, memoryLayout),
-    ...(entry.guard ? { guard: entry.guard } : {}),
-    ...(entry.dictionaryIndex !== undefined
-      ? { dictionaryIndex: entry.dictionaryIndex, dictionaryMode: entry.descriptor.dictionary }
-      : {}),
-    ...(entry.descriptor.values ? { values: entry.descriptor.values } : {}),
-    ...(entry.descriptor.literal !== undefined ? { literal: entry.descriptor.literal } : {}),
-  }));
+    for (const size of [1, 4, 8] as const) {
+      for (const entry of entries) {
+        if (entry.descriptor.size !== size) continue;
+        columnIndexes.set(entry.key, columnIndex++);
+      }
+    }
+  }
+
+  const rowSize =
+    memoryLayout === "columnar"
+      ? payloadBytes
+      : memoryLayout === "aligned"
+        ? alignTo(nextOffset, alignment)
+        : nextOffset;
+  const requiredAlignment = memoryLayout === "packed" ? 1 : alignment;
+
+  const fields: BinaryFieldLayout[] = entries.map((entry) => {
+    const columnIndex = columnIndexes.get(entry.key);
+
+    return {
+      key: entry.key,
+      kind: entry.descriptor.kind,
+      offset: offsets.get(entry.key) ?? nextOffset,
+      size: entry.descriptor.size,
+      access: fieldAccess(entry.descriptor, memoryLayout),
+      ...(entry.guard
+        ? {
+            guard: {
+              maskOffset: entry.guard.maskOffset,
+              shift: entry.guard.shift,
+              maskStride: memoryLayout === "columnar" ? maskBytes : 0,
+            },
+          }
+        : {}),
+      ...(columnIndex !== undefined ? { columnIndex } : {}),
+      ...(entry.dictionaryIndex !== undefined
+        ? { dictionaryIndex: entry.dictionaryIndex, dictionaryMode: entry.descriptor.dictionary }
+        : {}),
+      ...(entry.descriptor.values ? { values: entry.descriptor.values } : {}),
+      ...(entry.descriptor.literal !== undefined ? { literal: entry.descriptor.literal } : {}),
+    };
+  });
+  const columns =
+    memoryLayout === "columnar"
+      ? fields
+          .filter((field) => field.columnIndex !== undefined)
+          .sort((left, right) => (left.columnIndex ?? 0) - (right.columnIndex ?? 0))
+      : [];
+
   return {
     schema,
     rowSize,
     maskBytes,
     alignment: requiredAlignment,
-    paddingBytes: rowSize - payloadBytes,
+    paddingBytes: memoryLayout === "columnar" ? 0 : rowSize - payloadBytes,
     memoryLayout,
     views: createViewUsage(fields),
     fields,
+    columns,
   };
 }
 
@@ -776,6 +879,7 @@ function getAccessNeeds(fields: readonly BinaryFieldLayout[]): BinaryAccessNeeds
 
 function emitRowViewBindings(writer: CodeWriter, fields: readonly BinaryFieldLayout[], source = "rowset"): void {
   const needs = getAccessNeeds(fields);
+  const columnIndexes = new Set<number>();
 
   if (needs.bytes) writer.line(`const u8 = ${source}.bytes;`);
   if (needs.dataView) writer.line(`const dv = ${source}.view;`);
@@ -784,6 +888,14 @@ function emitRowViewBindings(writer: CodeWriter, fields: readonly BinaryFieldLay
   if (needs.views.float32) writer.line(`const float32 = ${source}.float32;`);
   if (needs.views.float64) writer.line(`const float64 = ${source}.float64;`);
   if (needs.views.bigint64) writer.line(`const bigint64 = ${source}.bigint64;`);
+
+  for (const field of fields) {
+    if (field.columnIndex !== undefined) columnIndexes.add(field.columnIndex);
+  }
+  if (columnIndexes.size > 0) {
+    writer.line(`const offsets = ${source}.offsets;`);
+    for (const columnIndex of columnIndexes) writer.line(`const b${columnIndex} = offsets[${columnIndex}];`);
+  }
 }
 
 function emitDictionaryBindings(writer: CodeWriter, fields: readonly BinaryFieldLayout[]): void {
@@ -798,7 +910,12 @@ function hasDictionary(fields: readonly BinaryFieldLayout[]): boolean {
   return fields.some((field) => field.dictionaryIndex !== undefined);
 }
 
-function emitRowCursorDeclarations(writer: CodeWriter, fields: readonly BinaryFieldLayout[]): void {
+function emitRowCursorDeclarations(
+  writer: CodeWriter,
+  layout: BinaryRowLayout,
+  fields: readonly BinaryFieldLayout[]
+): void {
+  if (layout.memoryLayout === "columnar") return;
   const needs = getAccessNeeds(fields);
 
   if (needs.bytes || needs.dataView) writer.line("let o = 0;");
@@ -807,6 +924,7 @@ function emitRowCursorDeclarations(writer: CodeWriter, fields: readonly BinaryFi
 }
 
 function emitRowCursorAdvance(writer: CodeWriter, layout: BinaryRowLayout, fields: readonly BinaryFieldLayout[]): void {
+  if (layout.memoryLayout === "columnar") return;
   const needs = getAccessNeeds(fields);
 
   if (needs.bytes || needs.dataView) writer.line(`o += ${layout.rowSize};`);
@@ -916,7 +1034,7 @@ function emitWriteField(writer: CodeWriter, field: BinaryFieldLayout): void {
 }
 
 function emitWriteScalar(writer: CodeWriter, field: BinaryFieldLayout, valueExpr: string): void {
-  const offset = `o + ${field.offset}`;
+  const offset = emitByteIndex(field);
 
   switch (field.kind) {
     case "float64":
@@ -1014,7 +1132,7 @@ function emitFieldValue(field: BinaryFieldLayout): string {
 }
 
 function emitScalarRead(field: BinaryFieldLayout): string {
-  const offset = `o + ${field.offset}`;
+  const offset = emitByteIndex(field);
 
   switch (field.kind) {
     case "float64":
@@ -1051,7 +1169,7 @@ function emitScalarRead(field: BinaryFieldLayout): string {
 }
 
 function emitFieldComparable(field: BinaryFieldLayout): string {
-  const offset = `o + ${field.offset}`;
+  const offset = emitByteIndex(field);
 
   switch (field.kind) {
     case "boolean":
@@ -1072,14 +1190,32 @@ function emitFieldComparable(field: BinaryFieldLayout): string {
 }
 
 function emitTypedIndex(field: BinaryFieldLayout): string {
+  if (field.columnIndex !== undefined) return `b${field.columnIndex} + i`;
   if (field.size === 8) return `d + ${field.offset / 8}`;
   if (field.size === 4) return `w + ${field.offset / 4}`;
   throw new JITError("INVALID_OPERATION", `binary field ${field.key} does not use a typed index`);
 }
 
+function emitByteIndex(field: BinaryFieldLayout): string {
+  return field.columnIndex === undefined ? `o + ${field.offset}` : `b${field.columnIndex} + i`;
+}
+
+function emitMaskIndex(layout: BinaryRowLayout, maskOffset: number): string {
+  if (layout.memoryLayout !== "columnar") return `o + ${maskOffset}`;
+  if (layout.maskBytes === 1) return "i";
+  return `i * ${layout.maskBytes} + ${maskOffset}`;
+}
+
 function emitGuardState(field: BinaryFieldLayout): string {
   if (!field.guard) return "2";
-  return `((u8[o + ${field.guard.maskOffset}] >> ${field.guard.shift}) & 3)`;
+  const maskIndex =
+    field.guard.maskStride === 0
+      ? `o + ${field.guard.maskOffset}`
+      : field.guard.maskStride === 1
+        ? "i"
+        : `i * ${field.guard.maskStride} + ${field.guard.maskOffset}`;
+
+  return `((u8[${maskIndex}] >> ${field.guard.shift}) & 3)`;
 }
 
 function createBinaryQueryPlan(nodes: readonly QueryNode[]): BinaryQueryPlan {
@@ -1216,7 +1352,7 @@ function emitBinaryArrayQuery(
 ): void {
   writer.line("const out = new Array(len);");
   writer.line("let j = 0;");
-  emitRowCursorDeclarations(writer, accessedFields);
+  emitRowCursorDeclarations(writer, layout, accessedFields);
   writer.line("for (let i = 0; i < len; i++) {");
   writer.indent(() => {
     const accepted = () => {
@@ -1263,7 +1399,7 @@ function emitBinaryAggregateQuery(
 
   if (aggregate.op === "count") {
     writer.line("let acc = 0;");
-    emitRowCursorDeclarations(writer, accessedFields);
+    emitRowCursorDeclarations(writer, layout, accessedFields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
       accepted(() => writer.line("acc++;"));
@@ -1286,7 +1422,7 @@ function emitBinaryAggregateQuery(
   switch (aggregate.op) {
     case "sum":
       writer.line("let acc = 0;");
-      emitRowCursorDeclarations(writer, accessedFields);
+      emitRowCursorDeclarations(writer, layout, accessedFields);
       writer.line("for (let i = 0; i < len; i++) {");
       writer.indent(() => {
         if (cacheAggregateValue) writer.line(`const v = ${rawValue};`);
@@ -1302,7 +1438,7 @@ function emitBinaryAggregateQuery(
     case "avg":
       writer.line("let acc = 0;");
       writer.line("let n = 0;");
-      emitRowCursorDeclarations(writer, accessedFields);
+      emitRowCursorDeclarations(writer, layout, accessedFields);
       writer.line("for (let i = 0; i < len; i++) {");
       writer.indent(() => {
         if (cacheAggregateValue) writer.line(`const v = ${rawValue};`);
@@ -1324,7 +1460,7 @@ function emitBinaryAggregateQuery(
       const op = aggregate.op === "min" ? "<" : ">";
 
       writer.line("let acc;");
-      emitRowCursorDeclarations(writer, accessedFields);
+      emitRowCursorDeclarations(writer, layout, accessedFields);
       writer.line("for (let i = 0; i < len; i++) {");
       writer.indent(() => {
         if (cacheAggregateValue) writer.line(`const v = ${rawValue};`);
@@ -1507,6 +1643,24 @@ class PreparedValues {
 
 function serializeQueryNodes(nodes: readonly QueryNode[]): string {
   return nodes.map(serializeQueryNode).join(";");
+}
+
+function serializeBinaryLayout(layout: BinaryRowLayout): string {
+  return JSON.stringify([
+    layout.memoryLayout,
+    layout.rowSize,
+    layout.maskBytes,
+    layout.fields.map((field) => [
+      field.key,
+      field.kind,
+      field.offset,
+      field.size,
+      field.access,
+      field.columnIndex,
+      field.guard?.maskOffset,
+      field.guard?.shift,
+    ]),
+  ]);
 }
 
 function serializeQueryNode(node: QueryNode): string {

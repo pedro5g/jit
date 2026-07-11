@@ -185,6 +185,7 @@ describe("generated source snapshots", () => {
       note: JIT.string().optional(),
     });
     const Users = JIT.array(User).binary({ strategy: "exact", memoryLayout: "aligned" });
+    const ColumnarUsers = JIT.array(User).binary({ strategy: "exact", memoryLayout: "columnar" });
     const query = JIT.query(Users)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
       .select("id", "score")
@@ -193,12 +194,19 @@ describe("generated source snapshots", () => {
       .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
       .sum("score")
       .compile();
+    const columnarQuery = JIT.query(ColumnarUsers)
+      .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
+      .select("id", "score")
+      .compile();
 
     expect({
       writer: Compiler.emitBinaryRowSetWriterSource(Users.layout),
       hydrate: Compiler.emitBinaryHydrateSource(Users.layout),
       query: sourceOf(query),
       sum: sourceOf(sum),
+      columnarWriter: Compiler.emitBinaryRowSetWriterSource(ColumnarUsers.layout),
+      columnarHydrate: Compiler.emitBinaryHydrateSource(ColumnarUsers.layout),
+      columnarQuery: sourceOf(columnarQuery),
     }).toMatchSnapshot();
   });
 

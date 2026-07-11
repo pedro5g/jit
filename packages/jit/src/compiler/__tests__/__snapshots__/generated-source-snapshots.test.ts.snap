@@ -2,6 +2,90 @@
 
 exports[`generated source snapshots > binary rowset: loader, hydrator, and byte query 1`] = `
 {
+  "columnarHydrate": "function hydrate(rowset) {
+  const u8 = rowset.bytes;
+  const int32 = rowset.int32;
+  const uint32 = rowset.uint32;
+  const float32 = rowset.float32;
+  const offsets = rowset.offsets;
+  const b2 = offsets[2];
+  const b0 = offsets[0];
+  const b1 = offsets[1];
+  const b3 = offsets[3];
+  const b4 = offsets[4];
+  const dictionaries = rowset.dictionaries;
+  const d0 = dictionaries[0];
+  const d1 = dictionaries[1];
+  const len = rowset.count;
+  const out = new Array(len);
+  for (let i = 0; i < len; i++) {
+    out[i] = { "id": int32[b2 + i], "role": d0.values[u8[b0 + i]], "active": u8[b1 + i] !== 0, "score": float32[b3 + i], "note": (((u8[i] >> 0) & 3) === 1 ? null : ((u8[i] >> 0) & 3) === 2 ? d1.values[uint32[b4 + i]] : undefined) };
+  }
+  return out;
+}
+return hydrate;",
+  "columnarQuery": "function query(rowset) {
+  const u8 = rowset.bytes;
+  const int32 = rowset.int32;
+  const float32 = rowset.float32;
+  const offsets = rowset.offsets;
+  const b2 = offsets[2];
+  const b0 = offsets[0];
+  const b1 = offsets[1];
+  const b3 = offsets[3];
+  const dictionaries = rowset.dictionaries;
+  const len = rowset.count;
+  const d0 = dictionaries[0];
+  const p0 = d0.ids.get(__q0);
+  const p1 = __q1 === true ? 1 : __q1 === false ? 0 : -1;
+  const out = new Array(len);
+  let j = 0;
+  for (let i = 0; i < len; i++) {
+    if ((u8[b0 + i] === p0 && u8[b1 + i] === p1)) {
+      out[j++] = { "id": int32[b2 + i], "score": float32[b3 + i] };
+    }
+  }
+  out.length = j;
+  return out;
+}",
+  "columnarWriter": "function writeRows(input, len, target, dictionaries) {
+  const u8 = target.bytes;
+  const int32 = target.int32;
+  const uint32 = target.uint32;
+  const float32 = target.float32;
+  const offsets = target.offsets;
+  const b2 = offsets[2];
+  const b0 = offsets[0];
+  const b1 = offsets[1];
+  const b3 = offsets[3];
+  const b4 = offsets[4];
+  const d0 = dictionaries[0];
+  const d1 = dictionaries[1];
+  for (let i = 0; i < len; i++) {
+    const item = input[i];
+    let m0 = 0;
+    if (item.note === null) m0 |= 1; else if (item.note !== undefined) m0 |= 2;
+    u8[i] = m0;
+    int32[b2 + i] = item.id;
+    let c0_1 = d0.ids.get(item.role);
+    if (c0_1 === undefined) {
+      throw new RangeError("jit binary rowset: value not in fixed dictionary for role: " + item.role);
+    }
+    u8[b0 + i] = c0_1;
+    u8[b1 + i] = item.active ? 1 : 0;
+    float32[b3 + i] = item.score;
+    if (item.note != null) {
+      let c1_1 = d1.ids.get(item.note);
+      if (c1_1 === undefined) {
+        c1_1 = d1.values.length;
+        d1.ids.set(item.note, c1_1);
+        d1.values[c1_1] = item.note;
+      }
+      uint32[b4 + i] = c1_1;
+    }
+  }
+}
+return writeRows;",
   "hydrate": "function hydrate(rowset) {
   const u8 = rowset.bytes;
   const int32 = rowset.int32;

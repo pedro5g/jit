@@ -134,7 +134,7 @@ describe("JIT AOT generate", () => {
       score: JIT.number().float32(),
     });
     const Users = JIT.array(User);
-    const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
+    const binary = Users.binary({ strategy: "exact", memoryLayout: "columnar" });
     const rowset = binary.load([
       { id: 1, role: "admin" as const, active: true, score: 10 },
       { id: 2, role: "user" as const, active: true, score: 7 },
@@ -158,8 +158,9 @@ describe("JIT AOT generate", () => {
     expect(result.skipped).toHaveLength(0);
     expect(source).not.toContain('from "jit"');
     expect(source).toContain("function query(rowset)");
-    expect(source).toContain("u8[o + 0]");
-    expect(source).toContain("int32[w + 1]");
+    expect(source).toContain("const offsets = rowset.offsets");
+    expect(source).toContain("u8[b0 + i]");
+    expect(source).toContain("int32[b2 + i]");
     expect(source).not.toContain("rowset.view");
     expect(generated.ActiveAdmins(rowset)).toEqual([{ id: 1, score: 10 }]);
   });
