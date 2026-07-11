@@ -82,6 +82,9 @@ function.
   - optional deterministic `manifest.json` and `plans/*.json`.
 - Benchmarks:
   - `pnpm bench:flows` for high-volume validate + query + JSON pipelines.
+  - `pnpm bench:load` for 10k/100k validation loads against TypeBox
+    `TypeCompiler.Check`, TypeBox `Value.Check`, typia generated validators,
+    and Zod, with persisted speed plus `heap/op` results.
 
 ## Next Phases
 

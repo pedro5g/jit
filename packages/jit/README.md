@@ -70,6 +70,24 @@ objects, filters/projects admins, and serializes the final JSON:
 | Zod safeParse + filter/map/stringify | 22.53 ms    | 8.58 MB     | baseline       |
 | Handwritten fused loop               | 2.02 ms     | 0.69 MB     | not comparable |
 
+High-load validation benchmark (`pnpm bench:load`) preallocates 10k/100k
+unknown users and measures only validation work. TypeBox is measured through
+both `TypeCompiler.Check` (compiled) and `Value.Check` (dynamic); typia uses
+generated `createIs<TypiaUser[]>()` / `createValidate<TypiaUser[]>()`.
+
+| Scenario                            | JIT avg / heap          | TypeBox compiled      | typia generated      | Zod 4                |
+| ----------------------------------- | ----------------------- | --------------------- | -------------------- | -------------------- |
+| `is()` valid users 10k              | **542.45 µs / 1.43 KB** | 751.53 µs / 774.69 KB | 661.98 µs / 152 B    | 9.76 ms / 4.16 MB    |
+| `is()` valid users 100k             | **7.01 ms / 96 B**      | 7.22 ms / 5.34 MB     | 7.17 ms / 152 B      | 114.15 ms / 21.14 MB |
+| `is()` invalid tail users 100k      | **7.06 ms / 96 B**      | 7.37 ms / 5.34 MB     | 7.34 ms / 560 B      | 111.58 ms / 20.98 MB |
+| `safeParse` valid users 10k         | **567.17 µs / 1.73 KB** | 655.54 µs / 560.25 KB | 793.31 µs / 263.75 B | 11.24 ms / 6.21 MB   |
+| `safeParse` invalid tail users 100k | **6.37 ms / 1.95 KB**   | 300.24 ms / 4.64 MB   | 27.76 ms / 5.46 MB   | 111.38 ms / 21.01 MB |
+
+The dynamic TypeBox path (`Value.Check`) is intentionally included in the raw
+suite because TypeBox documents both dynamic and compiled validation modes:
+on the 100k valid-user load it measured 76.61 ms / 11.74 MB, so the compiled
+JIT validator was 10.9x faster while staying effectively allocation-free.
+
 Selected operation load benchmarks from `pnpm bench:all`:
 
 | Operation                           | JIT avg / heap         | Fast competitor       | Competitor avg / heap | Speedup |
@@ -962,6 +980,7 @@ pnpm jit generate    # generate the configured AOT package
 pnpm jit clean       # remove configured generated output
 pnpm test            # vitest + typecheck + golden sources + snapshots
 pnpm bench:validate  # Zod 4 / typia / JIT runtime / JIT AOT validation bench
+pnpm bench:load      # 10k/100k validation load vs TypeBox / typia / Zod
 pnpm bench:flows     # high-volume validate + query + JSON pipeline bench
 pnpm bench:all       # all mitata suites (equal/clone/query/validate/serialize/...)
 pnpm bench:report    # regenerate docs/internal/BENCH.md from latest results
