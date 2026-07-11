@@ -6,7 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "clean": "rm -rf ATS aot compiler core errors factories runtime transforms *.js *.cjs *.d.ts *.d.cts *.d.mts",
+    "clean": "rm -rf ATS aot compiler core errors factories runtime shared transforms *.js *.cjs *.d.ts *.d.cts *.d.mts",
     "build": "zshy --project tsconfig.build.json",
     "test:watch": "pnpm vitest",
     "test": "pnpm vitest run"
