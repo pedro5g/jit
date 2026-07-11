@@ -6,7 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "clean": "tsx ../../scripts/clean-build-artifacts.ts --root .",
+    "clean": "rm -rf ATS aot compiler core errors factories runtime transforms *.js *.cjs *.d.ts *.d.cts *.d.mts",
     "build": "zshy --project tsconfig.build.json",
     "test:watch": "pnpm vitest",
     "test": "pnpm vitest run"
