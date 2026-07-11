@@ -102,6 +102,12 @@ values). Unions validate deeply through hoisted sync predicates;
 discriminated unions dispatch on the literal tag. Output is returned by
 reference when nothing rebuilds (`needsBuild` gates every allocation).
 
+The public runtime facade `JIT.validate(schema).is().compile()` is a thin
+host-style layer over the same validator compiler and cache. It does not
+introduce a second validation implementation. `JIT.validator(schema)` remains
+the object facade, while builder `schema["~standard"]` closes over the
+compiled `safeParse` function for Standard Schema interop.
+
 ## Wire formats (breaking-change surface)
 
 - **Binary codec v2** (`compiler/codec/emit-codec.ts`): byte 0 is the
@@ -139,13 +145,15 @@ reference when nothing rebuilds (`needsBuild` gates every allocation).
   hold callbacks is skipped with a reported reason, never miscompiled.
 
 CLI/config: `jit init` writes a typed `jit.config.*` in the current project
-root. `schemas` is optional; when omitted, `jit generate` scans from the
-project root. `schemas` accepts files, directories, and globs, while
-`patterns` controls directory scans (default `**/*.jit.ts`). The scanner skips
-`node_modules`, dot-dirs, and build output. If no buildable exported
-functions/objects are found, the CLI warns and writes nothing. TypeScript
-schema files load natively on runtimes that strip types, falling back to
-`jiti` when installed.
+root. `jit doctor` reports resolved config/discovery without generating, and
+`jit explain` loads declaration files and lists buildable grouped objects and
+standalone functions without writing output. `schemas` is optional; when
+omitted, `jit generate` scans from the project root. `schemas` accepts files,
+directories, and globs, while `patterns` controls directory scans (default
+`**/*.jit.ts`). The scanner skips `node_modules`, dot-dirs, and build output.
+If no buildable exported functions/objects are found, the CLI warns and
+writes nothing. TypeScript schema files load natively on runtimes that strip
+types, falling back to `jiti` when installed.
 
 ## Optimizer boundaries
 

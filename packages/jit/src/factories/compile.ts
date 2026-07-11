@@ -12,6 +12,7 @@ import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import type { CompiledModel } from "./model.js";
 
 /** Operations `JIT.compile` can aggregate. */
@@ -149,8 +150,10 @@ export function compile<
         break;
       case "fromJSON": {
         const parse = getValidator().parse;
+        const fromJSON = ((json: string) => parse(JSON.parse(json)) as TValue) as (json: string) => TValue;
 
-        selection.fromJSON = (json: string) => parse(JSON.parse(json)) as TValue;
+        registerArtifact(fromJSON as object, { kind: "operation", schema: unwrapped, op: "fromJSON" });
+        selection.fromJSON = fromJSON;
         break;
       }
       case "equal":

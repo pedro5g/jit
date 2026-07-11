@@ -1,4 +1,4 @@
-import { compileValidator } from "../../compiler/validate.js";
+import { compileValidator, compileValidatorSelection } from "../../compiler/validate.js";
 import { Regexes } from "../../shared/index.js";
 import * as Transform from "../../transforms/index.js";
 import {
@@ -17,6 +17,8 @@ import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
 type RuntimeBuilder = {
   schema: AnyTypeSchema;
 };
+
+const standardSchemaCache = new WeakMap<AnyTypeSchema, StandardSchemaProps<unknown>>();
 
 const baseBuilderPrototype = {
   is(this: RuntimeBuilder, value: unknown): boolean {
@@ -552,7 +554,7 @@ Object.defineProperty(baseBuilderPrototype, "~standard", {
   enumerable: false,
   configurable: false,
   get(this: RuntimeBuilder): StandardSchemaProps<unknown> {
-    return createStandardSchema(this.schema);
+    return getStandardSchema(this.schema);
   },
 });
 
@@ -747,12 +749,25 @@ function normalizeKeys(first: readonly string[] | string, rest: readonly string[
   return typeof first === "string" ? [first, ...rest] : first;
 }
 
+function getStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknown> {
+  const cached = standardSchemaCache.get(schema);
+
+  if (cached) return cached;
+
+  const standard = createStandardSchema(schema);
+
+  standardSchemaCache.set(schema, standard);
+  return standard;
+}
+
 function createStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknown> {
+  const safeParse = compileValidatorSelection(schema, ["safeParse"]).safeParse;
+
   return {
     version: 1,
     vendor: "jit",
     validate(value: unknown) {
-      const result = compileValidator(schema).safeParse(value);
+      const result = safeParse(value);
 
       if (result.success) return { value: result.data };
 
@@ -789,7 +804,7 @@ function attachStandardSchemaGetter(prototype: object): void {
     enumerable: false,
     configurable: false,
     get(this: RuntimeBuilder): StandardSchemaProps<unknown> {
-      return createStandardSchema(this.schema);
+      return getStandardSchema(this.schema);
     },
   });
 }

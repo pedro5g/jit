@@ -353,9 +353,12 @@ describe("JIT compiler validator", () => {
 
   it("should expose a lazy optional Standard Schema facade", () => {
     const standard = User["~standard"];
+    const again = User["~standard"];
     const success = standard.validate(ada);
     const failure = standard.validate({ ...ada, email: "broken" });
 
+    expect(standard).toBe(again);
+    expect(standard.validate).toBe(again.validate);
     expect(standard.version).toBe(1);
     expect(standard.vendor).toBe("jit");
     expect(success).toEqual({ value: ada });

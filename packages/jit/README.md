@@ -61,6 +61,15 @@ machine):
 | `safeParse` valid object      | 68.95 ns     | **67.74 ns**  | 810.21 ns | 40.24 b     | 1.92 kb     | **12.0x**   |
 | `safeParse` invalid, 7 issues | 126.18 ns    | **120.70 ns** | 25.14 µs  | 624.11 b    | 5.25 kb     | **208.3x**  |
 
+High-volume flow benchmark (`pnpm bench:flows`) validates 50k unknown
+objects, filters/projects admins, and serializes the final JSON:
+
+| Pipeline                             | Avg time    | Heap/op     | vs Zod         |
+| ------------------------------------ | ----------- | ----------- | -------------- |
+| JIT validate + query + JSON          | **8.77 ms** | **5.37 MB** | **2.68x**      |
+| Zod safeParse + filter/map/stringify | 23.47 ms    | 8.59 MB     | baseline       |
+| Handwritten fused loop               | 2.07 ms     | 0.69 MB     | not comparable |
+
 ## Install
 
 ```sh
@@ -320,6 +329,20 @@ const BaseKeys = Base.keyof(); // enum of known object keys
 ## Validation
 
 ```ts
+const isUser = JIT.validate(User).is().compile();
+const parseUser = JIT.validate(User).parse().compile();
+
+isUser(x); // (x: unknown) => x is User
+parseUser(x); // User or throws JITValidationError
+
+isUser.source; // generated source, useful for debugging
+isUser.hash; // deterministic source hash
+isUser.explain(); // { operation, hash, source, cache }
+```
+
+`JIT.validator` remains available when an object facade is more convenient:
+
+```ts
 const Users = JIT.validator(User);
 
 Users.is(x); // (x: unknown) => x is User — zero allocation
@@ -353,8 +376,10 @@ User.parse(input);
 ```
 
 For framework interop, every builder exposes an optional Standard Schema v1
-facade. It is lazy and never stored in the AST, so AOT output is unchanged
-unless you explicitly use it at runtime:
+facade. It is cached per schema and closes over the compiled `safeParse`
+function, so validation still runs through specialized generated code. The
+facade is never stored in the AST, so AOT output is unchanged unless you
+explicitly use it at runtime:
 
 ```ts
 const standard = User["~standard"];
@@ -400,6 +425,18 @@ User.fromJSON(json); // JSON.parse + compiled validation
 User.mask(a); // PII-safe copy for logs
 User.sanitize(a); // XSS-stripped copy
 User.codec.encode(a); // binary wire format
+```
+
+The lower-level operation facade follows the dual runtime/AOT API shape:
+
+```ts
+const equalUser = JIT.equal(User).compile();
+const cloneUser = JIT.clone(User).compile();
+const diffUser = JIT.diff(User).compile();
+const hashUser = JIT.hash(User).compile();
+
+// Backward-compatible: these are callable directly too.
+JIT.equal(User)(a, b);
 ```
 
 ## Query DSL
@@ -472,6 +509,9 @@ const json = JIT.serializer(User);
 
 json.stringify(user); // static keys baked in; escape fast path
 json.parse(body); // JSON.parse + compiled validation
+
+const stringifyUser = JIT.json(User).stringify().compile();
+const parseUserJson = JIT.json(User).parse().compile();
 ```
 
 ### Binary codec (wire format v2)
@@ -551,6 +591,9 @@ Create the config in the project root:
 
 ```sh
 pnpm jit init
+pnpm jit doctor
+pnpm jit explain
+pnpm jit generate
 ```
 
 Generated `jit.config.ts`:
@@ -584,6 +627,9 @@ Discovery rules are intentionally boring:
 - `patterns` controls directory scans; the default is `**/*.jit.ts`;
 - if no buildable functions are exported, the CLI prints a warning and writes
   nothing.
+- `jit doctor` prints resolved config, output directory, patterns, and files;
+- `jit explain` loads declaration files and lists grouped objects plus
+  standalone compiled exports without writing generated files.
 
 There is no raw-schema fallback. AOT builds only what you explicitly export.
 
@@ -597,10 +643,11 @@ const UserSchema = JIT.object({
   role: JIT.string(),
 });
 
-const selected = JIT.validator(UserSchema).get("is", "parse");
+const selected = JIT.validator(UserSchema).get("parse");
+const isUser = JIT.validate(UserSchema).is().compile();
 
 // Standalone functions keep their declared export names exactly.
-export const User_is = selected.is;
+export const User_is = isUser;
 export const User_parse = selected.parse;
 
 // Object-style aggregation exports one object: User.is, User.parse, ...
@@ -798,9 +845,12 @@ follows.
 
 ```sh
 pnpm jit init        # create jit.config.ts in the current project root
+pnpm jit doctor      # inspect resolved config/discovery
+pnpm jit explain     # list AOT-buildable exports without writing files
 pnpm jit generate    # generate the configured AOT package
 pnpm test            # vitest + typecheck + golden sources + snapshots
 pnpm bench:validate  # Zod 4 / typia / JIT runtime / JIT AOT validation bench
+pnpm bench:flows     # high-volume validate + query + JSON pipeline bench
 pnpm bench:all       # all mitata suites (equal/clone/query/validate/serialize/...)
 pnpm bench:report    # regenerate docs/internal/BENCH.md from latest results
 pnpm bench:coldstart # fresh-process AOT vs runtime compile

@@ -5,6 +5,8 @@
  * Usage:
  *   jit init [--force] [--format ts|mts|mjs|cjs] [--schemas <path-or-glob>] [--pattern <glob>]
  *   jit generate [files...] [--out <dir>] [--name <package-name>] [--watch] [--pattern <glob>]
+ *   jit doctor [files...] [--pattern <glob>]
+ *   jit explain [files...] [--pattern <glob>]
  *
  * `init` writes a typed `jit.config.*` in the current project root.
  * `generate` resolves config first, then falls back to pattern discovery.
@@ -22,6 +24,7 @@ import {
   loadModule,
 } from "./aot/discover.js";
 import { generate } from "./aot/generate.js";
+import { getArtifact } from "./runtime/artifact-registry.js";
 
 const DEFAULT_OUT_DIR = "node_modules/@jit/generated";
 const DEFAULT_PACKAGE_NAME = "@jit/generated";
@@ -43,6 +46,11 @@ interface GenerateArguments {
   readonly emitPackageJson: boolean | undefined;
 }
 
+interface ResolvedAotInputs extends GenerateArguments {
+  readonly configFile: string | undefined;
+  readonly resolvedOut: string;
+}
+
 export interface InitArguments {
   readonly format: ConfigFormat;
   readonly force: boolean;
@@ -57,6 +65,8 @@ export type ConfigFormat = (typeof CONFIG_FORMATS)[number];
 const USAGE = `Usage:
   jit init [--force] [--format ts|mts|mjs|cjs] [--schemas <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
   jit generate [files...] [--out <dir>] [--name <package>] [--watch] [--pattern <glob>] [--no-clean] [--no-package-json]
+  jit doctor [files...] [--pattern <glob>]
+  jit explain [files...] [--pattern <glob>]
 `;
 
 export async function main(argv: readonly string[], runtime: CliRuntime = {}): Promise<number> {
@@ -68,6 +78,8 @@ export async function main(argv: readonly string[], runtime: CliRuntime = {}): P
   try {
     if (command === "init") return runInit(parseInitArguments(rest), cwd, stdout, stderr);
     if (command === "generate") return runGenerate(parseGenerateArguments(rest, cwd), cwd, stdout, stderr);
+    if (command === "doctor") return runDoctor(parseGenerateArguments(rest, cwd), cwd, stdout);
+    if (command === "explain") return runExplain(parseGenerateArguments(rest, cwd), cwd, stdout, stderr);
     if (command === "--help" || command === "-h" || command === undefined) {
       stdout(USAGE);
       return command === undefined ? 1 : 0;
@@ -105,39 +117,16 @@ async function runGenerate(
   stdout: (text: string) => void,
   stderr: (text: string) => void
 ): Promise<number> {
-  let files = [...parsed.files];
-  let outDir = parsed.outDir;
-  let packageName = parsed.packageName;
-  let patterns = parsed.patterns;
-  let clean = parsed.clean;
-  let emitPackageJson = parsed.emitPackageJson;
+  const resolved = await resolveAotInputs(parsed, cwd);
+  const { files, packageName, clean, emitPackageJson, resolvedOut } = resolved;
 
-  if (files.length === 0) {
-    const configFile = findConfigFile(cwd);
-
-    if (configFile) {
-      const loaded = await loadModule(configFile);
-      const config = (loaded.default ?? loaded) as JitConfig;
-      const configDir = dirname(configFile);
-
-      patterns = patterns ?? config.patterns;
-      files = expandSchemaEntries(config.schemas, configDir, patterns);
-      outDir = outDir ?? (config.outDir ? resolve(configDir, config.outDir) : undefined);
-      packageName = packageName ?? config.packageName;
-      clean = clean ?? config.clean;
-      emitPackageJson = emitPackageJson ?? config.emitPackageJson;
-      stdout(`using ${configFile}\n`);
-    }
-
-    if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
-  }
+  if (resolved.configFile) stdout(`using ${resolved.configFile}\n`);
 
   if (files.length === 0) {
     stderr("No declaration files found: pass files, add jit.config.*, or create *.jit.ts modules\n");
     return 1;
   }
 
-  const resolvedOut = outDir ?? resolve(cwd, DEFAULT_OUT_DIR);
   const runOnce = async (): Promise<number> => {
     const { schemas, functions, sources } = await collectSchemas(files);
 
@@ -197,6 +186,108 @@ async function runGenerate(
   return new Promise<number>(() => {
     // watch mode runs until interrupted
   });
+}
+
+async function runDoctor(parsed: GenerateArguments, cwd: string, stdout: (text: string) => void): Promise<number> {
+  const resolved = await resolveAotInputs(parsed, cwd);
+
+  stdout("jit doctor\n");
+  stdout(`cwd: ${cwd}\n`);
+  stdout(`config: ${resolved.configFile ?? "not found"}\n`);
+  stdout(`outDir: ${resolved.resolvedOut}\n`);
+  stdout(`packageName: ${resolved.packageName ?? DEFAULT_PACKAGE_NAME}\n`);
+  stdout(`patterns: ${(resolved.patterns ?? DEFAULT_SCHEMA_PATTERNS).join(", ")}\n`);
+  stdout(`files: ${resolved.files.length}\n`);
+  for (const file of resolved.files) stdout(`  - ${file}\n`);
+
+  return resolved.files.length === 0 ? 1 : 0;
+}
+
+async function runExplain(
+  parsed: GenerateArguments,
+  cwd: string,
+  stdout: (text: string) => void,
+  stderr: (text: string) => void
+): Promise<number> {
+  const resolved = await resolveAotInputs(parsed, cwd);
+
+  if (resolved.files.length === 0) {
+    stderr("No declaration files found: pass files, add jit.config.*, or create *.jit.ts modules\n");
+    return 1;
+  }
+
+  const { schemas, functions } = await collectSchemas(resolved.files);
+
+  stdout("jit explain\n");
+  stdout(`files: ${resolved.files.length}\n`);
+  stdout(`grouped objects: ${Object.keys(schemas).length}\n`);
+  for (const [name, value] of Object.entries(schemas)) {
+    stdout(`  - ${name}: ${readOps(value).join(", ") || "no selected operations"}\n`);
+  }
+  stdout(`standalone functions: ${Object.keys(functions).length}\n`);
+  for (const [name, value] of Object.entries(functions)) {
+    const artifact = getArtifact(value);
+
+    stdout(
+      `  - ${name}: ${artifact ? artifact.kind : "unknown"}${artifact && "op" in artifact ? `:${artifact.op}` : ""}\n`
+    );
+  }
+
+  if (Object.keys(schemas).length === 0 && Object.keys(functions).length === 0) {
+    stderr("No AOT functions found in declaration files\n");
+    return 1;
+  }
+
+  return 0;
+}
+
+async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise<ResolvedAotInputs> {
+  let files = [...parsed.files];
+  let outDir = parsed.outDir;
+  let packageName = parsed.packageName;
+  let patterns = parsed.patterns;
+  let clean = parsed.clean;
+  let emitPackageJson = parsed.emitPackageJson;
+  let configFile: string | undefined;
+
+  if (files.length === 0) {
+    configFile = findConfigFile(cwd);
+
+    if (configFile) {
+      const loaded = await loadModule(configFile);
+      const config = (loaded.default ?? loaded) as JitConfig;
+      const configDir = dirname(configFile);
+
+      patterns = patterns ?? config.patterns;
+      files = expandSchemaEntries(config.schemas, configDir, patterns);
+      outDir = outDir ?? (config.outDir ? resolve(configDir, config.outDir) : undefined);
+      packageName = packageName ?? config.packageName;
+      clean = clean ?? config.clean;
+      emitPackageJson = emitPackageJson ?? config.emitPackageJson;
+    }
+
+    if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
+  }
+
+  return {
+    ...parsed,
+    files,
+    outDir,
+    packageName,
+    patterns,
+    clean,
+    emitPackageJson,
+    configFile,
+    resolvedOut: outDir ?? resolve(cwd, DEFAULT_OUT_DIR),
+  };
+}
+
+function readOps(value: unknown): readonly string[] {
+  if (value === null || typeof value !== "object") return [];
+
+  const ops = (value as { readonly ops?: unknown }).ops;
+
+  return Array.isArray(ops) ? ops.filter((op): op is string => typeof op === "string") : [];
 }
 
 function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateArguments {

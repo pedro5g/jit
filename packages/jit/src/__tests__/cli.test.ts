@@ -109,6 +109,57 @@ describe("jit CLI", () => {
     expect(types).not.toContain("export declare const User: {");
   });
 
+  it("should diagnose and explain AOT declaration discovery", async () => {
+    const { runtime, stdout, stderr } = createRuntime();
+
+    mkdirSync(join(projectDir, "src"), { recursive: true });
+    mkdirSync(join(projectDir, "node_modules"), { recursive: true });
+    symlinkSync(join(process.cwd(), "packages", "jit"), join(projectDir, "node_modules", "jit"), "dir");
+    writeFileSync(
+      join(projectDir, "src", "user.jit.ts"),
+      [
+        `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
+        "",
+        "export const User = JIT.object({",
+        "  id: JIT.number(),",
+        "  name: JIT.string(),",
+        "});",
+        "export const User_is = JIT.validate(User).is().compile();",
+        "export const UserModel = JIT.compile(User, {",
+        "  is: User_is,",
+        "  diff: JIT.diff(User).compile(),",
+        "});",
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      join(projectDir, "jit.config.mjs"),
+      createConfigSource({
+        format: "mjs",
+        force: true,
+        schemas: ["src"],
+        outDir: "generated",
+        packageName: "@acme/generated",
+        patterns: ["**/*.jit.ts"],
+      })
+    );
+
+    expect(await main(["doctor"], runtime)).toBe(0);
+    expect(stdout.join("")).toContain("jit doctor");
+    expect(stdout.join("")).toContain("files: 1");
+
+    stdout.length = 0;
+    stderr.length = 0;
+
+    expect(await main(["explain"], runtime)).toBe(0);
+    expect(stderr.join("")).toBe("");
+    expect(stdout.join("")).toContain("jit explain");
+    expect(stdout.join("")).toContain("grouped objects: 1");
+    expect(stdout.join("")).toContain("UserModel: is, diff");
+    expect(stdout.join("")).toContain("standalone functions: 1");
+    expect(stdout.join("")).toContain("User_is: validator:is");
+  });
+
   it("should warn when declaration files contain no buildable exports", async () => {
     const { runtime, stderr } = createRuntime();
 

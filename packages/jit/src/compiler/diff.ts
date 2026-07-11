@@ -1,4 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { buildDiffIR } from "./diff/build-diff-ir.js";
 import { emitDiff, emitDiffBody } from "./diff/emit-diff.js";
@@ -60,7 +61,12 @@ export function compileDiff<TSchema extends ATS.AnyTypeSchema>(
       const program = buildDiffIR(schema);
       const body = emitDiffBody(program);
 
-      return globalThis.Function(`return function diff(left, right) {\n${body}\n};`)() as Diff<ATS.Infer<TSchema>>;
+      const compiled = globalThis.Function(`return function diff(left, right) {\n${body}\n};`)() as Diff<
+        ATS.Infer<TSchema>
+      >;
+
+      registerArtifact(compiled as object, { kind: "operation", schema, op: "diff" });
+      return compiled;
     },
     options
   );

@@ -1,6 +1,6 @@
 export { compileClone } from "../compiler/clone.js";
 export { compileDiff } from "../compiler/diff.js";
-export { compileEqual, equal } from "../compiler/equal.js";
+export { compileEqual } from "../compiler/equal.js";
 export { compileHash } from "../compiler/hash.js";
 export {
   compileGroupBy,
@@ -33,6 +33,13 @@ export * from "./object/index.js";
 export * from "./primitive/index.js";
 export type { QueryBuilder, QueryConditionBuilder } from "./query.js";
 export { query } from "./query.js";
+export type {
+  JsonCompileBuilder,
+  RuntimeCompiledFunction,
+  RuntimeFunctionExplain,
+  ValidateCompileBuilder,
+} from "./runtime-ops.js";
+export { clone, diff, equal, hash, json, validate } from "./runtime-ops.js";
 export { mask, sanitize } from "./security.js";
 export type { CompiledSerializer } from "./serialize.js";
 export { codec, serializer } from "./serialize.js";

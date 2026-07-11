@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
+import { emitDiffSource } from "../compiler/diff.js";
 import { emitEqualSource } from "../compiler/equal.js";
 import { emitHashSource } from "../compiler/hash.js";
 import { emitMaskSource } from "../compiler/mask.js";
@@ -29,7 +30,9 @@ export const AOT_OPERATIONS = [
   "hash",
   "equal",
   "clone",
+  "diff",
   "stringify",
+  "fromJSON",
   "mask",
   "sanitize",
   "codec",
@@ -140,7 +143,7 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // is / parse / safeParse
-    const wantsValidator = wants("is") || wants("parse") || wants("safeParse");
+    const wantsValidator = wants("is") || wants("parse") || wants("safeParse") || wants("fromJSON");
     const validator = wantsValidator ? tryEmit(name, "validator", skipped, () => emitValidator(schema)) : undefined;
 
     if (validator) {
@@ -180,18 +183,32 @@ export function generate(options: GenerateOptions): GenerateResult {
             binding,
           });
         }
-        if (wants("parse")) {
-          const binding = internalIdentifier(`${name}_parse`);
+        if (wants("parse") || wants("fromJSON")) {
+          const parseBinding = internalIdentifier(`${name}_parse`);
 
           needsValidationError = true;
           js.push(
-            `const ${binding} = /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+            `const ${parseBinding} = /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
           );
-          operations.push({
-            prop: "parse",
-            type: `(value: unknown) => ${name}`,
-            binding,
-          });
+          if (wants("parse")) {
+            operations.push({
+              prop: "parse",
+              type: `(value: unknown) => ${name}`,
+              binding: parseBinding,
+            });
+          }
+          if (wants("fromJSON")) {
+            const binding = internalIdentifier(`${name}_fromJSON`);
+
+            js.push(
+              `const ${binding} = /*#__PURE__*/ ((parse) => (json) => parse(JSON.parse(json)))(${parseBinding});`
+            );
+            operations.push({
+              prop: "fromJSON",
+              type: `(json: string) => ${name}`,
+              binding,
+            });
+          }
         }
       }
     }
@@ -260,6 +277,20 @@ export function generate(options: GenerateOptions): GenerateResult {
 
       js.push(`const ${binding} = (${cloneSource});`);
       operations.push({ prop: "clone", type: `(value: ${name}) => ${name}`, binding });
+    }
+
+    // diff
+    const diffSource = wants("diff") ? tryEmit(name, "diff", skipped, () => emitDiffSource(schema)) : undefined;
+
+    if (diffSource) {
+      const binding = internalIdentifier(`${name}_diff`);
+
+      js.push(`const ${binding} = (${diffSource});`);
+      operations.push({
+        prop: "diff",
+        type: `(left: ${name}, right: ${name}) => readonly { readonly type: "add" | "remove" | "update"; readonly path: readonly PropertyKey[]; readonly value?: unknown }[]`,
+        binding,
+      });
     }
 
     // stringify
@@ -566,11 +597,42 @@ export function generate(options: GenerateOptions): GenerateResult {
 
         if (!cloneSource) return;
         js.push(`const ${name} = (${cloneSource});`);
+      } else if (op === "diff") {
+        const diffSource = tryEmit(name, "diff", skipped, () => emitDiffSource(schema));
+
+        if (!diffSource) return;
+        js.push(`const ${name} = (${diffSource});`);
       } else if (op === "stringify") {
         const serializeSource = tryEmit(name, "stringify", skipped, () => emitSerialize(schema));
 
         if (!serializeSource) return;
         js.push(`const ${name} = (${serializeSource});`);
+      } else if (op === "fromJSON") {
+        const validator = tryEmit(name, "fromJSON", skipped, () => emitValidator(schema));
+
+        if (!validator) return;
+
+        const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
+
+        if (inlined === undefined) {
+          skipped.push({
+            schema: name,
+            operation: "fromJSON",
+            reason: "refine/transform/default callbacks cannot be serialized ahead of time",
+          });
+          return;
+        }
+
+        needsValidationError = true;
+        const validatorName = internalIdentifier(`${name}_validator`);
+
+        js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
+        js.push(...inlined.map((line) => `  ${line}`));
+        js.push(...indentBlock(validator.source));
+        js.push("})();");
+        js.push(
+          `const ${name} = /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+        );
       } else if (op === "mask") {
         const maskSource = tryEmit(name, "mask", skipped, () => emitMaskSource(schema));
 
@@ -821,11 +883,16 @@ function operationType(
     case "equal":
       return `(left: ${valueType}, right: ${valueType}) => boolean`;
     case "clone":
+      return `(value: ${valueType}) => ${valueType}`;
+    case "diff":
+      return `(left: ${valueType}, right: ${valueType}) => readonly { readonly type: "add" | "remove" | "update"; readonly path: readonly PropertyKey[]; readonly value?: unknown }[]`;
     case "mask":
     case "sanitize":
       return `(value: ${valueType}) => ${valueType}`;
     case "stringify":
       return `(value: ${valueType}) => string`;
+    case "fromJSON":
+      return `(json: string) => ${valueType}`;
     case "codec":
       return `{ readonly encode: (value: ${valueType}) => Uint8Array; readonly encodeInto: (value: ${valueType}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${valueType} }`;
   }

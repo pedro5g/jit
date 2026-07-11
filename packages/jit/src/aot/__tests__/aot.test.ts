@@ -64,14 +64,21 @@ describe("JIT AOT generate", () => {
       body: JIT.string().sanitize(),
       at: JIT.date(),
     });
-    const selected = JIT.compile(Event, ["equal", "clone", "stringify"]);
+    const WireEvent = JIT.object({
+      id: JIT.number(),
+      kind: JIT.literal("click"),
+      target: JIT.string(),
+    });
+    const selected = JIT.compile(Event, ["equal", "clone", "diff", "stringify"]);
 
     const result = AOT.generate({
       schemas: {},
       functions: {
         Event_equal: selected.equal,
         Event_clone: selected.clone,
+        Event_diff: selected.diff,
         Event_stringify: selected.stringify,
+        Event_fromJSON: JIT.json(WireEvent).parse().compile(),
         Event_mask: JIT.mask(Event),
         Event_sanitize: JIT.sanitize(Event),
         Event_codec: JIT.codec(Event),
@@ -86,7 +93,9 @@ describe("JIT AOT generate", () => {
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
       Event_equal: (left: unknown, right: unknown) => boolean;
       Event_clone: <T>(value: T) => T;
+      Event_diff: (left: unknown, right: unknown) => readonly unknown[];
       Event_stringify: (value: unknown) => string;
+      Event_fromJSON: (json: string) => unknown;
       Event_mask: <T>(value: T) => T;
       Event_sanitize: <T>(value: T) => T;
       Event_codec: { encode: (value: unknown) => Uint8Array; decode: (bytes: Uint8Array) => unknown };
@@ -102,7 +111,16 @@ describe("JIT AOT generate", () => {
 
     expect(generated.Event_equal(event, { ...event })).toBe(true);
     expect(generated.Event_clone(event)).toEqual(event);
+    expect(generated.Event_diff(event, { ...event, target: "next" })).toEqual([
+      { type: "update", path: ["target"], value: "next" },
+    ]);
     expect(generated.Event_stringify(event)).toBe(JSON.stringify(event));
+    expect(generated.Event_fromJSON('{"id":7,"kind":"click","target":"next"}')).toEqual({
+      id: 7,
+      kind: "click",
+      target: "next",
+    });
+    expect(() => generated.Event_fromJSON('{"id":7}')).toThrow(/expected literal click/);
     expect(generated.Event_mask(event).target).toBe("***");
     expect(generated.Event_sanitize(event).body).toBe("hello");
     expect(generated.Event_codec.decode(generated.Event_codec.encode(event))).toEqual(event);
