@@ -176,6 +176,27 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitCodecSource(Event.schema)).toMatchSnapshot();
   });
 
+  it("binary rowset: loader, hydrator, and byte query", () => {
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      role: JIT.union(JIT.literal("admin"), JIT.literal("user"), JIT.literal("blocked")),
+      active: JIT.boolean(),
+      score: JIT.number().float32(),
+      note: JIT.string().optional(),
+    });
+    const Users = JIT.array(User).binary({ strategy: "exact" });
+    const query = JIT.query(Users)
+      .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
+      .select("id", "score")
+      .compile();
+
+    expect({
+      writer: Compiler.emitBinaryRowSetWriterSource(Users.layout),
+      hydrate: Compiler.emitBinaryHydrateSource(Users.layout),
+      query: sourceOf(query),
+    }).toMatchSnapshot();
+  });
+
   it("mapper: renames, nested objects, and fused many()", () => {
     const Entity = JIT.object({
       id: JIT.number(),

@@ -19,6 +19,7 @@ work and for production performance. Each page explains:
 - [Temporal, ISO, codecs, and special schemas](./temporal-iso-codec-special-schemas.md)
 - [Queries, mappers, and high-volume flows](./query-mapper-flows.md)
 - [Serialization and binary codec](./serialization-codec.md)
+- [Binary rowsets](./binary-rowsets.md)
 - [Benchmarks, memory, and load testing](./benchmarks-memory-load.md)
 
 ## Recommended Path
@@ -44,6 +45,7 @@ JIT is fast because expensive work moves from hot calls to compile time:
 - loops are classic indexed loops;
 - checks are ordered cheapest-first;
 - query and mapper pipelines are fused;
+- binary rowsets scan compact `ArrayBuffer` rows by fixed offsets;
 - optional cache helpers are emitted only when a strategy needs them;
 - AOT output is plain JS with zero imports from the JIT engine.
 

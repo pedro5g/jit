@@ -31,7 +31,9 @@ export type { CompiledModel } from "./model.js";
 export { model } from "./model.js";
 export * from "./object/index.js";
 export * from "./primitive/index.js";
-export type { QueryBuilder, QueryConditionBuilder } from "./query.js";
+export type { BinaryProcessBuilder, BinaryProcessCompiled, ProcessBuilder } from "./process.js";
+export { process } from "./process.js";
+export type { BinaryQueryBuilder, QueryBuilder, QueryConditionBuilder } from "./query.js";
 export { constant as const, param, query } from "./query.js";
 export type {
   JsonCompileBuilder,

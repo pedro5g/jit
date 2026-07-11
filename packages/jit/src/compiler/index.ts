@@ -1,4 +1,5 @@
 export { type CompileCacheOptions, clearCompileCache } from "../runtime/cache/compile-cache.js";
+export * from "./binary-rowset.js";
 export * from "./clone/index.js";
 export * from "./clone.js";
 export * from "./codec.js";

@@ -124,6 +124,12 @@ types that future package splits will reuse.
   guarded int32; strings length-prefixed UTF-8 written via
   `TextEncoder.encodeInto`. Changing any layout detail is a breaking wire
   change — bump the version byte semantics deliberately.
+- **Binary rowsets** (`compiler/binary-rowset.ts`): in-memory only, not a
+  transport format. Flat object arrays compile into fixed-width rows in one
+  `ArrayBuffer`; optionals/nullables use 2-bit row masks, string/literal
+  fields use per-field dictionaries, and `JIT.query(rowset)` emits byte-offset
+  scans. This layout may evolve independently from codec v2 because it is not
+  persisted across processes.
 - **Streaming** (`compiler/stream.ts` + `runtime/stream/boundary-scanner.ts`):
   the boundary FSM must survive tokens cut across chunks, including inside
   UTF-8 sequences.

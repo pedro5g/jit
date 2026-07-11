@@ -15,6 +15,7 @@ to answer different questions:
 pnpm bench:validate
 pnpm bench:load
 pnpm bench:flows
+pnpm bench:binary
 pnpm bench:all
 pnpm bench:report
 ```
@@ -66,6 +67,29 @@ heavily under array load. The load suite reports both time and `heap/op`.
 This is often closer to production than a single validator call. It shows
 whether the system avoids intermediate arrays and whether GC pressure stays
 low under throughput.
+
+## Binary Rowset Benchmarks
+
+`pnpm bench:binary` focuses on massive flat-object batches:
+
+- 10k users;
+- 100k users;
+- 1M users;
+- preloaded byte query;
+- full `load + query` with `exact` and `dynamic` strategies.
+
+Competitors include regular `JIT.query` over JS arrays, a handwritten
+filter/map loop marked as a biased baseline, and Zod 4 / TypeBox boundary
+comparisons that validate the full input before running the native filter/map.
+
+Read this suite differently from normal validation benchmarks:
+
+- `binary query preloaded` answers how fast the byte scanner is once data is
+  already in the rowset;
+- `binary process load+query` answers whether converting objects into bytes is
+  worth it for the current batch size;
+- `heap/op` tells you whether `exact`, `dynamic`, or `static` is the right
+  allocation strategy for the workload.
 
 ## How To Read Heap Numbers
 

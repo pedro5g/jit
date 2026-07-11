@@ -7,8 +7,8 @@
 Describe a data shape **once**, and jit compiles specialized JavaScript for
 **every** operation over it: validation, equality, cloning, diffing, hashing,
 immutable updates, in-memory queries, DTO mapping, PII masking, XSS
-sanitizing, JSON serialization, a versioned binary codec, and progressive
-streaming validation.
+sanitizing, JSON serialization, a versioned binary codec, in-memory binary
+rowsets for massive flat-object batches, and progressive streaming validation.
 
 Two execution modes, same generated code:
 
@@ -69,6 +69,22 @@ objects, filters/projects admins, and serializes the final JSON:
 | JIT validate + query + JSON          | **8.89 ms** | **5.42 MB** | **2.53x**      |
 | Zod safeParse + filter/map/stringify | 22.53 ms    | 8.58 MB     | baseline       |
 | Handwritten fused loop               | 2.02 ms     | 0.69 MB     | not comparable |
+
+Binary rowset benchmark (`pnpm bench:binary`) converts flat object batches to
+fixed-width `ArrayBuffer` rows and runs byte-offset queries. Numbers below
+were captured on the same machine as the table above.
+
+| Scenario                               | JIT binary               | Baseline                                          | Result                         |
+| -------------------------------------- | ------------------------ | ------------------------------------------------- | ------------------------------ |
+| Preloaded byte query, 100k users       | **844.90 µs**            | JIT query over JS array 982.38 µs                 | **1.16x faster**               |
+| Preloaded byte query, 1M users         | **13.67 ms**             | JIT query over JS array 16.55 ms                  | **1.21x faster**               |
+| `load+query`, 100k users, dynamic pool | **17.64 ms / 7.89 MB**   | Zod 4 parse + native filter 40.31 ms / 11.56 MB   | **2.29x faster, less heap**    |
+| `load+query`, 1M users, exact          | **412.10 ms / 78.20 MB** | Zod 4 parse + native filter 444.44 ms / 107.75 MB | **lower heap, slight speedup** |
+
+For one-off queries over already materialized JS arrays, regular `JIT.query`
+can still be the right tool. Binary rowsets are for reuse, repeated filters,
+controlled scratch memory, and pipelines where rows stay compact between
+processing stages.
 
 High-load validation benchmark (`pnpm bench:load`) preallocates 10k/100k
 unknown users and measures only validation work. TypeBox is measured through

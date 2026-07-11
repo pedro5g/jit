@@ -126,6 +126,42 @@ describe("JIT AOT generate", () => {
     expect(generated.Event_codec.decode(generated.Event_codec.encode(event))).toEqual(event);
   });
 
+  it("should re-emit binary rowset queries as import-free AOT source", async () => {
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+      active: JIT.boolean(),
+      score: JIT.number().float32(),
+    });
+    const Users = JIT.array(User);
+    const binary = Users.binary({ strategy: "exact" });
+    const rowset = binary.load([
+      { id: 1, role: "admin" as const, active: true, score: 10 },
+      { id: 2, role: "user" as const, active: true, score: 7 },
+      { id: 3, role: "admin" as const, active: false, score: 3 },
+    ]);
+    const ActiveAdmins = JIT.query(rowset)
+      .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
+      .select("id", "score")
+      .compile();
+
+    const result = AOT.generate({
+      schemas: {},
+      functions: { ActiveAdmins },
+      outDir,
+    });
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+      ActiveAdmins: (value: typeof rowset) => { readonly id: number; readonly score: number }[];
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "jit"');
+    expect(source).toContain("function query(rowset)");
+    expect(source).toContain("u8[o + 4]");
+    expect(generated.ActiveAdmins(rowset)).toEqual([{ id: 1, score: 10 }]);
+  });
+
   it("should generate validator flat exports with inlined regex bindings", () => {
     const User = JIT.object({
       id: JIT.number().int(),

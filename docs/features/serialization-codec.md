@@ -7,6 +7,8 @@ JIT has two serialization paths:
 
 They solve different problems. JSON is for interoperable text. Binary codec is
 for high-throughput internal transport where both sides share the schema.
+For in-memory analytics over many rows, use
+[binary rowsets](./binary-rowsets.md) instead of the wire codec.
 
 ## JSON Stringify
 

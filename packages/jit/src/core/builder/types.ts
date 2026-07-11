@@ -1,3 +1,4 @@
+import type { BinaryArray, BinaryRowSetOptions } from "../../compiler/binary-rowset.js";
 import type { SafeParseResult } from "../../compiler/validate.js";
 import type { Regexes } from "../../shared/index.js";
 import type {
@@ -668,6 +669,16 @@ export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
   max(length: number, message?: string): Builder<TSchema>;
   length(length: number, message?: string): Builder<TSchema>;
   nonEmpty(message?: string): Builder<TSchema>;
+  /**
+   * Compiles this array of objects into an in-memory binary rowset loader.
+   * The returned loader keeps rows in a compact ArrayBuffer and lets binary
+   * queries scan typed bytes instead of allocating intermediate JS objects.
+   */
+  binary(
+    options?: BinaryRowSetOptions
+  ): TSchema extends { readonly type: "array" }
+    ? BinaryArray<InferSchema<TSchema> extends (infer TElement)[] ? TElement : never>
+    : never;
 }
 
 export interface DateLikeCheckMethods<TSchema extends AnyTypeSchema> {

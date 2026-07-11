@@ -1,4 +1,6 @@
+import { type BinaryRowSetOptions, compileBinaryArray } from "../../compiler/binary-rowset.js";
 import { compileValidator, compileValidatorSelection } from "../../compiler/validate.js";
+import { JITError } from "../../errors/index.js";
 import { Regexes } from "../../shared/index.js";
 import * as Transform from "../../transforms/index.js";
 import {
@@ -457,6 +459,14 @@ const baseBuilderPrototype = {
 
   nonEmpty(this: RuntimeBuilder, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "nonEmpty", message }));
+  },
+
+  binary(this: RuntimeBuilder, options?: BinaryRowSetOptions): unknown {
+    if (this.schema.type !== TypeName.array) {
+      throw new JITError("INVALID_OPERATION", "binary rowsets can only be compiled from array schemas");
+    }
+
+    return compileBinaryArray(this.schema as never, options);
   },
 
   sanitize(this: RuntimeBuilder): AnyBuilder {

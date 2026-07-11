@@ -1,3 +1,10 @@
+import {
+  type BinaryArray,
+  type BinaryRowSet,
+  compileBinaryQuery,
+  isBinaryArray,
+  isBinaryRowSet,
+} from "../compiler/binary-rowset.js";
 import { compileQuery } from "../compiler/query.js";
 import type {
   QueryCompareNode,
@@ -35,7 +42,7 @@ type InferParamShape<TShape extends ParamSchemaShape> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.InferSchema<TSchema> : never;
 };
 type QueryComparable<TValue> = TValue | QueryConstRef<TValue> | QueryParamRef;
-type QueryRuntimeParams<TParams extends Readonly<Record<string, unknown>>> = {
+export type QueryRuntimeParams<TParams extends Readonly<Record<string, unknown>>> = {
   readonly [TKey in keyof TParams]: QueryParamRef<TParams[TKey]>;
 };
 type QueryCompiledFunction<
@@ -45,6 +52,13 @@ type QueryCompiledFunction<
 > = keyof TParams extends never
   ? (value: ATS.InferSchema<TSchema>) => TResult
   : (value: ATS.InferSchema<TSchema>, params: TParams) => TResult;
+type BinaryQueryCompiledFunction<
+  TElement,
+  TResult,
+  TParams extends Readonly<Record<string, unknown>>,
+> = keyof TParams extends never
+  ? (value: BinaryRowSet<TElement>) => TResult
+  : (value: BinaryRowSet<TElement>, params: TParams) => TResult;
 type QuerySelectResult<TResult, TSelected> =
   TResult extends Map<infer TKey, unknown>
     ? Map<TKey, TSelected>
@@ -149,6 +163,45 @@ export interface QueryBuilder<
   compile(): QueryCompiledFunction<TSchema, TResult, TParams>;
 }
 
+/**
+ * Query builder backed by a binary rowset layout. It accepts the same filter
+ * AST as regular `JIT.query`, but compiles supported filters/projections into
+ * byte-offset scans over `ArrayBuffer` rows.
+ */
+export interface BinaryQueryBuilder<
+  TElement,
+  TOutput,
+  TResult = TOutput[],
+  TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+> {
+  params<const TShape extends ParamSchemaShape>(
+    shape: TShape
+  ): BinaryQueryBuilder<TElement, TOutput, TResult, InferParamShape<TShape>>;
+  filter(
+    predicate: (query: QueryConditionBuilder<TElement>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
+  ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
+  select<const TKeys extends readonly Extract<keyof TOutput, string>[]>(
+    ...fields: TKeys
+  ): BinaryQueryBuilder<TElement, QueryPick<TOutput, TKeys[number]>, QueryPick<TOutput, TKeys[number]>[], TParams>;
+  /** Sums a numeric field over the filtered rowset. */
+  sum<TKey extends Extract<keyof TElement, string>>(key: TKey): BinaryQueryBuilder<TElement, TOutput, number, TParams>;
+  /** Counts filtered rows. */
+  count(): BinaryQueryBuilder<TElement, TOutput, number, TParams>;
+  /** Averages a numeric field; `undefined` when no row matches. */
+  avg<TKey extends Extract<keyof TElement, string>>(
+    key: TKey
+  ): BinaryQueryBuilder<TElement, TOutput, number | undefined, TParams>;
+  /** Minimum of a numeric field; `undefined` when no row matches. */
+  min<TKey extends Extract<keyof TElement, string>>(
+    key: TKey
+  ): BinaryQueryBuilder<TElement, TOutput, number | undefined, TParams>;
+  /** Maximum of a numeric field; `undefined` when no row matches. */
+  max<TKey extends Extract<keyof TElement, string>>(
+    key: TKey
+  ): BinaryQueryBuilder<TElement, TOutput, number | undefined, TParams>;
+  compile(): BinaryQueryCompiledFunction<TElement, TResult, TParams>;
+}
+
 export interface QueryParamRef<TValue = unknown> {
   readonly __jitQueryValue: "param";
   readonly name: string;
@@ -177,14 +230,87 @@ export function constant<const TValue extends string | number | bigint | boolean
  * @param schema - The schema or builder the query runs against.
  * @returns A fluent query builder that compiles to specialized JavaScript.
  */
+export function query<TElement>(
+  target: BinaryArray<TElement> | BinaryRowSet<TElement>
+): BinaryQueryBuilder<TElement, TElement, TElement[]>;
+
 export function query<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): QueryBuilder<
   TSchema,
   CollectionElementOf<ATS.InferSchema<TSchema>>,
   CollectionElementOf<ATS.InferSchema<TSchema>>[]
-> {
-  return createQueryBuilder(unwrapSchema(schema), [], [], []);
+>;
+
+export function query(schema: unknown): unknown {
+  if (isBinaryArray(schema) || isBinaryRowSet(schema)) {
+    return createBinaryQueryBuilder(schema, [], [], []);
+  }
+
+  return createQueryBuilder(unwrapSchema(schema as SchemaInput<ATS.AnyTypeSchema>), [], [], []);
+}
+
+function createBinaryQueryBuilder<
+  TElement,
+  TOutput,
+  TResult,
+  TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+>(
+  target: BinaryArray<TElement> | BinaryRowSet<TElement>,
+  nodes: readonly QueryNode[],
+  bindings: readonly unknown[],
+  paramNames: readonly string[]
+): BinaryQueryBuilder<TElement, TOutput, TResult, TParams> {
+  return {
+    params(shape) {
+      return createBinaryQueryBuilder<TElement, TOutput, TResult, InferParamShape<typeof shape>>(
+        target,
+        nodes,
+        bindings,
+        Object.keys(shape)
+      );
+    },
+
+    filter(predicate) {
+      const state = createConditionBuilder(bindings.length);
+      const condition = predicate(state.builder as QueryConditionBuilder<TElement>, createParamRefs(paramNames));
+
+      return createBinaryQueryBuilder(
+        target,
+        [...nodes, { kind: "filter", condition }],
+        [...bindings, ...state.bindings],
+        paramNames
+      );
+    },
+
+    select(...fields) {
+      return createBinaryQueryBuilder(target, [...nodes, { kind: "select:fields", fields }], bindings, paramNames);
+    },
+
+    sum(key) {
+      return createBinaryQueryBuilder(target, [...nodes, { kind: "aggregate", op: "sum", key }], bindings, paramNames);
+    },
+
+    count() {
+      return createBinaryQueryBuilder(target, [...nodes, { kind: "aggregate", op: "count" }], bindings, paramNames);
+    },
+
+    avg(key) {
+      return createBinaryQueryBuilder(target, [...nodes, { kind: "aggregate", op: "avg", key }], bindings, paramNames);
+    },
+
+    min(key) {
+      return createBinaryQueryBuilder(target, [...nodes, { kind: "aggregate", op: "min", key }], bindings, paramNames);
+    },
+
+    max(key) {
+      return createBinaryQueryBuilder(target, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
+    },
+
+    compile() {
+      return compileBinaryQuery<TElement, TResult, TParams>(target, { nodes, bindings, params: paramNames });
+    },
+  };
 }
 
 function createQueryBuilder<
