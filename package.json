@@ -18,6 +18,7 @@
     "lint": "biome lint --write .",
     "lint:check": "biome lint .",
     "clean": "pnpm run -r clean",
+    "clean:artifacts": "tsx scripts/clean-build-artifacts.ts",
     "build": "pnpm run -r --filter jit build",
     "jit": "tsx --conditions @jit/source packages/jit/src/cli.ts",
     "bench:equal": "tsx --conditions @jit/source bench/equal/index.ts",

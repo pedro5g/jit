@@ -6,7 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "clean": "git clean -xdf . -e node_modules",
+    "clean": "tsx ../../scripts/clean-build-artifacts.ts --root .",
     "build": "zshy --project tsconfig.build.json",
     "test:watch": "pnpm vitest",
     "test": "pnpm vitest run"

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "esbuild";
@@ -53,6 +53,40 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("clone");
     expect(bundled).not.toContain("JITValidationError"); // parse unused
     expect(bundled).not.toContain("Object.freeze"); // namespace dropped
+  });
+
+  it("should drop unused flat exports from the final app bundle", async () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      name: JIT.string(),
+      email: JIT.string().email(),
+    });
+    const selected = JIT.validator(User).get("is", "parse");
+    const stringify = JIT.json(User).stringify().compile();
+
+    AOT.generate({
+      schemas: {},
+      functions: {
+        User_is: selected.is,
+        User_parse: selected.parse,
+        User_stringify: stringify,
+      },
+      outDir,
+    });
+
+    const generated = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const bundled = await bundle(
+      `import { User_is } from "./index.mjs";\nconsole.log(User_is({ id: 1, name: "Ada", email: "ada@math.org" }));\n`
+    );
+
+    expect(generated).toContain("const User_parse");
+    expect(generated).toContain("const User_stringify");
+    expect(generated).toContain("class JITValidationError extends Error");
+    expect(bundled).toContain("User_is");
+    expect(bundled).not.toContain("User_parse");
+    expect(bundled).not.toContain("User_stringify");
+    expect(bundled).not.toContain("JITValidationError");
+    expect(bundled).not.toContain("function stringify");
   });
 
   it("should drop entire schemas that are never imported", async () => {

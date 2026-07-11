@@ -235,9 +235,81 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const User_is");
     expect(source).not.toContain("User_parse");
     expect(source).not.toContain("User_equal");
+    expect(source).not.toContain("JITValidationError");
+    expect(source).not.toContain("__hashCache");
+    expect(source).not.toContain("__indexCache");
+    expect(source).not.toContain("__getIndex");
     expect(source).not.toContain('from "jit"');
     expect(types).toContain("export declare const User_is");
     expect(types).not.toContain("export declare const User_parse");
+  });
+
+  it("should inline cache helpers only for operations that need them", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const PlainUsers = JIT.array(User);
+    const IndexedUsers = JIT.array(User).entity({ key: "id" }).indexBy("id");
+    const Hashed = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered");
+    const plainDir = join(outDir, "plain");
+    const indexedDir = join(outDir, "indexed");
+    const hashedDir = join(outDir, "hashed");
+
+    AOT.generate({
+      schemas: {},
+      functions: { Plain_equal: JIT.compile(PlainUsers, ["equal"]).equal },
+      outDir: plainDir,
+    });
+
+    const plainSource = readFileSync(join(plainDir, "index.mjs"), "utf8");
+
+    expect(plainSource).not.toContain("__indexCache");
+    expect(plainSource).not.toContain("__hashCache");
+
+    AOT.generate({
+      schemas: {},
+      functions: { Indexed_equal: JIT.compile(IndexedUsers, ["equal"]).equal },
+      outDir: indexedDir,
+    });
+
+    const indexedSource = readFileSync(join(indexedDir, "index.mjs"), "utf8");
+    const indexedGenerated = (await import(pathToFileURL(join(indexedDir, "index.mjs")).href)) as {
+      Indexed_equal: (left: readonly unknown[], right: readonly unknown[]) => boolean;
+    };
+    const left = Array.from({ length: 70 }, (_, index) => ({ id: index, name: `user-${index}` }));
+    const right = [...left].reverse();
+
+    expect(indexedSource.match(/const __indexCache = new WeakMap\(\);/g)).toHaveLength(1);
+    expect(indexedSource).toContain('__getIndex(r, "id")');
+    expect(indexedSource).not.toContain("__hashCache");
+    expect(indexedGenerated.Indexed_equal(left, right)).toBe(true);
+    expect(indexedGenerated.Indexed_equal(left, right)).toBe(true);
+    expect(
+      indexedGenerated.Indexed_equal(
+        left,
+        right.map((user) => (user.id === 35 ? { ...user, name: "changed" } : user))
+      )
+    ).toBe(false);
+
+    const selected = JIT.compile(Hashed, ["equal", "hash"]);
+
+    AOT.generate({
+      schemas: {},
+      functions: { Hashed_equal: selected.equal, Hashed_hash: selected.hash },
+      outDir: hashedDir,
+    });
+
+    const hashedSource = readFileSync(join(hashedDir, "index.mjs"), "utf8");
+    const hashedGenerated = (await import(pathToFileURL(join(hashedDir, "index.mjs")).href)) as {
+      Hashed_equal: (left: unknown, right: unknown) => boolean;
+      Hashed_hash: (value: unknown) => number;
+    };
+
+    expect(hashedSource.match(/const __hashCache = new WeakMap\(\);/g)).toHaveLength(1);
+    expect(hashedSource).not.toContain("__indexCache");
+    expect(hashedGenerated.Hashed_equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
+    expect(hashedGenerated.Hashed_equal({ id: 1, name: "Ada" }, { id: 1, name: "Grace" })).toBe(false);
+    expect(hashedGenerated.Hashed_hash({ id: 1, name: "Ada" })).toBe(
+      hashedGenerated.Hashed_hash({ id: 1, name: "Ada" })
+    );
   });
 
   it("should generate hash and hash-short-circuit equal with zero imports", async () => {
@@ -257,6 +329,7 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const Hashed_hash");
     expect(source).toContain("const Hashed_equal_hash");
     expect(source).toContain("((__hash) => (");
+    expect(source.match(/const __hashCache = new WeakMap\(\);/g)).toHaveLength(1);
     expect(source).not.toContain("import ");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {

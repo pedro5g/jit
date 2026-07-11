@@ -41,25 +41,25 @@ export type CompileOp = (typeof COMPILE_OPS)[number];
  * object — nothing else is compiled, typed, or shipped.
  */
 export type CompiledSelection<
-  T,
+  TSchema extends ATS.AnyTypeSchema,
   TOps extends readonly CompileOp[],
   TExtras extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 > = {
-  readonly schema: ATS.AnyTypeSchema;
+  readonly schema: TSchema;
   readonly ops: TOps;
   readonly extras: readonly Extract<keyof TExtras, string>[];
-} & Pick<CompiledModel<T>, TOps[number]> &
+} & Pick<CompiledModel<ATS.InferSchema<TSchema>>, TOps[number]> &
   Readonly<TExtras>;
 
 export type CompiledObjectSelection<
-  T,
+  TSchema extends ATS.AnyTypeSchema,
   TCompiled extends Readonly<Record<string, unknown>>,
   TOps extends CompileOp = Extract<keyof TCompiled, CompileOp>,
 > = {
-  readonly schema: ATS.AnyTypeSchema;
+  readonly schema: TSchema;
   readonly ops: readonly TOps[];
   readonly extras: readonly Exclude<Extract<keyof TCompiled, string>, CompileOp>[];
-} & Pick<CompiledModel<T>, TOps> &
+} & Pick<CompiledModel<ATS.InferSchema<TSchema>>, TOps> &
   Readonly<Omit<TCompiled, CompileOp>>;
 
 /**
@@ -94,16 +94,12 @@ export function compile<
   TSchema extends ATS.AnyTypeSchema,
   const TOps extends readonly CompileOp[],
   const TExtras extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
->(
-  schema: SchemaInput<TSchema>,
-  ops: TOps,
-  extras?: TExtras
-): CompiledSelection<ATS.InferSchema<TSchema>, TOps, TExtras>;
+>(schema: SchemaInput<TSchema>, ops: TOps, extras?: TExtras): CompiledSelection<TSchema, TOps, TExtras>;
 
 export function compile<TSchema extends ATS.AnyTypeSchema, const TCompiled extends Readonly<Record<string, unknown>>>(
   schema: SchemaInput<TSchema>,
   compiled: TCompiled
-): CompiledObjectSelection<ATS.InferSchema<TSchema>, TCompiled>;
+): CompiledObjectSelection<TSchema, TCompiled>;
 
 export function compile<
   TSchema extends ATS.AnyTypeSchema,
@@ -113,9 +109,7 @@ export function compile<
   schema: SchemaInput<TSchema>,
   opsOrCompiled: TOps | TExtras,
   extras?: TExtras
-):
-  | CompiledSelection<ATS.InferSchema<TSchema>, TOps, TExtras>
-  | CompiledObjectSelection<ATS.InferSchema<TSchema>, TExtras> {
+): CompiledSelection<TSchema, TOps, TExtras> | CompiledObjectSelection<TSchema, TExtras> {
   type TValue = ATS.InferSchema<TSchema>;
   const unwrapped = unwrapSchema(schema);
   if (!Array.isArray(opsOrCompiled)) {
@@ -201,13 +195,13 @@ export function compile<
   }
   selection.extras = Object.freeze(extraNames);
 
-  return Object.freeze(selection) as CompiledSelection<TValue, TOps, TExtras>;
+  return Object.freeze(selection) as CompiledSelection<TSchema, TOps, TExtras>;
 }
 
 function compileObjectSelection<
   TSchema extends ATS.AnyTypeSchema,
   const TCompiled extends Readonly<Record<string, unknown>>,
->(schema: TSchema, compiled: TCompiled): CompiledObjectSelection<ATS.InferSchema<TSchema>, TCompiled> {
+>(schema: TSchema, compiled: TCompiled): CompiledObjectSelection<TSchema, TCompiled> {
   const selection: Record<string, unknown> = { schema, ops: Object.freeze([]), extras: Object.freeze([]) };
   const ops: string[] = [];
   const extras: string[] = [];
@@ -227,7 +221,7 @@ function compileObjectSelection<
     enumerable: false,
     value: "grouped",
   });
-  return Object.freeze(selection) as CompiledObjectSelection<ATS.InferSchema<TSchema>, TCompiled>;
+  return Object.freeze(selection) as CompiledObjectSelection<TSchema, TCompiled>;
 }
 
 function isCompileOp(value: string): value is CompileOp {

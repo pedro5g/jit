@@ -54,6 +54,7 @@ describe("JIT.compile explicit aggregation", () => {
     expect(Users.extras).toEqual([]);
     expect(Object.keys(Users).sort()).toEqual(["extras", "is", "ops", "parse", "schema"]);
     expectTypeOf<keyof typeof Users>().toEqualTypeOf<"schema" | "ops" | "extras" | "is" | "parse">();
+    expectTypeOf<JIT.infer<typeof Users>>().toEqualTypeOf<JIT.infer<typeof User>>();
   });
 });
 

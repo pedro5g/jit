@@ -80,6 +80,14 @@ function.
   - `fromJSON` standalone/grouped generation.
   - optional subpath modules for `#jit/user`-style imports.
   - optional deterministic `manifest.json` and `plans/*.json`.
+  - regression coverage proving final bundlers drop unused standalone
+    generated functions and that grouped exports contain only explicitly
+    selected operations.
+  - conditional helper coverage for generated cache helpers: `__indexCache`
+    only for indexed equality and `__hashCache` only for hash/hash-short-
+    circuit operations.
+  - post-generation runtime and TypeScript import smoke test against the
+    generated `.mjs`/`.d.ts` package.
 - Benchmarks:
   - `pnpm bench:flows` for high-volume validate + query + JSON pipelines.
   - `pnpm bench:load` for 10k/100k validation loads against TypeBox
