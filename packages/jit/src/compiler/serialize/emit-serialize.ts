@@ -2,6 +2,7 @@ import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
 import { Parse } from "../../shared/index.js";
+import { emitDefaultedValue, emitStaticDefaultSource } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { emitPropertyAccess } from "../source/access.js";
 
@@ -257,7 +258,9 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
   const props = schema.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
   const keys = Object.keys(props);
   const holder = hoist(context, valueExpr);
-  const optionality = keys.map((key) => resolveSerializeWrappers(props[key]).optional);
+  const optionality = keys.map(
+    (key) => resolveSerializeWrappers(props[key]).optional && emitStaticDefaultSource(props[key]) === undefined
+  );
   const firstRequired = optionality.indexOf(false);
   const needsRuntimeComma =
     optionality.some((optional, position) => optional && position < firstRequired) || firstRequired === -1;
@@ -275,7 +278,8 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
 
     writer.line(`let ${flag} = false;`);
     keys.forEach((key, position) => {
-      const propExpr = emitPropertyAccess(holder, key);
+      const rawPropExpr = emitPropertyAccess(holder, key);
+      const propExpr = emitDefaultedValue(props[key], rawPropExpr);
       const keyPrefix = JSON.stringify(`${JSON.stringify(key)}:`);
       const emitProp = () => {
         writer.line(`if (${flag}) s += ",";`);
@@ -285,7 +289,7 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
       };
 
       if (optionality[position]) {
-        writer.line(`if (${propExpr} !== undefined) {`);
+        writer.line(`if (${rawPropExpr} !== undefined) {`);
         writer.indent(emitProp);
         writer.line("}");
       } else {
@@ -300,12 +304,13 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
   let hasPrevious = false;
 
   keys.forEach((key, position) => {
-    const propExpr = emitPropertyAccess(holder, key);
+    const rawPropExpr = emitPropertyAccess(holder, key);
+    const propExpr = emitDefaultedValue(props[key], rawPropExpr);
     const keyToken = `${JSON.stringify(key)}:`;
     const prefix = hasPrevious ? `,${keyToken}` : keyToken;
 
     if (optionality[position]) {
-      writer.line(`if (${propExpr} !== undefined) {`);
+      writer.line(`if (${rawPropExpr} !== undefined) {`);
       writer.indent(() => {
         writer.line(`s += ${JSON.stringify(`,${keyToken}`)};`);
         emitAppend(context, props[key], propExpr);

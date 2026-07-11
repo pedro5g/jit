@@ -1,5 +1,6 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
+import { emitStaticDefaultSource } from "../defaults.js";
 import { resolveWrappers } from "../resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./access.js";
 import { emitLiteral } from "./literal.js";
@@ -10,10 +11,16 @@ export function emitSchemaGuard(schema: ATS.AnyTypeSchema, value: string): strin
   const resolved = resolveWrappers(schema);
   const base = resolved.base as GuardSchema;
   const inner = emitBaseGuard(base, value);
+  const defaultable = emitStaticDefaultSource(schema) !== undefined;
 
   if (resolved.optional && resolved.nullable) return `(${value} == null || (${inner}))`;
   if (resolved.optional) return `(${value} === undefined || (${inner}))`;
-  if (resolved.nullable) return `(${value} === null || (${inner}))`;
+  if (resolved.nullable) {
+    return defaultable
+      ? `(${value} === undefined || ${value} === null || (${inner}))`
+      : `(${value} === null || (${inner}))`;
+  }
+  if (defaultable) return `(${value} === undefined || (${inner}))`;
 
   return inner;
 }

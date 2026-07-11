@@ -91,6 +91,40 @@ describe("JIT compiler diff", () => {
     expect(diff(value, next)).toEqual([{ type: "update", path: [], value: next }]);
   });
 
+  it("should diff defaulted object props against their canonical value", () => {
+    const schema = JIT.object({
+      id: JIT.number().default(1),
+      name: JIT.string().optional(),
+      profile: JIT.object({ enabled: JIT.boolean(), tags: JIT.array(JIT.string()) }).default({
+        enabled: true,
+        tags: ["core"],
+      }),
+    }).schema;
+    const diff = Compiler.compileDiff(schema);
+
+    expect(diff({} as never, { id: 1, profile: { enabled: true, tags: ["core"] } } as never)).toEqual([]);
+    expect(diff({ id: undefined } as never, { id: 1, profile: { enabled: true, tags: ["core"] } } as never)).toEqual(
+      []
+    );
+    expect(diff({} as never, { id: 2 } as never)).toEqual([{ type: "update", path: ["id"], value: 2 }]);
+    expect(diff({} as never, { id: 1, profile: { enabled: false, tags: ["core"] } } as never)).toEqual([
+      { type: "update", path: ["profile", "enabled"], value: false },
+    ]);
+  });
+
+  it("should diff union branches deeply when both values match the same shape", () => {
+    const Cat = JIT.object({ kind: JIT.literal("cat"), profile: JIT.object({ lives: JIT.number() }) });
+    const Dog = JIT.object({ kind: JIT.literal("dog"), profile: JIT.object({ bark: JIT.boolean() }) });
+    const diff = Compiler.compileDiff(JIT.discriminatedUnion("kind", [Cat, Dog]).schema);
+
+    expect(
+      diff({ kind: "cat", profile: { lives: 9 } } as never, { kind: "cat", profile: { lives: 8 } } as never)
+    ).toEqual([{ type: "update", path: ["profile", "lives"], value: 8 }]);
+    expect(
+      diff({ kind: "cat", profile: { lives: 9 } } as never, { kind: "dog", profile: { bark: true } } as never)
+    ).toEqual([{ type: "update", path: [], value: { kind: "dog", profile: { bark: true } } }]);
+  });
+
   it("should diff tuples, records, sets, and maps", () => {
     const tupleDiff = Compiler.compileDiff(JIT.tuple(JIT.number(), JIT.object({ name: JIT.string() })).schema);
 

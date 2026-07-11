@@ -1,7 +1,9 @@
+import { emitDefaultedValue } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { createEmitState, type EmitState } from "../emitter/emit-state.js";
 import { emitGuardTest } from "../schema-nodes.js";
 import { emitPropertyAccess } from "../source/access.js";
+import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
 import type { DiffIRNode, DiffIRProgram } from "./build-diff-ir.js";
 
@@ -54,6 +56,15 @@ function emitDiffNode(
       writer.line(`if (${left}.getTime() !== ${right}.getTime()) {`);
       writer.indent(() => emitChange(writer, "update", path, right));
       writer.line("}");
+      return;
+    case "union":
+      emitUnionDiff(writer, state, node, left, right, path);
+      return;
+    case "intersection":
+      emitIntersectionDiff(writer, state, node, left, right, path);
+      return;
+    case "discriminatedUnion":
+      emitDiscriminatedUnionDiff(writer, state, node, left, right, path);
       return;
     case "guard":
       emitGuardDiff(writer, state, node, left, right, path);
@@ -115,11 +126,100 @@ function emitObjectDiff(
   writer.line(`if (!Object.is(${left}, ${right})) {`);
   writer.indent(() => {
     for (const prop of node.props) {
-      emitDiffNode(writer, state, prop.value, emitPropertyAccess(left, prop.key), emitPropertyAccess(right, prop.key), [
-        ...path,
-        prop.key,
-      ]);
+      const leftValue = emitDefaultedValue(prop.schema, emitPropertyAccess(left, prop.key));
+      const rightValue = emitDefaultedValue(prop.schema, emitPropertyAccess(right, prop.key));
+
+      emitDiffNode(writer, state, prop.value, leftValue, rightValue, [...path, prop.key]);
     }
+  });
+  writer.line("}");
+}
+
+function emitUnionDiff(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<DiffIRNode, { readonly kind: "union" }>,
+  left: string,
+  right: string,
+  path: readonly PathPart[]
+): void {
+  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  writer.indent(() => {
+    if (node.options.length === 0) {
+      emitChange(writer, "update", path, right);
+      return;
+    }
+
+    let prefix = "if";
+
+    for (const option of node.options) {
+      writer.line(`${prefix} (${emitSchemaGuard(option.schema, left)}) {`);
+      writer.indent(() => {
+        writer.line(`if (${emitSchemaGuard(option.schema, right)}) {`);
+        writer.indent(() => emitDiffNode(writer, state, option.node, left, right, path));
+        writer.line("} else {");
+        writer.indent(() => emitChange(writer, "update", path, right));
+        writer.line("}");
+      });
+      prefix = "} else if";
+    }
+
+    writer.line("} else {");
+    writer.indent(() => emitChange(writer, "update", path, right));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+
+function emitIntersectionDiff(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<DiffIRNode, { readonly kind: "intersection" }>,
+  left: string,
+  right: string,
+  path: readonly PathPart[]
+): void {
+  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  writer.indent(() => {
+    for (const option of node.options) {
+      emitDiffNode(writer, state, option, left, right, path);
+    }
+  });
+  writer.line("}");
+}
+
+function emitDiscriminatedUnionDiff(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<DiffIRNode, { readonly kind: "discriminatedUnion" }>,
+  left: string,
+  right: string,
+  path: readonly PathPart[]
+): void {
+  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  writer.indent(() => {
+    if (node.options.length === 0) {
+      emitChange(writer, "update", path, right);
+      return;
+    }
+
+    let prefix = "if";
+
+    for (const option of node.options) {
+      writer.line(`${prefix} (${emitSchemaGuard(option.schema, left)}) {`);
+      writer.indent(() => {
+        writer.line(`if (${emitSchemaGuard(option.schema, right)}) {`);
+        writer.indent(() => emitDiffNode(writer, state, option.node, left, right, path));
+        writer.line("} else {");
+        writer.indent(() => emitChange(writer, "update", path, right));
+        writer.line("}");
+      });
+      prefix = "} else if";
+    }
+
+    writer.line("} else {");
+    writer.indent(() => emitChange(writer, "update", path, right));
+    writer.line("}");
   });
   writer.line("}");
 }

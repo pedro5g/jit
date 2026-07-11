@@ -51,24 +51,34 @@ values (regexes, refinement callbacks, query arguments) travel as external
 bindings — never interpolated into source.
 
 Measured on this repo's validation benchmark (mitata, Node 22.17.1,
-linux-x64, AMD Ryzen 7 5800H, Zod 4.4.3 — run `pnpm bench:validate` for your
-machine):
+linux-x64, AMD Ryzen 7 5800H, Zod 4.4.3, captured 2026-07-11 — run
+`pnpm bench:validate` for your machine):
 
-| Scenario                      | JIT runtime  | JIT AOT       | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
-| ----------------------------- | ------------ | ------------- | --------- | ----------- | ----------- | ----------- |
-| `is()` valid object           | **57.72 ns** | 58.82 ns      | 894.07 ns | 0.28 b      | 2.29 kb     | **15.2x**   |
-| `is()` invalid object         | **2.68 ns**  | 2.70 ns       | 29.60 µs  | 0.03 b      | 16.16 kb    | **10,963x** |
-| `safeParse` valid object      | 68.95 ns     | **67.74 ns**  | 810.21 ns | 40.24 b     | 1.92 kb     | **12.0x**   |
-| `safeParse` invalid, 7 issues | 126.18 ns    | **120.70 ns** | 25.14 µs  | 624.11 b    | 5.25 kb     | **208.3x**  |
+| Scenario                      | JIT runtime   | JIT AOT      | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
+| ----------------------------- | ------------- | ------------ | --------- | ----------- | ----------- | ----------- |
+| `is()` valid object           | 57.56 ns      | **56.99 ns** | 903.69 ns | 0.26 b      | 2.29 kb     | **15.9x**   |
+| `is()` invalid object         | 2.77 ns       | **2.61 ns**  | 29.29 µs  | 0.03 b      | 16.16 kb    | **11,222x** |
+| `safeParse` valid object      | 67.57 ns      | **66.31 ns** | 789.36 ns | 40.23 b     | 1.90 kb     | **11.9x**   |
+| `safeParse` invalid, 7 issues | **118.56 ns** | 120.59 ns    | 24.99 µs  | 624.33 b    | 5.31 kb     | **207.2x**  |
 
 High-volume flow benchmark (`pnpm bench:flows`) validates 50k unknown
 objects, filters/projects admins, and serializes the final JSON:
 
 | Pipeline                             | Avg time    | Heap/op     | vs Zod         |
 | ------------------------------------ | ----------- | ----------- | -------------- |
-| JIT validate + query + JSON          | **8.77 ms** | **5.37 MB** | **2.68x**      |
-| Zod safeParse + filter/map/stringify | 23.47 ms    | 8.59 MB     | baseline       |
-| Handwritten fused loop               | 2.07 ms     | 0.69 MB     | not comparable |
+| JIT validate + query + JSON          | **8.89 ms** | **5.42 MB** | **2.53x**      |
+| Zod safeParse + filter/map/stringify | 22.53 ms    | 8.58 MB     | baseline       |
+| Handwritten fused loop               | 2.02 ms     | 0.69 MB     | not comparable |
+
+Selected operation load benchmarks from `pnpm bench:all`:
+
+| Operation                           | JIT avg / heap         | Fast competitor       | Competitor avg / heap | Speedup |
+| ----------------------------------- | ---------------------- | --------------------- | --------------------- | ------- |
+| Equal, array 100k                   | **734.37 µs / 96 b**   | fast-deep-equal       | 9.58 ms / 12.21 MB    | 13.0x   |
+| Diff, nested arrays                 | **297.31 µs / 1 KB**   | microdiff             | 7.66 ms / 7.87 MB     | 25.8x   |
+| Update, deep object                 | **18.41 ns / 120 b**   | immer                 | 2.22 µs / 3.49 KB     | 120.6x  |
+| JSON stringify, medium user         | **207.49 ns / 875 b**  | fast-json-stringify   | 266.52 ns / 1.00 KB   | 1.3x    |
+| Stream reject early, bad item 3/10k | **18.89 µs / 24.5 KB** | JSON.parse + validate | 1.96 ms / 921.8 KB    | 103.8x  |
 
 ## Install
 
@@ -191,10 +201,13 @@ Every failing check accepts a custom message as its last argument:
 JIT.string()
   .min(2, "too short")
   .max(64)
+  .startsWith("user:")
+  .includes(":active:")
+  .endsWith(":v1")
   .oneOf(["admin", "user"] as const)
   .noEmpty()
   .regex(/^[a-z]+$/, "lowercase only");
-JIT.number().moreThan(0).lessThan(100).int32("must fit signed int32").float64();
+JIT.number().gt(0).lt(100).step(0.5).int32("must fit signed int32").float64();
 JIT.array(JIT.string()).nonEmpty("pick at least one tag");
 JIT.date().between("2026-01-01", "2026-12-31");
 ```
@@ -259,11 +272,13 @@ JIT.string().cuid2().ulid().nanoid().ksuid().xid();
 JIT.string().ipv4().ipv6().cidrv4().mac("-");
 JIT.string().base64().base64url().hex();
 JIT.string().hostname().domain().e164();
+JIT.string().httpUrl().jwt();
 JIT.string().date(); // YYYY-MM-DD, calendar-valid
 JIT.string().time({ precision: 0 }); // HH:MM:SS
 JIT.string().datetime({ offset: true }); // ISO datetime, allows ±HH:MM
 JIT.string().duration().emoji();
 JIT.string().digest("sha256", "base64url"); // md5..sha512 digests
+JIT.string().stringFormat("slug", /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 ```
 
 ### String masks
@@ -439,6 +454,14 @@ const hashUser = JIT.hash(User).compile();
 // Backward-compatible: these are callable directly too.
 JIT.equal(User)(a, b);
 ```
+
+Structural operations understand the same complex shape semantics as the
+validator. Selected object fields made optional by `.partial("id")` compare
+and update as optional values; static `.default(value)` fields are
+canonicalized by `equal`, `hash`, `clone`, `diff`, `update`, and
+`stringify`; and unions/discriminated unions dispatch by branch in generated
+code. A diff between two values in the same branch is deep; a branch change is
+a root update for that branch.
 
 Parameterized updates follow the same compile shape:
 

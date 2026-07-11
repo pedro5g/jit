@@ -38,6 +38,7 @@ import type {
   SchemaCheck,
   SchemaShape,
   StringCheck,
+  StringNormalizationForm,
   StringSchema,
   TemporalSchema,
   TemporalUnit,
@@ -116,11 +117,23 @@ type StringCheckPasses<TValue extends string, TCheck> =
             ? TValue extends `${string}@${string}.${string}`
               ? true
               : false
-            : TCheck extends SchemaCheck<"noEmpty", unknown>
-              ? TValue extends ""
-                ? false
-                : true
-              : true;
+            : TCheck extends SchemaCheck<"startsWith", infer TPrefix extends string>
+              ? TValue extends `${TPrefix}${string}`
+                ? true
+                : false
+              : TCheck extends SchemaCheck<"endsWith", infer TSuffix extends string>
+                ? TValue extends `${string}${TSuffix}`
+                  ? true
+                  : false
+                : TCheck extends SchemaCheck<"includes", infer TNeedle extends string>
+                  ? TValue extends `${string}${TNeedle}${string}`
+                    ? true
+                    : false
+                  : TCheck extends SchemaCheck<"noEmpty", unknown>
+                    ? TValue extends ""
+                      ? false
+                      : true
+                    : true;
 
 type StringChecksPass<TValue extends string, TChecks extends readonly unknown[]> = TChecks extends readonly [
   infer THead,
@@ -521,6 +534,18 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
     values: TValues,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"oneOf", TValues>>>;
+  startsWith<const TPrefix extends string>(
+    prefix: TPrefix,
+    message?: string
+  ): Builder<AppendStringCheck<TSchema, SchemaCheck<"startsWith", TPrefix>>>;
+  endsWith<const TSuffix extends string>(
+    suffix: TSuffix,
+    message?: string
+  ): Builder<AppendStringCheck<TSchema, SchemaCheck<"endsWith", TSuffix>>>;
+  includes<const TNeedle extends string>(
+    needle: TNeedle,
+    message?: string
+  ): Builder<AppendStringCheck<TSchema, SchemaCheck<"includes", TNeedle>>>;
   regex(pattern: RegExp, message?: string): Builder<TSchema>;
   /** Email format; pass a RegExp to override the default pattern (e.g. `JIT.regexes.rfc5322Email`). */
   email(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
@@ -529,10 +554,16 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   uuid(message?: string): Builder<TSchema>;
   uuid(version: number, message?: string): Builder<TSchema>;
   url(message?: string): Builder<TSchema>;
+  httpUrl(message?: string): Builder<TSchema>;
+  jwt(message?: string): Builder<TSchema>;
+  stringFormat(name: string, pattern: RegExp, message?: string): Builder<TSchema>;
   noEmpty(): Builder<AppendStringCheck<TSchema, SchemaCheck<"noEmpty">>>;
   trim(): Builder<TSchema>;
+  normalize(form?: StringNormalizationForm): Builder<TSchema>;
   lowercase(): Builder<TSchema>;
+  toLowerCase(): Builder<TSchema>;
   uppercase(): Builder<TSchema>;
+  toUpperCase(): Builder<TSchema>;
   /**
    * Strips HTML/script content and escapes stray angle brackets. Applied by
    * `JIT.sanitize` and inside compiled `parse`/`safeParse` output.
@@ -589,11 +620,27 @@ export interface NumberCheckMethods<TSchema extends AnyTypeSchema> {
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"max", TValue>>>;
+  gte<const TValue extends number>(
+    value: TValue,
+    message?: string
+  ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"min", TValue>>>;
+  lte<const TValue extends number>(
+    value: TValue,
+    message?: string
+  ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"max", TValue>>>;
   moreThan<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"moreThan", TValue>>>;
   lessThan<const TValue extends number>(
+    value: TValue,
+    message?: string
+  ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"lessThan", TValue>>>;
+  gt<const TValue extends number>(
+    value: TValue,
+    message?: string
+  ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"moreThan", TValue>>>;
+  lt<const TValue extends number>(
     value: TValue,
     message?: string
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"lessThan", TValue>>>;
@@ -603,7 +650,10 @@ export interface NumberCheckMethods<TSchema extends AnyTypeSchema> {
   ): Builder<AppendNumberCheck<TSchema, SchemaCheck<"oneOf", TValues>>>;
   positive(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"positive">>>;
   negative(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"negative">>>;
+  nonnegative(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"min", 0>>>;
+  nonpositive(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"max", 0>>>;
   multipleOf(value: number, message?: string): Builder<TSchema>;
+  step(value: number, message?: string): Builder<TSchema>;
   finite(message?: string): Builder<TSchema>;
   safe(message?: string): Builder<TSchema>;
   int(message?: string): Builder<AppendNumberCheck<TSchema, SchemaCheck<"integer">>>;

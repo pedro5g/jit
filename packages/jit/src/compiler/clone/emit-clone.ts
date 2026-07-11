@@ -1,3 +1,4 @@
+import { emitDefaultedValue } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { createEmitState, type EmitState } from "../emitter/emit-state.js";
 import { emitGuardTest } from "../schema-nodes.js";
@@ -112,7 +113,8 @@ function emitInlineObjectClone(
   const props: string[] = [];
 
   for (const prop of node.props) {
-    const cloned = emitInlineClone(prop.value, emitPropertyAccess(source, prop.key));
+    const propSource = emitDefaultedValue(prop.schema, emitPropertyAccess(source, prop.key));
+    const cloned = emitInlineClone(prop.value, propSource);
 
     if (!cloned) {
       return undefined;
@@ -153,7 +155,7 @@ function emitObjectClone(
   const entries: string[] = [];
 
   for (const prop of node.props) {
-    const propSource = emitPropertyAccess(source, prop.key);
+    const propSource = emitDefaultedValue(prop.schema, emitPropertyAccess(source, prop.key));
     const inline = emitInlineClone(prop.value, propSource);
 
     if (inline) {

@@ -768,6 +768,11 @@ class ValidatorEmitter {
         // Mutating checks first, cheap length window next, format regexes last.
         for (const check of checks) {
           if (check.kind === "trim") this.writer.line(`${value} = ${value}.trim();`);
+          if (check.kind === "normalize") {
+            const form = typeof check.value === "string" ? emitLiteral(check.value) : "";
+
+            this.writer.line(`${value} = ${value}.normalize(${form});`);
+          }
           if (check.kind === "lowercase") this.writer.line(`${value} = ${value}.toLowerCase();`);
           if (check.kind === "uppercase") this.writer.line(`${value} = ${value}.toUpperCase();`);
           if (check.kind === "sanitize") {
@@ -858,6 +863,33 @@ class ValidatorEmitter {
               );
               break;
             }
+            case "startsWith":
+              this.failIf(
+                `!${value}.startsWith(${emitLiteral(check.value as string)})`,
+                path,
+                "invalid_string",
+                `startsWith ${check.value}`,
+                check.message ?? `expected string to start with ${check.value}`
+              );
+              break;
+            case "endsWith":
+              this.failIf(
+                `!${value}.endsWith(${emitLiteral(check.value as string)})`,
+                path,
+                "invalid_string",
+                `endsWith ${check.value}`,
+                check.message ?? `expected string to end with ${check.value}`
+              );
+              break;
+            case "includes":
+              this.failIf(
+                `!${value}.includes(${emitLiteral(check.value as string)})`,
+                path,
+                "invalid_string",
+                `includes ${check.value}`,
+                check.message ?? `expected string to include ${check.value}`
+              );
+              break;
             case "digitsLength": {
               const lengths = Array.isArray(check.value) ? (check.value as readonly number[]) : [check.value as number];
               const test = lengths.map((length) => `${value}.length !== ${emitLiteral(length)}`).join(" && ");
@@ -911,6 +943,35 @@ class ValidatorEmitter {
               this.writer.line(`let ${holder} = true;`);
               this.writer.line(`try { new URL(${value}); } catch { ${holder} = false; }`);
               this.failIf(`!${holder}`, path, "invalid_format", "url", check.message ?? "expected a valid URL");
+              break;
+            }
+            case "httpUrl": {
+              const holder = this.nextVar("u");
+              const parsed = this.nextVar("url");
+
+              this.writer.line(`let ${holder} = true;`);
+              this.writer.line(
+                `try { const ${parsed} = new URL(${value}); ${holder} = ${parsed}.protocol === "http:" || ${parsed}.protocol === "https:"; } catch { ${holder} = false; }`
+              );
+              this.failIf(
+                `!${holder}`,
+                path,
+                "invalid_format",
+                "httpUrl",
+                check.message ?? "expected a valid HTTP(S) URL"
+              );
+              break;
+            }
+            case "stringFormat": {
+              const spec = check.value as { readonly name: string; readonly pattern: RegExp };
+
+              this.failIf(
+                `!${this.bind(spec.pattern)}.test(${value})`,
+                path,
+                "invalid_format",
+                spec.name,
+                check.message ?? `expected a valid ${spec.name}`
+              );
               break;
             }
             default:

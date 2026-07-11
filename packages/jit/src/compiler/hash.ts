@@ -11,6 +11,7 @@ import {
   hashUnknown,
   isHashCacheable,
 } from "../runtime/hash/index.js";
+import { emitDefaultedValue } from "./defaults.js";
 import { emitPropertyAccess } from "./source/access.js";
 
 /**
@@ -23,10 +24,9 @@ import { emitPropertyAccess } from "./source/access.js";
  */
 export type Hash<T = unknown> = (value: T) => number;
 
-interface HashSchema {
-  readonly type: ATS.AnyTypeName;
+type HashSchema = ATS.AnyTypeSchema & {
   readonly def: Readonly<Record<string, unknown>>;
-}
+};
 
 /**
  * Emits the JavaScript source of a schema-aware hash function.
@@ -180,7 +180,7 @@ function emitHashInto(lines: string[], schema: HashSchema, value: string, target
 
       for (const key of Object.keys(props)) {
         lines.push(`${pad}{`);
-        emitHashInto(lines, props[key], emitPropertyAccess(value, key), next, depth);
+        emitHashInto(lines, props[key], emitDefaultedValue(props[key], emitPropertyAccess(value, key)), next, depth);
         lines.push(`${pad}  ${target} = __combineHash(${target}, ${next});`);
         lines.push(`${pad}}`);
       }

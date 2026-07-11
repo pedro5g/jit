@@ -76,6 +76,7 @@ export type StringFormatKind =
   | "date"
   | "time"
   | "datetime"
+  | "jwt"
   | "digest";
 
 export type StringCheck =
@@ -83,15 +84,21 @@ export type StringCheck =
   | SchemaCheck<"max", number>
   | SchemaCheck<"length", number>
   | SchemaCheck<"oneOf", readonly string[]>
+  | SchemaCheck<"startsWith", string>
+  | SchemaCheck<"endsWith", string>
+  | SchemaCheck<"includes", string>
   | SchemaCheck<"regex", RegExp>
   | SchemaCheck<"email", RegExp>
   | SchemaCheck<"uuid", RegExp>
   | SchemaCheck<"url">
+  | SchemaCheck<"httpUrl">
   | SchemaCheck<"noEmpty">
   | SchemaCheck<"trim">
   | SchemaCheck<"lowercase">
   | SchemaCheck<"uppercase">
+  | SchemaCheck<"normalize", StringNormalizationForm | undefined>
   | SchemaCheck<"sanitize">
+  | SchemaCheck<"stringFormat", { readonly name: string; readonly pattern: RegExp }>
   | SchemaCheck<"digitsLength", number | readonly number[]>
   | SchemaCheck<"format", { readonly pattern: string; readonly stripNonDigits: boolean }>
   | SchemaCheck<"phoneBR">
@@ -114,6 +121,7 @@ export type NumberCheck =
   | SchemaCheck<"float64">;
 
 export type TemporalUnit = "minute" | "second" | "millisecond";
+export type StringNormalizationForm = "NFC" | "NFD" | "NFKC" | "NFKD";
 
 export type DateLikeCheck =
   | SchemaCheck<"min", Date | string>

@@ -31,6 +31,34 @@ Implemented and covered by tests:
 - Config accepts the plan-shaped `entries` + `output` block, while legacy
   `schemas`/`outDir` remains readable.
 
+## Schema Operator Alignment
+
+The schema operators requested in the finalization MD are present in the
+runtime builder surface and compile through the validator/codegen path:
+
+- conditional refinement and fields: `.refine(..., { when, path })`,
+  `.where(...)`, `.when(...)`;
+- object shape operators: `.pick(...)`, `.omit(...)`, `.partial(...)`,
+  `.required(...)`, `.strict()`, `.loose()`, `.catchall()`, `.keyof()`;
+- logical operators: `.or(...)`, `.and(...)`, `.xor(...)`, `.not()`;
+- string/format operators: `.oneOf(...)`, `.noEmpty()`, `.startsWith()`,
+  `.endsWith()`, `.includes()`, `.normalize()`, `.toLowerCase()`,
+  `.toUpperCase()`, `.httpUrl()`, `.jwt()`, `.stringFormat(name, regex)`,
+  masks (`.format`, `.cpf`, `.cnpj`, `.phoneBR`) and ISO date/time formats;
+- numeric operators: `.moreThan()`, `.lessThan()`, `.gt()`, `.gte()`,
+  `.lt()`, `.lte()`, `.nonnegative()`, `.nonpositive()`, `.step()`,
+  `.oneOf()`, `.int32()`, `.float32()`, `.float64()`;
+- Date and Temporal checks: `.min()`, `.max()`, `.between()`,
+  `.daysOfWeek()`, `.monthsOfYear()`, `.truncateTo()`;
+- special schemas: `JIT.templateLiteral`, `JIT.json`, `JIT.function`,
+  `JIT.custom`, `.apply`, and value `JIT.codec`.
+
+Compiled structural operations now share the same static-default semantics:
+`equal`, `hash`, `clone`, `diff`, `update`, and `stringify` canonicalize
+static `.default(value)` properties. Optional fields stay optional, and
+union/discriminated-union branches are handled by branch-aware generated code
+instead of generic schema interpretation.
+
 ## Shared Contracts
 
 Implemented in `packages/jit/src/core/host.ts`:

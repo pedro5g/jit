@@ -1,5 +1,6 @@
 import * as ATS from "../../../core/ats/index.js";
 import { JITError } from "../../../errors/index.js";
+import { staticDefaultIRExpr } from "../../defaults.js";
 import { resolveWrappers } from "../../resolvers/resolve-wrappers.js";
 import { isPrimitiveLikeSchema } from "../../schema-nodes.js";
 import { literalDiscriminatorValue } from "../../source/guard.js";
@@ -10,6 +11,7 @@ import {
   type IRNode,
   type IRProgram,
   irVar,
+  letDecl,
   literal,
   loadIndex,
   loadProp,
@@ -18,6 +20,7 @@ import {
   sameNumber,
   sameValue,
   schemaGuard,
+  store,
   strictEqual,
 } from "../ir.js";
 import { Scope } from "../scope.js";
@@ -223,17 +226,26 @@ function appendObjectCompare(body: IRNode[], schema: EqualSchema, left: IRExpr, 
     const prop = props[key];
     const leftProp = loadProp(left, key);
     const rightProp = loadProp(right, key);
+    const defaultExpr = staticDefaultIRExpr(prop);
     let leftValue = leftProp;
     let rightValue = rightProp;
 
-    if (shouldHoistObjectProp(prop)) {
+    if (defaultExpr || shouldHoistObjectProp(prop)) {
       const leftVar = scope.createVar(`l_${key}`);
       const rightVar = scope.createVar(`r_${key}`);
 
       body.push(
-        { kind: "assign", target: leftVar, expr: leftProp },
-        { kind: "assign", target: rightVar, expr: rightProp }
+        defaultExpr ? letDecl(leftVar, leftProp) : { kind: "assign", target: leftVar, expr: leftProp },
+        defaultExpr ? letDecl(rightVar, rightProp) : { kind: "assign", target: rightVar, expr: rightProp }
       );
+
+      if (defaultExpr) {
+        body.push(
+          { kind: "if", test: strictEqual(leftVar, literal(undefined)), then: [store(leftVar, defaultExpr)] },
+          { kind: "if", test: strictEqual(rightVar, literal(undefined)), then: [store(rightVar, defaultExpr)] }
+        );
+      }
+
       leftValue = leftVar;
       rightValue = rightVar;
     }

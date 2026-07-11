@@ -100,6 +100,24 @@ describe("JIT compiler serialize + codec", () => {
       expect(stringify(value)).toBe(JSON.stringify(value));
     });
 
+    it("should serialize static defaults instead of leaking undefined as null", () => {
+      const Data = JIT.object({
+        id: JIT.number().default(1),
+        name: JIT.string().optional(),
+        profile: JIT.object({ enabled: JIT.boolean(), tags: JIT.array(JIT.string()) }).default({
+          enabled: true,
+          tags: ["core"],
+        }),
+      });
+      const stringify = Compiler.compileSerialize(Data.schema);
+
+      expect(stringify({} as never)).toBe('{"id":1,"profile":{"enabled":true,"tags":["core"]}}');
+      expect(stringify({ id: undefined, name: undefined } as never)).toBe(
+        '{"id":1,"profile":{"enabled":true,"tags":["core"]}}'
+      );
+      expect(stringify({ id: 2 } as never)).toBe('{"id":2,"profile":{"enabled":true,"tags":["core"]}}');
+    });
+
     it("should reject schemas JSON cannot represent", () => {
       expect(() => Compiler.compileSerialize(JIT.object({ big: JIT.bigint() }).schema)).toThrow(Errors.JITError);
       expect(() => Compiler.compileSerialize(JIT.object({ set: JIT.set(JIT.number()) }).schema)).toThrow(
