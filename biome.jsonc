@@ -63,6 +63,7 @@
   "files": {
     "includes": [
       "**/*.ts",
+      "**/*.tsx",
       "!**/*.js",
       "!**/*.mjs",
       "!**/*.cjs",
@@ -79,6 +80,9 @@
       "!.next",
       "!packages/treeshake",
       "!.source",
+      "!apps/site/.next",
+      "!apps/site/.source",
+      "!apps/site/next-env.d.ts",
       "!bench/validate/typia-gen",
       "!**/.generated"
     ]

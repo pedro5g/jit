@@ -26,6 +26,7 @@
     "**/*.d.ts",
     "**/*.d.cts",
     "**/*.d.mts",
-    "vitest.root.mjs"
+    "vitest.root.mjs",
+    "apps"
   ]
 }

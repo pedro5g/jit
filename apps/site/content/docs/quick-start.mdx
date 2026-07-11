@@ -1,0 +1,71 @@
+---
+title: Quick start
+description: Install jit, define a schema, and use the compiled operations.
+---
+
+## Install
+
+```bash
+pnpm add jit
+```
+
+## Define a schema
+
+zod-like builders; every schema carries its inferred type.
+
+```ts
+import { JIT } from "jit/runtime";
+
+const User = JIT.object({
+  id: JIT.number().int().positive(),
+  name: JIT.string().min(2, "name is too short"),
+  email: JIT.string().email().pii("mask"),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+  tags: JIT.array(JIT.string()).max(8),
+});
+
+type User = JIT.Infer<typeof User>;
+```
+
+## Validate
+
+```ts
+const Users = JIT.validator(User);
+
+Users.is(input); // pure boolean guard — compiled specialized code
+Users.parse(input); // throws JITValidationError with every issue
+Users.safeParse(input); // { success, data | issues } — no exceptions
+```
+
+## Use the other compiled operations
+
+```ts
+const Model = JIT.model(User); // lazy: compiles each op on first access
+
+Model.equal(a, b); // schema-aware deep equality
+Model.clone(a); // static-literal deep clone
+Model.diff(a, b); // structural diff entries
+Model.update(a, { name: "Ada" }); // immutable surgical update
+Model.stringify(a); // compiled JSON — static keys baked in
+Model.mask(a); // PII-safe copy for logs
+```
+
+## Inspect what was generated
+
+Every compiled function carries its own source and cache report:
+
+```ts
+const isUser = JIT.validate(User).is().compile();
+
+isUser.source; // generated source, useful for debugging
+isUser.hash; // deterministic source hash
+isUser.explain(); // { operation, hash, source, cache }
+```
+
+## Go ahead-of-time
+
+```bash
+pnpm jit init      # writes jit.config.ts
+pnpm jit doctor    # checks the setup
+pnpm jit generate  # emits pure .mjs + .cjs + .d.ts modules
+```

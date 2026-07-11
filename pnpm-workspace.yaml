@@ -1,8 +1,20 @@
 packages:
   - packages/*
+  - apps/*
 
 allowBuilds:
   esbuild: true
+  sharp: true
+  "@tailwindcss/oxide": true
+  unrs-resolver: true
+
+minimumReleaseAgeExclude:
+  - '@fumadocs/tailwind@0.1.1'
+  - fumadocs-core@16.11.3
+  - fumadocs-ui@16.11.3
 
 onlyBuiltDependencies:
   - esbuild
+  - sharp
+  - "@tailwindcss/oxide"
+  - unrs-resolver

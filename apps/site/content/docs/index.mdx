@@ -1,0 +1,38 @@
+---
+title: Introduction
+description: What jit is, why it compiles your schemas, and how the two execution modes work.
+---
+
+jit is a **schema-first data engine** for TypeScript. Describe a data shape once, and jit
+compiles specialized JavaScript for **every** operation over it: validation, equality,
+cloning, diffing, hashing, immutable updates, in-memory queries, DTO mapping, PII masking,
+XSS sanitizing, JSON serialization, a versioned binary codec, binary rowsets for massive
+flat-object batches, and progressive streaming validation.
+
+## Why compiled?
+
+Generic libraries interpret your schema on every call — walk the tree, branch on types,
+allocate intermediates. jit walks the schema **once, at compile time**, and emits the exact
+monomorphic code a performance engineer would write by hand:
+
+- static property access only — never `for...in` / `Object.keys` on known shapes;
+- checks ordered cheapest-first: `typeof` → null → numeric → length → regex;
+- classic indexed loops, no closures, early returns;
+- runtime values (regexes, refinement callbacks, query arguments) travel as external
+  bindings — never interpolated into source.
+
+## Two execution modes, same generated code
+
+**JIT (runtime)** — operations compile on first use via `globalThis.Function` and are
+cached per schema. Ideal for dynamic schemas and long-lived processes.
+
+**AOT (build time, Prisma-style)** — `pnpm jit init` writes config and `jit generate`
+emits pure `.mjs` + `.cjs` + `.d.ts` modules with **zero imports**: the engine never ships
+to production, and the final bundle keeps only the generated functions your app imports.
+AOT output runs under strict CSP, edge runtimes and other locked-down environments.
+
+## Where to go next
+
+- [Quick start](/docs/quick-start) — install jit and compile your first schema.
+- The full feature guides currently live in the
+  [repository docs](https://github.com/pedro5g/jit/tree/main/docs) while this site grows.

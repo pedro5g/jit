@@ -151,3 +151,6 @@ bench/**/.generated/
 
 # Local agent instructions (machine-specific)
 CLAUDE.md
+
+# Fumadocs generated source
+.source/
