@@ -256,7 +256,7 @@ async function resolveAotInputs(
 
       config = (loaded.default ?? loaded) as JitConfig;
       patterns = patterns ?? config.patterns;
-      files = expandSchemaEntries(config.schemas, dirname(configFile), patterns);
+      files = expandSchemaEntries(config.entries ?? config.schemas, dirname(configFile), patterns);
     }
 
     if (files.length === 0) files = discoverSchemaFiles(root, patterns);

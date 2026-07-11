@@ -19,10 +19,21 @@ implementation with divergent semantics.
 Preferred runtime surface:
 
 ```ts
+import { JIT } from "jit/runtime";
+
 const isUser = JIT.validate(User).is().compile();
 const parseUser = JIT.validate(User).parse().compile();
 const equalUser = JIT.equal(User).compile();
 const stringifyUser = JIT.json(User).stringify().compile();
+```
+
+AOT declaration surface:
+
+```ts
+import { JIT } from "jit/define";
+
+export const isUser = JIT.validate(User).is().compile();
+export const stringifyUser = JIT.json(User).stringify().compile();
 ```
 
 Compatibility surfaces remain:
@@ -42,6 +53,14 @@ function.
 - `JIT.equal/clone/diff/hash(schema).compile()`.
 - `JIT.json()` still creates the JSON-value schema; `JIT.json(schema)` now
   exposes `.stringify().compile()` and `.parse().compile()`.
+- `JIT.Infer<typeof Schema>` alias.
+- `JIT.update(schema).patch({ field: JIT.param("name") }).compile()`.
+- `JIT.query(schema).params({...})` and `JIT.const(value)` / `q.constant(value)`.
+- `JIT.transform(schema).select(...).map(...).compile()` with inline built-in
+  field transforms.
+- `jit/runtime` and `jit/define` subpaths.
+- Shared host contracts in `core/host.ts`.
+- Define-mode AOT stubs that register artifacts and throw if executed.
 - Runtime compiled functions expose non-enumerable:
   - `source`
   - `hash`
@@ -51,22 +70,31 @@ function.
 - CLI:
   - `jit doctor`
   - `jit explain`
+  - `jit list`
+  - `jit inspect <export> --stage plan|source|declaration`
+  - `jit clean`
+  - `jit init` writes plan-shaped `entries`/`output` config plus a starter
+    `jit/user.jit.ts`.
 - AOT:
   - `diff` standalone/grouped generation.
+  - `fromJSON` standalone/grouped generation.
+  - optional subpath modules for `#jit/user`-style imports.
+  - optional deterministic `manifest.json` and `plans/*.json`.
 - Benchmarks:
   - `pnpm bench:flows` for high-volume validate + query + JSON pipelines.
 
 ## Next Phases
 
-1. Introduce explicit host contracts in code:
-   `CompilerHost`, `CompilationRequest`, `CompiledArtifact`.
-2. Move current emitters behind `compileArtifact(...)` without changing
+1. Move current emitters behind `compileArtifact(...)` without changing
    generated output.
-3. Add define-host stubs for future `@jit/define` style entrypoints.
-4. Add query params/external references for AOT-safe dynamic values.
-5. Expand AOT operation parity: update/fromJSON and operation metadata in
-   generated plans.
-6. Add `jit generate --watch` worker isolation and persistent artifact hashes.
+2. Split schema builders into compiler-free core so `jit/define` no longer
+   imports runtime compiler conveniences transitively.
+3. Add external references for AOT-safe custom callbacks.
+4. Expand AOT operation parity: update operation metadata in generated plans
+   as new operations land.
+5. Add `jit generate --watch` worker isolation and persistent artifact hashes.
+6. Replace thin subpath re-export modules with independent per-entry bundles
+   and add source maps.
 7. Keep benchmark coverage split between:
    - hot-call microbenchmarks;
    - cold compile/startup;

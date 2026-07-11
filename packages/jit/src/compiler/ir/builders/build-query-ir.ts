@@ -37,6 +37,7 @@ import {
 // generated sources stay identical to hand-written loops and stable across
 // compiles, which the golden-source tests rely on.
 const VALUE = irVar("value");
+const PARAMS = irVar("params");
 const LEN = irVar("len");
 const OUT = irVar("out");
 const CURSOR = irVar("j");
@@ -58,7 +59,15 @@ const COMPARE_OPERATORS = {
   lte: "lessThanOrEqual",
 } as const;
 
-export function buildQueryIR(target: QueryTarget, plan: OptimizedQueryPlan): IRProgram {
+export interface BuildQueryIROptions {
+  readonly hasParams?: boolean;
+}
+
+export function buildQueryIR(
+  target: QueryTarget,
+  plan: OptimizedQueryPlan,
+  options: BuildQueryIROptions = {}
+): IRProgram {
   const body = plan.mutation
     ? buildMutationQuery(target, plan)
     : plan.aggregate
@@ -67,7 +76,7 @@ export function buildQueryIR(target: QueryTarget, plan: OptimizedQueryPlan): IRP
         ? buildCollectedQuery(target, plan)
         : buildArrayQuery(target, plan);
 
-  return { kind: "program", params: [VALUE], body };
+  return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
 }
 
 function buildArrayQuery(target: QueryTarget, plan: OptimizedQueryPlan): readonly IRNode[] {
@@ -330,6 +339,8 @@ function buildValue(value: QueryValueNode): IRExpr {
       return loadProp(ITEM, value.key);
     case "binding":
       return irVar(value.name);
+    case "param":
+      return loadProp(PARAMS, value.name);
     case "literal":
       return literal(expectSafeLiteral(value.value));
   }

@@ -73,4 +73,19 @@ describe("runtime operation facade", () => {
     expect(stringifyUser.explain().operation).toBe("json.stringify");
     expect(parseUser.explain().operation).toBe("json.parse");
   });
+
+  it("should compile select/map transforms through the fluent facade", () => {
+    const toPublicUser = JIT.transform(User)
+      .select("id", "name")
+      .map("name", (field) => field.lowercase())
+      .compile();
+
+    expect(toPublicUser({ ...ada, name: "ADA" })).toEqual({ id: 1, name: "ada" });
+    expectTypeOf(toPublicUser).toMatchTypeOf<
+      (value: { id: number; name: string; role: "admin" | "member" }) => {
+        readonly id: number;
+        readonly name: string;
+      }
+    >();
+  });
 });

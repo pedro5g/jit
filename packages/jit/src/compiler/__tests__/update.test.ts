@@ -24,6 +24,37 @@ describe("JIT compiler update", () => {
     }>();
   });
 
+  it("should compile parameterized patch updates through the runtime facade", () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      name: JIT.string(),
+      active: JIT.boolean(),
+    });
+    const rename = JIT.update(User)
+      .patch({ name: JIT.param("name") })
+      .compile();
+    const direct = JIT.update(User).compile();
+    const input = { id: 1, name: "Ada", active: true };
+
+    expect(rename(input, { name: "Grace" })).toEqual({ id: 1, name: "Grace", active: true });
+    expect(rename(input, { name: "Ada" })).toBe(input);
+    expect(direct(input, { active: false })).toEqual({ id: 1, name: "Ada", active: false });
+    expectTypeOf(rename).toMatchTypeOf<
+      (
+        value: {
+          id: number;
+          name: string;
+          active: boolean;
+        },
+        params: { readonly name: unknown }
+      ) => {
+        id: number;
+        name: string;
+        active: boolean;
+      }
+    >();
+  });
+
   it("should update nested object branches with structural sharing", () => {
     const User = JIT.object({
       id: JIT.number(),

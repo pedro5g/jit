@@ -20,7 +20,7 @@ Two execution modes, same generated code:
   only the generated low-level functions the app actually imports.
 
 ```ts
-import { JIT } from "jit";
+import { JIT } from "jit/runtime";
 
 const User = JIT.object({
   id: JIT.number().int().positive(),
@@ -30,7 +30,7 @@ const User = JIT.object({
   tags: JIT.array(JIT.string()).max(8),
 });
 
-type User = JIT.infer<typeof User>;
+type User = JIT.Infer<typeof User>;
 
 const Users = JIT.validator(User);
 
@@ -81,7 +81,8 @@ pnpm add jit
 ## Schemas
 
 zod-like builders; every schema carries its inferred type
-(`JIT.infer<typeof X>` works on builders and raw schemas).
+(`JIT.Infer<typeof X>` and the legacy `JIT.infer<typeof X>` work on builders
+and raw schemas).
 
 ```ts
 // primitives
@@ -439,19 +440,37 @@ const hashUser = JIT.hash(User).compile();
 JIT.equal(User)(a, b);
 ```
 
+Parameterized updates follow the same compile shape:
+
+```ts
+const renameUser = JIT.update(User)
+  .patch({ name: JIT.param("name") })
+  .compile();
+
+renameUser(user, { name: "Grace" });
+```
+
 ## Query DSL
 
 Fused single-loop pipelines over collections — no intermediate arrays:
 
 ```ts
 const admins = JIT.query(UserList)
-  .filter((q) => q.and(q.not(q.eq("role", "blocked")), q.gt("id", 100)))
+  .params({ minimumId: JIT.int() })
+  .filter((q, params) =>
+    q.and(q.not(q.eq("role", "blocked")), q.gt("id", params.minimumId)),
+  )
   .select("id", "name", "role")
   .unique("id")
   .orderBy("name", "asc")
   .compile();
 
-admins(users); // one pass, out[j++] writes, zero allocation waste
+admins(users, { minimumId: 100 }); // one pass, params read directly
+
+// build-time constants are baked into the query artifact:
+JIT.query(UserList)
+  .filter((q) => q.eq("role", JIT.const("admin")))
+  .compile();
 
 // terminals
 JIT.query(UserList)
@@ -470,6 +489,21 @@ JIT.query(UserList)
   .filter((q) => q.eq("id", 7))
   .update({ active: false })
   .compile();
+```
+
+## Transform
+
+Compiled object transforms can select fields and use built-in field operators
+without shipping the schema engine:
+
+```ts
+const toUserDTO = JIT.transform(User)
+  .select("id", "name")
+  .map("name", (field) => field.lowercase())
+  .compile();
+
+toUserDTO({ id: 1, name: "ADA", role: "admin" });
+// { id: 1, name: "ada" }
 ```
 
 ## DTO mapper
@@ -602,40 +636,66 @@ Generated `jit.config.ts`:
 import { AOT } from "jit";
 
 export default AOT.defineConfig({
-  // Omit schemas to scan from the project root. Entries can be files,
-  // directories, or globs.
-  // schemas: ["src/schemas/**/*.ts"],
+  // Files, directories, or globs containing explicit compiled AOT exports.
+  entries: ["./jit/**/*.jit.ts"],
   // Default discovery is **/*.jit.ts; change or add patterns when your
   // declarations use another shape.
   patterns: ["**/*.jit.ts"],
-  // Generated files are importable directly from your app.
-  outDir: "node_modules/@jit/generated",
-  packageName: "@jit/generated",
-  // Use false when generating into a project source folder instead of
-  // node_modules/@jit/generated.
-  emitPackageJson: true,
-  // Delete only jit's known generated files before writing fresh output.
-  clean: true,
+  output: {
+    mode: "directory",
+    directory: "generated/jit",
+    importSpecifier: "#jit",
+    packageName: "@jit/generated",
+    // Use false when generating inside an existing source directory.
+    emitPackageJson: true,
+    // Delete only jit's known generated files before writing fresh output.
+    clean: true,
+  },
+  target: { runtime: "node", engine: "v8", version: "22", module: "esm" },
+  compiler: {
+    mode: "production",
+    optimization: "aggressive",
+    sourceMaps: false,
+    declarations: true,
+  },
+  performance: {
+    shapes: true,
+    strings: true,
+    allocation: "auto",
+    strategies: "auto",
+  },
+  emit: {
+    rootBarrel: true,
+    subpathModules: true,
+    manifest: true,
+    plans: true,
+    runtimeSchemas: false,
+  },
+  diagnostics: { explainPlans: true, generatedSource: true },
 });
 ```
 
 Discovery rules are intentionally boring:
 
-- if `schemas` is omitted, `jit generate` scans from the project root;
-- `schemas` accepts files, directories, and globs like
-  `src/schemas/**/*.ts`;
+- if `entries` is omitted, `jit generate` scans from the project root;
+- `entries` accepts files, directories, and globs like `jit/**/*.jit.ts`;
+- legacy `schemas` still works as a compatibility alias for `entries`;
 - `patterns` controls directory scans; the default is `**/*.jit.ts`;
 - if no buildable functions are exported, the CLI prints a warning and writes
   nothing.
 - `jit doctor` prints resolved config, output directory, patterns, and files;
 - `jit explain` loads declaration files and lists grouped objects plus
   standalone compiled exports without writing generated files.
+- `jit list` prints buildable exports in a compact format;
+- `jit inspect <export> --stage plan|source|declaration` shows the collected
+  descriptor or the generated source/types for review;
+- `jit clean` removes the configured generated directory.
 
 There is no raw-schema fallback. AOT builds only what you explicitly export.
 
 ```ts
-// src/user.jit.ts — discovered by convention (**/*.jit.ts)
-import { JIT } from "jit";
+// jit/user.jit.ts — discovered by convention (**/*.jit.ts)
+import { JIT } from "jit/define";
 
 const UserSchema = JIT.object({
   id: JIT.number(),
@@ -662,11 +722,13 @@ export const User = JIT.compile(UserSchema, {
 
 ```ts
 import { User, User_is, User_parse } from "@jit/generated";
+import { User as UserFromSubpath } from "#jit/user";
 
 User.is(input);
 User.findAdmins(users);
 User_is(input);
 User_parse(input);
+UserFromSubpath.is(input);
 ```
 
 Run generation:
@@ -676,7 +738,31 @@ pnpm jit generate
 pnpm jit generate src/user.jit.ts --out generated --name @acme/models
 pnpm jit generate --pattern "src/schemas/**/*.ts"
 pnpm jit generate --watch
+pnpm jit list
+pnpm jit inspect User --stage plan
+pnpm jit clean
 ```
+
+With the default config, generation writes the root dual package plus review
+artifacts:
+
+```text
+generated/jit/
+├── index.mjs
+├── index.cjs
+├── index.d.ts
+├── user.mjs
+├── user.cjs
+├── user.d.ts
+├── manifest.json
+└── plans/
+    └── user.json
+```
+
+The subpath modules are thin re-export entrypoints over the generated barrel,
+so they contain no `jit` runtime import and keep the developer-facing shape
+aligned with `#jit/user`. The later physical split can make each subpath an
+independent bundle without changing the API.
 
 Output: `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
 (exports map, `sideEffects: false`). The module is **fully self-contained**:
@@ -847,7 +933,10 @@ follows.
 pnpm jit init        # create jit.config.ts in the current project root
 pnpm jit doctor      # inspect resolved config/discovery
 pnpm jit explain     # list AOT-buildable exports without writing files
+pnpm jit list        # compact list of AOT exports
+pnpm jit inspect User --stage plan
 pnpm jit generate    # generate the configured AOT package
+pnpm jit clean       # remove configured generated output
 pnpm test            # vitest + typecheck + golden sources + snapshots
 pnpm bench:validate  # Zod 4 / typia / JIT runtime / JIT AOT validation bench
 pnpm bench:flows     # high-volume validate + query + JSON pipeline bench

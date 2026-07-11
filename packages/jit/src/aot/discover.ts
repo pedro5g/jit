@@ -8,10 +8,37 @@ import { getArtifact } from "../runtime/artifact-registry.js";
 /** `jit.config.*` shape — declaration discovery plus generation targets. */
 export interface JitConfig {
   /**
+   * Preferred AOT declaration entries. Accepts files, directories, or globs.
+   * Use this for new projects; `schemas` remains as a compatibility alias.
+   */
+  readonly entries?: readonly string[];
+  /**
    * Files, directories, or glob patterns to load AOT declarations from. When
    * omitted, `jit generate` scans from the project root using `patterns`.
    */
   readonly schemas?: readonly string[];
+  /** Preferred output block used by `jit init` and future generators. */
+  readonly output?: {
+    readonly mode?: "directory" | "package" | "node-modules";
+    readonly directory?: string;
+    readonly importSpecifier?: string;
+    readonly packageName?: string;
+    readonly clean?: boolean;
+    readonly emitPackageJson?: boolean;
+  };
+  /** Optional generated file layout knobs. */
+  readonly emit?: {
+    readonly rootBarrel?: boolean;
+    readonly subpathModules?: boolean;
+    readonly manifest?: boolean;
+    readonly plans?: boolean;
+    readonly runtimeSchemas?: boolean;
+  };
+  /** Compiler/diagnostic options accepted for forward-compatible configs. */
+  readonly target?: Readonly<Record<string, unknown>>;
+  readonly compiler?: Readonly<Record<string, unknown>>;
+  readonly performance?: Readonly<Record<string, unknown>>;
+  readonly diagnostics?: Readonly<Record<string, unknown>>;
   /** Output directory; defaults to `node_modules/@jit/generated`. */
   readonly outDir?: string;
   /** Generated package name; defaults to `@jit/generated`. */

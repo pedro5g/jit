@@ -108,6 +108,13 @@ introduce a second validation implementation. `JIT.validator(schema)` remains
 the object facade, while builder `schema["~standard"]` closes over the
 compiled `safeParse` function for Standard Schema interop.
 
+The package exposes transitional host entrypoints while the monorepo is still
+single-package: `jit/runtime` exports the runtime `JIT` namespace, and
+`jit/define` exports the same schema DSL with AOT stubs for compiled
+artifacts. `core/host.ts` owns the shared `CompilerHost`,
+`CompilationRequest`, `CompiledArtifact`, descriptor symbols, and AOT artifact
+types that future package splits will reuse.
+
 ## Wire formats (breaking-change surface)
 
 - **Binary codec v2** (`compiler/codec/emit-codec.ts`): byte 0 is the
@@ -125,6 +132,9 @@ compiled `safeParse` function for Standard Schema interop.
 
 - `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
   (exports map, `sideEffects: false`);
+- optional thin subpath entrypoints (`user.mjs`/`user.d.ts`) for
+  `#jit/user`-style imports, plus deterministic `manifest.json` and
+  `plans/*.json` review files when enabled;
 - zero imports — the validation error class and runtime helpers
   (keyed-index cache, hash primitives) are inlined;
 - export shape is explicit and bundle-oriented: standalone compiled functions
@@ -144,16 +154,20 @@ compiled `safeParse` function for Standard Schema interop.
   dev-defined extras from the artifact registry; anything whose bindings
   hold callbacks is skipped with a reported reason, never miscompiled.
 
-CLI/config: `jit init` writes a typed `jit.config.*` in the current project
-root. `jit doctor` reports resolved config/discovery without generating, and
-`jit explain` loads declaration files and lists buildable grouped objects and
-standalone functions without writing output. `schemas` is optional; when
-omitted, `jit generate` scans from the project root. `schemas` accepts files,
-directories, and globs, while `patterns` controls directory scans (default
-`**/*.jit.ts`). The scanner skips `node_modules`, dot-dirs, and build output.
-If no buildable exported functions/objects are found, the CLI warns and
-writes nothing. TypeScript schema files load natively on runtimes that strip
-types, falling back to `jiti` when installed.
+CLI/config: `jit init` writes a typed `jit.config.*` plus a starter
+`jit/user.jit.ts` using `jit/define`. `jit doctor` reports resolved
+config/discovery without generating; `jit explain` and `jit list` load
+declaration files and list buildable grouped objects plus standalone
+functions; `jit inspect <export> --stage plan|source|declaration` prints the
+collected descriptor or generated review output; `jit clean` removes the
+configured generated directory. `entries` is optional; when omitted,
+`jit generate` scans from the project root. `entries` accepts files,
+directories, and globs, with legacy `schemas` preserved as an alias.
+`patterns` controls directory scans (default `**/*.jit.ts`). The scanner skips
+`node_modules`, dot-dirs, and build output. If no buildable exported
+functions/objects are found, the CLI warns and writes nothing. TypeScript
+schema files load natively on runtimes that strip types, falling back to
+`jiti` when installed.
 
 ## Optimizer boundaries
 

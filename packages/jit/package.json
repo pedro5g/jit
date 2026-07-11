@@ -32,6 +32,8 @@
       "./package.json": "./package.json",
       ".": "./src/index.ts",
       "./cli": "./src/cli.ts",
+      "./runtime": "./src/runtime.ts",
+      "./define": "./src/define.ts",
       "./mcp": "./src/mcp.ts"
     },
     "conditions": {
@@ -65,6 +67,18 @@
       "types": "./cli.d.cts",
       "import": "./cli.js",
       "require": "./cli.cjs"
+    },
+    "./runtime": {
+      "@jit/source": "./src/runtime.ts",
+      "types": "./runtime.d.cts",
+      "import": "./runtime.js",
+      "require": "./runtime.cjs"
+    },
+    "./define": {
+      "@jit/source": "./src/define.ts",
+      "types": "./define.d.cts",
+      "import": "./define.js",
+      "require": "./define.cjs"
     },
     "./mcp": {
       "@jit/source": "./src/mcp.ts",

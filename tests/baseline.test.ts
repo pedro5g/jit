@@ -4,7 +4,7 @@ import * as jit from "../packages/jit/src/index.js";
 describe("public surface smoke test", () => {
   it("exposes every public namespace", () => {
     expect(Object.keys(jit).sort()).toEqual(
-      ["AOT", "AST", "Builder", "Compiler", "Errors", "JIT", "PipelineAST", "Runtime", "Transform"].sort()
+      ["AOT", "AST", "Builder", "Compiler", "Errors", "Host", "JIT", "PipelineAST", "Runtime", "Transform"].sort()
     );
   });
 

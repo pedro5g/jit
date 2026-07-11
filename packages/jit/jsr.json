@@ -5,6 +5,8 @@
     "./package.json": "./package.json",
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts",
+    "./runtime": "./src/runtime.ts",
+    "./define": "./src/define.ts",
     "./mcp": "./src/mcp.ts"
   },
   "publish": {
