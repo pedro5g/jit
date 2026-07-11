@@ -33,6 +33,7 @@ export * as AST from "./core/ats/index.js";
 export type { Infer } from "./core/ats/infer.js";
 /** Fluent builder chain internals (`createBuilder`, builder types). */
 export * as Builder from "./core/builder/index.js";
+export type { Strict } from "./core/builder/types.js";
 /** Typed error classes thrown by compiled functions (`JITError`). */
 export * as Errors from "./errors/index.js";
 /** The main public API: schema factories plus every `compile*` entry point. */

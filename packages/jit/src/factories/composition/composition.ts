@@ -3,8 +3,10 @@ import {
   createSchema,
   type DiscriminatedUnionSchema,
   type IntersectionSchema,
+  type NotSchema,
   TypeName,
   type UnionSchema,
+  type XorSchema,
 } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
@@ -22,6 +24,24 @@ export function union<const TOptions extends readonly SchemaInput[]>(
   return /* @__PURE__ */ createBuilder(
     createSchema(TypeName.union, {
       options: options.map(unwrapSchema) as unknown as UnwrapOptions<TOptions>,
+    })
+  );
+}
+
+export function xor<const TOptions extends readonly SchemaInput[]>(
+  ...options: TOptions
+): Builder<XorSchema<UnwrapOptions<TOptions>>> {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.xor, {
+      options: options.map(unwrapSchema) as unknown as UnwrapOptions<TOptions>,
+    })
+  );
+}
+
+export function not<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSchema>): Builder<NotSchema<TSchema>> {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.not, {
+      innerType: unwrapSchema(schema),
     })
   );
 }

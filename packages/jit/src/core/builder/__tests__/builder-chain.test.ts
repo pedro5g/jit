@@ -1,4 +1,4 @@
-import { AST, JIT } from "../../../index.js";
+import { AST, type Builder, JIT } from "../../../index.js";
 
 describe("Builder chain", () => {
   describe("minimal JIT factories", () => {
@@ -91,6 +91,37 @@ describe("Builder chain", () => {
       expect(assertInvalidNumberBuilder).toBeTypeOf("function");
     });
 
+    it("keeps pick name-only and partial/required selectable by field", () => {
+      const User = JIT.object({
+        id: JIT.number(),
+        name: JIT.string(),
+        email: JIT.string(),
+      });
+      const PartialName = User.partial("name");
+      const RequiredName = PartialName.required("name");
+      const Picked = User.pick("id", "name");
+      const assertInvalidShapeMask = () => {
+        // @ts-expect-error pick accepts field names, not `{ field: true }` masks
+        User.pick({ id: true });
+      };
+
+      expect(PartialName.schema.def.props.id.type).toBe(AST.TypeName.number);
+      expect(PartialName.schema.def.props.name.type).toBe(AST.TypeName.optional);
+      expect(RequiredName.schema.def.props.name.type).toBe(AST.TypeName.string);
+      expect(Object.keys(Picked.schema.def.props)).toEqual(["id", "name"]);
+      expectTypeOf<AST.Infer<typeof PartialName>>().toEqualTypeOf<{
+        id: number;
+        name: string | undefined;
+        email: string;
+      }>();
+      expectTypeOf<AST.Infer<typeof RequiredName>>().toEqualTypeOf<{
+        id: number;
+        name: string;
+        email: string;
+      }>();
+      expect(assertInvalidShapeMask).toBeTypeOf("function");
+    });
+
     it("wraps transform, refine, and coerce operators without mutating inputs", () => {
       const User = JIT.object({
         id: JIT.number(),
@@ -115,6 +146,49 @@ describe("Builder chain", () => {
       }>();
       expectTypeOf<AST.Infer<typeof RefinedName>>().toEqualTypeOf<string>();
       expectTypeOf<AST.Infer<typeof CoercedNumber>>().toEqualTypeOf<number>();
+    });
+
+    it("rejects statically invalid literal defaults", () => {
+      const ValidStringDefault = JIT.string().min(5).max(10).default("hello");
+      const ValidObjectDefault = JIT.object({
+        name: JIT.string().min(5),
+        role: JIT.string().oneOf(["admin", "user"] as const),
+      }).default({ name: "Pedro", role: "admin" });
+
+      const assertInvalidDefaults = () => {
+        // @ts-expect-error literal is shorter than the declared min length
+        JIT.string().min(5).default("oi");
+        JIT.string()
+          .oneOf(["admin", "user"] as const)
+          // @ts-expect-error literal is not one of the declared string options
+          .default("root");
+        // @ts-expect-error numeric literal is outside the declared max
+        JIT.number().max(10).default(11);
+        // @ts-expect-error object literal field violates nested constraints
+        JIT.object({ name: JIT.string().min(5) }).default({ name: "Ana" });
+      };
+
+      expect(ValidStringDefault.schema.type).toBe(AST.TypeName.default);
+      expect(ValidObjectDefault.schema.type).toBe(AST.TypeName.default);
+      expectTypeOf<Builder.Strict<typeof ValidObjectDefault, { name: "Pedro"; role: "admin" }>>().toEqualTypeOf<{
+        name: "Pedro";
+        role: "admin";
+      }>();
+      expectTypeOf<Builder.Strict<typeof ValidObjectDefault, { name: "Ana"; role: "admin" }>>().toEqualTypeOf<never>();
+      expect(assertInvalidDefaults).toBeTypeOf("function");
+    });
+
+    it("rejects invalid literal format patterns", () => {
+      const Formatted = JIT.string().format("(##) #####-####");
+      const assertInvalidFormats = () => {
+        // @ts-expect-error format patterns must contain at least one # placeholder
+        JIT.string().format("phone");
+        // @ts-expect-error format patterns only allow mask characters
+        JIT.string().format("##:##");
+      };
+
+      expect(Formatted.schema.type).toBe(AST.TypeName.string);
+      expect(assertInvalidFormats).toBeTypeOf("function");
     });
   });
 });

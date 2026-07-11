@@ -10,12 +10,14 @@ import type {
   PipeSchema,
   PromiseSchema,
   ReadonlySchema,
+  RefineOptions,
   RefineSchema,
   TransformSchema,
   TransformSpec,
 } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
+import type { ValidDefault } from "../../core/builder/types.js";
 import * as Transform from "../../transforms/index.js";
 import { nativeCoercions } from "../coerce.js";
 
@@ -88,9 +90,12 @@ export function promise<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSche
  * @param defaultValue - The eager value or lazy factory used for `undefined` input.
  * @returns A builder wrapping a default schema.
  */
-function defaultTo<TSchema extends AnyTypeSchema>(
+function defaultTo<
+  TSchema extends AnyTypeSchema,
+  const TDefault extends InferSchema<TSchema> | (() => InferSchema<TSchema>),
+>(
   schema: SchemaInput<TSchema>,
-  defaultValue: InferSchema<TSchema> | (() => InferSchema<TSchema>)
+  defaultValue: TDefault & ValidDefault<TSchema, TDefault>
 ): Builder<DefaultSchema<TSchema>> {
   return /* @__PURE__ */ createBuilder(Transform.default(unwrapSchema(schema), defaultValue));
 }
@@ -155,9 +160,10 @@ export function transform<TSchema extends AnyTypeSchema, const TSpec extends Tra
  */
 export function refine<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  predicate: (value: InferSchema<TSchema>) => boolean
+  predicate: (value: InferSchema<TSchema>) => boolean,
+  options?: string | RefineOptions<InferSchema<TSchema>>
 ): Builder<RefineSchema<TSchema>> {
-  return /* @__PURE__ */ createBuilder(Transform.refine(unwrapSchema(schema), predicate));
+  return /* @__PURE__ */ createBuilder(Transform.refine(unwrapSchema(schema), predicate, options));
 }
 
 /**

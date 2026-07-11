@@ -68,6 +68,29 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitValidatorSource(Payment.schema)).toMatchSnapshot();
   });
 
+  it("validator: strict checks, masks, noEmpty, and conditional refine", () => {
+    const Credentials = JIT.object({
+      password: JIT.string().min(8),
+      confirmPassword: JIT.string().min(8),
+    });
+    const Signup = JIT.object({
+      kind: JIT.string().oneOf(["admin", "user"] as const),
+      age: JIT.number().moreThan(17).lessThan(130).int32(),
+      cpf: JIT.string().cpf(),
+      phone: JIT.string().phoneBR(),
+      invite: JIT.string().noEmpty().optional(),
+      credentials: Credentials.refine((value) => value.password === value.confirmPassword, {
+        message: "passwords must match",
+        path: ["confirmPassword"],
+        when(payload) {
+          return Credentials.safeParse(payload.value).success;
+        },
+      }),
+    });
+
+    expect(Compiler.emitValidatorSource(Signup.schema)).toMatchSnapshot();
+  });
+
   it("validator: strict known keys and catchall transforms", () => {
     const Payload = JIT.object({
       id: JIT.number().int(),
@@ -97,6 +120,23 @@ describe("generated source snapshots", () => {
     });
 
     expect(Compiler.emitValidatorSource(Event.schema)).toMatchSnapshot();
+  });
+
+  it("validator: conditional fields, logical schemas, and temporal checks", () => {
+    const Checkout = JIT.object({
+      temDesconto: JIT.boolean(),
+      cupom: JIT.string().where("temDesconto", {
+        is: true,
+        then: (schema) => schema.required().min(3),
+        otherwise: (schema) => schema.optional(),
+      }),
+      ref: JIT.string().xor(JIT.string().min(8)),
+      status: JIT.literal("blocked").not(),
+      at: JIT.date().between("2026-07-01T00:00:00.000Z", "2026-07-31T23:59:59.999Z").truncateTo("minute"),
+      day: JIT.temporal.plainDate().daysOfWeek([1, 2, 3, 4, 5]).monthsOfYear([7]),
+    });
+
+    expect(Compiler.emitValidatorSource(Checkout.schema)).toMatchSnapshot();
   });
 
   it("validator: bidirectional value codec", () => {

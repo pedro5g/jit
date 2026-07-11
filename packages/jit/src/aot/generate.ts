@@ -129,10 +129,14 @@ export function generate(options: GenerateOptions): GenerateResult {
       const specifier = typeImportSpecifier(options.outDir, sourceFile);
 
       dts.push(`export type ${name} = import("jit").Infer<typeof import(${JSON.stringify(specifier)}).${name}>;`);
+      dts.push(
+        `export type ${name}Strict<TValue> = import("jit").Strict<typeof import(${JSON.stringify(specifier)}).${name}, TValue>;`
+      );
     } else {
       // No source file to anchor to (programmatic generate): fall back to a
       // structural type emitted from the schema tree.
       dts.push(`export type ${name} = ${emitTypeScriptType(schema)};`);
+      dts.push(`export type ${name}Strict<TValue> = TValue;`);
     }
 
     // is / parse / safeParse

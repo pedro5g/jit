@@ -13,9 +13,10 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
 
   switch (current.type) {
     case TypeName.string:
-      return "string";
+      return emitOneOfType(current, "string");
     case TypeName.number:
     case TypeName.int:
+      return emitOneOfType(current, "number");
     case TypeName.nan:
       return "number";
     case TypeName.boolean:
@@ -75,11 +76,16 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
       return `[${items.map(emitTypeScriptType).join(", ")}]`;
     }
     case TypeName.union:
+    case TypeName.xor:
     case TypeName.discriminatedUnion: {
       const options = current.def.options as readonly ATS.AnyTypeSchema[];
 
       return options.map(emitTypeScriptType).join(" | ");
     }
+    case TypeName.not:
+      return "unknown";
+    case TypeName.when:
+      return `${emitTypeScriptType(current.def.thenType as ATS.AnyTypeSchema)} | ${emitTypeScriptType(current.def.otherwiseType as ATS.AnyTypeSchema)}`;
     case TypeName.intersection: {
       const options = current.def.options as readonly ATS.AnyTypeSchema[];
 
@@ -147,6 +153,16 @@ function isOptional(schema: AnySchema): boolean {
   }
 
   return false;
+}
+
+function emitOneOfType(schema: AnySchema, fallback: "string" | "number"): string {
+  const checks =
+    (schema.def.checks as readonly { readonly kind: string; readonly value?: unknown }[] | undefined) ?? [];
+  const oneOf = checks.find((check) => check.kind === "oneOf");
+
+  if (!Array.isArray(oneOf?.value) || oneOf.value.length === 0) return fallback;
+
+  return oneOf.value.map((value) => (typeof value === "string" ? JSON.stringify(value) : String(value))).join(" | ");
 }
 
 function wrapForSuffix(type: string): string {

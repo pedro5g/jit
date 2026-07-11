@@ -4,13 +4,14 @@ import * as Transform from "../../transforms/index.js";
 import {
   type AnyTypeSchema,
   type CodecSchema,
+  createSchema,
   type FunctionSchema,
   type ObjectSchema,
   type SchemaShape,
   TypeName,
 } from "../ats/index.js";
 import { attachHint, type EntityHint, type HashStrategy, type OrderDirection } from "../hints/index.js";
-import type { AnyBuilder, Builder, ObjectBuilder } from "./types.js";
+import type { AnyBuilder, Builder, ObjectBuilder, StandardSchemaIssue, StandardSchemaProps } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
 
 type RuntimeBuilder = {
@@ -18,8 +19,32 @@ type RuntimeBuilder = {
 };
 
 const baseBuilderPrototype = {
+  is(this: RuntimeBuilder, value: unknown): boolean {
+    return compileValidator(this.schema).is(value);
+  },
+
+  safeParse(this: RuntimeBuilder, value: unknown): unknown {
+    return compileValidator(this.schema).safeParse(value);
+  },
+
+  parse(this: RuntimeBuilder, value: unknown): unknown {
+    return compileValidator(this.schema).parse(value);
+  },
+
+  safeParseAsync(this: RuntimeBuilder, value: unknown): Promise<unknown> {
+    return compileValidator(this.schema).safeParseAsync(value);
+  },
+
+  parseAsync(this: RuntimeBuilder, value: unknown): Promise<unknown> {
+    return compileValidator(this.schema).parseAsync(value);
+  },
+
   optional(this: RuntimeBuilder): AnyBuilder {
     return createBuilder(Transform.optional(this.schema));
+  },
+
+  required(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(requiredFieldSchema(this.schema, message));
   },
 
   nullable(this: RuntimeBuilder): AnyBuilder {
@@ -50,8 +75,74 @@ const baseBuilderPrototype = {
     return createBuilder(Transform.pipe(this.schema, transform));
   },
 
-  refine(this: RuntimeBuilder, predicate: (value: unknown) => boolean, message?: string): AnyBuilder {
-    return createBuilder(Transform.refine(this.schema, predicate, message));
+  or(this: RuntimeBuilder, right: SchemaInput): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.union, {
+        options: [this.schema, unwrapSchema(right)],
+      })
+    );
+  },
+
+  and(this: RuntimeBuilder, right: SchemaInput): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.intersection, {
+        options: [this.schema, unwrapSchema(right)],
+      })
+    );
+  },
+
+  xor(this: RuntimeBuilder, right: SchemaInput): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.xor, {
+        options: [this.schema, unwrapSchema(right)],
+      })
+    );
+  },
+
+  not(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.not, {
+        innerType: this.schema,
+      })
+    );
+  },
+
+  when(
+    this: RuntimeBuilder,
+    key: string,
+    options: {
+      readonly is: unknown;
+      readonly then: (schema: AnyBuilder) => SchemaInput;
+      readonly otherwise?: (schema: AnyBuilder) => SchemaInput;
+    }
+  ): AnyBuilder {
+    return createConditionalBuilder(this.schema, key, options);
+  },
+
+  where(
+    this: RuntimeBuilder,
+    key: string,
+    options: {
+      readonly is: unknown;
+      readonly then: (schema: AnyBuilder) => SchemaInput;
+      readonly otherwise?: (schema: AnyBuilder) => SchemaInput;
+    }
+  ): AnyBuilder {
+    return createConditionalBuilder(this.schema, key, options);
+  },
+
+  refine(
+    this: RuntimeBuilder,
+    predicate: (value: unknown) => boolean,
+    options?:
+      | string
+      | {
+          readonly message?: string;
+          readonly path?: readonly (string | number)[];
+          readonly when?: (payload: { readonly value: unknown }) => boolean;
+        }
+  ): AnyBuilder {
+    return createBuilder(Transform.refine(this.schema, predicate, options));
   },
 
   coerce(this: RuntimeBuilder, coercer: (value: unknown) => unknown): AnyBuilder {
@@ -189,8 +280,28 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "max", value, message }));
   },
 
+  between(this: RuntimeBuilder, min: unknown, max: unknown, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "between", value: { min, max }, message }));
+  },
+
+  daysOfWeek(this: RuntimeBuilder, value: readonly number[], message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "daysOfWeek", value, message }));
+  },
+
+  monthsOfYear(this: RuntimeBuilder, value: readonly number[], message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "monthsOfYear", value, message }));
+  },
+
+  truncateTo(this: RuntimeBuilder, value: "minute" | "second" | "millisecond", message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "truncateTo", value, message }));
+  },
+
   length(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "length", value, message }));
+  },
+
+  oneOf(this: RuntimeBuilder, value: readonly (string | number)[], message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "oneOf", value, message }));
   },
 
   regex(this: RuntimeBuilder, value: RegExp, message?: string): AnyBuilder {
@@ -217,6 +328,10 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "url", message }));
   },
 
+  noEmpty(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "noEmpty" }));
+  },
+
   trim(this: RuntimeBuilder): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "trim" }));
   },
@@ -237,6 +352,14 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "negative", message }));
   },
 
+  moreThan(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "moreThan", value, message }));
+  },
+
+  lessThan(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "lessThan", value, message }));
+  },
+
   multipleOf(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "multipleOf", value, message }));
   },
@@ -251,6 +374,18 @@ const baseBuilderPrototype = {
 
   int(this: RuntimeBuilder, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "integer", message }));
+  },
+
+  int32(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "int32", message }));
+  },
+
+  float32(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "float32", message }));
+  },
+
+  float64(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "float64", message }));
   },
 
   nonEmpty(this: RuntimeBuilder, message?: string): AnyBuilder {
@@ -366,6 +501,45 @@ const baseBuilderPrototype = {
     );
   },
 
+  format(
+    this: RuntimeBuilder,
+    pattern: string,
+    options?: { readonly stripNonDigits?: boolean },
+    message?: string
+  ): AnyBuilder {
+    return createBuilder(
+      appendCheck(this.schema, {
+        kind: "format",
+        value: { pattern, stripNonDigits: options?.stripNonDigits ?? true },
+        message,
+      })
+    );
+  },
+
+  cpf(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(
+      appendCheck(this.schema, {
+        kind: "format",
+        value: { pattern: "###.###.###-##", stripNonDigits: true },
+        message,
+      })
+    );
+  },
+
+  cnpj(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(
+      appendCheck(this.schema, {
+        kind: "format",
+        value: { pattern: "##.###.###/####-##", stripNonDigits: true },
+        message,
+      })
+    );
+  },
+
+  phoneBR(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "phoneBR", message }));
+  },
+
   pii(this: RuntimeBuilder, strategy: "redact" | "mask" | "hash" = "redact"): AnyBuilder {
     return createBuilder({
       ...this.schema,
@@ -373,6 +547,14 @@ const baseBuilderPrototype = {
     } as AnyTypeSchema);
   },
 };
+
+Object.defineProperty(baseBuilderPrototype, "~standard", {
+  enumerable: false,
+  configurable: false,
+  get(this: RuntimeBuilder): StandardSchemaProps<unknown> {
+    return createStandardSchema(this.schema);
+  },
+});
 
 function appendCheck(
   schema: AnyTypeSchema,
@@ -392,27 +574,76 @@ function appendCheck(
   } as AnyTypeSchema;
 }
 
+function requiredFieldSchema(schema: AnyTypeSchema, message?: string): AnyTypeSchema {
+  let required = schema;
+
+  if (schema.type === TypeName.optional || schema.type === TypeName.default) {
+    required = (schema.def as { readonly innerType: AnyTypeSchema }).innerType;
+  } else if (schema.type === TypeName.nullish) {
+    required = Transform.nullable((schema.def as { readonly innerType: AnyTypeSchema }).innerType);
+  }
+
+  if (message === undefined) return required;
+
+  return {
+    ...required,
+    def: { ...(required.def as object), requiredMessage: message },
+  } as AnyTypeSchema;
+}
+
+function createConditionalBuilder(
+  schema: AnyTypeSchema,
+  key: string,
+  options: {
+    readonly is: unknown;
+    readonly then: (schema: AnyBuilder) => SchemaInput;
+    readonly otherwise?: (schema: AnyBuilder) => SchemaInput;
+  }
+): AnyBuilder {
+  const requiredBuilder = createBuilder(requiredFieldSchema(schema));
+  const baseBuilder = createBuilder(schema);
+
+  return createBuilder(
+    createSchema(TypeName.when, {
+      key,
+      is: options.is,
+      thenType: unwrapSchema(options.then(requiredBuilder)),
+      otherwiseType: unwrapSchema(options.otherwise ? options.otherwise(baseBuilder) : baseBuilder),
+    })
+  );
+}
+
 const objectBuilderPrototype = {
   ...baseBuilderPrototype,
 
-  partial(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.partial(this.schema as ObjectSchema<SchemaShape>));
+  partial(this: RuntimeBuilder, first?: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    const keys = first === undefined ? undefined : normalizeKeys(first, rest);
+
+    return createBuilder(
+      Transform.partial(this.schema as ObjectSchema<SchemaShape>, keys as readonly never[])
+    ) as AnyBuilder;
   },
 
-  required(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.required(this.schema as ObjectSchema<SchemaShape>));
+  required(this: RuntimeBuilder, first?: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    const keys = first === undefined ? undefined : normalizeKeys(first, rest);
+
+    return createBuilder(
+      Transform.required(this.schema as ObjectSchema<SchemaShape>, keys as readonly never[])
+    ) as AnyBuilder;
   },
 
   strict(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.strict(this.schema as ObjectSchema<SchemaShape>));
+    return createBuilder(Transform.strict(this.schema as ObjectSchema<SchemaShape>)) as AnyBuilder;
   },
 
   loose(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.loose(this.schema as ObjectSchema<SchemaShape>));
+    return createBuilder(Transform.loose(this.schema as ObjectSchema<SchemaShape>)) as AnyBuilder;
   },
 
   catchall(this: RuntimeBuilder, schema: SchemaInput): AnyBuilder {
-    return createBuilder(Transform.catchall(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(schema)));
+    return createBuilder(
+      Transform.catchall(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(schema))
+    ) as AnyBuilder;
   },
 
   keyof(this: RuntimeBuilder): AnyBuilder {
@@ -427,11 +658,15 @@ const objectBuilderPrototype = {
   },
 
   pick(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
-    return createBuilder(Transform.pick(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
+    return createBuilder(
+      Transform.pick(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest))
+    ) as AnyBuilder;
   },
 
   omit(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
-    return createBuilder(Transform.omit(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
+    return createBuilder(
+      Transform.omit(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest))
+    ) as AnyBuilder;
   },
 
   extend(this: RuntimeBuilder, extension: Record<string, SchemaInput>): AnyBuilder {
@@ -441,11 +676,11 @@ const objectBuilderPrototype = {
       props[key] = unwrapSchema(extension[key]);
     }
 
-    return createBuilder(Transform.extend(this.schema as ObjectSchema<SchemaShape>, props));
+    return createBuilder(Transform.extend(this.schema as ObjectSchema<SchemaShape>, props)) as AnyBuilder;
   },
 
   merge(this: RuntimeBuilder, right: ObjectBuilder<SchemaShape> | ObjectSchema<SchemaShape>): AnyBuilder {
-    return createBuilder(Transform.merge(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(right)));
+    return createBuilder(Transform.merge(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(right))) as AnyBuilder;
   },
 };
 
@@ -494,6 +729,10 @@ const codecBuilderPrototype = {
   },
 };
 
+attachStandardSchemaGetter(objectBuilderPrototype);
+attachStandardSchemaGetter(functionBuilderPrototype);
+attachStandardSchemaGetter(codecBuilderPrototype);
+
 type RuntimeFunctionSchema = FunctionSchema<readonly AnyTypeSchema[], AnyTypeSchema | undefined>;
 type RuntimeCodecSchema = CodecSchema<AnyTypeSchema, AnyTypeSchema>;
 
@@ -506,6 +745,53 @@ function compileFunctionValidators(schema: RuntimeFunctionSchema) {
 
 function normalizeKeys(first: readonly string[] | string, rest: readonly string[]): readonly string[] {
   return typeof first === "string" ? [first, ...rest] : first;
+}
+
+function createStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknown> {
+  return {
+    version: 1,
+    vendor: "jit",
+    validate(value: unknown) {
+      const result = compileValidator(schema).safeParse(value);
+
+      if (result.success) return { value: result.data };
+
+      return { issues: result.issues.map(toStandardIssue) };
+    },
+  };
+}
+
+function toStandardIssue(issue: { readonly message: string; readonly path: string }): StandardSchemaIssue {
+  const path = parseIssuePath(issue.path);
+
+  return path.length === 0 ? { message: issue.message } : { message: issue.message, path };
+}
+
+function parseIssuePath(path: string): readonly (string | number)[] {
+  if (path === "") return [];
+
+  const segments: (string | number)[] = [];
+  const regex = /([^.[\]]+)|\[(\d+)\]/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(path)) !== null) {
+    if (match[1] !== undefined) {
+      segments.push(match[1]);
+    } else if (match[2] !== undefined) {
+      segments.push(Number(match[2]));
+    }
+  }
+  return segments;
+}
+
+function attachStandardSchemaGetter(prototype: object): void {
+  Object.defineProperty(prototype, "~standard", {
+    enumerable: false,
+    configurable: false,
+    get(this: RuntimeBuilder): StandardSchemaProps<unknown> {
+      return createStandardSchema(this.schema);
+    },
+  });
 }
 
 export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): Builder<TSchema> {

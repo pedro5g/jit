@@ -131,6 +131,11 @@ describe("JIT AST builders", () => {
       expect(union_schema.def.options).toHaveLength(2);
       expectTypeOf(union_schema._type).toEqualTypeOf<string | number>();
 
+      const xor_schema = JIT.xor(JIT.string(), JIT.number()).schema;
+      expect(xor_schema.type).toBe(AST.TypeName.xor);
+      expect(xor_schema.def.options).toHaveLength(2);
+      expectTypeOf(xor_schema._type).toEqualTypeOf<string | number>();
+
       const intersection_schema = JIT.intersection(
         JIT.object({ a: JIT.string() }),
         JIT.object({ b: JIT.number() })
@@ -144,6 +149,11 @@ describe("JIT AST builders", () => {
           b: number;
         }
       >();
+
+      const not_schema = JIT.not(JIT.literal("blocked")).schema;
+      expect(not_schema.type).toBe(AST.TypeName.not);
+      expect(not_schema.def.innerType.type).toBe(AST.TypeName.literal);
+      expectTypeOf(not_schema._type).toEqualTypeOf<unknown>();
     });
 
     it("should construct discriminated unions", () => {

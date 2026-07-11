@@ -164,11 +164,11 @@ function functionSchema<
 
 export { functionSchema as function, templateLiteral as templateLiterals };
 
-function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<TemporalSchema<TKind>> {
+function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<TemporalSchema<TKind, []>> {
   return /* @__PURE__ */ createBuilder(
     createSchema(TypeName.temporal, {
       kind,
-    })
+    }) as TemporalSchema<TKind, []>
   );
 }
 

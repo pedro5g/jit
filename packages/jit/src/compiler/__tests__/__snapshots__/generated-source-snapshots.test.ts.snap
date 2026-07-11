@@ -329,18 +329,21 @@ function safeParse(value) {
     let o4 = v3;
     if (!(globalThis.Temporal !== undefined && v3 instanceof globalThis.Temporal.Instant)) {
       issues[issues.length] = { path: "at", code: "invalid_temporal", expected: "Temporal.Instant", message: "expected Temporal.Instant" };
+    } else {
     }
     o4 = v3;
     let v5 = v1.date;
     let o6 = v5;
     if (!(globalThis.Temporal !== undefined && v5 instanceof globalThis.Temporal.PlainDate)) {
       issues[issues.length] = { path: "date", code: "invalid_temporal", expected: "Temporal.PlainDate", message: "expected Temporal.PlainDate" };
+    } else {
     }
     o6 = v5;
     let v7 = v1.duration;
     let o8 = v7;
     if (!(globalThis.Temporal !== undefined && v7 instanceof globalThis.Temporal.Duration)) {
       issues[issues.length] = { path: "duration", code: "invalid_temporal", expected: "Temporal.Duration", message: "expected Temporal.Duration" };
+    } else {
     }
     o8 = v7;
   }
@@ -389,9 +392,200 @@ function safeParse(value) {
   let o7 = v6;
   if (!(v6 instanceof Date) || v6.getTime() !== v6.getTime()) {
     issues[issues.length] = { path: "", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+  } else {
   }
   o7 = v6;
   o2 = o7;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;
+
+exports[`generated source snapshots > validator: conditional fields, logical schemas, and temporal checks 1`] = `
+"function iu1(value) {
+  let v11 = value;
+  if (typeof v11 !== "string") {
+    return false;
+  }
+  return true;
+}
+function iu2(value) {
+  let v13 = value;
+  if (typeof v13 !== "string") {
+    return false;
+  }
+  if (v13.length < 8) {
+    return false;
+  }
+  return true;
+}
+function iu3(value) {
+  let v17 = value;
+  if (v17 !== "blocked") {
+    return false;
+  }
+  return true;
+}
+function pu1(value) {
+  let v12 = value;
+  if (typeof v12 !== "string") {
+    return false;
+  }
+  return true;
+}
+function pu2(value) {
+  let v14 = value;
+  if (typeof v14 !== "string") {
+    return false;
+  }
+  if (v14.length < 8) {
+    return false;
+  }
+  return true;
+}
+function pu3(value) {
+  let v18 = value;
+  if (v18 !== "blocked") {
+    return false;
+  }
+  return true;
+}
+function is(value) {
+  let v1 = value;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    return false;
+  }
+  let v3 = v1.temDesconto;
+  if (typeof v3 !== "boolean") {
+    return false;
+  }
+  if (v1.temDesconto === true) {
+    let v5 = v1.cupom;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    if (v5.length < 3) {
+      return false;
+    }
+  } else {
+    let v7 = v1.cupom;
+    if (v7 !== undefined) {
+      if (typeof v7 !== "string") {
+        return false;
+      }
+    }
+  }
+  let v9 = v1.ref;
+  if ((iu1(v9) ? 1 : 0) + (iu2(v9) ? 1 : 0) !== 1) {
+    return false;
+  }
+  let v15 = v1.status;
+  if (iu3(v15)) {
+    return false;
+  }
+  let v19 = v1.at;
+  if (!(v19 instanceof Date) || v19.getTime() !== v19.getTime()) {
+    return false;
+  }
+  if (v19.getTime() < 1782864000000 || v19.getTime() > 1785542399999) {
+    return false;
+  }
+  if (v19.getSeconds() !== 0 || v19.getMilliseconds() !== 0) {
+    return false;
+  }
+  let v21 = v1.day;
+  if (!(globalThis.Temporal !== undefined && v21 instanceof globalThis.Temporal.PlainDate)) {
+    return false;
+  }
+  if (typeof v21.dayOfWeek !== "number" || (v21.dayOfWeek !== 1 && v21.dayOfWeek !== 2 && v21.dayOfWeek !== 3 && v21.dayOfWeek !== 4 && v21.dayOfWeek !== 5)) {
+    return false;
+  }
+  if (typeof v21.month !== "number" || (v21.month !== 7)) {
+    return false;
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v3 = v1.temDesconto;
+    let o4 = v3;
+    if (typeof v3 !== "boolean") {
+      issues[issues.length] = { path: "temDesconto", code: "expected_boolean", expected: "boolean", message: "expected boolean" };
+    }
+    o4 = v3;
+    let w5;
+    if (v1.temDesconto === true) {
+      let v6 = v1.cupom;
+      let o7 = v6;
+      if (typeof v6 !== "string") {
+        issues[issues.length] = { path: "cupom", code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
+      } else {
+        if (v6.length < 3) {
+          issues[issues.length] = { path: "cupom", code: "too_small", expected: "length >= 3", message: "expected at least 3 characters" };
+        }
+      }
+      o7 = v6;
+      w5 = o7;
+    } else {
+      let v8 = v1.cupom;
+      let o9 = v8;
+      if (v8 !== undefined) {
+        if (typeof v8 !== "string") {
+          issues[issues.length] = { path: "cupom", code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
+        } else {
+        }
+        o9 = v8;
+      }
+      w5 = o9;
+    }
+    let v10 = v1.ref;
+    let o11 = v10;
+    if ((pu1(v10) ? 1 : 0) + (pu2(v10) ? 1 : 0) !== 1) {
+      issues[issues.length] = { path: "ref", code: "invalid_xor", expected: "exactly one schema", message: "value must match exactly one schema" };
+    }
+    o11 = v10;
+    let v16 = v1.status;
+    let o17 = v16;
+    if (pu3(v16)) {
+      issues[issues.length] = { path: "status", code: "invalid_not", expected: "not", message: "value matched a forbidden schema" };
+    }
+    o17 = v16;
+    let v20 = v1.at;
+    let o21 = v20;
+    if (!(v20 instanceof Date) || v20.getTime() !== v20.getTime()) {
+      issues[issues.length] = { path: "at", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+    } else {
+      if (v20.getTime() < 1782864000000 || v20.getTime() > 1785542399999) {
+        issues[issues.length] = { path: "at", code: "out_of_range", expected: "2026-07-01T00:00:00.000Z..2026-07-31T23:59:59.999Z", message: "expected a value between 2026-07-01T00:00:00.000Z and 2026-07-31T23:59:59.999Z" };
+      }
+      if (v20.getSeconds() !== 0 || v20.getMilliseconds() !== 0) {
+        issues[issues.length] = { path: "at", code: "invalid_precision", expected: "minute", message: "expected value truncated to minute" };
+      }
+    }
+    o21 = v20;
+    let v22 = v1.day;
+    let o23 = v22;
+    if (!(globalThis.Temporal !== undefined && v22 instanceof globalThis.Temporal.PlainDate)) {
+      issues[issues.length] = { path: "day", code: "invalid_temporal", expected: "Temporal.PlainDate", message: "expected Temporal.PlainDate" };
+    } else {
+      if (typeof v22.dayOfWeek !== "number" || (v22.dayOfWeek !== 1 && v22.dayOfWeek !== 2 && v22.dayOfWeek !== 3 && v22.dayOfWeek !== 4 && v22.dayOfWeek !== 5)) {
+        issues[issues.length] = { path: "day", code: "invalid_day_of_week", expected: "1 | 2 | 3 | 4 | 5", message: "expected an allowed day of week" };
+      }
+      if (typeof v22.month !== "number" || (v22.month !== 7)) {
+        issues[issues.length] = { path: "day", code: "invalid_month_of_year", expected: "7", message: "expected an allowed month" };
+      }
+    }
+    o23 = v22;
+  }
+  o2 = v1;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }
@@ -663,6 +857,211 @@ function safeParse(value) {
     o8 = v7;
   }
   o2 = v1;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;
+
+exports[`generated source snapshots > validator: strict checks, masks, noEmpty, and conditional refine 1`] = `
+"function is(value) {
+  let v1 = value;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    return false;
+  }
+  let v3 = v1.kind;
+  if (typeof v3 !== "string") {
+    return false;
+  }
+  if (v3 !== "admin" && v3 !== "user") {
+    return false;
+  }
+  let v5 = v1.age;
+  if (typeof v5 !== "number") {
+    return false;
+  }
+  if (v5 <= 17) {
+    return false;
+  }
+  if (v5 >= 130) {
+    return false;
+  }
+  if (!Number.isInteger(v5) || v5 < -2147483648 || v5 > 2147483647) {
+    return false;
+  }
+  let v7 = v1.cpf;
+  if (typeof v7 !== "string") {
+    return false;
+  }
+  v7 = v7.replace(/\\D+/g, "");
+  if (v7.length !== 11) {
+    return false;
+  }
+  if (v7.length === 11) {
+    v7 = v7[0] + v7[1] + v7[2] + "." + v7[3] + v7[4] + v7[5] + "." + v7[6] + v7[7] + v7[8] + "-" + v7[9] + v7[10];
+  }
+  let v9 = v1.phone;
+  if (typeof v9 !== "string") {
+    return false;
+  }
+  v9 = v9.replace(/\\D+/g, "");
+  if (v9.length !== 10 && v9.length !== 11) {
+    return false;
+  }
+  if (v9.length === 10) {
+    v9 = "(" + v9[0] + v9[1] + ")" + " " + v9[2] + v9[3] + v9[4] + v9[5] + "-" + v9[6] + v9[7] + v9[8] + v9[9];
+  } else if (v9.length === 11) {
+    v9 = "(" + v9[0] + v9[1] + ")" + " " + v9[2] + v9[3] + v9[4] + v9[5] + v9[6] + "-" + v9[7] + v9[8] + v9[9] + v9[10];
+  }
+  let v11 = v1.invite;
+  if (v11 === "") {
+    v11 = undefined;
+  }
+  if (v11 !== undefined) {
+    if (typeof v11 !== "string") {
+      return false;
+    }
+  }
+  let v13 = v1.credentials;
+  if (v13 === null || typeof v13 !== "object" || Array.isArray(v13)) {
+    return false;
+  }
+  let v15 = v13.password;
+  if (typeof v15 !== "string") {
+    return false;
+  }
+  if (v15.length < 8) {
+    return false;
+  }
+  let v17 = v13.confirmPassword;
+  if (typeof v17 !== "string") {
+    return false;
+  }
+  if (v17.length < 8) {
+    return false;
+  }
+  if (__v1({ value: v13 })) {
+    if (!__v0(v13)) {
+      return false;
+    }
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  let b3;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v4 = v1.kind;
+    let o5 = v4;
+    if (typeof v4 !== "string") {
+      issues[issues.length] = { path: "kind", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+    } else {
+      if (v4 !== "admin" && v4 !== "user") {
+        issues[issues.length] = { path: "kind", code: "invalid_enum", expected: "admin | user", message: "expected one of the allowed values" };
+      }
+    }
+    o5 = v4;
+    let v6 = v1.age;
+    let o7 = v6;
+    if (typeof v6 !== "number") {
+      issues[issues.length] = { path: "age", code: "expected_number", expected: "number", message: "expected number", received: typeof v6 };
+    } else {
+      if (v6 <= 17) {
+        issues[issues.length] = { path: "age", code: "too_small", expected: "> 17", message: "expected a number > 17" };
+      }
+      if (v6 >= 130) {
+        issues[issues.length] = { path: "age", code: "too_big", expected: "< 130", message: "expected a number < 130" };
+      }
+      if (!Number.isInteger(v6) || v6 < -2147483648 || v6 > 2147483647) {
+        issues[issues.length] = { path: "age", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
+      }
+    }
+    o7 = v6;
+    let v8 = v1.cpf;
+    let o9 = v8;
+    if (typeof v8 !== "string") {
+      issues[issues.length] = { path: "cpf", code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
+    } else {
+      v8 = v8.replace(/\\D+/g, "");
+      if (v8.length !== 11) {
+        issues[issues.length] = { path: "cpf", code: "invalid_format", expected: "length === 11", message: "expected 11 characters before formatting" };
+      }
+      if (v8.length === 11) {
+        v8 = v8[0] + v8[1] + v8[2] + "." + v8[3] + v8[4] + v8[5] + "." + v8[6] + v8[7] + v8[8] + "-" + v8[9] + v8[10];
+      }
+    }
+    o9 = v8;
+    let v10 = v1.phone;
+    let o11 = v10;
+    if (typeof v10 !== "string") {
+      issues[issues.length] = { path: "phone", code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
+    } else {
+      v10 = v10.replace(/\\D+/g, "");
+      if (v10.length !== 10 && v10.length !== 11) {
+        issues[issues.length] = { path: "phone", code: "invalid_format", expected: "Brazilian phone with 10 or 11 digits", message: "expected a Brazilian phone number" };
+      }
+      if (v10.length === 10) {
+        v10 = "(" + v10[0] + v10[1] + ")" + " " + v10[2] + v10[3] + v10[4] + v10[5] + "-" + v10[6] + v10[7] + v10[8] + v10[9];
+      } else if (v10.length === 11) {
+        v10 = "(" + v10[0] + v10[1] + ")" + " " + v10[2] + v10[3] + v10[4] + v10[5] + v10[6] + "-" + v10[7] + v10[8] + v10[9] + v10[10];
+      }
+    }
+    o11 = v10;
+    let v12 = v1.invite;
+    let o13 = v12;
+    if (v12 === "") {
+      v12 = undefined;
+      o13 = v12;
+    }
+    if (v12 !== undefined) {
+      if (typeof v12 !== "string") {
+        issues[issues.length] = { path: "invite", code: "expected_string", expected: "string", message: "expected string", received: typeof v12 };
+      } else {
+      }
+      o13 = v12;
+    }
+    let v14 = v1.credentials;
+    let o15 = v14;
+    if (v14 === null || typeof v14 !== "object" || Array.isArray(v14)) {
+      issues[issues.length] = { path: "credentials", code: "expected_object", expected: "object", message: "expected object", received: typeof v14 };
+    } else {
+      let v16 = v14.password;
+      let o17 = v16;
+      if (typeof v16 !== "string") {
+        issues[issues.length] = { path: "credentials.password", code: "expected_string", expected: "string", message: "expected string", received: typeof v16 };
+      } else {
+        if (v16.length < 8) {
+          issues[issues.length] = { path: "credentials.password", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters" };
+        }
+      }
+      o17 = v16;
+      let v18 = v14.confirmPassword;
+      let o19 = v18;
+      if (typeof v18 !== "string") {
+        issues[issues.length] = { path: "credentials.confirmPassword", code: "expected_string", expected: "string", message: "expected string", received: typeof v18 };
+      } else {
+        if (v18.length < 8) {
+          issues[issues.length] = { path: "credentials.confirmPassword", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters" };
+        }
+      }
+      o19 = v18;
+    }
+    if (__v1({ value: v14 })) {
+      if (!__v0(v14)) {
+        issues[issues.length] = { path: "credentials.confirmPassword", code: "custom", expected: "refinement", message: "passwords must match" };
+      }
+    }
+    o15 = v14;
+    b3 = { "kind": o5, "age": o7, "cpf": o9, "phone": o11, "invite": o13, "credentials": o15 };
+  }
+  if (b3 === undefined) { b3 = v1; }
+  o2 = b3;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }
