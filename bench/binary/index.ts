@@ -46,11 +46,17 @@ for (const size of SIZES) {
   const users = createUsers(size);
   const binary = Users.binary({ strategy: "exact" });
   const rowset = binary.load(users);
+  const alignedBinary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
+  const alignedRowset = alignedBinary.load(users);
   const byteQuery = JIT.query(rowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score")
     .compile();
   const regularQuery = JIT.query(Users)
+    .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
+    .select("id", "name", "score")
+    .compile();
+  const alignedByteQuery = JIT.query(alignedRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score")
     .compile();
@@ -62,11 +68,19 @@ for (const size of SIZES) {
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .count()
     .compile();
+  const alignedByteCount = JIT.query(alignedRowset)
+    .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
+    .count()
+    .compile();
   const byteSum = JIT.query(rowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
     .sum("score")
     .compile();
   const regularSum = JIT.query(Users)
+    .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
+    .sum("score")
+    .compile();
+  const alignedByteSum = JIT.query(alignedRowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
     .sum("score")
     .compile();
@@ -80,6 +94,11 @@ for (const size of SIZES) {
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score")
     .compile();
+  const alignedPipeline = JIT.process(User)
+    .binary({ strategy: "exact", memoryLayout: "aligned" })
+    .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
+    .select("id", "name", "score")
+    .compile();
 
   registerScenario({
     op: "binary query preloaded",
@@ -87,6 +106,7 @@ for (const size of SIZES) {
     args: [rowset],
     jit: byteQuery,
     competitors: [
+      { name: "JIT aligned binary query", fn: () => alignedByteQuery(alignedRowset) },
       { name: "JIT query over JS array", fn: () => regularQuery(users) },
       { name: "handwritten JS filter/map", fn: () => handwritten(users), biased: GENERIC_BIAS },
     ],
@@ -98,6 +118,7 @@ for (const size of SIZES) {
     args: [rowset],
     jit: byteCount,
     competitors: [
+      { name: "JIT aligned binary count", fn: () => alignedByteCount(alignedRowset) },
       { name: "JIT count over JS array", fn: () => regularCount(users) },
       { name: "handwritten JS count", fn: () => handwrittenCount(users), biased: GENERIC_BIAS },
     ],
@@ -109,6 +130,7 @@ for (const size of SIZES) {
     args: [rowset],
     jit: byteSum,
     competitors: [
+      { name: "JIT aligned binary sum", fn: () => alignedByteSum(alignedRowset) },
       { name: "JIT sum over JS array", fn: () => regularSum(users) },
       { name: "handwritten JS sum", fn: () => handwrittenSum(users), biased: GENERIC_BIAS },
     ],
@@ -120,6 +142,7 @@ for (const size of SIZES) {
     args: [users],
     jit: exactPipeline.execute,
     competitors: [
+      { name: "JIT aligned binary load+query", fn: alignedPipeline.execute },
       { name: "JIT binary dynamic load+query", fn: dynamicPipeline.execute },
       { name: "JIT query over JS array", fn: regularQuery },
       { name: "handwritten JS filter/map", fn: handwritten, biased: GENERIC_BIAS },

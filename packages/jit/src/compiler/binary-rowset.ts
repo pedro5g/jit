@@ -21,6 +21,7 @@ type ArraySchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
 type ScalarDictionaryValue = string | number;
 
 export type BinaryRowSetStrategy = "dynamic" | "static" | "exact";
+export type BinaryMemoryLayout = "auto" | "packed" | "aligned";
 
 export interface BinaryRowSetOptions {
   /**
@@ -29,6 +30,8 @@ export interface BinaryRowSetOptions {
    * current batch.
    */
   readonly strategy?: BinaryRowSetStrategy;
+  /** `auto` keeps compact rows unless every wide field is naturally aligned. */
+  readonly memoryLayout?: BinaryMemoryLayout;
   /** Initial byte size for dynamic rowsets. Defaults to 8 MiB. */
   readonly initialBytes?: number;
   /** Fixed row capacity for static rowsets. */
@@ -61,6 +64,7 @@ export interface BinaryFieldLayout {
   readonly kind: BinaryFieldKind;
   readonly offset: number;
   readonly size: number;
+  readonly access: "none" | "byte" | "dataView" | "int32" | "uint32" | "float32" | "float64" | "bigint64";
   readonly guard?: BinaryFieldGuard;
   readonly dictionaryIndex?: number;
   readonly dictionaryMode?: "dynamic" | "fixed";
@@ -68,10 +72,22 @@ export interface BinaryFieldLayout {
   readonly literal?: unknown;
 }
 
+export interface BinaryRowViewUsage {
+  readonly int32: boolean;
+  readonly uint32: boolean;
+  readonly float32: boolean;
+  readonly float64: boolean;
+  readonly bigint64: boolean;
+}
+
 export interface BinaryRowLayout {
   readonly schema: ObjectSchema;
   readonly rowSize: number;
   readonly maskBytes: number;
+  readonly alignment: 1 | 4 | 8;
+  readonly paddingBytes: number;
+  readonly memoryLayout: Exclude<BinaryMemoryLayout, "auto">;
+  readonly views: BinaryRowViewUsage;
   readonly fields: readonly BinaryFieldLayout[];
 }
 
@@ -86,6 +102,12 @@ export interface BinaryRowSet<TElement = unknown> {
   readonly layout: BinaryRowLayout;
   buffer: ArrayBufferLike;
   bytes: Uint8Array;
+  int32: Int32Array;
+  uint32: Uint32Array;
+  float32: Float32Array;
+  float64: Float64Array;
+  bigint64: BigInt64Array;
+  /** Compatibility view. Compiled rowset hot paths use the typed views above. */
   view: DataView;
   count: number;
   capacity: number;
@@ -112,6 +134,17 @@ interface BinaryArrayState {
   buffer: ArrayBufferLike | undefined;
   bufferOffset: number;
   byteLength: number;
+}
+
+interface BinaryRowTarget {
+  readonly bytes: Uint8Array;
+  readonly int32: Int32Array;
+  readonly uint32: Uint32Array;
+  readonly float32: Float32Array;
+  readonly float64: Float64Array;
+  readonly bigint64: BigInt64Array;
+  readonly view: DataView;
+  readonly capacity: number;
 }
 
 export interface BinaryQueryProgram {
@@ -141,6 +174,11 @@ interface FieldLookup {
 const DEFAULT_DYNAMIC_BYTES = 8 * 1024 * 1024;
 const EMPTY_BUFFER = new ArrayBuffer(0);
 const EMPTY_BYTES = new Uint8Array(EMPTY_BUFFER);
+const EMPTY_INT32 = new Int32Array(EMPTY_BUFFER);
+const EMPTY_UINT32 = new Uint32Array(EMPTY_BUFFER);
+const EMPTY_FLOAT32 = new Float32Array(EMPTY_BUFFER);
+const EMPTY_FLOAT64 = new Float64Array(EMPTY_BUFFER);
+const EMPTY_BIGINT64 = new BigInt64Array(EMPTY_BUFFER);
 
 export function isBinaryRowSet(value: unknown): value is BinaryRowSet<unknown> {
   return (
@@ -164,7 +202,7 @@ export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
 ): BinaryArray<BinaryArrayElement<TSchema>> {
   const arraySchema = schema as ArraySchema;
   const objectSchema = expectArrayObjectSchema(arraySchema, "binary rowset");
-  const layout = createBinaryRowLayout(objectSchema);
+  const layout = createBinaryRowLayout(objectSchema, options.memoryLayout);
   const strategy = options.strategy ?? "dynamic";
   const state = createBinaryArrayState(layout, strategy, options);
   const writer = compileRowWriter(layout);
@@ -181,7 +219,7 @@ export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
       const dictionaries = createDictionaries(layout);
 
       resetDictionaries(dictionaries, layout);
-      writer(values, count, target.bytes, target.view, dictionaries);
+      writer(values, count, target, dictionaries);
 
       return createRowSet<BinaryArrayElement<TSchema>>(
         objectSchema,
@@ -207,14 +245,11 @@ export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
 export function emitBinaryRowSetWriterSource(layout: BinaryRowLayout): string {
   const writer = new CodeWriter();
 
-  writer.line("function writeRows(input, len, u8, dv, dictionaries) {");
+  writer.line("function writeRows(input, len, target, dictionaries) {");
   writer.indent(() => {
-    for (const field of layout.fields) {
-      if (field.dictionaryIndex !== undefined) {
-        writer.line(`const d${field.dictionaryIndex} = dictionaries[${field.dictionaryIndex}];`);
-      }
-    }
-    writer.line("let o = 0;");
+    emitRowViewBindings(writer, layout.fields, "target");
+    emitDictionaryBindings(writer, layout.fields);
+    emitRowCursorDeclarations(writer, layout.fields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
       writer.line("const item = input[i];");
@@ -222,7 +257,7 @@ export function emitBinaryRowSetWriterSource(layout: BinaryRowLayout): string {
       emitGuardMasks(writer, layout);
       for (let mask = 0; mask < layout.maskBytes; mask++) writer.line(`u8[o + ${mask}] = m${mask};`);
       for (const field of layout.fields) emitWriteField(writer, field);
-      writer.line(`o += ${layout.rowSize};`);
+      emitRowCursorAdvance(writer, layout, layout.fields);
     });
     writer.line("}");
   });
@@ -237,21 +272,16 @@ export function emitBinaryHydrateSource(layout: BinaryRowLayout): string {
 
   writer.line("function hydrate(rowset) {");
   writer.indent(() => {
-    writer.line("const u8 = rowset.bytes;");
-    writer.line("const dv = rowset.view;");
-    writer.line("const dictionaries = rowset.dictionaries;");
-    for (const field of layout.fields) {
-      if (field.dictionaryIndex !== undefined) {
-        writer.line(`const d${field.dictionaryIndex} = dictionaries[${field.dictionaryIndex}];`);
-      }
-    }
+    emitRowViewBindings(writer, layout.fields);
+    if (hasDictionary(layout.fields)) writer.line("const dictionaries = rowset.dictionaries;");
+    emitDictionaryBindings(writer, layout.fields);
     writer.line("const len = rowset.count;");
     writer.line("const out = new Array(len);");
-    writer.line("let o = 0;");
+    emitRowCursorDeclarations(writer, layout.fields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
       writer.line(`out[i] = ${emitObjectExpression(layout.fields)};`);
-      writer.line(`o += ${layout.rowSize};`);
+      emitRowCursorAdvance(writer, layout, layout.fields);
     });
     writer.line("}");
     writer.line("return out;");
@@ -267,29 +297,28 @@ export function emitBinaryQuerySource(layout: BinaryRowLayout, program: BinaryQu
   const lookup = createFieldLookup(layout);
 
   validateBinaryQueryPlan(lookup, plan);
+  const accessedFields = collectQueryAccessFields(layout, lookup, plan);
 
   const writer = new CodeWriter();
   const hasParams = Boolean(program.params?.length);
 
   writer.line(`function query(rowset${hasParams ? ", params" : ""}) {`);
   writer.indent(() => {
-    writer.line("const u8 = rowset.bytes;");
-    writer.line("const dv = rowset.view;");
-    writer.line("const dictionaries = rowset.dictionaries;");
+    emitRowViewBindings(writer, accessedFields);
+    if (hasDictionary(accessedFields)) writer.line("const dictionaries = rowset.dictionaries;");
     writer.line("const len = rowset.count;");
-    for (const field of layout.fields) {
-      if (field.dictionaryIndex !== undefined) {
-        writer.line(`const d${field.dictionaryIndex} = dictionaries[${field.dictionaryIndex}];`);
-      }
-    }
+    emitDictionaryBindings(writer, accessedFields);
 
     const prepared = new PreparedValues(writer);
-    const condition = emitBinaryFilter(plan, lookup, prepared);
+    const aggregateKey = plan.aggregate?.key;
+    const cacheAggregateValue = aggregateKey !== undefined && filtersReadField(plan.filters, aggregateKey);
+    const comparableOverrides = cacheAggregateValue ? new Map([[aggregateKey, "v"]]) : undefined;
+    const condition = emitBinaryFilter(plan, lookup, prepared, comparableOverrides);
 
     if (plan.aggregate) {
-      emitBinaryAggregateQuery(writer, layout, lookup, plan, condition);
+      emitBinaryAggregateQuery(writer, layout, lookup, plan, condition, accessedFields, cacheAggregateValue);
     } else {
-      emitBinaryArrayQuery(writer, layout, plan, condition);
+      emitBinaryArrayQuery(writer, layout, plan, condition, accessedFields);
     }
   });
   writer.line("}");
@@ -339,15 +368,13 @@ function compileRowWriter(
 ): (
   input: readonly unknown[],
   len: number,
-  u8: Uint8Array,
-  dv: DataView,
+  target: BinaryRowTarget,
   dictionaries: readonly BinaryDictionary[]
 ) => void {
   return globalThis.Function(emitBinaryRowSetWriterSource(layout))() as (
     input: readonly unknown[],
     len: number,
-    u8: Uint8Array,
-    dv: DataView,
+    target: BinaryRowTarget,
     dictionaries: readonly BinaryDictionary[]
   ) => void;
 }
@@ -365,6 +392,13 @@ function createBinaryArrayState(
   const buffer = source instanceof Uint8Array ? source.buffer : source;
   const bufferOffset = source instanceof Uint8Array ? source.byteOffset : 0;
   const byteLength = source instanceof Uint8Array ? source.byteLength : (buffer?.byteLength ?? 0);
+
+  if (source instanceof Uint8Array && bufferOffset % layout.alignment !== 0) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      `binary caller buffer byteOffset must be aligned to ${layout.alignment} bytes`
+    );
+  }
 
   if (strategy === "static" && options.capacity === undefined && source === undefined) {
     throw new JITError("INVALID_OPERATION", "binary static strategy requires a row capacity or caller buffer");
@@ -396,14 +430,14 @@ function allocateRowBuffer(
   strategy: BinaryRowSetStrategy,
   options: BinaryRowSetOptions,
   count: number
-): { readonly bytes: Uint8Array; readonly view: DataView; readonly capacity: number } {
+): BinaryRowTarget {
   const needed = count * layout.rowSize;
 
   if (strategy === "exact") {
     const buffer = new ArrayBuffer(needed);
     const bytes = new Uint8Array(buffer);
 
-    return { bytes, view: new DataView(buffer), capacity: count };
+    return createRowTarget(layout, bytes, count);
   }
 
   if (strategy === "static") {
@@ -416,11 +450,7 @@ function allocateRowBuffer(
     const buffer = state.buffer ?? EMPTY_BUFFER;
     const bytes = new Uint8Array(buffer, state.bufferOffset, needed);
 
-    return {
-      bytes,
-      view: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-      capacity: Math.floor(available / layout.rowSize),
-    };
+    return createRowTarget(layout, bytes, Math.floor(available / layout.rowSize));
   }
 
   const minBytes = Math.max(options.initialBytes ?? DEFAULT_DYNAMIC_BYTES, needed);
@@ -436,10 +466,22 @@ function allocateRowBuffer(
 
   const bytes = new Uint8Array(state.buffer, 0, needed);
 
+  return createRowTarget(layout, bytes, Math.floor(state.byteLength / layout.rowSize));
+}
+
+function createRowTarget(layout: BinaryRowLayout, bytes: Uint8Array, capacity: number): BinaryRowTarget {
+  const elements4 = bytes.byteLength / 4;
+  const elements8 = bytes.byteLength / 8;
+
   return {
     bytes,
+    int32: layout.views.int32 ? new Int32Array(bytes.buffer, bytes.byteOffset, elements4) : EMPTY_INT32,
+    uint32: layout.views.uint32 ? new Uint32Array(bytes.buffer, bytes.byteOffset, elements4) : EMPTY_UINT32,
+    float32: layout.views.float32 ? new Float32Array(bytes.buffer, bytes.byteOffset, elements4) : EMPTY_FLOAT32,
+    float64: layout.views.float64 ? new Float64Array(bytes.buffer, bytes.byteOffset, elements8) : EMPTY_FLOAT64,
+    bigint64: layout.views.bigint64 ? new BigInt64Array(bytes.buffer, bytes.byteOffset, elements8) : EMPTY_BIGINT64,
     view: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-    capacity: Math.floor(state.byteLength / layout.rowSize),
+    capacity,
   };
 }
 
@@ -448,7 +490,7 @@ function createRowSet<TElement>(
   layout: BinaryRowLayout,
   strategy: BinaryRowSetStrategy,
   dictionaries: readonly BinaryDictionary[],
-  target: { readonly bytes: Uint8Array; readonly view: DataView; readonly capacity: number },
+  target: BinaryRowTarget,
   count: number,
   hydrate: (rowset: BinaryRowSet<TElement>) => TElement[]
 ): BinaryRowSet<TElement> {
@@ -458,6 +500,11 @@ function createRowSet<TElement>(
     layout,
     buffer: target.bytes.buffer,
     bytes: target.bytes,
+    int32: target.int32,
+    uint32: target.uint32,
+    float32: target.float32,
+    float64: target.float64,
+    bigint64: target.bigint64,
     view: target.view,
     count,
     capacity: target.capacity,
@@ -469,6 +516,11 @@ function createRowSet<TElement>(
     release() {
       rowset.buffer = EMPTY_BUFFER;
       rowset.bytes = EMPTY_BYTES;
+      rowset.int32 = EMPTY_INT32;
+      rowset.uint32 = EMPTY_UINT32;
+      rowset.float32 = EMPTY_FLOAT32;
+      rowset.float64 = EMPTY_FLOAT64;
+      rowset.bigint64 = EMPTY_BIGINT64;
       rowset.view = new DataView(EMPTY_BUFFER);
       rowset.count = 0;
       rowset.capacity = 0;
@@ -524,9 +576,17 @@ function expectArrayObjectSchema(schema: ArraySchema, feature: string): ObjectSc
   return resolved as ObjectSchema;
 }
 
-export function createBinaryRowLayout(schema: ObjectSchema): BinaryRowLayout {
+export function createBinaryRowLayout(
+  schema: ObjectSchema,
+  requestedLayout: BinaryMemoryLayout = "auto"
+): BinaryRowLayout {
   const props = schema.def.props;
-  const fields: BinaryFieldLayout[] = [];
+  const entries: {
+    readonly key: string;
+    readonly descriptor: BinaryFieldDescriptor;
+    readonly guard: BinaryFieldGuard | undefined;
+    readonly dictionaryIndex: number | undefined;
+  }[] = [];
   let dictionaryIndex = 0;
   let guarded = 0;
 
@@ -537,49 +597,232 @@ export function createBinaryRowLayout(schema: ObjectSchema): BinaryRowLayout {
   }
 
   const maskBytes = Math.ceil(guarded / 4);
-  let nextOffset = maskBytes;
   let guardIndex = 0;
+  let alignment: 1 | 4 | 8 = 1;
+  let payloadBytes = maskBytes;
 
   for (const key of Object.keys(props)) {
     const resolved = resolveWrappers(props[key]);
     const descriptor = describeField(key, resolved.base);
+    const fieldAlignment = alignmentForSize(descriptor.size);
+    if (fieldAlignment > alignment) alignment = fieldAlignment;
     const guard =
       resolved.optional || resolved.nullable
         ? { maskOffset: guardIndex >> 2, shift: (guardIndex++ & 3) * 2 }
         : undefined;
-    const field: BinaryFieldLayout = {
-      key,
-      kind: descriptor.kind,
-      offset: nextOffset,
-      size: descriptor.size,
-      ...(guard ? { guard } : {}),
-      ...(descriptor.dictionary ? { dictionaryIndex: dictionaryIndex++, dictionaryMode: descriptor.dictionary } : {}),
-      ...(descriptor.values ? { values: descriptor.values } : {}),
-      ...(descriptor.literal !== undefined ? { literal: descriptor.literal } : {}),
-    };
 
-    fields[fields.length] = field;
-    nextOffset += descriptor.size;
+    entries[entries.length] = {
+      key,
+      descriptor,
+      guard,
+      dictionaryIndex: descriptor.dictionary ? dictionaryIndex++ : undefined,
+    };
+    payloadBytes += descriptor.size;
   }
 
+  const packedOffsets = new Map<string, number>();
+  let packedRowSize = maskBytes;
+
+  for (const entry of entries) {
+    packedOffsets.set(entry.key, packedRowSize);
+    packedRowSize += entry.descriptor.size;
+  }
+
+  const naturallyAligned =
+    packedRowSize % alignment === 0 &&
+    entries.every((entry) => {
+      const fieldAlignment = alignmentForSize(entry.descriptor.size);
+      return (packedOffsets.get(entry.key) ?? 0) % fieldAlignment === 0;
+    });
+  const memoryLayout = requestedLayout === "auto" ? (naturallyAligned ? "aligned" : "packed") : requestedLayout;
+  const offsets = memoryLayout === "packed" ? packedOffsets : new Map<string, number>();
+  let nextOffset = memoryLayout === "packed" ? packedRowSize : maskBytes;
+
+  if (memoryLayout === "aligned") {
+    // Small fields fill the bytes after the header before wider aligned lanes.
+    for (const size of [1, 4, 8] as const) {
+      if (!entries.some((entry) => entry.descriptor.size === size)) continue;
+      nextOffset = alignTo(nextOffset, alignmentForSize(size));
+
+      for (const entry of entries) {
+        if (entry.descriptor.size !== size) continue;
+        offsets.set(entry.key, nextOffset);
+        nextOffset += size;
+      }
+    }
+  }
+
+  const rowSize = memoryLayout === "aligned" ? alignTo(nextOffset, alignment) : nextOffset;
+  const requiredAlignment = memoryLayout === "aligned" ? alignment : 1;
+
+  const fields: BinaryFieldLayout[] = entries.map((entry) => ({
+    key: entry.key,
+    kind: entry.descriptor.kind,
+    offset: offsets.get(entry.key) ?? nextOffset,
+    size: entry.descriptor.size,
+    access: fieldAccess(entry.descriptor, memoryLayout),
+    ...(entry.guard ? { guard: entry.guard } : {}),
+    ...(entry.dictionaryIndex !== undefined
+      ? { dictionaryIndex: entry.dictionaryIndex, dictionaryMode: entry.descriptor.dictionary }
+      : {}),
+    ...(entry.descriptor.values ? { values: entry.descriptor.values } : {}),
+    ...(entry.descriptor.literal !== undefined ? { literal: entry.descriptor.literal } : {}),
+  }));
   return {
     schema,
-    rowSize: nextOffset,
+    rowSize,
     maskBytes,
+    alignment: requiredAlignment,
+    paddingBytes: rowSize - payloadBytes,
+    memoryLayout,
+    views: createViewUsage(fields),
     fields,
   };
 }
 
-function describeField(
-  key: string,
-  schema: ATS.AnyTypeSchema
-): {
+function fieldAccess(
+  descriptor: BinaryFieldDescriptor,
+  memoryLayout: Exclude<BinaryMemoryLayout, "auto">
+): BinaryFieldLayout["access"] {
+  if (descriptor.size === 0) return "none";
+  if (descriptor.size === 1) return "byte";
+  if (memoryLayout === "packed") return "dataView";
+
+  switch (descriptor.kind) {
+    case "int32":
+      return "int32";
+    case "float32":
+      return "float32";
+    case "float64":
+    case "date":
+      return "float64";
+    case "bigint":
+      return "bigint64";
+    case "string":
+    case "enum":
+    case "literalUnion":
+      return "uint32";
+    default:
+      throw new JITError("INVALID_OPERATION", `binary field ${descriptor.kind} has no aligned access strategy`);
+  }
+}
+
+function alignTo(value: number, alignment: 1 | 4 | 8): number {
+  return Math.ceil(value / alignment) * alignment;
+}
+
+function alignmentForSize(size: number): 1 | 4 | 8 {
+  if (size === 8) return 8;
+  if (size === 4) return 4;
+  return 1;
+}
+
+function createViewUsage(fields: readonly BinaryFieldLayout[]): BinaryRowViewUsage {
+  let int32 = false;
+  let uint32 = false;
+  let float32 = false;
+  let float64 = false;
+  let bigint64 = false;
+
+  for (const field of fields) {
+    switch (field.access) {
+      case "int32":
+        int32 = true;
+        break;
+      case "uint32":
+        uint32 = true;
+        break;
+      case "float32":
+        float32 = true;
+        break;
+      case "float64":
+        float64 = true;
+        break;
+      case "bigint64":
+        bigint64 = true;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return { int32, uint32, float32, float64, bigint64 };
+}
+
+interface BinaryAccessNeeds {
+  readonly bytes: boolean;
+  readonly dataView: boolean;
+  readonly words: boolean;
+  readonly doubles: boolean;
+  readonly views: BinaryRowViewUsage;
+}
+
+function getAccessNeeds(fields: readonly BinaryFieldLayout[]): BinaryAccessNeeds {
+  const views = createViewUsage(fields);
+  let bytes = false;
+  let dataView = false;
+  let words = false;
+  let doubles = false;
+
+  for (const field of fields) {
+    if (field.guard !== undefined || field.access === "byte") bytes = true;
+    if (field.access === "dataView") dataView = true;
+    if (field.access === "int32" || field.access === "uint32" || field.access === "float32") words = true;
+    if (field.access === "float64" || field.access === "bigint64") doubles = true;
+  }
+
+  return { bytes, dataView, words, doubles, views };
+}
+
+function emitRowViewBindings(writer: CodeWriter, fields: readonly BinaryFieldLayout[], source = "rowset"): void {
+  const needs = getAccessNeeds(fields);
+
+  if (needs.bytes) writer.line(`const u8 = ${source}.bytes;`);
+  if (needs.dataView) writer.line(`const dv = ${source}.view;`);
+  if (needs.views.int32) writer.line(`const int32 = ${source}.int32;`);
+  if (needs.views.uint32) writer.line(`const uint32 = ${source}.uint32;`);
+  if (needs.views.float32) writer.line(`const float32 = ${source}.float32;`);
+  if (needs.views.float64) writer.line(`const float64 = ${source}.float64;`);
+  if (needs.views.bigint64) writer.line(`const bigint64 = ${source}.bigint64;`);
+}
+
+function emitDictionaryBindings(writer: CodeWriter, fields: readonly BinaryFieldLayout[]): void {
+  for (const field of fields) {
+    if (field.dictionaryIndex !== undefined) {
+      writer.line(`const d${field.dictionaryIndex} = dictionaries[${field.dictionaryIndex}];`);
+    }
+  }
+}
+
+function hasDictionary(fields: readonly BinaryFieldLayout[]): boolean {
+  return fields.some((field) => field.dictionaryIndex !== undefined);
+}
+
+function emitRowCursorDeclarations(writer: CodeWriter, fields: readonly BinaryFieldLayout[]): void {
+  const needs = getAccessNeeds(fields);
+
+  if (needs.bytes || needs.dataView) writer.line("let o = 0;");
+  if (needs.words) writer.line("let w = 0;");
+  if (needs.doubles) writer.line("let d = 0;");
+}
+
+function emitRowCursorAdvance(writer: CodeWriter, layout: BinaryRowLayout, fields: readonly BinaryFieldLayout[]): void {
+  const needs = getAccessNeeds(fields);
+
+  if (needs.bytes || needs.dataView) writer.line(`o += ${layout.rowSize};`);
+  if (needs.words) writer.line(`w += ${layout.rowSize / 4};`);
+  if (needs.doubles) writer.line(`d += ${layout.rowSize / 8};`);
+}
+
+interface BinaryFieldDescriptor {
   readonly kind: BinaryFieldKind;
   readonly size: number;
   readonly dictionary?: "dynamic" | "fixed";
   readonly values?: readonly ScalarDictionaryValue[];
   readonly literal?: unknown;
-} {
+}
+
+function describeField(key: string, schema: ATS.AnyTypeSchema): BinaryFieldDescriptor {
   switch (schema.type) {
     case TypeName.number:
     case TypeName.nan:
@@ -677,22 +920,42 @@ function emitWriteScalar(writer: CodeWriter, field: BinaryFieldLayout, valueExpr
 
   switch (field.kind) {
     case "float64":
-      writer.line(`dv.setFloat64(${offset}, ${valueExpr}, true);`);
+      writer.line(
+        field.access === "dataView"
+          ? `dv.setFloat64(${offset}, ${valueExpr}, true);`
+          : `float64[${emitTypedIndex(field)}] = ${valueExpr};`
+      );
       return;
     case "float32":
-      writer.line(`dv.setFloat32(${offset}, ${valueExpr}, true);`);
+      writer.line(
+        field.access === "dataView"
+          ? `dv.setFloat32(${offset}, ${valueExpr}, true);`
+          : `float32[${emitTypedIndex(field)}] = ${valueExpr};`
+      );
       return;
     case "int32":
-      writer.line(`dv.setInt32(${offset}, ${valueExpr}, true);`);
+      writer.line(
+        field.access === "dataView"
+          ? `dv.setInt32(${offset}, ${valueExpr}, true);`
+          : `int32[${emitTypedIndex(field)}] = ${valueExpr};`
+      );
       return;
     case "boolean":
       writer.line(`u8[${offset}] = ${valueExpr} ? 1 : 0;`);
       return;
     case "bigint":
-      writer.line(`dv.setBigInt64(${offset}, ${valueExpr}, true);`);
+      writer.line(
+        field.access === "dataView"
+          ? `dv.setBigInt64(${offset}, ${valueExpr}, true);`
+          : `bigint64[${emitTypedIndex(field)}] = ${valueExpr};`
+      );
       return;
     case "date":
-      writer.line(`dv.setFloat64(${offset}, ${valueExpr}.getTime(), true);`);
+      writer.line(
+        field.access === "dataView"
+          ? `dv.setFloat64(${offset}, ${valueExpr}.getTime(), true);`
+          : `float64[${emitTypedIndex(field)}] = ${valueExpr}.getTime();`
+      );
       return;
     case "string":
     case "enum":
@@ -725,7 +988,8 @@ function emitDictionaryWrite(writer: CodeWriter, field: BinaryFieldLayout, value
   });
   writer.line("}");
   if (field.size === 1) writer.line(`u8[${offset}] = ${code};`);
-  else writer.line(`dv.setUint32(${offset}, ${code}, true);`);
+  else if (field.access === "dataView") writer.line(`dv.setUint32(${offset}, ${code}, true);`);
+  else writer.line(`uint32[${emitTypedIndex(field)}] = ${code};`);
 }
 
 function emitObjectExpression(fields: readonly BinaryFieldLayout[], selected?: readonly string[]): string {
@@ -754,21 +1018,29 @@ function emitScalarRead(field: BinaryFieldLayout): string {
 
   switch (field.kind) {
     case "float64":
-      return `dv.getFloat64(${offset}, true)`;
+      return field.access === "dataView" ? `dv.getFloat64(${offset}, true)` : `float64[${emitTypedIndex(field)}]`;
     case "float32":
-      return `dv.getFloat32(${offset}, true)`;
+      return field.access === "dataView" ? `dv.getFloat32(${offset}, true)` : `float32[${emitTypedIndex(field)}]`;
     case "int32":
-      return `dv.getInt32(${offset}, true)`;
+      return field.access === "dataView" ? `dv.getInt32(${offset}, true)` : `int32[${emitTypedIndex(field)}]`;
     case "boolean":
       return `u8[${offset}] !== 0`;
     case "bigint":
-      return `dv.getBigInt64(${offset}, true)`;
+      return field.access === "dataView" ? `dv.getBigInt64(${offset}, true)` : `bigint64[${emitTypedIndex(field)}]`;
     case "date":
-      return `new Date(dv.getFloat64(${offset}, true))`;
+      return field.access === "dataView"
+        ? `new Date(dv.getFloat64(${offset}, true))`
+        : `new Date(float64[${emitTypedIndex(field)}])`;
     case "string":
     case "enum":
     case "literalUnion":
-      return `d${field.dictionaryIndex}.values[${field.size === 1 ? `u8[${offset}]` : `dv.getUint32(${offset}, true)`}]`;
+      return `d${field.dictionaryIndex}.values[${
+        field.size === 1
+          ? `u8[${offset}]`
+          : field.access === "dataView"
+            ? `dv.getUint32(${offset}, true)`
+            : `uint32[${emitTypedIndex(field)}]`
+      }]`;
     case "literal":
       return emitLiteral(field.literal as never);
     case "null":
@@ -782,15 +1054,27 @@ function emitFieldComparable(field: BinaryFieldLayout): string {
   const offset = `o + ${field.offset}`;
 
   switch (field.kind) {
+    case "boolean":
+      return `u8[${offset}]`;
     case "date":
-      return `dv.getFloat64(${offset}, true)`;
+      return field.access === "dataView" ? `dv.getFloat64(${offset}, true)` : `float64[${emitTypedIndex(field)}]`;
     case "string":
     case "enum":
     case "literalUnion":
-      return field.size === 1 ? `u8[${offset}]` : `dv.getUint32(${offset}, true)`;
+      return field.size === 1
+        ? `u8[${offset}]`
+        : field.access === "dataView"
+          ? `dv.getUint32(${offset}, true)`
+          : `uint32[${emitTypedIndex(field)}]`;
     default:
       return emitScalarRead(field);
   }
+}
+
+function emitTypedIndex(field: BinaryFieldLayout): string {
+  if (field.size === 8) return `d + ${field.offset / 8}`;
+  if (field.size === 4) return `w + ${field.offset / 4}`;
+  throw new JITError("INVALID_OPERATION", `binary field ${field.key} does not use a typed index`);
 }
 
 function emitGuardState(field: BinaryFieldLayout): string {
@@ -866,20 +1150,73 @@ function validateKeys(lookup: FieldLookup, keys: readonly string[], label: strin
   }
 }
 
-function emitBinaryFilter(plan: BinaryQueryPlan, lookup: FieldLookup, prepared: PreparedValues): string | undefined {
+function collectQueryAccessFields(
+  layout: BinaryRowLayout,
+  lookup: FieldLookup,
+  plan: BinaryQueryPlan
+): readonly BinaryFieldLayout[] {
+  const keys = new Set<string>();
+
+  for (const filter of plan.filters) collectConditionFieldKeys(filter.condition, keys);
+
+  if (plan.aggregate?.key) {
+    keys.add(plan.aggregate.key);
+  } else if (!plan.aggregate) {
+    if (plan.select) {
+      for (const key of plan.select.fields) keys.add(key);
+    } else {
+      for (const field of layout.fields) keys.add(field.key);
+    }
+  }
+
+  return layout.fields.filter((field) => keys.has(field.key) && lookup.fields.has(field.key));
+}
+
+function collectConditionFieldKeys(condition: QueryConditionNode, keys: Set<string>): void {
+  switch (condition.kind) {
+    case "compare":
+      if (condition.left.kind === "field") keys.add(condition.left.key);
+      if (condition.right.kind === "field") keys.add(condition.right.key);
+      return;
+    case "logical":
+      collectConditionFieldKeys(condition.left, keys);
+      collectConditionFieldKeys(condition.right, keys);
+      return;
+    case "not":
+      collectConditionFieldKeys(condition.inner, keys);
+      return;
+  }
+}
+
+function filtersReadField(filters: readonly QueryFilterNode[], key: string): boolean {
+  const keys = new Set<string>();
+
+  for (const filter of filters) collectConditionFieldKeys(filter.condition, keys);
+  return keys.has(key);
+}
+
+function emitBinaryFilter(
+  plan: BinaryQueryPlan,
+  lookup: FieldLookup,
+  prepared: PreparedValues,
+  comparableOverrides?: ReadonlyMap<string, string>
+): string | undefined {
   if (plan.filters.length === 0) return undefined;
-  return plan.filters.map((filter) => emitCondition(filter.condition, lookup, prepared)).join(" && ");
+  return plan.filters
+    .map((filter) => emitCondition(filter.condition, lookup, prepared, comparableOverrides))
+    .join(" && ");
 }
 
 function emitBinaryArrayQuery(
   writer: CodeWriter,
   layout: BinaryRowLayout,
   plan: BinaryQueryPlan,
-  condition: string | undefined
+  condition: string | undefined,
+  accessedFields: readonly BinaryFieldLayout[]
 ): void {
   writer.line("const out = new Array(len);");
   writer.line("let j = 0;");
-  writer.line("let o = 0;");
+  emitRowCursorDeclarations(writer, accessedFields);
   writer.line("for (let i = 0; i < len; i++) {");
   writer.indent(() => {
     const accepted = () => {
@@ -893,7 +1230,7 @@ function emitBinaryArrayQuery(
     } else {
       accepted();
     }
-    writer.line(`o += ${layout.rowSize};`);
+    emitRowCursorAdvance(writer, layout, accessedFields);
   });
   writer.line("}");
   writer.line("out.length = j;");
@@ -905,7 +1242,9 @@ function emitBinaryAggregateQuery(
   layout: BinaryRowLayout,
   lookup: FieldLookup,
   plan: BinaryQueryPlan,
-  condition: string | undefined
+  condition: string | undefined,
+  accessedFields: readonly BinaryFieldLayout[],
+  cacheAggregateValue: boolean
 ): void {
   const aggregate = plan.aggregate;
 
@@ -924,11 +1263,11 @@ function emitBinaryAggregateQuery(
 
   if (aggregate.op === "count") {
     writer.line("let acc = 0;");
-    writer.line("let o = 0;");
+    emitRowCursorDeclarations(writer, accessedFields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
       accepted(() => writer.line("acc++;"));
-      writer.line(`o += ${layout.rowSize};`);
+      emitRowCursorAdvance(writer, layout, accessedFields);
     });
     writer.line("}");
     writer.line("return acc;");
@@ -940,17 +1279,22 @@ function emitBinaryAggregateQuery(
     throw new JITError("INVALID_QUERY", `binary query ${aggregate.op} expects a numeric field`);
   }
 
-  const value = emitFieldComparable(field);
+  const rawValue = emitFieldComparable(field);
+  const value = cacheAggregateValue ? "v" : rawValue;
   const present = field.guard ? `${emitGuardState(field)} === 2` : "true";
 
   switch (aggregate.op) {
     case "sum":
       writer.line("let acc = 0;");
-      writer.line("let o = 0;");
+      emitRowCursorDeclarations(writer, accessedFields);
       writer.line("for (let i = 0; i < len; i++) {");
       writer.indent(() => {
-        accepted(() => writer.line(`if (${present}) acc += ${value};`));
-        writer.line(`o += ${layout.rowSize};`);
+        if (cacheAggregateValue) writer.line(`const v = ${rawValue};`);
+        const shouldAdd = condition ? (field.guard ? `(${condition}) && ${present}` : condition) : present;
+
+        if (shouldAdd === "true") writer.line(`acc += ${value};`);
+        else writer.line(`acc += (${shouldAdd}) ? ${value} : 0;`);
+        emitRowCursorAdvance(writer, layout, accessedFields);
       });
       writer.line("}");
       writer.line("return acc;");
@@ -958,9 +1302,10 @@ function emitBinaryAggregateQuery(
     case "avg":
       writer.line("let acc = 0;");
       writer.line("let n = 0;");
-      writer.line("let o = 0;");
+      emitRowCursorDeclarations(writer, accessedFields);
       writer.line("for (let i = 0; i < len; i++) {");
       writer.indent(() => {
+        if (cacheAggregateValue) writer.line(`const v = ${rawValue};`);
         accepted(() => {
           writer.line(`if (${present}) {`);
           writer.indent(() => {
@@ -969,7 +1314,7 @@ function emitBinaryAggregateQuery(
           });
           writer.line("}");
         });
-        writer.line(`o += ${layout.rowSize};`);
+        emitRowCursorAdvance(writer, layout, accessedFields);
       });
       writer.line("}");
       writer.line("return n === 0 ? undefined : acc / n;");
@@ -979,18 +1324,19 @@ function emitBinaryAggregateQuery(
       const op = aggregate.op === "min" ? "<" : ">";
 
       writer.line("let acc;");
-      writer.line("let o = 0;");
+      emitRowCursorDeclarations(writer, accessedFields);
       writer.line("for (let i = 0; i < len; i++) {");
       writer.indent(() => {
+        if (cacheAggregateValue) writer.line(`const v = ${rawValue};`);
         accepted(() => {
           writer.line(`if (${present}) {`);
           writer.indent(() => {
-            writer.line(`const v = ${value};`);
-            writer.line(`if (acc === undefined || v ${op} acc) acc = v;`);
+            writer.line(`const candidate = ${value};`);
+            writer.line(`if (acc === undefined || candidate ${op} acc) acc = candidate;`);
           });
           writer.line("}");
         });
-        writer.line(`o += ${layout.rowSize};`);
+        emitRowCursorAdvance(writer, layout, accessedFields);
       });
       writer.line("}");
       writer.line("return acc;");
@@ -999,18 +1345,24 @@ function emitBinaryAggregateQuery(
   }
 }
 
-function emitCondition(condition: QueryConditionNode, lookup: FieldLookup, prepared: PreparedValues): string {
+function emitCondition(
+  condition: QueryConditionNode,
+  lookup: FieldLookup,
+  prepared: PreparedValues,
+  comparableOverrides?: ReadonlyMap<string, string>
+): string {
   switch (condition.kind) {
     case "compare":
-      return emitCompare(condition.left, condition.op, condition.right, lookup, prepared);
+      return emitCompare(condition.left, condition.op, condition.right, lookup, prepared, comparableOverrides);
     case "logical":
-      return `(${emitCondition(condition.left, lookup, prepared)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition(
+      return `(${emitCondition(condition.left, lookup, prepared, comparableOverrides)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition(
         condition.right,
         lookup,
-        prepared
+        prepared,
+        comparableOverrides
       )})`;
     case "not":
-      return `!(${emitCondition(condition.inner, lookup, prepared)})`;
+      return `!(${emitCondition(condition.inner, lookup, prepared, comparableOverrides)})`;
   }
 }
 
@@ -1019,18 +1371,19 @@ function emitCompare(
   op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte",
   right: QueryValueNode,
   lookup: FieldLookup,
-  prepared: PreparedValues
+  prepared: PreparedValues,
+  comparableOverrides?: ReadonlyMap<string, string>
 ): string {
   if (left.kind === "field") {
     const field = expectField(lookup, left.key);
 
-    return emitFieldCompare(field, op, right, prepared);
+    return emitFieldCompare(field, op, right, prepared, comparableOverrides?.get(left.key));
   }
 
   if (right.kind === "field") {
     const field = expectField(lookup, right.key);
 
-    return emitFieldCompare(field, reverseCompare(op), left, prepared);
+    return emitFieldCompare(field, reverseCompare(op), left, prepared, comparableOverrides?.get(right.key));
   }
 
   throw new JITError("INVALID_QUERY", "binary rowset comparisons require at least one field operand");
@@ -1040,9 +1393,10 @@ function emitFieldCompare(
   field: BinaryFieldLayout,
   op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte",
   value: QueryValueNode,
-  prepared: PreparedValues
+  prepared: PreparedValues,
+  comparableOverride?: string
 ): string {
-  const comparable = wrapComparable(field, emitFieldComparable(field));
+  const comparable = comparableOverride ?? emitFieldComparable(field);
   const valueExpr = prepared.valueFor(field, value);
   const equality =
     field.guard === undefined
@@ -1062,10 +1416,6 @@ function emitFieldCompare(
   const operator = op === "gt" ? ">" : op === "gte" ? ">=" : op === "lt" ? "<" : "<=";
 
   return `(${present}${comparable} ${operator} ${valueExpr})`;
-}
-
-function wrapComparable(field: BinaryFieldLayout, expr: string): string {
-  return field.kind === "boolean" ? `(${expr})` : expr;
 }
 
 function expectField(lookup: FieldLookup, key: string): BinaryFieldLayout {
@@ -1112,6 +1462,19 @@ class PreparedValues {
   }
 
   valueFor(field: BinaryFieldLayout, value: QueryValueNode): string {
+    if (field.kind === "boolean") {
+      const raw = this.rawFor(value);
+      const key = `boolean:${raw}`;
+      const existing = this.#prepared.get(key);
+
+      if (existing) return existing;
+      const name = `p${this.#prepared.size}`;
+
+      this.#writer.line(`const ${name} = ${raw} === true ? 1 : ${raw} === false ? 0 : -1;`);
+      this.#prepared.set(key, name);
+      return name;
+    }
+
     if (field.kind === "date") {
       const raw = this.rawFor(value);
       const key = `date:${raw}`;

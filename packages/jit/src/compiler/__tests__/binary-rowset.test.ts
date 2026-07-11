@@ -18,21 +18,81 @@ describe("binary rowsets", () => {
   ];
 
   it("loads flat objects into compact rows and hydrates them back", () => {
-    const binary = Users.binary({ strategy: "exact" });
+    const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
     const rowset = binary.load(rows);
 
     expect(rowset.__jitBinaryRowSet).toBe(true);
     expect(rowset.count).toBe(rows.length);
     expect(rowset.bytes.byteLength).toBe(rowset.layout.rowSize * rows.length);
     expect(rowset.layout.fields.map((field) => [field.key, field.kind, field.offset])).toEqual([
-      ["id", "int32", 1],
-      ["name", "string", 5],
-      ["role", "literalUnion", 9],
-      ["active", "boolean", 10],
-      ["score", "float32", 11],
-      ["note", "string", 15],
+      ["id", "int32", 4],
+      ["name", "string", 8],
+      ["role", "literalUnion", 1],
+      ["active", "boolean", 2],
+      ["score", "float32", 12],
+      ["note", "string", 16],
     ]);
+    expect(rowset.layout).toMatchObject({
+      rowSize: 20,
+      maskBytes: 1,
+      alignment: 4,
+      paddingBytes: 1,
+      memoryLayout: "aligned",
+    });
+    expect(rowset.int32).toBeInstanceOf(Int32Array);
+    expect(rowset.uint32).toBeInstanceOf(Uint32Array);
+    expect(rowset.float32).toBeInstanceOf(Float32Array);
+    expect(rowset.float64.byteLength).toBe(0);
     expect(rowset.hydrate()).toEqual(rows);
+  });
+
+  it("keeps mixed rows packed in auto mode and uses typed views when already aligned", () => {
+    const packed = Users.binary({ strategy: "exact" });
+    const naturallyAligned = JIT.array(JIT.object({ id: JIT.number().int32(), score: JIT.number().float32() })).binary({
+      strategy: "exact",
+    });
+
+    expect(packed.layout).toMatchObject({ rowSize: 19, paddingBytes: 0, alignment: 1, memoryLayout: "packed" });
+    expect(packed.layout.fields.map((field) => field.access)).toContain("dataView");
+    expect(naturallyAligned.layout).toMatchObject({
+      rowSize: 8,
+      paddingBytes: 0,
+      alignment: 4,
+      memoryLayout: "aligned",
+    });
+    expect(naturallyAligned.layout.fields.map((field) => field.access)).toEqual(["int32", "float32"]);
+  });
+
+  it("naturally aligns 64-bit fields and rejects misaligned caller memory", () => {
+    const Events = JIT.array(
+      JIT.object({
+        present: JIT.boolean().optional(),
+        sequence: JIT.number().int32(),
+        createdAt: JIT.date(),
+        total: JIT.bigint(),
+      })
+    );
+    const binary = Events.binary({ strategy: "exact", memoryLayout: "aligned" });
+    const rowset = binary.load([{ present: true, sequence: 7, createdAt: new Date(1_700_000_000_000), total: 42n }]);
+
+    expect(binary.layout.fields.map((field) => [field.key, field.offset])).toEqual([
+      ["present", 1],
+      ["sequence", 4],
+      ["createdAt", 8],
+      ["total", 16],
+    ]);
+    expect(binary.layout).toMatchObject({ rowSize: 24, alignment: 8, paddingBytes: 2 });
+    expect(rowset.float64).toBeInstanceOf(Float64Array);
+    expect(rowset.bigint64).toBeInstanceOf(BigInt64Array);
+    expect(rowset.hydrate()).toEqual([
+      { present: true, sequence: 7, createdAt: new Date(1_700_000_000_000), total: 42n },
+    ]);
+
+    const misaligned = new Uint8Array(new ArrayBuffer(128), 1, 96);
+
+    expect(() => Events.binary({ strategy: "static", memoryLayout: "aligned", buffer: misaligned })).toThrow(
+      /aligned to 8 bytes/
+    );
   });
 
   it("supports dynamic, static, and exact allocation strategies", () => {
@@ -47,15 +107,23 @@ describe("binary rowsets", () => {
 
     expect(exact.capacity).toBe(2);
     expect(exact.bytes.byteLength).toBe(exact.layout.rowSize * 2);
+    expect(Object.keys(first)).toEqual(Object.keys(exact));
 
     const fixed = Users.binary({ strategy: "static", capacity: 2 });
 
     expect(fixed.load(rows.slice(0, 2)).capacity).toBe(2);
     expect(() => fixed.load(rows)).toThrow(RangeError);
+
+    const shape = Object.keys(first);
+
+    first.release();
+    expect(Object.keys(first)).toEqual(shape);
+    expect(first.bytes.byteLength).toBe(0);
+    expect(first.int32.byteLength).toBe(0);
   });
 
   it("queries rowsets directly from byte offsets", () => {
-    const binary = Users.binary({ strategy: "exact" });
+    const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
     const rowset = binary.load(rows);
     const findAdmins = JIT.query(rowset)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
@@ -69,7 +137,7 @@ describe("binary rowsets", () => {
   });
 
   it("handles params and numeric aggregates without hydrating rows", () => {
-    const binary = Users.binary({ strategy: "exact" });
+    const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
     const rowset = binary.load(rows);
     const total = JIT.query(rowset)
       .params({ active: JIT.boolean() })
@@ -135,7 +203,7 @@ describe("binary rowsets", () => {
   });
 
   it("emits deterministic loader, hydrator, and byte-query source", () => {
-    const binary = Users.binary({ strategy: "exact" });
+    const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
     const source = Compiler.emitBinaryQuerySource(binary.layout, {
       nodes: [
         {
@@ -155,7 +223,38 @@ describe("binary rowsets", () => {
     expect(Compiler.emitBinaryRowSetWriterSource(binary.layout)).toContain("function writeRows");
     expect(Compiler.emitBinaryHydrateSource(binary.layout)).toContain("function hydrate");
     expect(source).toContain('const p0 = d1.ids.get("admin");');
-    expect(source).toContain("u8[o + 9] === p0");
+    expect(source).toContain("u8[o + 1] === p0");
+    expect(source).toContain("int32[w + 1]");
+    expect(source).toContain("uint32[w + 2]");
+    expect(source).not.toContain("rowset.view");
+    expect(source).not.toContain("d2 =");
     expect(source).not.toContain("item.role");
+  });
+
+  it("emits only typed views and dictionaries touched by a query", () => {
+    const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
+    const source = Compiler.emitBinaryQuerySource(binary.layout, {
+      nodes: [
+        {
+          kind: "filter",
+          condition: {
+            kind: "compare",
+            op: "eq",
+            left: { kind: "field", key: "role" },
+            right: { kind: "literal", value: "admin" },
+          },
+        },
+        { kind: "aggregate", op: "count" },
+      ],
+      bindings: [],
+    });
+
+    expect(source).toContain("const u8 = rowset.bytes;");
+    expect(source).toContain("const d1 = dictionaries[1];");
+    expect(source).not.toContain("rowset.int32");
+    expect(source).not.toContain("rowset.uint32");
+    expect(source).not.toContain("rowset.float32");
+    expect(source).not.toContain("d0 =");
+    expect(source).not.toContain("d2 =");
   });
 });
