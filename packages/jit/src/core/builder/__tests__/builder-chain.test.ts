@@ -91,6 +91,37 @@ describe("Builder chain", () => {
       expect(assertInvalidNumberBuilder).toBeTypeOf("function");
     });
 
+    it("keeps pick name-only and partial/required selectable by field", () => {
+      const User = JIT.object({
+        id: JIT.number(),
+        name: JIT.string(),
+        email: JIT.string(),
+      });
+      const PartialName = User.partial("name");
+      const RequiredName = PartialName.required("name");
+      const Picked = User.pick("id", "name");
+      const assertInvalidShapeMask = () => {
+        // @ts-expect-error pick accepts field names, not `{ field: true }` masks
+        User.pick({ id: true });
+      };
+
+      expect(PartialName.schema.def.props.id.type).toBe(AST.TypeName.number);
+      expect(PartialName.schema.def.props.name.type).toBe(AST.TypeName.optional);
+      expect(RequiredName.schema.def.props.name.type).toBe(AST.TypeName.string);
+      expect(Object.keys(Picked.schema.def.props)).toEqual(["id", "name"]);
+      expectTypeOf<AST.Infer<typeof PartialName>>().toEqualTypeOf<{
+        id: number;
+        name: string | undefined;
+        email: string;
+      }>();
+      expectTypeOf<AST.Infer<typeof RequiredName>>().toEqualTypeOf<{
+        id: number;
+        name: string;
+        email: string;
+      }>();
+      expect(assertInvalidShapeMask).toBeTypeOf("function");
+    });
+
     it("wraps transform, refine, and coerce operators without mutating inputs", () => {
       const User = JIT.object({
         id: JIT.number(),
@@ -145,6 +176,19 @@ describe("Builder chain", () => {
       }>();
       expectTypeOf<Builder.Strict<typeof ValidObjectDefault, { name: "Ana"; role: "admin" }>>().toEqualTypeOf<never>();
       expect(assertInvalidDefaults).toBeTypeOf("function");
+    });
+
+    it("rejects invalid literal format patterns", () => {
+      const Formatted = JIT.string().format("(##) #####-####");
+      const assertInvalidFormats = () => {
+        // @ts-expect-error format patterns must contain at least one # placeholder
+        JIT.string().format("phone");
+        // @ts-expect-error format patterns only allow mask characters
+        JIT.string().format("##:##");
+      };
+
+      expect(Formatted.schema.type).toBe(AST.TypeName.string);
+      expect(assertInvalidFormats).toBeTypeOf("function");
     });
   });
 });

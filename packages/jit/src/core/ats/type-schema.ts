@@ -113,6 +113,16 @@ export type NumberCheck =
   | SchemaCheck<"float32">
   | SchemaCheck<"float64">;
 
+export type TemporalUnit = "minute" | "second" | "millisecond";
+
+export type DateLikeCheck =
+  | SchemaCheck<"min", Date | string>
+  | SchemaCheck<"max", Date | string>
+  | SchemaCheck<"between", { readonly min: Date | string; readonly max: Date | string }>
+  | SchemaCheck<"daysOfWeek", readonly number[]>
+  | SchemaCheck<"monthsOfYear", readonly number[]>
+  | SchemaCheck<"truncateTo", TemporalUnit>;
+
 export type ArrayCheck =
   | SchemaCheck<"min", number>
   | SchemaCheck<"max", number>
@@ -208,7 +218,11 @@ export type BooleanSchema = BaseSchema<boolean, "boolean", CoercibleDef>;
 export type UndefinedSchema = BaseSchema<undefined, "undefined", EmptyDef>;
 export type SymbolSchema = BaseSchema<symbol, "symbol", EmptyDef>;
 export type BigIntSchema = BaseSchema<bigint, "bigint", CoercibleDef>;
-export type DateSchema = BaseSchema<Date, "date", CoercibleDef>;
+export type DateSchema<TChecks extends readonly DateLikeCheck[] = readonly DateLikeCheck[]> = BaseSchema<
+  Date,
+  "date",
+  CoercibleDef & ChecksDef<DateLikeCheck, TChecks>
+>;
 export type RegexSchema = BaseSchema<RegExp, "regex", EmptyDef>;
 export type FileSchema = BaseSchema<File, "file", EmptyDef>;
 
@@ -318,11 +332,17 @@ export interface BinaryDef<TLeft extends AnyTypeSchema = AnyTypeSchema, TRight e
   readonly right: TRight;
 }
 
-export type AnyCompositionSchema = UnionSchema | IntersectionSchema | DiscriminatedUnionSchema;
+export type AnyCompositionSchema = UnionSchema | XorSchema | IntersectionSchema | DiscriminatedUnionSchema;
 
 export type UnionSchema<TOptions extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[]> = BaseSchema<
   InferSchema<TOptions[number]>,
   "union",
+  OptionsDef<TOptions>
+>;
+
+export type XorSchema<TOptions extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[]> = BaseSchema<
+  InferSchema<TOptions[number]>,
+  "xor",
   OptionsDef<TOptions>
 >;
 
@@ -363,7 +383,8 @@ export type AnyWrapperSchema =
   | BrandSchema
   | TransformSchema
   | PipeSchema
-  | LazySchema;
+  | LazySchema
+  | WhenSchema;
 
 export type OptionalSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
   InferSchema<TInner> | undefined,
@@ -471,6 +492,23 @@ export type LazySchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchem
   LazyDef<TInner>
 >;
 
+export type WhenMatcher<TContextValue = unknown> = TContextValue | ((value: TContextValue) => boolean);
+
+export interface WhenDef<
+  TThen extends AnyTypeSchema = AnyTypeSchema,
+  TOtherwise extends AnyTypeSchema = AnyTypeSchema,
+> {
+  readonly key: string;
+  readonly is: WhenMatcher;
+  readonly thenType: TThen;
+  readonly otherwiseType: TOtherwise;
+}
+
+export type WhenSchema<
+  TThen extends AnyTypeSchema = AnyTypeSchema,
+  TOtherwise extends AnyTypeSchema = AnyTypeSchema,
+> = BaseSchema<InferSchema<TThen> | InferSchema<TOtherwise>, "when", WhenDef<TThen, TOtherwise>>;
+
 export type AnySpecialSchema =
   | LiteralSchema
   | EnumSchema
@@ -478,6 +516,7 @@ export type AnySpecialSchema =
   | RefineSchema
   | CoerceSchema
   | CustomSchema
+  | NotSchema
   | TemplateLiteralSchema
   | FunctionSchema
   | TemporalSchema
@@ -531,6 +570,8 @@ export interface CustomDef<TOutput = unknown> {
 }
 
 export type CustomSchema<TOutput = unknown> = BaseSchema<TOutput, "custom", CustomDef<TOutput>>;
+
+export type NotSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<unknown, "not", InnerTypeDef<TInner>>;
 
 export type TemplateLiteralInputPart = string | AnyTypeSchema | { readonly schema: AnyTypeSchema };
 
@@ -605,8 +646,12 @@ export type TemporalKind =
   | "plainMonthDay"
   | "duration";
 
-export interface TemporalDef<TKind extends TemporalKind = TemporalKind> {
+export interface TemporalDef<
+  TKind extends TemporalKind = TemporalKind,
+  TChecks extends readonly DateLikeCheck[] = readonly DateLikeCheck[],
+> {
   readonly kind: TKind;
+  readonly checks?: TChecks;
 }
 
 export type TemporalOutput<TKind extends TemporalKind> = TKind extends "instant"
@@ -625,11 +670,10 @@ export type TemporalOutput<TKind extends TemporalKind> = TKind extends "instant"
               ? Temporal.PlainMonthDay
               : Temporal.Duration;
 
-export type TemporalSchema<TKind extends TemporalKind = TemporalKind> = BaseSchema<
-  TemporalOutput<TKind>,
-  "temporal",
-  TemporalDef<TKind>
->;
+export type TemporalSchema<
+  TKind extends TemporalKind = TemporalKind,
+  TChecks extends readonly DateLikeCheck[] = readonly DateLikeCheck[],
+> = BaseSchema<TemporalOutput<TKind>, "temporal", TemporalDef<TKind, TChecks>>;
 
 export interface CodecDef<TInput extends AnyTypeSchema = AnyTypeSchema, TOutput extends AnyTypeSchema = AnyTypeSchema> {
   readonly input: TInput;

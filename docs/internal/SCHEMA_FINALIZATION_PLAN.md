@@ -182,10 +182,14 @@ Tasks:
 - Add `.catchall(schema)` for unknown-key validation and output preservation.
 - Add `.keyof()` returning an enum/literal-key schema.
 - Allow `.pick("id", "name")` and `.omit("secret")` in addition to arrays.
-- Make `.partial()` deep by default.
-- Make `.required()` deep by default.
-- Support path-specific `.partial("theme.color")` and
-  `.required("theme.color")`.
+- Do not support object masks such as `.pick({ id: true })`; field-name
+  selection keeps the object API aligned with `.omit(...)`.
+- `.partial()` with no keys applies to the whole object; `.partial("name")`
+  applies only to selected fields.
+- `.required()` with no keys unwraps all optional fields; `.required("name")`
+  unwraps only selected fields.
+- Path-specific `.partial("theme.color")` and `.required("theme.color")` stay
+  future work and must not be faked by top-level field selection.
 - Ensure `.extend(...)` and `JIT.object({ ...Base.shape, extra: ... })` are
   supported without quadratic chained type cost.
 - Preserve refinements/checks across safe extension paths.
@@ -263,6 +267,10 @@ Tasks:
   - multipleOf/step
 - Date:
   - min/max
+  - between
+  - daysOfWeek using ISO weekday numbers: Mon=1 ... Sun=7
+  - monthsOfYear using calendar month numbers: Jan=1 ... Dec=12
+  - truncateTo for minute/second/millisecond precision
 
 Definition of done:
 
@@ -283,7 +291,15 @@ Tasks:
 - Add `JIT.temporal.plainDateTime()`.
 - Add `JIT.temporal.zonedDateTime()`.
 - Add `JIT.temporal.duration()`.
-- Allow optional constructor binding for polyfill environments.
+- Add min/max/between checks for comparable Temporal values.
+- Add daysOfWeek/monthsOfYear checks where the Temporal type exposes those
+  fields.
+- Add truncateTo for minute/second/millisecond precision. Minute means
+  second, millisecond, microsecond, and nanosecond are all zero.
+- Use the test setup polyfill (`@js-temporal/polyfill`) only for tests; do
+  not bundle a polyfill into runtime or AOT output.
+- Allow optional constructor binding for polyfill environments in a later
+  compatibility phase if native/global Temporal is not enough.
 
 Definition of done:
 
@@ -348,9 +364,15 @@ Implemented in this stage:
   relative issue paths.
 - Builder validator conveniences: `.is`, `.safeParse`, `.parse`,
   `.safeParseAsync`, `.parseAsync`.
-- Yup-compatible `.notRequired()` alias for `.optional()`.
-- Object `.pick({ field: true })` mask overload for conditional validation
-  helpers.
+- Object `.pick(...)` and `.omit(...)` accept field names only, either as
+  arrays or variadic names. Object masks such as `.pick({ field: true })` are
+  intentionally not supported.
+- Object `.partial()` / `.required()` apply to the whole object when no field
+  is passed, and only selected top-level fields when names are passed.
+- Field-level `.where(...)` / `.when(...)` conditionals that branch validation
+  from sibling values while preserving compiled, specialized output.
+- Logical schema operators `.or(...)`, `.and(...)`, `.xor(...)`, `.not()` plus
+  `JIT.xor(...)` and `JIT.not(...)` factories.
 - String checks/transforms:
   - `.oneOf([...])`
   - `.noEmpty()` before optional/default guards
@@ -378,6 +400,29 @@ Implemented in this stage:
     `import("jit").Strict<...>`.
 - Generated-source snapshot covering strict checks, masks, `noEmpty`, and
   conditional refinement.
+
+## 2026-07-11 Refinement Update
+
+Refined after API review:
+
+- Removed the object-mask `pick` direction before release. `pick` now mirrors
+  `omit`: use `.pick("id", "name")` or `.pick(["id", "name"])`.
+- Removed `.notRequired()` from the public builder surface. Optionality is
+  expressed by `.optional()`, `.nullable()`, and `.nullish()`.
+- Added object-aware `required()` typing so object `required()` no longer
+  conflicts with field-level `required(message?)` used inside conditional
+  branches.
+- Added Date and Temporal checks:
+  - `.min(value)`
+  - `.max(value)`
+  - `.between(min, max)`
+  - `.daysOfWeek([...])`
+  - `.monthsOfYear([...])`
+  - `.truncateTo("minute" | "second" | "millisecond")`
+- Added strict ISO string tests for `.date()`, `.time({ precision })`, and
+  `.datetime({ offset, local, precision })`.
+- Added generated-source snapshots for conditional fields, logical schemas,
+  and temporal checks.
 
 TypeScript limitation:
 

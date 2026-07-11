@@ -156,7 +156,7 @@ describe("JIT compiler validator", () => {
       message: "Passwords do not match",
       path: ["confirmPassword"],
       when(payload) {
-        return BaseSignup.pick({ password: true, confirmPassword: true }).safeParse(payload.value).success;
+        return BaseSignup.pick("password", "confirmPassword").safeParse(payload.value).success;
       },
     });
     const validate = JIT.validator(Signup);
@@ -175,6 +175,45 @@ describe("JIT compiler validator", () => {
       expect(invalidBase.issues.map((issue) => issue.path)).toEqual(["password", "confirmPassword"]);
       expect(invalidBase.issues.some((issue) => issue.code === "custom")).toBe(false);
     }
+  });
+
+  it("should branch field validation with where/when using sibling values", () => {
+    const Checkout = JIT.object({
+      temDesconto: JIT.boolean(),
+      cupom: JIT.string().where("temDesconto", {
+        is: true,
+        then: (schema) => schema.required("O cupom é obrigatório").min(3),
+        otherwise: (schema) => schema.optional(),
+      }),
+      code: JIT.string().when("temDesconto", {
+        is: (value) => value === true,
+        then: (schema) => schema.required().oneOf(["VIP"] as const),
+        otherwise: (schema) => schema.optional(),
+      }),
+    });
+    const validate = JIT.validator(Checkout);
+
+    expect(validate.is({ temDesconto: false })).toBe(true);
+    expect(validate.is({ temDesconto: true, cupom: "SAVE10", code: "VIP" })).toBe(true);
+    expect(validate.is({ temDesconto: true })).toBe(false);
+    expect(validate.is({ temDesconto: true, cupom: "ok", code: "NOPE" })).toBe(false);
+
+    const missing = validate.safeParse({ temDesconto: true });
+    const skipped = validate.safeParse({ temDesconto: false });
+
+    expect(skipped.success).toBe(true);
+    expect(missing.success).toBe(false);
+    if (!missing.success) {
+      expect(missing.issues.map((issue) => issue.path)).toEqual(["cupom", "code"]);
+      expect(missing.issues[0].code).toBe("expected_string");
+      expect(missing.issues[0].message).toBe("O cupom é obrigatório");
+    }
+
+    expectTypeOf<AST.Infer<typeof Checkout>>().toEqualTypeOf<{
+      temDesconto: boolean;
+      cupom: string | undefined;
+      code: string | undefined;
+    }>();
   });
 
   it("should validate oneOf and strict numeric bounds", () => {
@@ -215,9 +254,50 @@ describe("JIT compiler validator", () => {
     }
   });
 
+  it("should validate ISO date, time, and datetime strings with precision options", () => {
+    const datetime = JIT.string().datetime();
+    const datetimeWithOffset = JIT.string().datetime({ offset: true });
+    const localDatetime = JIT.string().datetime({ local: true });
+    const minuteDatetime = JIT.string().datetime({ precision: -1 });
+    const secondDatetime = JIT.string().datetime({ precision: 0 });
+    const millisecondDatetime = JIT.string().datetime({ precision: 3 });
+    const date = JIT.string().date();
+    const time = JIT.string().time();
+    const minuteTime = JIT.string().time({ precision: -1 });
+    const secondTime = JIT.string().time({ precision: 0 });
+    const millisecondTime = JIT.string().time({ precision: 3 });
+
+    expect(JIT.validator(datetime).is("2020-01-01T06:15Z")).toBe(true);
+    expect(JIT.validator(datetime).is("2020-01-01T06:15:00.123456Z")).toBe(true);
+    expect(JIT.validator(datetime).is("2020-01-01T06:15:00+02:00")).toBe(false);
+    expect(JIT.validator(datetime).is("2020-01-01T06:15:00")).toBe(false);
+    expect(JIT.validator(datetimeWithOffset).is("2020-01-01T06:15:00+02:00")).toBe(true);
+    expect(JIT.validator(datetimeWithOffset).is("2020-01-01T06:15:00+0200")).toBe(false);
+    expect(JIT.validator(localDatetime).is("2020-01-01T06:15")).toBe(true);
+    expect(JIT.validator(minuteDatetime).is("2020-01-01T06:15Z")).toBe(true);
+    expect(JIT.validator(minuteDatetime).is("2020-01-01T06:15:00Z")).toBe(false);
+    expect(JIT.validator(secondDatetime).is("2020-01-01T06:15:00Z")).toBe(true);
+    expect(JIT.validator(secondDatetime).is("2020-01-01T06:15Z")).toBe(false);
+    expect(JIT.validator(millisecondDatetime).is("2020-01-01T06:15:00.123Z")).toBe(true);
+    expect(JIT.validator(millisecondDatetime).is("2020-01-01T06:15:00.12Z")).toBe(false);
+
+    expect(JIT.validator(date).is("2020-01-01")).toBe(true);
+    expect(JIT.validator(date).is("2020-1-1")).toBe(false);
+    expect(JIT.validator(date).is("2020-01-32")).toBe(false);
+    expect(JIT.validator(time).is("03:15")).toBe(true);
+    expect(JIT.validator(time).is("03:15:00.9999999")).toBe(true);
+    expect(JIT.validator(time).is("03:15:00Z")).toBe(false);
+    expect(JIT.validator(minuteTime).is("03:15")).toBe(true);
+    expect(JIT.validator(minuteTime).is("03:15:00")).toBe(false);
+    expect(JIT.validator(secondTime).is("03:15:00")).toBe(true);
+    expect(JIT.validator(secondTime).is("03:15")).toBe(false);
+    expect(JIT.validator(millisecondTime).is("03:15:00.999")).toBe(true);
+    expect(JIT.validator(millisecondTime).is("03:15:00.99")).toBe(false);
+  });
+
   it("should treat empty strings as undefined before optional/default guards", () => {
     const Search = JIT.object({
-      query: JIT.string().noEmpty().notRequired(),
+      query: JIT.string().noEmpty().optional(),
       locale: JIT.string().noEmpty().default("pt-BR"),
       required: JIT.string().noEmpty(),
     });
@@ -408,6 +488,35 @@ describe("JIT compiler validator", () => {
 
     expect(result.success).toBe(true);
     if (result.success && result.data.kind === "msg") expect(result.data.text).toBe("hi");
+  });
+
+  it("should validate builder logical operators or, and, xor, and not", () => {
+    const TextOrPositive = JIT.string().or(JIT.number().positive());
+    const WithName = JIT.object({ name: JIT.string().trim() });
+    const WithId = JIT.object({ id: JIT.number().int() });
+    const Full = WithId.and(WithName);
+    const ExclusiveText = JIT.string().xor(JIT.string().min(2));
+    const NotBlocked = JIT.literal("blocked").not();
+
+    expect(JIT.validator(TextOrPositive).is("ok")).toBe(true);
+    expect(JIT.validator(TextOrPositive).is(1)).toBe(true);
+    expect(JIT.validator(TextOrPositive).is(-1)).toBe(false);
+
+    const parsed = JIT.validator(Full).safeParse({ id: 1, name: "  Ada  " });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({ id: 1, name: "Ada" });
+
+    expect(JIT.validator(ExclusiveText).is("a")).toBe(true);
+    expect(JIT.validator(ExclusiveText).is("ab")).toBe(false);
+    expect(JIT.validator(ExclusiveText).is(1)).toBe(false);
+    expect(JIT.validator(NotBlocked).is("open")).toBe(true);
+    expect(JIT.validator(NotBlocked).is("blocked")).toBe(false);
+
+    const xorFailure = JIT.validator(ExclusiveText).safeParse("ab");
+
+    expect(xorFailure.success).toBe(false);
+    if (!xorFailure.success) expect(xorFailure.issues[0].code).toBe("invalid_xor");
   });
 
   it("should rebuild tuple, set, map, and record outputs under transforms", () => {
@@ -665,6 +774,41 @@ describe("JIT compiler validator", () => {
       expect(failed.success).toBe(false);
       if (!failed.success) expect(failed.issues[0].expected).toBe(expected);
     }
+  });
+
+  it("should validate Date and Temporal calendar bounds and truncation checks", () => {
+    const BusinessDate = JIT.date()
+      .between("2026-07-01T00:00:00.000Z", "2026-07-31T23:59:59.999Z")
+      .daysOfWeek([1, 2, 3, 4, 5])
+      .monthsOfYear([7])
+      .truncateTo("minute");
+    const PlainBusinessDate = JIT.temporal
+      .plainDate()
+      .between("2026-07-01", "2026-07-31")
+      .daysOfWeek([1, 2, 3, 4, 5])
+      .monthsOfYear([7]);
+    const WholeMinute = JIT.temporal.plainTime().min("09:00:00").max("18:00:00").truncateTo("minute");
+    const date = JIT.validator(BusinessDate);
+    const plainDate = JIT.validator(PlainBusinessDate);
+    const wholeMinute = JIT.validator(WholeMinute);
+
+    expect(date.is(new Date("2026-07-06T12:30:00.000Z"))).toBe(true);
+    expect(date.is(new Date("2026-07-04T12:30:00.000Z"))).toBe(false);
+    expect(date.is(new Date("2026-08-03T12:30:00.000Z"))).toBe(false);
+    expect(date.is(new Date("2026-07-06T12:30:01.000Z"))).toBe(false);
+
+    expect(plainDate.is(Temporal.PlainDate.from("2026-07-06"))).toBe(true);
+    expect(plainDate.is(Temporal.PlainDate.from("2026-07-04"))).toBe(false);
+    expect(plainDate.is(Temporal.PlainDate.from("2026-08-03"))).toBe(false);
+
+    expect(wholeMinute.is(Temporal.PlainTime.from("12:30"))).toBe(true);
+    expect(wholeMinute.is(Temporal.PlainTime.from("12:30:01"))).toBe(false);
+    expect(wholeMinute.is(Temporal.PlainTime.from("18:30"))).toBe(false);
+
+    const result = date.safeParse(new Date("2026-07-06T12:30:01.000Z"));
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.issues[0].code).toBe("invalid_precision");
   });
 
   it("should decode and encode bidirectional value codecs", () => {

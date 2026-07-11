@@ -78,6 +78,12 @@ function emitBaseGuard(schema: GuardSchema, value: string): string {
       return `Array.isArray(${value})`;
     case TypeName.union:
       return `(${(schema.def.options as ATS.AnyTypeSchema[]).map((option) => emitSchemaGuard(option, value)).join(" || ")})`;
+    case TypeName.xor:
+      return emitXorGuard(schema, value);
+    case TypeName.not:
+      return `!(${emitSchemaGuard(schema.def.innerType as ATS.AnyTypeSchema, value)})`;
+    case TypeName.when:
+      return `((${emitSchemaGuard(schema.def.thenType as ATS.AnyTypeSchema, value)}) || (${emitSchemaGuard(schema.def.otherwiseType as ATS.AnyTypeSchema, value)}))`;
     case TypeName.discriminatedUnion:
       return emitDiscriminatedUnionGuard(schema, value);
     case TypeName.intersection:
@@ -87,6 +93,14 @@ function emitBaseGuard(schema: GuardSchema, value: string): string {
     default:
       return "true";
   }
+}
+
+function emitXorGuard(schema: GuardSchema, value: string): string {
+  const tests = (schema.def.options as ATS.AnyTypeSchema[]).map((option) => emitSchemaGuard(option, value));
+
+  if (tests.length === 0) return "false";
+
+  return `(${tests.map((test) => `((${test}) ? 1 : 0)`).join(" + ")} === 1)`;
 }
 
 function emitObjectGuard(schema: GuardSchema, value: string): string {

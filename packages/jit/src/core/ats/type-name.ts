@@ -15,6 +15,8 @@ export const TypeName = {
   set: "set",
   tuple: "tuple",
   union: "union",
+  xor: "xor",
+  not: "not",
   record: "record",
   map: "map",
   unknown: "unknown",
@@ -47,6 +49,7 @@ export const TypeName = {
   function: "function",
   temporal: "temporal",
   codec: "codec",
+  when: "when",
 } as const;
 
 export type AnyTypeName = TypeName[keyof TypeName];

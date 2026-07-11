@@ -31,11 +31,15 @@ export function partial<
   TShape extends SchemaShape,
   TUnknownKeys extends ObjectUnknownKeys,
   TCatchall extends AnyTypeSchema | undefined,
->(schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>): ObjectSchema<PartialShape<TShape>, TUnknownKeys, TCatchall> {
+>(
+  schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>,
+  keys?: readonly (keyof TShape)[]
+): ObjectSchema<PartialShape<TShape>, TUnknownKeys, TCatchall> {
   const props: Record<string, AnyTypeSchema> = {};
+  const selected = keys ? new Set<PropertyKey>(keys) : undefined;
 
   for (const key in schema.def.props) {
-    props[key] = optional(schema.def.props[key]);
+    props[key] = selected === undefined || selected.has(key) ? optional(schema.def.props[key]) : schema.def.props[key];
   }
 
   return /* @__PURE__ */ createSchema(
@@ -219,12 +223,16 @@ export function required<
   TShape extends SchemaShape,
   TUnknownKeys extends ObjectUnknownKeys,
   TCatchall extends AnyTypeSchema | undefined,
->(schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>): ObjectSchema<RequiredShape<TShape>, TUnknownKeys, TCatchall> {
+>(
+  schema: ObjectSchema<TShape, TUnknownKeys, TCatchall>,
+  keys?: readonly (keyof TShape)[]
+): ObjectSchema<RequiredShape<TShape>, TUnknownKeys, TCatchall> {
   const props: Record<string, AnyTypeSchema> = {};
+  const selected = keys ? new Set<PropertyKey>(keys) : undefined;
 
   for (const key in schema.def.props) {
     const prop = schema.def.props[key];
-    props[key] = isOptionalSchema(prop) ? prop.def.innerType : prop;
+    props[key] = (selected === undefined || selected.has(key)) && isOptionalSchema(prop) ? prop.def.innerType : prop;
   }
 
   return /* @__PURE__ */ createSchema(

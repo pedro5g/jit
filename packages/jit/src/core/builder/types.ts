@@ -5,6 +5,8 @@ import type {
   BrandSchema,
   CodecSchema,
   CoerceSchema,
+  DateLikeCheck,
+  DateSchema,
   DefaultSchema,
   EnumSchema,
   EnumValuesInput,
@@ -12,9 +14,11 @@ import type {
   FunctionReturn,
   FunctionSchema,
   InferSchema,
+  IntersectionSchema,
   IntSchema,
   LiteralSchema,
   MergeShape,
+  NotSchema,
   NullableSchema,
   NullishSchema,
   NumberCheck,
@@ -35,8 +39,14 @@ import type {
   SchemaShape,
   StringCheck,
   StringSchema,
+  TemporalSchema,
+  TemporalUnit,
   TransformSchema,
   TransformSpec,
+  UnionSchema,
+  WhenMatcher,
+  WhenSchema,
+  XorSchema,
 } from "../ats/index.js";
 import type { EntityHint, HashStrategy, OrderDirection, PropertySelector } from "../hints/index.js";
 import type { SchemaInput } from "./unwrap-schema.js";
@@ -292,6 +302,65 @@ type AppendNumberCheck<TSchema extends AnyTypeSchema, TCheck extends NumberCheck
       ? IntSchema<readonly [...TChecks, TCheck]>
       : TSchema;
 
+type AppendDateLikeCheck<TSchema extends AnyTypeSchema, TCheck extends DateLikeCheck> =
+  TSchema extends DateSchema<infer TChecks>
+    ? DateSchema<readonly [...TChecks, TCheck]>
+    : TSchema extends TemporalSchema<infer TKind, infer TChecks>
+      ? TemporalSchema<TKind, readonly [...TChecks, TCheck]>
+      : TSchema;
+
+type RequiredField<TSchema extends AnyTypeSchema> =
+  TSchema extends OptionalSchema<infer TInner>
+    ? TInner
+    : TSchema extends NullishSchema<infer TInner>
+      ? NullableSchema<TInner>
+      : TSchema extends DefaultSchema<infer TInner>
+        ? TInner
+        : TSchema;
+
+type FormatPatternChar = "#" | " " | "-" | "." | "/" | "(" | ")" | "+";
+
+type HasFormatPlaceholder<TPattern extends string> = TPattern extends `${string}#${string}` ? true : false;
+
+type IsFormatPattern<TPattern extends string> = TPattern extends ""
+  ? true
+  : TPattern extends `${infer THead}${infer TRest}`
+    ? THead extends FormatPatternChar
+      ? IsFormatPattern<TRest>
+      : false
+    : true;
+
+type ValidFormatPattern<TPattern extends string> = string extends TPattern
+  ? TPattern
+  : HasFormatPlaceholder<TPattern> extends true
+    ? IsFormatPattern<TPattern> extends true
+      ? TPattern
+      : never
+    : never;
+
+export interface WhenOptions<
+  TSchema extends AnyTypeSchema,
+  TContextValue = unknown,
+  TThen extends AnyTypeSchema = RequiredField<TSchema>,
+  TOtherwise extends AnyTypeSchema = TSchema,
+> {
+  readonly is: WhenMatcher<TContextValue>;
+  readonly then: (schema: Builder<RequiredField<TSchema>>) => SchemaInput<TThen>;
+  readonly otherwise?: (schema: Builder<TSchema>) => SchemaInput<TOtherwise>;
+}
+
+type PartialKeysShape<TShape extends SchemaShape, TKeys extends keyof TShape> = {
+  readonly [TKey in keyof TShape]: TKey extends TKeys ? OptionalSchema<TShape[TKey]> : TShape[TKey];
+};
+
+type RequiredKeysShape<TShape extends SchemaShape, TKeys extends keyof TShape> = {
+  readonly [TKey in keyof TShape]: TKey extends TKeys
+    ? TShape[TKey] extends OptionalSchema<infer TInner>
+      ? TInner
+      : TShape[TKey]
+    : TShape[TKey];
+};
+
 export interface BuilderCore<TSchema extends AnyTypeSchema> {
   readonly schema: TSchema;
   readonly "~standard": StandardSchemaProps<unknown, InferSchema<TSchema>>;
@@ -301,7 +370,7 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   safeParseAsync(value: unknown): Promise<SafeParseResult<InferSchema<TSchema>>>;
   parseAsync(value: unknown): Promise<InferSchema<TSchema>>;
   optional(): Builder<OptionalSchema<TSchema>>;
-  notRequired(): Builder<OptionalSchema<TSchema>>;
+  required(message?: string): Builder<RequiredField<TSchema>>;
   nullable(): Builder<NullableSchema<TSchema>>;
   nullish(): Builder<NullishSchema<TSchema>>;
   readonly(): Builder<ReadonlySchema<TSchema>>;
@@ -311,6 +380,22 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   ): Builder<DefaultSchema<TSchema>>;
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
   pipe<TOutput>(transform: (value: InferSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
+  or<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<UnionSchema<[TSchema, TRight]>>;
+  and<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<IntersectionSchema<[TSchema, TRight]>>;
+  xor<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<XorSchema<[TSchema, TRight]>>;
+  not(): Builder<NotSchema<TSchema>>;
+  when<
+    const TKey extends string,
+    TContextValue = unknown,
+    TThen extends AnyTypeSchema = RequiredField<TSchema>,
+    TOtherwise extends AnyTypeSchema = TSchema,
+  >(key: TKey, options: WhenOptions<TSchema, TContextValue, TThen, TOtherwise>): Builder<WhenSchema<TThen, TOtherwise>>;
+  where<
+    const TKey extends string,
+    TContextValue = unknown,
+    TThen extends AnyTypeSchema = RequiredField<TSchema>,
+    TOtherwise extends AnyTypeSchema = TSchema,
+  >(key: TKey, options: WhenOptions<TSchema, TContextValue, TThen, TOtherwise>): Builder<WhenSchema<TThen, TOtherwise>>;
   refine(
     predicate: (value: InferSchema<TSchema>) => boolean,
     options?: string | RefineOptions<InferSchema<TSchema>>
@@ -347,7 +432,19 @@ export interface ObjectOperators<
   TCatchall extends AnyTypeSchema | undefined = undefined,
 > {
   partial(): ObjectBuilder<PartialShape<TShape>, TUnknownKeys, TCatchall>;
+  partial<const TKeys extends readonly (keyof TShape)[]>(
+    keys: TKeys
+  ): ObjectBuilder<PartialKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  partial<const TKeys extends readonly (keyof TShape)[]>(
+    ...keys: TKeys
+  ): ObjectBuilder<PartialKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
   required(): ObjectBuilder<RequiredShape<TShape>, TUnknownKeys, TCatchall>;
+  required<const TKeys extends readonly (keyof TShape)[]>(
+    keys: TKeys
+  ): ObjectBuilder<RequiredKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
+  required<const TKeys extends readonly (keyof TShape)[]>(
+    ...keys: TKeys
+  ): ObjectBuilder<RequiredKeysShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
   strict(): ObjectBuilder<TShape, "strict", TCatchall>;
   loose(): ObjectBuilder<TShape, "passthrough", TCatchall>;
   catchall<TCatchallNext extends AnyTypeSchema>(
@@ -357,9 +454,6 @@ export interface ObjectOperators<
   transform<const TSpec extends TransformSpec<InferSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>>>>(
     transforms: TSpec
   ): Builder<TransformSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>, TSpec>>;
-  pick<const TMask extends PickMask<TShape>>(
-    mask: TMask
-  ): ObjectBuilder<PickShape<TShape, Extract<KeysFromMask<TMask>, keyof TShape>>, TUnknownKeys, TCatchall>;
   pick<const TKeys extends readonly (keyof TShape)[]>(
     keys: TKeys
   ): ObjectBuilder<PickShape<TShape, TKeys[number]>, TUnknownKeys, TCatchall>;
@@ -389,14 +483,6 @@ export type UnwrapBuilderShape<TShape extends Record<string, SchemaInput>> = {
     ? TSchema
     : never;
 };
-
-type PickMask<TShape extends SchemaShape> = {
-  readonly [TKey in keyof TShape]?: boolean;
-};
-
-type KeysFromMask<TMask> = {
-  readonly [TKey in keyof TMask]: TMask[TKey] extends true ? TKey : never;
-}[keyof TMask];
 
 export type BaseBuilder<TSchema extends AnyTypeSchema> = BuilderCore<TSchema>;
 
@@ -481,8 +567,8 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
    * Formats parsed strings through a `#` mask. By default non-digits are
    * stripped first, so `.format("###.###.###-##")` accepts raw CPF digits.
    */
-  format(
-    pattern: string,
+  format<const TPattern extends string>(
+    pattern: TPattern & ValidFormatPattern<TPattern>,
     options?: { readonly stripNonDigits?: boolean },
     message?: string
   ): Builder<
@@ -534,19 +620,46 @@ export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
   nonEmpty(message?: string): Builder<TSchema>;
 }
 
+export interface DateLikeCheckMethods<TSchema extends AnyTypeSchema> {
+  min(value: Date | string, message?: string): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"min", Date | string>>>;
+  max(value: Date | string, message?: string): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"max", Date | string>>>;
+  between(
+    min: Date | string,
+    max: Date | string,
+    message?: string
+  ): Builder<
+    AppendDateLikeCheck<TSchema, SchemaCheck<"between", { readonly min: Date | string; readonly max: Date | string }>>
+  >;
+  daysOfWeek(
+    days: readonly number[],
+    message?: string
+  ): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"daysOfWeek", readonly number[]>>>;
+  monthsOfYear(
+    months: readonly number[],
+    message?: string
+  ): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"monthsOfYear", readonly number[]>>>;
+  truncateTo(
+    unit: TemporalUnit,
+    message?: string
+  ): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"truncateTo", TemporalUnit>>>;
+}
+
 type CheckMethods<TSchema extends AnyTypeSchema> = TSchema extends { readonly type: "string" }
   ? StringCheckMethods<TSchema>
   : TSchema extends { readonly type: "number" | "int" }
     ? NumberCheckMethods<TSchema>
     : TSchema extends { readonly type: "array" }
       ? ArrayCheckMethods<TSchema>
-      : unknown;
+      : TSchema extends { readonly type: "date" | "temporal" }
+        ? DateLikeCheckMethods<TSchema>
+        : unknown;
 
 export type ObjectBuilder<
   TShape extends SchemaShape,
   TUnknownKeys extends ObjectUnknownKeys = undefined,
   TCatchall extends AnyTypeSchema | undefined = undefined,
-> = BuilderCore<ObjectSchema<TShape, TUnknownKeys, TCatchall>> & ObjectOperators<TShape, TUnknownKeys, TCatchall>;
+> = Omit<BuilderCore<ObjectSchema<TShape, TUnknownKeys, TCatchall>>, "required"> &
+  ObjectOperators<TShape, TUnknownKeys, TCatchall>;
 
 export type FunctionBuilder<
   TInput extends readonly AnyTypeSchema[],

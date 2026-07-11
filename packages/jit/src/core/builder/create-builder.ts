@@ -4,6 +4,7 @@ import * as Transform from "../../transforms/index.js";
 import {
   type AnyTypeSchema,
   type CodecSchema,
+  createSchema,
   type FunctionSchema,
   type ObjectSchema,
   type SchemaShape,
@@ -42,8 +43,8 @@ const baseBuilderPrototype = {
     return createBuilder(Transform.optional(this.schema));
   },
 
-  notRequired(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.optional(this.schema));
+  required(this: RuntimeBuilder, message?: string): AnyBuilder {
+    return createBuilder(requiredFieldSchema(this.schema, message));
   },
 
   nullable(this: RuntimeBuilder): AnyBuilder {
@@ -72,6 +73,62 @@ const baseBuilderPrototype = {
 
   pipe(this: RuntimeBuilder, transform: (value: unknown) => unknown): AnyBuilder {
     return createBuilder(Transform.pipe(this.schema, transform));
+  },
+
+  or(this: RuntimeBuilder, right: SchemaInput): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.union, {
+        options: [this.schema, unwrapSchema(right)],
+      })
+    );
+  },
+
+  and(this: RuntimeBuilder, right: SchemaInput): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.intersection, {
+        options: [this.schema, unwrapSchema(right)],
+      })
+    );
+  },
+
+  xor(this: RuntimeBuilder, right: SchemaInput): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.xor, {
+        options: [this.schema, unwrapSchema(right)],
+      })
+    );
+  },
+
+  not(this: RuntimeBuilder): AnyBuilder {
+    return createBuilder(
+      createSchema(TypeName.not, {
+        innerType: this.schema,
+      })
+    );
+  },
+
+  when(
+    this: RuntimeBuilder,
+    key: string,
+    options: {
+      readonly is: unknown;
+      readonly then: (schema: AnyBuilder) => SchemaInput;
+      readonly otherwise?: (schema: AnyBuilder) => SchemaInput;
+    }
+  ): AnyBuilder {
+    return createConditionalBuilder(this.schema, key, options);
+  },
+
+  where(
+    this: RuntimeBuilder,
+    key: string,
+    options: {
+      readonly is: unknown;
+      readonly then: (schema: AnyBuilder) => SchemaInput;
+      readonly otherwise?: (schema: AnyBuilder) => SchemaInput;
+    }
+  ): AnyBuilder {
+    return createConditionalBuilder(this.schema, key, options);
   },
 
   refine(
@@ -221,6 +278,22 @@ const baseBuilderPrototype = {
 
   max(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "max", value, message }));
+  },
+
+  between(this: RuntimeBuilder, min: unknown, max: unknown, message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "between", value: { min, max }, message }));
+  },
+
+  daysOfWeek(this: RuntimeBuilder, value: readonly number[], message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "daysOfWeek", value, message }));
+  },
+
+  monthsOfYear(this: RuntimeBuilder, value: readonly number[], message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "monthsOfYear", value, message }));
+  },
+
+  truncateTo(this: RuntimeBuilder, value: "minute" | "second" | "millisecond", message?: string): AnyBuilder {
+    return createBuilder(appendCheck(this.schema, { kind: "truncateTo", value, message }));
   },
 
   length(this: RuntimeBuilder, value: number, message?: string): AnyBuilder {
@@ -501,27 +574,76 @@ function appendCheck(
   } as AnyTypeSchema;
 }
 
+function requiredFieldSchema(schema: AnyTypeSchema, message?: string): AnyTypeSchema {
+  let required = schema;
+
+  if (schema.type === TypeName.optional || schema.type === TypeName.default) {
+    required = (schema.def as { readonly innerType: AnyTypeSchema }).innerType;
+  } else if (schema.type === TypeName.nullish) {
+    required = Transform.nullable((schema.def as { readonly innerType: AnyTypeSchema }).innerType);
+  }
+
+  if (message === undefined) return required;
+
+  return {
+    ...required,
+    def: { ...(required.def as object), requiredMessage: message },
+  } as AnyTypeSchema;
+}
+
+function createConditionalBuilder(
+  schema: AnyTypeSchema,
+  key: string,
+  options: {
+    readonly is: unknown;
+    readonly then: (schema: AnyBuilder) => SchemaInput;
+    readonly otherwise?: (schema: AnyBuilder) => SchemaInput;
+  }
+): AnyBuilder {
+  const requiredBuilder = createBuilder(requiredFieldSchema(schema));
+  const baseBuilder = createBuilder(schema);
+
+  return createBuilder(
+    createSchema(TypeName.when, {
+      key,
+      is: options.is,
+      thenType: unwrapSchema(options.then(requiredBuilder)),
+      otherwiseType: unwrapSchema(options.otherwise ? options.otherwise(baseBuilder) : baseBuilder),
+    })
+  );
+}
+
 const objectBuilderPrototype = {
   ...baseBuilderPrototype,
 
-  partial(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.partial(this.schema as ObjectSchema<SchemaShape>));
+  partial(this: RuntimeBuilder, first?: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    const keys = first === undefined ? undefined : normalizeKeys(first, rest);
+
+    return createBuilder(
+      Transform.partial(this.schema as ObjectSchema<SchemaShape>, keys as readonly never[])
+    ) as AnyBuilder;
   },
 
-  required(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.required(this.schema as ObjectSchema<SchemaShape>));
+  required(this: RuntimeBuilder, first?: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    const keys = first === undefined ? undefined : normalizeKeys(first, rest);
+
+    return createBuilder(
+      Transform.required(this.schema as ObjectSchema<SchemaShape>, keys as readonly never[])
+    ) as AnyBuilder;
   },
 
   strict(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.strict(this.schema as ObjectSchema<SchemaShape>));
+    return createBuilder(Transform.strict(this.schema as ObjectSchema<SchemaShape>)) as AnyBuilder;
   },
 
   loose(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(Transform.loose(this.schema as ObjectSchema<SchemaShape>));
+    return createBuilder(Transform.loose(this.schema as ObjectSchema<SchemaShape>)) as AnyBuilder;
   },
 
   catchall(this: RuntimeBuilder, schema: SchemaInput): AnyBuilder {
-    return createBuilder(Transform.catchall(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(schema)));
+    return createBuilder(
+      Transform.catchall(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(schema))
+    ) as AnyBuilder;
   },
 
   keyof(this: RuntimeBuilder): AnyBuilder {
@@ -535,20 +657,16 @@ const objectBuilderPrototype = {
     return createBuilder(Transform.transform(this.schema as ObjectSchema<SchemaShape>, transforms));
   },
 
-  pick(
-    this: RuntimeBuilder,
-    first: readonly string[] | string | Record<string, boolean>,
-    ...rest: readonly string[]
-  ): AnyBuilder {
-    return createBuilder(Transform.pick(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
+  pick(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    return createBuilder(
+      Transform.pick(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest))
+    ) as AnyBuilder;
   },
 
-  omit(
-    this: RuntimeBuilder,
-    first: readonly string[] | string | Record<string, boolean>,
-    ...rest: readonly string[]
-  ): AnyBuilder {
-    return createBuilder(Transform.omit(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest)));
+  omit(this: RuntimeBuilder, first: readonly string[] | string, ...rest: readonly string[]): AnyBuilder {
+    return createBuilder(
+      Transform.omit(this.schema as ObjectSchema<SchemaShape>, normalizeKeys(first, rest))
+    ) as AnyBuilder;
   },
 
   extend(this: RuntimeBuilder, extension: Record<string, SchemaInput>): AnyBuilder {
@@ -558,11 +676,11 @@ const objectBuilderPrototype = {
       props[key] = unwrapSchema(extension[key]);
     }
 
-    return createBuilder(Transform.extend(this.schema as ObjectSchema<SchemaShape>, props));
+    return createBuilder(Transform.extend(this.schema as ObjectSchema<SchemaShape>, props)) as AnyBuilder;
   },
 
   merge(this: RuntimeBuilder, right: ObjectBuilder<SchemaShape> | ObjectSchema<SchemaShape>): AnyBuilder {
-    return createBuilder(Transform.merge(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(right)));
+    return createBuilder(Transform.merge(this.schema as ObjectSchema<SchemaShape>, unwrapSchema(right))) as AnyBuilder;
   },
 };
 
@@ -625,15 +743,8 @@ function compileFunctionValidators(schema: RuntimeFunctionSchema) {
   };
 }
 
-function normalizeKeys(
-  first: readonly string[] | string | Record<string, boolean>,
-  rest: readonly string[]
-): readonly string[] {
-  if (typeof first === "string") return [first, ...rest];
-  if (Array.isArray(first)) return first;
-  const mask = first as Record<string, boolean>;
-
-  return Object.keys(mask).filter((key) => mask[key] === true);
+function normalizeKeys(first: readonly string[] | string, rest: readonly string[]): readonly string[] {
+  return typeof first === "string" ? [first, ...rest] : first;
 }
 
 function createStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknown> {

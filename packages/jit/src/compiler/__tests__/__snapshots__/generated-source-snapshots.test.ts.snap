@@ -329,18 +329,21 @@ function safeParse(value) {
     let o4 = v3;
     if (!(globalThis.Temporal !== undefined && v3 instanceof globalThis.Temporal.Instant)) {
       issues[issues.length] = { path: "at", code: "invalid_temporal", expected: "Temporal.Instant", message: "expected Temporal.Instant" };
+    } else {
     }
     o4 = v3;
     let v5 = v1.date;
     let o6 = v5;
     if (!(globalThis.Temporal !== undefined && v5 instanceof globalThis.Temporal.PlainDate)) {
       issues[issues.length] = { path: "date", code: "invalid_temporal", expected: "Temporal.PlainDate", message: "expected Temporal.PlainDate" };
+    } else {
     }
     o6 = v5;
     let v7 = v1.duration;
     let o8 = v7;
     if (!(globalThis.Temporal !== undefined && v7 instanceof globalThis.Temporal.Duration)) {
       issues[issues.length] = { path: "duration", code: "invalid_temporal", expected: "Temporal.Duration", message: "expected Temporal.Duration" };
+    } else {
     }
     o8 = v7;
   }
@@ -389,9 +392,200 @@ function safeParse(value) {
   let o7 = v6;
   if (!(v6 instanceof Date) || v6.getTime() !== v6.getTime()) {
     issues[issues.length] = { path: "", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+  } else {
   }
   o7 = v6;
   o2 = o7;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { is: is, safeParse: safeParse };"
+`;
+
+exports[`generated source snapshots > validator: conditional fields, logical schemas, and temporal checks 1`] = `
+"function iu1(value) {
+  let v11 = value;
+  if (typeof v11 !== "string") {
+    return false;
+  }
+  return true;
+}
+function iu2(value) {
+  let v13 = value;
+  if (typeof v13 !== "string") {
+    return false;
+  }
+  if (v13.length < 8) {
+    return false;
+  }
+  return true;
+}
+function iu3(value) {
+  let v17 = value;
+  if (v17 !== "blocked") {
+    return false;
+  }
+  return true;
+}
+function pu1(value) {
+  let v12 = value;
+  if (typeof v12 !== "string") {
+    return false;
+  }
+  return true;
+}
+function pu2(value) {
+  let v14 = value;
+  if (typeof v14 !== "string") {
+    return false;
+  }
+  if (v14.length < 8) {
+    return false;
+  }
+  return true;
+}
+function pu3(value) {
+  let v18 = value;
+  if (v18 !== "blocked") {
+    return false;
+  }
+  return true;
+}
+function is(value) {
+  let v1 = value;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    return false;
+  }
+  let v3 = v1.temDesconto;
+  if (typeof v3 !== "boolean") {
+    return false;
+  }
+  if (v1.temDesconto === true) {
+    let v5 = v1.cupom;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    if (v5.length < 3) {
+      return false;
+    }
+  } else {
+    let v7 = v1.cupom;
+    if (v7 !== undefined) {
+      if (typeof v7 !== "string") {
+        return false;
+      }
+    }
+  }
+  let v9 = v1.ref;
+  if ((iu1(v9) ? 1 : 0) + (iu2(v9) ? 1 : 0) !== 1) {
+    return false;
+  }
+  let v15 = v1.status;
+  if (iu3(v15)) {
+    return false;
+  }
+  let v19 = v1.at;
+  if (!(v19 instanceof Date) || v19.getTime() !== v19.getTime()) {
+    return false;
+  }
+  if (v19.getTime() < 1782864000000 || v19.getTime() > 1785542399999) {
+    return false;
+  }
+  if (v19.getSeconds() !== 0 || v19.getMilliseconds() !== 0) {
+    return false;
+  }
+  let v21 = v1.day;
+  if (!(globalThis.Temporal !== undefined && v21 instanceof globalThis.Temporal.PlainDate)) {
+    return false;
+  }
+  if (typeof v21.dayOfWeek !== "number" || (v21.dayOfWeek !== 1 && v21.dayOfWeek !== 2 && v21.dayOfWeek !== 3 && v21.dayOfWeek !== 4 && v21.dayOfWeek !== 5)) {
+    return false;
+  }
+  if (typeof v21.month !== "number" || (v21.month !== 7)) {
+    return false;
+  }
+  return true;
+}
+function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v3 = v1.temDesconto;
+    let o4 = v3;
+    if (typeof v3 !== "boolean") {
+      issues[issues.length] = { path: "temDesconto", code: "expected_boolean", expected: "boolean", message: "expected boolean" };
+    }
+    o4 = v3;
+    let w5;
+    if (v1.temDesconto === true) {
+      let v6 = v1.cupom;
+      let o7 = v6;
+      if (typeof v6 !== "string") {
+        issues[issues.length] = { path: "cupom", code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
+      } else {
+        if (v6.length < 3) {
+          issues[issues.length] = { path: "cupom", code: "too_small", expected: "length >= 3", message: "expected at least 3 characters" };
+        }
+      }
+      o7 = v6;
+      w5 = o7;
+    } else {
+      let v8 = v1.cupom;
+      let o9 = v8;
+      if (v8 !== undefined) {
+        if (typeof v8 !== "string") {
+          issues[issues.length] = { path: "cupom", code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
+        } else {
+        }
+        o9 = v8;
+      }
+      w5 = o9;
+    }
+    let v10 = v1.ref;
+    let o11 = v10;
+    if ((pu1(v10) ? 1 : 0) + (pu2(v10) ? 1 : 0) !== 1) {
+      issues[issues.length] = { path: "ref", code: "invalid_xor", expected: "exactly one schema", message: "value must match exactly one schema" };
+    }
+    o11 = v10;
+    let v16 = v1.status;
+    let o17 = v16;
+    if (pu3(v16)) {
+      issues[issues.length] = { path: "status", code: "invalid_not", expected: "not", message: "value matched a forbidden schema" };
+    }
+    o17 = v16;
+    let v20 = v1.at;
+    let o21 = v20;
+    if (!(v20 instanceof Date) || v20.getTime() !== v20.getTime()) {
+      issues[issues.length] = { path: "at", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+    } else {
+      if (v20.getTime() < 1782864000000 || v20.getTime() > 1785542399999) {
+        issues[issues.length] = { path: "at", code: "out_of_range", expected: "2026-07-01T00:00:00.000Z..2026-07-31T23:59:59.999Z", message: "expected a value between 2026-07-01T00:00:00.000Z and 2026-07-31T23:59:59.999Z" };
+      }
+      if (v20.getSeconds() !== 0 || v20.getMilliseconds() !== 0) {
+        issues[issues.length] = { path: "at", code: "invalid_precision", expected: "minute", message: "expected value truncated to minute" };
+      }
+    }
+    o21 = v20;
+    let v22 = v1.day;
+    let o23 = v22;
+    if (!(globalThis.Temporal !== undefined && v22 instanceof globalThis.Temporal.PlainDate)) {
+      issues[issues.length] = { path: "day", code: "invalid_temporal", expected: "Temporal.PlainDate", message: "expected Temporal.PlainDate" };
+    } else {
+      if (typeof v22.dayOfWeek !== "number" || (v22.dayOfWeek !== 1 && v22.dayOfWeek !== 2 && v22.dayOfWeek !== 3 && v22.dayOfWeek !== 4 && v22.dayOfWeek !== 5)) {
+        issues[issues.length] = { path: "day", code: "invalid_day_of_week", expected: "1 | 2 | 3 | 4 | 5", message: "expected an allowed day of week" };
+      }
+      if (typeof v22.month !== "number" || (v22.month !== 7)) {
+        issues[issues.length] = { path: "day", code: "invalid_month_of_year", expected: "7", message: "expected an allowed month" };
+      }
+    }
+    o23 = v22;
+  }
+  o2 = v1;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }

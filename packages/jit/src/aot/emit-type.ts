@@ -76,11 +76,16 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
       return `[${items.map(emitTypeScriptType).join(", ")}]`;
     }
     case TypeName.union:
+    case TypeName.xor:
     case TypeName.discriminatedUnion: {
       const options = current.def.options as readonly ATS.AnyTypeSchema[];
 
       return options.map(emitTypeScriptType).join(" | ");
     }
+    case TypeName.not:
+      return "unknown";
+    case TypeName.when:
+      return `${emitTypeScriptType(current.def.thenType as ATS.AnyTypeSchema)} | ${emitTypeScriptType(current.def.otherwiseType as ATS.AnyTypeSchema)}`;
     case TypeName.intersection: {
       const options = current.def.options as readonly ATS.AnyTypeSchema[];
 

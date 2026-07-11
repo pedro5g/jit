@@ -87,13 +87,16 @@ JIT.tuple(A, B)  JIT.object({ ... })
 
 // composition
 JIT.union(A, B, C)                       // variadic
+JIT.xor(A, B)                            // exactly one option must match
+JIT.not(A)                               // reject values matching A
 JIT.discriminatedUnion("kind", [A, B])   // tagged, O(1) dispatch
 JIT.intersection(A, B)
 
 // wrappers (chainable on any builder)
-.optional() .notRequired() .nullable() .nullish() .readonly() .promise()
+.optional() .nullable() .nullish() .readonly() .promise()
 .default(value | () => value) .brand("UserId")
 .refine((v) => v.ok, "custom message") .pipe((v) => transform(v))
+.or(Other) .and(Other) .xor(Other) .not()
 ```
 
 Objects are mutable by default for normal TypeScript ergonomics. Use
@@ -146,6 +149,15 @@ JIT.temporal.zonedDateTime();
 JIT.temporal.plainYearMonth();
 JIT.temporal.plainMonthDay();
 JIT.temporal.duration();
+
+JIT.temporal
+  .plainDate()
+  .between("2026-07-01", "2026-07-31")
+  .daysOfWeek([1, 2, 3, 4, 5]) // ISO: Mon=1 ... Sun=7
+  .monthsOfYear([7]);
+
+JIT.temporal.plainTime().min("09:00:00").max("18:00:00").truncateTo("minute");
+JIT.date().min("2026-01-01").max("2026-12-31").truncateTo("second");
 ```
 
 Value codecs are bidirectional transforms, separate from the binary wire
@@ -174,6 +186,7 @@ JIT.string()
   .regex(/^[a-z]+$/, "lowercase only");
 JIT.number().moreThan(0).lessThan(100).int32("must fit signed int32").float64();
 JIT.array(JIT.string()).nonEmpty("pick at least one tag");
+JIT.date().between("2026-01-01", "2026-12-31");
 ```
 
 Literal defaults are checked against static constraints when TypeScript can see
@@ -209,6 +222,20 @@ const Signup = Credentials.refine(
 );
 ```
 
+Field-level conditionals use sibling values. `where` and `when` are aliases;
+the selected branch is still compiled into direct specialized validation:
+
+```ts
+const Checkout = JIT.object({
+  temDesconto: JIT.boolean(),
+  cupom: JIT.string().where("temDesconto", {
+    is: true,
+    then: (schema) => schema.required("O cupom é obrigatório").min(3),
+    otherwise: (schema) => schema.optional(),
+  }),
+});
+```
+
 ### String formats
 
 All formats compile to a single inlined regex test. The full regex library is
@@ -222,7 +249,9 @@ JIT.string().cuid2().ulid().nanoid().ksuid().xid();
 JIT.string().ipv4().ipv6().cidrv4().mac("-");
 JIT.string().base64().base64url().hex();
 JIT.string().hostname().domain().e164();
-JIT.string().date().time({ precision: 0 }).datetime({ offset: true });
+JIT.string().date(); // YYYY-MM-DD, calendar-valid
+JIT.string().time({ precision: 0 }); // HH:MM:SS
+JIT.string().datetime({ offset: true }); // ISO datetime, allows ±HH:MM
 JIT.string().duration().emoji();
 JIT.string().digest("sha256", "base64url"); // md5..sha512 digests
 ```
@@ -240,6 +269,9 @@ const Contact = JIT.object({
   code: JIT.string().format("##-##"),
 });
 ```
+
+Literal mask patterns are type-checked: they must include at least one `#`
+placeholder and only use supported mask characters.
 
 ### Coercion (zod-style)
 
@@ -270,7 +302,11 @@ JIT.object({...}).hash("ordered")                      // equal short-circuit
 ### Object algebra
 
 ```ts
-Base.pick("id", "name")  Base.omit("secret")  Base.partial()
+Base.pick("id", "name")  Base.omit("secret")
+Base.partial()           // every field optional
+Base.partial("name")     // only selected fields optional
+Base.required()          // every optional field required again
+Base.required("name")    // only selected fields required again
 Base.extend({ tag: JIT.string() })  Base.merge(Other)
 
 const Strict = Base.strict(); // reject unknown keys
