@@ -424,6 +424,70 @@ Refined after API review:
 - Added generated-source snapshots for conditional fields, logical schemas,
   and temporal checks.
 
+## 2026-07-11 Complex Shape And Operator Audit Update
+
+Reviewed against the schema MD and current branch implementation:
+
+- Present and tested from the requested operator set:
+  - `.refine(..., { when, path })`
+  - `.where(...)` / `.when(...)`
+  - `.pick("id", "name")` and `.omit("secret")`
+  - `.partial()` / `.partial("id")`
+  - `.required()` / `.required("id")`
+  - `.or(...)`, `.and(...)`, `.xor(...)`, `.not()`
+  - `.oneOf(...)`, `.noEmpty()`, `.moreThan()`, `.lessThan()`
+  - `.int32()`, `.float32()`, `.float64()`
+  - Date/Temporal `.min()`, `.max()`, `.between()`,
+    `.daysOfWeek()`, `.monthsOfYear()`, `.truncateTo()`
+  - ISO `.date()`, `.time({ precision })`,
+    `.datetime({ offset, local, precision })`
+  - `JIT.templateLiteral(...)`, `JIT.json()`, `JIT.function(...)`,
+    `JIT.custom(...)`, `.apply(...)`, and value `JIT.codec(...)`
+- Added from older plan aliases without introducing new hot-path
+  interpretation:
+  - string `.startsWith()`, `.endsWith()`, `.includes()`, `.normalize()`,
+    `.toLowerCase()`, `.toUpperCase()`, `.httpUrl()`, `.jwt()`,
+    `.stringFormat(name, regex)`
+  - number `.gt()`, `.gte()`, `.lt()`, `.lte()`, `.nonnegative()`,
+    `.nonpositive()`, `.step()`
+- Static defaults are now canonicalized by compiled structural operations:
+  - `equal`
+  - `hash`
+  - `clone`
+  - `diff`
+  - `update`
+  - `stringify`
+- Object optionality/default order is intentional:
+  - `JIT.string().default("x").optional()` lets the outer optional consume
+    `undefined`.
+  - `JIT.string().optional().default("x")` lets the outer default materialize
+    `"x"`.
+- `.partial("id")` propagates through object-operation codegen. A missing
+  field and an explicit `undefined` field compare as the same optional value;
+  a defaulted field compares/hashes/diffs against its static default.
+- Alternate object shapes are covered in compiled operations:
+  - `equal`, `clone`, `diff`, and `update` understand union and
+    discriminated-union branches.
+  - `diff` performs a deep diff when both sides match the same branch and a
+    root update when the branch changes.
+  - `update` deep-merges a partial patch inside the current branch; for
+    discriminated unions, a patch with a different discriminator replaces the
+    branch instead of mixing shapes.
+- Static literal defaults are type-checked for the newly added string
+  prefix/suffix/includes checks.
+
+Intentionally deferred:
+
+- Lazy/function defaults are not evaluated by non-parse structural operations.
+  Only static defaults that can be emitted as deterministic source are
+  canonicalized in `equal/hash/clone/diff/update/stringify`.
+- `stringFormat(name, predicate)` is deferred until callback binding policy is
+  added for AOT-safe user predicates.
+- Low-level `.check(...)` and `JIT.property(...)` remain a future semantic
+  node, not a thin alias.
+- BigInt min/max/sign/multiple checks remain future work.
+- Path-specific `.partial("a.b")` / `.required("a.b")` remains future work.
+
 TypeScript limitation:
 
 - A normal alias like `type User = { name: string }` cannot reject a concrete

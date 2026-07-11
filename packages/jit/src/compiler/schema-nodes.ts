@@ -14,6 +14,7 @@ export interface ObjectNode<TNode> {
 
 export interface ObjectNodeProp<TNode> {
   readonly key: string;
+  readonly schema: ATS.AnyTypeSchema;
   readonly value: TNode;
 }
 
@@ -99,7 +100,7 @@ export function buildSchemaNode<TNode>(
 
       return {
         kind: "object",
-        props: Object.keys(props).map((key) => ({ key, value: buildNode(props[key]) })),
+        props: Object.keys(props).map((key) => ({ key, schema: props[key], value: buildNode(props[key]) })),
       };
     }
     default:

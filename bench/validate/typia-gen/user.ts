@@ -18,6 +18,7 @@ export interface TypiaUser {
         score: number;
     };
 }
+export type TypiaUsers = TypiaUser[];
 export const isUser = (() => { const _io0 = (input: any): boolean => "number" === typeof input.id && (__typia_transform__isTypeInt32._isTypeInt32(input.id) && 0 < input.id) && ("string" === typeof input.name && (2 <= input.name.length && input.name.length <= 64)) && ("string" === typeof input.email && __typia_transform__isFormatEmail._isFormatEmail(input.email)) && "boolean" === typeof input.active && (Array.isArray(input.tags) && (input.tags.length <= 8 && input.tags.every((elem: any) => "string" === typeof elem))) && ("object" === typeof input.profile && null !== input.profile && _io1(input.profile)); const _io1 = (input: any): boolean => "number" === typeof input.age && (__typia_transform__isTypeInt32._isTypeInt32(input.age) && 0 <= input.age && input.age <= 150) && "number" === typeof input.score; return (input: any): input is TypiaUser => "object" === typeof input && null !== input && _io0(input); })();
 export const validateUser = (() => { const _io0 = (input: any): boolean => "number" === typeof input.id && (__typia_transform__isTypeInt32._isTypeInt32(input.id) && 0 < input.id) && ("string" === typeof input.name && (2 <= input.name.length && input.name.length <= 64)) && ("string" === typeof input.email && __typia_transform__isFormatEmail._isFormatEmail(input.email)) && "boolean" === typeof input.active && (Array.isArray(input.tags) && (input.tags.length <= 8 && input.tags.every((elem: any) => "string" === typeof elem))) && ("object" === typeof input.profile && null !== input.profile && _io1(input.profile)); const _io1 = (input: any): boolean => "number" === typeof input.age && (__typia_transform__isTypeInt32._isTypeInt32(input.age) && 0 <= input.age && input.age <= 150) && "number" === typeof input.score; const _vo0 = (input: any, _path: string, _exceptionable: boolean = true): boolean => ["number" === typeof input.id && (__typia_transform__isTypeInt32._isTypeInt32(input.id) || _report(_exceptionable, {
         path: _path + ".id",
@@ -110,6 +111,123 @@ export const validateUser = (() => { const _io0 = (input: any): boolean => "numb
         })) && _vo0(input, _path + "", true) || _report(true, {
             path: _path + "",
             expected: "TypiaUser",
+            value: input
+        }))(input, "$input", true);
+        const success = 0 === errors.length;
+        return success ? {
+            success,
+            data: input
+        } : {
+            success,
+            errors,
+            data: input
+        } as any;
+    }
+    return {
+        success: true,
+        data: input
+    } as any;
+}); })();
+export const isUsers = (() => { const _io0 = (input: any): boolean => "number" === typeof input.id && (__typia_transform__isTypeInt32._isTypeInt32(input.id) && 0 < input.id) && ("string" === typeof input.name && (2 <= input.name.length && input.name.length <= 64)) && ("string" === typeof input.email && __typia_transform__isFormatEmail._isFormatEmail(input.email)) && "boolean" === typeof input.active && (Array.isArray(input.tags) && (input.tags.length <= 8 && input.tags.every((elem: any) => "string" === typeof elem))) && ("object" === typeof input.profile && null !== input.profile && _io1(input.profile)); const _io1 = (input: any): boolean => "number" === typeof input.age && (__typia_transform__isTypeInt32._isTypeInt32(input.age) && 0 <= input.age && input.age <= 150) && "number" === typeof input.score; return (input: any): input is TypiaUsers => Array.isArray(input) && input.every((elem: any) => "object" === typeof elem && null !== elem && _io0(elem)); })();
+export const validateUsers = (() => { const _io0 = (input: any): boolean => "number" === typeof input.id && (__typia_transform__isTypeInt32._isTypeInt32(input.id) && 0 < input.id) && ("string" === typeof input.name && (2 <= input.name.length && input.name.length <= 64)) && ("string" === typeof input.email && __typia_transform__isFormatEmail._isFormatEmail(input.email)) && "boolean" === typeof input.active && (Array.isArray(input.tags) && (input.tags.length <= 8 && input.tags.every((elem: any) => "string" === typeof elem))) && ("object" === typeof input.profile && null !== input.profile && _io1(input.profile)); const _io1 = (input: any): boolean => "number" === typeof input.age && (__typia_transform__isTypeInt32._isTypeInt32(input.age) && 0 <= input.age && input.age <= 150) && "number" === typeof input.score; const _vo0 = (input: any, _path: string, _exceptionable: boolean = true): boolean => ["number" === typeof input.id && (__typia_transform__isTypeInt32._isTypeInt32(input.id) || _report(_exceptionable, {
+        path: _path + ".id",
+        expected: "number & Type<\"int32\">",
+        value: input.id
+    })) && (0 < input.id || _report(_exceptionable, {
+        path: _path + ".id",
+        expected: "number & ExclusiveMinimum<0>",
+        value: input.id
+    })) || _report(_exceptionable, {
+        path: _path + ".id",
+        expected: "(number & Type<\"int32\"> & ExclusiveMinimum<0>)",
+        value: input.id
+    }), "string" === typeof input.name && (2 <= input.name.length || _report(_exceptionable, {
+        path: _path + ".name",
+        expected: "string & MinLength<2>",
+        value: input.name
+    })) && (input.name.length <= 64 || _report(_exceptionable, {
+        path: _path + ".name",
+        expected: "string & MaxLength<64>",
+        value: input.name
+    })) || _report(_exceptionable, {
+        path: _path + ".name",
+        expected: "(string & MinLength<2> & MaxLength<64>)",
+        value: input.name
+    }), "string" === typeof input.email && (__typia_transform__isFormatEmail._isFormatEmail(input.email) || _report(_exceptionable, {
+        path: _path + ".email",
+        expected: "string & Format<\"email\">",
+        value: input.email
+    })) || _report(_exceptionable, {
+        path: _path + ".email",
+        expected: "(string & Format<\"email\">)",
+        value: input.email
+    }), "boolean" === typeof input.active || _report(_exceptionable, {
+        path: _path + ".active",
+        expected: "boolean",
+        value: input.active
+    }), (Array.isArray(input.tags) || _report(_exceptionable, {
+        path: _path + ".tags",
+        expected: "(Array<string> & MaxItems<8>)",
+        value: input.tags
+    })) && ((input.tags.length <= 8 || _report(_exceptionable, {
+        path: _path + ".tags",
+        expected: "Array<> & MaxItems<8>",
+        value: input.tags
+    })) && input.tags.map((elem: any, _index4: number) => "string" === typeof elem || _report(_exceptionable, {
+        path: _path + ".tags[" + _index4 + "]",
+        expected: "string",
+        value: elem
+    })).every((flag: boolean) => flag)) || _report(_exceptionable, {
+        path: _path + ".tags",
+        expected: "(Array<string> & MaxItems<8>)",
+        value: input.tags
+    }), ("object" === typeof input.profile && null !== input.profile || _report(_exceptionable, {
+        path: _path + ".profile",
+        expected: "__type",
+        value: input.profile
+    })) && _vo1(input.profile, _path + ".profile", true && _exceptionable) || _report(_exceptionable, {
+        path: _path + ".profile",
+        expected: "__type",
+        value: input.profile
+    })].every((flag: boolean) => flag); const _vo1 = (input: any, _path: string, _exceptionable: boolean = true): boolean => ["number" === typeof input.age && (__typia_transform__isTypeInt32._isTypeInt32(input.age) || _report(_exceptionable, {
+        path: _path + ".age",
+        expected: "number & Type<\"int32\">",
+        value: input.age
+    })) && (0 <= input.age || _report(_exceptionable, {
+        path: _path + ".age",
+        expected: "number & Minimum<0>",
+        value: input.age
+    })) && (input.age <= 150 || _report(_exceptionable, {
+        path: _path + ".age",
+        expected: "number & Maximum<150>",
+        value: input.age
+    })) || _report(_exceptionable, {
+        path: _path + ".age",
+        expected: "(number & Type<\"int32\"> & Minimum<0> & Maximum<150>)",
+        value: input.age
+    }), "number" === typeof input.score || _report(_exceptionable, {
+        path: _path + ".score",
+        expected: "number",
+        value: input.score
+    })].every((flag: boolean) => flag); const __is = (input: any): input is TypiaUsers => Array.isArray(input) && input.every((elem: any) => "object" === typeof elem && null !== elem && _io0(elem)); let errors: any; let _report: any; return __typia_transform__createStandardSchema._createStandardSchema((input: any): import("typia").IValidation<TypiaUsers> => {
+    if (false === __is(input)) {
+        errors = [];
+        _report = (__typia_transform__validateReport._validateReport as any)(errors);
+        ((input: any, _path: string, _exceptionable: boolean = true) => (Array.isArray(input) || _report(true, {
+            path: _path + "",
+            expected: "TypiaUsers",
+            value: input
+        })) && input.map((elem: any, _index3: number) => ("object" === typeof elem && null !== elem || _report(true, {
+            path: _path + "[" + _index3 + "]",
+            expected: "TypiaUser",
+            value: elem
+        })) && _vo0(elem, _path + "[" + _index3 + "]", true) || _report(true, {
+            path: _path + "[" + _index3 + "]",
+            expected: "TypiaUser",
+            value: elem
+        })).every((flag: boolean) => flag) || _report(true, {
+            path: _path + "",
+            expected: "TypiaUsers",
             value: input
         }))(input, "$input", true);
         const success = 0 === errors.length;

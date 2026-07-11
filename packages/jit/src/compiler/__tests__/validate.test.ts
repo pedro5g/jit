@@ -220,18 +220,30 @@ describe("JIT compiler validator", () => {
     const Metric = JIT.object({
       status: JIT.string().oneOf(["open", "closed"] as const),
       score: JIT.number()
-        .moreThan(0)
-        .lessThan(10)
+        .gt(0)
+        .lt(10)
         .oneOf([1, 3, 5, 7, 9] as const),
       int32: JIT.number().int32(),
       sample: JIT.number().float32(),
       finite: JIT.number().float64(),
+      step: JIT.number().gte(0).lte(10).step(0.5),
+      nonnegative: JIT.number().nonnegative(),
+      nonpositive: JIT.number().nonpositive(),
     });
     const validate = JIT.validator(Metric);
 
-    expect(validate.is({ status: "open", score: 3, int32: 2147483647, sample: Math.fround(1.5), finite: 1.2 })).toBe(
-      true
-    );
+    expect(
+      validate.is({
+        status: "open",
+        score: 3,
+        int32: 2147483647,
+        sample: Math.fround(1.5),
+        finite: 1.2,
+        step: 2.5,
+        nonnegative: 0,
+        nonpositive: 0,
+      })
+    ).toBe(true);
 
     const result = validate.safeParse({
       status: "pending",
@@ -239,6 +251,9 @@ describe("JIT compiler validator", () => {
       int32: 2147483648,
       sample: 0.1,
       finite: Number.POSITIVE_INFINITY,
+      step: 2.25,
+      nonnegative: -1,
+      nonpositive: 1,
     });
 
     expect(result.success).toBe(false);
@@ -250,6 +265,9 @@ describe("JIT compiler validator", () => {
         "not_int32",
         "not_float32",
         "not_float64",
+        "not_multiple_of",
+        "too_small",
+        "too_big",
       ]);
     }
   });
@@ -353,9 +371,12 @@ describe("JIT compiler validator", () => {
 
   it("should expose a lazy optional Standard Schema facade", () => {
     const standard = User["~standard"];
+    const again = User["~standard"];
     const success = standard.validate(ada);
     const failure = standard.validate({ ...ada, email: "broken" });
 
+    expect(standard).toBe(again);
+    expect(standard.validate).toBe(again.validate);
     expect(standard.version).toBe(1);
     expect(standard.vendor).toBe("jit");
     expect(success).toEqual({ value: ada });

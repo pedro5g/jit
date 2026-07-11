@@ -59,6 +59,7 @@ export type QueryCompiled<TValue, TOutput> = (value: TValue) => TOutput;
 export interface QueryProgram {
   readonly nodes: readonly QueryNode[];
   readonly bindings: readonly unknown[];
+  readonly params?: readonly string[];
 }
 
 interface QueryPlan {
@@ -98,7 +99,7 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
 
   validateQueryPlan(target.objectSchema, plan);
 
-  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan)));
+  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams: Boolean(program.params?.length) })));
 }
 
 /**
@@ -201,6 +202,8 @@ function serializeValue(value: QueryValueNode): string {
       return `.${value.key}`;
     case "binding":
       return `$${value.name}`;
+    case "param":
+      return `p:${value.name}`;
     case "literal":
       return `#${typeof value.value}:${String(value.value)}`;
   }

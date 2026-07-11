@@ -133,6 +133,41 @@ describe("JIT compiler", () => {
       expect(equal({ id: 1 }, { id: 2 })).toBe(false);
     });
 
+    it("should compare defaulted object props against their canonical value", () => {
+      const schema = JIT.object({
+        id: JIT.number().default(1),
+        name: JIT.string().optional(),
+        profile: JIT.object({ enabled: JIT.boolean(), tags: JIT.array(JIT.string()) }).default({
+          enabled: true,
+          tags: ["core"],
+        }),
+      }).schema;
+      const equal = Compiler.compileEqual(schema);
+
+      expect(equal({} as never, { id: 1, profile: { enabled: true, tags: ["core"] } } as never)).toBe(true);
+      expect(equal({ id: undefined } as never, { id: 1, profile: { enabled: true, tags: ["core"] } } as never)).toBe(
+        true
+      );
+      expect(
+        equal(
+          { id: undefined, name: undefined } as never,
+          { id: 1, profile: { enabled: true, tags: ["core"] } } as never
+        )
+      ).toBe(true);
+      expect(equal({} as never, { id: 2 } as never)).toBe(false);
+    });
+
+    it("should treat partial object props as optionally present", () => {
+      const schema = JIT.object({
+        id: JIT.number(),
+        name: JIT.string(),
+      }).partial("id").schema;
+      const equal = Compiler.compileEqual(schema);
+
+      expect(equal({ name: "Ada" } as never, { id: undefined, name: "Ada" } as never)).toBe(true);
+      expect(equal({ name: "Ada" } as never, { id: 1, name: "Ada" } as never)).toBe(false);
+    });
+
     it("should emit deterministic readable source", () => {
       const schema = JIT.object({
         id: JIT.number(),

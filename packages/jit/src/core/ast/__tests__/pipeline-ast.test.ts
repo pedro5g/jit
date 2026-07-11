@@ -63,7 +63,7 @@ describe("PipelineAST", () => {
 
   describe("node type contracts", () => {
     it("keeps discriminated unions closed over their kinds", () => {
-      expectTypeOf<PipelineAST.QueryValueNode["kind"]>().toEqualTypeOf<"field" | "literal" | "binding">();
+      expectTypeOf<PipelineAST.QueryValueNode["kind"]>().toEqualTypeOf<"field" | "literal" | "binding" | "param">();
       expectTypeOf<PipelineAST.QueryConditionNode["kind"]>().toEqualTypeOf<"compare" | "logical" | "not">();
       expectTypeOf<PipelineAST.QueryCompareOperator>().toEqualTypeOf<"eq" | "neq" | "gt" | "gte" | "lt" | "lte">();
       expectTypeOf<PipelineAST.UpdateNode>().toEqualTypeOf<PipelineAST.UpdateSetNode>();

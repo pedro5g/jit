@@ -34,6 +34,19 @@ export type { Infer } from "./core/ats/infer.js";
 /** Fluent builder chain internals (`createBuilder`, builder types). */
 export * as Builder from "./core/builder/index.js";
 export type { Strict } from "./core/builder/types.js";
+export type {
+  AnyCompiledFunction,
+  AOTArtifact,
+  ArtifactDescriptor,
+  CompilationOptions,
+  CompilationRequest,
+  CompiledArtifact,
+  CompilerHost,
+  OperationDescriptor,
+  SchemaMetadata,
+} from "./core/host.js";
+/** Shared host contracts used by runtime JIT and AOT definition entrypoints. */
+export * as Host from "./core/host.js";
 /** Typed error classes thrown by compiled functions (`JITError`). */
 export * as Errors from "./errors/index.js";
 /** The main public API: schema factories plus every `compile*` entry point. */

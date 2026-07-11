@@ -1,7 +1,9 @@
+import { emitDefaultedValue } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { createEmitState, type EmitState } from "../emitter/emit-state.js";
 import { emitGuardTest } from "../schema-nodes.js";
 import { emitPropertyAccess } from "../source/access.js";
+import { emitSchemaGuard, literalDiscriminatorValue } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
 import type { UpdateIRNode, UpdateIRProgram } from "./build-update-ir.js";
 
@@ -58,6 +60,12 @@ function emitUpdateTo(
       );
       writer.indent(() => writer.line(`${target} = new Date(${patch}.getTime());`));
       writer.line("}");
+      return;
+    case "union":
+      emitUnionUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "discriminatedUnion":
+      emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, target);
       return;
     case "guard":
       emitGuardUpdateTo(writer, state, node, value, patch, target);
@@ -124,9 +132,15 @@ function emitObjectUpdateTo(
     const changedVars: string[] = [];
 
     for (const prop of node.props) {
-      const propValue = emitPropertyAccess(value, prop.key);
+      const rawPropValue = emitPropertyAccess(value, prop.key);
+      const defaultedPropValue = emitDefaultedValue(prop.schema, rawPropValue);
+      const propValue = defaultedPropValue === rawPropValue ? rawPropValue : state.nextVar(`value_${prop.key}`);
       const propPatch = emitPropertyAccess(patch, prop.key);
       const propNext = state.nextVar(`next_${prop.key}`);
+
+      if (propValue !== rawPropValue) {
+        writer.line(`const ${propValue} = ${defaultedPropValue};`);
+      }
 
       emitUpdateTo(writer, state, prop.value, propValue, propPatch, propNext);
       changedVars.push(`${propNext} !== ${propValue}`);
@@ -135,6 +149,93 @@ function emitObjectUpdateTo(
 
     writer.line(`if (${changedVars.join(" || ")}) {`);
     writer.indent(() => writer.line(`${target} = { ${entries.join(", ")} };`));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+
+function emitUnionUpdateTo(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<UpdateIRNode, { readonly kind: "union" }>,
+  value: string,
+  patch: string,
+  target: string
+): void {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    if (node.options.length === 0) {
+      writer.line(`${target} = ${patch};`);
+      return;
+    }
+
+    let prefix = "if";
+
+    for (const option of node.options) {
+      writer.line(`${prefix} (${emitSchemaGuard(option.schema, value)}) {`);
+      writer.indent(() => {
+        const next = state.nextVar(`${target}_branch`);
+
+        emitUpdateTo(writer, state, option.node, value, patch, next);
+        writer.line(`${target} = ${next};`);
+      });
+      prefix = "} else if";
+    }
+
+    writer.line("} else {");
+    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+
+function emitDiscriminatedUnionUpdateTo(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<UpdateIRNode, { readonly kind: "discriminatedUnion" }>,
+  value: string,
+  patch: string,
+  target: string
+): void {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    if (node.options.length === 0) {
+      writer.line(`${target} = ${patch};`);
+      return;
+    }
+
+    let prefix = "if";
+
+    for (const option of node.options) {
+      writer.line(`${prefix} (${emitSchemaGuard(option.schema, value)}) {`);
+      writer.indent(() => {
+        const tag = literalDiscriminatorValue(option.schema, node.discriminator);
+        const next = state.nextVar(`${target}_branch`);
+
+        if (tag !== undefined) {
+          const patchTag = emitPropertyAccess(patch, node.discriminator);
+
+          writer.line(`if (${patchTag} !== undefined && ${patchTag} !== ${emitLiteral(tag)}) {`);
+          writer.indent(() => writer.line(`${target} = ${patch};`));
+          writer.line("} else {");
+          writer.indent(() => {
+            emitUpdateTo(writer, state, option.node, value, patch, next);
+            writer.line(`${target} = ${next};`);
+          });
+          writer.line("}");
+          return;
+        }
+
+        emitUpdateTo(writer, state, option.node, value, patch, next);
+        writer.line(`${target} = ${next};`);
+      });
+      prefix = "} else if";
+    }
+
+    writer.line("} else {");
+    writer.indent(() => writer.line(`${target} = ${patch};`));
     writer.line("}");
   });
   writer.line("}");

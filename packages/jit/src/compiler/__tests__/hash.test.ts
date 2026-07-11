@@ -35,6 +35,24 @@ describe("JIT compiler hash", () => {
     expect(source).toContain("__hash(r)");
   });
 
+  it("should hash defaulted object props as their canonical value", () => {
+    const User = JIT.object({
+      id: JIT.number().default(1),
+      name: JIT.string().optional(),
+      profile: JIT.object({ enabled: JIT.boolean(), tags: JIT.array(JIT.string()) }).default({
+        enabled: true,
+        tags: ["core"],
+      }),
+    }).schema;
+    const hash = Compiler.compileHash(User);
+
+    expect(hash({} as never)).toBe(hash({ id: 1, profile: { enabled: true, tags: ["core"] } } as never));
+    expect(hash({ id: undefined } as never)).toBe(
+      hash({ id: 1, name: undefined, profile: { enabled: true, tags: ["core"] } } as never)
+    );
+    expect(hash({} as never)).not.toBe(hash({ id: 2 } as never));
+  });
+
   it("should keep hash short-circuits collision-safe", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered").schema;
     const equalSource = Compiler.emitEqualSource(User);

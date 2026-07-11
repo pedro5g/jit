@@ -544,6 +544,59 @@ describe("JIT compiler query", () => {
     expectTypeOf(chained).toEqualTypeOf<{ readonly name: string }[]>();
   });
 
+  it("should compile runtime params without captured bindings", () => {
+    const adminsAboveAge = JIT.query(Users)
+      .params({ minimumAge: JIT.number() })
+      .filter((q, params) => q.and(q.gt("age", params.minimumAge), q.eq("role", JIT.const("admin"))))
+      .select("id", "name")
+      .compile();
+    const source = Compiler.emitQuerySource(Users.schema, {
+      nodes: [
+        {
+          kind: "filter",
+          condition: {
+            kind: "logical",
+            op: "and",
+            left: {
+              kind: "compare",
+              op: "gt",
+              left: { kind: "field", key: "age" },
+              right: { kind: "param", name: "minimumAge" },
+            },
+            right: {
+              kind: "compare",
+              op: "eq",
+              left: { kind: "field", key: "role" },
+              right: { kind: "literal", value: "admin" },
+            },
+          },
+        },
+        { kind: "select:fields", fields: ["id", "name"] },
+      ],
+      bindings: [],
+      params: ["minimumAge"],
+    });
+    const result = adminsAboveAge(input, { minimumAge: 37 });
+
+    expect(result).toEqual([{ id: 1, name: "Ada v2" }]);
+    expect(source).toContain("function query(value, params)");
+    expect(source).toContain("item.age > params.minimumAge");
+    expect(source).toContain('item.role === "admin"');
+    expect(source).not.toContain("__q0");
+    expectNoInterpretedArrayOps(source);
+    expectTypeOf(adminsAboveAge).toMatchTypeOf<
+      (
+        value: {
+          id: number;
+          name: string;
+          age: number;
+          role: string;
+        }[],
+        params: { readonly minimumAge: number }
+      ) => { readonly id: number; readonly name: string }[]
+    >();
+  });
+
   it("should reject unknown keys and unsupported schemas", () => {
     expect(() =>
       JIT.query(Users)

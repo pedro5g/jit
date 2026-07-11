@@ -16,5 +16,9 @@ export interface TypiaUser {
   };
 }
 
+export type TypiaUsers = TypiaUser[];
+
 export const isUser = typia.createIs<TypiaUser>();
 export const validateUser = typia.createValidate<TypiaUser>();
+export const isUsers = typia.createIs<TypiaUsers>();
+export const validateUsers = typia.createValidate<TypiaUsers>();

@@ -1,8 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { AOT, JIT } from "../../index.js";
 
 describe("JIT AOT dual output and tree-shakable exports", () => {
@@ -84,6 +85,56 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     expect(types).not.toContain("export declare const User_is");
     expect(types).toContain("readonly is: (value: unknown) => value is User;");
   });
+
+  it("should emit subpath modules, manifest, and plans when requested", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const selected = JIT.validator(User).get("is");
+    const schemaFile = join(outDir, "jit", "user.jit.ts");
+
+    const result = AOT.generate({
+      schemas: { User: JIT.compile(User, { is: selected.is }) },
+      functions: { isUser: selected.is },
+      sources: new Map([
+        ["User", schemaFile],
+        ["isUser", schemaFile],
+      ]),
+      outDir,
+      emit: { subpathModules: true, manifest: true, plans: true },
+      importSpecifier: "#jit",
+    });
+    const files = result.files.map((file) => file.split("/").pop()).sort();
+    const manifest = JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8")) as {
+      modules: readonly { readonly name: string; readonly import: string; readonly exports: readonly string[] }[];
+      artifacts: readonly { readonly name: string; readonly module: string }[];
+      files: readonly string[];
+    };
+    const plan = JSON.parse(readFileSync(join(outDir, "plans", "user.json"), "utf8")) as {
+      module: string;
+      artifacts: readonly { readonly name: string }[];
+    };
+    const generated = (await import(pathToFileURL(join(outDir, "user.mjs")).href)) as {
+      User: { is: (value: unknown) => boolean };
+      isUser: (value: unknown) => boolean;
+    };
+
+    expect(files).toContain("user.mjs");
+    expect(files).toContain("manifest.json");
+    expect(result.files).toContain(join(outDir, "plans", "user.json"));
+    expect(readFileSync(join(outDir, "package.json"), "utf8")).toContain('"./user"');
+    expect(readFileSync(join(outDir, "user.mjs"), "utf8")).toBe('export { User, isUser } from "./index.mjs";\n');
+    expect(manifest.modules).toEqual([
+      { name: "user", source: schemaFile, import: "#jit/user", exports: ["User", "isUser"] },
+    ]);
+    expect(manifest.artifacts.map((artifact) => `${artifact.module}:${artifact.name}`)).toEqual([
+      "user:User",
+      "user:isUser",
+    ]);
+    expect(manifest.files).toContain("plans/user.json");
+    expect(plan.module).toBe("user");
+    expect(plan.artifacts.map((artifact) => artifact.name)).toEqual(["User", "isUser"]);
+    expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.isUser({ id: "x", name: "Ada" })).toBe(false);
+  });
 });
 
 describe("JIT AOT inference-anchored types", () => {
@@ -118,6 +169,110 @@ describe("JIT AOT inference-anchored types", () => {
     // No hand-emitted structural type when the source anchors the inference.
     expect(types).not.toContain("readonly id: number");
   });
+
+  it("should typecheck real imports from generated files after generation", async () => {
+    const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const selected = JIT.validator(UserSchema).get("is", "parse");
+    const srcDir = join(outDir, "src");
+    const generatedDir = join(outDir, "node_modules", "@jit", "generated");
+    const schemaFile = join(srcDir, "user.jit.ts");
+    const consumerFile = join(outDir, "consumer.ts");
+    const repoRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
+    const tscBin = join(repoRoot, "node_modules", "typescript", "bin", "tsc");
+
+    mkdirSync(srcDir, { recursive: true });
+    writeFileSync(
+      schemaFile,
+      [
+        'import { JIT } from "jit/define";',
+        "",
+        "export const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });",
+        "export const isUser = JIT.validate(UserSchema).is().compile();",
+        "export const parseUser = JIT.validate(UserSchema).parse().compile();",
+        "export const User = JIT.compile(UserSchema, { is: isUser, parse: parseUser });",
+        "",
+      ].join("\n")
+    );
+
+    AOT.generate({
+      schemas: { User: JIT.compile(UserSchema, { is: selected.is, parse: selected.parse }) },
+      functions: { isUser: selected.is },
+      sources: new Map([
+        ["User", schemaFile],
+        ["isUser", schemaFile],
+      ]),
+      outDir: generatedDir,
+    });
+
+    writeFileSync(
+      consumerFile,
+      [
+        'import { User, isUser, type User as UserValue } from "@jit/generated";',
+        "",
+        'const ok: UserValue = { id: 1, name: "Ada" };',
+        "const parsed = User.parse(ok);",
+        "const same: UserValue = parsed;",
+        "const guard: (value: unknown) => value is UserValue = User.is;",
+        "const standaloneGuard: (value: unknown) => value is UserValue = isUser;",
+        "guard(ok);",
+        "standaloneGuard(ok);",
+        "same.id.toFixed();",
+        "// @ts-expect-error generated User type rejects invalid id type",
+        'const bad: UserValue = { id: "1", name: "Ada" };',
+        "// @ts-expect-error parse result keeps the generated User shape",
+        "const badName: number = parsed.name;",
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      join(outDir, "tsconfig.json"),
+      JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2022",
+            lib: ["ESNext"],
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+            types: ["node"],
+            typeRoots: [join(repoRoot, "node_modules/@types")],
+            ignoreDeprecations: "6.0",
+            baseUrl: ".",
+            paths: {
+              jit: [join(repoRoot, "packages/jit/src/index.ts")],
+              "jit/define": [join(repoRoot, "packages/jit/src/define.ts")],
+            },
+          },
+          include: ["consumer.ts", "src/**/*.ts"],
+        },
+        null,
+        2
+      )
+    );
+
+    const generated = (await import(pathToFileURL(join(generatedDir, "index.mjs")).href)) as {
+      User: { is: (value: unknown) => boolean; parse: (value: unknown) => unknown };
+      isUser: (value: unknown) => boolean;
+    };
+
+    expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.User.parse({ id: 1, name: "Ada" })).toEqual({ id: 1, name: "Ada" });
+    expect(generated.isUser({ id: "x", name: "Ada" })).toBe(false);
+    try {
+      execFileSync(process.execPath, [tscBin, "--project", join(outDir, "tsconfig.json"), "--pretty", "false"], {
+        cwd: outDir,
+        stdio: "pipe",
+      });
+    } catch (error) {
+      const failed = error as { readonly stdout?: Buffer; readonly stderr?: Buffer };
+
+      throw new Error(
+        `generated import typecheck failed\n${failed.stdout?.toString() ?? ""}${failed.stderr?.toString() ?? ""}`
+      );
+    }
+  }, 15_000);
 
   it("should fall back to structural types for programmatic schemas without sources", () => {
     const User = JIT.object({ id: JIT.number() });

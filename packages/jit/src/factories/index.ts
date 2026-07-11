@@ -1,6 +1,6 @@
 export { compileClone } from "../compiler/clone.js";
 export { compileDiff } from "../compiler/diff.js";
-export { compileEqual, equal } from "../compiler/equal.js";
+export { compileEqual } from "../compiler/equal.js";
 export { compileHash } from "../compiler/hash.js";
 export {
   compileGroupBy,
@@ -18,7 +18,7 @@ export { compileUpdate } from "../compiler/update.js";
 /**
  * Infers the TypeScript type of a schema or builder — `JIT.infer<typeof User>`.
  */
-export type { Infer as infer } from "../core/ats/infer.js";
+export type { Infer, Infer as infer } from "../core/ats/infer.js";
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export * from "./collection/index.js";
@@ -32,12 +32,21 @@ export { model } from "./model.js";
 export * from "./object/index.js";
 export * from "./primitive/index.js";
 export type { QueryBuilder, QueryConditionBuilder } from "./query.js";
-export { query } from "./query.js";
+export { constant as const, param, query } from "./query.js";
+export type {
+  JsonCompileBuilder,
+  RuntimeCompiledFunction,
+  RuntimeFunctionExplain,
+  ValidateCompileBuilder,
+} from "./runtime-ops.js";
+export { clone, diff, equal, hash, json, validate } from "./runtime-ops.js";
 export { mask, sanitize } from "./security.js";
 export type { CompiledSerializer } from "./serialize.js";
 export { codec, serializer } from "./serialize.js";
 export * from "./special/index.js";
 export { stream } from "./stream.js";
+export type { TransformBuilder, TransformFieldOps } from "./transform.js";
+export { transform } from "./transform.js";
 export type { Draft, RuntimeUpdate, UpdateInput, UpdateRecipe } from "./update.js";
 export { update } from "./update.js";
 export { validator } from "./validate.js";

@@ -64,14 +64,21 @@ describe("JIT AOT generate", () => {
       body: JIT.string().sanitize(),
       at: JIT.date(),
     });
-    const selected = JIT.compile(Event, ["equal", "clone", "stringify"]);
+    const WireEvent = JIT.object({
+      id: JIT.number(),
+      kind: JIT.literal("click"),
+      target: JIT.string(),
+    });
+    const selected = JIT.compile(Event, ["equal", "clone", "diff", "stringify"]);
 
     const result = AOT.generate({
       schemas: {},
       functions: {
         Event_equal: selected.equal,
         Event_clone: selected.clone,
+        Event_diff: selected.diff,
         Event_stringify: selected.stringify,
+        Event_fromJSON: JIT.json(WireEvent).parse().compile(),
         Event_mask: JIT.mask(Event),
         Event_sanitize: JIT.sanitize(Event),
         Event_codec: JIT.codec(Event),
@@ -86,7 +93,9 @@ describe("JIT AOT generate", () => {
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
       Event_equal: (left: unknown, right: unknown) => boolean;
       Event_clone: <T>(value: T) => T;
+      Event_diff: (left: unknown, right: unknown) => readonly unknown[];
       Event_stringify: (value: unknown) => string;
+      Event_fromJSON: (json: string) => unknown;
       Event_mask: <T>(value: T) => T;
       Event_sanitize: <T>(value: T) => T;
       Event_codec: { encode: (value: unknown) => Uint8Array; decode: (bytes: Uint8Array) => unknown };
@@ -102,7 +111,16 @@ describe("JIT AOT generate", () => {
 
     expect(generated.Event_equal(event, { ...event })).toBe(true);
     expect(generated.Event_clone(event)).toEqual(event);
+    expect(generated.Event_diff(event, { ...event, target: "next" })).toEqual([
+      { type: "update", path: ["target"], value: "next" },
+    ]);
     expect(generated.Event_stringify(event)).toBe(JSON.stringify(event));
+    expect(generated.Event_fromJSON('{"id":7,"kind":"click","target":"next"}')).toEqual({
+      id: 7,
+      kind: "click",
+      target: "next",
+    });
+    expect(() => generated.Event_fromJSON('{"id":7}')).toThrow(/expected literal click/);
     expect(generated.Event_mask(event).target).toBe("***");
     expect(generated.Event_sanitize(event).body).toBe("hello");
     expect(generated.Event_codec.decode(generated.Event_codec.encode(event))).toEqual(event);
@@ -217,9 +235,81 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const User_is");
     expect(source).not.toContain("User_parse");
     expect(source).not.toContain("User_equal");
+    expect(source).not.toContain("JITValidationError");
+    expect(source).not.toContain("__hashCache");
+    expect(source).not.toContain("__indexCache");
+    expect(source).not.toContain("__getIndex");
     expect(source).not.toContain('from "jit"');
     expect(types).toContain("export declare const User_is");
     expect(types).not.toContain("export declare const User_parse");
+  });
+
+  it("should inline cache helpers only for operations that need them", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const PlainUsers = JIT.array(User);
+    const IndexedUsers = JIT.array(User).entity({ key: "id" }).indexBy("id");
+    const Hashed = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered");
+    const plainDir = join(outDir, "plain");
+    const indexedDir = join(outDir, "indexed");
+    const hashedDir = join(outDir, "hashed");
+
+    AOT.generate({
+      schemas: {},
+      functions: { Plain_equal: JIT.compile(PlainUsers, ["equal"]).equal },
+      outDir: plainDir,
+    });
+
+    const plainSource = readFileSync(join(plainDir, "index.mjs"), "utf8");
+
+    expect(plainSource).not.toContain("__indexCache");
+    expect(plainSource).not.toContain("__hashCache");
+
+    AOT.generate({
+      schemas: {},
+      functions: { Indexed_equal: JIT.compile(IndexedUsers, ["equal"]).equal },
+      outDir: indexedDir,
+    });
+
+    const indexedSource = readFileSync(join(indexedDir, "index.mjs"), "utf8");
+    const indexedGenerated = (await import(pathToFileURL(join(indexedDir, "index.mjs")).href)) as {
+      Indexed_equal: (left: readonly unknown[], right: readonly unknown[]) => boolean;
+    };
+    const left = Array.from({ length: 70 }, (_, index) => ({ id: index, name: `user-${index}` }));
+    const right = [...left].reverse();
+
+    expect(indexedSource.match(/const __indexCache = new WeakMap\(\);/g)).toHaveLength(1);
+    expect(indexedSource).toContain('__getIndex(r, "id")');
+    expect(indexedSource).not.toContain("__hashCache");
+    expect(indexedGenerated.Indexed_equal(left, right)).toBe(true);
+    expect(indexedGenerated.Indexed_equal(left, right)).toBe(true);
+    expect(
+      indexedGenerated.Indexed_equal(
+        left,
+        right.map((user) => (user.id === 35 ? { ...user, name: "changed" } : user))
+      )
+    ).toBe(false);
+
+    const selected = JIT.compile(Hashed, ["equal", "hash"]);
+
+    AOT.generate({
+      schemas: {},
+      functions: { Hashed_equal: selected.equal, Hashed_hash: selected.hash },
+      outDir: hashedDir,
+    });
+
+    const hashedSource = readFileSync(join(hashedDir, "index.mjs"), "utf8");
+    const hashedGenerated = (await import(pathToFileURL(join(hashedDir, "index.mjs")).href)) as {
+      Hashed_equal: (left: unknown, right: unknown) => boolean;
+      Hashed_hash: (value: unknown) => number;
+    };
+
+    expect(hashedSource.match(/const __hashCache = new WeakMap\(\);/g)).toHaveLength(1);
+    expect(hashedSource).not.toContain("__indexCache");
+    expect(hashedGenerated.Hashed_equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
+    expect(hashedGenerated.Hashed_equal({ id: 1, name: "Ada" }, { id: 1, name: "Grace" })).toBe(false);
+    expect(hashedGenerated.Hashed_hash({ id: 1, name: "Ada" })).toBe(
+      hashedGenerated.Hashed_hash({ id: 1, name: "Ada" })
+    );
   });
 
   it("should generate hash and hash-short-circuit equal with zero imports", async () => {
@@ -239,6 +329,7 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const Hashed_hash");
     expect(source).toContain("const Hashed_equal_hash");
     expect(source).toContain("((__hash) => (");
+    expect(source.match(/const __hashCache = new WeakMap\(\);/g)).toHaveLength(1);
     expect(source).not.toContain("import ");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {

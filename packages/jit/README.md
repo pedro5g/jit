@@ -20,7 +20,7 @@ Two execution modes, same generated code:
   only the generated low-level functions the app actually imports.
 
 ```ts
-import { JIT } from "jit";
+import { JIT } from "jit/runtime";
 
 const User = JIT.object({
   id: JIT.number().int().positive(),
@@ -30,7 +30,7 @@ const User = JIT.object({
   tags: JIT.array(JIT.string()).max(8),
 });
 
-type User = JIT.infer<typeof User>;
+type User = JIT.Infer<typeof User>;
 
 const Users = JIT.validator(User);
 
@@ -51,15 +51,52 @@ values (regexes, refinement callbacks, query arguments) travel as external
 bindings — never interpolated into source.
 
 Measured on this repo's validation benchmark (mitata, Node 22.17.1,
-linux-x64, AMD Ryzen 7 5800H, Zod 4.4.3 — run `pnpm bench:validate` for your
-machine):
+linux-x64, AMD Ryzen 7 5800H, Zod 4.4.3, captured 2026-07-11 — run
+`pnpm bench:validate` for your machine):
 
-| Scenario                      | JIT runtime  | JIT AOT       | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
-| ----------------------------- | ------------ | ------------- | --------- | ----------- | ----------- | ----------- |
-| `is()` valid object           | **57.72 ns** | 58.82 ns      | 894.07 ns | 0.28 b      | 2.29 kb     | **15.2x**   |
-| `is()` invalid object         | **2.68 ns**  | 2.70 ns       | 29.60 µs  | 0.03 b      | 16.16 kb    | **10,963x** |
-| `safeParse` valid object      | 68.95 ns     | **67.74 ns**  | 810.21 ns | 40.24 b     | 1.92 kb     | **12.0x**   |
-| `safeParse` invalid, 7 issues | 126.18 ns    | **120.70 ns** | 25.14 µs  | 624.11 b    | 5.25 kb     | **208.3x**  |
+| Scenario                      | JIT runtime   | JIT AOT      | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
+| ----------------------------- | ------------- | ------------ | --------- | ----------- | ----------- | ----------- |
+| `is()` valid object           | 57.56 ns      | **56.99 ns** | 903.69 ns | 0.26 b      | 2.29 kb     | **15.9x**   |
+| `is()` invalid object         | 2.77 ns       | **2.61 ns**  | 29.29 µs  | 0.03 b      | 16.16 kb    | **11,222x** |
+| `safeParse` valid object      | 67.57 ns      | **66.31 ns** | 789.36 ns | 40.23 b     | 1.90 kb     | **11.9x**   |
+| `safeParse` invalid, 7 issues | **118.56 ns** | 120.59 ns    | 24.99 µs  | 624.33 b    | 5.31 kb     | **207.2x**  |
+
+High-volume flow benchmark (`pnpm bench:flows`) validates 50k unknown
+objects, filters/projects admins, and serializes the final JSON:
+
+| Pipeline                             | Avg time    | Heap/op     | vs Zod         |
+| ------------------------------------ | ----------- | ----------- | -------------- |
+| JIT validate + query + JSON          | **8.89 ms** | **5.42 MB** | **2.53x**      |
+| Zod safeParse + filter/map/stringify | 22.53 ms    | 8.58 MB     | baseline       |
+| Handwritten fused loop               | 2.02 ms     | 0.69 MB     | not comparable |
+
+High-load validation benchmark (`pnpm bench:load`) preallocates 10k/100k
+unknown users and measures only validation work. TypeBox is measured through
+both `TypeCompiler.Check` (compiled) and `Value.Check` (dynamic); typia uses
+generated `createIs<TypiaUser[]>()` / `createValidate<TypiaUser[]>()`.
+
+| Scenario                            | JIT avg / heap          | TypeBox compiled      | typia generated      | Zod 4                |
+| ----------------------------------- | ----------------------- | --------------------- | -------------------- | -------------------- |
+| `is()` valid users 10k              | **542.45 µs / 1.43 KB** | 751.53 µs / 774.69 KB | 661.98 µs / 152 B    | 9.76 ms / 4.16 MB    |
+| `is()` valid users 100k             | **7.01 ms / 96 B**      | 7.22 ms / 5.34 MB     | 7.17 ms / 152 B      | 114.15 ms / 21.14 MB |
+| `is()` invalid tail users 100k      | **7.06 ms / 96 B**      | 7.37 ms / 5.34 MB     | 7.34 ms / 560 B      | 111.58 ms / 20.98 MB |
+| `safeParse` valid users 10k         | **567.17 µs / 1.73 KB** | 655.54 µs / 560.25 KB | 793.31 µs / 263.75 B | 11.24 ms / 6.21 MB   |
+| `safeParse` invalid tail users 100k | **6.37 ms / 1.95 KB**   | 300.24 ms / 4.64 MB   | 27.76 ms / 5.46 MB   | 111.38 ms / 21.01 MB |
+
+The dynamic TypeBox path (`Value.Check`) is intentionally included in the raw
+suite because TypeBox documents both dynamic and compiled validation modes:
+on the 100k valid-user load it measured 76.61 ms / 11.74 MB, so the compiled
+JIT validator was 10.9x faster while staying effectively allocation-free.
+
+Selected operation load benchmarks from `pnpm bench:all`:
+
+| Operation                           | JIT avg / heap         | Fast competitor       | Competitor avg / heap | Speedup |
+| ----------------------------------- | ---------------------- | --------------------- | --------------------- | ------- |
+| Equal, array 100k                   | **734.37 µs / 96 b**   | fast-deep-equal       | 9.58 ms / 12.21 MB    | 13.0x   |
+| Diff, nested arrays                 | **297.31 µs / 1 KB**   | microdiff             | 7.66 ms / 7.87 MB     | 25.8x   |
+| Update, deep object                 | **18.41 ns / 120 b**   | immer                 | 2.22 µs / 3.49 KB     | 120.6x  |
+| JSON stringify, medium user         | **207.49 ns / 875 b**  | fast-json-stringify   | 266.52 ns / 1.00 KB   | 1.3x    |
+| Stream reject early, bad item 3/10k | **18.89 µs / 24.5 KB** | JSON.parse + validate | 1.96 ms / 921.8 KB    | 103.8x  |
 
 ## Install
 
@@ -72,7 +109,8 @@ pnpm add jit
 ## Schemas
 
 zod-like builders; every schema carries its inferred type
-(`JIT.infer<typeof X>` works on builders and raw schemas).
+(`JIT.Infer<typeof X>` and the legacy `JIT.infer<typeof X>` work on builders
+and raw schemas).
 
 ```ts
 // primitives
@@ -181,10 +219,13 @@ Every failing check accepts a custom message as its last argument:
 JIT.string()
   .min(2, "too short")
   .max(64)
+  .startsWith("user:")
+  .includes(":active:")
+  .endsWith(":v1")
   .oneOf(["admin", "user"] as const)
   .noEmpty()
   .regex(/^[a-z]+$/, "lowercase only");
-JIT.number().moreThan(0).lessThan(100).int32("must fit signed int32").float64();
+JIT.number().gt(0).lt(100).step(0.5).int32("must fit signed int32").float64();
 JIT.array(JIT.string()).nonEmpty("pick at least one tag");
 JIT.date().between("2026-01-01", "2026-12-31");
 ```
@@ -249,11 +290,13 @@ JIT.string().cuid2().ulid().nanoid().ksuid().xid();
 JIT.string().ipv4().ipv6().cidrv4().mac("-");
 JIT.string().base64().base64url().hex();
 JIT.string().hostname().domain().e164();
+JIT.string().httpUrl().jwt();
 JIT.string().date(); // YYYY-MM-DD, calendar-valid
 JIT.string().time({ precision: 0 }); // HH:MM:SS
 JIT.string().datetime({ offset: true }); // ISO datetime, allows ±HH:MM
 JIT.string().duration().emoji();
 JIT.string().digest("sha256", "base64url"); // md5..sha512 digests
+JIT.string().stringFormat("slug", /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 ```
 
 ### String masks
@@ -320,6 +363,20 @@ const BaseKeys = Base.keyof(); // enum of known object keys
 ## Validation
 
 ```ts
+const isUser = JIT.validate(User).is().compile();
+const parseUser = JIT.validate(User).parse().compile();
+
+isUser(x); // (x: unknown) => x is User
+parseUser(x); // User or throws JITValidationError
+
+isUser.source; // generated source, useful for debugging
+isUser.hash; // deterministic source hash
+isUser.explain(); // { operation, hash, source, cache }
+```
+
+`JIT.validator` remains available when an object facade is more convenient:
+
+```ts
 const Users = JIT.validator(User);
 
 Users.is(x); // (x: unknown) => x is User — zero allocation
@@ -353,8 +410,10 @@ User.parse(input);
 ```
 
 For framework interop, every builder exposes an optional Standard Schema v1
-facade. It is lazy and never stored in the AST, so AOT output is unchanged
-unless you explicitly use it at runtime:
+facade. It is cached per schema and closes over the compiled `safeParse`
+function, so validation still runs through specialized generated code. The
+facade is never stored in the AST, so AOT output is unchanged unless you
+explicitly use it at runtime:
 
 ```ts
 const standard = User["~standard"];
@@ -402,19 +461,57 @@ User.sanitize(a); // XSS-stripped copy
 User.codec.encode(a); // binary wire format
 ```
 
+The lower-level operation facade follows the dual runtime/AOT API shape:
+
+```ts
+const equalUser = JIT.equal(User).compile();
+const cloneUser = JIT.clone(User).compile();
+const diffUser = JIT.diff(User).compile();
+const hashUser = JIT.hash(User).compile();
+
+// Backward-compatible: these are callable directly too.
+JIT.equal(User)(a, b);
+```
+
+Structural operations understand the same complex shape semantics as the
+validator. Selected object fields made optional by `.partial("id")` compare
+and update as optional values; static `.default(value)` fields are
+canonicalized by `equal`, `hash`, `clone`, `diff`, `update`, and
+`stringify`; and unions/discriminated unions dispatch by branch in generated
+code. A diff between two values in the same branch is deep; a branch change is
+a root update for that branch.
+
+Parameterized updates follow the same compile shape:
+
+```ts
+const renameUser = JIT.update(User)
+  .patch({ name: JIT.param("name") })
+  .compile();
+
+renameUser(user, { name: "Grace" });
+```
+
 ## Query DSL
 
 Fused single-loop pipelines over collections — no intermediate arrays:
 
 ```ts
 const admins = JIT.query(UserList)
-  .filter((q) => q.and(q.not(q.eq("role", "blocked")), q.gt("id", 100)))
+  .params({ minimumId: JIT.int() })
+  .filter((q, params) =>
+    q.and(q.not(q.eq("role", "blocked")), q.gt("id", params.minimumId)),
+  )
   .select("id", "name", "role")
   .unique("id")
   .orderBy("name", "asc")
   .compile();
 
-admins(users); // one pass, out[j++] writes, zero allocation waste
+admins(users, { minimumId: 100 }); // one pass, params read directly
+
+// build-time constants are baked into the query artifact:
+JIT.query(UserList)
+  .filter((q) => q.eq("role", JIT.const("admin")))
+  .compile();
 
 // terminals
 JIT.query(UserList)
@@ -433,6 +530,21 @@ JIT.query(UserList)
   .filter((q) => q.eq("id", 7))
   .update({ active: false })
   .compile();
+```
+
+## Transform
+
+Compiled object transforms can select fields and use built-in field operators
+without shipping the schema engine:
+
+```ts
+const toUserDTO = JIT.transform(User)
+  .select("id", "name")
+  .map("name", (field) => field.lowercase())
+  .compile();
+
+toUserDTO({ id: 1, name: "ADA", role: "admin" });
+// { id: 1, name: "ada" }
 ```
 
 ## DTO mapper
@@ -472,6 +584,9 @@ const json = JIT.serializer(User);
 
 json.stringify(user); // static keys baked in; escape fast path
 json.parse(body); // JSON.parse + compiled validation
+
+const stringifyUser = JIT.json(User).stringify().compile();
+const parseUserJson = JIT.json(User).parse().compile();
 ```
 
 ### Binary codec (wire format v2)
@@ -551,6 +666,9 @@ Create the config in the project root:
 
 ```sh
 pnpm jit init
+pnpm jit doctor
+pnpm jit explain
+pnpm jit generate
 ```
 
 Generated `jit.config.ts`:
@@ -559,37 +677,66 @@ Generated `jit.config.ts`:
 import { AOT } from "jit";
 
 export default AOT.defineConfig({
-  // Omit schemas to scan from the project root. Entries can be files,
-  // directories, or globs.
-  // schemas: ["src/schemas/**/*.ts"],
+  // Files, directories, or globs containing explicit compiled AOT exports.
+  entries: ["./jit/**/*.jit.ts"],
   // Default discovery is **/*.jit.ts; change or add patterns when your
   // declarations use another shape.
   patterns: ["**/*.jit.ts"],
-  // Generated files are importable directly from your app.
-  outDir: "node_modules/@jit/generated",
-  packageName: "@jit/generated",
-  // Use false when generating into a project source folder instead of
-  // node_modules/@jit/generated.
-  emitPackageJson: true,
-  // Delete only jit's known generated files before writing fresh output.
-  clean: true,
+  output: {
+    mode: "directory",
+    directory: "generated/jit",
+    importSpecifier: "#jit",
+    packageName: "@jit/generated",
+    // Use false when generating inside an existing source directory.
+    emitPackageJson: true,
+    // Delete only jit's known generated files before writing fresh output.
+    clean: true,
+  },
+  target: { runtime: "node", engine: "v8", version: "22", module: "esm" },
+  compiler: {
+    mode: "production",
+    optimization: "aggressive",
+    sourceMaps: false,
+    declarations: true,
+  },
+  performance: {
+    shapes: true,
+    strings: true,
+    allocation: "auto",
+    strategies: "auto",
+  },
+  emit: {
+    rootBarrel: true,
+    subpathModules: true,
+    manifest: true,
+    plans: true,
+    runtimeSchemas: false,
+  },
+  diagnostics: { explainPlans: true, generatedSource: true },
 });
 ```
 
 Discovery rules are intentionally boring:
 
-- if `schemas` is omitted, `jit generate` scans from the project root;
-- `schemas` accepts files, directories, and globs like
-  `src/schemas/**/*.ts`;
+- if `entries` is omitted, `jit generate` scans from the project root;
+- `entries` accepts files, directories, and globs like `jit/**/*.jit.ts`;
+- legacy `schemas` still works as a compatibility alias for `entries`;
 - `patterns` controls directory scans; the default is `**/*.jit.ts`;
 - if no buildable functions are exported, the CLI prints a warning and writes
   nothing.
+- `jit doctor` prints resolved config, output directory, patterns, and files;
+- `jit explain` loads declaration files and lists grouped objects plus
+  standalone compiled exports without writing generated files.
+- `jit list` prints buildable exports in a compact format;
+- `jit inspect <export> --stage plan|source|declaration` shows the collected
+  descriptor or the generated source/types for review;
+- `jit clean` removes the configured generated directory.
 
 There is no raw-schema fallback. AOT builds only what you explicitly export.
 
 ```ts
-// src/user.jit.ts — discovered by convention (**/*.jit.ts)
-import { JIT } from "jit";
+// jit/user.jit.ts — discovered by convention (**/*.jit.ts)
+import { JIT } from "jit/define";
 
 const UserSchema = JIT.object({
   id: JIT.number(),
@@ -597,10 +744,11 @@ const UserSchema = JIT.object({
   role: JIT.string(),
 });
 
-const selected = JIT.validator(UserSchema).get("is", "parse");
+const selected = JIT.validator(UserSchema).get("parse");
+const isUser = JIT.validate(UserSchema).is().compile();
 
 // Standalone functions keep their declared export names exactly.
-export const User_is = selected.is;
+export const User_is = isUser;
 export const User_parse = selected.parse;
 
 // Object-style aggregation exports one object: User.is, User.parse, ...
@@ -615,11 +763,13 @@ export const User = JIT.compile(UserSchema, {
 
 ```ts
 import { User, User_is, User_parse } from "@jit/generated";
+import { User as UserFromSubpath } from "#jit/user";
 
 User.is(input);
 User.findAdmins(users);
 User_is(input);
 User_parse(input);
+UserFromSubpath.is(input);
 ```
 
 Run generation:
@@ -629,7 +779,31 @@ pnpm jit generate
 pnpm jit generate src/user.jit.ts --out generated --name @acme/models
 pnpm jit generate --pattern "src/schemas/**/*.ts"
 pnpm jit generate --watch
+pnpm jit list
+pnpm jit inspect User --stage plan
+pnpm jit clean
 ```
+
+With the default config, generation writes the root dual package plus review
+artifacts:
+
+```text
+generated/jit/
+├── index.mjs
+├── index.cjs
+├── index.d.ts
+├── user.mjs
+├── user.cjs
+├── user.d.ts
+├── manifest.json
+└── plans/
+    └── user.json
+```
+
+The subpath modules are thin re-export entrypoints over the generated barrel,
+so they contain no `jit` runtime import and keep the developer-facing shape
+aligned with `#jit/user`. The later physical split can make each subpath an
+independent bundle without changing the API.
 
 Output: `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
 (exports map, `sideEffects: false`). The module is **fully self-contained**:
@@ -798,11 +972,19 @@ follows.
 
 ```sh
 pnpm jit init        # create jit.config.ts in the current project root
+pnpm jit doctor      # inspect resolved config/discovery
+pnpm jit explain     # list AOT-buildable exports without writing files
+pnpm jit list        # compact list of AOT exports
+pnpm jit inspect User --stage plan
 pnpm jit generate    # generate the configured AOT package
+pnpm jit clean       # remove configured generated output
 pnpm test            # vitest + typecheck + golden sources + snapshots
 pnpm bench:validate  # Zod 4 / typia / JIT runtime / JIT AOT validation bench
+pnpm bench:load      # 10k/100k validation load vs TypeBox / typia / Zod
+pnpm bench:flows     # high-volume validate + query + JSON pipeline bench
 pnpm bench:all       # all mitata suites (equal/clone/query/validate/serialize/...)
 pnpm bench:report    # regenerate docs/internal/BENCH.md from latest results
 pnpm bench:coldstart # fresh-process AOT vs runtime compile
+pnpm clean:artifacts # rm -rf ignored package build artifacts generated by zshy
 pnpm format          # biome
 ```

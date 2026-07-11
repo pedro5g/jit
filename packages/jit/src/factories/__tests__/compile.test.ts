@@ -54,6 +54,7 @@ describe("JIT.compile explicit aggregation", () => {
     expect(Users.extras).toEqual([]);
     expect(Object.keys(Users).sort()).toEqual(["extras", "is", "ops", "parse", "schema"]);
     expectTypeOf<keyof typeof Users>().toEqualTypeOf<"schema" | "ops" | "extras" | "is" | "parse">();
+    expectTypeOf<JIT.infer<typeof Users>>().toEqualTypeOf<JIT.infer<typeof User>>();
   });
 });
 
@@ -125,7 +126,11 @@ describe("AOT generation from JIT.compile markers", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const ada = { id: 1, name: "Ada" };
     const selected = JIT.validator(User).get("is", "parse");
-    const marked = JIT.compile(User, { is: selected.is, parse: selected.parse });
+    const marked = JIT.compile(User, {
+      is: selected.is,
+      parse: selected.parse,
+      fromJSON: JIT.json(User).parse().compile(),
+    });
 
     AOT.generate({ schemas: { User: marked }, outDir });
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
@@ -133,19 +138,26 @@ describe("AOT generation from JIT.compile markers", () => {
 
     expect(source).toContain("const User_is");
     expect(source).toContain("const User_parse");
+    expect(source).toContain("const User_fromJSON");
     expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_is/);
     expect(types).not.toContain("export declare const User_is");
     expect(types).toContain("readonly is: (value: unknown) => value is User;");
+    expect(types).toContain("readonly fromJSON: (json: string) => User;");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
-      User: { is: (value: unknown) => boolean; parse: (value: unknown) => typeof ada };
+      User: {
+        is: (value: unknown) => boolean;
+        parse: (value: unknown) => typeof ada;
+        fromJSON: (json: string) => typeof ada;
+      };
       User_is?: unknown;
     };
 
     expect(generated.User.is(ada)).toBe(true);
     expect(generated.User.parse(ada)).toEqual(ada);
+    expect(generated.User.fromJSON(JSON.stringify(ada))).toEqual(ada);
     expect(generated.User_is).toBeUndefined();
   });
 

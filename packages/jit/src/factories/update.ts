@@ -4,6 +4,7 @@ import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+import type { QueryParamRef } from "./query.js";
 
 /**
  * Mutable draft shape accepted by update recipes.
@@ -44,7 +45,31 @@ export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
  * @param input - A structural patch or draft recipe.
  * @returns The updated value.
  */
-export type RuntimeUpdate<T> = (value: T, input: UpdateInput<T>) => T;
+export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
+  compile(): RuntimeUpdate<T>;
+  patch<const TPatch extends UpdatePatchTemplate<T>>(
+    patch: TPatch
+  ): {
+    compile(): (value: T, params: UpdatePatchParams<TPatch>) => T;
+  };
+};
+
+export type UpdatePatchTemplate<T> = T extends object
+  ? { readonly [TKey in keyof T]?: UpdatePatchTemplate<T[TKey]> | QueryParamRef<T[TKey]> | T[TKey] }
+  : T | QueryParamRef<T>;
+
+type UpdatePatchParamNames<TPatch> =
+  TPatch extends QueryParamRef<unknown>
+    ? TPatch["name"]
+    : TPatch extends readonly unknown[]
+      ? UpdatePatchParamNames<TPatch[number]>
+      : TPatch extends object
+        ? { [TKey in keyof TPatch]: UpdatePatchParamNames<TPatch[TKey]> }[keyof TPatch]
+        : never;
+
+export type UpdatePatchParams<TPatch> = [UpdatePatchParamNames<TPatch>] extends [never]
+  ? Readonly<Record<never, never>>
+  : Readonly<Record<Extract<UpdatePatchParamNames<TPatch>, string>, unknown>>;
 
 /**
  * Compiles a runtime update function for a schema.
@@ -79,18 +104,56 @@ export function update<TSchema extends AnyTypeSchema>(
   assertUpdateable(unwrapped);
 
   const compiled = compileUpdate(unwrapped);
-  const run = (current: InferSchema<TSchema>, updateInput: UpdateInput<InferSchema<TSchema>>) => {
+  const run = ((current: InferSchema<TSchema>, updateInput: UpdateInput<InferSchema<TSchema>>) => {
     const patch =
       typeof updateInput === "function"
         ? captureDraftPatch(updateInput as UpdateRecipe<InferSchema<TSchema>>)
         : updateInput;
 
     return compiled(current, patch);
-  };
+  }) as RuntimeUpdate<InferSchema<TSchema>>;
+
+  Object.defineProperties(run, {
+    compile: {
+      enumerable: false,
+      value: () => run,
+    },
+    patch: {
+      enumerable: false,
+      value: (template: UpdatePatchTemplate<InferSchema<TSchema>>) => ({
+        compile: () => (current: InferSchema<TSchema>, params: Readonly<Record<string, unknown>>) =>
+          run(current, materializeParamPatch(template, params) as UpdatePatch<InferSchema<TSchema>>),
+      }),
+    },
+  });
 
   if (args.length === 0) return run;
 
   return run(args[0], args[1]);
+}
+
+function materializeParamPatch(template: unknown, params: Readonly<Record<string, unknown>>): unknown {
+  if (isParamRef(template)) return params[template.name];
+  if (Array.isArray(template)) return template.map((value) => materializeParamPatch(value, params));
+
+  if (template !== null && typeof template === "object") {
+    const out: Record<string, unknown> = {};
+
+    for (const key of Object.keys(template)) {
+      out[key] = materializeParamPatch((template as Readonly<Record<string, unknown>>)[key], params);
+    }
+    return out;
+  }
+
+  return template;
+}
+
+function isParamRef(value: unknown): value is QueryParamRef {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as { readonly __jitQueryValue?: unknown }).__jitQueryValue === "param"
+  );
 }
 
 function captureDraftPatch<T>(recipe: UpdateRecipe<T>): UpdatePatch<T> {

@@ -15,7 +15,12 @@ export interface QueryBindingNode {
   readonly name: string;
 }
 
-export type QueryValueNode = QueryFieldNode | QueryLiteralNode | QueryBindingNode;
+export interface QueryParamNode {
+  readonly kind: "param";
+  readonly name: string;
+}
+
+export type QueryValueNode = QueryFieldNode | QueryLiteralNode | QueryBindingNode | QueryParamNode;
 
 export interface QueryCompareNode {
   readonly kind: "compare";

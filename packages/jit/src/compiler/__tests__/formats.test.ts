@@ -54,14 +54,29 @@ describe("JIT string format checks", () => {
     accepts(JIT.string().hostname(), ["example.com", "localhost"], ["-bad.com"]);
     accepts(JIT.string().domain(), ["example.com.br"], ["localhost"]);
     accepts(JIT.string().e164(), ["+5511999998888"], ["11999998888", "+0123"]);
+    accepts(JIT.string().httpUrl(), ["https://example.com", "http://localhost:3000"], ["ftp://example.com", "nope"]);
   });
 
   it("should validate encodings, hex, and digests", () => {
     accepts(JIT.string().base64(), ["aGVsbG8=", ""], ["aGVsbG8"]);
     accepts(JIT.string().base64url(), ["aGVsbG8_-", ""], ["aGVsbG8="]);
     accepts(JIT.string().hex(), ["deadBEEF", ""], ["xyz"]);
+    accepts(JIT.string().jwt(), ["eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature"], ["header.payload"]);
     accepts(JIT.string().digest("sha256"), ["a".repeat(64)], ["a".repeat(63)]);
     accepts(JIT.string().digest("md5", "base64"), ["1B2M2Y8AsgTpgAmY7PhCfg=="], ["1B2M2Y8AsgTpgAmY7PhCfg"]);
+  });
+
+  it("should validate string operators and custom regex formats", () => {
+    accepts(
+      JIT.string().startsWith("jit:").includes(":user:").endsWith(":v1"),
+      ["jit:tenant:user:42:v1"],
+      ["tenant:user:42:v1", "jit:tenant:admin:42:v1", "jit:tenant:user:42:v2"]
+    );
+    accepts(JIT.string().stringFormat("slug", /^[a-z0-9]+(?:-[a-z0-9]+)*$/), ["hello-world"], ["Hello World"]);
+
+    const normalized = JIT.validator(JIT.string().normalize("NFC").toLowerCase()).parse("A\u0301");
+
+    expect(normalized).toBe("á");
   });
 
   it("should validate temporal formats", () => {

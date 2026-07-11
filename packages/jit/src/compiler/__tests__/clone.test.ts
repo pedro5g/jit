@@ -67,6 +67,25 @@ describe("JIT compiler clone", () => {
     expect(schema.type).toBe(AST.TypeName.nullish);
   });
 
+  it("should materialize static default object props while cloning", () => {
+    const schema = JIT.object({
+      id: JIT.number().default(1),
+      name: JIT.string().optional(),
+      profile: JIT.object({ enabled: JIT.boolean(), tags: JIT.array(JIT.string()) }).default({
+        enabled: true,
+        tags: ["core"],
+      }),
+    }).schema;
+    const clone = Compiler.compileClone(schema);
+
+    expect(clone({} as never)).toEqual({ id: 1, name: undefined, profile: { enabled: true, tags: ["core"] } });
+    expect(clone({ id: undefined } as never)).toEqual({
+      id: 1,
+      name: undefined,
+      profile: { enabled: true, tags: ["core"] },
+    });
+  });
+
   it("should clone nullable dates without unsafe access", () => {
     const schema = JIT.date().nullable().schema;
     const clone = Compiler.compileClone(schema);

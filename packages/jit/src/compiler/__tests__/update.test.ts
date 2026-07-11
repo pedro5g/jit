@@ -24,6 +24,37 @@ describe("JIT compiler update", () => {
     }>();
   });
 
+  it("should compile parameterized patch updates through the runtime facade", () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      name: JIT.string(),
+      active: JIT.boolean(),
+    });
+    const rename = JIT.update(User)
+      .patch({ name: JIT.param("name") })
+      .compile();
+    const direct = JIT.update(User).compile();
+    const input = { id: 1, name: "Ada", active: true };
+
+    expect(rename(input, { name: "Grace" })).toEqual({ id: 1, name: "Grace", active: true });
+    expect(rename(input, { name: "Ada" })).toBe(input);
+    expect(direct(input, { active: false })).toEqual({ id: 1, name: "Ada", active: false });
+    expectTypeOf(rename).toMatchTypeOf<
+      (
+        value: {
+          id: number;
+          name: string;
+          active: boolean;
+        },
+        params: { readonly name: unknown }
+      ) => {
+        id: number;
+        name: string;
+        active: boolean;
+      }
+    >();
+  });
+
   it("should update nested object branches with structural sharing", () => {
     const User = JIT.object({
       id: JIT.number(),
@@ -133,6 +164,50 @@ describe("JIT compiler update", () => {
     expect(update(value, new Date(value.getTime()))).toBe(value);
     expect(update(value, next)).toEqual(next);
     expect(update(value, next)).not.toBe(next);
+  });
+
+  it("should update defaulted object props against their canonical value", () => {
+    const schema = JIT.object({
+      id: JIT.number().default(1),
+      name: JIT.string().optional(),
+      profile: JIT.object({ enabled: JIT.boolean(), tags: JIT.array(JIT.string()) }).default({
+        enabled: true,
+        tags: ["core"],
+      }),
+    }).schema;
+    const update = Compiler.compileUpdate(schema);
+    const input = {};
+
+    expect(update(input as never, { id: 1 } as never)).toBe(input);
+    expect(update(input as never, { id: 2 } as never)).toEqual({
+      id: 2,
+      name: undefined,
+      profile: { enabled: true, tags: ["core"] },
+    });
+    expect(update(input as never, { name: "Ada" } as never)).toEqual({
+      id: 1,
+      name: "Ada",
+      profile: { enabled: true, tags: ["core"] },
+    });
+    expect(update(input as never, { profile: { enabled: false } } as never)).toEqual({
+      id: 1,
+      name: undefined,
+      profile: { enabled: false, tags: ["core"] },
+    });
+  });
+
+  it("should update discriminated union branches without mixing shapes", () => {
+    const Cat = JIT.object({ kind: JIT.literal("cat"), profile: JIT.object({ lives: JIT.number() }) });
+    const Dog = JIT.object({ kind: JIT.literal("dog"), profile: JIT.object({ bark: JIT.boolean() }) });
+    const update = Compiler.compileUpdate(JIT.discriminatedUnion("kind", [Cat, Dog]).schema);
+    const input = { kind: "cat", profile: { lives: 9 } };
+    const nextDog = { kind: "dog", profile: { bark: true } };
+
+    expect(update(input as never, { profile: { lives: 8 } } as never)).toEqual({
+      kind: "cat",
+      profile: { lives: 8 },
+    });
+    expect(update(input as never, nextDog as never)).toBe(nextDog);
   });
 
   it("should update tuples, records, sets, and maps", () => {

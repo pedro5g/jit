@@ -158,6 +158,12 @@ describe("Builder chain", () => {
       const assertInvalidDefaults = () => {
         // @ts-expect-error literal is shorter than the declared min length
         JIT.string().min(5).default("oi");
+        // @ts-expect-error literal does not start with the declared prefix
+        JIT.string().startsWith("jit:").default("app:user");
+        // @ts-expect-error literal does not include the declared segment
+        JIT.string().includes(":user:").default("jit:admin:1");
+        // @ts-expect-error literal does not end with the declared suffix
+        JIT.string().endsWith(":v1").default("jit:user:v2");
         JIT.string()
           .oneOf(["admin", "user"] as const)
           // @ts-expect-error literal is not one of the declared string options
