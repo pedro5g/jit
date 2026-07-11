@@ -967,6 +967,7 @@ jit
 See [docs/architecture.md](../../docs/architecture.md) for the full pipeline
 (`DSL → AST → IR → optimizer → codegen`) and the codegen rules every emitter
 follows.
+Feature-specific guides live in [docs/features](../../docs/features/README.md).
 
 ## Development
 

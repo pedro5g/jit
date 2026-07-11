@@ -4,6 +4,8 @@ jit is a compiled data engine: a schema described once becomes specialized
 JavaScript for every operation over that shape. This document describes the
 project flow end to end and the rules every part follows.
 
+User-facing feature guides live in [docs/features](./features/README.md).
+
 ## The pipeline
 
 ```text
