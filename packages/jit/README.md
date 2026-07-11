@@ -74,12 +74,12 @@ Binary rowset benchmark (`pnpm bench:binary`) converts flat object batches to
 fixed-width `ArrayBuffer` rows and runs byte-offset queries. Numbers below
 were captured on the same machine as the table above.
 
-| Scenario                           | JIT binary                  | Baseline                                          | Result                  |
-| ---------------------------------- | --------------------------- | ------------------------------------------------- | ----------------------- |
-| Preloaded selective projection, 1M | **columnar 13.95 ms**       | JIT query over JS array 18.03 ms                  | **1.29x faster**        |
-| Filtered `count`, 1M               | **columnar 1.07 ms / 96 B** | JIT query over JS array 4.24 ms / 96 B            | **3.97x faster**        |
-| Filtered `sum`, 1M                 | **columnar 1.28 ms / 96 B** | JIT query over JS array 4.45 ms / 96 B            | **3.48x faster**        |
-| `load+query`, 1M, dynamic packed   | **402.94 ms / 80.88 MB**    | Zod 4 parse + native filter 462.48 ms / 109.69 MB | **lower time and heap** |
+| Scenario                           | JIT binary                  | Baseline                                          | Result                          |
+| ---------------------------------- | --------------------------- | ------------------------------------------------- | ------------------------------- |
+| Preloaded selective projection, 1M | **columnar 15.04 ms**       | JIT query over JS array 17.86 ms                  | **1.19x faster**                |
+| Filtered `count`, 1M               | **columnar 1.09 ms / 96 B** | JIT query over JS array 4.24 ms / 96 B            | **3.88x faster**                |
+| Filtered `sum`, 1M                 | **columnar 1.26 ms / 96 B** | JIT query over JS array 4.45 ms / 96 B            | **3.53x faster**                |
+| Adaptive `load+query`, 1M, dynamic | **52.67 ms / 28.26 MB**     | Zod 4 parse + native filter 454.89 ms / 110.31 MB | **8.64x faster, 74% less heap** |
 
 For one-off queries over already materialized JS arrays, regular `JIT.query`
 can still be the right tool. Binary rowsets are for reuse, repeated filters,
@@ -87,7 +87,9 @@ controlled scratch memory, and pipelines where rows stay compact between
 processing stages. `memoryLayout: "auto"` keeps mixed schemas packed and uses
 typed views when already naturally aligned. Use `"columnar"` for batches that
 feed repeated scans/aggregates; it keeps fields contiguous in the same single
-buffer and emits `columnBase + i` hot loops.
+buffer and emits `columnBase + i` hot loops. `JIT.process()` also samples
+projection-only strings, skipping high-cardinality maps while preserving
+integer dictionaries for every string used in a filter.
 
 High-load validation benchmark (`pnpm bench:load`) preallocates 10k/100k
 unknown users and measures only validation work. TypeBox is measured through

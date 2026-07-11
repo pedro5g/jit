@@ -175,6 +175,30 @@ static strategies. Unused typed-view properties point to shared empty views;
 `release()` replaces references instead of deleting properties. This keeps
 the call sites that consume rowsets monomorphic.
 
+### Adaptive Projection Strings
+
+`JIT.process()` knows the complete filter/projection plan before it creates the
+binary loader. A dynamic string used only in the output is marked adaptive:
+the loader samples up to 1,024 present values. At 50% or higher uniqueness it
+stores identity codes and row string references directly, skipping the large
+`Map<string, code>` construction. Low-cardinality fields retain canonical
+dictionaries.
+
+```ts
+const projectUsers = JIT.process(User)
+  .binary({ strategy: "dynamic", memoryLayout: "columnar" })
+  .filter((q) => q.eq("role", "admin")) // indexed integer dictionary
+  .select("id", "name") // unique name can use identity codes
+  .compile();
+```
+
+This optimization is deliberately plan-scoped. A string used by any filter is
+always indexed and compared as an integer. A standalone
+`JIT.array(User).binary().load()` also builds complete dictionaries because it
+cannot know which future queries will need string equality. The adaptive
+branch is chosen once before the generated writer loop and remains stable for
+the whole batch.
+
 ## Why It Is Faster
 
 Regular JS array filtering repeatedly loads object properties from the heap.
@@ -194,6 +218,8 @@ Binary rowsets change the hot loop:
 - filters and projections are fused into one generated loop;
 - filtered numeric aggregates cache a field read once per row and `sum` uses
   conditional accumulation instead of a callback or intermediate array;
+- process plans avoid building high-cardinality string maps for fields that
+  are proven to be projection-only;
 - rows that fail the filter are never hydrated back into JS objects.
 
 That is why the byte-query path is especially strong for selective filters:
@@ -267,6 +293,7 @@ codecs, schema builders, the runtime compiler, or unused rowset helpers.
 
 ```sh
 pnpm bench:binary
+pnpm bench:binary-strings
 pnpm bench:report
 ```
 
@@ -282,6 +309,10 @@ The binary suite measures:
 - Zod 4 and TypeBox validation plus native filter/map as marked biased
   boundary comparisons.
 
+The string strategy suite separately measures dictionary versus fixed UTF-8
+hash slots at low, medium, and unique cardinalities, including exact byte
+verification and hydration.
+
 Mitata persists `heap/op` and GC stats in `bench/results/binary.latest.json`.
 Use those numbers to decide between `exact`, `dynamic`, and `static` for a
 real workload.
@@ -290,12 +321,12 @@ Latest local run in this repo on Node 22.17.1, linux-x64, Ryzen 7 5800H:
 
 | Scenario                           | Best rowset result                         | Same-run comparison                        |
 | ---------------------------------- | ------------------------------------------ | ------------------------------------------ |
-| Preloaded selective projection, 1M | **columnar: 13.95 ms / 13.74 MiB heap/op** | aligned: 14.28 ms; packed: 16.12 ms        |
-| Filtered `count`, 1M               | **columnar: 1.07 ms / 96 B**               | packed: 1.45 ms; JIT JS array: 4.24 ms     |
-| Filtered `sum`, 1M                 | **columnar: 1.28 ms / 96 B**               | aligned: 1.77 ms; packed: 2.33 ms          |
-| Isolated `load`, 1M                | **columnar: 457.82 ms / 90.45 MiB**        | aligned: 463.77 ms; packed: 475.27 ms      |
-| `load+query`, 1M, exact            | **columnar: 404.72 ms / 80.83 MiB**        | packed: 405.42 ms; aligned: 412.23 ms      |
-| `load+query`, 1M, dynamic packed   | **402.94 ms / 80.88 MiB**                  | Zod parse + native: 462.48 ms / 109.69 MiB |
+| Preloaded selective projection, 1M | **columnar: 15.04 ms / 13.62 MiB heap/op** | aligned: 15.26 ms; packed: 16.89 ms        |
+| Filtered `count`, 1M               | **columnar: 1.09 ms / 96 B**               | packed: 1.38 ms; JIT JS array: 4.24 ms     |
+| Filtered `sum`, 1M                 | **columnar: 1.26 ms / 96 B**               | aligned: 1.68 ms; packed: 2.31 ms          |
+| Generic isolated `load`, 1M        | **columnar: 463.41 ms / 90.21 MiB**        | aligned: 480.78 ms; packed: 482.90 ms      |
+| Adaptive `load+query`, 1M, exact   | **columnar: 63.36 ms / 29.49 MiB**         | aligned: 65.97 ms; packed: 67.40 ms        |
+| Adaptive `load+query`, 1M, dynamic | **packed: 52.67 ms / 28.26 MiB**           | Zod parse + native: 454.89 ms / 110.31 MiB |
 
 The table is intentionally split: preloaded rowsets measure the byte scanner;
 `load+query` measures conversion plus compute. If a workload runs one simple
@@ -313,6 +344,20 @@ and adaptive row layout first brought the comparable results to 1.39 ms, 1.51
 ms, 403.32 ms, and 402.34 ms respectively. Columnar storage then reduced the
 same allocation-free scans to 1.07 ms and 1.28 ms while remaining competitive
 for one-pass load+query.
+
+The next bottleneck was not byte scanning but building maps for unique `name`
+values. Plan-scoped adaptive strings reduced the 1M dynamic load+query flow
+from roughly 403 ms / 81 MiB to 52.67 ms / 28.26 MiB. Generic `binary.load()`
+intentionally remains around 463-483 ms in this fixture because it prepares
+all dynamic strings for arbitrary future equality queries.
+
+The dedicated 300k-string benchmark explains the threshold. At cardinality
+32, dictionary load was 3.48 ms versus 31.46 ms inline and equality was 0.22
+ms versus 0.74 ms. With 300k unique values, inline load won 34.32 ms versus
+81.17 ms and used far less heap, but inline hydration took 46.67 ms versus
+1.88 ms. Therefore fixed inline UTF-8 is not a default; adaptive identity
+codes capture the high-cardinality load/memory benefit while preserving fast
+dictionary hydration and exact integer filters where required.
 
 Forcing every row to be aligned was tested and rejected as the default. It
 changed the benchmark schema from 19 to 20 bytes per row. Typed reads helped
@@ -337,9 +382,8 @@ when JIT says a rowset query scans bytes, it really scans bytes with fixed
 offsets instead of silently falling back to generic object interpretation.
 
 The next measured storage stage is a hybrid/indexed plan for repeated equality
-and range filters. Bounded strings will be evaluated by cardinality and UTF-8
-byte cost rather than inferred blindly from `.max()`: integer dictionaries are
-better for equality and repeated values, while inline strings may help
-unique-value projection. Discriminated object unions need a numeric type tag
-and separate branch layouts; intersections can be flattened only when
-overlapping fields have compatible physical representations.
+and range filters. An explicit bounded inline UTF-8 mode remains a possible
+niche for data that is loaded but never hydrated; it will not be inferred
+blindly from `.max()`. Discriminated object unions need a numeric type tag and
+separate branch layouts; intersections can be flattened only when overlapping
+fields have compatible physical representations.

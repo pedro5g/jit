@@ -132,8 +132,11 @@ types that future package splits will reuse.
   typed views when naturally aligned, and supports explicit aligned and
   columnar modes. Columnar storage keeps one buffer with a leading mask plane
   and per-field contiguous lanes; generated queries bind only the column bases,
-  views, and dictionaries they touch. This layout may evolve independently
-  from codec v2 because it is not persisted across processes.
+  views, and dictionaries they touch. Process plans mark projection-only
+  strings adaptive: a bounded sample chooses canonical dictionary codes for
+  repeated values or identity codes for high-cardinality values, while filter
+  strings always stay indexed. This layout may evolve independently from codec
+  v2 because it is not persisted across processes.
 - **Streaming** (`compiler/stream.ts` + `runtime/stream/boundary-scanner.ts`):
   the boundary FSM must survive tokens cut across chunks, including inside
   UTF-8 sequences.
