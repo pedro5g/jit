@@ -198,7 +198,9 @@ function createBinaryProcessBuilder<
     compile() {
       const processSchema = createProcessObjectSchema(objectSchema, nodes);
       const arraySchema = createSchema(TypeName.array, { element: processSchema }) as ATS.ArraySchema;
-      const binary = compileBinaryArray(arraySchema, options) as BinaryArray<TElement>;
+      const binary = compileBinaryArray(arraySchema, options, {
+        adaptiveStringFields: collectProjectionOnlyFields(processSchema, nodes),
+      }) as BinaryArray<TElement>;
       const query = compileBinaryQuery<TElement, TResult, TParams>(binary, { nodes, bindings, params: paramNames });
       const execute = ((values: readonly TElement[], second?: TParams | number, third?: number): TResult => {
         const hasParams = paramNames.length > 0;
@@ -214,6 +216,26 @@ function createBinaryProcessBuilder<
       return Object.freeze({ binary, query, execute }) as BinaryProcessCompiled<TElement, TResult, TParams>;
     },
   };
+}
+
+function collectProjectionOnlyFields(schema: ATS.AnyTypeSchema, nodes: readonly QueryNode[]): ReadonlySet<string> {
+  const filtered = new Set<string>();
+  let selected: readonly string[] | undefined;
+  let aggregate = false;
+
+  for (const node of nodes) {
+    if (node.kind === "filter") collectConditionKeys(node.condition, filtered);
+    else if (node.kind === "select:fields") selected = node.fields;
+    else if (node.kind === "aggregate") aggregate = true;
+  }
+
+  if (aggregate) return new Set();
+  const projected = new Set(
+    selected ?? (schema.type === TypeName.object ? Object.keys((schema as ATS.ObjectSchema).def.props) : [])
+  );
+
+  for (const key of filtered) projected.delete(key);
+  return projected;
 }
 
 function createProcessObjectSchema(schema: ATS.AnyTypeSchema, nodes: readonly QueryNode[]): ATS.AnyTypeSchema {

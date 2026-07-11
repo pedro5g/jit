@@ -270,6 +270,42 @@ describe("binary rowsets", () => {
     ]);
   });
 
+  it("adapts projection-only string storage without weakening string filters", () => {
+    const projected = JIT.process(User)
+      .binary({ strategy: "exact", memoryLayout: "columnar" })
+      .filter((q) => q.eq("role", "admin"))
+      .select("id", "name")
+      .compile();
+    const uniqueRowset = projected.binary.load(rows);
+    const name = projected.binary.layout.fields.find((field) => field.key === "name");
+    const dictionary = uniqueRowset.dictionaries[name?.dictionaryIndex ?? -1];
+
+    expect(name?.dictionaryMode).toBe("adaptive");
+    expect(dictionary.identity).toBe(true);
+    expect(dictionary.ids.size).toBe(0);
+    expect(projected.query(uniqueRowset)).toEqual([
+      { id: 1, name: "Ada" },
+      { id: 4, name: "Margaret" },
+    ]);
+
+    const repeated = rows.map((row) => ({ ...row, name: "same" }));
+    const repeatedRowset = projected.binary.load(repeated);
+    const repeatedDictionary = repeatedRowset.dictionaries[name?.dictionaryIndex ?? -1];
+
+    expect(repeatedDictionary.identity).toBe(false);
+    expect(repeatedDictionary.ids.size).toBe(1);
+
+    const filtered = JIT.process(User)
+      .binary({ strategy: "exact" })
+      .filter((q) => q.eq("name", "Ada"))
+      .select("id", "name")
+      .compile();
+    const filteredName = filtered.binary.layout.fields.find((field) => field.key === "name");
+
+    expect(filteredName?.dictionaryMode).toBe("dynamic");
+    expect(filtered.execute(rows)).toEqual([{ id: 1, name: "Ada" }]);
+  });
+
   it("exposes typed binary APIs", () => {
     const binary = Users.binary();
     const rowset = binary.load(rows);

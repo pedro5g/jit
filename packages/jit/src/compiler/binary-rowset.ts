@@ -72,7 +72,7 @@ export interface BinaryFieldLayout {
   readonly columnIndex?: number;
   readonly guard?: BinaryFieldGuard;
   readonly dictionaryIndex?: number;
-  readonly dictionaryMode?: "dynamic" | "fixed";
+  readonly dictionaryMode?: "dynamic" | "adaptive" | "fixed";
   readonly values?: readonly ScalarDictionaryValue[];
   readonly literal?: unknown;
 }
@@ -100,6 +100,7 @@ export interface BinaryRowLayout {
 export interface BinaryDictionary {
   readonly ids: Map<ScalarDictionaryValue, number>;
   readonly values: ScalarDictionaryValue[];
+  identity: boolean;
 }
 
 export interface BinaryRowSet<TElement = unknown> {
@@ -142,6 +143,10 @@ interface BinaryArrayState {
   buffer: ArrayBufferLike | undefined;
   bufferOffset: number;
   byteLength: number;
+}
+
+interface BinaryCompileHints {
+  readonly adaptiveStringFields?: ReadonlySet<string>;
 }
 
 interface BinaryRowTarget {
@@ -208,11 +213,12 @@ export function isBinaryArray(value: unknown): value is BinaryArray<unknown> {
 
 export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
   schema: TSchema,
-  options: BinaryRowSetOptions = {}
+  options: BinaryRowSetOptions = {},
+  hints: BinaryCompileHints = {}
 ): BinaryArray<BinaryArrayElement<TSchema>> {
   const arraySchema = schema as ArraySchema;
   const objectSchema = expectArrayObjectSchema(arraySchema, "binary rowset");
-  const layout = createBinaryRowLayout(objectSchema, options.memoryLayout);
+  const layout = createBinaryRowLayout(objectSchema, options.memoryLayout, hints.adaptiveStringFields);
   const strategy = options.strategy ?? "dynamic";
   const state = createBinaryArrayState(layout, strategy, options);
   const writer = compileRowWriter(layout);
@@ -229,6 +235,7 @@ export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
       const dictionaries = createDictionaries(layout);
 
       resetDictionaries(dictionaries, layout);
+      prepareAdaptiveDictionaries(values, count, layout, dictionaries);
       writer(values, count, target, dictionaries);
 
       return createRowSet<BinaryArrayElement<TSchema>>(
@@ -258,7 +265,7 @@ export function emitBinaryRowSetWriterSource(layout: BinaryRowLayout): string {
   writer.line("function writeRows(input, len, target, dictionaries) {");
   writer.indent(() => {
     emitRowViewBindings(writer, layout.fields, "target");
-    emitDictionaryBindings(writer, layout.fields);
+    emitDictionaryBindings(writer, layout.fields, true);
     emitRowCursorDeclarations(writer, layout, layout.fields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
@@ -610,6 +617,7 @@ function resetDictionaries(dictionaries: readonly BinaryDictionary[], layout: Bi
   for (const dictionary of dictionaries) {
     dictionary.ids.clear();
     dictionary.values.length = 0;
+    dictionary.identity = false;
   }
 
   for (const field of layout.fields) {
@@ -628,7 +636,33 @@ function createDictionaries(layout: BinaryRowLayout): BinaryDictionary[] {
 }
 
 function createDictionary(): BinaryDictionary {
-  return { ids: new Map(), values: [] };
+  return { ids: new Map(), values: [], identity: false };
+}
+
+function prepareAdaptiveDictionaries(
+  input: readonly unknown[],
+  count: number,
+  layout: BinaryRowLayout,
+  dictionaries: readonly BinaryDictionary[]
+): void {
+  const sampleSize = Math.min(count, 1024);
+
+  if (sampleSize === 0) return;
+
+  for (const field of layout.fields) {
+    if (field.dictionaryMode !== "adaptive" || field.dictionaryIndex === undefined) continue;
+    const values = new Set<ScalarDictionaryValue>();
+    let present = 0;
+
+    for (let index = 0; index < sampleSize; index++) {
+      const value = (input[index] as Readonly<Record<string, unknown>>)[field.key];
+
+      if (typeof value !== "string" && typeof value !== "number") continue;
+      present++;
+      values.add(value);
+    }
+    dictionaries[field.dictionaryIndex].identity = present > 0 && values.size * 2 >= present;
+  }
 }
 
 function expectArrayObjectSchema(schema: ArraySchema, feature: string): ObjectSchema {
@@ -643,7 +677,8 @@ function expectArrayObjectSchema(schema: ArraySchema, feature: string): ObjectSc
 
 export function createBinaryRowLayout(
   schema: ObjectSchema,
-  requestedLayout: BinaryMemoryLayout = "auto"
+  requestedLayout: BinaryMemoryLayout = "auto",
+  adaptiveStringFields?: ReadonlySet<string>
 ): BinaryRowLayout {
   const props = schema.def.props;
   const entries: {
@@ -668,7 +703,7 @@ export function createBinaryRowLayout(
 
   for (const key of Object.keys(props)) {
     const resolved = resolveWrappers(props[key]);
-    const descriptor = describeField(key, resolved.base);
+    const descriptor = describeField(key, resolved.base, adaptiveStringFields);
     const fieldAlignment = alignmentForSize(descriptor.size);
     if (fieldAlignment > alignment) alignment = fieldAlignment;
     const guard =
@@ -898,10 +933,17 @@ function emitRowViewBindings(writer: CodeWriter, fields: readonly BinaryFieldLay
   }
 }
 
-function emitDictionaryBindings(writer: CodeWriter, fields: readonly BinaryFieldLayout[]): void {
+function emitDictionaryBindings(
+  writer: CodeWriter,
+  fields: readonly BinaryFieldLayout[],
+  includeAdaptiveMode = false
+): void {
   for (const field of fields) {
     if (field.dictionaryIndex !== undefined) {
       writer.line(`const d${field.dictionaryIndex} = dictionaries[${field.dictionaryIndex}];`);
+      if (includeAdaptiveMode && field.dictionaryMode === "adaptive") {
+        writer.line(`const a${field.dictionaryIndex} = d${field.dictionaryIndex}.identity;`);
+      }
     }
   }
 }
@@ -935,12 +977,16 @@ function emitRowCursorAdvance(writer: CodeWriter, layout: BinaryRowLayout, field
 interface BinaryFieldDescriptor {
   readonly kind: BinaryFieldKind;
   readonly size: number;
-  readonly dictionary?: "dynamic" | "fixed";
+  readonly dictionary?: "dynamic" | "adaptive" | "fixed";
   readonly values?: readonly ScalarDictionaryValue[];
   readonly literal?: unknown;
 }
 
-function describeField(key: string, schema: ATS.AnyTypeSchema): BinaryFieldDescriptor {
+function describeField(
+  key: string,
+  schema: ATS.AnyTypeSchema,
+  adaptiveStringFields?: ReadonlySet<string>
+): BinaryFieldDescriptor {
   switch (schema.type) {
     case TypeName.number:
     case TypeName.nan:
@@ -954,7 +1000,11 @@ function describeField(key: string, schema: ATS.AnyTypeSchema): BinaryFieldDescr
     case TypeName.date:
       return { kind: "date", size: 8 };
     case TypeName.string:
-      return { kind: "string", size: 4, dictionary: "dynamic" };
+      return {
+        kind: "string",
+        size: 4,
+        dictionary: adaptiveStringFields?.has(key) ? "adaptive" : "dynamic",
+      };
     case TypeName.enum: {
       const values = Object.values((schema as ATS.EnumSchema).def.values) as ScalarDictionaryValue[];
 
@@ -1090,21 +1140,36 @@ function emitWriteScalar(writer: CodeWriter, field: BinaryFieldLayout, valueExpr
 function emitDictionaryWrite(writer: CodeWriter, field: BinaryFieldLayout, valueExpr: string, offset: string): void {
   const dictionary = `d${field.dictionaryIndex}`;
   const code = `c${field.dictionaryIndex}_${field.offset}`;
+  const emitIndexedWrite = (declaration: "let" | "assign") => {
+    writer.line(`${declaration === "let" ? "let " : ""}${code} = ${dictionary}.ids.get(${valueExpr});`);
+    writer.line(`if (${code} === undefined) {`);
+    writer.indent(() => {
+      if (field.dictionaryMode === "fixed") {
+        writer.line(
+          `throw new RangeError("jit binary rowset: value not in fixed dictionary for ${field.key}: " + ${valueExpr});`
+        );
+      } else {
+        writer.line(`${code} = ${dictionary}.values.length;`);
+        writer.line(`${dictionary}.ids.set(${valueExpr}, ${code});`);
+        writer.line(`${dictionary}.values[${code}] = ${valueExpr};`);
+      }
+    });
+    writer.line("}");
+  };
 
-  writer.line(`let ${code} = ${dictionary}.ids.get(${valueExpr});`);
-  writer.line(`if (${code} === undefined) {`);
-  writer.indent(() => {
-    if (field.dictionaryMode === "fixed") {
-      writer.line(
-        `throw new RangeError("jit binary rowset: value not in fixed dictionary for ${field.key}: " + ${valueExpr});`
-      );
-    } else {
+  if (field.dictionaryMode === "adaptive") {
+    writer.line(`let ${code};`);
+    writer.line(`if (a${field.dictionaryIndex}) {`);
+    writer.indent(() => {
       writer.line(`${code} = ${dictionary}.values.length;`);
-      writer.line(`${dictionary}.ids.set(${valueExpr}, ${code});`);
       writer.line(`${dictionary}.values[${code}] = ${valueExpr};`);
-    }
-  });
-  writer.line("}");
+    });
+    writer.line("} else {");
+    writer.indent(() => emitIndexedWrite("assign"));
+    writer.line("}");
+  } else {
+    emitIndexedWrite("let");
+  }
   if (field.size === 1) writer.line(`u8[${offset}] = ${code};`);
   else if (field.access === "dataView") writer.line(`dv.setUint32(${offset}, ${code}, true);`);
   else writer.line(`uint32[${emitTypedIndex(field)}] = ${code};`);
@@ -1532,6 +1597,9 @@ function emitFieldCompare(
   prepared: PreparedValues,
   comparableOverride?: string
 ): string {
+  if (field.dictionaryMode === "adaptive") {
+    throw new JITError("INVALID_QUERY", `binary adaptive string field ${field.key} is projection-only`);
+  }
   const comparable = comparableOverride ?? emitFieldComparable(field);
   const valueExpr = prepared.valueFor(field, value);
   const equality =

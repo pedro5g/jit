@@ -198,6 +198,11 @@ describe("generated source snapshots", () => {
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
       .select("id", "score")
       .compile();
+    const adaptiveProcess = JIT.process(User)
+      .binary({ strategy: "exact", memoryLayout: "columnar" })
+      .filter((q) => q.eq("role", "admin"))
+      .select("id", "note")
+      .compile();
 
     expect({
       writer: Compiler.emitBinaryRowSetWriterSource(Users.layout),
@@ -207,6 +212,8 @@ describe("generated source snapshots", () => {
       columnarWriter: Compiler.emitBinaryRowSetWriterSource(ColumnarUsers.layout),
       columnarHydrate: Compiler.emitBinaryHydrateSource(ColumnarUsers.layout),
       columnarQuery: sourceOf(columnarQuery),
+      adaptiveWriter: Compiler.emitBinaryRowSetWriterSource(adaptiveProcess.binary.layout),
+      adaptiveQuery: sourceOf(adaptiveProcess.query),
     }).toMatchSnapshot();
   });
 
