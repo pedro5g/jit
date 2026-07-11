@@ -76,17 +76,18 @@ were captured on the same machine as the table above.
 
 | Scenario                           | JIT binary                  | Baseline                                          | Result                  |
 | ---------------------------------- | --------------------------- | ------------------------------------------------- | ----------------------- |
-| Preloaded selective projection, 1M | **aligned 7.13 ms**         | JIT query over JS array 16.70 ms                  | **2.34x faster**        |
-| Filtered `count`, 1M               | **packed 1.39 ms / 96 B**   | JIT query over JS array 4.17 ms / 96 B            | **3.00x faster**        |
-| Filtered `sum`, 1M                 | **aligned 1.43 ms / 112 B** | JIT query over JS array 4.32 ms / 96 B            | **3.02x faster**        |
-| `load+query`, 1M, dynamic          | **402.34 ms / 80.97 MB**    | Zod 4 parse + native filter 423.34 ms / 112.12 MB | **lower time and heap** |
+| Preloaded selective projection, 1M | **columnar 13.95 ms**       | JIT query over JS array 18.03 ms                  | **1.29x faster**        |
+| Filtered `count`, 1M               | **columnar 1.07 ms / 96 B** | JIT query over JS array 4.24 ms / 96 B            | **3.97x faster**        |
+| Filtered `sum`, 1M                 | **columnar 1.28 ms / 96 B** | JIT query over JS array 4.45 ms / 96 B            | **3.48x faster**        |
+| `load+query`, 1M, dynamic packed   | **402.94 ms / 80.88 MB**    | Zod 4 parse + native filter 462.48 ms / 109.69 MB | **lower time and heap** |
 
 For one-off queries over already materialized JS arrays, regular `JIT.query`
 can still be the right tool. Binary rowsets are for reuse, repeated filters,
 controlled scratch memory, and pipelines where rows stay compact between
 processing stages. `memoryLayout: "auto"` keeps mixed schemas packed and uses
-typed views when already naturally aligned; force `"aligned"` only after the
-binary benchmark proves it for the target workload.
+typed views when already naturally aligned. Use `"columnar"` for batches that
+feed repeated scans/aggregates; it keeps fields contiguous in the same single
+buffer and emits `columnBase + i` hot loops.
 
 High-load validation benchmark (`pnpm bench:load`) preallocates 10k/100k
 unknown users and measures only validation work. TypeBox is measured through

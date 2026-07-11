@@ -34,13 +34,13 @@ const admins = findAdmins(rowset);
 ```
 
 The default `memoryLayout: "auto"` keeps mixed rows packed and switches to
-typed views when the existing field order is already naturally aligned. Force
-an aligned layout only after measuring a query-heavy workload:
+typed views when the existing field order is already naturally aligned. For
+repeated scans and aggregates, select contiguous column storage explicitly:
 
 ```ts
 const AnalyticalUsers = JIT.array(User).binary({
   strategy: "static",
-  memoryLayout: "aligned",
+  memoryLayout: "columnar",
   capacity: 1_000_000,
 });
 ```
@@ -66,9 +66,11 @@ pipeline.execute(batch, batchLength);
 
 ## Memory Strategies
 
-`strategy: "exact"` allocates exactly `rowSize * length` bytes for the current
-batch. It is the best default for HTTP payloads, database pages, and queue
-batches where the array length is known before processing.
+`strategy: "exact"` allocates the exact calculated byte length for the current
+batch. Row layouts use `rowSize * length`; columnar layouts add only the
+alignment bytes needed between entire columns. It is the best default for HTTP
+payloads, database pages, and queue batches where the array length is known
+before processing.
 
 ```ts
 JIT.array(User).binary({ strategy: "exact" });
@@ -146,11 +148,24 @@ and row stride is naturally aligned, so generated code can use direct typed
 array indexing. A caller-provided `Uint8Array` must have a byte offset matching
 `layout.alignment`; a misaligned static buffer fails during compilation.
 
+`memoryLayout: "columnar"` keeps the same single `ArrayBuffer`, but stores each
+field as one contiguous typed column. Optional masks occupy the leading bytes;
+the remaining columns are aligned once per column, not once per row. Generated
+queries load the required column bases from `rowset.offsets` before the loop and
+then read `columnBase + i`. This is the strongest mode for repeated filters,
+counts, sums, and queries that touch a small subset of a wide schema.
+
+Columnar mode is explicit because row order is usually better for one-pass
+hydration and because `auto` cannot know how many times an application will
+reuse a batch. It supports `exact`, `dynamic`, `static`, caller buffers,
+optionals/nullables, dictionaries, 32/64-bit values, hydration, JIT queries,
+and import-free AOT queries.
+
 Inspect the decision without reading generated source:
 
 ```ts
-console.log(AnalyticalUsers.layout.memoryLayout); // "aligned"
-console.log(AnalyticalUsers.layout.rowSize); // bytes per row
+console.log(AnalyticalUsers.layout.memoryLayout); // "columnar"
+console.log(AnalyticalUsers.layout.rowSize); // logical bytes per value
 console.log(AnalyticalUsers.layout.paddingBytes);
 console.log(AnalyticalUsers.layout.fields);
 ```
@@ -174,6 +189,8 @@ Binary rowsets change the hot loop:
   loop, so the loop does not compare strings or convert booleans;
 - naturally aligned layouts read wide values through specialized typed views;
   compact mixed layouts retain `DataView` when padding would cost more;
+- columnar layouts keep each scanned field contiguous and remove row-stride
+  cursor math from generated loops;
 - filters and projections are fused into one generated loop;
 - filtered numeric aggregates cache a field read once per row and `sum` uses
   conditional accumulation instead of a callback or intermediate array;
@@ -257,7 +274,8 @@ The binary suite measures:
 
 - preloaded byte query over 10k, 100k, and 1M rows;
 - allocation-free `count` and `sum` scans;
-- packed and forced-aligned layouts over the same data;
+- packed, forced-aligned, and columnar layouts over the same data;
+- isolated layout conversion (`load`) at 100k and 1M rows;
 - full `load + query` pipelines with exact and dynamic strategies;
 - regular `JIT.query` over JS arrays;
 - handwritten JS filter/map as a marked biased baseline;
@@ -270,13 +288,14 @@ real workload.
 
 Latest local run in this repo on Node 22.17.1, linux-x64, Ryzen 7 5800H:
 
-| Scenario                           | Best rowset result                      | Same-run comparison                                 |
-| ---------------------------------- | --------------------------------------- | --------------------------------------------------- |
-| Preloaded selective projection, 1M | **aligned: 7.13 ms / 7.69 MiB heap/op** | packed: 15.50 ms / 14.40 MiB                        |
-| Filtered `count`, 1M               | **packed: 1.39 ms / 96 B**              | aligned: 1.60 ms; JIT JS array: 4.17 ms             |
-| Filtered `sum`, 1M                 | **aligned: 1.43 ms / 112 B**            | packed: 1.51 ms; JIT JS array: 4.32 ms              |
-| `load+query`, 1M, exact            | **packed: 403.32 ms / 78.47 MiB**       | aligned: 415.31 ms / 82.53 MiB                      |
-| `load+query`, 1M, dynamic          | **packed: 402.34 ms / 80.97 MiB**       | Zod 4 parse + native filter: 423.34 ms / 112.12 MiB |
+| Scenario                           | Best rowset result                         | Same-run comparison                        |
+| ---------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| Preloaded selective projection, 1M | **columnar: 13.95 ms / 13.74 MiB heap/op** | aligned: 14.28 ms; packed: 16.12 ms        |
+| Filtered `count`, 1M               | **columnar: 1.07 ms / 96 B**               | packed: 1.45 ms; JIT JS array: 4.24 ms     |
+| Filtered `sum`, 1M                 | **columnar: 1.28 ms / 96 B**               | aligned: 1.77 ms; packed: 2.33 ms          |
+| Isolated `load`, 1M                | **columnar: 457.82 ms / 90.45 MiB**        | aligned: 463.77 ms; packed: 475.27 ms      |
+| `load+query`, 1M, exact            | **columnar: 404.72 ms / 80.83 MiB**        | packed: 405.42 ms; aligned: 412.23 ms      |
+| `load+query`, 1M, dynamic packed   | **402.94 ms / 80.88 MiB**                  | Zod parse + native: 462.48 ms / 109.69 MiB |
 
 The table is intentionally split: preloaded rowsets measure the byte scanner;
 `load+query` measures conversion plus compute. If a workload runs one simple
@@ -290,8 +309,10 @@ The baseline captured before this work used only packed `DataView` reads. On
 the same machine it measured 1.50 ms for the 1M filtered count, 2.67 ms for the
 filtered sum, 413.71 ms for exact load+query, and 424.66 ms for dynamic
 load+query. Integer boolean comparisons, single-read aggregate specialization,
-and adaptive layout brought the comparable results to 1.39 ms, 1.51 ms,
-403.32 ms, and 402.34 ms respectively.
+and adaptive row layout first brought the comparable results to 1.39 ms, 1.51
+ms, 403.32 ms, and 402.34 ms respectively. Columnar storage then reduced the
+same allocation-free scans to 1.07 ms and 1.28 ms while remaining competitive
+for one-pass load+query.
 
 Forcing every row to be aligned was tested and rejected as the default. It
 changed the benchmark schema from 19 to 20 bytes per row. Typed reads helped
@@ -302,8 +323,10 @@ faster in isolation.
 
 Heap-per-operation for projecting queries includes result object allocation
 and GC timing, so compare repeated runs. Physical rowset storage is
-deterministic: `rowSize * count`, plus dictionaries. In this fixture that is
-19 MiB packed or 20 MiB aligned per million rows.
+deterministic: `rowSize * count` for row layouts; columnar adds at most a few
+alignment bytes between full columns. In this fixture that is 19,000,000 bytes
+packed/columnar or 20,000,000 bytes aligned per million rows, plus dictionaries
+and the small column-offset table.
 
 ## Current Limits
 
@@ -313,10 +336,10 @@ the normal JIT validators/queries. This keeps the binary hot path honest:
 when JIT says a rowset query scans bytes, it really scans bytes with fixed
 offsets instead of silently falling back to generic object interpretation.
 
-The next measured layout stage is columnar/hybrid storage for repeated scans.
-Bounded strings will be evaluated by cardinality and UTF-8 byte cost rather
-than inferred blindly from `.max()`: integer dictionaries are better for
-equality and repeated values, while inline strings may help unique-value
-projection. Discriminated object unions need a numeric type tag and separate
-branch layouts; intersections can be flattened only when overlapping fields
-have compatible physical representations.
+The next measured storage stage is a hybrid/indexed plan for repeated equality
+and range filters. Bounded strings will be evaluated by cardinality and UTF-8
+byte cost rather than inferred blindly from `.max()`: integer dictionaries are
+better for equality and repeated values, while inline strings may help
+unique-value projection. Discriminated object unions need a numeric type tag
+and separate branch layouts; intersections can be flattened only when
+overlapping fields have compatible physical representations.

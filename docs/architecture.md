@@ -129,10 +129,11 @@ types that future package splits will reuse.
   `ArrayBuffer`; optionals/nullables use 2-bit row masks, string/literal
   fields use per-field integer dictionaries, and `JIT.query(rowset)` emits
   byte-offset scans. The adaptive memory layout keeps mixed rows packed, uses
-  typed views when naturally aligned, and supports an explicit aligned mode;
-  generated queries bind only the views and dictionaries they touch. This
-  layout may evolve independently from codec v2 because it is not persisted
-  across processes.
+  typed views when naturally aligned, and supports explicit aligned and
+  columnar modes. Columnar storage keeps one buffer with a leading mask plane
+  and per-field contiguous lanes; generated queries bind only the column bases,
+  views, and dictionaries they touch. This layout may evolve independently
+  from codec v2 because it is not persisted across processes.
 - **Streaming** (`compiler/stream.ts` + `runtime/stream/boundary-scanner.ts`):
   the boundary FSM must survive tokens cut across chunks, including inside
   UTF-8 sequences.
