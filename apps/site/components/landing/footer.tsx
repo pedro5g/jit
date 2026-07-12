@@ -23,9 +23,21 @@ const columns = [
   {
     title: "Resources",
     links: [
-      { href: `${githubUrl}/tree/main/docs`, label: "Feature guides", external: true },
-      { href: `${githubUrl}/blob/main/docs/architecture.md`, label: "Architecture", external: true },
-      { href: `${githubUrl}/blob/main/LICENSE`, label: "MIT license", external: true },
+      {
+        href: `${githubUrl}/tree/main/docs`,
+        label: "Feature guides",
+        external: true,
+      },
+      {
+        href: `${githubUrl}/blob/main/docs/architecture.md`,
+        label: "Architecture",
+        external: true,
+      },
+      {
+        href: `${githubUrl}/blob/main/LICENSE`,
+        label: "MIT license",
+        external: true,
+      },
     ],
   },
 ];
@@ -33,10 +45,10 @@ const columns = [
 export function SiteFooter() {
   return (
     <footer className="border-t border-line-subtle bg-night-950">
-      <div className="mx-auto grid w-full max-w-[1200px] gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1.4fr_repeat(3,1fr)]">
+      <div className="mx-auto grid w-full max-w-300 gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1.4fr_repeat(3,1fr)]">
         <div>
           <JitLogo />
-          <p className="mt-4 max-w-[280px] text-sm leading-relaxed text-fg-subtle">
+          <p className="mt-4 max-w-70 text-sm leading-relaxed text-fg-subtle">
             The compiled data engine — schemas in, straight-line code out.
           </p>
         </div>
@@ -67,7 +79,7 @@ export function SiteFooter() {
         ))}
       </div>
       <div className="border-t border-line-subtle">
-        <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-2 px-5 py-5 sm:px-8">
+        <div className="mx-auto flex w-full max-w-300 flex-wrap items-center justify-between gap-2 px-5 py-5 sm:px-8">
           <p className="font-mono text-xs text-fg-subtle">MIT © {new Date().getFullYear()} pedro5g</p>
           <p className="font-mono text-xs text-fg-subtle">compiled, cached, and specialized</p>
         </div>

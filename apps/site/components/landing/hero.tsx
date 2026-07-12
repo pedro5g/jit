@@ -1,4 +1,4 @@
-import { JitGhostInteractive } from "@/components/brand/jit-ghost-interactive";
+import { JitGhost } from "@/components/brand/jit-ghost";
 import { PixelBadge } from "@/components/brand/pixel-badge";
 import { CodePanel } from "@/components/code/code-panel";
 import { CopyButton } from "@/components/code/copy-button";
@@ -51,14 +51,14 @@ export function Hero() {
 
         <div className="relative flex flex-col justify-center">
           <div className="absolute -top-6 right-2 z-10 hidden items-end gap-1 lg:flex">
-            <JitGhostInteractive size={132} />
+            <JitGhost size={132} follow="full" glow />
             <span aria-hidden className="hero-wordmark mb-3 font-pixel text-3xl text-gold-200">
               jit.
             </span>
           </div>
           <HeroSequence>
             <div className="mb-5 flex items-end justify-center gap-2 lg:hidden">
-              <JitGhostInteractive size={88} />
+              <JitGhost size={88} follow="eyes" glow />
               <span aria-hidden className="hero-wordmark mb-2 font-pixel text-2xl text-gold-200">
                 jit.
               </span>

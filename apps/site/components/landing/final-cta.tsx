@@ -1,4 +1,4 @@
-import { JitGhostStatic } from "@/components/brand/jit-ghost-static";
+import { JitGhost } from "@/components/brand/jit-ghost";
 import { CopyButton } from "@/components/code/copy-button";
 import { ButtonLink } from "@/components/ui/button-link";
 import { Section } from "@/components/ui/section";
@@ -10,7 +10,7 @@ export function FinalCta() {
       <div className="relative overflow-hidden rounded-panel border border-line-gold/50 bg-night-800 px-6 py-14 text-center sm:px-12">
         <div aria-hidden className="bg-hero-glow absolute inset-0" />
         <div className="relative flex flex-col items-center">
-          <JitGhostStatic size={104} />
+          <JitGhost size={104} glow />
           <h2 className="mt-6 text-balance text-3xl font-semibold tracking-tight text-fg-strong sm:text-4xl">
             Ship the code you meant to write
           </h2>

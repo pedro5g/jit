@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { JitGhostStatic } from "@/components/brand/jit-ghost-static";
+import { JitGhost } from "@/components/brand/jit-ghost";
 import { ButtonLink } from "@/components/ui/button-link";
 
 export default function NotFound() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center px-5 text-center">
-      <JitGhostStatic size={140} />
+      <JitGhost size={140} glow />
       <p className="mt-8 font-pixel text-5xl text-gold-200">404</p>
       <h1 className="mt-3 text-xl font-semibold text-fg-strong">Nothing compiled at this path</h1>
       <p className="mt-2 max-w-105 text-sm leading-relaxed text-fg-muted">

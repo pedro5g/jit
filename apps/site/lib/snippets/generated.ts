@@ -10,6 +10,8 @@ export interface OperationSnippet {
   label: string;
   input: string;
   output: string;
+  /** real output of running the generated function (captured, not invented) */
+  result: string;
 }
 
 const isInput = `const isUser = JIT.validate(User).is().compile();
@@ -258,12 +260,65 @@ const mapperOutput = `{
   }
 }`;
 
+const adaLiteral = `{ id: 1, name: "Ada", email: "ada@lovelace.dev", role: "admin", tags: ["compiler"] }`;
+
 export const operationSnippets: OperationSnippet[] = [
-  { id: "validate", label: "validate", input: isInput, output: isOutput },
-  { id: "equal", label: "equal", input: equalInput, output: equalOutput },
-  { id: "clone", label: "clone", input: cloneInput, output: cloneOutput },
-  { id: "diff", label: "diff", input: diffInput, output: diffOutput },
-  { id: "query", label: "query", input: queryInput, output: queryOutput },
-  { id: "mapper", label: "mapper", input: mapperInput, output: mapperOutput },
-  { id: "stringify", label: "stringify", input: stringifyInput, output: stringifyOutput },
+  {
+    id: "validate",
+    label: "validate",
+    input: isInput,
+    output: isOutput,
+    result: `isUser(${adaLiteral})  →  true\nisUser({ id: -1, name: "A", email: "nope", role: "root", tags: [1] })  →  false`,
+  },
+  {
+    id: "equal",
+    label: "equal",
+    input: equalInput,
+    output: equalOutput,
+    result: `equalUser(ada, { ...ada, tags: ["compiler"] })  →  true\nequalUser(ada, grace)  →  false`,
+  },
+  {
+    id: "clone",
+    label: "clone",
+    input: cloneInput,
+    output: cloneOutput,
+    result: `cloneUser(ada)  →  ${adaLiteral}\ncloneUser(ada) !== ada  →  true (new reference)`,
+  },
+  {
+    id: "diff",
+    label: "diff",
+    input: diffInput,
+    output: diffOutput,
+    result: `diffUser(ada, { ...ada, name: "Ada L.", tags: ["compiler", "math"] })  →
+[
+  { type: "update", path: ["name"], value: "Ada L." },
+  { type: "add", path: ["tags", 1], value: "math" }
+]`,
+  },
+  {
+    id: "query",
+    label: "query",
+    input: queryInput,
+    output: queryOutput,
+    result: `admins([ada, grace, barbara], { minimumId: 1 })  →
+[
+  { id: 3, name: "Barbara", role: "user" },
+  { id: 2, name: "Grace", role: "admin" }
+]`,
+  },
+  {
+    id: "mapper",
+    label: "mapper",
+    input: mapperInput,
+    output: mapperOutput,
+    result: `toDTO.map({ id: 1, fullName: "Ada Lovelace", passwordHash: "…", profile: { age: 36, city: "London" } })  →
+{ id: 1, name: "Ada Lovelace", profile: { age: 36, city: "London" } }  // passwordHash cannot leak`,
+  },
+  {
+    id: "stringify",
+    label: "stringify",
+    input: stringifyInput,
+    output: stringifyOutput,
+    result: `toJSON(ada)  →  '{"id":1,"name":"Ada","email":"ada@lovelace.dev","role":"admin","tags":["compiler"]}'`,
+  },
 ];

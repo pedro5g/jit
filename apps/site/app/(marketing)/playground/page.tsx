@@ -13,8 +13,8 @@ export default function PlaygroundPage() {
     <Section ghostState="typing" ghostLabel="compiling your schema…">
       <SectionHeading
         eyebrow="Playground"
-        title="Compile a schema, read the generated code"
-        lead="The same engine that runs in Node runs here, in a Web Worker in your browser. Define a schema, feed it JSON, and inspect the exact specialized function jit emits."
+        title="The whole engine, in your browser"
+        lead="A real TypeScript editor with full jit type inference, every compiled operation one click away. Define a schema, customize the inputs, run it, and read the exact specialized source the compiler emits."
       />
       <PlaygroundClient />
     </Section>

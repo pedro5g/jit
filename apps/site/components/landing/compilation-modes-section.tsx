@@ -1,4 +1,4 @@
-import { JitGhostStatic } from "@/components/brand/jit-ghost-static";
+import { JitGhost } from "@/components/brand/jit-ghost";
 import { PixelBadge } from "@/components/brand/pixel-badge";
 import { CodePanel } from "@/components/code/code-panel";
 import { Section, SectionHeading } from "@/components/ui/section";
@@ -44,7 +44,7 @@ export function CompilationModesSection() {
           </ul>
         </article>
         <article className="relative flex flex-col rounded-panel border border-line-gold/60 bg-night-800 p-6 sm:p-8">
-          <JitGhostStatic size={72} float={false} className="absolute -top-9 right-6" />
+          <JitGhost size={72} className="absolute -top-9 right-6" />
           <div className="mb-4 flex items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-fg-strong">Build cartridge</h3>
             <PixelBadge tone="success">AOT</PixelBadge>

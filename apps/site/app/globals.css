@@ -153,6 +153,32 @@ body {
   color: var(--text-primary);
 }
 
+/* Slim night scrollbars everywhere */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-600) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-600);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--gold-400);
+}
+
 button {
   cursor: pointer;
 }
@@ -186,6 +212,10 @@ button {
   padding: 0;
   font-size: 0.8125rem;
   line-height: 1.6;
+  /* wrap long lines instead of horizontal scrolling */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {
@@ -291,6 +321,31 @@ button {
 
 .type-lines .line.line-on {
   visibility: visible;
+}
+
+/* Ghost eyes: blink (scaleY squash, guide §layer B) — translate comes from JS on the group */
+.jit-ghost-eyes rect {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ghost-blink 5.4s infinite;
+}
+
+@keyframes ghost-blink {
+  0%,
+  91%,
+  97%,
+  100% {
+    transform: scaleY(1);
+  }
+  94% {
+    transform: scaleY(0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jit-ghost-eyes rect {
+    animation: none;
+  }
 }
 
 /* Ghost companion states */

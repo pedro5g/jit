@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { type GhostState, JitGhost } from "./jit-ghost";
 
 const VISIBLE_KEY = "jit:ghost-visible";
 
@@ -81,10 +82,7 @@ export function GhostCompanion() {
           <X aria-hidden className="size-3" />
         </button>
       </div>
-      <div aria-hidden className={`ghost-state-${active.state}`}>
-        {/* biome-ignore lint/performance/noImgElement: static brand SVG */}
-        <img src="/brand/jit-ghost.svg" alt="" width={64} height={64} draggable={false} />
-      </div>
+      <JitGhost size={64} state={active.state as GhostState} follow="eyes" />
     </div>
   );
 }

@@ -49,7 +49,21 @@ export function CodegenSection() {
         panels={operationSnippets.map((snippet) => (
           <div key={snippet.id} className="grid gap-5 lg:grid-cols-[2fr_3fr]">
             <CodePanel code={snippet.input} lang="ts" title="you write" copy />
-            <CodePanel code={snippet.output} lang="js" title="jit generates" badge={<GeneratedBadge />} />
+            <div className="flex flex-col gap-3">
+              <CodePanel
+                code={snippet.output}
+                lang="js"
+                title="jit generates"
+                badge={<GeneratedBadge />}
+                className="op-generated"
+              />
+              <div className="rounded-[14px] border border-success/25 bg-success/5 px-4 py-3">
+                <p className="mb-1.5 font-pixel-badge text-[10px] uppercase tracking-wider text-success">» run it</p>
+                <pre className="whitespace-pre-wrap wrap-break-word font-mono text-xs leading-relaxed text-ghost-200">
+                  {snippet.result}
+                </pre>
+              </div>
+            </div>
           </div>
         ))}
       />
