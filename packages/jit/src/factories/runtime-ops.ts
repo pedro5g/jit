@@ -2,6 +2,7 @@ import { type Clone, compileClone, emitCloneSource } from "../compiler/clone.js"
 import { compileDiff, type Diff, emitDiffSource } from "../compiler/diff.js";
 import { compileEqual, type Equal, emitEqualSource } from "../compiler/equal.js";
 import { compileHash, emitHashSource, type Hash } from "../compiler/hash.js";
+import { compileStringifyChunks, type JsonChunksOptions, type StringifyChunks } from "../compiler/json-chunks.js";
 import { compileSerialize, emitSerializeSource, type Serialize } from "../compiler/serialize.js";
 import {
   type CompiledValidator,
@@ -13,6 +14,7 @@ import {
 import type * as ATS from "../core/ats/index.js";
 import type { Builder, SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import type { ValidationIssue } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { json as jsonSchema } from "./special/special.js";
 
@@ -42,10 +44,12 @@ export interface ValidateCompileBuilder<T> {
   safeParse(): RuntimeCompileStep<(value: unknown) => SafeParseResult<T>>;
   parseAsync(): RuntimeCompileStep<(value: unknown) => Promise<T>>;
   safeParseAsync(): RuntimeCompileStep<(value: unknown) => Promise<SafeParseResult<T>>>;
+  issues(): RuntimeCompileStep<(value: unknown) => IterableIterator<ValidationIssue>>;
 }
 
 export interface JsonCompileBuilder<T> {
   stringify(): RuntimeCompileStep<Serialize<T>>;
+  stringifyChunks(options?: JsonChunksOptions): RuntimeCompileStep<StringifyChunks<T>>;
   parse(): RuntimeCompileStep<(json: string) => T>;
 }
 
@@ -65,6 +69,21 @@ export function validate<TSchema extends ATS.AnyTypeSchema>(
     safeParse: () => validatorStep(unwrapped, "safeParse"),
     parseAsync: () => validatorStep(unwrapped, "parseAsync"),
     safeParseAsync: () => validatorStep(unwrapped, "safeParseAsync"),
+    issues: () => ({
+      compile() {
+        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
+        const issues = function* issues(value: unknown): IterableIterator<ValidationIssue> {
+          const result = safeParse(value);
+
+          if (!result.success) yield* result.issues;
+        };
+        return attachRuntimeMetadata(issues, {
+          operation: "validate.issues",
+          source: () =>
+            "function* issues(value) {\n  const result = __safeParse(value);\n  if (!result.success) yield* result.issues;\n}",
+        });
+      },
+    }),
   });
 }
 
@@ -130,6 +149,16 @@ export function json<TSchema extends ATS.AnyTypeSchema>(
           return attachRuntimeMetadata(compileSerialize(unwrapped), {
             operation: "json.stringify",
             source: () => emitSerializeSource(unwrapped),
+          });
+        },
+      };
+    },
+    stringifyChunks(options?: JsonChunksOptions): RuntimeCompileStep<StringifyChunks<ATS.InferSchema<TSchema>>> {
+      return {
+        compile() {
+          return attachRuntimeMetadata(compileStringifyChunks(unwrapped, options), {
+            operation: "json.stringifyChunks",
+            source: () => "function* stringifyChunks(value) { /* specialized chunk emitter */ }",
           });
         },
       };

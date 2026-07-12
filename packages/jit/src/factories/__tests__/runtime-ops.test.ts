@@ -1,4 +1,4 @@
-import { AST, JIT } from "../../index.js";
+import { AST, type Errors, JIT } from "../../index.js";
 
 describe("runtime operation facade", () => {
   const User = JIT.object({
@@ -72,6 +72,25 @@ describe("runtime operation facade", () => {
     expect(stringifyUser.compile()).toBe(stringifyUser);
     expect(stringifyUser.explain().operation).toBe("json.stringify");
     expect(parseUser.explain().operation).toBe("json.parse");
+  });
+
+  it("streams validation issues and specialized JSON chunks", () => {
+    const Item = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(3) });
+    const Items = JIT.array(Item);
+    const issues = JIT.validate(Item).issues().compile();
+    const stringifyChunks = JIT.json(Items).stringifyChunks({ chunkBytes: 24 }).compile();
+    const values = [
+      { id: 1, name: "Ada" },
+      { id: 2, name: "Grace" },
+      { id: 3, name: "Linus" },
+    ];
+    const chunks = [...stringifyChunks(values)];
+
+    expect([...issues({ id: 1.5, name: "x" })].map((issue) => issue.code)).toEqual(["not_int32", "too_small"]);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toBe(JSON.stringify(values));
+    expectTypeOf(issues).returns.toEqualTypeOf<IterableIterator<Errors.ValidationIssue>>();
+    expectTypeOf(stringifyChunks).toMatchTypeOf<(value: JIT.infer<typeof Items>) => IterableIterator<string>>();
   });
 
   it("should compile select/map transforms through the fluent facade", () => {

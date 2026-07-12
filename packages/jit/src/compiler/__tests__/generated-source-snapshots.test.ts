@@ -217,6 +217,39 @@ describe("generated source snapshots", () => {
     }).toMatchSnapshot();
   });
 
+  it("binary rowset: tagged object union", () => {
+    const Shape = JIT.discriminatedUnion("kind", [
+      JIT.object({ kind: JIT.literal("circle"), id: JIT.number().int32(), radius: JIT.number().float32() }),
+      JIT.object({
+        kind: JIT.literal("rectangle"),
+        id: JIT.number().int32(),
+        width: JIT.number().float32(),
+        height: JIT.number().float32(),
+      }),
+    ]);
+    const Shapes = JIT.array(Shape).binary({ strategy: "exact", memoryLayout: "columnar" });
+    const circles = JIT.query(Shapes)
+      .filter((q) => q.eq("kind", "circle"))
+      .compile();
+
+    expect({
+      writer: Compiler.emitBinaryRowSetWriterSource(Shapes.layout),
+      hydrate: Compiler.emitBinaryHydrateSource(Shapes.layout),
+      query: sourceOf(circles),
+    }).toMatchSnapshot();
+  });
+
+  it("lazy query and chunked JSON backends", () => {
+    const iterate = JIT.query(Users)
+      .filter((q) => q.eq("role", "admin"))
+      .select("id", "name")
+      .take(10)
+      .compileIterator();
+    const stringifyChunks = JIT.json(Users).stringifyChunks({ chunkBytes: 1024 }).compile();
+
+    expect({ iterator: sourceOf(iterate), stringifyChunks: sourceOf(stringifyChunks) }).toMatchSnapshot();
+  });
+
   it("mapper: renames, nested objects, and fused many()", () => {
     const Entity = JIT.object({
       id: JIT.number(),

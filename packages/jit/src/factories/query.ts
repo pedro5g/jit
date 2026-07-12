@@ -5,17 +5,29 @@ import {
   isBinaryArray,
   isBinaryRowSet,
 } from "../compiler/binary-rowset.js";
+import {
+  compileQueryAsyncIterator,
+  compileQueryIterator,
+  compileQueryVisitor,
+  explainQueryExecution,
+  type QueryAsyncIteratorCompiled,
+  type QueryExecutionPlan,
+  type QueryIteratorCompiled,
+  type QueryVisitorCompiled,
+} from "../compiler/lazy-query.js";
 import { compileQuery } from "../compiler/query.js";
 import type {
   QueryCompareNode,
   QueryCompareOperator,
   QueryConditionNode,
   QueryNode,
+  QueryPipelineNode,
   QueryValueNode,
 } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import { JITError } from "../errors/index.js";
 
 type CollectionElementOf<TValue> = TValue extends readonly (infer TElement)[]
   ? TElement
@@ -65,6 +77,7 @@ type QuerySelectResult<TResult, TSelected> =
     : TResult extends Record<infer TKey extends PropertyKey, unknown[]>
       ? Record<TKey, TSelected[]>
       : TSelected[];
+type IterableElement<TValue> = TValue extends Iterable<infer TElement> ? TElement : never;
 
 /**
  * Type-safe condition factory passed to `query().filter()`.
@@ -138,6 +151,33 @@ export interface QueryBuilder<
     key: TKey,
     direction?: "asc" | "desc"
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  flatMap<TKey extends Extract<keyof TOutput, string>>(
+    key: TKey
+  ): QueryBuilder<TSchema, IterableElement<TOutput[TKey]>, IterableElement<TOutput[TKey]>[], TParams>;
+  take(count: number): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  drop(count: number): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  takeWhile(
+    predicate: (
+      query: QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+      params: QueryRuntimeParams<TParams>
+    ) => QueryConditionNode
+  ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  dropWhile(
+    predicate: (
+      query: QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+      params: QueryRuntimeParams<TParams>
+    ) => QueryConditionNode
+  ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  chunk(size: number): QueryBuilder<TSchema, TOutput[], TOutput[][], TParams>;
+  window(size: number): QueryBuilder<TSchema, TOutput[], TOutput[][], TParams>;
+  pairwise(): QueryBuilder<TSchema, readonly [TOutput, TOutput], (readonly [TOutput, TOutput])[], TParams>;
+  scan<TAccumulator>(options: {
+    readonly initial: TAccumulator;
+    readonly update: (accumulator: TAccumulator, value: TOutput) => TAccumulator | Promise<TAccumulator>;
+  }): QueryBuilder<TSchema, TAccumulator, TAccumulator[], TParams>;
+  groupAdjacentBy<TKey extends Extract<keyof TOutput, string>>(
+    key: TKey
+  ): QueryBuilder<TSchema, TOutput[], TOutput[][], TParams>;
   delete(): QueryBuilder<TSchema, TOutput, ATS.InferSchema<TSchema>, TParams>;
   update(
     patch: QueryUpdatePatch<ATS.InferSchema<TSchema>>
@@ -161,6 +201,23 @@ export interface QueryBuilder<
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number | undefined, TParams>;
   compile(): QueryCompiledFunction<TSchema, TResult, TParams>;
+  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  lazy(): LazyQueryBuilder<TSchema, TOutput, TParams>;
+  explain(outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
+}
+
+export interface LazyQueryBuilder<
+  TSchema extends ATS.AnyTypeSchema,
+  TOutput,
+  TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+> {
+  compile(): QueryIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  explain(outputMode?: "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
 }
 
 /**
@@ -320,7 +377,7 @@ function createQueryBuilder<
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 >(
   schema: TSchema,
-  nodes: readonly QueryNode[],
+  nodes: readonly QueryPipelineNode[],
   bindings: readonly unknown[],
   paramNames: readonly string[]
 ): QueryBuilder<TSchema, TOutput, TResult, TParams> {
@@ -369,6 +426,77 @@ function createQueryBuilder<
       return createQueryBuilder(schema, [...nodes, { kind: "orderBy", key, direction }], bindings, paramNames);
     },
 
+    flatMap(key) {
+      return createQueryBuilder(schema, [...nodes, { kind: "flatMap", key }], bindings, paramNames);
+    },
+
+    take(count) {
+      assertPositiveInteger(count, "query take");
+      return createQueryBuilder(schema, [...nodes, { kind: "take", count }], bindings, paramNames);
+    },
+
+    drop(count) {
+      assertNonNegativeInteger(count, "query drop");
+      return createQueryBuilder(schema, [...nodes, { kind: "drop", count }], bindings, paramNames);
+    },
+
+    takeWhile(predicate) {
+      const state = createConditionBuilder(bindings.length);
+      const condition = predicate(
+        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+        createParamRefs(paramNames)
+      );
+      return createQueryBuilder(
+        schema,
+        [...nodes, { kind: "takeWhile", condition }],
+        [...bindings, ...state.bindings],
+        paramNames
+      );
+    },
+
+    dropWhile(predicate) {
+      const state = createConditionBuilder(bindings.length);
+      const condition = predicate(
+        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+        createParamRefs(paramNames)
+      );
+      return createQueryBuilder(
+        schema,
+        [...nodes, { kind: "dropWhile", condition }],
+        [...bindings, ...state.bindings],
+        paramNames
+      );
+    },
+
+    chunk(size) {
+      assertPositiveInteger(size, "query chunk");
+      return createQueryBuilder(schema, [...nodes, { kind: "chunk", size }], bindings, paramNames);
+    },
+
+    window(size) {
+      assertPositiveInteger(size, "query window");
+      return createQueryBuilder(schema, [...nodes, { kind: "window", size }], bindings, paramNames);
+    },
+
+    pairwise() {
+      return createQueryBuilder(schema, [...nodes, { kind: "pairwise" }], bindings, paramNames);
+    },
+
+    scan(options) {
+      const initialBinding = `__q${bindings.length}`;
+      const updateBinding = `__q${bindings.length + 1}`;
+      return createQueryBuilder(
+        schema,
+        [...nodes, { kind: "scan", initialBinding, updateBinding }],
+        [...bindings, options.initial, options.update],
+        paramNames
+      );
+    },
+
+    groupAdjacentBy(key) {
+      return createQueryBuilder(schema, [...nodes, { kind: "groupAdjacentBy", key }], bindings, paramNames);
+    },
+
     delete() {
       return createQueryBuilder(schema, [...nodes, { kind: "delete" }], bindings, paramNames);
     },
@@ -405,13 +533,93 @@ function createQueryBuilder<
     },
 
     compile() {
-      return compileQuery(schema, { nodes, bindings, params: paramNames }) as QueryCompiledFunction<
-        TSchema,
-        TResult,
-        TParams
-      >;
+      if (!hasIncrementalNodes(nodes)) {
+        return compileQuery(schema, {
+          nodes: nodes as readonly QueryNode[],
+          bindings,
+          params: paramNames,
+        }) as QueryCompiledFunction<TSchema, TResult, TParams>;
+      }
+      const iterator = compileQueryIterator(schema, { nodes, bindings, params: paramNames });
+      return ((value: ATS.InferSchema<TSchema>, params?: TParams) =>
+        Array.from(
+          paramNames.length > 0
+            ? (iterator as (input: Iterable<unknown>, params: TParams) => Iterable<unknown>)(
+                value as Iterable<unknown>,
+                params as TParams
+              )
+            : (iterator as (input: Iterable<unknown>) => Iterable<unknown>)(value as Iterable<unknown>)
+        )) as QueryCompiledFunction<TSchema, TResult, TParams>;
+    },
+
+    compileIterator() {
+      return compileQueryIterator(schema, { nodes, bindings, params: paramNames });
+    },
+
+    compileAsyncIterator() {
+      return compileQueryAsyncIterator(schema, { nodes, bindings, params: paramNames });
+    },
+
+    compileVisitor() {
+      return compileQueryVisitor(schema, { nodes, bindings, params: paramNames });
+    },
+
+    lazy() {
+      return createLazyQueryBuilder(schema, nodes, bindings, paramNames);
+    },
+
+    explain(outputMode = "eager-array") {
+      return explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
     },
   };
+}
+
+function createLazyQueryBuilder<
+  TSchema extends ATS.AnyTypeSchema,
+  TOutput,
+  TParams extends Readonly<Record<string, unknown>>,
+>(
+  schema: TSchema,
+  nodes: readonly QueryPipelineNode[],
+  bindings: readonly unknown[],
+  paramNames: readonly string[]
+): LazyQueryBuilder<TSchema, TOutput, TParams> {
+  const program = { nodes, bindings, params: paramNames };
+  return {
+    compile: () => compileQueryIterator(schema, program),
+    compileIterator: () => compileQueryIterator(schema, program),
+    compileAsyncIterator: () => compileQueryAsyncIterator(schema, program),
+    compileVisitor: () => compileQueryVisitor(schema, program),
+    explain: (outputMode = "generator") => explainQueryExecution(program, outputMode),
+  };
+}
+
+function hasIncrementalNodes(nodes: readonly QueryPipelineNode[]): boolean {
+  return nodes.some((node) =>
+    [
+      "flatMap",
+      "take",
+      "drop",
+      "takeWhile",
+      "dropWhile",
+      "chunk",
+      "window",
+      "pairwise",
+      "scan",
+      "groupAdjacentBy",
+    ].includes(node.kind)
+  );
+}
+
+function assertPositiveInteger(value: number, label: string): void {
+  if (!Number.isInteger(value) || value <= 0)
+    throw new JITError("INVALID_QUERY", `${label} expects a positive integer`);
+}
+
+function assertNonNegativeInteger(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new JITError("INVALID_QUERY", `${label} expects a non-negative integer`);
+  }
 }
 
 function createPatchBindings(

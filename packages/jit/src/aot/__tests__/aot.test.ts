@@ -165,6 +165,44 @@ describe("JIT AOT generate", () => {
     expect(generated.ActiveAdmins(rowset)).toEqual([{ id: 1, score: 10 }]);
   });
 
+  it("should re-emit lazy iterators and direct visitors as import-free AOT source", async () => {
+    const User = JIT.object({ id: JIT.number().int32(), active: JIT.boolean() });
+    const Users = JIT.array(User);
+    const ActiveIds = JIT.query(Users)
+      .filter((q) => q.eq("active", true))
+      .select("id")
+      .take(2)
+      .compileIterator();
+    const VisitActiveIds = JIT.query(Users)
+      .filter((q) => q.eq("active", true))
+      .select("id")
+      .compileVisitor();
+    const result = AOT.generate({ schemas: {}, functions: { ActiveIds, VisitActiveIds }, outDir });
+    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+      ActiveIds: (input: readonly { id: number; active: boolean }[]) => IterableIterator<{ id: number }>;
+      VisitActiveIds: (
+        input: readonly { id: number; active: boolean }[],
+        consume: (value: { id: number }) => void
+      ) => number;
+    };
+    const users = [
+      { id: 1, active: true },
+      { id: 2, active: false },
+      { id: 3, active: true },
+      { id: 4, active: true },
+    ];
+    const visited: number[] = [];
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "jit"');
+    expect(source).toContain("function* stage0(input, params)");
+    expect(source).toContain("function visit(input, consume)");
+    expect([...generated.ActiveIds(users)]).toEqual([{ id: 1 }, { id: 3 }]);
+    expect(generated.VisitActiveIds(users, (value) => visited.push(value.id))).toBe(3);
+    expect(visited).toEqual([1, 3, 4]);
+  });
+
   it("should generate validator flat exports with inlined regex bindings", () => {
     const User = JIT.object({
       id: JIT.number().int(),

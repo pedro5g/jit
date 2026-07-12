@@ -94,6 +94,70 @@ export interface QueryUpdateNode {
   readonly patch: Readonly<Record<string, QueryBindingNode>>;
 }
 
+export interface QueryFlatMapNode {
+  readonly kind: "flatMap";
+  readonly key: string;
+}
+
+export interface QueryTakeNode {
+  readonly kind: "take";
+  readonly count: number;
+}
+
+export interface QueryDropNode {
+  readonly kind: "drop";
+  readonly count: number;
+}
+
+export interface QueryTakeWhileNode {
+  readonly kind: "takeWhile";
+  readonly condition: QueryConditionNode;
+}
+
+export interface QueryDropWhileNode {
+  readonly kind: "dropWhile";
+  readonly condition: QueryConditionNode;
+}
+
+export interface QueryChunkNode {
+  readonly kind: "chunk";
+  readonly size: number;
+}
+
+export interface QueryWindowNode {
+  readonly kind: "window";
+  readonly size: number;
+}
+
+export interface QueryPairwiseNode {
+  readonly kind: "pairwise";
+}
+
+export interface QueryScanNode {
+  readonly kind: "scan";
+  readonly initialBinding: string;
+  readonly updateBinding: string;
+}
+
+export interface QueryGroupAdjacentNode {
+  readonly kind: "groupAdjacentBy";
+  readonly key: string;
+}
+
+export type QueryIncrementalNode =
+  | QueryFlatMapNode
+  | QueryTakeNode
+  | QueryDropNode
+  | QueryTakeWhileNode
+  | QueryDropWhileNode
+  | QueryChunkNode
+  | QueryWindowNode
+  | QueryPairwiseNode
+  | QueryScanNode
+  | QueryGroupAdjacentNode;
+
+export type QueryPipelineNode = QueryNode | QueryIncrementalNode;
+
 export type QueryCollectorNode = QueryKeyedNode | QueryGroupByNode;
 
 export type QueryMutationNode = QueryDeleteNode | QueryUpdateNode;

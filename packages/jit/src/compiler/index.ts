@@ -13,6 +13,8 @@ export * from "./ir/ir.js";
 export * from "./ir/optimizer/cost/optimize-cost.js";
 export * from "./ir/optimizer/optimize-ir.js";
 export * from "./ir/scope.js";
+export * from "./json-chunks.js";
+export * from "./lazy-query.js";
 export * from "./mapper/build-mapper-plan.js";
 export * from "./mapper.js";
 export * from "./mask.js";
