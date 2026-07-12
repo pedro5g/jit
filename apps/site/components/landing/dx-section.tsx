@@ -9,7 +9,7 @@ const inferenceSnippet = `type User = JIT.Infer<typeof User>;
 
 export function DxSection() {
   return (
-    <Section id="developer-experience">
+    <Section id="developer-experience" ghostState="observing" ghostLabel="inspecting fn.source…">
       <SectionHeading
         eyebrow="Developer experience"
         title="Compiled does not mean opaque"

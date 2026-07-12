@@ -51,8 +51,7 @@
   --radius-pill: 999px;
 
   --shadow-card:
-    0 24px 64px rgba(0, 0, 0, 0.34),
-    inset 0 1px rgba(255, 255, 255, 0.035);
+    0 24px 64px rgba(0, 0, 0, 0.34), inset 0 1px rgba(255, 255, 255, 0.035);
   --shadow-gold: 0 16px 50px rgba(247, 210, 126, 0.12);
 
   --duration-fast: 140ms;
@@ -154,6 +153,10 @@ body {
   color: var(--text-primary);
 }
 
+button {
+  cursor: pointer;
+}
+
 ::selection {
   background-color: var(--gold-200);
   color: var(--bg-900);
@@ -161,7 +164,11 @@ body {
 
 /* Atmosphere (§22): radial gold glow + 32px technical grid */
 .bg-hero-glow {
-  background-image: radial-gradient(ellipse 640px 420px at 72% 18%, var(--glow-gold), transparent 68%);
+  background-image: radial-gradient(
+    ellipse 640px 420px at 72% 18%,
+    var(--glow-gold),
+    transparent 68%
+  );
 }
 
 .bg-tech-grid {
@@ -179,6 +186,12 @@ body {
   padding: 0;
   font-size: 0.8125rem;
   line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .code-panel pre {
+    font-size: 0.75rem;
+  }
 }
 
 .code-panel code {
@@ -202,8 +215,200 @@ body {
   }
 }
 
+/* Scroll reveals — no-JS keeps everything visible; JS adds .reveal before paint */
+.reveal {
+  opacity: 0;
+  transform: translateY(26px);
+}
+
+.reveal-in {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity var(--duration-section) var(--ease-out),
+    transform var(--duration-section) var(--ease-out);
+}
+
+/* Operation tab panels animate on switch (hidden toggles display, restarting the animation) */
+[role="tabpanel"]:not([hidden]) {
+  animation: panel-in var(--duration-normal) var(--ease-out);
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Hero compile sequence — phases driven by data-phase on the terminal column */
+.hero-sequence[data-phase="typing"] .hero-generated,
+.hero-sequence[data-phase="typing"] .hero-status,
+.hero-sequence[data-phase="typing"] .hero-wordmark {
+  opacity: 0;
+}
+
+.hero-sequence[data-phase="compiling"] .hero-generated,
+.hero-sequence[data-phase="compiling"] .hero-wordmark {
+  opacity: 0;
+}
+
+.hero-sequence .hero-status,
+.hero-sequence .hero-generated,
+.hero-sequence .hero-wordmark {
+  transition: opacity var(--duration-slow) var(--ease-out);
+}
+
+.hero-sequence[data-phase="compiling"] .hero-status .hero-spinner {
+  animation: compile-pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes compile-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.hero-sequence[data-phase="done"] .hero-wordmark {
+  animation: wordmark-pop 0.42s var(--ease-snap);
+}
+
+@keyframes wordmark-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Line-by-line code typing (applied by the hero orchestrator to shiki .line spans) */
+.type-lines .line {
+  visibility: hidden;
+}
+
+.type-lines .line.line-on {
+  visibility: visible;
+}
+
+/* Ghost companion states */
+.ghost-state-idle {
+  animation: ghost-float 3.2s ease-in-out infinite;
+}
+
+.ghost-state-observing {
+  animation: ghost-observe 2.4s ease-in-out infinite;
+}
+
+.ghost-state-typing {
+  animation: ghost-typing 0.9s ease-in-out infinite;
+}
+
+.ghost-state-compiling {
+  animation: ghost-compile 0.34s linear infinite;
+  filter: drop-shadow(0 0 14px var(--glow-gold));
+}
+
+.ghost-state-running {
+  animation: ghost-run 0.72s ease-in-out infinite;
+}
+
+.ghost-state-success {
+  animation: ghost-success 0.9s var(--ease-snap);
+}
+
+@keyframes ghost-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes ghost-observe {
+  0%,
+  100% {
+    transform: translateY(-2px) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(3deg);
+  }
+}
+
+@keyframes ghost-typing {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.02);
+  }
+}
+
+@keyframes ghost-compile {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
+  }
+}
+
+@keyframes ghost-run {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(2deg);
+  }
+}
+
+@keyframes ghost-success {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  40% {
+    transform: translateY(-10px) scale(1.06);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .terminal-cursor {
+  .terminal-cursor,
+  .ghost-state-idle,
+  .ghost-state-observing,
+  .ghost-state-typing,
+  .ghost-state-compiling,
+  .ghost-state-running,
+  .ghost-state-success,
+  [role="tabpanel"]:not([hidden]) {
     animation: none;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  .hero-sequence .hero-status,
+  .hero-sequence .hero-generated,
+  .hero-sequence .hero-wordmark {
+    opacity: 1 !important;
+    transition: none;
+  }
+
+  .type-lines .line {
+    visibility: visible;
   }
 }

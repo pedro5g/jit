@@ -20,7 +20,7 @@ const operations = [
 
 export function OperationsSection() {
   return (
-    <Section id="operations" className="bg-night-950/40">
+    <Section id="operations" className="bg-night-950/40" ghostState="observing" ghostLabel="so many ops to compile…">
       <SectionHeading
         eyebrow="Operations"
         title="One schema. Every operation compiled."

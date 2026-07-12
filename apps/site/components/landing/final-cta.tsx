@@ -6,7 +6,7 @@ import { githubUrl, installCommand } from "@/lib/site";
 
 export function FinalCta() {
   return (
-    <Section id="get-started">
+    <Section id="get-started" ghostState="success" ghostLabel="ship it!">
       <div className="relative overflow-hidden rounded-panel border border-line-gold/50 bg-night-800 px-6 py-14 text-center sm:px-12">
         <div aria-hidden className="bg-hero-glow absolute inset-0" />
         <div className="relative flex flex-col items-center">

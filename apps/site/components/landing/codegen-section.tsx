@@ -24,7 +24,12 @@ const stages = [
 
 export function CodegenSection() {
   return (
-    <Section id="schema-to-code" className="bg-night-950/40">
+    <Section
+      id="schema-to-code"
+      className="bg-night-950/40"
+      ghostState="typing"
+      ghostLabel="emitting specialized code…"
+    >
       <SectionHeading
         eyebrow="Schema → IR → generated code"
         title="Every operation gets its own compiled function"

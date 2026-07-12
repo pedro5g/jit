@@ -1,4 +1,4 @@
-import { JitGhostStatic } from "@/components/brand/jit-ghost-static";
+import { JitGhostInteractive } from "@/components/brand/jit-ghost-interactive";
 import { PixelBadge } from "@/components/brand/pixel-badge";
 import { CodePanel } from "@/components/code/code-panel";
 import { CopyButton } from "@/components/code/copy-button";
@@ -7,14 +7,15 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { TerminalFrame } from "@/components/ui/terminal-frame";
 import { githubUrl, installCommand } from "@/lib/site";
 import { heroGeneratedExcerpt, userSchemaSource } from "@/lib/snippets/user-schema";
+import { HeroSequence } from "./hero-sequence";
 
 export function Hero() {
   return (
     <section className="relative overflow-hidden">
       <div aria-hidden className="bg-hero-glow absolute inset-0" />
       <div aria-hidden className="bg-tech-grid absolute inset-0" />
-      <div className="relative mx-auto grid w-full max-w-[1200px] gap-12 px-5 pb-20 pt-16 sm:px-8 sm:pt-24 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-28">
-        <div className="flex max-w-[620px] flex-col items-start justify-center">
+      <div className="relative mx-auto grid w-full max-w-300 gap-12 px-5 pb-20 pt-16 sm:px-8 sm:pt-24 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-28">
+        <div className="flex max-w-155 flex-col items-start justify-center">
           <p className="mb-5 font-pixel-badge text-xs uppercase tracking-[0.24em] text-gold-200">
             The compiled data engine
           </p>
@@ -49,22 +50,43 @@ export function Hero() {
         </div>
 
         <div className="relative flex flex-col justify-center">
-          <JitGhostStatic size={132} className="absolute -top-4 right-2 z-10 hidden lg:inline-flex" />
-          <TerminalFrame
-            title="user.schema.ts — jit compile"
-            footer={
-              <span>
-                compiled on first use via <span className="text-ghost-300">globalThis.Function</span> · cached per
-                schema · AOT emits the same code as plain modules
+          <div className="absolute -top-6 right-2 z-10 hidden items-end gap-1 lg:flex">
+            <JitGhostInteractive size={132} />
+            <span aria-hidden className="hero-wordmark mb-3 font-pixel text-3xl text-gold-200">
+              jit.
+            </span>
+          </div>
+          <HeroSequence>
+            <div className="mb-5 flex items-end justify-center gap-2 lg:hidden">
+              <JitGhostInteractive size={88} />
+              <span aria-hidden className="hero-wordmark mb-2 font-pixel text-2xl text-gold-200">
+                jit.
               </span>
-            }
-            className="lg:mt-10"
-          >
-            <div className="flex flex-col gap-3">
-              <CodePanel code={userSchemaSource} lang="ts" title="schema" />
-              <CodePanel code={heroGeneratedExcerpt} lang="js" title="Users.is.source" badge={<GeneratedBadge />} />
             </div>
-          </TerminalFrame>
+            <TerminalFrame
+              title="user.schema.ts — jit compile"
+              footer={
+                <span>
+                  compiled on first use via <span className="text-ghost-300">globalThis.Function</span> · cached per
+                  schema · AOT emits the same code as plain modules
+                </span>
+              }
+              className="lg:mt-10"
+            >
+              <div className="flex flex-col gap-3">
+                <CodePanel code={userSchemaSource} lang="ts" title="schema" className="hero-schema" />
+                <div className="hero-generated">
+                  <CodePanel
+                    code={heroGeneratedExcerpt}
+                    lang="js"
+                    title="Users.is.source"
+                    badge={<GeneratedBadge />}
+                    className="hero-generated-panel"
+                  />
+                </div>
+              </div>
+            </TerminalFrame>
+          </HeroSequence>
         </div>
       </div>
     </section>

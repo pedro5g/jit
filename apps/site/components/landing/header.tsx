@@ -8,14 +8,15 @@ import { MobileNav } from "./mobile-nav";
 const navLinks = [
   { href: "/#why-specialization", label: "Why jit" },
   { href: "/#operations", label: "Operations" },
-  { href: "/#benchmarks", label: "Benchmarks" },
+  { href: "/benchmarks", label: "Benchmarks" },
+  { href: "/playground", label: "Playground" },
   { href: "/docs", label: "Docs" },
 ];
 
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-line-subtle bg-night-900/85 backdrop-blur">
-      <div className="relative mx-auto flex h-[72px] w-full max-w-[1200px] items-center gap-6 px-5 sm:px-8">
+      <div className="relative mx-auto flex h-18 w-full max-w-300 items-center gap-6 px-5 sm:px-8">
         <Link href="/" aria-label="jit — home" className="shrink-0">
           <JitLogo />
         </Link>

@@ -14,7 +14,7 @@ export function TerminalFrame({
   return (
     <div
       className={clsx(
-        "overflow-hidden rounded-panel border border-line-subtle bg-night-950 shadow-[var(--shadow-card)]",
+        "overflow-hidden rounded-panel border border-line-subtle bg-night-950 shadow-(--shadow-card)",
         className
       )}
     >

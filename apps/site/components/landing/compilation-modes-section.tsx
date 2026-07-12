@@ -23,7 +23,7 @@ User.is(input);`;
 
 export function CompilationModesSection() {
   return (
-    <Section id="compilation-modes">
+    <Section id="compilation-modes" ghostState="idle" ghostLabel="building cartridges…">
       <SectionHeading
         eyebrow="Runtime JIT vs AOT"
         title="Two execution modes, same generated code"

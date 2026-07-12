@@ -23,7 +23,7 @@ const guarantees = [
 
 export function OptimizerSection() {
   return (
-    <Section id="optimizer">
+    <Section id="optimizer" ghostState="compiling" ghostLabel="running optimizer passes…">
       <SectionHeading
         eyebrow="Optimizer pipeline"
         title="From schema to straight-line code"

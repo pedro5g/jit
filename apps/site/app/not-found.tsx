@@ -8,7 +8,7 @@ export default function NotFound() {
       <JitGhostStatic size={140} />
       <p className="mt-8 font-pixel text-5xl text-gold-200">404</p>
       <h1 className="mt-3 text-xl font-semibold text-fg-strong">Nothing compiled at this path</h1>
-      <p className="mt-2 max-w-[420px] text-sm leading-relaxed text-fg-muted">
+      <p className="mt-2 max-w-105 text-sm leading-relaxed text-fg-muted">
         The schema for this URL has no matching page. The ghost checked the cache twice.
       </p>
       <div className="mt-8 flex gap-3">

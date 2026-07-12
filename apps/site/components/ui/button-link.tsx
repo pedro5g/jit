@@ -1,8 +1,10 @@
+"use client";
 import { clsx } from "clsx";
 import Link from "next/link";
+import { useState } from "react";
 
 const variants = {
-  primary: "bg-gold-200 text-night-900 shadow-[var(--shadow-gold)] hover:bg-gold-100 focus-visible:outline-gold-200",
+  primary: "bg-gold-200 text-night-900 shadow-(--shadow-gold) hover:bg-gold-100 focus-visible:outline-gold-200",
   secondary:
     "border border-line bg-transparent text-ghost-100 hover:border-line-gold hover:text-gold-200 focus-visible:outline-gold-200",
   ghost: "text-fg-muted hover:text-ghost-100 focus-visible:outline-gold-200",
@@ -21,6 +23,7 @@ export function ButtonLink({
   external?: boolean;
   className?: string;
 }) {
+  const [active, setActive] = useState(false);
   const classes = clsx(
     "inline-flex items-center justify-center gap-2 rounded-control px-5 py-2.5 text-sm font-semibold",
     "transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2",
@@ -37,7 +40,7 @@ export function ButtonLink({
   }
 
   return (
-    <Link href={href} className={classes}>
+    <Link href={href} className={classes} prefetch={active ? null : false} onMouseEnter={() => setActive(true)}>
       {children}
     </Link>
   );

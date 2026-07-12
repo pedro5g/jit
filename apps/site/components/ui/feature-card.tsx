@@ -14,7 +14,7 @@ export function FeatureCard({
   return (
     <article
       className={clsx(
-        "rounded-card border border-line-subtle bg-night-800 p-6 shadow-[var(--shadow-card)]",
+        "rounded-card border border-line-subtle bg-night-800 p-6 shadow-(--shadow-card)",
         "transition-colors duration-200 hover:border-line",
         className
       )}

@@ -27,7 +27,7 @@ const targets = [
 
 export function RuntimeSection() {
   return (
-    <Section id="runtimes" className="bg-night-950/40">
+    <Section id="runtimes" className="bg-night-950/40" ghostState="idle" ghostLabel="checking runtime support…">
       <SectionHeading
         eyebrow="Runtime compatibility"
         title="Honest about where each mode runs"

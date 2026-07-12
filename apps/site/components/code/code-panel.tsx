@@ -22,7 +22,7 @@ export async function CodePanel({
   return (
     <figure
       className={clsx(
-        "code-panel overflow-hidden rounded-[14px] border border-line-subtle bg-night-950 shadow-[var(--shadow-card)]",
+        "code-panel overflow-hidden rounded-[14px] border border-line-subtle bg-night-950 shadow-(--shadow-card)",
         className
       )}
     >

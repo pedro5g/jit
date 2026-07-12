@@ -31,7 +31,7 @@ function is(value) {
 
 export function SpecializationSection() {
   return (
-    <Section id="why-specialization">
+    <Section id="why-specialization" ghostState="observing" ghostLabel="reading the generic path…">
       <SectionHeading
         eyebrow="Why specialization"
         title="Interpreting a schema on every call is the tax you never audited"
