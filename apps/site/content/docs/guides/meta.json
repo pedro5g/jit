@@ -3,6 +3,7 @@
   "pages": [
     "choosing-an-execution-mode",
     "boundary-recipes",
-    "browser-and-edge"
+    "browser-and-edge",
+    "executable-examples"
   ]
 }

@@ -22,6 +22,7 @@ work and for production performance. Each page explains:
 - [Serialization and binary codec](./serialization-codec.md)
 - [Binary rowsets](./binary-rowsets.md)
 - [Benchmarks, memory, and load testing](./benchmarks-memory-load.md)
+- [Executable runtime and AOT examples](./examples.md)
 
 ## Find A Feature By Goal
 
@@ -38,6 +39,7 @@ work and for production performance. Each page explains:
 | Ship strict-CSP/browser code      | AOT/tree sharing        | grouped object vs standalone export         |
 | Configure generation/CI           | CLI and config          | discovery, output package and diagnostics   |
 | Reproduce performance claims      | Benchmarks/load         | matching fixture, heap and GC               |
+| Compare JIT and generated code    | Executable examples     | runtime lifecycle vs import-free AOT        |
 
 The public website mirrors these guides with smaller task-oriented pages and a
 complete operator reference under `apps/site/content/docs`.

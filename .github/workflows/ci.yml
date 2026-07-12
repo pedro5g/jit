@@ -56,3 +56,6 @@ jobs:
 
       - name: verify JSR package
         run: pnpm run release:jsr:dry-run
+
+      - name: verify runtime and generated examples
+        run: pnpm run examples:check

@@ -1,0 +1,34 @@
+{
+  "name": "@jit/examples",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#examples": {
+      "types": "./compiled/generated/index.d.ts",
+      "import": "./compiled/generated/index.mjs"
+    },
+    "#examples/catalog": {
+      "types": "./compiled/generated/catalog.d.ts",
+      "import": "./compiled/generated/catalog.mjs"
+    }
+  },
+  "scripts": {
+    "generate": "tsx --conditions @jit/source ../jit/src/cli.ts generate",
+    "check:generated": "pnpm run generate && git diff --exit-code -- compiled/generated && test -z \"$(git ls-files --others --exclude-standard compiled/generated)\"",
+    "runtime": "tsx --conditions @jit/source runtime/index.ts",
+    "compiled": "tsx compiled/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .tmp"
+  },
+  "dependencies": {
+    "@jit/compiler": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

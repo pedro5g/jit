@@ -48,6 +48,7 @@
     "release:check": "tsx scripts/check-release.ts",
     "release:pack": "tsx scripts/smoke-package.ts",
     "release:jsr:dry-run": "pnpm --dir packages/jit exec jsr publish --dry-run --allow-dirty",
+    "examples:check": "pnpm --filter @jit/examples run check:generated && pnpm --filter @jit/examples run typecheck && pnpm --filter @jit/examples run test",
     "bench:coldstart": "pnpm build && tsx bench/coldstart/index.ts",
     "bench:stream": "tsx --conditions @jit/source bench/stream/index.ts"
   },

@@ -1,0 +1,46 @@
+---
+title: Executable Examples
+description: Run equivalent runtime JIT and generated AOT workflows, including streams, binary data, and TCP sockets.
+---
+
+The repository includes a private `@jit/examples` workspace. It is executable
+documentation and a release gate rather than a collection of disconnected
+snippets.
+
+```sh
+pnpm --filter @jit/examples run runtime
+pnpm --filter @jit/examples run generate
+pnpm --filter @jit/examples run compiled
+pnpm --filter @jit/examples run test
+```
+
+## Runtime Mode
+
+The runtime example compiles selective validators, structural operations,
+queries, lazy iterators, visitors, JSON boundaries, a progressive stream,
+columnar binary rowsets, a fused `process()` aggregate, and a binary codec.
+
+It also sends the codec payload through a real ephemeral TCP server. The socket
+uses a four-byte length prefix because TCP does not preserve message boundaries.
+
+## AOT Mode
+
+`compiled/catalog.jit.ts` declares validation, equal, clone, diff, hash,
+masking, sanitization, mapper, eager query, lazy iterator, visitor, JSON, and
+codec operations. The CLI emits committed ESM, CommonJS, declarations,
+manifest, subpath, and plan files.
+
+The compiled application imports `#examples`, which maps directly to generated
+files. Generated JavaScript imports nothing from `@jit/compiler`, including in
+the TCP codec round trip.
+
+## Why Generated Files Are Committed
+
+The generated source is part of the compiler's behavioral contract. CI
+regenerates it and rejects any diff, exposing changes in source shape,
+tree-shaking surface, declarations, manifest paths, operation plans, or helper
+inclusion.
+
+Progressive stream state and binary-rowset allocation remain runtime ingestion
+responsibilities. AOT specializes their validators, codecs, and query paths;
+it does not hide live network or memory ownership behind generated code.

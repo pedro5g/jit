@@ -810,6 +810,7 @@ export function generate(options: GenerateOptions): GenerateResult {
   const esm = exportNames.length > 0 ? `${body}\nexport { ${exportList} };\n` : `${body}\nexport {};\n`;
   const cjs =
     exportNames.length > 0 ? `${body}\nmodule.exports = { ${exportList} };\n` : `${body}\nmodule.exports = {};\n`;
+  while (dts[dts.length - 1] === "") dts.pop();
   const types = `${dts.join("\n")}\n`;
   const subpathModules = emit.subpathModules ? buildSubpathModules(options.outDir, exportNames, options.sources) : [];
   const files: string[] = [];
@@ -978,7 +979,7 @@ function writeManifest(
           modules.length > 0
             ? modules.map((module) => ({
                 name: module.name,
-                source: module.sourceFile,
+                source: manifestSourceSpecifier(outDir, module.sourceFile),
                 import: importSpecifier ? `${importSpecifier}/${module.name}` : `./${module.name}.mjs`,
                 exports: module.exports,
               }))
@@ -1202,6 +1203,12 @@ function typeImportSpecifier(outDir: string, sourceFile: string): string {
     .replace(/\.ts$/, ".js");
 
   return mapped.startsWith(".") ? mapped : `./${mapped}`;
+}
+
+function manifestSourceSpecifier(outDir: string, sourceFile: string): string {
+  const relativePath = relative(resolve(outDir), resolve(sourceFile)).split("\\").join("/");
+
+  return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
 }
 
 function moduleNameFromSource(sourceFile: string): string {

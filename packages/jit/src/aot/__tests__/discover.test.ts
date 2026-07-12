@@ -123,7 +123,7 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     expect(readFileSync(join(outDir, "package.json"), "utf8")).toContain('"./user"');
     expect(readFileSync(join(outDir, "user.mjs"), "utf8")).toBe('export { User, isUser } from "./index.mjs";\n');
     expect(manifest.modules).toEqual([
-      { name: "user", source: schemaFile, import: "#jit/user", exports: ["User", "isUser"] },
+      { name: "user", source: "./jit/user.jit.ts", import: "#jit/user", exports: ["User", "isUser"] },
     ]);
     expect(manifest.artifacts.map((artifact) => `${artifact.module}:${artifact.name}`)).toEqual([
       "user:User",

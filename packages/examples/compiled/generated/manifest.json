@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "packageName": "@jit/examples-generated",
+  "importSpecifier": "#examples",
+  "files": [
+    "index.mjs",
+    "index.cjs",
+    "index.d.ts",
+    "index.d.cts",
+    "package.json",
+    "catalog.mjs",
+    "catalog.cjs",
+    "catalog.d.ts",
+    "catalog.d.cts",
+    "manifest.json",
+    "plans/catalog.json"
+  ],
+  "modules": [
+    {
+      "name": "catalog",
+      "source": "../catalog.jit.ts",
+      "import": "#examples/catalog",
+      "exports": [
+        "User",
+        "iterateActiveUsers",
+        "visitActiveUsers"
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "User",
+      "kind": "grouped",
+      "operations": [
+        "is",
+        "parse",
+        "safeParse",
+        "equal",
+        "clone",
+        "diff",
+        "hash",
+        "stringify",
+        "fromJSON",
+        "mask",
+        "sanitize",
+        "codec"
+      ],
+      "module": "catalog"
+    },
+    {
+      "name": "iterateActiveUsers",
+      "kind": "query",
+      "operations": [
+        "query"
+      ],
+      "module": "catalog"
+    },
+    {
+      "name": "visitActiveUsers",
+      "kind": "query",
+      "operations": [
+        "query"
+      ],
+      "module": "catalog"
+    }
+  ]
+}

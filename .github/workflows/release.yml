@@ -33,6 +33,7 @@ jobs:
       - run: pnpm build
       - run: pnpm release:pack
       - run: pnpm release:jsr:dry-run
+      - run: pnpm examples:check
 
   npm:
     name: Publish npm

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "module": "catalog",
+  "artifacts": [
+    {
+      "name": "User",
+      "kind": "grouped",
+      "operations": [
+        "is",
+        "parse",
+        "safeParse",
+        "equal",
+        "clone",
+        "diff",
+        "hash",
+        "stringify",
+        "fromJSON",
+        "mask",
+        "sanitize",
+        "codec"
+      ]
+    },
+    {
+      "name": "iterateActiveUsers",
+      "kind": "query",
+      "operations": [
+        "query"
+      ]
+    },
+    {
+      "name": "visitActiveUsers",
+      "kind": "query",
+      "operations": [
+        "query"
+      ]
+    }
+  ]
+}
