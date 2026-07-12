@@ -6,6 +6,9 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 
 export default defineConfig({
   resolve: {
+    alias: {
+      "@jit/compiler/runtime": resolve(root, "packages/jit/src/runtime.ts"),
+    },
     conditions: ["@jit/source", "default"],
     externalConditions: ["@jit/source", "default"],
   },
