@@ -110,6 +110,14 @@ introduce a second validation implementation. `JIT.validator(schema)` remains
 the object facade, while builder `schema["~standard"]` closes over the
 compiled `safeParse` function for Standard Schema interop.
 
+Query output is a physical-plan choice. `.compile()` keeps the specialized
+eager-array backend; `.compileIterator()`, `.compileAsyncIterator()`, and
+`.compileVisitor()` select explicit incremental backends. The lazy emitter
+fuses adjacent filter/select/control nodes, emits direct indexed array loops,
+and records materialization barriers in `explain()`. Direct visitors avoid the
+iterator protocol for fusible pipelines. Cardinality-changing operators use
+separate generator stages so their state remains local and deterministic.
+
 The package exposes transitional host entrypoints while the monorepo is still
 single-package: `jit/runtime` exports the runtime `JIT` namespace, and
 `jit/define` exports the same schema DSL with AOT stubs for compiled
@@ -135,7 +143,9 @@ types that future package splits will reuse.
   views, and dictionaries they touch. Process plans mark projection-only
   strings adaptive: a bounded sample chooses canonical dictionary codes for
   repeated values or identity codes for high-cardinality values, while filter
-  strings always stay indexed. This layout may evolve independently from codec
+  strings always stay indexed. Compatible object intersections are flattened;
+  discriminated object unions use dense integer tags and variant-specific
+  hydration. This layout may evolve independently from codec
   v2 because it is not persisted across processes.
 - **Streaming** (`compiler/stream.ts` + `runtime/stream/boundary-scanner.ts`):
   the boundary FSM must survive tokens cut across chunks, including inside

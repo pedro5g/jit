@@ -18,6 +18,7 @@ work and for production performance. Each page explains:
 - [Schema operators](./schema-operators.md)
 - [Temporal, ISO, codecs, and special schemas](./temporal-iso-codec-special-schemas.md)
 - [Queries, mappers, and high-volume flows](./query-mapper-flows.md)
+- [Lazy queries, iterators, and visitors](./lazy-execution.md)
 - [Serialization and binary codec](./serialization-codec.md)
 - [Binary rowsets](./binary-rowsets.md)
 - [Benchmarks, memory, and load testing](./benchmarks-memory-load.md)

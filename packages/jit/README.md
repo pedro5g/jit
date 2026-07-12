@@ -80,6 +80,7 @@ were captured on the same machine as the table above.
 | Filtered `count`, 1M               | **columnar 1.09 ms / 96 B** | JIT query over JS array 4.24 ms / 96 B            | **3.88x faster**                |
 | Filtered `sum`, 1M                 | **columnar 1.26 ms / 96 B** | JIT query over JS array 4.45 ms / 96 B            | **3.53x faster**                |
 | Adaptive `load+query`, 1M, dynamic | **52.67 ms / 28.26 MB**     | Zod 4 parse + native filter 454.89 ms / 110.31 MB | **8.64x faster, 74% less heap** |
+| Tagged-union `count`, 1M          | **0.78 ms**                  | Native JS string discriminator 2.64 ms            | **3.40x faster**                |
 
 For one-off queries over already materialized JS arrays, regular `JIT.query`
 can still be the right tool. Binary rowsets are for reuse, repeated filters,
@@ -553,6 +554,35 @@ JIT.query(UserList)
   .compile();
 ```
 
+### Lazy iterators and visitors
+
+The eager array remains the default. Choose an explicit incremental terminal
+when the consumer should control materialization:
+
+```ts
+const activeNames = JIT.query(UserList)
+  .filter((q) => q.eq("active", true))
+  .select("id", "name")
+  .take(10);
+
+activeNames.compile(); // eager array
+activeNames.compileIterator(); // IterableIterator<{ id, name }>
+activeNames.compileAsyncIterator(); // AsyncGenerator, accepts cursors/streams
+activeNames.compileVisitor(); // (input, consume) => emitted count
+activeNames.lazy().compile(); // alias for compileIterator()
+```
+
+Incremental operators include `flatMap`, `take`, `takeWhile`, `drop`,
+`dropWhile`, `unique`, `chunk`, `window`, `pairwise`, `scan`, and
+`groupAdjacentBy`. Consecutive filter/projection/control operators are fused
+into one generated stage. `orderBy` is supported but reported as a
+materialization barrier by `.explain("generator")`.
+
+On the one-million-row lazy benchmark, direct `compileVisitor()` consumed
+800k projected matches in **3.81 ms / 760 B heap**, versus **15.21 ms / 7.75
+MiB** for a handwritten generator. See
+[`docs/features/lazy-execution.md`](../../docs/features/lazy-execution.md).
+
 ## Transform
 
 Compiled object transforms can select fields and use built-in field operators
@@ -608,6 +638,19 @@ json.parse(body); // JSON.parse + compiled validation
 
 const stringifyUser = JIT.json(User).stringify().compile();
 const parseUserJson = JIT.json(User).parse().compile();
+
+const stringifyChunks = JIT.json(UserList)
+  .stringifyChunks({ chunkBytes: 16 * 1024 })
+  .compile();
+
+for (const chunk of stringifyChunks(users)) writable.write(chunk);
+```
+
+Validation issues can also be consumed through an iterator:
+
+```ts
+const issues = JIT.validate(User).issues().compile();
+for (const issue of issues(input)) log(issue);
 ```
 
 ### Binary codec (wire format v2)

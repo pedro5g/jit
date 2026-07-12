@@ -117,6 +117,44 @@ The rowset compiler accepts flat object schemas with scalar fields:
 - `literal`, `null`, `undefined`;
 - optional and nullable wrappers around those fields.
 
+It also accepts intersections of compatible flat objects and discriminated
+object unions. A plain `JIT.union()` is eligible when every option has one
+shared string/number literal field with distinct values; otherwise use
+`JIT.discriminatedUnion()` to make the physical dispatch explicit.
+
+### Tagged Unions And Intersections
+
+```ts
+const Shape = JIT.discriminatedUnion("kind", [
+  JIT.object({
+    kind: JIT.literal("circle"),
+    id: JIT.number().int32(),
+    radius: JIT.number().float32(),
+  }),
+  JIT.object({
+    kind: JIT.literal("rectangle"),
+    id: JIT.number().int32(),
+    width: JIT.number().float32(),
+    height: JIT.number().float32(),
+  }),
+]);
+
+const Shapes = JIT.array(Shape).binary({ memoryLayout: "columnar" });
+```
+
+The compiler assigns dense tags `0..N-1` in declaration order. The public
+literal field is kept in the hydrated object, but filters resolve the literal
+once and compare its `uint8`/`uint32` code in the hot loop. Variant-only fields
+receive presence guards, and hydration switches on the integer tag so it
+rebuilds only the properties belonging to that variant.
+
+Object intersections are flattened before offsets are calculated. Duplicate
+fields must have the same physical representation. Required wins over
+optional, and non-nullable wins over nullable, because an intersection must
+satisfy every option. Conflicts such as `id.int32()` intersected with
+`id.string()` fail during compilation rather than introducing a generic
+runtime branch.
+
 Each row has a fixed byte width. Optional and nullable fields use a compact
 2-bit state in a per-row bitmask:
 
@@ -293,6 +331,7 @@ codecs, schema builders, the runtime compiler, or unused rowset helpers.
 
 ```sh
 pnpm bench:binary
+pnpm bench:binary-compositions
 pnpm bench:binary-strings
 pnpm bench:report
 ```
@@ -312,6 +351,11 @@ The binary suite measures:
 The string strategy suite separately measures dictionary versus fixed UTF-8
 hash slots at low, medium, and unique cardinalities, including exact byte
 verification and hydration.
+
+The composition suite measures integer-tagged union scans against native JS
+string-discriminator loops. On the same Node 22/Ryzen 7 5800H environment,
+one million variants measured 0.78 ms for tagged `count` versus 2.64 ms for
+native string comparison, and 0.96 ms for tagged `sum` versus 2.77 ms.
 
 Mitata persists `heap/op` and GC stats in `bench/results/binary.latest.json`.
 Use those numbers to decide between `exact`, `dynamic`, and `static` for a
