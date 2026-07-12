@@ -341,6 +341,96 @@ describe("binary rowsets", () => {
     expect(() => Nested.binary()).toThrow(/flat scalar object fields/);
   });
 
+  it("stores discriminated object unions with integer tags and restores each shape", () => {
+    const Shape = JIT.discriminatedUnion("kind", [
+      JIT.object({ kind: JIT.literal("circle"), id: JIT.number().int32(), radius: JIT.number().float32() }),
+      JIT.object({
+        kind: JIT.literal("rectangle"),
+        id: JIT.number().int32(),
+        width: JIT.number().float32(),
+        height: JIT.number().float32(),
+      }),
+    ]);
+    const Shapes = JIT.array(Shape);
+    const values: JIT.infer<typeof Shape>[] = [
+      { kind: "circle", id: 1, radius: 2.5 },
+      { kind: "rectangle", id: 2, width: 4, height: 3 },
+      { kind: "circle", id: 3, radius: 1.25 },
+    ];
+    const binary = Shapes.binary({ strategy: "exact", memoryLayout: "columnar" });
+    const rowset = binary.load(values);
+    const circles = JIT.query(rowset)
+      .filter((q) => q.eq("kind", "circle"))
+      .compile();
+    const kind = binary.layout.fields.find((field) => field.key === "kind");
+
+    expect(binary.layout.union).toEqual({
+      discriminator: "kind",
+      variants: [
+        { tag: 0, value: "circle", keys: ["kind", "id", "radius"] },
+        { tag: 1, value: "rectangle", keys: ["kind", "id", "width", "height"] },
+      ],
+    });
+    expect(kind).toMatchObject({ kind: "literalUnion", size: 1, dictionaryMode: "fixed" });
+    expect([
+      ...rowset.bytes.subarray(rowset.offsets[kind?.columnIndex ?? 0], rowset.offsets[kind?.columnIndex ?? 0] + 3),
+    ]).toEqual([0, 1, 0]);
+    expect(rowset.hydrate()).toEqual(values);
+    expect(circles(rowset)).toEqual([
+      { kind: "circle", id: 1, radius: 2.5 },
+      { kind: "circle", id: 3, radius: 1.25 },
+    ]);
+    expect(
+      Compiler.emitBinaryQuerySource(binary.layout, {
+        nodes: [
+          {
+            kind: "filter",
+            condition: {
+              kind: "compare",
+              op: "eq",
+              left: { kind: "field", key: "kind" },
+              right: { kind: "literal", value: "circle" },
+            },
+          },
+        ],
+        bindings: [],
+      })
+    ).toContain("switch (u8[b0 + i])");
+  });
+
+  it("infers literal discriminators for plain unions and flattens intersections", () => {
+    const Event = JIT.union(
+      JIT.object({ type: JIT.literal(10), id: JIT.number().int32(), value: JIT.string() }),
+      JIT.object({ type: JIT.literal(20), id: JIT.number().int32(), value: JIT.string() })
+    );
+    const Entity = JIT.intersection(
+      JIT.object({ id: JIT.number().int32(), name: JIT.string().optional() }),
+      JIT.object({ active: JIT.boolean(), name: JIT.string() })
+    );
+    const events = JIT.array(Event).binary({ strategy: "exact" });
+    const entities = JIT.array(Entity).binary({ strategy: "exact" });
+
+    expect(events.layout.union?.discriminator).toBe("type");
+    expect(
+      events
+        .load([
+          { type: 10, id: 1, value: "a" },
+          { type: 20, id: 2, value: "b" },
+        ])
+        .hydrate()
+    ).toEqual([
+      { type: 10, id: 1, value: "a" },
+      { type: 20, id: 2, value: "b" },
+    ]);
+    expect(entities.layout.fields.find((field) => field.key === "name")?.guard).toBeUndefined();
+    expect(entities.load([{ id: 1, name: "Ada", active: true }]).hydrate()).toEqual([
+      { id: 1, name: "Ada", active: true },
+    ]);
+
+    const Invalid = JIT.intersection(JIT.object({ id: JIT.number().int32() }), JIT.object({ id: JIT.string() }));
+    expect(() => JIT.array(Invalid).binary()).toThrow(/incompatible physical definitions/);
+  });
+
   it("emits deterministic loader, hydrator, and byte-query source", () => {
     const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
     const source = Compiler.emitBinaryQuerySource(binary.layout, {

@@ -7,7 +7,7 @@ import type {
   QueryValueNode,
 } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
-import { TypeName } from "../core/ats/index.js";
+import { createSchema, TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
@@ -95,6 +95,19 @@ export interface BinaryRowLayout {
   readonly views: BinaryRowViewUsage;
   readonly fields: readonly BinaryFieldLayout[];
   readonly columns: readonly BinaryFieldLayout[];
+  /** Integer-tagged object variants, or undefined for a monomorphic row. */
+  readonly union: BinaryUnionLayout | undefined;
+}
+
+export interface BinaryUnionVariantLayout {
+  readonly tag: number;
+  readonly value: string | number;
+  readonly keys: readonly string[];
+}
+
+export interface BinaryUnionLayout {
+  readonly discriminator: string;
+  readonly variants: readonly BinaryUnionVariantLayout[];
 }
 
 export interface BinaryDictionary {
@@ -147,6 +160,11 @@ interface BinaryArrayState {
 
 interface BinaryCompileHints {
   readonly adaptiveStringFields?: ReadonlySet<string>;
+}
+
+interface BinaryElementLayout {
+  readonly schema: ObjectSchema;
+  readonly union: BinaryUnionLayout | undefined;
 }
 
 interface BinaryRowTarget {
@@ -217,8 +235,9 @@ export function compileBinaryArray<TSchema extends ATS.ArraySchema>(
   hints: BinaryCompileHints = {}
 ): BinaryArray<BinaryArrayElement<TSchema>> {
   const arraySchema = schema as ArraySchema;
-  const objectSchema = expectArrayObjectSchema(arraySchema, "binary rowset");
-  const layout = createBinaryRowLayout(objectSchema, options.memoryLayout, hints.adaptiveStringFields);
+  const element = resolveBinaryElement(arraySchema.def.element, "binary rowset");
+  const objectSchema = element.schema;
+  const layout = createBinaryRowLayout(objectSchema, options.memoryLayout, hints.adaptiveStringFields, element.union);
   const strategy = options.strategy ?? "dynamic";
   const state = createBinaryArrayState(layout, strategy, options);
   const writer = compileRowWriter(layout);
@@ -299,7 +318,7 @@ export function emitBinaryHydrateSource(layout: BinaryRowLayout): string {
     emitRowCursorDeclarations(writer, layout, layout.fields);
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
-      writer.line(`out[i] = ${emitObjectExpression(layout.fields)};`);
+      emitHydratedObjectAssignment(writer, layout, "out[i]");
       emitRowCursorAdvance(writer, layout, layout.fields);
     });
     writer.line("}");
@@ -665,20 +684,225 @@ function prepareAdaptiveDictionaries(
   }
 }
 
-function expectArrayObjectSchema(schema: ArraySchema, feature: string): ObjectSchema {
-  const resolved = resolveWrappers(schema.def.element).base;
+function resolveBinaryElement(schema: ATS.AnyTypeSchema, feature: string): BinaryElementLayout {
+  const resolved = resolveWrappers(schema).base;
 
-  if (resolved.type !== TypeName.object) {
-    throw new JITError("UNSUPPORTED_SCHEMA", `${feature} expects an array of object schemas`);
+  if (resolved.type === TypeName.object) {
+    return { schema: resolved as ObjectSchema, union: undefined };
+  }
+  if (resolved.type === TypeName.intersection) {
+    return { schema: flattenObjectIntersection(resolved, feature), union: undefined };
+  }
+  if (resolved.type === TypeName.union || resolved.type === TypeName.discriminatedUnion) {
+    return flattenObjectUnion(resolved, feature);
+  }
+  throw new JITError(
+    "UNSUPPORTED_SCHEMA",
+    `${feature} expects object, object intersection, or discriminated object union elements`
+  );
+}
+
+interface ResolvedObjectField {
+  readonly base: ATS.AnyTypeSchema;
+  readonly optional: boolean;
+  readonly nullable: boolean;
+}
+
+function flattenObjectIntersection(schema: ATS.AnyTypeSchema, feature: string): ObjectSchema {
+  const options = (schema.def as ATS.OptionsDef).options;
+  const fields = new Map<string, ResolvedObjectField>();
+
+  for (const option of options) {
+    const object = resolveObjectOption(option, feature);
+
+    for (const key of Object.keys(object.def.props)) {
+      const next = resolvedObjectField(object.def.props[key]);
+      const previous = fields.get(key);
+
+      if (previous && fieldSignature(key, previous.base) !== fieldSignature(key, next.base)) {
+        throw new JITError(
+          "UNSUPPORTED_SCHEMA",
+          `${feature} intersection has incompatible physical definitions for field ${JSON.stringify(key)}`
+        );
+      }
+      fields.set(
+        key,
+        previous
+          ? {
+              base: previous.base,
+              optional: previous.optional && next.optional,
+              nullable: previous.nullable && next.nullable,
+            }
+          : next
+      );
+    }
+  }
+  return createObjectSchema(fields);
+}
+
+function flattenObjectUnion(schema: ATS.AnyTypeSchema, feature: string): BinaryElementLayout {
+  const options = (schema.def as ATS.OptionsDef).options.map((option) => resolveObjectOption(option, feature));
+  const explicit =
+    schema.type === TypeName.discriminatedUnion ? (schema.def as ATS.DiscriminatedUnionDef).discriminator : undefined;
+  const discriminator = explicit ?? inferLiteralDiscriminator(options);
+
+  if (!discriminator) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      `${feature} object unions require a shared field with a distinct string or number literal in every option`
+    );
   }
 
-  return resolved as ObjectSchema;
+  const variants = options.map((option, tag) => {
+    const discriminatorSchema = option.def.props[discriminator];
+    const value = discriminatorSchema ? scalarLiteralValue(discriminatorSchema) : undefined;
+
+    if (value === undefined) {
+      throw new JITError(
+        "UNSUPPORTED_SCHEMA",
+        `${feature} discriminator ${JSON.stringify(discriminator)} must be a required string or number literal`
+      );
+    }
+    return { tag, value, keys: Object.keys(option.def.props) } satisfies BinaryUnionVariantLayout;
+  });
+  const values = new Set(variants.map((variant) => `${typeof variant.value}:${String(variant.value)}`));
+
+  if (values.size !== variants.length) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      `${feature} discriminator ${JSON.stringify(discriminator)} contains duplicate literal values`
+    );
+  }
+
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  const merged = new Map<string, ResolvedObjectField>();
+
+  for (const option of options) {
+    for (const key of Object.keys(option.def.props)) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        keys[keys.length] = key;
+      }
+    }
+  }
+
+  for (const key of keys) {
+    if (key === discriminator) {
+      const literalSchemas = variants.map((variant) => createSchema(TypeName.literal, { value: variant.value }));
+      merged.set(key, {
+        base: createSchema(TypeName.union, { options: literalSchemas }),
+        optional: false,
+        nullable: false,
+      });
+      continue;
+    }
+
+    let selected: ResolvedObjectField | undefined;
+    let present = 0;
+
+    for (const option of options) {
+      const field = option.def.props[key];
+
+      if (!field) continue;
+      const next = resolvedObjectField(field);
+
+      if (selected && fieldSignature(key, selected.base) !== fieldSignature(key, next.base)) {
+        throw new JITError(
+          "UNSUPPORTED_SCHEMA",
+          `${feature} union has incompatible physical definitions for field ${JSON.stringify(key)}`
+        );
+      }
+      selected = selected
+        ? {
+            base: selected.base,
+            optional: selected.optional || next.optional,
+            nullable: selected.nullable || next.nullable,
+          }
+        : next;
+      present++;
+    }
+
+    if (selected) merged.set(key, { ...selected, optional: selected.optional || present !== options.length });
+  }
+
+  return {
+    schema: createObjectSchema(merged),
+    union: { discriminator, variants },
+  };
+}
+
+function resolveObjectOption(schema: ATS.AnyTypeSchema, feature: string): ObjectSchema {
+  const resolved = resolveWrappers(schema).base;
+
+  if (resolved.type === TypeName.object) return resolved as ObjectSchema;
+  if (resolved.type === TypeName.intersection) return flattenObjectIntersection(resolved, feature);
+  throw new JITError("UNSUPPORTED_SCHEMA", `${feature} composition options must resolve to object schemas`);
+}
+
+function inferLiteralDiscriminator(options: readonly ObjectSchema[]): string | undefined {
+  const first = options[0];
+
+  if (!first) return undefined;
+  for (const key of Object.keys(first.def.props)) {
+    const seen = new Set<string>();
+    let valid = true;
+
+    for (const option of options) {
+      const schema = option.def.props[key];
+      const value = schema ? scalarLiteralValue(schema) : undefined;
+
+      if (value === undefined) {
+        valid = false;
+        break;
+      }
+      const signature = `${typeof value}:${String(value)}`;
+      if (seen.has(signature)) {
+        valid = false;
+        break;
+      }
+      seen.add(signature);
+    }
+    if (valid) return key;
+  }
+  return undefined;
+}
+
+function scalarLiteralValue(schema: ATS.AnyTypeSchema): string | number | undefined {
+  const resolved = resolveWrappers(schema);
+
+  if (resolved.optional || resolved.nullable || resolved.base.type !== TypeName.literal) return undefined;
+  const value = (resolved.base as ATS.LiteralSchema).def.value;
+  return typeof value === "string" || typeof value === "number" ? value : undefined;
+}
+
+function resolvedObjectField(schema: ATS.AnyTypeSchema): ResolvedObjectField {
+  const resolved = resolveWrappers(schema);
+  return { base: resolved.base, optional: resolved.optional, nullable: resolved.nullable };
+}
+
+function createObjectSchema(fields: ReadonlyMap<string, ResolvedObjectField>): ObjectSchema {
+  const props: Record<string, ATS.AnyTypeSchema> = {};
+
+  for (const [key, field] of fields) {
+    let schema = field.base;
+    if (field.nullable) schema = createSchema(TypeName.nullable, { innerType: schema });
+    if (field.optional) schema = createSchema(TypeName.optional, { innerType: schema });
+    props[key] = schema;
+  }
+  return createSchema(TypeName.object, { props }) as ObjectSchema;
+}
+
+function fieldSignature(key: string, schema: ATS.AnyTypeSchema): string {
+  const descriptor = describeField(key, schema);
+  return JSON.stringify([descriptor.kind, descriptor.size, descriptor.values, descriptor.literal]);
 }
 
 export function createBinaryRowLayout(
   schema: ObjectSchema,
   requestedLayout: BinaryMemoryLayout = "auto",
-  adaptiveStringFields?: ReadonlySet<string>
+  adaptiveStringFields?: ReadonlySet<string>,
+  union: BinaryUnionLayout | undefined = undefined
 ): BinaryRowLayout {
   const props = schema.def.props;
   const entries: {
@@ -815,6 +1039,7 @@ export function createBinaryRowLayout(
     views: createViewUsage(fields),
     fields,
     columns,
+    union,
   };
 }
 
@@ -1186,6 +1411,33 @@ function emitObjectExpression(fields: readonly BinaryFieldLayout[], selected?: r
   return `{ ${entries.join(", ")} }`;
 }
 
+function emitHydratedObjectAssignment(writer: CodeWriter, layout: BinaryRowLayout, target: string): void {
+  const union = layout.union;
+
+  if (!union) {
+    writer.line(`${target} = ${emitObjectExpression(layout.fields)};`);
+    return;
+  }
+  const discriminator = layout.fields.find((field) => field.key === union.discriminator);
+
+  if (!discriminator) {
+    throw new JITError("INVALID_OPERATION", `binary union discriminator ${union.discriminator} is missing`);
+  }
+  writer.line(`switch (${emitFieldComparable(discriminator)}) {`);
+  writer.indent(() => {
+    for (const variant of union.variants) {
+      writer.line(`case ${variant.tag}:`);
+      writer.indent(() => {
+        writer.line(`${target} = ${emitObjectExpression(layout.fields, variant.keys)};`);
+        writer.line("break;");
+      });
+    }
+    writer.line("default:");
+    writer.indent(() => writer.line('throw new RangeError("jit binary rowset: invalid union tag");'));
+  });
+  writer.line("}");
+}
+
 function emitFieldValue(field: BinaryFieldLayout): string {
   const read = emitScalarRead(field);
 
@@ -1421,7 +1673,11 @@ function emitBinaryArrayQuery(
   writer.line("for (let i = 0; i < len; i++) {");
   writer.indent(() => {
     const accepted = () => {
-      writer.line(`out[j++] = ${emitObjectExpression(layout.fields, plan.select?.fields)};`);
+      if (layout.union && !plan.select) {
+        emitHydratedObjectAssignment(writer, layout, "out[j++]");
+      } else {
+        writer.line(`out[j++] = ${emitObjectExpression(layout.fields, plan.select?.fields)};`);
+      }
     };
 
     if (condition) {
@@ -1718,6 +1974,9 @@ function serializeBinaryLayout(layout: BinaryRowLayout): string {
     layout.memoryLayout,
     layout.rowSize,
     layout.maskBytes,
+    layout.union
+      ? [layout.union.discriminator, layout.union.variants.map((variant) => [variant.tag, variant.value, variant.keys])]
+      : undefined,
     layout.fields.map((field) => [
       field.key,
       field.kind,
