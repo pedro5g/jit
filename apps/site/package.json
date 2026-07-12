@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/generate-jit-dts.mjs && next dev",
-    "build": "pnpm --filter @pedro5g/jit build && node scripts/generate-jit-dts.mjs && next build",
+    "build": "pnpm --filter @jit/compiler build && node scripts/generate-jit-dts.mjs && next build",
     "gen:dts": "node scripts/generate-jit-dts.mjs",
     "start": "next start",
     "postinstall": "fumadocs-mdx",
@@ -18,7 +18,7 @@
     "fumadocs-core": "^16.11.3",
     "fumadocs-mdx": "^15.1.0",
     "fumadocs-ui": "^16.11.3",
-    "@pedro5g/jit": "workspace:*",
+    "@jit/compiler": "workspace:*",
     "lucide-react": "^1.24.0",
     "motion": "^12.42.2",
     "next": "^16.2.10",

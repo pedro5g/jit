@@ -6,7 +6,7 @@ description: Install jit, define a schema, and use the compiled operations.
 ## Install
 
 ```bash
-pnpm add @pedro5g/jit
+pnpm add @jit/compiler
 ```
 
 ## Define a schema
@@ -14,7 +14,7 @@ pnpm add @pedro5g/jit
 zod-like builders; every schema carries its inferred type.
 
 ```ts
-import { JIT } from "@pedro5g/jit/runtime";
+import { JIT } from "@jit/compiler/runtime";
 
 const User = JIT.object({
   id: JIT.number().int().positive(),

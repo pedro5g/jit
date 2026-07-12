@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit";
+import { JIT } from "@jit/compiler";
 import fastJson from "fast-json-stringify";
 import { registerScenario } from "../shared/scenario.js";
 

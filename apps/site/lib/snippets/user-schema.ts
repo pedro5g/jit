@@ -3,7 +3,7 @@
  * captured from the real compiler (`JIT.*(User).compile().source`) — keep them
  * in sync with the library output when the emitters change.
  */
-export const userSchemaSource = `import { JIT } from "@pedro5g/jit/runtime";
+export const userSchemaSource = `import { JIT } from "@jit/compiler/runtime";
 
 const User = JIT.object({
   id: JIT.number().int().positive(),

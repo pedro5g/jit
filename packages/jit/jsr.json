@@ -1,5 +1,5 @@
 {
-  "name": "@pedro5g/jit",
+  "name": "@jit/compiler",
   "version": "1.0.0",
   "exports": {
     "./package.json": "./package.json",

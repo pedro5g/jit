@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit";
+import { JIT } from "@jit/compiler";
 
 export interface SmallUser {
   readonly id: number;

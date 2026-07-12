@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit";
+import { JIT } from "@jit/compiler";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { z } from "zod";

@@ -22,7 +22,7 @@ const packageDir = join(__dirname, "packages/jit");
 const packageManifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as PackageManifest;
 const jsrManifest = JSON.parse(readFileSync(join(packageDir, "jsr.json"), "utf8")) as JsrManifest;
 const changelog = readFileSync(join(__dirname, "CHANGELOG.md"), "utf8");
-const expectedName = "@pedro5g/jit";
+const expectedName = "@jit/compiler";
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

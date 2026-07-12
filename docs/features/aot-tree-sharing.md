@@ -13,7 +13,7 @@ include only the low-level validation/stringify/query functions it imports.
 Create `*.jit.ts` declaration files with the define entrypoint:
 
 ```ts
-import { JIT } from "@pedro5g/jit/define";
+import { JIT } from "@jit/compiler/define";
 
 export const UserSchema = JIT.object({
   id: JIT.number().int().positive(),

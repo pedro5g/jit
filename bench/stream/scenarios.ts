@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit";
+import { JIT } from "@jit/compiler";
 import { registerScenario } from "../shared/scenario.js";
 
 const Event = JIT.object({

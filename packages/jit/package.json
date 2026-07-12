@@ -1,5 +1,5 @@
 {
-  "name": "@pedro5g/jit",
+  "name": "@jit/compiler",
   "version": "1.0.0",
   "author": "Pedro5g <pedro.env5@gmail.com>",
   "description": "A compiled TypeScript data engine for validation, queries, transforms, serialization, and binary processing",

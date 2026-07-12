@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit";
+import { JIT } from "@jit/compiler";
 import { produce } from "../shared/competitors.js";
 import { createNestedUsers, createUsers, type MediumUser, NestedArraysSchema, UsersSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";

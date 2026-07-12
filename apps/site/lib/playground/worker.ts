@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit/runtime";
+import { JIT } from "@jit/compiler/runtime";
 
 export type PlaygroundOp =
   | "validate"

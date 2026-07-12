@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AOT, JIT } from "@pedro5g/jit";
+import { AOT, JIT } from "@jit/compiler";
 import { FormatRegistry, Type } from "@sinclair/typebox";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import { Value } from "@sinclair/typebox/value";

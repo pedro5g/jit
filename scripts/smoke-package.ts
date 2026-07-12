@@ -49,19 +49,19 @@ try {
 
   writeFileSync(
     join(consumerDir, "esm.mjs"),
-    'import { JIT } from "@pedro5g/jit/runtime";\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
+    'import { JIT } from "@jit/compiler/runtime";\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
   );
   writeFileSync(
     join(consumerDir, "cjs.cjs"),
-    'const { JIT } = require("@pedro5g/jit/runtime");\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
+    'const { JIT } = require("@jit/compiler/runtime");\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
   );
   run(process.execPath, ["esm.mjs"], consumerDir);
   run(process.execPath, ["cjs.cjs"], consumerDir);
 
-  const cli = run(process.execPath, [join(consumerDir, "node_modules/@pedro5g/jit/cli.js"), "--help"], consumerDir);
+  const cli = run(process.execPath, [join(consumerDir, "node_modules/@jit/compiler/cli.js"), "--help"], consumerDir);
   if (!cli.includes("jit generate")) throw new Error("packed CLI help did not load correctly");
 
-  const manifest = JSON.parse(readFileSync(join(consumerDir, "node_modules/@pedro5g/jit/package.json"), "utf8")) as {
+  const manifest = JSON.parse(readFileSync(join(consumerDir, "node_modules/@jit/compiler/package.json"), "utf8")) as {
     name?: string;
     version?: string;
   };

@@ -9,7 +9,7 @@
  *
  * @example
  * ```ts
- * import { JIT } from "@pedro5g/jit";
+ * import { JIT } from "@jit/compiler";
  *
  * const User = JIT.object({ id: JIT.number(), name: JIT.string() });
  * const equal = JIT.compileEqual(User.schema);
@@ -28,7 +28,7 @@ export * as PipelineAST from "./core/ast/index.js";
 export * as AST from "./core/ats/index.js";
 /**
  * Infers the TypeScript type of a schema or builder. Root-level export so
- * generated `.d.ts` files can reference it as `import("@pedro5g/jit").Infer<...>`.
+ * generated `.d.ts` files can reference it as `import("@jit/compiler").Infer<...>`.
  */
 export type { Infer } from "./core/ats/infer.js";
 /** Fluent builder chain internals (`createBuilder`, builder types). */

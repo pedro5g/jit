@@ -636,10 +636,10 @@ export function createConfigSource(options: InitArguments): string {
   ];
 
   if (options.format === "cjs") {
-    return `/** @type {import("@pedro5g/jit").AOT.JitConfig} */\nmodule.exports = {\n${lines.join("\n")}\n};\n`;
+    return `/** @type {import("@jit/compiler").AOT.JitConfig} */\nmodule.exports = {\n${lines.join("\n")}\n};\n`;
   }
 
-  return `import { AOT } from "@pedro5g/jit";\n\nexport default AOT.defineConfig({\n${lines.join("\n")}\n});\n`;
+  return `import { AOT } from "@jit/compiler";\n\nexport default AOT.defineConfig({\n${lines.join("\n")}\n});\n`;
 }
 
 function writeExampleDeclaration(cwd: string): void {
@@ -652,7 +652,7 @@ function writeExampleDeclaration(cwd: string): void {
   writeFileSync(
     file,
     [
-      'import { JIT } from "@pedro5g/jit/define";',
+      'import { JIT } from "@jit/compiler/define";',
       "",
       "export const User = JIT.object({",
       "  id: JIT.int(),",

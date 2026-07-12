@@ -17,12 +17,12 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^21.0.2
         version: 21.0.2
+      '@jit/compiler':
+        specifier: workspace:*
+        version: link:packages/jit
       '@js-temporal/polyfill':
         specifier: ^0.5.1
         version: 0.5.1
-      '@pedro5g/jit':
-        specifier: workspace:*
-        version: link:packages/jit
       '@sinclair/typebox':
         specifier: ^0.34.50
         version: 0.34.50
@@ -101,12 +101,12 @@ importers:
 
   apps/site:
     dependencies:
+      '@jit/compiler':
+        specifier: workspace:*
+        version: link:../../packages/jit
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@pedro5g/jit':
-        specifier: workspace:*
-        version: link:../../packages/jit
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

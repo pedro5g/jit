@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit";
+import { JIT } from "@jit/compiler";
 import { microdiff } from "../shared/competitors.js";
 import { createNestedUsers, createUsers, NestedArraysSchema, UsersSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";

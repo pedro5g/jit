@@ -8,7 +8,7 @@ import type { PlaygroundOp, PlaygroundResponse } from "@/lib/playground/worker";
 
 const RUN_TIMEOUT_MS = 2500;
 
-const defaultCode = `import { JIT } from "@pedro5g/jit/runtime";
+const defaultCode = `import { JIT } from "@jit/compiler/runtime";
 
 const schema = JIT.object({
   id: JIT.number().int().positive(),
@@ -83,7 +83,7 @@ const examples: { id: string; label: string; code: string; a: string; op: Playgr
   {
     id: "coerce",
     label: "Coercion & defaults",
-    code: `import { JIT } from "@pedro5g/jit/runtime";
+    code: `import { JIT } from "@jit/compiler/runtime";
 
 const schema = JIT.object({
   page: JIT.coerce.number().int().min(1).default(1),

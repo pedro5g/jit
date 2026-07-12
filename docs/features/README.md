@@ -50,7 +50,7 @@ For application code, prefer this order:
    typed operator chain.
 2. Compile only the operations you need with `JIT.validate(...).is().compile()`,
    `JIT.json(...).stringify().compile()`, `JIT.query(...).compile()`, etc.
-3. For runtime-only apps, import from `@pedro5g/jit/runtime`.
+3. For runtime-only apps, import from `@jit/compiler/runtime`.
 4. For generated production bundles, export compiled artifacts from
    `*.jit.ts` files and run `jit generate`.
 5. In front-end code, import only the generated function or grouped object you

@@ -6,20 +6,21 @@ only from an immutable Git tag named `vX.Y.Z`; `packages/jit/package.json`,
 
 ## Registry Names
 
-Both registries use `@pedro5g/jit`. The unscoped npm name `jit` belongs to a
+Both registries use `@jit/compiler`. The unscoped npm name `jit` belongs to a
 different project and must never be used by this release pipeline.
 
 ## One-Time Registry Bootstrap
 
 Before pushing the first release tag:
 
-1. Sign in to npm as the `pedro5g` account. npm requires a package to exist
-   before trusted publishing can be configured, so add a short-lived granular
-   `NPM_TOKEN` GitHub secret with publish access for the first release only.
+1. Sign in to an npm account with publish access to the `@jit` scope. npm
+   requires a package to exist before trusted publishing can be configured, so
+   add a short-lived granular `NPM_TOKEN` GitHub secret with publish access for
+   the first release only.
 2. After that first npm publication, configure a GitHub Actions trusted publisher for
    repository `pedro5g/jit` and workflow file `release.yml`. Allow
    `npm publish`.
-3. Create the JSR scope `@pedro5g` and package `@pedro5g/jit`.
+3. Create the JSR scope `@jit` and package `@jit/compiler`.
 4. In the JSR package settings, link `pedro5g/jit` as the GitHub repository.
 5. Delete `NPM_TOKEN`; subsequent npm releases authenticate only through OIDC.
 6. Optionally create a GitHub environment with required reviewers, then add the

@@ -1,4 +1,4 @@
-import { JIT } from "@pedro5g/jit";
+import { JIT } from "@jit/compiler";
 import { z } from "zod";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
