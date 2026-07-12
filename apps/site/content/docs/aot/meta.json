@@ -1,0 +1,4 @@
+{
+  "title": "AOT",
+  "pages": ["cli-and-config", "generation-and-tree-shaking"]
+}

@@ -1,0 +1,37 @@
+---
+title: Binary rowsets
+description: Scan million-row flat datasets through compact packed, aligned or columnar memory.
+---
+
+```ts
+const binary = JIT.array(User).binary({
+  strategy: "exact",
+  memoryLayout: "columnar",
+});
+const rowset = binary.load(users);
+
+const count = JIT.query(rowset)
+  .filter((q) => q.eq("role", "admin"))
+  .count()
+  .compile();
+```
+
+`packed` minimizes bytes, `aligned` enables typed views and `columnar` stores each field
+contiguously for repeated analytical scans. `auto` chooses between packed and naturally
+aligned rows.
+
+Optional/null values use two mask bits. Strings use dictionaries; filter constants are
+resolved once and hot loops compare integer codes. Projection-only high-cardinality
+strings can use identity codes and skip a large map.
+
+## Tagged unions
+
+Discriminated object unions receive dense numeric tags. Plain unions are supported when
+the compiler can infer one shared field with distinct literal values. Hydration switches
+on the integer tag and rebuilds only that variant's fields.
+
+Compatible object intersections are flattened before offsets are assigned. Conflicting
+physical fields fail at compilation.
+
+One-million-variant benchmark: tagged count **0.78 ms**, native string discriminator
+**2.64 ms**.

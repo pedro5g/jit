@@ -1,0 +1,25 @@
+---
+title: CLI and configuration
+description: Initialize, inspect, generate and clean an AOT project.
+---
+
+```bash
+pnpm jit init
+pnpm jit doctor
+pnpm jit list
+pnpm jit explain
+pnpm jit inspect User --stage source
+pnpm jit generate
+pnpm jit clean
+```
+
+`init` writes a typed root config and a starter `*.jit.ts` declaration. Without `entries`,
+discovery starts at the project root and uses `**/*.jit.ts`. Entries can also be explicit
+files, directories or globs such as `src/schemas/**/*.ts`.
+
+Set `output.emitPackageJson: false` when generation targets an existing project source
+directory. Keep it enabled when the output acts as a standalone package or lives under
+`node_modules`-style resolution.
+
+If no explicit compiled exports are found, generation prints a diagnostic and writes
+nothing. There is no raw-schema fallback.

@@ -1,0 +1,26 @@
+---
+title: Serialization and codecs
+description: Specialized JSON, chunked output and a versioned binary transport format.
+---
+
+```ts
+const stringify = JIT.json(User).stringify().compile();
+const parse = JIT.json(User).parse().compile();
+```
+
+Known JSON keys and punctuation are baked into source. Strings use a fast clean-string
+path and fall back to native escaping only when necessary.
+
+For large arrays, stream bounded chunks:
+
+```ts
+const stringifyChunks = JIT.json(Users)
+  .stringifyChunks({ chunkBytes: 16 * 1024 })
+  .compile();
+
+for (const chunk of stringifyChunks(users)) writable.write(chunk);
+```
+
+The binary codec is a transport format with an explicit version byte. Binary rowsets are
+different: they are evolvable process-local analytical memory and must not be persisted
+as a wire contract.

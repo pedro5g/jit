@@ -1,0 +1,37 @@
+---
+title: Generation and tree shaking
+description: Export grouped objects or standalone functions without shipping the compiler.
+---
+
+```ts
+const selected = JIT.validator(UserSchema).get("is", "parse");
+
+export const User = JIT.compile(UserSchema, {
+  is: selected.is,
+  parse: selected.parse,
+});
+
+export const User_is = selected.is;
+```
+
+Grouped declarations generate one object import:
+
+```ts
+import { User } from "@jit/generated";
+User.is(input);
+```
+
+Standalone declarations keep their exact exported name:
+
+```ts
+import { User_is } from "@jit/generated";
+```
+
+Generated modules contain no import from `jit` and declare `sideEffects: false`. Only
+selected operations and their required low-level helpers are emitted. This matters most
+in browser bundles: importing one validator cannot retain schema builders, codecs,
+queries or the runtime compiler.
+
+Manifest and plan files make the retained surface reviewable. Bindings that cannot be
+serialized, such as arbitrary callbacks, are skipped with a reason instead of being
+miscompiled.

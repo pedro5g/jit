@@ -1,0 +1,21 @@
+---
+title: Operator matrix
+description: Choose the correct eager, lazy, binary or streaming execution path.
+---
+
+| Need | Recommended API | Materializes output? |
+| --- | --- | --- |
+| Validate one value | `JIT.validate(S).is/parse/safeParse()` | only issues/transforms |
+| Query an in-memory array | `JIT.query(List).compile()` | yes |
+| Stop consumption early | `compileIterator()` | no |
+| Consume async cursor | `compileAsyncIterator()` | no |
+| Highest-throughput callback sink | `compileVisitor()` | no |
+| Repeated million-row scans | `array.binary({ memoryLayout: "columnar" })` | compact rowset |
+| Serialize one value | `JIT.json(S).stringify()` | final string |
+| Write a huge JSON array | `stringifyChunks()` | bounded chunks |
+| Validate a transport stream | `JIT.stream()` | item-by-item |
+| Strict-CSP/browser production | explicit AOT exports | only imported code |
+
+`equal`, `hash` and `clone` are scalar/complete operations and do not benefit from a
+generator backend. General `orderBy` and `groupBy` require global state; use ordered data,
+adjacent grouping, top-k or an index when true streaming is required.

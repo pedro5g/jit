@@ -1,0 +1,45 @@
+---
+title: Schemas and strict types
+description: Build data shapes, compose operators and preserve TypeScript inference.
+---
+
+```ts
+const User = JIT.object({
+  id: JIT.number().int32().positive(),
+  name: JIT.string().min(3).max(80),
+  email: JIT.string().email(),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
+});
+
+type User = JIT.Infer<typeof User>;
+```
+
+The runtime AST has a stable `{ type, _type, def, annotations }` shape. `_type` is
+always `null` at runtime and carries inference only at compile time.
+
+## Object transforms
+
+```ts
+User.partial();
+User.partial("email");
+User.required();
+User.pick("id", "name");
+User.omit("email");
+User.extend({ active: JIT.boolean() });
+```
+
+Transforms return new schemas and do not mutate the original.
+
+## Composition
+
+Use `union`, `xor`, `intersection`, `not`, `when/where`, refinements, codecs and
+template literals as declarative schema nodes. TypeScript rejects invalid literal
+defaults when their value can be checked statically against string/number constraints.
+
+```ts
+JIT.string().min(5).default("hello");
+// JIT.string().min(5).default("no"); // TypeScript error
+```
+
+Runtime validation remains authoritative for dynamic strings and numbers whose literal
+value is not known to TypeScript.

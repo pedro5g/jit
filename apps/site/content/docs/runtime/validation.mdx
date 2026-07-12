@@ -1,0 +1,27 @@
+---
+title: Compiled validation
+description: Generate only is, parse, safeParse or asynchronous validation when needed.
+---
+
+```ts
+const selected = JIT.validator(User).get("is", "parse");
+
+selected.is(input);
+selected.parse(input);
+```
+
+Selection is explicit: requesting `is` and `parse` does not compile serializers, hash
+functions or unused validator variants.
+
+```ts
+const isUser = JIT.validate(User).is().compile();
+const safeParseUser = JIT.validate(User).safeParse().compile();
+const issues = JIT.validate(User).issues().compile();
+```
+
+`is` is fail-fast and allocation-free on the normal path. `safeParse` collects stable
+issues with `path`, `code`, `expected` and `message`. `parse` throws
+`JITValidationError`. Promise schemas use the asynchronous variants.
+
+The `~standard` adapter closes over the compiled `safeParse` function; it does not run a
+second generic validator.

@@ -1,0 +1,46 @@
+---
+title: Compilation model
+description: How schemas become specialized runtime JIT or import-free AOT functions.
+---
+
+JIT treats a schema as compile-time input. Schema traversal, wrapper resolution,
+strategy selection, optimization and source generation happen once; hot calls run
+plain JavaScript specialized for one known shape.
+
+```text
+JIT builders -> schema AST -> operation plan -> optimizer -> code generator
+                                                       -> runtime Function
+                                                       -> pure AOT module
+```
+
+## Runtime JIT
+
+Runtime operations compile through `globalThis.Function` and are cached by schema
+identity and operation plan. External values such as predicates and query constants
+are passed as bindings, never interpolated into generated source.
+
+```ts
+const isUser = JIT.validate(User).is().compile();
+
+isUser.source;
+isUser.hash;
+isUser.explain();
+```
+
+## Build-time AOT
+
+`jit generate` evaluates explicit declarations and writes self-contained ESM, CJS and
+declaration files. Generated operations have zero imports from the JIT engine, so the
+schema builders and compiler do not ship in the production bundle.
+
+## Why the generated path is fast
+
+- known properties use direct access;
+- arrays use indexed loops;
+- validators order cheap checks before regex and transforms;
+- queries fuse filtering and projection;
+- binary rowsets replace string discriminators and booleans with integer codes;
+- unused operations are never generated.
+
+Compile cost and execution cost are reported separately in benchmarks. A complicated
+optimization is accepted only when the hot-path result justifies it.

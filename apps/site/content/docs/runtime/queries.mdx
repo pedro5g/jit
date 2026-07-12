@@ -1,0 +1,22 @@
+---
+title: Queries and mappers
+description: Fuse filters, projections, aggregates and DTO mapping into specialized loops.
+---
+
+```ts
+const findAdmins = JIT.query(Users)
+  .params({ minimumScore: JIT.number() })
+  .filter((q, params) =>
+    q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)),
+  )
+  .select("id", "name")
+  .compile();
+```
+
+The generated query does not allocate a filter result before mapping. It preallocates
+one output array, writes by cursor and trims once. `count`, `sum`, `avg`, `min` and `max`
+avoid result arrays entirely.
+
+Mappers whitelist the destination shape and compile renames, nested mapping and bulk
+`many()` loops. Callback overrides remain external bindings and are reported when they
+cannot be emitted safely by AOT.

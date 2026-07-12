@@ -1,0 +1,17 @@
+---
+title: Cache, hash and indexes
+description: Understand identity caches, structural hashes and indexed repeated queries.
+---
+
+Schema-only operations use a `WeakMap` from schema identity to compiled function. Query
+and mapper templates cache pure source while applying user bindings to a fresh closure.
+This prevents one caller's values from leaking into another compiled operation.
+
+`JIT.hash(schema)` emits a shape-specialized structural hash. Equal values under the same
+schema produce the same hash; use it for memoization buckets and change detection, then
+confirm collisions with compiled equality when correctness requires it.
+
+Entity hints and keyed indexes are useful when the same list receives many lookups. Index
+caches are weakly attached to source collections and can be invalidated by watched-list
+versions. A one-off scan should stay a scan: building an index has an upfront time and
+memory cost.

@@ -1,0 +1,41 @@
+---
+title: Lazy execution
+description: Iterators, async generators, visitors and incremental pipeline operators.
+---
+
+Eager arrays remain the default. Lazy consumption is an explicit terminal contract:
+
+```ts
+const query = JIT.query(Users)
+  .filter((q) => q.eq("active", true))
+  .select("id", "name")
+  .take(10);
+
+query.compile();
+query.compileIterator();
+query.compileAsyncIterator();
+query.compileVisitor();
+query.lazy().compile();
+```
+
+Supported incremental operators include `flatMap`, `take/takeWhile`, `drop/dropWhile`,
+`unique`, `chunk`, `window`, `pairwise`, `scan` and `groupAdjacentBy`.
+
+Consecutive filters, projections and control operators share one generated stage. Array
+inputs use an indexed loop. The direct visitor backend calls the consumer without an
+iterator object or `{ value, done }` protocol.
+
+```ts
+const visit = JIT.query(Users)
+  .filter((q) => q.eq("active", true))
+  .select("id")
+  .compileVisitor();
+
+visit(users, sendToQueue);
+```
+
+`orderBy` remains available but `explain("generator")` marks it as a materialization
+barrier because global ordering must observe every accepted item.
+
+Latest one-million-row local benchmark: visitor **3.81 ms / 760 B heap** for 800k
+projected results; handwritten generator **15.21 ms / 7.75 MiB**.
