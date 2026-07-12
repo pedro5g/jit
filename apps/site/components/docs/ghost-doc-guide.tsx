@@ -4,8 +4,8 @@ import { X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { type GhostState, JitGhost } from "@/components/brand/jit-ghost";
+import { useGhostVisibility } from "@/hooks/use-ghost-visibility";
 
-const VISIBLE_KEY = "jit:ghost-visible";
 const GHOST_SIZE = 60;
 const LANE_WIDTH = 88;
 
@@ -57,7 +57,7 @@ type Side = "left" | "right" | "dock";
  */
 export function GhostDocGuide() {
   const pathname = usePathname();
-  const [enabled, setEnabled] = useState(true);
+  const [enabled, setEnabled] = useGhostVisibility();
   const [target, setTarget] = useState<Target | null>(null);
   const [side, setSide] = useState<Side>("right");
   const [ghostState, setGhostState] = useState<GhostState>("observing");
@@ -89,10 +89,7 @@ export function GhostDocGuide() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(pathname): targets must be re-collected when the docs route changes
   useEffect(() => {
-    if (localStorage.getItem(VISIBLE_KEY) === "0") {
-      setEnabled(false);
-      return;
-    }
+    if (!enabled) return;
     if (window.matchMedia("(max-width: 1023px)").matches) return;
 
     const article = document.querySelector<HTMLElement>("article#nd-page") ?? document.querySelector("article");
@@ -130,6 +127,11 @@ export function GhostDocGuide() {
           activeEl = nodes[i];
           activeIndex = i;
         }
+      }
+      if (!activeEl) {
+        // nothing passed yet (top of the page) — greet at the first section
+        activeEl = nodes[0];
+        activeIndex = 0;
       }
 
       const ship = shipRef.current;
@@ -208,7 +210,7 @@ export function GhostDocGuide() {
       if (frame.current) cancelAnimationFrame(frame.current);
       if (stateTimer.current) clearTimeout(stateTimer.current);
     };
-  }, [pathname]);
+  }, [pathname, enabled]);
 
   if (!enabled) return null;
 
@@ -250,7 +252,6 @@ export function GhostDocGuide() {
                   type="button"
                   aria-label="Hide the reading guide"
                   onClick={() => {
-                    localStorage.setItem(VISIBLE_KEY, "0");
                     setEnabled(false);
                   }}
                   className="pointer-events-auto inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:text-danger"
