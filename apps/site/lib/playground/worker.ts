@@ -11,7 +11,10 @@ export type PlaygroundOp =
   | "stringify"
   | "mask"
   | "sanitize"
-  | "codec";
+  | "codec"
+  | "query"
+  | "transform"
+  | "mapper";
 
 export interface PlaygroundRequest {
   id: number;
@@ -69,9 +72,31 @@ function hex(bytes: Uint8Array, limit = 48): string {
 }
 
 /**
+ * Compiled artifacts are named functions produced by `new Function`, so their
+ * toString() IS the real generated source. Runtime wrappers (arrow closures)
+ * are rejected so we never present glue code as generated output.
+ */
+function sourceOf(fn: unknown): string | null {
+  if (typeof fn !== "function") return null;
+  const withSource = fn as { source?: unknown };
+  if (typeof withSource.source === "string") return withSource.source;
+  const text = Function.prototype.toString.call(fn);
+  return /^function\s+\w*\s*\(/.test(text) && !text.includes("[native code]") ? text : null;
+}
+
+interface UserBindings {
+  schema?: unknown;
+  query?: unknown;
+  transform?: unknown;
+  mapper?: unknown;
+}
+
+/**
  * Executes user schema code with JIT in scope, then compiles and runs the
  * selected operation (guide §16: client-only, terminable worker, never on a
- * server, never logged). Import lines are stripped — JIT is injected.
+ * server, never logged). Import lines are stripped — JIT is injected. Besides
+ * `schema`, the snippet may define `query`, `transform` and `mapper` bindings
+ * for the pipeline operations.
  */
 self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
   const { id, code, op, inputA, inputB } = event.data;
@@ -82,39 +107,49 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
     const body = code.replace(/^\s*import[^\n]*$/gm, "");
     const build = new Function(
       "JIT",
-      `"use strict";\n${body}\n;return typeof schema === "undefined" ? undefined : schema;`
+      `"use strict";\n${body}\n;return {
+        schema: typeof schema === "undefined" ? undefined : schema,
+        query: typeof query === "undefined" ? undefined : query,
+        transform: typeof transform === "undefined" ? undefined : transform,
+        mapper: typeof mapper === "undefined" ? undefined : mapper,
+      };`
     );
-    const schema = build(JIT);
-    if (!schema) {
-      throw new Error("define a `schema` binding, e.g. `const schema = JIT.object({ … })`");
-    }
+
+    const compileStart = performance.now();
+    const bindings = build(JIT) as UserBindings;
+
+    const requireSchema = () => {
+      if (!bindings.schema) throw new Error("define a `schema` binding, e.g. `const schema = JIT.object({ … })`");
+      return bindings.schema as never;
+    };
 
     const a: unknown = inputA.trim() === "" ? undefined : JSON.parse(inputA);
     const b: unknown = inputB.trim() === "" ? undefined : JSON.parse(inputB);
-    const requireA = () => {
-      if (a === undefined) throw new Error("this operation needs a JSON value in input A");
-      return a;
+    // returns `never` so the values fit every compiled signature — the real
+    // shape check is exactly what the compiled operations do at runtime
+    const requireA = (label = "a JSON value"): never => {
+      if (a === undefined) throw new Error(`this operation needs ${label} in input A`);
+      return a as never;
     };
-    const requireB = (label: string) => {
+    const requireB = (label: string): never => {
       if (b === undefined) throw new Error(`this operation needs ${label} in input B`);
-      return b;
+      return b as never;
     };
 
     let source: string | null = null;
     let run: () => unknown;
 
-    const compileStart = performance.now();
     switch (op) {
       case "validate": {
-        const is = JIT.validate(schema).is().compile();
-        const validator = JIT.validator(schema);
-        source = is.source;
+        const is = JIT.validate(requireSchema()).is().compile();
+        const validator = JIT.validator(requireSchema());
+        source = sourceOf(is);
         run = () => ({ is: is(requireA()), safeParse: validator.safeParse(requireA()) });
         break;
       }
       case "parse": {
-        const parse = JIT.validate(schema).parse().compile();
-        source = parse.source;
+        const parse = JIT.validate(requireSchema()).parse().compile();
+        source = sourceOf(parse);
         run = () => {
           try {
             return parse(requireA());
@@ -128,14 +163,14 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
         break;
       }
       case "equal": {
-        const equal = JIT.equal(schema).compile();
-        source = equal.source;
+        const equal = JIT.equal(requireSchema()).compile();
+        source = sourceOf(equal);
         run = () => equal(requireA(), requireB("a second value"));
         break;
       }
       case "clone": {
-        const clone = JIT.clone(schema).compile();
-        source = clone.source;
+        const clone = JIT.clone(requireSchema()).compile();
+        source = sourceOf(clone);
         run = () => {
           const out = clone(requireA());
           return { clone: out, newReference: out !== a };
@@ -143,19 +178,19 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
         break;
       }
       case "diff": {
-        const diff = JIT.diff(schema).compile();
-        source = diff.source;
+        const diff = JIT.diff(requireSchema()).compile();
+        source = sourceOf(diff);
         run = () => diff(requireA(), requireB("a second value"));
         break;
       }
       case "hash": {
-        const hashFn = JIT.hash(schema).compile();
-        source = hashFn.source;
+        const hashFn = JIT.hash(requireSchema()).compile();
+        source = sourceOf(hashFn);
         run = () => hashFn(requireA());
         break;
       }
       case "update": {
-        const model = JIT.model(schema);
+        const model = JIT.model(requireSchema());
         run = () => {
           const out = model.update(requireA() as never, requireB("a patch object") as never);
           return { updated: out, untouchedInput: out !== a };
@@ -163,27 +198,67 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
         break;
       }
       case "stringify": {
-        const stringify = JIT.json(schema).stringify().compile();
-        source = stringify.source;
-        run = () => stringify(requireA());
+        const stringify = JIT.json(requireSchema()).stringify().compile();
+        source = sourceOf(stringify);
+        run = () => stringify(requireA() as never);
         break;
       }
       case "mask": {
-        const model = JIT.model(schema);
-        run = () => model.mask(requireA() as never);
+        const mask = JIT.mask(requireSchema());
+        run = () => mask(requireA() as never);
+        // compiles lazily on first call — capture the source after running once
+        run();
+        source = sourceOf(mask);
         break;
       }
       case "sanitize": {
-        const model = JIT.model(schema);
-        run = () => model.sanitize(requireA() as never);
+        const sanitize = JIT.sanitize(requireSchema());
+        run = () => sanitize(requireA() as never);
+        run();
+        source = sourceOf(sanitize);
         break;
       }
       case "codec": {
-        const codec = JIT.codec(schema, { version: 2 });
+        const codec = JIT.codec(requireSchema(), { version: 2 });
+        source = sourceOf(codec.encode);
         run = () => {
           const bytes = codec.encode(requireA() as never);
           return { byteLength: bytes.length, wire: hex(bytes), decoded: codec.decode(bytes) };
         };
+        break;
+      }
+      case "query": {
+        const query = bindings.query as ((rows: unknown, params?: unknown) => unknown) | undefined;
+        if (typeof query !== "function") {
+          throw new Error(
+            "define a `query` binding, e.g. `const query = JIT.query(JIT.array(schema)).filter(...).compile()`"
+          );
+        }
+        source = sourceOf(query);
+        run = () =>
+          b === undefined ? query(requireA("a JSON array of rows")) : query(requireA("a JSON array of rows"), b);
+        break;
+      }
+      case "transform": {
+        const transform = bindings.transform as ((value: unknown) => unknown) | undefined;
+        if (typeof transform !== "function") {
+          throw new Error(
+            "define a `transform` binding, e.g. `const transform = JIT.transform(schema).select(...).compile()`"
+          );
+        }
+        source = sourceOf(transform);
+        run = () => transform(requireA());
+        break;
+      }
+      case "mapper": {
+        const mapper = bindings.mapper as
+          | { map: (value: unknown) => unknown; many: (values: unknown[]) => unknown }
+          | undefined;
+        if (!mapper || typeof mapper.map !== "function") {
+          throw new Error("define a `mapper` binding, e.g. `const mapper = JIT.mapper(schema, Target, { … })`");
+        }
+        source = sourceOf(mapper.map);
+        run = () => (Array.isArray(a) ? mapper.many(a) : mapper.map(requireA()));
         break;
       }
       default:

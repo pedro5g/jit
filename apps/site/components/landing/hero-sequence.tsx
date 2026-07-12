@@ -69,7 +69,7 @@ export function HeroSequence({ children }: { children: React.ReactNode }) {
         ) : (
           <>
             <span aria-hidden className="size-2 bg-success" />
-            <span className="text-success">compiled</span> · cached per schema · same output in AOT
+            <span className="text-success">compiled</span> · ~57 ns per is() on Node 22 · cached per schema
           </>
         )}
       </output>

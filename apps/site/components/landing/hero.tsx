@@ -7,6 +7,7 @@ import { ButtonLink } from "@/components/ui/button-link";
 import { TerminalFrame } from "@/components/ui/terminal-frame";
 import { githubUrl, installCommand } from "@/lib/site";
 import { heroGeneratedExcerpt, userSchemaSource } from "@/lib/snippets/user-schema";
+import { HeroParticles } from "./hero-particles";
 import { HeroSequence } from "./hero-sequence";
 
 export function Hero() {
@@ -14,6 +15,7 @@ export function Hero() {
     <section className="relative overflow-hidden">
       <div aria-hidden className="bg-hero-glow absolute inset-0" />
       <div aria-hidden className="bg-tech-grid absolute inset-0" />
+      <HeroParticles />
       <div className="relative mx-auto grid w-full max-w-300 gap-12 px-5 pb-20 pt-16 sm:px-8 sm:pt-24 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-28">
         <div className="flex max-w-155 flex-col items-start justify-center">
           <p className="mb-5 font-pixel-badge text-xs uppercase tracking-[0.24em] text-gold-200">

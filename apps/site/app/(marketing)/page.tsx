@@ -9,6 +9,7 @@ import { OptimizerSection } from "@/components/landing/optimizer-section";
 import { ProofStrip } from "@/components/landing/proof-strip";
 import { RuntimeSection } from "@/components/landing/runtime-section";
 import { SpecializationSection } from "@/components/landing/specialization-section";
+import { PixelDivider } from "@/components/ui/pixel-divider";
 
 export default function HomePage() {
   return (
@@ -16,12 +17,19 @@ export default function HomePage() {
       <Hero />
       <ProofStrip />
       <SpecializationSection />
+      <PixelDivider />
       <CodegenSection />
+      <PixelDivider />
       <CompilationModesSection />
+      <PixelDivider />
       <OperationsSection />
+      <PixelDivider />
       <OptimizerSection />
+      <PixelDivider />
       <BenchmarksSection />
+      <PixelDivider />
       <DxSection />
+      <PixelDivider />
       <RuntimeSection />
       <FinalCta />
     </>

@@ -17,6 +17,7 @@ export function JitGhost({
   state = "idle",
   follow = "eyes",
   glow = false,
+  mirror = false,
   className,
 }: {
   size?: number;
@@ -24,6 +25,8 @@ export function JitGhost({
   /** none: static · eyes: pupils track the cursor · full: body drifts too */
   follow?: "none" | "eyes" | "full";
   glow?: boolean;
+  /** flip horizontally so the arm points left (e.g. at the docs content) */
+  mirror?: boolean;
   className?: string;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -104,7 +107,14 @@ export function JitGhost({
         />
       )}
       <div ref={bodyRef} className="size-full will-change-transform">
-        <svg viewBox="0 0 64 64" width={size} height={size} shapeRendering="crispEdges" role="presentation">
+        <svg
+          viewBox="0 0 64 64"
+          width={size}
+          height={size}
+          shapeRendering="crispEdges"
+          role="presentation"
+          className={mirror ? "-scale-x-100" : undefined}
+        >
           {/* body */}
           <path
             d="M12 60 L12 20 H16 V12 H20 V8 H24 V4 H40 V8 H44 V12 H48 V20 H52 V60 H46 L46 54 H40 L40 60 H34 L34 54 H28 L28 60 H22 L22 54 H16 L16 60 Z"

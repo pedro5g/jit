@@ -51,7 +51,10 @@ export function GhostCompanion() {
         }
         if (best) {
           const state = best.dataset.ghostState ?? "idle";
-          setActive({ state, label: best.dataset.ghostLabel ?? defaultLabels[state] ?? defaultLabels.idle });
+          setActive({
+            state,
+            label: best.dataset.ghostLabel ?? defaultLabels[state] ?? defaultLabels.idle,
+          });
         } else {
           setActive(null);
         }
@@ -66,7 +69,7 @@ export function GhostCompanion() {
 
   return (
     <div className="fixed bottom-5 right-5 z-40 hidden flex-col items-end gap-2 md:flex">
-      <div className="flex items-center gap-2 rounded-control border border-line-subtle bg-night-950/90 py-1.5 pl-3 pr-1.5 shadow-[var(--shadow-card)] backdrop-blur">
+      <div className="flex items-center gap-2 rounded-control border border-line-subtle bg-night-950/90 py-1.5 pl-3 pr-1.5 shadow-(--shadow-card) backdrop-blur">
         <output aria-live="polite" className="font-mono text-[11px] text-fg-muted">
           {active.label}
         </output>
@@ -77,7 +80,7 @@ export function GhostCompanion() {
             localStorage.setItem(VISIBLE_KEY, "0");
             setEnabled(false);
           }}
-          className="inline-flex size-5 items-center justify-center rounded-[4px] text-fg-subtle hover:text-danger"
+          className="inline-flex size-5 items-center justify-center rounded-sm text-fg-subtle hover:text-danger"
         >
           <X aria-hidden className="size-3" />
         </button>

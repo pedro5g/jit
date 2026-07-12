@@ -33,9 +33,16 @@ const adaInput = `{
 interface OpConfig {
   id: PlaygroundOp;
   label: string;
+  aLabel?: string;
   needsB: false | { label: string; default: string };
   hasSource: boolean;
 }
+
+const usersArrayInput = `[
+  { "id": 1, "name": "Ada", "email": "ada@lovelace.dev", "role": "admin", "tags": ["compiler"] },
+  { "id": 2, "name": "Grace", "email": "grace@navy.mil", "role": "admin", "tags": ["cobol"] },
+  { "id": 3, "name": "Barbara", "email": "barbara@mit.edu", "role": "user", "tags": [] }
+]`;
 
 const ops: OpConfig[] = [
   { id: "validate", label: "validate", needsB: false, hasSource: true },
@@ -60,9 +67,18 @@ const ops: OpConfig[] = [
   { id: "hash", label: "hash", needsB: false, hasSource: true },
   { id: "update", label: "update", needsB: { label: "patch", default: `{ "name": "Grace" }` }, hasSource: false },
   { id: "stringify", label: "stringify", needsB: false, hasSource: true },
-  { id: "mask", label: "mask", needsB: false, hasSource: false },
-  { id: "sanitize", label: "sanitize", needsB: false, hasSource: false },
-  { id: "codec", label: "codec", needsB: false, hasSource: false },
+  { id: "mask", label: "mask", needsB: false, hasSource: true },
+  { id: "sanitize", label: "sanitize", needsB: false, hasSource: true },
+  { id: "codec", label: "codec", needsB: false, hasSource: true },
+  {
+    id: "query",
+    label: "query",
+    aLabel: "rows (JSON array)",
+    needsB: { label: "params (optional)", default: `{ "minimumId": 1 }` },
+    hasSource: true,
+  },
+  { id: "transform", label: "transform", needsB: false, hasSource: true },
+  { id: "mapper", label: "mapper", aLabel: "value or array (JSON)", needsB: false, hasSource: true },
 ];
 
 const examples: { id: string; label: string; code: string; a: string; op: PlaygroundOp }[] = [
@@ -107,6 +123,83 @@ const schema = JIT.object({
     code: defaultCode,
     a: adaInput,
     op: "codec",
+  },
+  {
+    id: "query",
+    label: "Query pipeline",
+    code: `import { JIT } from "@jit/compiler/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int().positive(),
+  name: JIT.string().min(2),
+  email: JIT.string().email(),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+  tags: JIT.array(JIT.string()).max(8),
+});
+
+// fused single-loop pipeline — no intermediate arrays
+const query = JIT.query(JIT.array(schema))
+  .params({ minimumId: JIT.int() })
+  .filter((q, p) => q.and(q.eq("role", "admin"), q.gte("id", p.minimumId)))
+  .select("id", "name", "role")
+  .orderBy("name", "asc")
+  .compile();
+`,
+    a: usersArrayInput,
+    op: "query",
+  },
+  {
+    id: "mapper",
+    label: "DTO mapper (no leaks)",
+    code: `import { JIT } from "@jit/compiler/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int(),
+  fullName: JIT.string(),
+  passwordHash: JIT.string(),
+  profile: JIT.object({ age: JIT.number(), city: JIT.string() }),
+});
+
+const PublicUser = JIT.object({
+  id: JIT.number(),
+  name: JIT.string(),
+  label: JIT.string(),
+});
+
+// whitelist by construction — passwordHash cannot leak
+const mapper = JIT.mapper(schema, PublicUser, {
+  name: { from: "fullName" },
+  label: (user) => user.fullName + "#" + user.id,
+});
+`,
+    a: `{
+  "id": 1,
+  "fullName": "Ada Lovelace",
+  "passwordHash": "$argon2id$…",
+  "profile": { "age": 36, "city": "London" }
+}`,
+    op: "mapper",
+  },
+  {
+    id: "transform",
+    label: "Transform (select + map)",
+    code: `import { JIT } from "@jit/compiler/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int().positive(),
+  name: JIT.string().min(2),
+  email: JIT.string().email(),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+  tags: JIT.array(JIT.string()).max(8),
+});
+
+const transform = JIT.transform(schema)
+  .select("id", "name")
+  .map("name", (field) => field.lowercase())
+  .compile();
+`,
+    a: `{ "id": 1, "name": "ADA LOVELACE", "email": "ada@lovelace.dev", "role": "admin", "tags": [] }`,
+    op: "transform",
   },
 ];
 
@@ -231,7 +324,7 @@ export function PlaygroundClient() {
       ts.typescriptDefaults.setEagerModelSync(true);
       if (dts) {
         for (const [path, content] of Object.entries(dts)) {
-          ts.typescriptDefaults.addExtraLib(content, `file:///node_modules/jit/${path}`);
+          ts.typescriptDefaults.addExtraLib(content, `file:///node_modules/@jit/compiler/${path}`);
         }
       }
     },
@@ -408,7 +501,7 @@ export function PlaygroundClient() {
           <div className={opConfig.needsB ? "grid gap-4 sm:grid-cols-2" : "grid gap-4"}>
             <div>
               <label htmlFor="playground-input-a" className="mb-1.5 block font-mono text-xs text-fg-subtle">
-                input A (JSON)
+                {opConfig.aLabel ?? "input A (JSON)"}
               </label>
               <textarea
                 id="playground-input-a"

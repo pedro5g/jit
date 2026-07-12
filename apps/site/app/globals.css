@@ -323,6 +323,40 @@ button {
   visibility: visible;
 }
 
+/* Floating pixel particles in the hero (decorative, reduced-motion off) */
+.pixel-particle {
+  position: absolute;
+  display: block;
+  background: var(--gold-200);
+  opacity: 0;
+  animation: particle-drift var(--particle-duration, 9s) linear infinite;
+  animation-delay: var(--particle-delay, 0s);
+}
+
+@keyframes particle-drift {
+  0% {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  12% {
+    opacity: var(--particle-opacity, 0.5);
+  }
+  80% {
+    opacity: var(--particle-opacity, 0.5);
+  }
+  100% {
+    transform: translateY(-110px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-particle {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 /* Ghost eyes: blink (scaleY squash, guide §layer B) — translate comes from JS on the group */
 .jit-ghost-eyes rect {
   transform-box: fill-box;

@@ -39,12 +39,28 @@ export function SpecializationSection() {
       />
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-pixel border-2 border-danger/40 bg-danger/10 px-2.5 py-1 font-pixel-badge text-[10px] uppercase tracking-wider text-danger">
+              ✗ dispatch per call
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-pixel border-2 border-danger/40 bg-danger/10 px-2.5 py-1 font-pixel-badge text-[10px] uppercase tracking-wider text-danger">
+              ✗ allocates issues
+            </span>
+          </div>
           <CodePanel code={genericPath} lang="js" title="generic path — interpreted per call" />
           <p className="mt-3 text-sm leading-relaxed text-fg-subtle">
             Dynamic dispatch, generic loops and issue allocation on the hot path, repeated for every value.
           </p>
         </div>
         <div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-pixel border-2 border-success/40 bg-success/10 px-2.5 py-1 font-pixel-badge text-[10px] uppercase tracking-wider text-success">
+              ✓ straight-line
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-pixel border-2 border-success/40 bg-success/10 px-2.5 py-1 font-pixel-badge text-[10px] uppercase tracking-wider text-success">
+              ✓ zero allocation
+            </span>
+          </div>
           <CodePanel code={jitPath} lang="js" title="jit path — specialized" badge={<GeneratedBadge />} />
           <p className="mt-3 text-sm leading-relaxed text-fg-subtle">
             Static property access, checks ordered cheapest-first (typeof → null → numeric → length → regex), classic
