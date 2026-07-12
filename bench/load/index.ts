@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { AOT, JIT } from "@pedro5g/jit";
 import { FormatRegistry, Type } from "@sinclair/typebox";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import { Value } from "@sinclair/typebox/value";
-import { AOT, JIT } from "jit";
 import { z } from "zod";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";

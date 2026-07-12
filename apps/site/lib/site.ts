@@ -8,6 +8,6 @@ export const siteDescription =
   "at runtime or ahead of time.";
 
 export const githubUrl = "https://github.com/pedro5g/jit";
-export const npmUrl = "https://www.npmjs.com/package/jit";
-export const jsrUrl = "https://jsr.io/@jit/jit";
-export const installCommand = "pnpm add jit";
+export const npmUrl = "https://www.npmjs.com/package/@pedro5g/jit";
+export const jsrUrl = "https://jsr.io/@pedro5g/jit";
+export const installCommand = "pnpm add @pedro5g/jit";

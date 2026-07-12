@@ -1,5 +1,5 @@
+import { JIT } from "@pedro5g/jit";
 import { zx } from "@traversable/zod";
-import { JIT } from "jit";
 import { z } from "zod";
 import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
 import { registerScenario } from "../shared/scenario.js";

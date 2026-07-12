@@ -1,0 +1,31 @@
+name: Usage question
+description: Ask a focused question about using or integrating JIT
+title: "question: "
+labels: ["type: question", "status: needs-triage"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to build?
+    validations:
+      required: true
+  - type: textarea
+    id: attempt
+    attributes:
+      label: Current schema or configuration
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Specific question
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: JIT version
+      placeholder: "1.0.0"
+    validations:
+      required: true

@@ -1,0 +1,82 @@
+name: Bug report
+description: Report reproducible incorrect behavior or a regression
+title: "bug: "
+labels: ["type: bug", "status: needs-triage", "needs reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve JIT. A small executable reproduction lets us inspect both behavior and generated source.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Schemas and type inference
+        - Validation and generated code
+        - Runtime JIT and caches
+        - AOT generation and tree shaking
+        - Queries and lazy execution
+        - Binary codecs, rowsets, or streaming
+        - CLI and configuration
+        - MCP server
+        - Documentation site or playground
+        - Unsure
+    validations:
+      required: true
+  - type: dropdown
+    id: execution
+    attributes:
+      label: Execution mode
+      options:
+        - Runtime JIT
+        - Generated AOT package
+        - Both JIT and AOT
+        - TypeScript types only
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the schema, compiled operation, input, and command required to reproduce the problem.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the complete error, generated-source excerpt, or incorrect output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: JIT version or commit
+      placeholder: "@pedro5g/jit 1.0.0 or commit SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node/Deno/Bun version, OS, package manager, TypeScript version, and bundler when relevant.
+      placeholder: "Node 22.17.1, pnpm 11.8.0, TypeScript 6.0.3, Linux x64"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not find the same report.
+          required: true
+        - label: The reproduction does not contain secrets or private data.
+          required: true

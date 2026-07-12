@@ -19,7 +19,7 @@ import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
 import type { ValidDefault } from "../../core/builder/types.js";
 import * as Transform from "../../transforms/index.js";
-import { nativeCoercions } from "../coerce.js";
+import { type NativeCoercions, nativeCoercions } from "../coerce.js";
 
 /**
  * Creates an optional schema builder from a schema input.
@@ -188,4 +188,11 @@ function coerceWith<TSchema extends AnyTypeSchema>(
  *   `.date()` — zod-style native coercions, emitted inline
  *   (`Number(v)`, `new Date(v)`, ...) and therefore AOT-safe.
  */
-export const coerce = Object.assign(coerceWith, nativeCoercions);
+export interface CoerceFactory extends NativeCoercions {
+  <TSchema extends AnyTypeSchema>(
+    schema: SchemaInput<TSchema>,
+    coercer: (value: unknown) => InferSchema<TSchema>
+  ): Builder<CoerceSchema<TSchema>>;
+}
+
+export const coerce: CoerceFactory = Object.assign(coerceWith, nativeCoercions);

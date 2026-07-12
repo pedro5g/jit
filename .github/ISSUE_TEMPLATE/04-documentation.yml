@@ -1,0 +1,25 @@
+name: Documentation improvement
+description: Report missing, unclear, outdated, or incorrect documentation
+title: "docs: "
+labels: ["type: documentation", "area: docs", "status: needs-triage"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page or API
+      description: Link the page or name the undocumented symbol.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is unclear or incorrect?
+    validations:
+      required: true
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Suggested improvement or example
+      description: Include the use case, configuration, tradeoff, or comparison the page should explain.
+    validations:
+      required: true

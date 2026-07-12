@@ -148,7 +148,7 @@ describe("JIT AOT inference-anchored types", () => {
     rmSync(outDir, { recursive: true, force: true });
   });
 
-  it('should derive .d.ts types from the dev schema file via import("jit").Infer', () => {
+  it('should derive .d.ts types from the dev schema file via import("@pedro5g/jit").Infer', () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const selected = JIT.validator(User).get("is");
     const generated = join(outDir, "generated");
@@ -162,9 +162,11 @@ describe("JIT AOT inference-anchored types", () => {
 
     const types = readFileSync(join(generated, "index.d.ts"), "utf8");
 
-    expect(types).toContain('export type User = import("jit").Infer<typeof import("../src/user.jit.js").User>;');
     expect(types).toContain(
-      'export type UserStrict<TValue> = import("jit").Strict<typeof import("../src/user.jit.js").User, TValue>;'
+      'export type User = import("@pedro5g/jit").Infer<typeof import("../src/user.jit.js").User>;'
+    );
+    expect(types).toContain(
+      'export type UserStrict<TValue> = import("@pedro5g/jit").Strict<typeof import("../src/user.jit.js").User, TValue>;'
     );
     // No hand-emitted structural type when the source anchors the inference.
     expect(types).not.toContain("readonly id: number");
@@ -184,7 +186,7 @@ describe("JIT AOT inference-anchored types", () => {
     writeFileSync(
       schemaFile,
       [
-        'import { JIT } from "jit/define";',
+        'import { JIT } from "@pedro5g/jit/define";',
         "",
         "export const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });",
         "export const isUser = JIT.validate(UserSchema).is().compile();",
@@ -241,8 +243,8 @@ describe("JIT AOT inference-anchored types", () => {
             ignoreDeprecations: "6.0",
             baseUrl: ".",
             paths: {
-              jit: [join(repoRoot, "packages/jit/src/index.ts")],
-              "jit/define": [join(repoRoot, "packages/jit/src/define.ts")],
+              "@pedro5g/jit": [join(repoRoot, "packages/jit/src/index.ts")],
+              "@pedro5g/jit/define": [join(repoRoot, "packages/jit/src/define.ts")],
             },
           },
           include: ["consumer.ts", "src/**/*.ts"],

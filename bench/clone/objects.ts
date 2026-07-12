@@ -1,5 +1,5 @@
+import { JIT } from "@pedro5g/jit";
 import { zx } from "@traversable/zod";
-import { JIT } from "jit";
 import { z } from "zod";
 import { lodashCloneDeep, rfdcClone } from "../shared/competitors.js";
 import {

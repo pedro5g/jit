@@ -28,7 +28,15 @@ function flagged<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Builder<TS
  * });
  * ```
  */
-export const nativeCoercions = {
+export interface NativeCoercions {
+  string(): Builder<ATS.StringSchema>;
+  number(): Builder<ATS.NumberSchema>;
+  boolean(): Builder<ATS.BooleanSchema>;
+  bigint(): Builder<ATS.BigIntSchema>;
+  date(): Builder<ATS.DateSchema>;
+}
+
+export const nativeCoercions: NativeCoercions = {
   string(): Builder<ATS.StringSchema> {
     return flagged(stringFactory().schema);
   },
@@ -44,4 +52,4 @@ export const nativeCoercions = {
   date(): Builder<ATS.DateSchema> {
     return flagged(dateFactory().schema);
   },
-} as const;
+};

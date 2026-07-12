@@ -56,7 +56,7 @@ export interface GenerateOptions {
   /**
    * Schema name → source file it was loaded from. When present, the
    * generated `.d.ts` derives the value type from the dev's own schema via
-   * `import("jit").Infer<typeof import("<file>").Name>` — the single source
+   * `import("@pedro5g/jit").Infer<typeof import("<file>").Name>` — the single source
    * of truth for typing — instead of re-emitting a structural type by hand.
    * Type-only imports erase at runtime, so tree-shaking is unaffected.
    */
@@ -148,9 +148,11 @@ export function generate(options: GenerateOptions): GenerateResult {
     if (sourceFile) {
       const specifier = typeImportSpecifier(options.outDir, sourceFile);
 
-      dts.push(`export type ${name} = import("jit").Infer<typeof import(${JSON.stringify(specifier)}).${name}>;`);
       dts.push(
-        `export type ${name}Strict<TValue> = import("jit").Strict<typeof import(${JSON.stringify(specifier)}).${name}, TValue>;`
+        `export type ${name} = import("@pedro5g/jit").Infer<typeof import(${JSON.stringify(specifier)}).${name}>;`
+      );
+      dts.push(
+        `export type ${name}Strict<TValue> = import("@pedro5g/jit").Strict<typeof import(${JSON.stringify(specifier)}).${name}, TValue>;`
       );
     } else {
       // No source file to anchor to (programmatic generate): fall back to a

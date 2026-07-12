@@ -33,7 +33,7 @@ build output that zshy writes beside package source files.
 Prefer the plan-shaped config:
 
 ```ts
-import { AOT } from "jit";
+import { AOT } from "@pedro5g/jit";
 
 export default AOT.defineConfig({
   entries: ["src/schemas/**/*.jit.ts"],

@@ -1,0 +1,59 @@
+name: Performance report
+description: Report a reproducible speed, memory, allocation, or bundle regression
+title: "perf: "
+labels: ["type: performance", "status: needs-triage", "needs benchmark"]
+body:
+  - type: dropdown
+    id: metric
+    attributes:
+      label: Primary metric
+      options:
+        - Throughput or latency
+        - Heap allocation or retained memory
+        - Cold compile time
+        - Generated code size
+        - Browser bundle size
+        - Startup time
+    validations:
+      required: true
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload and data shape
+      description: Include cardinality, valid/invalid distribution, schema complexity, warmup, and operation count.
+    validations:
+      required: true
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: Executable benchmark
+      description: Provide a repository, script, or test that runs without private dependencies.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Results
+      description: Include raw JIT results, baseline results, units, variance, and heap methodology.
+      placeholder: "JIT: 1.20 ms / 96 B; baseline: 2.40 ms / 2.1 MB; 100 iterations after warmup"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Benchmark environment
+      description: CPU, RAM, OS, architecture, runtime version, power profile, and package versions.
+    validations:
+      required: true
+  - type: checkboxes
+    id: methodology
+    attributes:
+      label: Methodology checks
+      options:
+        - label: I separated compile time from steady-state execution time.
+          required: true
+        - label: I verified the benchmark consumes its output and is not optimized away.
+          required: true
+        - label: I included a warmup or explained why cold start is the measured scenario.
+          required: true

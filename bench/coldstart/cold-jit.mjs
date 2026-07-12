@@ -2,7 +2,7 @@
 // the validator + serializer, run one call of each. Prints elapsed ns.
 const start = process.hrtime.bigint();
 
-const { JIT } = await import("jit");
+const { JIT } = await import("@pedro5g/jit");
 
 const UserSchema = JIT.object({
   id: JIT.number().int().positive(),

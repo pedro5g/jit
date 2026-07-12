@@ -1,0 +1,48 @@
+name: Feature or API proposal
+description: Propose a new operator, compiler capability, or developer workflow
+title: "feat: "
+labels: ["type: feature", "status: needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the real workflow or limitation, not only the desired method name.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API and behavior
+      description: Show runtime behavior, inferred types, invalid cases, and error semantics.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: aot
+    attributes:
+      label: JIT, AOT, and bundle impact
+      description: Explain what should be compiled, cached, emitted, and removed by tree shaking.
+    validations:
+      required: true
+  - type: textarea
+    id: performance
+    attributes:
+      label: Performance and memory strategy
+      description: Identify the hot path, expected allocations, stable shapes, indexes, or benchmarks needed.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and prior art
+      description: Link comparable APIs and explain which semantics should or should not be copied.
+  - type: checkboxes
+    id: compatibility
+    attributes:
+      label: Compatibility surface
+      options:
+        - label: This may change public TypeScript types.
+        - label: This may change generated source or AOT output.
+        - label: This may change a persisted wire format.
+        - label: This is intended to remain backward compatible.

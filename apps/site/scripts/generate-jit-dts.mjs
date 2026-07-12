@@ -1,6 +1,6 @@
 // Collects the jit package's built .d.ts files into a JSON manifest served to
 // the playground, where they are registered as Monaco extra libs so the editor
-// gets full type inference for `import { JIT } from "jit/runtime"`.
+// gets full type inference for `import { JIT } from "@pedro5g/jit/runtime"`.
 // Run from apps/site (wired into the dev/build scripts). Output is gitignored.
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -27,7 +27,9 @@ await collect(pkgDir, pkgDir, files);
 
 const count = Object.keys(files).length;
 if (count === 0) {
-  console.error("[jit-dts] no .d.ts files found — build the jit package first (pnpm --filter jit build)");
+  console.error(
+    "[jit-dts] no .d.ts files found - build the jit package first (pnpm --filter @pedro5g/jit build)",
+  );
   process.exit(1);
 }
 

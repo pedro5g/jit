@@ -1,5 +1,5 @@
+import { JIT } from "@pedro5g/jit";
 import fastJson from "fast-json-stringify";
-import { JIT } from "jit";
 import { registerScenario } from "../shared/scenario.js";
 
 const UserSchema = JIT.object({

@@ -39,7 +39,7 @@ describe("jit CLI", () => {
     expect(code).toBe(0);
     expect(stdout.join("")).toContain("created");
     expect(stderr.join("")).toBe("");
-    expect(source).toContain('import { AOT } from "jit";');
+    expect(source).toContain('import { AOT } from "@pedro5g/jit";');
     expect(source).toContain('entries: ["./jit/**/*.jit.ts"]');
     expect(source).toContain('directory: "generated/jit"');
     expect(source).toContain('importSpecifier: "#jit"');
@@ -73,8 +73,8 @@ describe("jit CLI", () => {
     const { runtime, stdout, stderr } = createRuntime();
 
     mkdirSync(join(projectDir, "src"), { recursive: true });
-    mkdirSync(join(projectDir, "node_modules"), { recursive: true });
-    symlinkSync(join(process.cwd(), "packages", "jit"), join(projectDir, "node_modules", "jit"), "dir");
+    mkdirSync(join(projectDir, "node_modules", "@pedro5g"), { recursive: true });
+    symlinkSync(join(process.cwd(), "packages", "jit"), join(projectDir, "node_modules", "@pedro5g", "jit"), "dir");
     writeFileSync(
       join(projectDir, "src", "user.jit.ts"),
       [
@@ -122,8 +122,8 @@ describe("jit CLI", () => {
     const { runtime, stdout, stderr } = createRuntime();
 
     mkdirSync(join(projectDir, "src"), { recursive: true });
-    mkdirSync(join(projectDir, "node_modules"), { recursive: true });
-    symlinkSync(join(process.cwd(), "packages", "jit"), join(projectDir, "node_modules", "jit"), "dir");
+    mkdirSync(join(projectDir, "node_modules", "@pedro5g"), { recursive: true });
+    symlinkSync(join(process.cwd(), "packages", "jit"), join(projectDir, "node_modules", "@pedro5g", "jit"), "dir");
     writeFileSync(
       join(projectDir, "src", "user.jit.ts"),
       [

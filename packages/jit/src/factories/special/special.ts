@@ -172,7 +172,18 @@ function temporalSchema<TKind extends TemporalKind>(kind: TKind): Builder<Tempor
   );
 }
 
-export const temporal = {
+export interface TemporalFactories {
+  instant(): Builder<TemporalSchema<"instant", []>>;
+  plainDate(): Builder<TemporalSchema<"plainDate", []>>;
+  plainTime(): Builder<TemporalSchema<"plainTime", []>>;
+  plainDateTime(): Builder<TemporalSchema<"plainDateTime", []>>;
+  zonedDateTime(): Builder<TemporalSchema<"zonedDateTime", []>>;
+  plainYearMonth(): Builder<TemporalSchema<"plainYearMonth", []>>;
+  plainMonthDay(): Builder<TemporalSchema<"plainMonthDay", []>>;
+  duration(): Builder<TemporalSchema<"duration", []>>;
+}
+
+export const temporal: TemporalFactories = {
   instant: () => temporalSchema("instant"),
   plainDate: () => temporalSchema("plainDate"),
   plainTime: () => temporalSchema("plainTime"),
@@ -181,4 +192,4 @@ export const temporal = {
   plainYearMonth: () => temporalSchema("plainYearMonth"),
   plainMonthDay: () => temporalSchema("plainMonthDay"),
   duration: () => temporalSchema("duration"),
-} as const;
+};

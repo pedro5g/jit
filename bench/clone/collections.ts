@@ -1,4 +1,4 @@
-import { JIT } from "jit";
+import { JIT } from "@pedro5g/jit";
 import { lodashCloneDeep, rfdcClone } from "../shared/competitors.js";
 import { createNumberMap, createNumberSet, NumberMapSchema, NumberSetSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";

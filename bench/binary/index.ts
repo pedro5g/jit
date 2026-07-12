@@ -1,6 +1,6 @@
+import { JIT } from "@pedro5g/jit";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
-import { JIT } from "jit";
 import { z } from "zod";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";

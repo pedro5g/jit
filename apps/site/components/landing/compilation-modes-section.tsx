@@ -3,7 +3,7 @@ import { PixelBadge } from "@/components/brand/pixel-badge";
 import { CodePanel } from "@/components/code/code-panel";
 import { Section, SectionHeading } from "@/components/ui/section";
 
-const runtimeSnippet = `import { JIT } from "jit/runtime";
+const runtimeSnippet = `import { JIT } from "@pedro5g/jit/runtime";
 
 // compiles on first use, cached per schema
 const isUser = JIT.validate(User).is().compile();

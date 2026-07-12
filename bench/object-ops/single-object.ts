@@ -1,4 +1,4 @@
-import { JIT } from "jit";
+import { JIT } from "@pedro5g/jit";
 import { createMediumUser, type MediumUser, MediumUserSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
 import { genericMerge, genericOmit, genericPick, genericTransform } from "./generic.js";

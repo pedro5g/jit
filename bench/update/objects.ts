@@ -1,4 +1,4 @@
-import { JIT } from "jit";
+import { JIT } from "@pedro5g/jit";
 import { produce } from "../shared/competitors.js";
 import {
   createDeepUser,

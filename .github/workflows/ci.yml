@@ -2,23 +2,31 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: install pnpm
         uses: pnpm/action-setup@v4
 
       - name: setup node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: "pnpm"
@@ -31,11 +39,20 @@ jobs:
           pnpm run format:check
           pnpm run lint:check
 
-      - name: check semver version
-        run: pnpm run check:semver
+      - name: check release metadata
+        run: pnpm run release:check
 
       - name: run tests
         run: pnpm run test
 
       - name: build project
         run: pnpm run build
+
+      - name: build documentation site
+        run: pnpm --filter @jit/site build
+
+      - name: verify npm package
+        run: pnpm run release:pack
+
+      - name: verify JSR package
+        run: pnpm run release:jsr:dry-run

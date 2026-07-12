@@ -391,7 +391,7 @@ function isDirectRun(): boolean {
   return entry !== undefined && import.meta.url === pathToFileURL(resolve(entry)).href;
 }
 
-export function runStdioServer(cwd = process.cwd()): void {
+export function runStdioServer(cwd: string = process.cwd()): void {
   const runtime: Runtime = {
     cwd,
     write: (message) => process.stdout.write(`${JSON.stringify(message)}\n`),

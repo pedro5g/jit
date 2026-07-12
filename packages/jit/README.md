@@ -20,7 +20,7 @@ Two execution modes, same generated code:
   only the generated low-level functions the app actually imports.
 
 ```ts
-import { JIT } from "jit/runtime";
+import { JIT } from "@pedro5g/jit/runtime";
 
 const User = JIT.object({
   id: JIT.number().int().positive(),
@@ -123,7 +123,7 @@ Selected operation load benchmarks from `pnpm bench:all`:
 ## Install
 
 ```sh
-pnpm add jit
+pnpm add @pedro5g/jit
 ```
 
 ---
@@ -758,7 +758,7 @@ pnpm jit generate
 Generated `jit.config.ts`:
 
 ```ts
-import { AOT } from "jit";
+import { AOT } from "@pedro5g/jit";
 
 export default AOT.defineConfig({
   // Files, directories, or globs containing explicit compiled AOT exports.
@@ -820,7 +820,7 @@ There is no raw-schema fallback. AOT builds only what you explicitly export.
 
 ```ts
 // jit/user.jit.ts — discovered by convention (**/*.jit.ts)
-import { JIT } from "jit/define";
+import { JIT } from "@pedro5g/jit/define";
 
 const UserSchema = JIT.object({
   id: JIT.number(),
@@ -899,10 +899,10 @@ Types are derived from your schema file, never re-emitted by hand:
 
 ```ts
 // grouped marker
-export type User = import("jit").Infer<
+export type User = import("@pedro5g/jit").Infer<
   typeof import("../src/user.jit.js").User
 >;
-export type UserStrict<TValue> = import("jit").Strict<
+export type UserStrict<TValue> = import("@pedro5g/jit").Strict<
   typeof import("../src/user.jit.js").User,
   TValue
 >;

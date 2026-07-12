@@ -1,4 +1,4 @@
-import { JIT } from "jit";
+import { JIT } from "@pedro5g/jit";
 import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
 import { range } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";

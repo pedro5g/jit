@@ -1,0 +1,23 @@
+{
+  "description": "Compiled TypeScript data engine with specialized JIT and import-free AOT operations",
+  "homepage": "https://github.com/pedro5g/jit#readme",
+  "features": {
+    "issues": true,
+    "projects": true,
+    "wiki": false,
+    "discussions": true
+  },
+  "topics": [
+    "aot",
+    "code-generation",
+    "compiler",
+    "data-validation",
+    "javascript",
+    "jit",
+    "performance",
+    "schema",
+    "serialization",
+    "typescript",
+    "validation"
+  ]
+}
