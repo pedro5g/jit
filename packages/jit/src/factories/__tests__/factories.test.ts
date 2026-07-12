@@ -441,6 +441,22 @@ describe("JIT AST builders", () => {
       expectTypeOf(Duration._type).toEqualTypeOf<Temporal.Duration>();
     });
 
+    it("should group ISO string schemas under one namespace", () => {
+      const IsoDate = JIT.iso.date();
+      const Time = JIT.iso.time({ precision: 3 });
+      const Datetime = JIT.iso.datetime({ offset: true, precision: 0 });
+      const Duration = JIT.iso.duration();
+
+      expect(IsoDate.schema.def.checks?.[0]).toMatchObject({ kind: "date" });
+      expect(Time.schema.def.checks?.[0]).toMatchObject({ kind: "time" });
+      expect(Datetime.schema.def.checks?.[0]).toMatchObject({ kind: "datetime" });
+      expect(Duration.schema.def.checks?.[0]).toMatchObject({ kind: "duration" });
+      expectTypeOf(IsoDate.schema._type).toEqualTypeOf<string>();
+      expectTypeOf(Time.schema._type).toEqualTypeOf<string>();
+      expectTypeOf(Datetime.schema._type).toEqualTypeOf<string>();
+      expectTypeOf(Duration.schema._type).toEqualTypeOf<string>();
+    });
+
     it("should construct bidirectional value codecs", () => {
       const StringToDate = JIT.codec(JIT.string().datetime(), JIT.date(), {
         decode: (iso) => new Date(iso),

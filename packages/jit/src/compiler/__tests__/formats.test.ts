@@ -89,6 +89,17 @@ describe("JIT string format checks", () => {
     accepts(JIT.string().duration(), ["P3Y6M4DT12H30M5S", "P4W"], ["P", "3Y"]);
   });
 
+  it("should expose the same ISO checks through JIT.iso", () => {
+    accepts(JIT.iso.date(), ["2026-07-05", "2024-02-29"], ["2026-13-01", "2025-02-29"]);
+    accepts(JIT.iso.time({ precision: 3 }), ["23:59:59.123"], ["23:59", "23:59:59.12"]);
+    accepts(
+      JIT.iso.datetime({ offset: true, precision: 0 }),
+      ["2026-07-05T12:00:00Z", "2026-07-05T12:00:00-03:00"],
+      ["2026-07-05T12:00Z", "2026-07-05T12:00:00-0300"]
+    );
+    accepts(JIT.iso.duration(), ["P3Y6M4DT12H30M5S", "P4W"], ["P", "3Y"]);
+  });
+
   it("should validate emoji strings", () => {
     accepts(JIT.string().emoji(), ["🚀", "👍🏽🎉"], ["rocket 🚀"]);
   });

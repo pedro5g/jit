@@ -122,6 +122,17 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitValidatorSource(Event.schema)).toMatchSnapshot();
   });
 
+  it("validator: ISO namespace schemas", () => {
+    const Boundary = JIT.object({
+      date: JIT.iso.date(),
+      time: JIT.iso.time({ precision: 3 }),
+      at: JIT.iso.datetime({ offset: true, precision: 0 }),
+      ttl: JIT.iso.duration(),
+    });
+
+    expect(Compiler.emitValidatorSource(Boundary.schema)).toMatchSnapshot();
+  });
+
   it("validator: conditional fields, logical schemas, and temporal checks", () => {
     const Checkout = JIT.object({
       temDesconto: JIT.boolean(),

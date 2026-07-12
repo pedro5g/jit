@@ -25,6 +25,7 @@ export * from "./collection/index.js";
 export type { CompiledSelection, CompileOp } from "./compile.js";
 export { COMPILE_OPS, compile } from "./compile.js";
 export * from "./composition/index.js";
+export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export { mapper } from "./mapper.js";
 export type { CompiledModel } from "./model.js";
