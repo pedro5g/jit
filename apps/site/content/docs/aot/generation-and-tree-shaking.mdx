@@ -35,3 +35,38 @@ queries or the runtime compiler.
 Manifest and plan files make the retained surface reviewable. Bindings that cannot be
 serialized, such as arbitrary callbacks, are skipped with a reason instead of being
 miscompiled.
+
+## Grouped versus standalone
+
+Grouped objects are ergonomic domain modules. Standalone exports are finer
+tree-shaking units. If one route needs only `is`, importing a grouped object
+that also declares parse/stringify can retain those siblings depending on how
+the object is consumed.
+
+```ts
+export const User_is = selected.is; // narrowest unit
+export const User = JIT.compile(UserSchema, {
+  is: selected.is,
+  parse: selected.parse,
+});
+```
+
+## Generated package
+
+The generator writes ESM, CJS, matching declarations, exports map and
+`sideEffects: false`. Optional subpath modules let route bundles import one
+declaration file without evaluating the root barrel.
+
+## Helper retention
+
+Operation-specific helpers are emitted only when needed. A validator that does
+not parse cannot retain `JITValidationError`; a query that touches `id` and
+`score` cannot retain an unrelated string dictionary; a standalone `is` cannot
+retain codec or mapper infrastructure.
+
+## Proof, not assumption
+
+The repository bundles generated fixtures through esbuild and asserts that
+unused exports/helper classes disappear. Applications should also inspect their
+actual Vite/Next/Webpack output because grouping and re-export barrels can alter
+tree-shaking boundaries.

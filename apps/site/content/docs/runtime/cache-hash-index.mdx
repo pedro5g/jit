@@ -15,3 +15,25 @@ Entity hints and keyed indexes are useful when the same list receives many looku
 caches are weakly attached to source collections and can be invalidated by watched-list
 versions. A one-off scan should stay a scan: building an index has an upfront time and
 memory cost.
+
+## Cache tiers
+
+Schema-only operations use `WeakMap<schema, function>`. Query/mapper plans cache
+the pure source factory and apply each caller's bindings to a fresh closure.
+This keeps compiled templates reusable without sharing user state.
+
+## Hash strategy
+
+Hashes are accelerators, not identity proofs. Use the hash to select a bucket,
+then compiled equality to resolve collisions where correctness matters. Weak
+hash caches are useful for immutable/reused objects; mutation invalidates the
+assumption.
+
+## Index break-even
+
+An index costs O(n) build time and memory. It pays off only across enough
+lookups or range scans. Measure cardinality and mutation rate: a frequently
+rebuilt index over a short list can be worse than direct specialized scans.
+
+Watched collections maintain explicit versions so cached indexes can be
+invalidated predictably rather than relying on deep mutation detection.

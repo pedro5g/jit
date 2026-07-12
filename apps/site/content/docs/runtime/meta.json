@@ -1,4 +1,12 @@
 {
   "title": "Runtime",
-  "pages": ["validation", "queries", "lazy-execution", "binary-rowsets", "serialization", "cache-hash-index"]
+  "pages": [
+    "validation",
+    "dates-temporal-codecs",
+    "queries",
+    "lazy-execution",
+    "binary-rowsets",
+    "serialization",
+    "cache-hash-index"
+  ]
 }

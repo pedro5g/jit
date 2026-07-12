@@ -20,3 +20,37 @@ avoid result arrays entirely.
 Mappers whitelist the destination shape and compile renames, nested mapping and bulk
 `many()` loops. Callback overrides remain external bindings and are reported when they
 cannot be emitted safely by AOT.
+
+## Aggregation
+
+```ts
+const revenue = JIT.query(Orders)
+  .filter((q) => q.eq("status", "paid"))
+  .sum("total")
+  .compile();
+```
+
+`count` and `sum` return zero for empty input. `avg`, `min` and `max` return
+`undefined`. Aggregates do not allocate an output array.
+
+## Params versus constants
+
+Use `.params(shape)` for values supplied per call. Use `JIT.const(value)` for a
+primitive compiler literal. Ordinary closure values become safe external
+bindings. No untrusted value is interpolated into generated source.
+
+## Collection outputs
+
+`unique` retains first occurrences, `keyed` returns a Map, `groupBy` returns
+arrays per key and `orderBy` performs a global sort. Mutation operators rebuild
+collections immutably and require a filter to prevent accidental full-table
+updates/deletes.
+
+## Mapper strategy
+
+Prefer declarative renames and target schemas for portable AOT. Callback fields
+are useful at runtime but may prevent build-time emission unless represented by
+an explicit importable external.
+
+For all incremental operators and output backends, see
+[Query operators](/docs/reference/operators/queries).

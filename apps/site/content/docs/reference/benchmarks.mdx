@@ -20,11 +20,11 @@ from win/loss summaries.
 
 Representative local results on Node 22.17.1 and Ryzen 7 5800H:
 
-| Scenario | JIT | Baseline |
-| --- | ---: | ---: |
-| Binary adaptive load + query, 1M | 52.67 ms / 28.26 MiB | Zod 454.89 ms / 110.31 MiB |
-| Tagged union count, 1M | 0.78 ms | string discriminator 2.64 ms |
-| Lazy direct visitor, 800k outputs | 3.81 ms / 760 B | generator 15.21 ms / 7.75 MiB |
+| Scenario                          |                  JIT |                      Baseline |
+| --------------------------------- | -------------------: | ----------------------------: |
+| Binary adaptive load + query, 1M  | 52.67 ms / 28.26 MiB |    Zod 454.89 ms / 110.31 MiB |
+| Tagged union count, 1M            |              0.78 ms |  string discriminator 2.64 ms |
+| Lazy direct visitor, 800k outputs |      3.81 ms / 760 B | generator 15.21 ms / 7.75 MiB |
 
 Always benchmark the production shape. Cardinality, selectivity, string uniqueness,
 engine version and cache reuse can change the winning physical plan.

@@ -23,3 +23,42 @@ directory. Keep it enabled when the output acts as a standalone package or lives
 
 If no explicit compiled exports are found, generation prints a diagnostic and writes
 nothing. There is no raw-schema fallback.
+
+## Discovery
+
+`entries` accepts files, directories and globs. Directory scans use `patterns`
+(default `**/*.jit.ts`) and skip node_modules, dot directories and generated
+output. Omit entries to scan from the project root.
+
+```ts
+export default AOT.defineConfig({
+  entries: ["src/schemas/**/*.ts", "jit"],
+  patterns: ["**/*.jit.ts", "**/*.schema.ts"],
+});
+```
+
+## Output modes
+
+Generate a standalone package when consumers import `@jit/generated`; keep
+`emitPackageJson: true`. Generate into an existing application source tree with
+`emitPackageJson: false` so JIT does not create a nested package boundary.
+
+`clean: true` removes only known generated files before a new generation. It
+does not recursively delete arbitrary user files.
+
+## Diagnostics workflow
+
+1. `doctor`: resolved config, patterns, output and discovered files.
+2. `list`: buildable grouped and standalone exports.
+3. `explain`: why each declaration can/cannot build.
+4. `inspect --stage plan`: normalized operation descriptor.
+5. `inspect --stage source`: exact generated JS.
+6. `inspect --stage declaration`: public generated types.
+
+Use this sequence in CI before generation when config drift should fail early.
+
+## CI
+
+Run generate in a clean checkout and fail when generated files differ. This
+proves declarations are current and prevents local stale artifacts from hiding
+missing exports.

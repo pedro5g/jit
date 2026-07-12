@@ -1,0 +1,124 @@
+---
+title: Objects and collections
+description: Shape transforms, unknown keys, collections, binary layouts and inference behavior.
+---
+
+## Object construction
+
+```ts
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+  email: JIT.string().email(),
+});
+```
+
+Known keys are captured in declaration order. Generated validators, cloners,
+serializers and mappers use static property access rather than enumerating the
+schema on each call.
+
+## Shape transforms
+
+| Operator                | Result                                   |
+| ----------------------- | ---------------------------------------- |
+| `.partial()`            | every property becomes optional          |
+| `.partial("a", "b")`    | only selected properties become optional |
+| `.required()`           | every property becomes required          |
+| `.required("a")`        | selected properties become required      |
+| `.pick("a", "b")`       | keeps selected properties                |
+| `.omit("secret")`       | removes selected properties              |
+| `.extend({ extra: S })` | adds/replaces properties                 |
+| `.merge(Other)`         | merges another object shape              |
+| `.keyof()`              | enum schema of known keys                |
+
+Array forms are accepted when keys are already stored in a tuple:
+
+```ts
+const fields = ["id", "name"] as const;
+const PublicUser = User.pick(fields);
+```
+
+Transforms are immutable. Reuse the base schema without fear that a later
+partial/pick changes previously compiled operations.
+
+## Unknown key policy
+
+```ts
+const Closed = User.strict();
+const Envelope = User.loose();
+const Extensible = User.catchall(JIT.string());
+```
+
+- `strict` reports unknown keys;
+- `loose` passes unknown keys through;
+- `catchall` validates every unknown value with one schema.
+
+Strict is a strong API-contract default. Loose is appropriate for external
+envelopes where this service owns only a subset. Catchall is useful for labels,
+headers and extension maps.
+
+## Collections
+
+| Factory            | Runtime representation | Notes                                    |
+| ------------------ | ---------------------- | ---------------------------------------- |
+| `JIT.array(T)`     | mutable array          | indexed generated loops                  |
+| `JIT.tuple(A, B)`  | fixed tuple            | positional schemas                       |
+| `JIT.set(T)`       | native Set             | uniqueness by JS Set semantics           |
+| `JIT.map(K, V)`    | native Map             | preserves non-string keys                |
+| `JIT.record(K, V)` | plain object           | JSON-compatible string/symbol key domain |
+
+Array checks: `min`, `max`, `length`, `nonEmpty`.
+
+JSON cannot represent Set/Map directly. Convert them at a codec/mapper boundary
+or use a transport that defines their representation.
+
+## Composition versus conditional fields
+
+Prefer discriminated object unions for real variants:
+
+```ts
+const Command = JIT.discriminatedUnion("type", [
+  JIT.object({ type: JIT.literal("create"), payload: CreatePayload }),
+  JIT.object({ type: JIT.literal("delete"), id: JIT.string().uuid() }),
+]);
+```
+
+Use `when/where` when one field changes requirement but the overall object is
+still one shape. Tagged unions generate clearer TypeScript narrowing and direct
+branch dispatch.
+
+## Binary rowsets
+
+Arrays of flat scalar objects can compile into process-local binary memory:
+
+```ts
+const Users = JIT.array(User).binary({
+  strategy: "static",
+  memoryLayout: "columnar",
+  capacity: 1_000_000,
+});
+```
+
+Memory strategies:
+
+- `exact`: one exact allocation per live batch;
+- `dynamic`: reusable geometrically growing scratch buffer;
+- `static`: fixed capacity/caller memory and predictable failure.
+
+Layouts:
+
+- `packed`: smallest row, DataView for misaligned wide fields;
+- `aligned`: typed views with possible padding;
+- `columnar`: contiguous field lanes for repeated scans;
+- `auto`: packed unless already naturally aligned.
+
+Tagged object unions become integer codes. Compatible intersections flatten
+before offsets are calculated. Nested arbitrary objects are intentionally not
+accepted by the rowset path; use the normal compiled query or flatten a DTO.
+
+## Shape stability
+
+Builders keep a small stable `{ schema }` shape and share methods through the
+prototype. Rowsets retain the same public property order across exact, dynamic
+and static strategies. Unused views reference shared empty typed arrays instead
+of deleting properties. This helps V8 keep call sites monomorphic.

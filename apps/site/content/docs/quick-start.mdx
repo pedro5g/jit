@@ -20,6 +20,7 @@ const User = JIT.object({
   id: JIT.number().int().positive(),
   name: JIT.string().min(2, "name is too short"),
   email: JIT.string().email().pii("mask"),
+  createdAt: JIT.iso.datetime(),
   role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
   tags: JIT.array(JIT.string()).max(8),
 });

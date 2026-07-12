@@ -1,4 +1,4 @@
 {
   "title": "Reference",
-  "pages": ["benchmarks", "operator-matrix"]
+  "pages": ["operators", "operator-matrix", "library-comparison", "benchmarks"]
 }

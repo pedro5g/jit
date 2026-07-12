@@ -56,6 +56,9 @@ Every schema node keeps this stable runtime shape and property order:
   flag on the base def (zod semantics — not a wrapper).
 - Transforms (`partial`, `pick`, `merge`, ...) return transformed schemas,
   not new AST node kinds.
+- `JIT.iso.date/time/datetime/duration` are namespace factories over the same
+  StringSchema checks as the legacy string chains. Native Date and Temporal
+  remain separate runtime-value schema families.
 
 ## Codegen rules (non-negotiable, every emitter)
 

@@ -1,0 +1,161 @@
+---
+title: Choosing a validation and data library
+description: Architectural comparison with Zod, Valibot, TypeBox and Typia, plus reproducible local measurements.
+---
+
+There is no universally best schema library. The right choice depends on
+whether the primary artifact is a runtime schema, a small modular parser, JSON
+Schema, a transformed TypeScript type, or a family of compiled data operations.
+
+## Architecture matrix
+
+| Capability                              | JIT              | Zod 4               | Valibot              | TypeBox                     | Typia                                 |
+| --------------------------------------- | ---------------- | ------------------- | -------------------- | --------------------------- | ------------------------------------- |
+| Schema-first TypeScript API             | yes              | yes                 | yes                  | yes                         | no, type-first                        |
+| Runtime/dynamic schema creation         | yes              | yes                 | yes                  | yes                         | limited                               |
+| Ahead-of-time specialized validation    | yes              | no default compiler | no default compiler  | compiler available          | primary model                         |
+| Runtime specialized compilation         | yes              | no                  | no                   | compiler available          | no                                    |
+| JSON Schema as primary representation   | no               | conversion          | conversion/ecosystem | yes                         | generation                            |
+| Import-free generated operation modules | yes              | no                  | no                   | depends on integration      | transformed output may retain helpers |
+| Compiled query/mapper/update/hash/diff  | yes              | no                  | no                   | value utilities differ      | validation/JSON/protobuf focus        |
+| Binary analytical rowsets               | yes              | no                  | no                   | no                          | no                                    |
+| Standard Schema                         | compiled adapter | yes                 | yes                  | ecosystem/version dependent | not primary                           |
+
+This table describes project architecture, not every extension in each
+ecosystem. Check the linked official documentation for the version you deploy.
+
+## JIT
+
+Choose JIT when one declared shape should drive validation plus equality,
+clone, diff, immutable update, hash, query, mapping, security operations,
+serialization, binary transport and analytical rowsets.
+
+Strengths:
+
+- same compiler supports runtime JIT and explicit AOT;
+- compile only selected operations;
+- generated source is inspectable and deterministic;
+- AOT output has zero imports from the engine;
+- specialized high-volume query/binary/streaming paths.
+
+Tradeoffs:
+
+- runtime JIT requires `Function` and is unsuitable under strict CSP;
+- AOT needs an explicit generate step;
+- schema ecosystem/integrations are younger than Zod's;
+- custom callbacks need a serialization/module strategy for AOT.
+
+## Zod 4
+
+Zod is a strong default when ecosystem integration, familiar fluent parsing and
+broad community adoption matter most. Its schema object is directly executable
+and Zod 4 includes ISO namespaces, codecs, JSON Schema conversion and Zod Mini.
+
+Compared with JIT, Zod normally executes its runtime parser rather than
+generating one operation-specific straight-line function. This makes dynamic
+composition simple but leaves schema dispatch in hot calls. JIT's local suite
+measures that difference; it does not imply every application is validation
+bound.
+
+Official docs: [Zod](https://zod.dev/packages/zod),
+[codecs](https://zod.dev/codecs), and [JSON Schema](https://zod.dev/json-schema).
+
+## Valibot
+
+Valibot is designed around many small pure schema/action functions. That is an
+excellent browser-bundle strategy: bundlers can remove actions that are not
+imported, and the official guide advertises a sub-kilobyte starting point.
+
+JIT attacks bundle size differently. Runtime JIT is larger because it includes
+a compiler; AOT emits only the final specialized functions and can remove the
+schema engine entirely. Choose Valibot for minimal modular runtime parsing;
+choose JIT AOT when generated multi-operation behavior and zero engine runtime
+are more important.
+
+Official docs: [Valibot introduction](https://valibot.dev/guides/introduction/),
+[API reference](https://valibot.dev/api/), and
+[internal architecture](https://valibot.dev/guides/internal-architecture/).
+
+## TypeBox
+
+TypeBox is a natural fit when JSON Schema is the source/interchange artifact.
+It separates schema construction from Value operations and offers compiled
+validation. That separation is valuable for OpenAPI/AJV-oriented systems.
+
+JIT's AST is not a general JSON Schema implementation. It carries hints and
+operations that are difficult to represent in JSON Schema, such as immutable
+update, mapping, query and binary rowset strategy. Use TypeBox when standards
+interchange dominates; use JIT when the schema is an optimization source for
+application-specific generated operations.
+
+The local benchmark pins TypeBox `0.34.x`; current TypeBox documentation also
+describes a newer 1.x generation. Do not compare results across those versions
+without rerunning the suite.
+
+Official source and performance notes:
+[TypeBox repository](https://github.com/sinclairzx81/typebox).
+
+## Typia
+
+Typia reads TypeScript types and tags at build time and transforms call sites
+into validators, serializers and other generated functions. It removes the
+need to declare a parallel runtime schema and is a serious performance-oriented
+alternative.
+
+Typia's tradeoff is toolchain coupling: the transformer/generator must run, and
+runtime-created schemas are not its main model. JIT keeps a runtime AST, so it
+can compile dynamic schemas in a long-lived service and use the same declaration
+for non-validation operations. JIT AOT is closer to Typia's generated model,
+but generation is explicit and produces importable artifacts rather than
+rewriting generic type call sites.
+
+Official docs: [Typia introduction](https://typia.io/docs/),
+[pure TypeScript/AOT](https://typia.io/docs/pure/), and
+[`is()`](https://typia.io/docs/validators/is/).
+
+## Standard Schema interoperability
+
+Standard Schema defines one `~standard` interface so frameworks can accept many
+schema libraries without adapters. JIT's implementation invokes the compiled
+`safeParse` function. The standard does not prescribe whether validation is
+interpreted or compiled.
+
+Official specification: [Standard Schema](https://standardschema.dev/schema).
+
+## Reproducible local comparison
+
+The repository compares only pinned installed versions under the same process,
+fixtures and machine. It records time, heap and GC and labels workloads that do
+different work as not directly comparable.
+
+```bash
+pnpm bench:validate
+pnpm bench:load
+pnpm bench:flows
+pnpm bench:binary
+pnpm bench:lazy
+```
+
+Selected Node 22.17.1 / Ryzen 7 5800H results:
+
+| Workload                      |                  JIT |                                                   Comparison |
+| ----------------------------- | -------------------: | -----------------------------------------------------------: |
+| `is`, valid object            |         56.99 ns AOT |                                             Zod 4: 903.69 ns |
+| `safeParse`, invalid 7 issues |        120.59 ns AOT |                                              Zod 4: 24.99 us |
+| `is`, 100k valid users        |       7.01 ms / 96 B | TypeBox compiled: 7.22 ms / 5.34 MiB; Typia: 7.17 ms / 152 B |
+| binary load + query, 1M       | 52.67 ms / 28.26 MiB |              Zod parse + native flow: 454.89 ms / 110.31 MiB |
+
+These results are evidence for the checked fixtures, not universal rankings.
+Rerun them after dependency, Node, CPU or schema changes.
+
+## Practical selection
+
+- Choose **Zod** for maximum ecosystem familiarity and productive runtime parsing.
+- Choose **Valibot** for modular, aggressively tree-shakable runtime schemas.
+- Choose **TypeBox** when JSON Schema interoperability is central.
+- Choose **Typia** when type-first transformer-based AOT fits the build system.
+- Choose **JIT** when specialized operations, dual JIT/AOT, analytical memory
+  and one optimization-aware schema are the goal.
+
+It is valid to combine tools at service boundaries. Standard Schema can make
+framework integration neutral while internal hot paths use a compiled engine.

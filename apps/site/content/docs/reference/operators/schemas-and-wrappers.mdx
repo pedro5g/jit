@@ -1,0 +1,158 @@
+---
+title: Schemas and wrappers
+description: Complete reference for primitive factories, wrappers, defaults, composition and custom rules.
+---
+
+## Primitive factories
+
+| Factory              | Inferred output | Important behavior                            |
+| -------------------- | --------------- | --------------------------------------------- |
+| `JIT.string()`       | `string`        | string checks and parse transforms            |
+| `JIT.number()`       | `number`        | IEEE-754 number, configurable constraints     |
+| `JIT.int()`          | `number`        | integer base schema                           |
+| `JIT.bigint()`       | `bigint`        | native bigint                                 |
+| `JIT.boolean()`      | `boolean`       | native boolean                                |
+| `JIT.date()`         | `Date`          | valid native Date instance                    |
+| `JIT.literal(value)` | literal type    | exact `Object.is`-style domain value          |
+| `JIT.enum(values)`   | value union     | array or enum-like object                     |
+| `JIT.null()`         | `null`          | exact null                                    |
+| `JIT.undefined()`    | `undefined`     | exact undefined                               |
+| `JIT.nan()`          | `number`        | specifically NaN                              |
+| `JIT.unknown()`      | `unknown`       | accepts any input without erasing type safety |
+| `JIT.any()`          | `any`           | compatibility escape hatch                    |
+| `JIT.never()`        | `never`         | rejects every value                           |
+
+Prefer `unknown` over `any` at boundaries. `any` intentionally disables useful
+inference and should be isolated to compatibility adapters.
+
+## Wrappers
+
+All builders expose wrappers that create new AST nodes. The original schema is
+never mutated.
+
+```ts
+const Name = JIT.string().min(2);
+
+const OptionalName = Name.optional();
+const NullableName = Name.nullable();
+const NullishName = Name.nullish();
+```
+
+| Wrapper          | Type            |    Missing |     `null` | Runtime note                         |
+| ---------------- | --------------- | ---------: | ---------: | ------------------------------------ | ----------------------------- | ------------------------ |
+| `.optional()`    | `T              | undefined` |   accepted | delegated                            | object property may be absent |
+| `.nullable()`    | `T              |      null` |         no | accepted                             | explicit null only            |
+| `.nullish()`     | `T              |       null | undefined` | accepted                             | accepted                      | combines both boundaries |
+| `.required()`    | removes absence |         no |  unchanged | unwraps optional/default absence     |
+| `.readonly()`    | readonly output |  unchanged |  unchanged | type contract, no extra deep clone   |
+| `.promise()`     | `Promise<T>`    |         no |  delegated | requires async parse to settle input |
+| `.brand("Name")` | nominal `T`     |  unchanged |  unchanged | no runtime payload property          |
+
+## Defaults
+
+```ts
+const Locale = JIT.string()
+  .oneOf(["pt-BR", "en-US"] as const)
+  .default("pt-BR");
+const RequestId = JIT.string().default(() => crypto.randomUUID());
+```
+
+Literal defaults are checked by TypeScript where the rule is statically
+provable. Runtime values and factories are still validated by the generated
+parser.
+
+Defaults affect parse output, equality, hash, clone, diff, update and
+serialization consistently. Use a factory for mutable objects or values that
+must be fresh per parse.
+
+## Parse transforms
+
+`pipe`, coercion and string transforms can make input and output differ:
+
+```ts
+const Port = JIT.coerce.number().int().min(1).max(65_535);
+const Slug = JIT.string().trim().toLowerCase();
+const UserId = JIT.string().uuid(7).brand("UserId");
+```
+
+`is()` checks whether the current input already satisfies the schema.
+`parse()` and `safeParse()` produce transformed output. Choose a codec when a
+conversion must also support the reverse direction.
+
+## Logical composition
+
+```ts
+const AorB = JIT.union(A, B);
+const ExactlyOne = JIT.xor(A, B);
+const Both = JIT.intersection(A, B);
+const NotA = JIT.not(A);
+
+// Equivalent fluent forms
+A.or(B);
+A.xor(B);
+A.and(B);
+A.not();
+```
+
+Use a discriminated union for object variants:
+
+```ts
+const Result = JIT.discriminatedUnion("status", [
+  JIT.object({ status: JIT.literal("ok"), value: Payload }),
+  JIT.object({ status: JIT.literal("error"), message: JIT.string() }),
+]);
+```
+
+It improves TypeScript narrowing, generated validator dispatch, diff/update
+behavior and binary rowset layout. `xor` is for overlapping alternatives where
+exactly one branch must validate; it does more work than a tagged dispatch.
+
+## Refinements and conditions
+
+```ts
+const Passwords = JIT.object({
+  password: JIT.string().min(8),
+  confirmation: JIT.string().min(8),
+}).refine((value) => value.password === value.confirmation, {
+  path: ["confirmation"],
+  message: "Passwords do not match",
+  when: ({ value }) =>
+    Base.pick("password", "confirmation").safeParse(value).success,
+});
+```
+
+`when` prevents a dependent rule from running when its prerequisites are
+invalid. Field-level `.when(key, options)` and `.where(key, options)` change a
+field schema based on a sibling.
+
+Callbacks are external bindings. Runtime JIT supports them safely, but AOT can
+emit only callbacks with an explicit serializable/module strategy. Built-in
+operators should be preferred for portable generated artifacts.
+
+## Custom, apply and lazy
+
+```ts
+const Decimal = JIT.custom<DecimalJs>(DecimalJs.isDecimal, "expected Decimal");
+
+const Percentage = JIT.number().apply((schema) => schema.min(0).max(100));
+
+interface Node {
+  value: string;
+  children: Node[];
+}
+const NodeSchema = JIT.lazy(() =>
+  JIT.object({ value: JIT.string(), children: JIT.array(NodeSchema) }),
+);
+```
+
+`custom` is the escape hatch for opaque third-party values. `apply` is a
+construction-time macro and introduces no runtime node by itself. `lazy`
+breaks recursive declaration cycles; compile once and reuse the resulting
+operation rather than rebuilding recursive schemas per request.
+
+## Standard Schema
+
+Every builder exposes `schema["~standard"]` compatibility through the builder
+surface. Its `validate` function closes over JIT's compiled `safeParse`; it does
+not interpret the AST on every call. This allows framework integrations that
+accept Standard Schema without adding an adapter dependency.

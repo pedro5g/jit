@@ -1,0 +1,108 @@
+---
+title: Query operators
+description: Filters, projection, aggregation, mutation, lazy operators and output backends.
+---
+
+## Conditions
+
+The condition builder supports `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `and`,
+`or`, and `not`.
+
+```ts
+const query = JIT.query(Users)
+  .params({ minimum: JIT.number(), role: JIT.string() })
+  .filter((q, params) =>
+    q.and(q.eq("role", params.role), q.gte("score", params.minimum)),
+  );
+```
+
+Runtime parameters are read from the typed params object. `JIT.const(value)`
+marks a compiler literal. Ordinary values become external bindings and are not
+interpolated into generated source.
+
+## Eager operators
+
+| Operator                     | Output/behavior                    |
+| ---------------------------- | ---------------------------------- |
+| `.filter(predicate)`         | keeps matching elements            |
+| `.select(...keys)`           | projects a typed object            |
+| `.unique(key)`               | first value for each key           |
+| `.keyed(key)`                | Map keyed by one field             |
+| `.groupBy(key)`              | record of arrays                   |
+| `.orderBy(key, direction)`   | global sort                        |
+| `.sum/.count/.avg/.min/.max` | scalar aggregate                   |
+| `.delete()`                  | immutable filtered collection      |
+| `.update(patch)`             | immutable update of matching items |
+
+Filters and projection share a generated loop. Aggregates avoid output arrays.
+`orderBy` necessarily stores accepted elements before sorting.
+
+## Incremental operators
+
+| Operator                     | Retained state               |   Can stop early? |
+| ---------------------------- | ---------------------------- | ----------------: |
+| `.take(n)`                   | counter                      |               yes |
+| `.takeWhile(predicate)`      | flag                         |               yes |
+| `.drop(n)`                   | counter                      |                no |
+| `.dropWhile(predicate)`      | flag                         |                no |
+| `.flatMap(key)`              | current nested iterable      | consumer can stop |
+| `.unique(key)`               | Set of distinct keys         | consumer can stop |
+| `.chunk(n)`                  | at most `n` outputs          | consumer can stop |
+| `.window(n)`                 | circular buffer of `n` items | consumer can stop |
+| `.pairwise()`                | previous item                | consumer can stop |
+| `.scan({ initial, update })` | accumulator                  | consumer can stop |
+| `.groupAdjacentBy(key)`      | current group                | consumer can stop |
+
+`unique` is lazy, not constant-memory. `groupAdjacentBy` is constant in the
+number of groups but assumes equal keys are adjacent. `window` emits independent
+arrays so retaining one result is safe.
+
+## Output backends
+
+```ts
+const plan = JIT.query(Users)
+  .filter((q) => q.eq("active", true))
+  .select("id", "name")
+  .take(10);
+
+plan.compile(); // eager result array
+plan.compileIterator(); // synchronous iterator
+plan.compileAsyncIterator(); // async source/backpressure
+plan.compileVisitor(); // callback sink, returns emitted count
+```
+
+Use eager arrays when most/all results are consumed and callers need random
+access. Use iterator for partial consumption or unbounded sources. Use async
+iterator for cursors, queues and streams. Use visitor for the lowest allocation
+hot sink when callback control is acceptable.
+
+## Physical fusion
+
+Consecutive `filter`, `select`, `take`, `drop`, `takeWhile`, `dropWhile`, and
+`unique` nodes compile into one stage. The array backend uses an indexed loop.
+The direct visitor backend removes generator suspension and iterator result
+records entirely.
+
+Cardinality-changing operators get isolated stages so their state stays local.
+`explain(mode)` reports barriers and retained structures:
+
+```ts
+plan.explain("generator");
+// {
+//   materializes: false,
+//   earlyTermination: true,
+//   retainedState: [],
+//   barriers: []
+// }
+```
+
+`orderBy` reports `materializes: true`. Lazy delivery cannot remove the global
+sort buffer. Consider a preordered source, ordered index, or bounded top-k
+algorithm when memory must remain bounded.
+
+## Binary queries
+
+`JIT.query(rowset)` reuses the same condition AST for fixed-offset scans. It
+supports filter, projection and numeric aggregates. Only touched typed views
+and dictionaries are bound in generated source. String/literal filters resolve
+to integer dictionary IDs before the loop.

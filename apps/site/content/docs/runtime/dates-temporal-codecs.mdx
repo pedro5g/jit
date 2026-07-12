@@ -1,0 +1,86 @@
+---
+title: ISO, Date, Temporal and codecs
+description: Choose the correct date representation and validate or transform it without ambiguity.
+---
+
+## Three different domains
+
+| Schema           | Runtime value   | Choose it for                         |
+| ---------------- | --------------- | ------------------------------------- |
+| `JIT.iso.*`      | string          | JSON/forms/headers/database text      |
+| `JIT.date()`     | native Date     | existing JS APIs and SDKs             |
+| `JIT.temporal.*` | Temporal object | explicit calendar/time-zone semantics |
+
+Keeping these separate prevents hidden parsing and timezone conversion.
+
+## ISO namespace
+
+```ts
+JIT.iso.date();
+JIT.iso.time({ precision: -1 });
+JIT.iso.datetime({ offset: true, precision: 3 });
+JIT.iso.duration();
+```
+
+All infer `string`. They append the same check nodes as the legacy
+`JIT.string().date/time/datetime/duration` methods, which remain supported.
+
+### Datetime options
+
+- default: requires `Z`;
+- `offset: true`: also accepts `+HH:MM` and `-HH:MM`;
+- `local: true`: also accepts no zone designator;
+- `precision: -1`: exact minute precision;
+- `precision: 0`: exact seconds;
+- `precision: n`: exact fractional digits.
+
+```ts
+const UtcMillis = JIT.iso.datetime({ precision: 3 });
+const PartnerTimestamp = JIT.iso.datetime({ offset: true });
+const AppointmentWallTime = JIT.iso.datetime({ local: true, precision: -1 });
+```
+
+Use local datetimes only when a timezone is carried separately. Transport
+events normally require UTC or an explicit offset.
+
+## Date operators
+
+```ts
+const DateInWindow = JIT.date()
+  .between("2026-01-01T00:00:00.000Z", "2026-12-31T23:59:59.999Z")
+  .daysOfWeek([1, 2, 3, 4, 5])
+  .monthsOfYear([1, 2, 3, 4, 5, 6])
+  .truncateTo("minute");
+```
+
+`min`, `max` and `between` are inclusive. Weekdays use JS numbering (`0` is
+Sunday); months use `1..12`. Truncation rejects non-zero lower fields.
+
+## Temporal families
+
+`instant`, `plainDate`, `plainTime`, `plainDateTime`, `zonedDateTime`,
+`plainYearMonth`, `plainMonthDay`, and `duration` validate their matching
+Temporal constructors. Date-like checks are available where meaningful.
+
+The test suite installs `@js-temporal/polyfill`. Applications must provide a
+polyfill on hosts without native Temporal.
+
+## Bidirectional codecs
+
+```ts
+const IsoToDate = JIT.codec(JIT.iso.datetime(), JIT.date(), {
+  decode: (text) => new Date(text),
+  encode: (date) => date.toISOString(),
+});
+```
+
+Codecs validate both input/output schemas around the transform. They model a
+domain conversion; `JIT.codec(schema, { version })` for bytes is a different
+transport API.
+
+## Performance model
+
+ISO regexes are created while building/compiling the schema. The generated hot
+path performs a type gate and regex test without allocating Date/Temporal
+objects. Date and Temporal checks compare existing fields/epoch values. Decode
+only once when the next layer truly needs a richer object.

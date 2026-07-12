@@ -24,3 +24,28 @@ for (const chunk of stringifyChunks(users)) writable.write(chunk);
 The binary codec is a transport format with an explicit version byte. Binary rowsets are
 different: they are evolvable process-local analytical memory and must not be persisted
 as a wire contract.
+
+## JSON behavior
+
+Known object keys and punctuation are static source fragments. Optional
+undefined properties are omitted like native JSON. Strings use a short-string
+character scan or long-string regex probe before falling back to native escaping.
+
+Use `JIT.json(S).parse()` at an untrusted text boundary. Use the serializer
+directly only when the input is already typed/validated.
+
+## Chunk strategy
+
+`chunkBytes` is an approximate UTF-16 code-unit budget, not exact UTF-8 bytes.
+Tune it to downstream backpressure and write overhead. Larger chunks reduce
+write calls; smaller chunks reduce peak retained text.
+
+## Binary wire compatibility
+
+Codec v2 stores a version byte, little-endian numeric payloads, 2-bit optional
+states and length-prefixed UTF-8 strings. Changing this layout is a protocol
+change. Keep golden vectors between producers/consumers and reject version
+drift loudly.
+
+Value codecs are different: they transform between two validated schemas in
+memory, for example ISO text and native Date.

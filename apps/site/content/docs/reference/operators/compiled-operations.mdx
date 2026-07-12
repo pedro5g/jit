@@ -1,0 +1,90 @@
+---
+title: Compiled operations
+description: Validation, equality, clone, diff, update, hash, serialization, security and mapping.
+---
+
+One schema can drive multiple independent compilers. Generate only what the
+application imports.
+
+## Validation
+
+```ts
+JIT.validate(User).is().compile();
+JIT.validate(User).parse().compile();
+JIT.validate(User).safeParse().compile();
+JIT.validate(User).parseAsync().compile();
+JIT.validate(User).issues().compile();
+```
+
+`is` is fail-fast. `safeParse` collects issues and transformed output. `parse`
+throws `JITValidationError`. Async variants settle promise schemas. `issues`
+offers iterable consumption over the same compiled issue vector.
+
+## Structural operations
+
+| API             | Result                  | Allocation strategy            |
+| --------------- | ----------------------- | ------------------------------ |
+| `JIT.equal(S)`  | boolean                 | early return, no result object |
+| `JIT.clone(S)`  | deep shape clone        | allocates required output only |
+| `JIT.diff(S)`   | change entries          | allocates only differences     |
+| `JIT.update(S)` | immutable updated value | shares untouched branches      |
+| `JIT.hash(S)`   | numeric structural hash | scalar accumulator             |
+
+Hints such as `entity`, `keyed`, `ordered`, `indexBy` and `hash` influence
+strategies for repeated collection operations. Benchmark index construction
+against expected reuse; a single lookup may be cheaper as a scan.
+
+## JSON and codecs
+
+```ts
+JIT.json(User).stringify().compile();
+JIT.json(User).parse().compile();
+JIT.json(Users).stringifyChunks().compile();
+JIT.codec(Event, { version: 2 });
+```
+
+JSON stringify bakes known keys and punctuation into source. Chunked JSON keeps
+large array output bounded. The binary codec is a persisted wire contract with
+a version byte; binary rowsets are process-local and may evolve independently.
+
+## Mapper and transform
+
+```ts
+const toPublic = JIT.mapper(UserEntity, PublicUser, {
+  name: { from: "fullName" },
+});
+
+toPublic(entity);
+toPublic.many(entities);
+```
+
+Mapper output is whitelisted by the destination schema. `many()` emits one
+bulk indexed loop. `JIT.transform` provides field operations and selection over
+one source schema.
+
+## Security operations
+
+```ts
+const SafeLog = JIT.mask(User);
+const CleanForm = JIT.sanitize(Form);
+```
+
+`.pii("redact" | "mask" | "hash")` controls field masking. Sanitization
+rebuilds only marked paths. These operations reduce accidental data exposure,
+but application authorization and context-specific HTML policy remain separate
+responsibilities.
+
+## Aggregated exports
+
+```ts
+const selected = JIT.validator(UserSchema).get("is", "parse");
+
+export const User = JIT.compile(UserSchema, {
+  is: selected.is,
+  parse: selected.parse,
+  equal: JIT.equal(UserSchema),
+});
+```
+
+The object exposes only declared operations. AOT emits only those properties
+and required helpers. Standalone exports keep their exact declaration name.

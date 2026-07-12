@@ -1,0 +1,11 @@
+{
+  "title": "Operators",
+  "pages": [
+    "schemas-and-wrappers",
+    "strings",
+    "numbers-and-dates",
+    "objects-and-collections",
+    "queries",
+    "compiled-operations"
+  ]
+}

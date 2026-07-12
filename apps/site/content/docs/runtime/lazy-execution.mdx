@@ -39,3 +39,30 @@ barrier because global ordering must observe every accepted item.
 
 Latest one-million-row local benchmark: visitor **3.81 ms / 760 B heap** for 800k
 projected results; handwritten generator **15.21 ms / 7.75 MiB**.
+
+## State and memory
+
+Lazy does not automatically mean constant memory. `unique` retains a Set,
+`orderBy` materializes all accepted values and `groupBy` needs all groups.
+`chunk`, `window`, `pairwise` and `groupAdjacentBy` keep bounded/current state.
+Use `.explain()` to make these costs visible.
+
+## Safe windows
+
+`window(n)` emits independent arrays. JIT does not expose a reused mutable view
+by default because consumers commonly retain windows. The allocation is an
+explicit correctness tradeoff; a future ephemeral-view API would require a
+different contract.
+
+## Visitor fallback
+
+Filter/select/control pipelines receive direct visitor source. Pipelines with
+cardinality-changing stages use the iterator backend as a correctness fallback.
+Generated source and `explain()` reveal which strategy was selected.
+
+## Async guidance
+
+Async iterators are for already asynchronous sources. Do not wrap an in-memory
+array in async iteration for style: promise scheduling and async generator
+protocols cost more than a synchronous indexed loop. Async `scan` updates are
+awaited and downstream consumption provides natural backpressure.

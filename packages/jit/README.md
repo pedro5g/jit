@@ -80,7 +80,7 @@ were captured on the same machine as the table above.
 | Filtered `count`, 1M               | **columnar 1.09 ms / 96 B** | JIT query over JS array 4.24 ms / 96 B            | **3.88x faster**                |
 | Filtered `sum`, 1M                 | **columnar 1.26 ms / 96 B** | JIT query over JS array 4.45 ms / 96 B            | **3.53x faster**                |
 | Adaptive `load+query`, 1M, dynamic | **52.67 ms / 28.26 MB**     | Zod 4 parse + native filter 454.89 ms / 110.31 MB | **8.64x faster, 74% less heap** |
-| Tagged-union `count`, 1M          | **0.78 ms**                  | Native JS string discriminator 2.64 ms            | **3.40x faster**                |
+| Tagged-union `count`, 1M           | **0.78 ms**                 | Native JS string discriminator 2.64 ms            | **3.40x faster**                |
 
 For one-off queries over already materialized JS arrays, regular `JIT.query`
 can still be the right tool. Binary rowsets are for reuse, repeated filters,
@@ -220,11 +220,28 @@ JIT.temporal.plainTime().min("09:00:00").max("18:00:00").truncateTo("minute");
 JIT.date().min("2026-01-01").max("2026-12-31").truncateTo("second");
 ```
 
+ISO text is a separate namespace and always infers `string`:
+
+```ts
+JIT.iso.date(); // strict YYYY-MM-DD with calendar/leap-year validation
+JIT.iso.time({ precision: -1 }); // exact HH:MM
+JIT.iso.time({ precision: 3 }); // exact HH:MM:SS.sss
+JIT.iso.datetime(); // requires Z
+JIT.iso.datetime({ offset: true }); // also accepts +/-HH:MM
+JIT.iso.datetime({ local: true }); // also accepts no zone
+JIT.iso.duration(); // ISO 8601-1 duration
+```
+
+Use `JIT.iso.*` for transport strings, `JIT.date()` for actual native Date
+objects, and `JIT.temporal.*` when calendar/time-zone semantics must be explicit.
+The legacy `JIT.string().date/time/datetime/duration` chains remain compatible
+and compile to the same checks.
+
 Value codecs are bidirectional transforms, separate from the binary wire
 codec:
 
 ```ts
-const stringToDate = JIT.codec(JIT.string().datetime(), JIT.date(), {
+const stringToDate = JIT.codec(JIT.iso.datetime(), JIT.date(), {
   decode: (iso) => new Date(iso),
   encode: (date) => date.toISOString(),
 });
@@ -313,10 +330,13 @@ JIT.string().ipv4().ipv6().cidrv4().mac("-");
 JIT.string().base64().base64url().hex();
 JIT.string().hostname().domain().e164();
 JIT.string().httpUrl().jwt();
-JIT.string().date(); // YYYY-MM-DD, calendar-valid
-JIT.string().time({ precision: 0 }); // HH:MM:SS
-JIT.string().datetime({ offset: true }); // ISO datetime, allows ±HH:MM
-JIT.string().duration().emoji();
+JIT.iso.date(); // YYYY-MM-DD, calendar-valid
+JIT.iso.time({ precision: 0 }); // HH:MM:SS
+JIT.iso.datetime({ offset: true }); // ISO datetime, allows ±HH:MM
+JIT.iso.duration();
+
+// Legacy string chains remain aliases for the same compiled checks.
+JIT.string().datetime({ offset: true });
 JIT.string().digest("sha256", "base64url"); // md5..sha512 digests
 JIT.string().stringFormat("slug", /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 ```

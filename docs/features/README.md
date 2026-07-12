@@ -23,6 +23,25 @@ work and for production performance. Each page explains:
 - [Binary rowsets](./binary-rowsets.md)
 - [Benchmarks, memory, and load testing](./benchmarks-memory-load.md)
 
+## Find A Feature By Goal
+
+| Goal                              | Start here              | Main decision                               |
+| --------------------------------- | ----------------------- | ------------------------------------------- |
+| Validate one request/config value | Runtime validation      | `is` vs `parse` vs `safeParse`              |
+| Define constraints and transforms | Schema operators        | built-in operator vs callback refinement    |
+| Model date/time boundaries        | Temporal, ISO, codecs   | ISO string vs Date vs Temporal              |
+| Filter/project application arrays | Queries and mappers     | eager result vs iterator/visitor            |
+| Process unbounded/cursor input    | Lazy execution          | sync iterator vs async iterator             |
+| Scan million-row flat batches     | Binary rowsets          | packed/aligned/columnar and memory strategy |
+| Send JSON or binary data          | Serialization and codec | full string, chunks, or versioned bytes     |
+| Reuse expensive lookups           | Cache/hash/index        | build cost vs reuse count                   |
+| Ship strict-CSP/browser code      | AOT/tree sharing        | grouped object vs standalone export         |
+| Configure generation/CI           | CLI and config          | discovery, output package and diagnostics   |
+| Reproduce performance claims      | Benchmarks/load         | matching fixture, heap and GC               |
+
+The public website mirrors these guides with smaller task-oriented pages and a
+complete operator reference under `apps/site/content/docs`.
+
 ## Recommended Path
 
 For application code, prefer this order:

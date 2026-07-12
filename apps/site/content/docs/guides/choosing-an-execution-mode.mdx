@@ -1,0 +1,122 @@
+---
+title: Choosing an execution mode
+description: Select runtime JIT, AOT, eager arrays, lazy iterators, visitors or binary rowsets by workload.
+---
+
+JIT has two compilation times and several execution backends. Choose them
+independently: AOT versus runtime decides **when source is generated**; eager,
+lazy, visitor and binary decide **how one operation consumes data**.
+
+## Runtime JIT or AOT
+
+| Constraint                             | Prefer runtime JIT | Prefer AOT |
+| -------------------------------------- | -----------------: | ---------: |
+| Schemas assembled dynamically          |                yes |         no |
+| Long-lived Node service                |                yes |   optional |
+| Strict CSP / no `new Function`         |                 no |        yes |
+| Edge/serverless cold start             |              maybe |        yes |
+| Browser bundle must exclude compiler   |                 no |        yes |
+| Generated source review required       |           optional |        yes |
+| Plugin callbacks known only at runtime |                yes |    limited |
+
+Both modes run the same operation emitters. Runtime JIT caches compilation by
+schema identity. AOT writes pure modules and declarations before deployment.
+
+## Eager array
+
+Use `.compile()` when:
+
+- callers consume most results;
+- random access or `.length` is required immediately;
+- output already fits comfortably in memory;
+- the next API expects an array.
+
+The eager backend preallocates and fills one output array. `take()` still exits
+early; lazy is not required merely to stop a scan.
+
+## Synchronous iterator
+
+Use `.compileIterator()` when:
+
+- consumers often stop early;
+- output cardinality is unknown (`flatMap`);
+- pipelines feed `for...of` or another iterable API;
+- the complete result should not stay live;
+- input may be an iterable rather than an array.
+
+Generators have suspension/protocol overhead. JIT fuses compatible operators
+into one stage so it does not suspend once per logical operator.
+
+## Async iterator
+
+Use `.compileAsyncIterator()` for database cursors, queue consumers, HTTP body
+sources and paginated APIs. Consumer speed naturally controls production:
+
+```ts
+for await (const item of processCursor(cursor)) {
+  await destination.write(item);
+}
+```
+
+Do not put CPU-only arrays through async iteration for style; promises and
+async generator steps cost more than a synchronous indexed loop.
+
+## Visitor
+
+Use `.compileVisitor()` for high-throughput sinks:
+
+```ts
+const visit = query.compileVisitor();
+visit(users, (user) => encoder.write(user));
+```
+
+The direct backend avoids result arrays, iterator objects, `{ value, done }`
+records and generator suspension. It pays one callback call per accepted item.
+It is ideal when the consumer can be represented as a stable monomorphic
+function and does not need to pull values manually.
+
+## Binary rowset
+
+Use binary memory when a large flat batch receives repeated filters or
+aggregates, or when scratch-memory control matters more than object ergonomics.
+
+```ts
+const binary = JIT.array(Metric).binary({
+  strategy: "static",
+  memoryLayout: "columnar",
+  capacity: 1_000_000,
+});
+```
+
+Do not pay conversion cost for a tiny one-off query. The strongest case is a
+batch reused across many scans, or `JIT.process()` where load and query are one
+planned flow.
+
+## Decision examples
+
+### Form submission
+
+Runtime `safeParse` is usually enough. A browser with strict CSP can import an
+AOT validator. No binary/lazy backend is needed for one object.
+
+### API returns 50k rows, UI displays first 30
+
+Validate at the boundary, then use a lazy iterator with `take(30)` or move the
+limit into the database. Avoid creating 50k projected card models.
+
+### Analytics service scans one million metrics repeatedly
+
+Load a columnar binary rowset once, compile count/sum/projection queries, and
+reuse it until the batch expires.
+
+### Queue-to-database transform
+
+Use async iterator for the queue source and `chunk(1_000)` for bounded writes.
+Use visitor only if the source is synchronous and the destination callback does
+not need backpressure.
+
+## Measure the real shape
+
+Selectivity, cardinality, string uniqueness and reuse dominate results. Run the
+matching suite and record heap as well as time. A backend that wins nanoseconds
+but retains a 100 MiB output is not the winner for a constrained edge worker.

@@ -1,0 +1,108 @@
+---
+title: Numbers, ISO, Date and Temporal
+description: Numeric constraints, physical precision and the three date models.
+---
+
+## Numeric bounds
+
+| Operator                      | Generated relation       |
+| ----------------------------- | ------------------------ |
+| `.min(n)` / `.gte(n)`         | `value >= n`             |
+| `.max(n)` / `.lte(n)`         | `value <= n`             |
+| `.moreThan(n)` / `.gt(n)`     | `value > n`              |
+| `.lessThan(n)` / `.lt(n)`     | `value < n`              |
+| `.positive()`                 | `value > 0`              |
+| `.negative()`                 | `value < 0`              |
+| `.nonnegative()`              | `value >= 0`             |
+| `.nonpositive()`              | `value <= 0`             |
+| `.oneOf(values)`              | exact numeric allow-list |
+| `.multipleOf(n)` / `.step(n)` | numeric step             |
+
+```ts
+const Percentage = JIT.number().min(0).max(100).float64();
+const Port = JIT.number().int32().min(1).max(65_535);
+```
+
+## Numeric representation
+
+| Operator     | Use it when                                    | Binary rowset width |
+| ------------ | ---------------------------------------------- | ------------------: |
+| `.int()`     | any integer in JS number semantics             |    normally 8 bytes |
+| `.safe()`    | integer arithmetic must stay in the safe range |    normally 8 bytes |
+| `.int32()`   | signed IDs/counters fit 32 bits                |             4 bytes |
+| `.float32()` | measured precision loss is acceptable          |             4 bytes |
+| `.float64()` | normal finite double precision                 |             8 bytes |
+| `.finite()`  | infinities/NaN are never domain values         |     depends on base |
+
+`float32` is not a money type. Prefer integer minor units, bigint, or a custom
+decimal schema. Physical hints matter in binary rowsets: one million float32
+values use roughly four MiB before masks/alignment versus eight MiB as float64.
+
+## ISO text
+
+`JIT.iso` validates boundary strings without constructing date objects:
+
+```ts
+const DateText = JIT.iso.date();
+const MinuteText = JIT.iso.time({ precision: -1 });
+const Timestamp = JIT.iso.datetime({ offset: true, precision: 3 });
+const DurationText = JIT.iso.duration();
+```
+
+Datetime defaults to `Z`. `offset: true` adds `+HH:MM/-HH:MM`; `local: true`
+allows no zone. Precision `-1` means minutes, `0` exact seconds and positive
+values exact fractional digits.
+
+Choose ISO text when the transport/storage contract is text and no date
+arithmetic is needed in the current layer.
+
+## Native Date
+
+```ts
+const BillingInstant = JIT.date()
+  .between("2026-01-01T00:00:00.000Z", "2026-12-31T23:59:59.999Z")
+  .daysOfWeek([1, 2, 3, 4, 5])
+  .truncateTo("minute");
+```
+
+Native `Date` always represents an instant; calendar-only values can shift when
+rendered in another zone. Use it for existing JavaScript/SDK APIs, not birthdays
+or recurring local dates.
+
+Date operators:
+
+- `min` and `max`: inclusive instant bounds;
+- `between`: inclusive range;
+- `daysOfWeek`: Sunday `0` through Saturday `6`;
+- `monthsOfYear`: January `1` through December `12`;
+- `truncateTo("minute" | "second" | "millisecond")`: rejects lower precision.
+
+## Temporal objects
+
+```ts
+const BusinessDate = JIT.temporal
+  .plainDate()
+  .between("2026-01-01", "2026-12-31")
+  .daysOfWeek([1, 2, 3, 4, 5]);
+
+const WholeMinute = JIT.temporal.plainTime().truncateTo("minute");
+```
+
+Factories: `instant`, `plainDate`, `plainTime`, `plainDateTime`,
+`zonedDateTime`, `plainYearMonth`, `plainMonthDay`, and `duration`.
+
+Temporal makes domain semantics explicit. Use `PlainDate` for calendar dates,
+`Instant` for globally ordered instants, and `ZonedDateTime` only when the zone
+is part of the value itself.
+
+## Boundary codec
+
+```ts
+const IsoToDate = JIT.codec(JIT.iso.datetime(), JIT.date(), {
+  decode: (text) => new Date(text),
+  encode: (date) => date.toISOString(),
+});
+```
+
+Validate and convert once at the edge. Repeated `Date.parse` calls inside a
+query prevent numeric specialization and create avoidable ambiguity.

@@ -40,7 +40,8 @@ const Schema = Base.refine((data) => data.password === data.confirmPassword, {
   message: "Passwords do not match",
   path: ["confirmPassword"],
   when(payload) {
-    return Base.pick("password", "confirmPassword").safeParse(payload.value).success;
+    return Base.pick("password", "confirmPassword").safeParse(payload.value)
+      .success;
   },
 });
 ```
@@ -77,13 +78,7 @@ directly through the tag value.
 ## String Operators
 
 ```ts
-JIT.string()
-  .trim()
-  .toLowerCase()
-  .min(2)
-  .max(64)
-  .email()
-  .noEmpty();
+JIT.string().trim().toLowerCase().min(2).max(64).email().noEmpty();
 ```
 
 Useful checks include:
@@ -97,6 +92,67 @@ Useful checks include:
 - `.jwt()`
 - `.normalize()`
 - `.noEmpty()`
+
+### String Reference
+
+| Operator                             | Semantics                                              | Transform? | Good fit                                      |
+| ------------------------------------ | ------------------------------------------------------ | ---------- | --------------------------------------------- |
+| `.min(n)` / `.max(n)` / `.length(n)` | UTF-16 string length bounds                            | no         | names, codes, fixed identifiers               |
+| `.oneOf(values)`                     | exact allow-list                                       | no         | small domain enums that should remain strings |
+| `.startsWith/.endsWith/.includes`    | direct string relation                                 | no         | namespaced IDs and protocol tokens            |
+| `.regex(pattern)`                    | custom regular expression                              | no         | a format not covered by built-ins             |
+| `.email(pattern?)`                   | default practical email or explicit pattern            | no         | account/contact boundaries                    |
+| `.uuid(version?)`, `.guid()`         | UUID/GUID syntax                                       | no         | API identifiers                               |
+| `.url()` / `.httpUrl()`              | URL syntax, optionally HTTP(S)-only                    | no         | links and webhooks                            |
+| `.trim()`                            | trims output during parse                              | yes        | human form input                              |
+| `.lowercase/.uppercase`              | validates existing case                                | no         | canonical-input enforcement                   |
+| `.toLowerCase/.toUpperCase`          | converts parsed output                                 | yes        | normalization boundaries                      |
+| `.normalize(form)`                   | Unicode normalization                                  | yes        | search keys, user names                       |
+| `.noEmpty()`                         | turns `""` into missing input before wrappers/defaults | yes        | HTML forms and query strings                  |
+| `.sanitize()`                        | removes script/style markup and escapes angle brackets | yes        | defensive text ingestion                      |
+| `.format(mask)`                      | applies a typed `#` digit mask                         | yes        | CPF/CNPJ/phone display values                 |
+
+Format checks also include `cuid`, `cuid2`, `ulid`, `xid`, `ksuid`, `nanoid`,
+`emoji`, `ipv4`, `ipv6`, `cidrv4`, `cidrv6`, `mac`, `base64`, `base64url`,
+`hostname`, `domain`, `e164`, `hex`, `jwt`, and fixed hash `digest` formats.
+ISO date/time methods remain available on string chains for compatibility, but
+new code should use `JIT.iso.date/time/datetime/duration`.
+
+Validation-only checks can return the original input reference. Transforming
+checks require `parse`/`safeParse` to build the changed output; `is` only answers
+whether the input already satisfies the schema.
+
+### Empty Form Values
+
+`.noEmpty()` runs before optional/default guards:
+
+```ts
+const Search = JIT.object({
+  query: JIT.string().noEmpty().optional(),
+  locale: JIT.string().noEmpty().default("pt-BR"),
+  required: JIT.string().noEmpty(),
+});
+
+Search.parse({ query: "", locale: "", required: "term" });
+// { query: undefined, locale: "pt-BR", required: "term" }
+```
+
+Use it only when the transport convention defines empty text as missing. An
+empty string can be meaningful in patch/document domains and should then stay
+a normal string.
+
+### Masks And Documents
+
+```ts
+const CPF = JIT.string().cpf().format("###.###.###-##");
+const CNPJ = JIT.string().cnpj().format("##.###.###/####-##");
+const Phone = JIT.string().phoneBR().format("(##) #####-####");
+```
+
+The format pattern is checked by TypeScript: only `#`, spaces and supported
+punctuation are accepted, and a pattern without a placeholder is rejected.
+Keep storage canonical when possible; apply presentation masks at an explicit
+boundary rather than using formatted text as an index key.
 
 Mask/format helpers cover common real-world strings such as document numbers
 and Brazilian phone values. Prefer these helpers over custom callbacks when
@@ -116,6 +172,94 @@ JIT.number()
 
 Aliases such as `.gt`, `.gte`, `.lt`, `.lte`, `.nonnegative`, and
 `.nonpositive` compile to direct numeric comparisons.
+
+### Number Reference
+
+| Operator                    | Rule                                      |
+| --------------------------- | ----------------------------------------- |
+| `.min/.gte(n)`              | `value >= n`                              |
+| `.max/.lte(n)`              | `value <= n`                              |
+| `.moreThan/.gt(n)`          | `value > n`                               |
+| `.lessThan/.lt(n)`          | `value < n`                               |
+| `.positive/.negative`       | strict sign, zero rejected                |
+| `.nonnegative/.nonpositive` | inclusive zero bound                      |
+| `.multipleOf/.step(n)`      | exact numeric step rule                   |
+| `.finite()`                 | rejects infinities and NaN                |
+| `.safe()`                   | safe integer range                        |
+| `.int()`                    | integer                                   |
+| `.int32()`                  | signed 32-bit integer                     |
+| `.float32()`                | exactly representable as IEEE-754 float32 |
+| `.float64()`                | finite IEEE-754 double constraint         |
+| `.oneOf(values)`            | exact numeric allow-list                  |
+
+Choose physical numeric checks intentionally. `.int32()` lets binary rowsets
+store four bytes instead of eight. `.float32()` can halve analytical memory,
+but values are rounded to float32 semantics; money normally needs integer minor
+units or a decimal domain type, not float32.
+
+NaN is the reason generated logical negation does not blindly invert every
+comparison. JIT preserves JavaScript comparison semantics under `not` instead
+of applying unsafe De Morgan rewrites to ordered numeric operators.
+
+## Array And Collection Operators
+
+```ts
+const Page = JIT.array(User).min(1).max(100).nonEmpty();
+```
+
+`.min`, `.max`, `.length`, and `.nonEmpty` validate collection cardinality.
+`JIT.array(ObjectSchema).binary(options)` is a compilation terminal, not a
+validation check: it produces a rowset loader for large flat-object batches.
+
+Use `JIT.set`, `JIT.map`, `JIT.record`, and `JIT.tuple` when the runtime
+representation matters. JSON boundaries cannot faithfully carry Map/Set;
+convert them explicitly or use the binary codec where supported.
+
+## Common Wrappers
+
+| Operator                      | Output meaning                   | Notes                                      |
+| ----------------------------- | -------------------------------- | ------------------------------------------ | ------------------------ | ---------------------- |
+| `.optional()`                 | `T                               | undefined`                                 | property may be absent   |
+| `.required(message?)`         | removes optional/default absence | object form can target fields              |
+| `.nullable()`                 | `T                               | null`                                      | does not imply undefined |
+| `.nullish()`                  | `T                               | null                                       | undefined`               | nullable plus optional |
+| `.default(value/factory)`     | supplies missing output          | literal defaults receive static checks     |
+| `.readonly()`                 | readonly inferred output         | does not invent deep cloning               |
+| `.promise()`                  | `Promise<T>`                     | enables async validator generation         |
+| `.brand(name)`                | nominal type marker              | runtime representation stays unchanged     |
+| `.pipe(transform)`            | changes output type              | callback is an external binding            |
+| `.refine(predicate, options)` | domain predicate                 | use `when` to avoid noisy dependent errors |
+| `.apply(fn)`                  | reusable builder macro           | runs while constructing the schema         |
+
+## Unknown Object Keys
+
+```ts
+const Strict = User.strict(); // unknown keys are issues
+const Loose = User.loose(); // unknown keys pass through
+const Metadata = User.catchall(JIT.string()); // unknown values must be strings
+```
+
+Choose this at trust boundaries, not by habit. Strict objects catch API drift;
+loose objects are useful for envelopes owned by another service; catchalls
+preserve extension points while still validating their values.
+
+## Conditional Validation Strategy
+
+Use `when/where` when one field's schema changes with a sibling. Use
+`refine(..., { when })` when the final rule compares multiple already-valid
+fields. Use a discriminated union when the condition defines genuinely
+different object shapes:
+
+```ts
+const Payment = JIT.discriminatedUnion("method", [
+  JIT.object({ method: JIT.literal("pix"), key: JIT.string().min(1) }),
+  JIT.object({ method: JIT.literal("card"), last4: JIT.string().length(4) }),
+]);
+```
+
+The union gives TypeScript branch narrowing and lets validators/binary rowsets
+dispatch directly. A large web of conditional optional fields usually has
+worse types, diagnostics, and generated branches.
 
 ## Defaults And Strict Typing
 
@@ -164,3 +308,9 @@ same metadata without materializing a normalized schema at runtime.
 - Keep `when` predicates narrow and deterministic.
 - Use `.noEmpty()` at input boundaries where empty strings should behave like
   missing values.
+- Put cheap/selective checks before opaque refinements. The compiler reorders
+  safe built-ins, but it cannot reason through arbitrary callbacks.
+- Use custom messages for user-facing constraints and stable issue `code`
+  values for program logic.
+- Prefer native composition over copying schemas; transforms are immutable and
+  preserve one source of truth.

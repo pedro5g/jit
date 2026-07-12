@@ -25,3 +25,50 @@ issues with `path`, `code`, `expected` and `message`. `parse` throws
 
 The `~standard` adapter closes over the compiled `safeParse` function; it does not run a
 second generic validator.
+
+## Select the smallest operation
+
+| Need                           | Compile        | Failure behavior             |  Happy-path allocation |
+| ------------------------------ | -------------- | ---------------------------- | ---------------------: |
+| Boolean gate                   | `is`           | `false` on first mismatch    |                   none |
+| Typed value or exception       | `parse`        | collects issues, then throws |    transform-dependent |
+| Typed result without exception | `safeParse`    | issue vector                 |    transform-dependent |
+| Promise schemas                | async variants | Promise result/error         |        async machinery |
+| Consume issue records          | `issues`       | iterator                     | validator issue vector |
+
+Do not compile `safeParse` for a hot boolean branch merely because it is the
+most familiar API. `is` can return as soon as one cheap check fails.
+
+## Issue handling
+
+```ts
+const result = safeParseUser(input);
+
+if (!result.success) {
+  for (const issue of result.issues) {
+    fields.set(issue.path, issue.message);
+  }
+}
+```
+
+Use stable `code` values for program behavior and custom `message` text for
+users. `path` is a root-relative string suitable for logs/forms.
+
+## Transforming parsers
+
+Defaults, coercion, trim/case conversion, masks and pipes make output differ
+from input. The generated validator tracks whether rebuilding is necessary and
+returns the original reference when no transform changed the value.
+
+## Standard Schema
+
+Frameworks can call `schema["~standard"].validate(value)`. JIT's adapter uses
+the already compiled validator, so interoperability does not introduce a
+generic validation layer.
+
+## Security notes
+
+Validation proves the declared shape, not authorization or business ownership.
+Avoid echoing raw received values in public issue messages. Opaque custom
+predicates should be deterministic and free of side effects because validators
+may be cached and reused across requests.

@@ -35,3 +35,35 @@ physical fields fail at compilation.
 
 One-million-variant benchmark: tagged count **0.78 ms**, native string discriminator
 **2.64 ms**.
+
+## Strategies
+
+| Strategy  | Allocation              | Lifetime                     | Choose it for                       |
+| --------- | ----------------------- | ---------------------------- | ----------------------------------- |
+| `exact`   | exact bytes per load    | independent rowsets          | concurrent HTTP/queue batches       |
+| `dynamic` | reusable growing buffer | next load overwrites scratch | sequential long-lived worker        |
+| `static`  | fixed/caller memory     | controlled                   | low-jitter capacity-bounded service |
+
+Static overflow throws. Dynamic rowsets should be consumed before loading the
+next batch through the same loader. Call `rowset.release()` and
+`binary.clear()` when long-lived references should be dropped.
+
+## Layout choice
+
+`packed` minimizes bytes and can win mixed one-pass rows. `aligned` removes
+DataView access at the cost of padding. `columnar` wins repeated scans that
+touch a small field subset. `auto` cannot know reuse count, so it chooses only
+between compact packed and already naturally aligned layouts.
+
+## Supported shapes
+
+Flat scalar object fields, optionals/nullables, literal unions, enums, Date,
+bigint and typed numbers are supported. Discriminated object unions and
+compatible intersections are normalized. Nested arbitrary objects/arrays are
+rejected: flatten a DTO or use regular `JIT.query`.
+
+## Query generation
+
+Only touched columns/views/dictionaries are bound. Filtered string constants
+become integer IDs outside the loop. Rows that fail never hydrate back into JS
+objects. AOT queries are import-free and retain only selected low-level helpers.

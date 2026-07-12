@@ -1,0 +1,80 @@
+---
+title: Browser and edge deployment
+description: Generate strict-CSP modules, minimize bundles and control cold-start and memory.
+---
+
+## Why AOT matters in the browser
+
+Runtime JIT needs `globalThis.Function`, which strict Content Security Policy
+often blocks. It also requires shipping schema builders and compiler code.
+AOT performs that work during the build and emits only ordinary JavaScript.
+
+```ts
+// jit/user.jit.ts
+const selected = JIT.validator(UserSchema).get("is", "safeParse");
+
+export const User = JIT.compile(UserSchema, {
+  is: selected.is,
+  safeParse: selected.safeParse,
+});
+```
+
+```ts
+import { User } from "@jit/generated";
+```
+
+## Tree-shaking checklist
+
+1. Export only operations used by the application.
+2. Prefer standalone exports for route-level granularity.
+3. Keep generated package `sideEffects: false`.
+4. Import from generated modules, not `jit/runtime`, in production UI code.
+5. Inspect the bundler output, not just source package size.
+6. Run `jit inspect <export> --stage source` when a helper is unexpectedly retained.
+
+A grouped object is convenient but importing one property retains the object and
+its declared siblings. Standalone functions provide the narrowest bundler unit.
+
+## Callbacks and bindings
+
+Regexes and primitive constants are serializable. Arbitrary closures are not.
+When a query/mapper/refinement captures a runtime callback, generation reports
+why it was skipped instead of embedding an unsafe or environment-dependent
+value.
+
+Keep browser AOT declarations declarative. Move application side effects to the
+consumer of a visitor/iterator rather than capturing them in a generated plan.
+
+## Cold start
+
+AOT removes runtime schema traversal and `Function` compilation. Module parse
+still has a cost: one giant generated barrel can be slower than route-specific
+subpath modules. Enable subpaths and import only the feature used by a route.
+
+## Memory
+
+- Prefer `is` for a boolean gate; `safeParse` allocates issues on failure.
+- Use projection before storing UI models.
+- Use iterator/visitor when the full result does not need to stay live.
+- Avoid binary rowsets for small UI lists; conversion can cost more than the scan.
+- Use exact rowsets when multiple batches stay alive; dynamic scratch buffers
+  are for sequential reuse.
+
+## Edge runtimes
+
+Generated code has zero imports from JIT and is suitable for locked-down edge
+workers. Confirm support for APIs your schema uses: Temporal may need a
+polyfill, `File` differs across runtimes, and Node-specific constructors should
+not appear in browser schemas.
+
+## Verification
+
+```bash
+pnpm jit doctor
+pnpm jit generate
+pnpm build
+```
+
+The repository's AOT tests import generated ESM/CJS modules, execute typed
+functions and bundle selected exports with esbuild to prove unused operations
+are removed.

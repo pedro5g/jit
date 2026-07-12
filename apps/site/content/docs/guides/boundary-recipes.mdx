@@ -1,0 +1,136 @@
+---
+title: Boundary recipes
+description: Practical schemas for HTTP, forms, environment variables, dates, databases and queues.
+---
+
+## HTTP JSON request
+
+```ts
+const CreateUser = JIT.object({
+  name: JIT.string().trim().min(2).max(80),
+  email: JIT.string().trim().toLowerCase().email(),
+  birthday: JIT.iso.date(),
+}).strict();
+
+const parse = JIT.json(CreateUser).parse().compile();
+const input = parse(await request.text());
+```
+
+Strict keys catch client/server drift. Keep birthday as a calendar string or
+decode it to `Temporal.PlainDate`; do not invent a UTC midnight Date.
+
+## HTML form
+
+```ts
+const Filters = JIT.object({
+  query: JIT.string().trim().noEmpty().optional(),
+  page: JIT.coerce.number().int32().min(1).default(1),
+  active: JIT.coerce.boolean().optional(),
+});
+```
+
+Forms encode numbers and booleans as text and commonly use `""` for missing
+controls. Coercion and `noEmpty` belong at this boundary, not in the internal
+domain model.
+
+## Environment variables
+
+```ts
+const Environment = JIT.object({
+  PORT: JIT.coerce.number().int32().min(1).max(65_535).default(3000),
+  LOG_LEVEL: JIT.string()
+    .oneOf(["debug", "info", "warn", "error"] as const)
+    .default("info"),
+  DATABASE_URL: JIT.string().url(),
+}).strict();
+
+export const env = Environment.parse(process.env);
+```
+
+Parse once at startup. Do not repeatedly validate environment values in request
+handlers.
+
+## ISO to domain value
+
+```ts
+const Timestamp = JIT.codec(JIT.iso.datetime({ offset: true }), JIT.date(), {
+  decode: (text) => new Date(text),
+  encode: (date) => date.toISOString(),
+});
+```
+
+Codecs document both directions. Use a one-way `pipe` only when reverse
+serialization is not a domain requirement.
+
+## Conditional checkout
+
+```ts
+const Checkout = JIT.object({
+  hasDiscount: JIT.boolean(),
+  coupon: JIT.string().when("hasDiscount", {
+    is: true,
+    then: (schema) => schema.required("coupon is required").min(3),
+    otherwise: (schema) => schema.optional(),
+  }),
+});
+```
+
+If discounted and non-discounted checkouts diverge in many fields, model them
+as a discriminated union instead of stacking conditions.
+
+## Public DTO
+
+```ts
+const PublicUser = User.pick("id", "name", "avatarUrl");
+const toPublic = JIT.mapper(User, PublicUser);
+
+return Response.json(toPublic.many(users));
+```
+
+Destination-schema whitelisting prevents accidental password/token leakage.
+For very large responses, combine mapping/query projection with chunked JSON.
+
+## Repeated analytics batch
+
+```ts
+const processAdmins = JIT.process(User)
+  .binary({ strategy: "dynamic", memoryLayout: "columnar" })
+  .filter((q) => q.eq("role", "admin"))
+  .select("id", "name")
+  .compile();
+
+const result = processAdmins.execute(rows);
+```
+
+Filtered strings retain canonical integer dictionaries. Projection-only unique
+strings can use identity codes and skip the large lookup Map.
+
+## Queue batching
+
+```ts
+const batches = JIT.query(Events)
+  .filter((q) => q.eq("valid", true))
+  .chunk(1_000)
+  .compileAsyncIterator();
+
+for await (const batch of batches(cursor)) await database.insert(batch);
+```
+
+Chunk size should be chosen from destination limits and measured working-set
+memory, not copied blindly from this example.
+
+## Safe logs
+
+```ts
+const User = JIT.object({
+  id: JIT.string().uuid(),
+  email: JIT.string().email().pii("mask"),
+  token: JIT.string().pii("redact"),
+});
+
+const safeLog = JIT.mask(User);
+logger.info(safeLog(user));
+```
+
+Masking is a final logging boundary. It does not replace authorization or data
+minimization upstream.

@@ -1,0 +1,147 @@
+---
+title: String operators
+description: Length, formats, normalization, document masks, sanitization and ISO string checks.
+---
+
+## Length and membership
+
+| Operator            | Accepts             | Example                   |
+| ------------------- | ------------------- | ------------------------- |
+| `.min(n)`           | length at least `n` | username minimum          |
+| `.max(n)`           | length at most `n`  | database column limit     |
+| `.length(n)`        | exact length        | country code, fixed token |
+| `.oneOf(values)`    | one exact string    | small status allow-list   |
+| `.startsWith(text)` | fixed prefix        | namespaced identifier     |
+| `.endsWith(text)`   | fixed suffix        | file extension convention |
+| `.includes(text)`   | required substring  | protocol marker           |
+
+```ts
+const TenantKey = JIT.string()
+  .startsWith("tenant:")
+  .includes(":user:")
+  .endsWith(":v1");
+```
+
+Literal lengths and allow-lists participate in strict default checking. Dynamic
+strings still require runtime validation because TypeScript cannot know their
+contents.
+
+## Validation versus transformation
+
+| Validation only             | Produces transformed parse output |
+| --------------------------- | --------------------------------- |
+| `lowercase`, `uppercase`    | `toLowerCase`, `toUpperCase`      |
+| format checks               | `trim`, `normalize`               |
+| `regex`, `startsWith`, etc. | `noEmpty`, `format`, `sanitize`   |
+
+```ts
+const CanonicalEmail = JIT.string().trim().toLowerCase().email();
+
+CanonicalEmail.is(" Ada@Example.com "); // false: not canonical yet
+CanonicalEmail.parse(" Ada@Example.com "); // "ada@example.com"
+```
+
+Parsers return the original input reference when no node requires rebuilding.
+Transforms make the build path explicit and may allocate the changed string or
+parent object.
+
+## Web and identifiers
+
+Built-ins include:
+
+- `email(customPattern?, message?)`;
+- `url()` and HTTP(S)-only `httpUrl()`;
+- `uuid(version?)` and permissive UUID-like `guid()`;
+- `cuid`, `cuid2`, `ulid`, `xid`, `ksuid`, `nanoid`;
+- `jwt`, `hostname`, `domain`, E.164 `e164`;
+- `ipv4`, `ipv6`, `cidrv4`, `cidrv6`, `mac(delimiter?)`;
+- `base64`, `base64url`, `hex`, and `digest(algorithm, encoding)`;
+- Unicode `emoji`.
+
+```ts
+const TraceId = JIT.string().ulid("invalid trace id");
+const AssetHash = JIT.string().digest("sha256", "base64url");
+const Webhook = JIT.string().httpUrl();
+```
+
+Built-ins are more portable than an opaque refinement: regex bindings are
+external in runtime JIT and safely emitted in AOT.
+
+## Custom formats
+
+```ts
+const Slug = JIT.string().stringFormat(
+  "slug",
+  /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+  "expected a lowercase slug",
+);
+```
+
+Use `.regex()` for a local check. Use `.stringFormat(name, pattern)` when the
+issue's expected value should expose a stable format name.
+
+Avoid regexes with catastrophic backtracking at untrusted boundaries. JIT can
+move schema traversal out of the hot path, but it cannot make an unsafe regular
+expression safe.
+
+## Empty HTML form values
+
+```ts
+const Filters = JIT.object({
+  search: JIT.string().noEmpty().optional(),
+  locale: JIT.string().noEmpty().default("pt-BR"),
+});
+```
+
+`noEmpty` maps `""` to missing input before optional/default handling. It is
+ideal for form controls and URL query parameters. Do not use it for patches or
+documents where clearing a value to an empty string is meaningful.
+
+## Brazilian documents and masks
+
+```ts
+const Customer = JIT.object({
+  cpf: JIT.string().cpf().format("###.###.###-##"),
+  cnpj: JIT.string().cnpj().format("##.###.###/####-##"),
+  phone: JIT.string().phoneBR().format("(##) #####-####"),
+});
+```
+
+The format grammar is typed. `#` is a digit placeholder; spaces and supported
+punctuation are literals. By default non-digits are stripped before formatting.
+Set `{ stripNonDigits: false }` when the input must already be canonical.
+
+Store/index canonical digits when possible and format at a presentation or
+serialization boundary. Comparing masked strings increases cardinality and can
+defeat binary dictionary/index reuse.
+
+## Sanitization
+
+`.sanitize()` removes script/style blocks and HTML tags, then escapes stray
+angle brackets in parsed output. `JIT.sanitize(schema)` creates a dedicated
+compiled sanitizer over marked fields.
+
+This is defense in depth, not a complete HTML policy engine. Rich-text input
+should use a dedicated allow-list sanitizer designed for HTML semantics.
+
+## ISO aliases
+
+The following remain compatible:
+
+```ts
+JIT.string().date();
+JIT.string().time({ precision: 0 });
+JIT.string().datetime({ offset: true });
+JIT.string().duration();
+```
+
+Prefer the grouped API in new code:
+
+```ts
+JIT.iso.date();
+JIT.iso.time({ precision: 0 });
+JIT.iso.datetime({ offset: true });
+JIT.iso.duration();
+```
+
+Both compile to the same check nodes and infer `string`.
