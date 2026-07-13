@@ -39,11 +39,12 @@ describe("jit CLI", () => {
     expect(code).toBe(0);
     expect(stdout.join("")).toContain("created");
     expect(stderr.join("")).toBe("");
-    expect(source).toContain('import { AOT } from "@jit/compiler";');
+    expect(source).toContain('import { AOT } from "@jit-compiler/jit";');
     expect(source).toContain('entries: ["./jit/**/*.jit.ts"]');
     expect(source).toContain('directory: "generated/jit"');
     expect(source).toContain('importSpecifier: "#jit"');
     expect(source).toContain('patterns: ["**/*.jit.ts"]');
+    expect(source).toContain('packageName: "@jit-compiler/jit"');
     expect(source).toContain("subpathModules: true");
     expect(source).toContain("manifest: true");
     expect(source).toContain("plans: true");
@@ -73,8 +74,12 @@ describe("jit CLI", () => {
     const { runtime, stdout, stderr } = createRuntime();
 
     mkdirSync(join(projectDir, "src"), { recursive: true });
-    mkdirSync(join(projectDir, "node_modules", "@jit"), { recursive: true });
-    symlinkSync(join(process.cwd(), "packages", "jit"), join(projectDir, "node_modules", "@jit", "compiler"), "dir");
+    mkdirSync(join(projectDir, "node_modules", "@jit-compiler"), { recursive: true });
+    symlinkSync(
+      join(process.cwd(), "packages", "jit"),
+      join(projectDir, "node_modules", "@jit-compiler", "jit"),
+      "dir"
+    );
     writeFileSync(
       join(projectDir, "src", "user.jit.ts"),
       [
@@ -122,8 +127,12 @@ describe("jit CLI", () => {
     const { runtime, stdout, stderr } = createRuntime();
 
     mkdirSync(join(projectDir, "src"), { recursive: true });
-    mkdirSync(join(projectDir, "node_modules", "@jit"), { recursive: true });
-    symlinkSync(join(process.cwd(), "packages", "jit"), join(projectDir, "node_modules", "@jit", "compiler"), "dir");
+    mkdirSync(join(projectDir, "node_modules", "@jit-compiler"), { recursive: true });
+    symlinkSync(
+      join(process.cwd(), "packages", "jit"),
+      join(projectDir, "node_modules", "@jit-compiler", "jit"),
+      "dir"
+    );
     writeFileSync(
       join(projectDir, "src", "user.jit.ts"),
       [

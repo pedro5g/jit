@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AOT, JIT } from "@jit/compiler";
+import { AOT, JIT } from "@jit-compiler/jit";
 import { z } from "zod";
 import { registerScenario } from "../shared/scenario.js";
 import { isUser as typiaIs, validateUser as typiaValidate } from "./typia-gen/user.js";

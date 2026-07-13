@@ -1,4 +1,4 @@
-import { JIT } from "@jit/compiler";
+import { JIT } from "@jit-compiler/jit";
 import { zx } from "@traversable/zod";
 import fc from "fast-check";
 import { z } from "zod";

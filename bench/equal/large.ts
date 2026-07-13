@@ -1,4 +1,4 @@
-import { JIT } from "@jit/compiler";
+import { JIT } from "@jit-compiler/jit";
 import { range } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
 

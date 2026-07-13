@@ -8,7 +8,7 @@ import type { PlaygroundOp, PlaygroundResponse } from "@/lib/playground/worker";
 
 const RUN_TIMEOUT_MS = 2500;
 
-const defaultCode = `import { JIT } from "@jit/compiler/runtime";
+const defaultCode = `import { JIT } from "@jit-compiler/jit/runtime";
 
 const schema = JIT.object({
   id: JIT.number().int().positive(),
@@ -99,7 +99,7 @@ const examples: { id: string; label: string; code: string; a: string; op: Playgr
   {
     id: "coerce",
     label: "Coercion & defaults",
-    code: `import { JIT } from "@jit/compiler/runtime";
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
 
 const schema = JIT.object({
   page: JIT.coerce.number().int().min(1).default(1),
@@ -127,7 +127,7 @@ const schema = JIT.object({
   {
     id: "query",
     label: "Query pipeline",
-    code: `import { JIT } from "@jit/compiler/runtime";
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
 
 const schema = JIT.object({
   id: JIT.number().int().positive(),
@@ -151,7 +151,7 @@ const query = JIT.query(JIT.array(schema))
   {
     id: "mapper",
     label: "DTO mapper (no leaks)",
-    code: `import { JIT } from "@jit/compiler/runtime";
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
 
 const schema = JIT.object({
   id: JIT.number().int(),
@@ -183,7 +183,7 @@ const mapper = JIT.mapper(schema, PublicUser, {
   {
     id: "transform",
     label: "Transform (select + map)",
-    code: `import { JIT } from "@jit/compiler/runtime";
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
 
 const schema = JIT.object({
   id: JIT.number().int().positive(),
@@ -324,7 +324,7 @@ export function PlaygroundClient() {
       ts.typescriptDefaults.setEagerModelSync(true);
       if (dts) {
         for (const [path, content] of Object.entries(dts)) {
-          ts.typescriptDefaults.addExtraLib(content, `file:///node_modules/@jit/compiler/${path}`);
+          ts.typescriptDefaults.addExtraLib(content, `file:///node_modules/@jit-compiler/jit/${path}`);
         }
       }
     },

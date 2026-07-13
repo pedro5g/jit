@@ -87,7 +87,7 @@ describe("JIT AOT generate", () => {
     });
     const source = readFileSync(join(outDir, "index.mjs"), "utf8");
 
-    expect(source).not.toContain('from "@jit/compiler"');
+    expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(result.skipped).toHaveLength(0);
 
     const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
@@ -156,7 +156,7 @@ describe("JIT AOT generate", () => {
     };
 
     expect(result.skipped).toHaveLength(0);
-    expect(source).not.toContain('from "@jit/compiler"');
+    expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(source).toContain("function query(rowset)");
     expect(source).toContain("const offsets = rowset.offsets");
     expect(source).toContain("u8[b0 + i]");
@@ -195,7 +195,7 @@ describe("JIT AOT generate", () => {
     const visited: number[] = [];
 
     expect(result.skipped).toHaveLength(0);
-    expect(source).not.toContain('from "@jit/compiler"');
+    expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(source).toContain("function* stage0(input, params)");
     expect(source).toContain("function visit(input, consume)");
     expect([...generated.ActiveIds(users)]).toEqual([{ id: 1 }, { id: 3 }]);
@@ -316,7 +316,7 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain("__hashCache");
     expect(source).not.toContain("__indexCache");
     expect(source).not.toContain("__getIndex");
-    expect(source).not.toContain('from "@jit/compiler"');
+    expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(types).toContain("export declare const User_is");
     expect(types).not.toContain("export declare const User_parse");
   });

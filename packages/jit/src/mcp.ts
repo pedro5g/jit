@@ -26,7 +26,7 @@ import {
  */
 
 const SERVER_NAME = "jit-mcp";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = "1.0.1";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([LATEST_PROTOCOL_VERSION]);
 
@@ -88,6 +88,7 @@ const AOT_PROPERTIES = {
 const OUTPUT_PROPERTIES = {
   outDir: optionalString("Output directory relative to the project root."),
   packageName: optionalString("Generated package name. Defaults to config or @jit/generated."),
+  compilerPackageName: optionalString("Package specifier used by generated type-only imports."),
   clean: optionalBoolean("Remove known generated files before generation."),
   emitPackageJson: optionalBoolean("Emit a package.json exports map."),
   emit: {

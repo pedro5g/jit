@@ -6,17 +6,18 @@ only from an immutable Git tag named `vX.Y.Z`; `packages/jit/package.json`,
 
 ## Registry Names
 
-Both registries use `@jit/compiler`. The unscoped npm name `jit` belongs to a
-different project and must never be used by this release pipeline.
+npm uses `@jit-compiler/jit`; JSR uses `@jit/compiler`. The npm `@jit` scope
+belongs to another publisher, and the unscoped npm name `jit` belongs to a
+different project. Neither may be used by this release pipeline.
 
 ## One-Time Registry Bootstrap
 
 Before pushing the first release tag:
 
-1. Sign in to an npm account with publish access to the `@jit` scope. npm
+1. Sign in to an npm account with publish access to the `@jit-compiler` scope. npm
    requires a package to exist before trusted publishing can be configured, so
-   add a short-lived granular `NPM_TOKEN` GitHub secret with publish access for
-   the first release only.
+   add a short-lived granular `NPM_TOKEN` GitHub secret with publish access to
+   `@jit-compiler/jit` for the first release only.
 2. After that first npm publication, configure a GitHub Actions trusted publisher for
    repository `pedro5g/jit` and workflow file `release.yml`. Allow
    `npm publish`.
@@ -61,9 +62,9 @@ separately.
 Create an annotated tag only after the release commit is on `main`:
 
 ```sh
-git tag -a v1.0.0 -m "release: v1.0.0"
+git tag -a v1.0.1 -m "release: v1.0.1"
 git push origin main
-git push origin v1.0.0
+git push origin v1.0.1
 ```
 
 The tag starts `.github/workflows/release.yml`. The workflow verifies the full

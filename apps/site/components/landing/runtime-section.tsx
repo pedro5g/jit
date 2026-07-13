@@ -15,8 +15,8 @@ const targets = [
   },
   {
     name: "Deno & JSR",
-    badge: "@jit/compiler",
-    body: "Published on JSR as @jit/compiler alongside npm. Dual ESM + CJS builds with subpath exports for runtime, CLI and MCP.",
+    badge: "npm + JSR",
+    body: "Published as @jit-compiler/jit on npm and @jit/compiler on JSR. Dual ESM + CJS builds with subpath exports for runtime, CLI and MCP.",
   },
   {
     name: "Edge & serverless",

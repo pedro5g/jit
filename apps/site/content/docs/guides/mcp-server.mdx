@@ -3,7 +3,7 @@ title: MCP server
 description: Give coding agents safe project context, AOT diagnostics, previews, resources, and prompts.
 ---
 
-`@jit/compiler` includes `jit-mcp`, a local MCP `2025-11-25` stdio server. It
+`@jit-compiler/jit` includes `jit-mcp`, a local MCP `2025-11-25` stdio server. It
 uses the same declaration discovery and generator as the CLI while keeping the
 agent workflow inspectable and workspace-scoped.
 
@@ -48,7 +48,9 @@ explicit `{ "write": true }`; omission is an error.
 
 Preview compiles in a temporary directory and cleans it afterwards. Config is
 the default source for files, patterns, output, package identity, cleanup, and
-emit settings; a tool call can override those values for one run.
+emit settings; a tool call can override those values for one run. The optional
+`compilerPackageName` override changes only the type import used by generated
+declarations, which is useful when consuming JIT through JSR.
 
 ## Resources and prompts
 

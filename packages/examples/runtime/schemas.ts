@@ -1,4 +1,4 @@
-import { JIT } from "@jit/compiler/runtime";
+import { JIT } from "@jit-compiler/jit/runtime";
 
 export const UserSchema = JIT.object({
   id: JIT.number().int32().positive(),

@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { JIT } from "@jit/compiler/runtime";
+import { JIT } from "@jit-compiler/jit/runtime";
 import { events, invalidUser, type ShowcaseResult, users } from "../shared/data.js";
 import { socketRoundTrip } from "../shared/socket.js";
 import { EventSchema, PublicUserSchema, UserListSchema, UserSchema } from "./schemas.js";

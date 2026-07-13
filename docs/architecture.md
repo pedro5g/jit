@@ -122,8 +122,8 @@ iterator protocol for fusible pipelines. Cardinality-changing operators use
 separate generator stages so their state remains local and deterministic.
 
 The package exposes transitional host entrypoints while the monorepo is still
-single-package: `@jit/compiler/runtime` exports the runtime `JIT` namespace, and
-`@jit/compiler/define` exports the same schema DSL with AOT stubs for compiled
+single-package: `@jit-compiler/jit/runtime` exports the runtime `JIT` namespace, and
+`@jit-compiler/jit/define` exports the same schema DSL with AOT stubs for compiled
 artifacts. `core/host.ts` owns the shared `CompilerHost`,
 `CompilationRequest`, `CompiledArtifact`, descriptor symbols, and AOT artifact
 types that future package splits will reuse.
@@ -175,7 +175,7 @@ types that future package splits will reuse.
   markers use only the keys present in the compiled object; standalone output
   uses only exported registered functions;
 - `.d.ts` types anchor on the dev's schema file via
-  `import("@jit/compiler").Infer<typeof import("./user.jit.js").User>` — inference is
+  `import("@jit-compiler/jit").Infer<typeof import("./user.jit.js").User>` — inference is
   the single source of truth (`aot/emit-type.ts` is only the fallback for
   programmatic generation without a source file);
 - `JIT.compile` markers restrict generation to the requested ops and add
@@ -183,7 +183,7 @@ types that future package splits will reuse.
   hold callbacks is skipped with a reported reason, never miscompiled.
 
 CLI/config: `jit init` writes a typed `jit.config.*` plus a starter
-`jit/user.jit.ts` using `@jit/compiler/define`. `jit doctor` reports resolved
+`jit/user.jit.ts` using `@jit-compiler/jit/define`. `jit doctor` reports resolved
 config/discovery without generating; `jit explain` and `jit list` load
 declaration files and list buildable grouped objects plus standalone
 functions; `jit inspect <export> --stage plan|source|declaration` prints the

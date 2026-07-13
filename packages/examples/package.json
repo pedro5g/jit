@@ -23,7 +23,7 @@
     "clean": "rm -rf .tmp"
   },
   "dependencies": {
-    "@jit/compiler": "workspace:*"
+    "@jit-compiler/jit": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

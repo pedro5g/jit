@@ -148,7 +148,7 @@ describe("JIT AOT inference-anchored types", () => {
     rmSync(outDir, { recursive: true, force: true });
   });
 
-  it('should derive .d.ts types from the dev schema file via import("@jit/compiler").Infer', () => {
+  it('should derive .d.ts types from the dev schema file via import("@jit-compiler/jit").Infer', () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const selected = JIT.validator(User).get("is");
     const generated = join(outDir, "generated");
@@ -163,13 +163,29 @@ describe("JIT AOT inference-anchored types", () => {
     const types = readFileSync(join(generated, "index.d.ts"), "utf8");
 
     expect(types).toContain(
-      'export type User = import("@jit/compiler").Infer<typeof import("../src/user.jit.js").User>;'
+      'export type User = import("@jit-compiler/jit").Infer<typeof import("../src/user.jit.js").User>;'
     );
     expect(types).toContain(
-      'export type UserStrict<TValue> = import("@jit/compiler").Strict<typeof import("../src/user.jit.js").User, TValue>;'
+      'export type UserStrict<TValue> = import("@jit-compiler/jit").Strict<typeof import("../src/user.jit.js").User, TValue>;'
     );
     // No hand-emitted structural type when the source anchors the inference.
     expect(types).not.toContain("readonly id: number");
+  });
+
+  it("should support a registry-specific compiler specifier in generated declarations", () => {
+    const User = JIT.object({ id: JIT.number() });
+    const generated = join(outDir, "generated");
+
+    AOT.generate({
+      schemas: { User: JIT.compile(User, { is: JIT.validator(User).get("is").is }) },
+      sources: new Map([["User", join(outDir, "src", "user.jit.ts")]]),
+      outDir: generated,
+      compilerPackageName: "jsr:@jit/compiler",
+    });
+
+    const types = readFileSync(join(generated, "index.d.ts"), "utf8");
+    expect(types).toContain('import("jsr:@jit/compiler").Infer');
+    expect(types).not.toContain('import("@jit-compiler/jit").Infer');
   });
 
   it("should typecheck real imports from generated files after generation", async () => {
@@ -186,7 +202,7 @@ describe("JIT AOT inference-anchored types", () => {
     writeFileSync(
       schemaFile,
       [
-        'import { JIT } from "@jit/compiler/define";',
+        'import { JIT } from "@jit-compiler/jit/define";',
         "",
         "export const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });",
         "export const isUser = JIT.validate(UserSchema).is().compile();",
@@ -243,8 +259,8 @@ describe("JIT AOT inference-anchored types", () => {
             ignoreDeprecations: "6.0",
             baseUrl: ".",
             paths: {
-              "@jit/compiler": [join(repoRoot, "packages/jit/src/index.ts")],
-              "@jit/compiler/define": [join(repoRoot, "packages/jit/src/define.ts")],
+              "@jit-compiler/jit": [join(repoRoot, "packages/jit/src/index.ts")],
+              "@jit-compiler/jit/define": [join(repoRoot, "packages/jit/src/define.ts")],
             },
           },
           include: ["consumer.ts", "src/**/*.ts"],

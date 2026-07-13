@@ -54,7 +54,7 @@ pnpm --filter @jit/examples run test
 
 The tests execute both modes, open and close real ephemeral TCP servers, verify
 observable parity, and assert that generated JavaScript contains no import from
-`@jit/compiler`.
+`@jit-compiler/jit`.
 
 Generated files are committed on purpose. When a compiler change modifies
 them, the diff is a source-level review of exactly what an application would

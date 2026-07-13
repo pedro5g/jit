@@ -1,4 +1,4 @@
-import { AOT } from "@jit/compiler";
+import { AOT } from "@jit-compiler/jit";
 
 export default AOT.defineConfig({
   entries: ["compiled/catalog.jit.ts"],
@@ -13,6 +13,7 @@ export default AOT.defineConfig({
   },
   target: { runtime: "node", engine: "v8", version: "22", module: "esm" },
   compiler: {
+    packageName: "@jit-compiler/jit",
     mode: "production",
     optimization: "aggressive",
     sourceMaps: false,

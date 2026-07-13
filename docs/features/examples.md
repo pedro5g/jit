@@ -62,7 +62,7 @@ compiled/generated/
 └── plans/catalog.json
 ```
 
-The JavaScript has zero imports from `@jit/compiler`. The package `imports`
+The JavaScript has zero imports from `@jit-compiler/jit`. The package `imports`
 map exposes it as `#examples`, so TypeScript consumes generated declarations
 while Node executes `index.mjs`.
 

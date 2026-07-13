@@ -17,7 +17,7 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^21.0.2
         version: 21.0.2
-      '@jit/compiler':
+      '@jit-compiler/jit':
         specifier: workspace:*
         version: link:packages/jit
       '@js-temporal/polyfill':
@@ -101,7 +101,7 @@ importers:
 
   apps/site:
     dependencies:
-      '@jit/compiler':
+      '@jit-compiler/jit':
         specifier: workspace:*
         version: link:../../packages/jit
       '@monaco-editor/react':
@@ -168,7 +168,7 @@ importers:
 
   packages/examples:
     dependencies:
-      '@jit/compiler':
+      '@jit-compiler/jit':
         specifier: workspace:*
         version: link:../jit
     devDependencies:

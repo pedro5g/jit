@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AOT, JIT } from "@jit/compiler";
+import { AOT, JIT } from "@jit-compiler/jit";
 
 /**
  * Cold start: runtime JIT compile vs pregenerated AOT module, both measured

@@ -55,6 +55,7 @@ interface ResolvedAotInputs extends GenerateArguments {
   readonly configFile: string | undefined;
   readonly resolvedOut: string;
   readonly importSpecifier: string | undefined;
+  readonly compilerPackageName: string | undefined;
 }
 
 export interface InitArguments {
@@ -131,7 +132,8 @@ async function runGenerate(
   stderr: (text: string) => void
 ): Promise<number> {
   const resolved = await resolveAotInputs(parsed, cwd);
-  const { files, packageName, clean, emitPackageJson, emit, importSpecifier, resolvedOut } = resolved;
+  const { files, packageName, clean, emitPackageJson, emit, importSpecifier, compilerPackageName, resolvedOut } =
+    resolved;
 
   if (resolved.configFile) stdout(`using ${resolved.configFile}\n`);
 
@@ -160,6 +162,7 @@ async function runGenerate(
       ...(emitPackageJson !== undefined ? { emitPackageJson } : {}),
       ...(emit !== undefined ? { emit } : {}),
       ...(importSpecifier !== undefined ? { importSpecifier } : {}),
+      ...(compilerPackageName !== undefined ? { compilerPackageName } : {}),
     });
 
     for (const skip of result.skipped) {
@@ -387,6 +390,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
   let emitPackageJson = parsed.emitPackageJson;
   let emit = parsed.emit;
   let importSpecifier: string | undefined;
+  let compilerPackageName: string | undefined;
   let configFile: string | undefined;
 
   if (files.length === 0) {
@@ -409,6 +413,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
       emitPackageJson = emitPackageJson ?? output?.emitPackageJson ?? config.emitPackageJson;
       emit = mergeEmit(config.emit, emit);
       importSpecifier = output?.importSpecifier;
+      compilerPackageName = config.compiler?.packageName;
     }
 
     if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
@@ -424,6 +429,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     emitPackageJson,
     emit,
     importSpecifier,
+    compilerPackageName,
     configFile,
     resolvedOut: outDir ?? resolve(cwd, DEFAULT_OUT_DIR),
   };
@@ -629,17 +635,17 @@ export function createConfigSource(options: InitArguments): string {
     "    clean: true,",
     "  },",
     '  target: { runtime: "node", engine: "v8", version: "22", module: "esm" },',
-    '  compiler: { mode: "production", optimization: "aggressive", sourceMaps: false, declarations: true },',
+    '  compiler: { packageName: "@jit-compiler/jit", mode: "production", optimization: "aggressive", sourceMaps: false, declarations: true },',
     '  performance: { shapes: true, strings: true, allocation: "auto", strategies: "auto" },',
     "  emit: { rootBarrel: true, subpathModules: true, manifest: true, plans: true, runtimeSchemas: false },",
     "  diagnostics: { explainPlans: true, generatedSource: true },",
   ];
 
   if (options.format === "cjs") {
-    return `/** @type {import("@jit/compiler").AOT.JitConfig} */\nmodule.exports = {\n${lines.join("\n")}\n};\n`;
+    return `/** @type {import("@jit-compiler/jit").AOT.JitConfig} */\nmodule.exports = {\n${lines.join("\n")}\n};\n`;
   }
 
-  return `import { AOT } from "@jit/compiler";\n\nexport default AOT.defineConfig({\n${lines.join("\n")}\n});\n`;
+  return `import { AOT } from "@jit-compiler/jit";\n\nexport default AOT.defineConfig({\n${lines.join("\n")}\n});\n`;
 }
 
 function writeExampleDeclaration(cwd: string): void {
@@ -652,7 +658,7 @@ function writeExampleDeclaration(cwd: string): void {
   writeFileSync(
     file,
     [
-      'import { JIT } from "@jit/compiler/define";',
+      'import { JIT } from "@jit-compiler/jit/define";',
       "",
       "export const User = JIT.object({",
       "  id: JIT.int(),",

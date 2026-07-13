@@ -49,6 +49,8 @@ export interface GenerateOptions {
   readonly outDir: string;
   /** Generated package name; defaults to `@jit/generated`. */
   readonly packageName?: string;
+  /** Compiler package used by generated type-only imports. */
+  readonly compilerPackageName?: string;
   /** Remove known generated files before writing; defaults to true. */
   readonly clean?: boolean;
   /** Write a package.json exports map beside the JS/types; defaults to true. */
@@ -56,7 +58,7 @@ export interface GenerateOptions {
   /**
    * Schema name → source file it was loaded from. When present, the
    * generated `.d.ts` derives the value type from the dev's own schema via
-   * `import("@jit/compiler").Infer<typeof import("<file>").Name>` — the single source
+   * `import("@jit-compiler/jit").Infer<typeof import("<file>").Name>` — the single source
    * of truth for typing — instead of re-emitting a structural type by hand.
    * Type-only imports erase at runtime, so tree-shaking is unaffected.
    */
@@ -101,6 +103,7 @@ export interface GenerateResult {
  */
 export function generate(options: GenerateOptions): GenerateResult {
   const packageName = options.packageName ?? "@jit/generated";
+  const compilerPackageName = options.compilerPackageName ?? "@jit-compiler/jit";
   const skipped: SkippedOperation[] = [];
   const js: string[] = [];
   const dts: string[] = [];
@@ -149,10 +152,10 @@ export function generate(options: GenerateOptions): GenerateResult {
       const specifier = typeImportSpecifier(options.outDir, sourceFile);
 
       dts.push(
-        `export type ${name} = import("@jit/compiler").Infer<typeof import(${JSON.stringify(specifier)}).${name}>;`
+        `export type ${name} = import(${JSON.stringify(compilerPackageName)}).Infer<typeof import(${JSON.stringify(specifier)}).${name}>;`
       );
       dts.push(
-        `export type ${name}Strict<TValue> = import("@jit/compiler").Strict<typeof import(${JSON.stringify(specifier)}).${name}, TValue>;`
+        `export type ${name}Strict<TValue> = import(${JSON.stringify(compilerPackageName)}).Strict<typeof import(${JSON.stringify(specifier)}).${name}, TValue>;`
       );
     } else {
       // No source file to anchor to (programmatic generate): fall back to a

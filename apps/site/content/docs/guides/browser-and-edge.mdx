@@ -28,7 +28,7 @@ import { User } from "@jit/generated";
 1. Export only operations used by the application.
 2. Prefer standalone exports for route-level granularity.
 3. Keep generated package `sideEffects: false`.
-4. Import from generated modules, not `@jit/compiler/runtime`, in production UI code.
+4. Import from generated modules, not `@jit-compiler/jit/runtime`, in production UI code.
 5. Inspect the bundler output, not just source package size.
 6. Run `jit inspect <export> --stage source` when a helper is unexpectedly retained.
 

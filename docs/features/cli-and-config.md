@@ -33,7 +33,7 @@ build output that zshy writes beside package source files.
 Prefer the plan-shaped config:
 
 ```ts
-import { AOT } from "@jit/compiler";
+import { AOT } from "@jit-compiler/jit";
 
 export default AOT.defineConfig({
   entries: ["src/schemas/**/*.jit.ts"],
@@ -43,17 +43,25 @@ export default AOT.defineConfig({
     packageName: "@jit/generated",
     emitPackageJson: true,
     clean: true,
-    emit: {
-      subpathModules: true,
-      manifest: true,
-      plans: true,
-    },
+  },
+  compiler: {
+    packageName: "@jit-compiler/jit",
+  },
+  emit: {
+    subpathModules: true,
+    manifest: true,
+    plans: true,
   },
 });
 ```
 
 If `entries` is omitted, discovery scans from the project root using
 `patterns`. The default pattern is `**/*.jit.ts`.
+
+`compiler.packageName` is used only by generated declaration files. npm users
+should keep `@jit-compiler/jit`; a Deno/JSR project can set
+`jsr:@jit/compiler`. Generated JavaScript remains self-contained and does not
+import either package.
 
 ## Output Directory Choices
 

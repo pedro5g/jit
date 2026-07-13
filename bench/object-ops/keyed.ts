@@ -1,4 +1,4 @@
-import { JIT } from "@jit/compiler";
+import { JIT } from "@jit-compiler/jit";
 import { createUsers, type MediumUser, MediumUserSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
 import { genericGroupBy, genericNormalize, genericSortBy, genericUniqueBy } from "./generic.js";

@@ -37,7 +37,7 @@ describe("runtime and define entrypoints", () => {
         isUser: (value: unknown) => boolean;
       };
 
-      expect(source).not.toContain('from "@jit/compiler"');
+      expect(source).not.toContain('from "@jit-compiler/jit"');
       expect(generated.isUser({ id: 1 })).toBe(true);
       expect(generated.isUser({ id: "1" })).toBe(false);
       expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is DefineJIT.Infer<typeof User>>();

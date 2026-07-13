@@ -1,4 +1,4 @@
-import { JIT } from "@jit/compiler/define";
+import { JIT } from "@jit-compiler/jit/define";
 
 const UserSchema = JIT.object({
   id: JIT.number().int32().positive(),

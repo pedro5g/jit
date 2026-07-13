@@ -9,7 +9,7 @@ specialized validation, equality, cloning, diffing, hashing, updates, queries,
 mapping, serialization, codecs, streaming, and binary processing operations.
 
 ```ts
-import { JIT } from "@jit/compiler/runtime";
+import { JIT } from "@jit-compiler/jit/runtime";
 
 const User = JIT.object({
   id: JIT.int().positive(),
@@ -29,13 +29,17 @@ bundle.
 ## Install
 
 ```sh
-pnpm add @jit/compiler
+pnpm add @jit-compiler/jit
 ```
 
 JSR users can install the same version and API:
 
 ```sh
 deno add jsr:@jit/compiler
+```
+
+```ts
+import { JIT } from "jsr:@jit/compiler/runtime";
 ```
 
 ## Documentation

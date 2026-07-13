@@ -36,7 +36,10 @@ export interface JitConfig {
   };
   /** Compiler/diagnostic options accepted for forward-compatible configs. */
   readonly target?: Readonly<Record<string, unknown>>;
-  readonly compiler?: Readonly<Record<string, unknown>>;
+  readonly compiler?: Readonly<Record<string, unknown>> & {
+    /** Package specifier used by generated declaration-only type imports. */
+    readonly packageName?: string;
+  };
   readonly performance?: Readonly<Record<string, unknown>>;
   readonly diagnostics?: Readonly<Record<string, unknown>>;
   /** Output directory; defaults to `node_modules/@jit/generated`. */

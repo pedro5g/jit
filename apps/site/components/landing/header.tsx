@@ -1,4 +1,4 @@
-import pkg from "@jit/compiler/package.json";
+import pkg from "@jit-compiler/jit/package.json";
 import Link from "next/link";
 import { GhostToggle } from "@/components/brand/ghost-toggle";
 import { JitLogo } from "@/components/brand/jit-logo";

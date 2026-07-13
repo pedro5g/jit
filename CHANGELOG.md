@@ -6,6 +6,14 @@ npm and JSR.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-12
+
+### Fixed
+
+- Publish the npm distribution as `@jit-compiler/jit`, because the npm `@jit`
+  scope belongs to another publisher; JSR remains `@jit/compiler`.
+- Preserve the `jit` and `jit-mcp` executable shims when installing from npm.
+
 ## [1.0.0] - 2026-07-12
 
 ### Added
@@ -20,5 +28,6 @@ npm and JSR.
 - MCP stdio server with structured tools, resources, prompts, completions,
   workspace-confined AOT preview/generation, and installed-package smoke tests.
 
-[Unreleased]: https://github.com/pedro5g/jit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/pedro5g/jit/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/pedro5g/jit/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/pedro5g/jit/releases/tag/v1.0.0

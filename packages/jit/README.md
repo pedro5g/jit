@@ -20,7 +20,7 @@ Two execution modes, same generated code:
   only the generated low-level functions the app actually imports.
 
 ```ts
-import { JIT } from "@jit/compiler/runtime";
+import { JIT } from "@jit-compiler/jit/runtime";
 
 const User = JIT.object({
   id: JIT.number().int().positive(),
@@ -123,7 +123,17 @@ Selected operation load benchmarks from `pnpm bench:all`:
 ## Install
 
 ```sh
-pnpm add @jit/compiler
+pnpm add @jit-compiler/jit
+```
+
+JSR keeps the shorter registry-native identity:
+
+```sh
+deno add jsr:@jit/compiler
+```
+
+```ts
+import { JIT } from "jsr:@jit/compiler/runtime";
 ```
 
 ---
@@ -758,7 +768,7 @@ pnpm jit generate
 Generated `jit.config.ts`:
 
 ```ts
-import { AOT } from "@jit/compiler";
+import { AOT } from "@jit-compiler/jit";
 
 export default AOT.defineConfig({
   // Files, directories, or globs containing explicit compiled AOT exports.
@@ -778,6 +788,8 @@ export default AOT.defineConfig({
   },
   target: { runtime: "node", engine: "v8", version: "22", module: "esm" },
   compiler: {
+    // Package used only by type imports in generated declarations.
+    packageName: "@jit-compiler/jit",
     mode: "production",
     optimization: "aggressive",
     sourceMaps: false,
@@ -806,6 +818,8 @@ Discovery rules are intentionally boring:
 - `entries` accepts files, directories, and globs like `jit/**/*.jit.ts`;
 - legacy `schemas` still works as a compatibility alias for `entries`;
 - `patterns` controls directory scans; the default is `**/*.jit.ts`;
+- `compiler.packageName` defaults to the npm identity `@jit-compiler/jit`;
+  Deno/JSR projects can use `jsr:@jit/compiler`;
 - if no buildable functions are exported, the CLI prints a warning and writes
   nothing.
 - `jit doctor` prints resolved config, output directory, patterns, and files;
@@ -820,7 +834,7 @@ There is no raw-schema fallback. AOT builds only what you explicitly export.
 
 ```ts
 // jit/user.jit.ts — discovered by convention (**/*.jit.ts)
-import { JIT } from "@jit/compiler/define";
+import { JIT } from "@jit-compiler/jit/define";
 
 const UserSchema = JIT.object({
   id: JIT.number(),
@@ -899,10 +913,10 @@ Types are derived from your schema file, never re-emitted by hand:
 
 ```ts
 // grouped marker
-export type User = import("@jit/compiler").Infer<
+export type User = import("@jit-compiler/jit").Infer<
   typeof import("../src/user.jit.js").User
 >;
-export type UserStrict<TValue> = import("@jit/compiler").Strict<
+export type UserStrict<TValue> = import("@jit-compiler/jit").Strict<
   typeof import("../src/user.jit.js").User,
   TValue
 >;

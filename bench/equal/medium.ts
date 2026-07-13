@@ -1,4 +1,4 @@
-import { JIT } from "@jit/compiler";
+import { JIT } from "@jit-compiler/jit";
 import { zx } from "@traversable/zod";
 import { z } from "zod";
 import { fastEqual, lodashIsEqual } from "../shared/competitors.js";

@@ -9,7 +9,7 @@ development and generated production builds.
 Use the operation builder when you want a single compiled function:
 
 ```ts
-import { JIT } from "@jit/compiler/runtime";
+import { JIT } from "@jit-compiler/jit/runtime";
 
 const User = JIT.object({
   id: JIT.number().int().positive(),

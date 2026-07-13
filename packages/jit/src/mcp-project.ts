@@ -32,6 +32,7 @@ interface ResolvedAotProject {
   readonly patterns: readonly string[];
   readonly clean: boolean;
   readonly emitPackageJson: boolean;
+  readonly compilerPackageName: string;
   readonly emit?: GenerateEmitOptions;
   readonly importSpecifier?: string;
 }
@@ -129,6 +130,7 @@ export async function previewAot(args: Readonly<Record<string, unknown>>, worksp
       sources: collected.sources,
       outDir: tempDir,
       packageName: resolved.packageName,
+      compilerPackageName: resolved.compilerPackageName,
       clean: true,
       emitPackageJson: resolved.emitPackageJson,
       emit: {
@@ -175,6 +177,7 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
     sources: collected.sources,
     outDir: resolved.outDir,
     packageName: resolved.packageName,
+    compilerPackageName: resolved.compilerPackageName,
     clean: resolved.clean,
     emitPackageJson: resolved.emitPackageJson,
     ...(resolved.emit ? { emit: resolved.emit } : {}),
@@ -184,6 +187,7 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
   const data = {
     outDir: relativePath(resolved.root, resolved.outDir),
     packageName: resolved.packageName,
+    compilerPackageName: resolved.compilerPackageName,
     files,
     skipped: jsonSkipped(result.skipped),
   } as JsonValue;
@@ -221,7 +225,8 @@ export async function doctorProject(args: Readonly<Record<string, unknown>>, wor
   }
 
   const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "0", 10);
-  if (nodeMajor < 20) errors.push(`Node ${process.versions.node} is unsupported; @jit/compiler requires Node >=20.`);
+  if (nodeMajor < 20)
+    errors.push(`Node ${process.versions.node} is unsupported; @jit-compiler/jit requires Node >=20.`);
 
   const data = {
     ok: errors.length === 0,
@@ -395,6 +400,7 @@ function outputDescriptor(resolved: ResolvedAotProject): JsonValue {
   return {
     directory: relativePath(resolved.root, resolved.outDir) ?? resolved.outDir,
     packageName: resolved.packageName,
+    compilerPackageName: resolved.compilerPackageName,
     importSpecifier: resolved.importSpecifier ?? null,
     clean: resolved.clean,
     emitPackageJson: resolved.emitPackageJson,
@@ -444,6 +450,8 @@ async function resolveAotProject(
     : resolveInside(configDir, configuredOut, "AOT output directory", root);
   const packageName =
     readOptionalString(args, "packageName") ?? output?.packageName ?? config.packageName ?? DEFAULT_PACKAGE_NAME;
+  const compilerPackageName =
+    readOptionalString(args, "compilerPackageName") ?? config.compiler?.packageName ?? "@jit-compiler/jit";
   const clean = readOptionalBoolean(args, "clean") ?? output?.clean ?? config.clean ?? true;
   const emitPackageJson =
     readOptionalBoolean(args, "emitPackageJson") ?? output?.emitPackageJson ?? config.emitPackageJson ?? true;
@@ -456,6 +464,7 @@ async function resolveAotProject(
     files,
     outDir,
     packageName,
+    compilerPackageName,
     patterns: patterns ?? DEFAULT_SCHEMA_PATTERNS,
     clean,
     emitPackageJson,

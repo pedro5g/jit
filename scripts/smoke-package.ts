@@ -50,23 +50,27 @@ try {
 
   writeFileSync(
     join(consumerDir, "esm.mjs"),
-    'import { JIT } from "@jit/compiler/runtime";\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
+    'import { JIT } from "@jit-compiler/jit/runtime";\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
   );
   writeFileSync(
     join(consumerDir, "cjs.cjs"),
-    'const { JIT } = require("@jit/compiler/runtime");\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
+    'const { JIT } = require("@jit-compiler/jit/runtime");\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validator(schema).is({ id: 1 })) process.exit(1);\n'
   );
   run(process.execPath, ["esm.mjs"], consumerDir);
   run(process.execPath, ["cjs.cjs"], consumerDir);
 
-  const cli = run(process.execPath, [join(consumerDir, "node_modules/@jit/compiler/cli.js"), "--help"], consumerDir);
+  const cli = run(
+    process.execPath,
+    [join(consumerDir, "node_modules/@jit-compiler/jit/cli.js"), "--help"],
+    consumerDir
+  );
   if (!cli.includes("jit generate")) throw new Error("packed CLI help did not load correctly");
   const cliShim = run(join(consumerDir, "node_modules/.bin/jit"), ["--help"], consumerDir);
   if (!cliShim.includes("jit generate")) throw new Error("packed jit bin shim did not load correctly");
 
   const mcpOutput = run(
     process.execPath,
-    [join(consumerDir, "node_modules/@jit/compiler/mcp.js")],
+    [join(consumerDir, "node_modules/@jit-compiler/jit/mcp.js")],
     consumerDir,
     `${JSON.stringify({
       jsonrpc: "2.0",
@@ -105,11 +109,16 @@ try {
     throw new Error("packed jit-mcp bin shim did not load correctly");
   }
 
-  const manifest = JSON.parse(readFileSync(join(consumerDir, "node_modules/@jit/compiler/package.json"), "utf8")) as {
+  const manifest = JSON.parse(
+    readFileSync(join(consumerDir, "node_modules/@jit-compiler/jit/package.json"), "utf8")
+  ) as {
     name?: string;
     version?: string;
     bin?: { jit?: string; "jit-mcp"?: string };
   };
+  if (manifest.name !== "@jit-compiler/jit") {
+    throw new Error(`packed npm package name is invalid: ${JSON.stringify(manifest.name)}`);
+  }
   if (manifest.bin?.jit !== "cli.js" || manifest.bin["jit-mcp"] !== "mcp.js") {
     throw new Error(`packed bin map is invalid: ${JSON.stringify(manifest.bin)}`);
   }

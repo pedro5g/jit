@@ -3,12 +3,13 @@
 Updated: 2026-07-11
 
 This audit compares the master dual JIT + AOT plan with the current
-single-package implementation. The package is published as `@jit/compiler`, with transitional
-subpaths that map to the planned split:
+single-package implementation. npm publishes it as `@jit-compiler/jit`, while
+JSR keeps `@jit/compiler`. The npm package exposes transitional subpaths that
+map to the planned split:
 
-- `@jit/compiler/runtime` maps to the planned runtime host entrypoint.
-- `@jit/compiler/define` maps to the planned AOT definition host entrypoint.
-- `@jit/compiler` keeps the compatibility root namespace.
+- `@jit-compiler/jit/runtime` maps to the planned runtime host entrypoint.
+- `@jit-compiler/jit/define` maps to the planned AOT definition host entrypoint.
+- `@jit-compiler/jit` keeps the compatibility root namespace.
 
 ## API Alignment
 
@@ -24,7 +25,7 @@ Implemented and covered by tests:
 - `JIT.const(value)` and `q.constant(value)` for build-time query literals.
 - `JIT.transform(schema).select(...).map(...).compile()` for built-in field
   transforms such as `lowercase`, `uppercase`, and `trim`.
-- `@jit/compiler/define` AOT stubs throw if executed and register artifact metadata for
+- `@jit-compiler/jit/define` AOT stubs throw if executed and register artifact metadata for
   `jit generate`.
 - `jit init`, `jit doctor`, `jit explain`, `jit list`, `jit inspect`,
   `jit clean`, and `jit generate`.
@@ -75,7 +76,7 @@ Implemented in `packages/jit/src/core/host.ts`:
 - `SCHEMA_METADATA`
 - `createJIT(host, namespace)` transitional adapter
 
-These contracts are now public through `import { Host } from "@jit/compiler"` and
+These contracts are now public through `import { Host } from "@jit-compiler/jit"` and
 type exports from the root package.
 
 ## AOT Generation
@@ -107,7 +108,7 @@ Still structural/future work from the plan:
 ## Known Architectural Gap
 
 The current monorepo still has schema builders coupled to builder runtime
-conveniences, so importing `@jit/compiler/define` is a host-compatible API step but not
+conveniences, so importing `@jit-compiler/jit/define` is a host-compatible API step but not
 yet the final physical package split where define imports zero compiler code.
 The current `createJIT(host, namespace)` adapter exists to lock the contract;
 the next migration should move schema builders into a compiler-free core

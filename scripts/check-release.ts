@@ -22,14 +22,15 @@ const packageDir = join(__dirname, "packages/jit");
 const packageManifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as PackageManifest;
 const jsrManifest = JSON.parse(readFileSync(join(packageDir, "jsr.json"), "utf8")) as JsrManifest;
 const changelog = readFileSync(join(__dirname, "CHANGELOG.md"), "utf8");
-const expectedName = "@jit/compiler";
+const expectedNpmName = "@jit-compiler/jit";
+const expectedJsrName = "@jit/compiler";
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-check(packageManifest.name === expectedName, `npm package must be named ${expectedName}`);
-check(jsrManifest.name === expectedName, `JSR package must be named ${expectedName}`);
+check(packageManifest.name === expectedNpmName, `npm package must be named ${expectedNpmName}`);
+check(jsrManifest.name === expectedJsrName, `JSR package must be named ${expectedJsrName}`);
 check(packageManifest.version !== undefined, "package.json version is missing");
 check(semver.valid(packageManifest.version), `invalid package version: ${packageManifest.version}`);
 check(jsrManifest.version === packageManifest.version, "package.json and jsr.json versions must match");
@@ -50,4 +51,6 @@ if (tag !== undefined) {
   check(tag === `v${packageManifest.version}`, `tag ${tag} does not match version v${packageManifest.version}`);
 }
 
-console.log(`Release metadata is valid for ${expectedName}@${packageManifest.version}${tag ? ` (${tag})` : ""}.`);
+console.log(
+  `Release metadata is valid for npm ${expectedNpmName}@${packageManifest.version} and JSR ${expectedJsrName}@${packageManifest.version}${tag ? ` (${tag})` : ""}.`
+);

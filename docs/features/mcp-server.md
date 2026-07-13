@@ -1,6 +1,6 @@
 # MCP Server
 
-`@jit/compiler` includes `jit-mcp`, a local Model Context Protocol server for
+`@jit-compiler/jit` includes `jit-mcp`, a local Model Context Protocol server for
 coding agents working in a JIT project. It exposes the same declaration
 discovery and AOT generator used by the CLI, plus project documentation,
 diagnostics, prompts, and safe generated-source previews.
@@ -119,8 +119,8 @@ cannot turn an inspection request into a write by omitting a default.
 ```
 
 Config remains the source of defaults. Tool arguments may override `files`,
-`patterns`, `outDir`, `packageName`, `clean`, `emitPackageJson`, and individual
-`emit` flags for one call.
+`patterns`, `outDir`, `packageName`, `compilerPackageName`, `clean`,
+`emitPackageJson`, and individual `emit` flags for one call.
 
 ## Resources
 
@@ -192,7 +192,7 @@ List methods currently fit in one page. Supplying a stale cursor returns
 ## Testing The Installed Server
 
 The release smoke test packs the actual npm tarball, installs it into an empty
-project, starts `node_modules/@jit/compiler/mcp.js`, sends an MCP initialize
+project, starts `node_modules/@jit-compiler/jit/mcp.js`, sends an MCP initialize
 request over stdin, and verifies tools/resources/prompts capabilities. Unit
 tests additionally cover resources, templates, prompts, completions, preview,
 generation, JSON-RPC errors, and path traversal.
