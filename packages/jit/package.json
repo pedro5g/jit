@@ -105,8 +105,8 @@
     }
   },
   "bin": {
-    "jit": "./cli.js",
-    "jit-mcp": "./mcp.js"
+    "jit": "cli.js",
+    "jit-mcp": "mcp.js"
   },
   "devDependencies": {
     "@types/node": "^26.1.0"

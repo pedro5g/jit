@@ -61,6 +61,8 @@ try {
 
   const cli = run(process.execPath, [join(consumerDir, "node_modules/@jit/compiler/cli.js"), "--help"], consumerDir);
   if (!cli.includes("jit generate")) throw new Error("packed CLI help did not load correctly");
+  const cliShim = run(join(consumerDir, "node_modules/.bin/jit"), ["--help"], consumerDir);
+  if (!cliShim.includes("jit generate")) throw new Error("packed jit bin shim did not load correctly");
 
   const mcpOutput = run(
     process.execPath,
@@ -87,11 +89,30 @@ try {
   ) {
     throw new Error("packed MCP stdio server did not negotiate its complete capability set");
   }
+  const mcpShimOutput = run(
+    join(consumerDir, "node_modules/.bin/jit-mcp"),
+    [],
+    consumerDir,
+    `${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "smoke", version: "1" } },
+    })}\n`
+  );
+  const mcpShimResponse = JSON.parse(mcpShimOutput.trim()) as { result?: { serverInfo?: { name?: string } } };
+  if (mcpShimResponse.result?.serverInfo?.name !== "jit-mcp") {
+    throw new Error("packed jit-mcp bin shim did not load correctly");
+  }
 
   const manifest = JSON.parse(readFileSync(join(consumerDir, "node_modules/@jit/compiler/package.json"), "utf8")) as {
     name?: string;
     version?: string;
+    bin?: { jit?: string; "jit-mcp"?: string };
   };
+  if (manifest.bin?.jit !== "cli.js" || manifest.bin["jit-mcp"] !== "mcp.js") {
+    throw new Error(`packed bin map is invalid: ${JSON.stringify(manifest.bin)}`);
+  }
   console.log(
     `Packed ${manifest.name}@${manifest.version}: ${result.entryCount} files, ${result.unpackedSize} unpacked bytes; ESM, CJS, CLI, and MCP smoke tests passed.`
   );

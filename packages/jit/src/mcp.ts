@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -490,7 +491,7 @@ function isRequestId(value: unknown): value is string | number | null {
 
 function isDirectRun(): boolean {
   const entry = process.argv[1];
-  return entry !== undefined && import.meta.url === pathToFileURL(resolve(entry)).href;
+  return entry !== undefined && import.meta.url === pathToFileURL(realpathSync(resolve(entry))).href;
 }
 
 export function runStdioServer(cwd: string = process.env.JIT_MCP_ROOT ?? process.cwd()): void {

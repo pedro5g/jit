@@ -14,7 +14,7 @@
  * `init` writes a typed `jit.config.*` in the current project root.
  * `generate` resolves config first, then falls back to pattern discovery.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -686,7 +686,7 @@ function formatStringArray(values: readonly string[]): string {
 function isDirectRun(): boolean {
   const entry = process.argv[1];
 
-  return entry !== undefined && import.meta.url === pathToFileURL(resolve(entry)).href;
+  return entry !== undefined && import.meta.url === pathToFileURL(realpathSync(resolve(entry))).href;
 }
 
 if (isDirectRun()) {
