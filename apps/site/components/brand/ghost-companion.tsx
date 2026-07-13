@@ -114,11 +114,15 @@ export function GhostCompanion() {
       ref={shipRef}
       className={`pointer-events-none fixed left-0 top-0 z-40 hidden transition-transform duration-900 ease-out will-change-transform motion-reduce:transition-none ${active ? "md:block" : ""}`}
     >
-      <div className={`flex items-start gap-2 ${pointingLeft ? "flex-row" : "flex-row-reverse"}`}>
+      {/* anchored on the ghost — the bubble hangs off the content-facing side
+          absolutely so it can never push the ghost off-screen */}
+      <div className="relative size-16">
         {active && (
           <output
             aria-live="polite"
-            className="pointer-events-auto mt-1 flex items-center gap-2 rounded-control border border-line-subtle bg-night-950/95 py-1.5 pl-3 pr-1.5 shadow-(--shadow-card) backdrop-blur"
+            className={`pointer-events-auto absolute top-0 flex w-max max-w-64 items-center gap-2 rounded-control border border-line-subtle bg-night-950/95 py-1.5 pl-3 pr-1.5 shadow-(--shadow-card) backdrop-blur ${
+              pointingLeft ? "right-full mr-2" : "left-full ml-2"
+            }`}
           >
             <span className="font-mono text-[11px] text-fg-muted">{active.label}</span>
             <button

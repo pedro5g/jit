@@ -233,14 +233,19 @@ export function GhostDocGuide() {
         ref={shipRef}
         className={`pointer-events-none fixed left-0 top-0 z-40 hidden transition-transform duration-700 ease-out will-change-transform motion-reduce:transition-none ${target ? "lg:block" : ""}`}
       >
-        <div className={`flex items-start gap-1.5 ${pointing ? "flex-row" : "flex-row-reverse"}`}>
-          <div className={`mt-6 flex flex-col gap-0 ${pointing ? "items-end" : "items-start"}`}>
+        {/* the ship anchors on the GHOST — bubble and chevrons hang off its
+            content-facing side absolutely, so x/y always mean the ghost and it
+            can never be pushed off-screen by the bubble width */}
+        <div className="relative" style={{ width: GHOST_SIZE, height: GHOST_SIZE }}>
+          <div
+            className={`absolute top-0 flex flex-col ${pointing ? "right-full mr-2 items-end" : "left-full ml-2 items-start"}`}
+          >
             {target && (
-              <div className="pointer-events-auto mb-1.5 flex max-w-64 items-start gap-2 rounded-control border border-line-subtle bg-night-950/95 py-1.5 pl-3 pr-1.5 shadow-(--shadow-card) backdrop-blur">
+              <div className="pointer-events-auto mb-1.5 flex w-max max-w-64 items-start gap-2 rounded-control border border-line-subtle bg-night-950/95 py-1.5 pl-3 pr-1.5 shadow-(--shadow-card) backdrop-blur">
                 <output
                   aria-live="polite"
                   aria-label={`${target.text}: ${target.tip}`}
-                  className="flex flex-col font-mono text-[11px] leading-snug"
+                  className="flex min-w-0 flex-col font-mono text-[11px] leading-snug"
                 >
                   <span className="truncate text-ghost-100">{target.text}</span>
                   <span className="text-fg-subtle">
@@ -262,7 +267,7 @@ export function GhostDocGuide() {
             )}
             <div
               aria-hidden
-              className={`flex items-center gap-0.5 ${pointing ? "mr-1 self-start" : "ml-1 self-end"}`}
+              className={`flex items-center gap-0.5 ${pointing ? "mr-1" : "ml-1"}`}
               style={{ "--chevron-shift": pointing ? "-3px" : "3px" } as React.CSSProperties}
             >
               <span className="guide-chevron" data-dir={pointing ? "left" : "right"} />
