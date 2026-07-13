@@ -936,15 +936,12 @@ with a reported reason instead of silently miscompiling.
 
 ## MCP server — `jit-mcp`
 
-jit ships a small MCP stdio server for coding agents working inside a project.
-It speaks newline-delimited JSON-RPC over stdin/stdout and exposes three tools:
-
-- `jit_project_context` — summarizes package metadata, branch, commands, and
-  docs.
-- `jit_aot_inspect` — discovers `.jit.ts` declarations and reports buildable
-  grouped objects / standalone functions.
-- `jit_aot_generate` — runs the same explicit AOT generation contract as
-  `jit generate`.
+jit ships an MCP `2025-11-25` stdio server for coding agents working inside a
+project. It exposes structured project context, docs search, AOT doctor,
+declaration inspection, read-only generated-source previews, and explicitly
+confirmed generation. Resources cover architecture, status, config, AOT
+inventory, docs, and generated artifacts; prompts guide schema design, AOT
+workflows, and measured performance reviews.
 
 Example client config:
 
@@ -958,6 +955,23 @@ Example client config:
   }
 }
 ```
+
+The process working directory is the workspace security boundary. Use
+`JIT_MCP_ROOT=/absolute/project/path` when the host cannot set `cwd`. Every
+path is confined to that workspace, symlinks are canonicalized, resources are
+size-limited, and `jit_aot_generate` requires `{ "write": true }`.
+
+Recommended agent sequence:
+
+1. `jit_project_doctor`
+2. `jit_aot_inspect`
+3. `jit_aot_preview` for source and declarations
+4. `jit_aot_generate` with explicit write confirmation
+
+The MCP implementation has no SDK dependency, so installing the compiler does
+not add an agent framework to application runtime graphs. See the
+[complete MCP guide](https://github.com/pedro5g/jit/blob/main/docs/features/mcp-server.md)
+for all tools, resources, prompts, errors, and security details.
 
 ---
 

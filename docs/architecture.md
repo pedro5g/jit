@@ -33,7 +33,7 @@ in the compilation path. The emitted function interprets nothing.
 | `runtime`      | compile cache, keyed-index cache, hash primitives, boundary scanner (stream), artifact registry                                                                                 |
 | `factories`    | the public `JIT.*` namespace: schema factories + every `compile*` entry point + `model`/`compile` aggregations                                                                  |
 | `aot`          | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary                                                                              |
-| `mcp.ts`       | stdio MCP server for agents: project context, AOT inspection, and AOT generation tools                                                                                          |
+| `mcp.ts`       | MCP stdio protocol, tools/resources/prompts/completion dispatch; `mcp-project.ts` owns workspace-safe docs and AOT operations                                                   |
 | `shared`       | source-emission helpers (`parse.ts`: escaping, identifiers, key access) and the `regexes` format library                                                                        |
 | `errors`       | typed `JITError` / `JITValidationError`                                                                                                                                         |
 

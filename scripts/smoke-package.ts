@@ -18,10 +18,11 @@ const root = new URL("..", import.meta.url).pathname;
 const packageDir = join(root, "packages/jit");
 const tempDir = mkdtempSync(join(tmpdir(), "jit-package-"));
 
-function run(command: string, args: string[], cwd: string): string {
+function run(command: string, args: string[], cwd: string, input?: string): string {
   return execFileSync(command, args, {
     cwd,
     encoding: "utf8",
+    ...(input === undefined ? {} : { input }),
     env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },
   });
 }
@@ -61,12 +62,38 @@ try {
   const cli = run(process.execPath, [join(consumerDir, "node_modules/@jit/compiler/cli.js"), "--help"], consumerDir);
   if (!cli.includes("jit generate")) throw new Error("packed CLI help did not load correctly");
 
+  const mcpOutput = run(
+    process.execPath,
+    [join(consumerDir, "node_modules/@jit/compiler/mcp.js")],
+    consumerDir,
+    `${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "smoke", version: "1" } },
+    })}\n`
+  );
+  const mcpResponse = JSON.parse(mcpOutput.trim()) as {
+    result?: {
+      serverInfo?: { name?: string };
+      capabilities?: { tools?: unknown; resources?: unknown; prompts?: unknown };
+    };
+  };
+  if (
+    mcpResponse.result?.serverInfo?.name !== "jit-mcp" ||
+    mcpResponse.result.capabilities?.tools === undefined ||
+    mcpResponse.result.capabilities.resources === undefined ||
+    mcpResponse.result.capabilities.prompts === undefined
+  ) {
+    throw new Error("packed MCP stdio server did not negotiate its complete capability set");
+  }
+
   const manifest = JSON.parse(readFileSync(join(consumerDir, "node_modules/@jit/compiler/package.json"), "utf8")) as {
     name?: string;
     version?: string;
   };
   console.log(
-    `Packed ${manifest.name}@${manifest.version}: ${result.entryCount} files, ${result.unpackedSize} unpacked bytes; ESM, CJS, and CLI smoke tests passed.`
+    `Packed ${manifest.name}@${manifest.version}: ${result.entryCount} files, ${result.unpackedSize} unpacked bytes; ESM, CJS, CLI, and MCP smoke tests passed.`
   );
 } finally {
   rmSync(tempDir, { recursive: true, force: true });

@@ -1,32 +1,33 @@
 #!/usr/bin/env node
-/**
- * jit MCP server.
- *
- * A small stdio JSON-RPC server for agents working inside a jit project.
- * The transport is newline-delimited JSON as required by the MCP stdio spec.
- */
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import {
-  collectSchemas,
-  discoverSchemaFiles,
-  expandSchemaEntries,
-  findConfigFile,
-  type JitConfig,
-  loadModule,
-} from "./aot/discover.js";
-import { generate } from "./aot/generate.js";
+  completeValue,
+  doctorProject,
+  generateAot,
+  inspectAot,
+  type JsonValue,
+  listResources,
+  previewAot,
+  projectContext,
+  readResource,
+  resourceTemplates,
+  searchDocs,
+} from "./mcp-project.js";
+
+/**
+ * JIT MCP server.
+ *
+ * The server deliberately has no MCP SDK dependency: consumers that only use
+ * the compiler do not pay for agent tooling. The protocol surface follows MCP
+ * 2025-11-25 and uses newline-delimited JSON-RPC over stdio.
+ */
 
 const SERVER_NAME = "jit-mcp";
-const SERVER_VERSION = "0.1.0";
-const DEFAULT_PACKAGE_NAME = "@jit/generated";
-const DEFAULT_OUT_DIR = "node_modules/@jit/generated";
-
-type JsonPrimitive = string | number | boolean | null;
-type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
+const SERVER_VERSION = "1.0.0";
+const LATEST_PROTOCOL_VERSION = "2025-11-25";
+const SUPPORTED_PROTOCOL_VERSIONS = new Set([LATEST_PROTOCOL_VERSION]);
 
 interface JsonRpcRequest {
   readonly jsonrpc: "2.0";
@@ -48,75 +49,181 @@ interface JsonRpcResponse {
 
 interface ToolDefinition {
   readonly name: string;
+  readonly title: string;
   readonly description: string;
   readonly inputSchema: JsonValue;
+  readonly outputSchema: JsonValue;
+  readonly annotations: JsonValue;
 }
 
-interface Runtime {
+export interface McpRuntime {
   readonly cwd: string;
   readonly write: (message: JsonRpcResponse) => void;
   readonly log: (message: string) => void;
 }
 
+class JsonRpcError extends Error {
+  readonly code: number;
+  readonly data: JsonValue | undefined;
+
+  constructor(code: number, message: string, data?: JsonValue) {
+    super(message);
+    this.code = code;
+    this.data = data;
+  }
+}
+
+const RESULT_SCHEMA: JsonValue = {
+  type: "object",
+  additionalProperties: true,
+};
+
+const AOT_PROPERTIES = {
+  root: optionalString("Project root below the MCP workspace. Defaults to the workspace root."),
+  files: optionalStringArray("Explicit declaration files relative to the project root."),
+  patterns: optionalStringArray("Discovery globs. Defaults to config or **/*.jit.ts."),
+} as const;
+
+const OUTPUT_PROPERTIES = {
+  outDir: optionalString("Output directory relative to the project root."),
+  packageName: optionalString("Generated package name. Defaults to config or @jit/generated."),
+  clean: optionalBoolean("Remove known generated files before generation."),
+  emitPackageJson: optionalBoolean("Emit a package.json exports map."),
+  emit: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      rootBarrel: { type: "boolean" },
+      subpathModules: { type: "boolean" },
+      manifest: { type: "boolean" },
+      plans: { type: "boolean" },
+      sourceMaps: { type: "boolean" },
+    },
+  },
+} as const;
+
 const TOOLS: readonly ToolDefinition[] = [
-  {
-    name: "jit_project_context",
-    description: "Summarize the local jit project: package metadata, branch, useful commands, and tracked docs.",
-    inputSchema: objectSchema({
-      root: optionalString("Project root. Defaults to the MCP server working directory."),
-      includeDocs: optionalBoolean("Include short architecture/status document snippets. Defaults to true."),
+  tool(
+    "jit_project_context",
+    "Project context",
+    "Summarize package metadata, Git state, useful pnpm commands, and key JIT documents.",
+    objectSchema({
+      root: AOT_PROPERTIES.root,
+      includeDocs: optionalBoolean("Include short architecture and status excerpts. Defaults to true."),
     }),
+    readOnlyAnnotations()
+  ),
+  tool(
+    "jit_project_doctor",
+    "AOT doctor",
+    "Validate Node, config discovery, declaration loading, explicit compiled exports, and output settings.",
+    objectSchema(AOT_PROPERTIES),
+    readOnlyAnnotations()
+  ),
+  tool(
+    "jit_docs_search",
+    "Search JIT docs",
+    "Search project and package Markdown documentation and return file/line matches.",
+    objectSchema(
+      {
+        root: AOT_PROPERTIES.root,
+        query: { type: "string", minLength: 1, description: "Case-insensitive text to find." },
+        limit: { type: "integer", minimum: 1, maximum: 50, description: "Maximum matches. Defaults to 10." },
+      },
+      ["query"]
+    ),
+    readOnlyAnnotations()
+  ),
+  tool(
+    "jit_aot_inspect",
+    "Inspect AOT declarations",
+    "Discover declaration files and report grouped objects, standalone compiled functions, operations, and output config.",
+    objectSchema(AOT_PROPERTIES),
+    readOnlyAnnotations()
+  ),
+  tool(
+    "jit_aot_preview",
+    "Preview AOT output",
+    "Compile into a temporary directory and inspect source, declarations, manifest, or plans without changing the project.",
+    objectSchema({
+      ...AOT_PROPERTIES,
+      ...OUTPUT_PROPERTIES,
+      stage: {
+        type: "string",
+        enum: ["summary", "source", "declaration", "manifest", "plan"],
+        description: "Artifact to return. Defaults to summary.",
+      },
+      target: optionalString("Export name used to select a plan when stage is plan."),
+    }),
+    readOnlyAnnotations()
+  ),
+  tool(
+    "jit_aot_generate",
+    "Generate AOT package",
+    "Write the explicit AOT exports selected by the project. Requires write=true; preview first for read-only inspection.",
+    objectSchema(
+      {
+        ...AOT_PROPERTIES,
+        ...OUTPUT_PROPERTIES,
+        write: {
+          type: "boolean",
+          const: true,
+          description: "Explicit confirmation that generated files may be written.",
+        },
+      },
+      ["write"]
+    ),
+    {
+      title: "Generate AOT package",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    }
+  ),
+];
+
+const PROMPTS: readonly JsonValue[] = [
+  {
+    name: "jit_schema_design",
+    title: "Design a JIT schema",
+    description: "Design or review a typed schema and select only the operations the application needs.",
+    arguments: [
+      { name: "goal", description: "The data boundary or model to represent.", required: true },
+      { name: "mode", description: "runtime, aot, or hybrid.", required: false },
+    ],
   },
   {
-    name: "jit_aot_inspect",
-    description: "Discover jit AOT declaration files and report buildable grouped objects and standalone functions.",
-    inputSchema: objectSchema({
-      root: optionalString("Project root. Defaults to the MCP server working directory."),
-      files: optionalStringArray("Explicit declaration files, relative to root."),
-      patterns: optionalStringArray("Glob patterns for discovery. Defaults to jit config or **/*.jit.ts."),
-    }),
+    name: "jit_aot_workflow",
+    title: "Prepare an AOT workflow",
+    description: "Inspect declarations, preview generated output, and produce a tree-shakeable integration plan.",
+    arguments: [{ name: "goal", description: "The build or migration goal.", required: false }],
   },
   {
-    name: "jit_aot_generate",
-    description: "Run jit AOT generation from explicit declaration exports, respecting config discovery when present.",
-    inputSchema: objectSchema({
-      root: optionalString("Project root. Defaults to the MCP server working directory."),
-      files: optionalStringArray("Explicit declaration files, relative to root."),
-      outDir: optionalString("Generated output directory. Defaults to config or node_modules/@jit/generated."),
-      packageName: optionalString("Generated package name. Defaults to config or @jit/generated."),
-      patterns: optionalStringArray("Glob patterns for discovery. Defaults to jit config or **/*.jit.ts."),
-      clean: optionalBoolean("Delete known generated files before writing. Defaults to config or true."),
-      emitPackageJson: optionalBoolean("Write package.json exports map. Defaults to config or true."),
-    }),
+    name: "jit_performance_review",
+    title: "Review JIT performance",
+    description: "Review an operation using JIT's compile-time, allocation, cache, and benchmark principles.",
+    arguments: [
+      { name: "operation", description: "Operation or pipeline to review.", required: true },
+      { name: "dataShape", description: "Representative shape, cardinality, and reuse pattern.", required: false },
+    ],
   },
 ];
 
-export async function handleJsonRpc(request: JsonRpcRequest, runtime: Runtime): Promise<void> {
-  if (request.id === undefined) return;
+export async function handleJsonRpc(request: JsonRpcRequest, runtime: McpRuntime): Promise<void> {
+  if (request.id === undefined) {
+    handleNotification(request, runtime);
+    return;
+  }
 
   try {
-    if (request.method === "initialize") {
-      runtime.write(response(request.id, initializeResult(request.params)));
-      return;
-    }
-
-    if (request.method === "ping") {
-      runtime.write(response(request.id, {}));
-      return;
-    }
-
-    if (request.method === "tools/list") {
-      runtime.write(response(request.id, { tools: TOOLS as unknown as JsonValue }));
-      return;
-    }
-
-    if (request.method === "tools/call") {
-      runtime.write(response(request.id, await callTool(request.params, runtime.cwd)));
-      return;
-    }
-
-    runtime.write(errorResponse(request.id, -32601, `unknown method "${request.method}"`));
+    const result = await dispatchRequest(request.method, request.params, runtime.cwd);
+    runtime.write(response(request.id, result));
   } catch (error) {
+    if (error instanceof JsonRpcError) {
+      runtime.write(errorResponse(request.id, error.code, error.message, error.data));
+      return;
+    }
     runtime.write(errorResponse(request.id, -32603, error instanceof Error ? error.message : String(error)));
   }
 }
@@ -124,246 +231,225 @@ export async function handleJsonRpc(request: JsonRpcRequest, runtime: Runtime): 
 export async function callTool(params: unknown, cwd: string): Promise<JsonValue> {
   const record = requireRecord(params, "tools/call params");
   const name = readRequiredString(record, "name");
-  const args = readRecord(record.arguments, "arguments") ?? {};
+  const args = readRecord(record.arguments) ?? {};
 
-  if (name === "jit_project_context") return toolResult(projectContext(args, cwd));
-  if (name === "jit_aot_inspect") return toolResult(await inspectAot(args, cwd));
-  if (name === "jit_aot_generate") return toolResult(await generateAot(args, cwd));
+  try {
+    if (name === "jit_project_context") return toolResult(projectContext(args, cwd));
+    if (name === "jit_project_doctor") return toolResult(await doctorProject(args, cwd));
+    if (name === "jit_docs_search") return toolResult(searchDocs(args, cwd));
+    if (name === "jit_aot_inspect") return toolResult(await inspectAot(args, cwd));
+    if (name === "jit_aot_preview") return toolResult(await previewAot(args, cwd));
+    if (name === "jit_aot_generate") return toolResult(await generateAot(args, cwd));
+    throw new JsonRpcError(-32602, `Unknown JIT tool "${name}".`);
+  } catch (error) {
+    if (error instanceof JsonRpcError) throw error;
+    return toolError(error instanceof Error ? error.message : String(error));
+  }
+}
 
-  return toolResult(`Unknown jit tool "${name}".`, true);
+export async function processJsonRpcLine(line: string, runtime: McpRuntime): Promise<void> {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    runtime.write(errorResponse(null, -32700, "Parse error"));
+    return;
+  }
+
+  if (isJsonRpcRequest(parsed)) {
+    await handleJsonRpc(parsed, runtime);
+    return;
+  }
+
+  if (isJsonRpcResponse(parsed)) return;
+  const id = readRecord(parsed)?.id;
+  runtime.write(errorResponse(isRequestId(id) ? id : null, -32600, "Invalid Request"));
+}
+
+async function dispatchRequest(method: string, params: unknown, cwd: string): Promise<JsonValue> {
+  if (method === "initialize") return initializeResult(params);
+  if (method === "ping") return {};
+  if (method === "tools/list") return listResult("tools", TOOLS, params);
+  if (method === "tools/call") return callTool(params, cwd);
+  if (method === "resources/list") return listResult("resources", await listResources(cwd), params);
+  if (method === "resources/templates/list") return listResult("resourceTemplates", resourceTemplates(), params);
+  if (method === "resources/read") {
+    const uri = readRequiredString(requireRecord(params, "resources/read params"), "uri");
+    try {
+      return await readResource(uri, cwd);
+    } catch (error) {
+      throw new JsonRpcError(-32002, error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (method === "prompts/list") return listResult("prompts", PROMPTS, params);
+  if (method === "prompts/get") return getPrompt(params);
+  if (method === "completion/complete") return complete(params, cwd);
+  if (method === "logging/setLevel") {
+    readRequiredString(requireRecord(params, "logging/setLevel params"), "level");
+    return {};
+  }
+  throw new JsonRpcError(-32601, `Method not found: ${method}`);
 }
 
 function initializeResult(params: unknown): JsonValue {
-  const requestedVersion = readRecord(params, "initialize params")?.protocolVersion;
-  const protocolVersion = typeof requestedVersion === "string" ? requestedVersion : "2025-11-25";
+  const record = requireRecord(params, "initialize params");
+  const requested = readRequiredString(record, "protocolVersion");
+  const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(requested) ? requested : LATEST_PROTOCOL_VERSION;
 
   return {
     protocolVersion,
     capabilities: {
       tools: {},
+      resources: {},
+      prompts: {},
+      completions: {},
+      logging: {},
     },
     serverInfo: {
       name: SERVER_NAME,
+      title: "JIT compiler workspace server",
       version: SERVER_VERSION,
+      description: "Project context, documentation, and safe JIT AOT workflows for coding agents",
+      websiteUrl: "https://github.com/pedro5g/jit",
     },
+    instructions:
+      "Read jit://project/context and jit://project/architecture before architecture work. Preview AOT output before calling jit_aot_generate with write=true.",
   };
 }
 
-function projectContext(args: Readonly<Record<string, unknown>>, cwd: string): string {
-  const root = resolveRoot(args, cwd);
-  const includeDocs = readOptionalBoolean(args, "includeDocs") ?? true;
-  const packageJson = readJsonFile(resolve(root, "package.json"));
-  const branch = gitValue(root, ["branch", "--show-current"]) ?? "unknown";
-  const head = gitValue(root, ["rev-parse", "--short", "HEAD"]) ?? "unknown";
-  const scripts = readRecord(packageJson?.scripts, "package.json scripts") ?? {};
-  const lines = [
-    `jit project: ${typeof packageJson?.name === "string" ? packageJson.name : "workspace"}`,
-    `root: ${root}`,
-    `git: ${branch}@${head}`,
-    "",
-    "useful commands:",
-    ...["format:check", "lint:check", "test", "build", "jit", "bench:validate", "bench:report"]
-      .filter((script) => typeof scripts[script] === "string")
-      .map((script) => `- pnpm ${script}`),
-  ];
+function getPrompt(params: unknown): JsonValue {
+  const record = requireRecord(params, "prompts/get params");
+  const name = readRequiredString(record, "name");
+  const args = readRecord(record.arguments) ?? {};
+  const prompt = PROMPTS.find((candidate) => readRecord(candidate)?.name === name);
+  if (!prompt) throw new JsonRpcError(-32602, `Unknown JIT prompt "${name}".`);
+  const text = promptText(name, args);
 
-  if (includeDocs) {
-    lines.push("", "docs:");
-    for (const file of [
-      "docs/architecture.md",
-      "docs/internal/STATUS.md",
-      "docs/internal/SCHEMA_FINALIZATION_PLAN.md",
-    ]) {
-      const path = resolve(root, file);
-
-      if (existsSync(path)) lines.push(`- ${file}: ${excerpt(readFileSync(path, "utf8"))}`);
-    }
-  }
-
-  return lines.join("\n");
+  return {
+    description: readRecord(prompt)?.description as JsonValue,
+    messages: [{ role: "user", content: { type: "text", text } }],
+  };
 }
 
-async function inspectAot(args: Readonly<Record<string, unknown>>, cwd: string): Promise<string> {
-  const resolved = await resolveAotInputs(args, cwd);
-  const collected = await collectSchemas(resolved.files);
-
-  return [
-    `root: ${resolved.root}`,
-    resolved.configFile ? `config: ${resolved.configFile}` : "config: none",
-    `declaration files: ${resolved.files.length}`,
-    ...resolved.files.map((file) => `- ${file}`),
-    `grouped exports: ${Object.keys(collected.schemas).join(", ") || "none"}`,
-    `standalone functions: ${Object.keys(collected.functions).join(", ") || "none"}`,
-  ].join("\n");
+function promptText(name: string, args: Readonly<Record<string, unknown>>): string {
+  if (name === "jit_schema_design") {
+    const goal = readRequiredString(args, "goal");
+    const mode = readOptionalString(args, "mode") ?? "hybrid";
+    return `Design a typed JIT schema for: ${goal}\nExecution mode: ${mode}\nUse project conventions, select only required compiled operations, and include runtime plus inference tests.`;
+  }
+  if (name === "jit_aot_workflow") {
+    const goal = readOptionalString(args, "goal") ?? "prepare the project for import-free AOT output";
+    return `Use the JIT project resources and read-only tools to ${goal}. Run doctor, inspect declarations, preview generated source/types, verify explicit exports and tree sharing, then describe any write step before generation.`;
+  }
+  const operation = readRequiredString(args, "operation");
+  const dataShape = readOptionalString(args, "dataShape") ?? "not provided";
+  return `Review JIT ${operation} performance. Representative data: ${dataShape}. Separate compile cost from execution cost, inspect generated source, allocations, cache lifetime, monomorphic shapes, and propose a reproducible benchmark before accepting complexity.`;
 }
 
-async function generateAot(args: Readonly<Record<string, unknown>>, cwd: string): Promise<string> {
-  const resolved = await resolveAotInputs(args, cwd);
-  const collected = await collectSchemas(resolved.files);
-  const clean = readOptionalBoolean(args, "clean") ?? resolved.config.clean;
-  const emitPackageJson = readOptionalBoolean(args, "emitPackageJson") ?? resolved.config.emitPackageJson;
-
-  if (Object.keys(collected.schemas).length === 0 && Object.keys(collected.functions).length === 0) {
-    return [
-      "No AOT functions found.",
-      "Export standalone compiled functions or JIT.compile(schema, { ... }) objects from declaration files.",
-      `files: ${resolved.files.join(", ") || "none"}`,
-    ].join("\n");
-  }
-
-  const result = generate({
-    schemas: collected.schemas,
-    functions: collected.functions,
-    sources: collected.sources,
-    outDir: resolve(resolved.root, readOptionalString(args, "outDir") ?? resolved.config.outDir ?? DEFAULT_OUT_DIR),
-    packageName: readOptionalString(args, "packageName") ?? resolved.config.packageName ?? DEFAULT_PACKAGE_NAME,
-    ...(clean !== undefined ? { clean } : {}),
-    ...(emitPackageJson !== undefined ? { emitPackageJson } : {}),
-  });
-
-  return [
-    result.files.length > 0
-      ? `generated files:\n${result.files.map((file) => `- ${file}`).join("\n")}`
-      : "generated files: none",
-    result.skipped.length > 0
-      ? `skipped:\n${result.skipped.map((skip) => `- ${skip.schema}.${skip.operation}: ${skip.reason}`).join("\n")}`
-      : "skipped: none",
-  ].join("\n\n");
+function complete(params: unknown, cwd: string): JsonValue {
+  const record = requireRecord(params, "completion/complete params");
+  const argument = requireRecord(record.argument, "completion argument");
+  const name = readRequiredString(argument, "name");
+  const value = readOptionalString(argument, "value", true) ?? "";
+  const values = completeValue(name, value, cwd);
+  return { completion: { values, total: values.length, hasMore: false } };
 }
 
-async function resolveAotInputs(
-  args: Readonly<Record<string, unknown>>,
-  cwd: string
-): Promise<{
-  readonly root: string;
-  readonly configFile?: string;
-  readonly config: JitConfig;
-  readonly files: readonly string[];
-}> {
-  const root = resolveRoot(args, cwd);
-  const explicitFiles = readOptionalStringArray(args, "files");
-  const explicitPatterns = readOptionalStringArray(args, "patterns");
-  let config: JitConfig = {};
-  let configFile: string | undefined;
-  let files = explicitFiles?.map((file) => resolve(root, file)) ?? [];
-  let patterns = explicitPatterns;
+function listResult(key: string, values: readonly unknown[], params: unknown): JsonValue {
+  const cursor = readRecord(params)?.cursor;
+  if (cursor !== undefined) throw new JsonRpcError(-32602, "This list has no next page; cursor must be omitted.");
+  return { [key]: values as JsonValue };
+}
 
-  if (files.length === 0) {
-    configFile = findConfigFile(root);
-
-    if (configFile) {
-      const loaded = await loadModule(configFile);
-
-      config = (loaded.default ?? loaded) as JitConfig;
-      patterns = patterns ?? config.patterns;
-      files = expandSchemaEntries(config.entries ?? config.schemas, dirname(configFile), patterns);
-    }
-
-    if (files.length === 0) files = discoverSchemaFiles(root, patterns);
+function handleNotification(request: JsonRpcRequest, runtime: McpRuntime): void {
+  if (
+    request.method === "notifications/initialized" ||
+    request.method === "notifications/cancelled" ||
+    request.method === "notifications/roots/list_changed"
+  ) {
+    return;
   }
+  runtime.log(`ignored notification: ${request.method}`);
+}
 
-  return { root, ...(configFile ? { configFile } : {}), config, files };
+function tool(
+  name: string,
+  title: string,
+  description: string,
+  inputSchema: JsonValue,
+  annotations: JsonValue
+): ToolDefinition {
+  return { name, title, description, inputSchema, outputSchema: RESULT_SCHEMA, annotations };
+}
+
+function readOnlyAnnotations(): JsonValue {
+  return { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+}
+
+function toolResult(payload: { readonly text: string; readonly data: JsonValue }): JsonValue {
+  return {
+    content: [{ type: "text", text: payload.text }],
+    structuredContent: payload.data,
+  };
+}
+
+function toolError(message: string): JsonValue {
+  return {
+    content: [{ type: "text", text: message }],
+    structuredContent: { error: message },
+    isError: true,
+  };
 }
 
 function response(id: string | number | null, result: JsonValue): JsonRpcResponse {
   return { jsonrpc: "2.0", id, result };
 }
 
-function errorResponse(id: string | number | null, code: number, message: string): JsonRpcResponse {
-  return { jsonrpc: "2.0", id, error: { code, message } };
-}
-
-function toolResult(text: string, isError = false): JsonValue {
-  return {
-    content: [{ type: "text", text }],
-    ...(isError ? { isError: true } : {}),
-  };
-}
-
-function resolveRoot(args: Readonly<Record<string, unknown>>, cwd: string): string {
-  return resolve(cwd, readOptionalString(args, "root") ?? ".");
-}
-
-function readJsonFile(path: string): Readonly<Record<string, unknown>> | undefined {
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) as Readonly<Record<string, unknown>>;
-  } catch {
-    return undefined;
-  }
-}
-
-function gitValue(cwd: string, args: readonly string[]): string | undefined {
-  try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-function excerpt(text: string): string {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"))
-    .slice(0, 2)
-    .join(" ");
+function errorResponse(id: string | number | null, code: number, message: string, data?: JsonValue): JsonRpcResponse {
+  return { jsonrpc: "2.0", id, error: { code, message, ...(data === undefined ? {} : { data }) } };
 }
 
 function requireRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
-  const record = readRecord(value, label);
-
-  if (!record) throw new Error(`${label} must be an object`);
+  const record = readRecord(value);
+  if (!record) throw new JsonRpcError(-32602, `${label} must be an object`);
   return record;
 }
 
-function readRecord(value: unknown, _label: string): Readonly<Record<string, unknown>> | undefined {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Readonly<Record<string, unknown>>;
-  }
-  return undefined;
+function readRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
 }
 
 function readRequiredString(record: Readonly<Record<string, unknown>>, key: string): string {
   const value = record[key];
-
-  if (typeof value !== "string" || value.length === 0) throw new Error(`${key} must be a non-empty string`);
-  return value;
-}
-
-function readOptionalString(record: Readonly<Record<string, unknown>>, key: string): string | undefined {
-  const value = record[key];
-
-  if (value === undefined) return undefined;
-  if (typeof value !== "string") throw new Error(`${key} must be a string`);
-  return value;
-}
-
-function readOptionalBoolean(record: Readonly<Record<string, unknown>>, key: string): boolean | undefined {
-  const value = record[key];
-
-  if (value === undefined) return undefined;
-  if (typeof value !== "boolean") throw new Error(`${key} must be a boolean`);
-  return value;
-}
-
-function readOptionalStringArray(
-  record: Readonly<Record<string, unknown>>,
-  key: string
-): readonly string[] | undefined {
-  const value = record[key];
-
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new Error(`${key} must be an array of strings`);
+  if (typeof value !== "string" || value.length === 0) {
+    throw new JsonRpcError(-32602, `${key} must be a non-empty string`);
   }
   return value;
 }
 
-function objectSchema(properties: Readonly<Record<string, JsonValue>>): JsonValue {
+function readOptionalString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  allowEmpty = false
+): string | undefined {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || (!allowEmpty && value.length === 0)) {
+    throw new JsonRpcError(-32602, `${key} must be ${allowEmpty ? "a string" : "a non-empty string"}`);
+  }
+  return value;
+}
+
+function objectSchema(properties: Readonly<Record<string, JsonValue>>, required?: readonly string[]): JsonValue {
   return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     additionalProperties: false,
     properties,
+    ...(required && required.length > 0 ? { required } : {}),
   };
 }
 
@@ -376,23 +462,39 @@ function optionalBoolean(description: string): JsonValue {
 }
 
 function optionalStringArray(description: string): JsonValue {
-  return { type: "array", description, items: { type: "string" } };
+  return { type: "array", description, items: { type: "string", minLength: 1 } };
 }
 
 function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
-  const record = readRecord(value, "JSON-RPC message");
+  const record = readRecord(value);
+  return (
+    record?.jsonrpc === "2.0" &&
+    typeof record.method === "string" &&
+    (record.id === undefined || isRequestId(record.id))
+  );
+}
 
-  return record?.jsonrpc === "2.0" && typeof record.method === "string";
+function isJsonRpcResponse(value: unknown): boolean {
+  const record = readRecord(value);
+  return (
+    record?.jsonrpc === "2.0" &&
+    isRequestId(record.id) &&
+    record.method === undefined &&
+    (record.result !== undefined || record.error !== undefined)
+  );
+}
+
+function isRequestId(value: unknown): value is string | number | null {
+  return value === null || typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
 }
 
 function isDirectRun(): boolean {
   const entry = process.argv[1];
-
   return entry !== undefined && import.meta.url === pathToFileURL(resolve(entry)).href;
 }
 
-export function runStdioServer(cwd: string = process.cwd()): void {
-  const runtime: Runtime = {
+export function runStdioServer(cwd: string = process.env.JIT_MCP_ROOT ?? process.cwd()): void {
+  const runtime: McpRuntime = {
     cwd,
     write: (message) => process.stdout.write(`${JSON.stringify(message)}\n`),
     log: (message) => process.stderr.write(`${message}\n`),
@@ -401,22 +503,7 @@ export function runStdioServer(cwd: string = process.cwd()): void {
 
   reader.on("line", (line) => {
     if (line.trim().length === 0) return;
-
-    let parsed: unknown;
-
-    try {
-      parsed = JSON.parse(line);
-    } catch (error) {
-      runtime.log(`invalid JSON-RPC message: ${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-
-    if (!isJsonRpcRequest(parsed)) {
-      runtime.log("ignored non-request JSON-RPC message");
-      return;
-    }
-
-    handleJsonRpc(parsed, runtime).catch((error: unknown) => {
+    processJsonRpcLine(line, runtime).catch((error: unknown) => {
       runtime.log(error instanceof Error ? error.message : String(error));
     });
   });

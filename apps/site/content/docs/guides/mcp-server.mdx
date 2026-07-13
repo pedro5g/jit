@@ -1,0 +1,76 @@
+---
+title: MCP server
+description: Give coding agents safe project context, AOT diagnostics, previews, resources, and prompts.
+---
+
+`@jit/compiler` includes `jit-mcp`, a local MCP `2025-11-25` stdio server. It
+uses the same declaration discovery and generator as the CLI while keeping the
+agent workflow inspectable and workspace-scoped.
+
+```json
+{
+  "mcpServers": {
+    "jit": {
+      "command": "pnpm",
+      "args": ["exec", "jit-mcp"]
+    }
+  }
+}
+```
+
+Start the client from the project root. Hosts that cannot set a working
+directory can provide `JIT_MCP_ROOT=/absolute/project/path` in the server
+environment.
+
+## Tools
+
+| Tool                  | Writes | Use                                                        |
+| --------------------- | ------ | ---------------------------------------------------------- |
+| `jit_project_context` | No     | Package, Git state, commands, and key docs                 |
+| `jit_project_doctor`  | No     | Config, declarations, exports, Node, and output validation |
+| `jit_docs_search`     | No     | Markdown search with file/line matches                     |
+| `jit_aot_inspect`     | No     | Explicit grouped and standalone AOT inventory              |
+| `jit_aot_preview`     | No     | Temporary source, declaration, manifest, or plan build     |
+| `jit_aot_generate`    | Yes    | Write the configured generated package                     |
+
+Every result includes text and structured content. Read-only and mutating
+annotations let the host apply an approval policy. Generation requires an
+explicit `{ "write": true }`; omission is an error.
+
+## Safe workflow
+
+1. Run `jit_project_doctor`.
+2. Inspect explicit exports with `jit_aot_inspect`.
+3. Preview `source` and `declaration` stages.
+4. Preview a `manifest` or named `plan` when needed.
+5. Generate with `write: true` only after review.
+6. Run tests and bundle/tree-shaking checks.
+
+Preview compiles in a temporary directory and cleans it afterwards. Config is
+the default source for files, patterns, output, package identity, cleanup, and
+emit settings; a tool call can override those values for one run.
+
+## Resources and prompts
+
+Project context, READMEs, architecture, local status, config, and the dynamic
+AOT inventory are available under `jit://project/*` and `jit://aot/*`.
+`jit://docs/{path}` reads Markdown below `docs/`, while
+`jit://generated/{path}` reads generated source, types, manifests, and plans.
+
+Prompts cover schema design, AOT migration/generation, and measured performance
+review. Completion suggests execution modes, operation names, and docs paths.
+
+## Security boundary
+
+The startup directory or `JIT_MCP_ROOT` is the workspace boundary. Root,
+declaration, output, docs, and generated paths cannot escape it. Existing
+symlinks are canonicalized before access. Resources are limited to 512 KiB.
+
+AOT declarations are executable local project modules, as with `jit generate`.
+Use the server only with trusted checkouts. The server has no HTTP listener and
+no MCP SDK dependency, so applications do not acquire an agent framework in
+their runtime dependency graph.
+
+See the repository's full [MCP feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/mcp-server.md)
+for all tool arguments, resources, prompts, error codes, and the manual stdio
+test.

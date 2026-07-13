@@ -44,6 +44,7 @@ deno add jsr:@jit/compiler
 - [Architecture](docs/architecture.md)
 - [Feature guides](docs/features/README.md)
 - [Executable runtime and AOT examples](packages/examples/README.md)
+- [MCP server](docs/features/mcp-server.md)
 - [AOT audit](docs/aot/audit.md)
 - [Release process](docs/maintainers/releases.md)
 - [Changelog](CHANGELOG.md)

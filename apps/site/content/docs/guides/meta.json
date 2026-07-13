@@ -4,6 +4,7 @@
     "choosing-an-execution-mode",
     "boundary-recipes",
     "browser-and-edge",
-    "executable-examples"
+    "executable-examples",
+    "mcp-server"
   ]
 }

@@ -23,6 +23,7 @@ work and for production performance. Each page explains:
 - [Binary rowsets](./binary-rowsets.md)
 - [Benchmarks, memory, and load testing](./benchmarks-memory-load.md)
 - [Executable runtime and AOT examples](./examples.md)
+- [MCP server for coding agents](./mcp-server.md)
 
 ## Find A Feature By Goal
 
@@ -40,6 +41,7 @@ work and for production performance. Each page explains:
 | Configure generation/CI           | CLI and config          | discovery, output package and diagnostics   |
 | Reproduce performance claims      | Benchmarks/load         | matching fixture, heap and GC               |
 | Compare JIT and generated code    | Executable examples     | runtime lifecycle vs import-free AOT        |
+| Give an agent safe JIT context    | MCP server              | inspect/preview first, explicit generation  |
 
 The public website mirrors these guides with smaller task-oriented pages and a
 complete operator reference under `apps/site/content/docs`.

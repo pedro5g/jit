@@ -52,8 +52,9 @@ pnpm release:jsr:dry-run
 
 `release:pack` creates the real npm tarball in a temporary directory, rejects
 TypeScript sources and tests, enforces an unpacked-size ceiling, installs the
-tarball in an empty consumer project, and executes ESM, CommonJS, and CLI smoke
-tests. The JSR dry run validates the TypeScript-source distribution separately.
+tarball in an empty consumer project, and executes ESM, CommonJS, CLI, and MCP
+stdio smoke tests. The JSR dry run validates the TypeScript-source distribution
+separately.
 
 ## Tagging And Publication
 
@@ -69,7 +70,9 @@ The tag starts `.github/workflows/release.yml`. The workflow verifies the full
 repository, publishes npm and JSR in parallel, and creates a GitHub Release only
 after both registries succeed. A failed registry publish leaves no successful
 GitHub Release and can be retried from the same immutable tag after correcting
-registry configuration.
+registry configuration. The npm job checks the exact package version first and
+skips publication when that immutable version already exists, so a retry is
+safe after npm succeeded but JSR or GitHub Release failed.
 
 Never move or recreate a published tag. Published registry versions are
 immutable. Fix a bad release with a new patch version.
