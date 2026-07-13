@@ -32,7 +32,9 @@ export function Hero() {
             at runtime or ahead of time.
           </p>
           <div className="mt-8 flex w-full flex-wrap items-center gap-3">
-            <ButtonLink href="/docs/quick-start">Get started</ButtonLink>
+            <ButtonLink href="/docs/quick-start" className="w-full sm:w-auto">
+              Get started
+            </ButtonLink>
             <ButtonLink href={githubUrl} variant="secondary" external>
               Star on GitHub
             </ButtonLink>

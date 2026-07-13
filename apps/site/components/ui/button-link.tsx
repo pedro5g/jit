@@ -25,7 +25,7 @@ export function ButtonLink({
 }) {
   const [active, setActive] = useState(false);
   const classes = clsx(
-    "inline-flex items-center justify-center gap-2 rounded-control px-5 py-2.5 text-sm font-semibold",
+    "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control px-5 py-2.5 text-sm font-semibold",
     "transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2",
     variants[variant],
     className

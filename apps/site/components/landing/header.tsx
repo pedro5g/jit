@@ -11,10 +11,10 @@ import { NavLinks, navLinks } from "./nav-links";
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-line-subtle bg-night-900/85 backdrop-blur">
-      <div className="relative mx-auto flex h-18 w-full max-w-300 items-center gap-5 px-5 sm:px-8">
+      <div className="relative mx-auto flex h-18 w-full max-w-300 items-center gap-3 px-5 sm:px-8 lg:gap-5">
         <Link href="/" aria-label="jit — home" className="flex shrink-0 items-center gap-2.5">
           <JitLogo />
-          <span className="hidden rounded-pixel border border-line-gold/40 bg-gold-200/10 px-1.5 py-0.5 font-pixel-badge text-[9px] uppercase tracking-wider text-gold-200 sm:inline-flex">
+          <span className="hidden rounded-pixel border border-line-gold/40 bg-gold-200/10 px-1.5 py-0.5 font-pixel-badge text-[9px] uppercase tracking-wider text-gold-200 lg:inline-flex">
             v{pkg.version}
           </span>
         </Link>
@@ -22,7 +22,7 @@ export function SiteHeader() {
           <NavLinks />
         </nav>
         <div className="ml-auto flex items-center gap-2.5">
-          <GhostToggle className="hidden sm:inline-flex" />
+          <GhostToggle className="hidden xl:inline-flex" />
           <a
             href={githubUrl}
             target="_blank"
@@ -32,7 +32,7 @@ export function SiteHeader() {
           >
             <GithubIcon className="size-4.5" />
           </a>
-          <ButtonLink href="/docs/quick-start" className="hidden sm:inline-flex">
+          <ButtonLink href="/docs/quick-start" className="hidden px-3 sm:inline-flex lg:px-5">
             Get started
           </ButtonLink>
           <MobileNav links={navLinks} />

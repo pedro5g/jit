@@ -36,6 +36,13 @@ export function MobileNav({ links }: { links: { href: string; label: string }[] 
               </li>
             ))}
           </ul>
+          <Link
+            href="/docs/quick-start"
+            onClick={() => setOpen(false)}
+            className="mt-3 inline-flex w-full items-center justify-center rounded-control bg-gold-200 px-5 py-2.5 text-sm font-semibold whitespace-nowrap text-night-900 shadow-(--shadow-gold) transition-colors hover:bg-gold-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-200"
+          >
+            Get started
+          </Link>
         </nav>
       )}
     </div>
