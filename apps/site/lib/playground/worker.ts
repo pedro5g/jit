@@ -21,7 +21,8 @@ export type PlaygroundOp =
   | "binary"
   | "jsonChunks"
   | "transform"
-  | "mapper";
+  | "mapper"
+  | "model";
 
 export interface PlaygroundRequest {
   id: number;
@@ -104,6 +105,7 @@ interface UserBindings {
   stringifyChunks?: unknown;
   transform?: unknown;
   mapper?: unknown;
+  model?: unknown;
   reactiveUpdate?: unknown;
 }
 
@@ -151,6 +153,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         stringifyChunks: typeof stringifyChunks === "undefined" ? undefined : stringifyChunks,
         transform: typeof transform === "undefined" ? undefined : transform,
         mapper: typeof mapper === "undefined" ? undefined : mapper,
+        model: typeof model === "undefined" ? undefined : model,
         reactiveUpdate: typeof reactiveUpdate === "undefined" ? undefined : reactiveUpdate,
       };`
     );
@@ -424,6 +427,26 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         }
         source = sourceOf(mapper.map);
         run = () => (Array.isArray(a) ? mapper.many(a) : mapper.map(requireA()));
+        break;
+      }
+      case "model": {
+        const model = bindings.model as
+          | {
+              readonly ops?: readonly string[];
+              readonly is?: (value: unknown) => boolean;
+              readonly parse?: (value: unknown) => unknown;
+              readonly clone?: (value: unknown) => unknown;
+            }
+          | undefined;
+        if (!model || !Array.isArray(model.ops)) {
+          throw new Error("define a narrow `model` binding with `JIT.model(schema, { is: true, ... })`");
+        }
+        run = () => ({
+          operations: model.ops,
+          is: model.is?.(requireA()),
+          parsed: model.parse?.(requireA()),
+          cloned: model.clone?.(requireA()),
+        });
         break;
       }
       default:

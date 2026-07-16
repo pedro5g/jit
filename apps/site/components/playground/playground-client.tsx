@@ -121,6 +121,7 @@ const ops: OpConfig[] = [
   { id: "jsonChunks", label: "chunks", aLabel: "values (JSON array)", needsB: false, hasSource: true },
   { id: "transform", label: "transform", needsB: false, hasSource: true },
   { id: "mapper", label: "mapper", aLabel: "value or array (JSON)", needsB: false, hasSource: true },
+  { id: "model", label: "model", needsB: false, hasSource: false },
 ];
 
 const examples: { id: string; label: string; code: string; a: string; op: PlaygroundOp }[] = [
@@ -409,6 +410,27 @@ const mapper = JIT.mapper(schema, PublicUser, {
   "profile": { "age": 36, "city": "London" }
 }`,
     op: "mapper",
+  },
+  {
+    id: "model",
+    label: "Explicit model operations",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32().positive(),
+  name: JIT.string().min(2),
+  email: JIT.string().email(),
+});
+
+// Only these methods exist, compile, and enter the runtime bundle.
+const model = JIT.model(schema, {
+  is: true,
+  parse: true,
+  clone: true,
+});
+`,
+    a: `{ "id": 1, "name": "Ada", "email": "ada@lovelace.dev" }`,
+    op: "model",
   },
   {
     id: "transform",

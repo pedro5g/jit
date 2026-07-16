@@ -72,6 +72,22 @@ const reactiveUpdate = (initial, patches) => {
     });
   });
 
+  it("executes an explicitly configured model", () => {
+    const result = execute(
+      "model",
+      `const schema = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
+const model = JIT.model(schema, { is: true, parse: true, clone: true });`,
+      { id: 1, name: "Ada" }
+    );
+
+    expect(result.value).toEqual({
+      operations: ["is", "parse", "clone"],
+      is: true,
+      parsed: { id: 1, name: "Ada" },
+      cloned: { id: 1, name: "Ada" },
+    });
+  });
+
   it("executes lazy generators and direct visitors", () => {
     const lazy = execute(
       "lazy",

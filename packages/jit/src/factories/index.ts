@@ -34,8 +34,16 @@ export * from "./composition/index.js";
 export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export { mapper } from "./mapper.js";
-export type { CompiledModel } from "./model.js";
-export { model } from "./model.js";
+export type {
+  CompiledModel,
+  ConfiguredModel,
+  ModelFacade,
+  ModelGet,
+  ModelOp,
+  ModelOptions,
+  ModelSelection,
+} from "./model.js";
+export { MODEL_OPS, model } from "./model.js";
 export * from "./object/index.js";
 export * from "./primitive/index.js";
 export type {

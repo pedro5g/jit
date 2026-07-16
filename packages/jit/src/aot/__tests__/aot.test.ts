@@ -43,6 +43,37 @@ describe("JIT model namespace", () => {
     });
     expect(() => WithMap.stringify).toThrow(/serialize/);
   });
+
+  it("should expose explicit get selections without compiling unused model operations", () => {
+    const selected = User.get("is", "parse");
+    const sameSelection = User.get("parse", "is");
+
+    expect(selected).toBe(sameSelection);
+    expect(Object.keys(selected)).toEqual(["schema", "ops", "is", "parse"]);
+    expect(selected.ops).toEqual(["is", "parse"]);
+    expect(selected.is(ada)).toBe(true);
+    expect(selected.parse(ada)).toBe(ada);
+    expectTypeOf(selected).toHaveProperty("is");
+    expectTypeOf(selected).toHaveProperty("parse");
+    // @ts-expect-error clone was not selected
+    selected.clone;
+    expect(() => User.get("unknown" as never)).toThrow(/unknown model operation/);
+  });
+
+  it("should create narrow models from boolean operation options", () => {
+    const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const Compact = JIT.model(UserSchema, { is: true, equal: true, clone: false });
+    const Json = JIT.model(UserSchema, { fromJSON: true });
+
+    expect(Object.keys(Compact)).toEqual(["schema", "ops", "is", "equal"]);
+    expect(Compact.ops).toEqual(["is", "equal"]);
+    expect(Compact.is({ id: 1, name: "Ada" })).toBe(true);
+    expect(Compact.equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
+    expect(Json.fromJSON('{"id":1,"name":"Ada"}')).toEqual({ id: 1, name: "Ada" });
+    // @ts-expect-error parse was not configured
+    Compact.parse;
+    expect(() => JIT.model(UserSchema, { unknown: true } as never)).toThrow(/unknown model operation/);
+  });
 });
 
 describe("JIT AOT generate", () => {
@@ -54,6 +85,31 @@ describe("JIT AOT generate", () => {
 
   afterEach(() => {
     rmSync(outDir, { recursive: true, force: true });
+  });
+
+  it("should emit only explicitly configured model operations", async () => {
+    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
+    const UserRuntime = JIT.model(User, { is: true, clone: true });
+    const result = AOT.generate({ schemas: { User: UserRuntime }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const declarations = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        readonly is: (value: unknown) => boolean;
+        readonly clone: <T>(value: T) => T;
+      };
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(Object.keys(generated.User)).toEqual(["is", "clone"]);
+    expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.User.clone({ id: 1, name: "Ada" })).toEqual({ id: 1, name: "Ada" });
+    expect(source).toContain("function is(value)");
+    expect(source).toContain("function clone(value)");
+    expect(source).not.toContain("function stringify");
+    expect(declarations).toContain("readonly is:");
+    expect(declarations).toContain("readonly clone:");
+    expect(declarations).not.toContain("readonly parse:");
   });
 
   it("should generate a standalone runnable module for callback-free operations", async () => {

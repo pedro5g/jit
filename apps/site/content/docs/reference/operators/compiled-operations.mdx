@@ -36,6 +36,37 @@ against expected reuse; a single lookup may be cheaper as a scan. The
 [cache, hash and indexes guide](/docs/runtime/cache-hash-index) documents the
 immutability contract, adaptive threshold and invalidation choices.
 
+## Models
+
+`JIT.model(schema)` is a compatible lazy facade over every operation. Accessing
+one property compiles only that property, and the per-schema cache reuses it.
+For application boundaries, prefer an explicit model so unsupported or unused
+methods do not exist in the value or its TypeScript type.
+
+```ts
+const lazy = JIT.model(User);
+const ReadUser = lazy.get("is", "parse");
+
+const UserRuntime = JIT.model(User, {
+  is: true,
+  parse: true,
+  equal: true,
+  codec: false,
+});
+
+ReadUser.ops; // ["is", "parse"]
+UserRuntime.equal(left, right);
+// UserRuntime.clone does not exist
+```
+
+`.get()` normalizes operation order and caches equal selections. Boolean model
+configuration is convenient for feature flags and shared runtime modules. Both
+forms compile validator methods together when possible, while unrelated
+compilers are never called. Explicit model selections are grouped AOT markers,
+so exporting `UserRuntime` from a configured `*.jit.ts` entry emits the same
+narrow object. `JIT.compile(schema, { ... })` remains the API for mixing model
+operations with custom queries, mappers or other developer-defined functions.
+
 ## Collection changes
 
 ```ts
