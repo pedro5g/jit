@@ -1,41 +1,454 @@
 ---
 title: Cache, hash and indexes
-description: Understand identity caches, structural hashes and indexed repeated queries.
+description: Choose and configure compile caches, structural hashes, indexes and invalidation strategies.
 ---
 
-Schema-only operations use a `WeakMap` from schema identity to compiled function. Query
-and mapper templates cache pure source while applying user bindings to a fresh closure.
-This prevents one caller's values from leaking into another compiled operation.
+JIT has three independent ways to avoid repeated work:
 
-`JIT.hash(schema)` emits a shape-specialized structural hash. Equal values under the same
-schema produce the same hash; use it for memoization buckets and change detection, then
-confirm collisions with compiled equality when correctness requires it.
+| Mechanism              | What it reuses                          | Best fit                                  | Main constraint                               |
+| ---------------------- | --------------------------------------- | ----------------------------------------- | --------------------------------------------- |
+| Compile cache          | Generated functions or source factories | Every runtime compilation                 | Keyed by schema identity                      |
+| Structural hash cache  | The hash of an object reference         | Repeated comparisons of immutable values  | In-place mutation makes the cached hash stale |
+| Collection index cache | A `Map` for one array and one key       | Repeated equality over large keyed arrays | Array and key fields must stay immutable      |
 
-Entity hints and keyed indexes are useful when the same list receives many
-lookups. Index caches are weakly attached to source collections. A one-off scan
-should stay a scan: building an index has an upfront time and memory cost.
+These are not query-result caches. Calling the same compiled query twice still
+executes the query twice. Compilation caching removes code-generation work;
+hashes and indexes remove repeated traversal work.
 
-## Cache tiers
+## Which strategy should I use?
 
-Schema-only operations use `WeakMap<schema, function>`. Query/mapper plans cache
-the pure source factory and apply each caller's bindings to a fresh closure.
-This keeps compiled templates reusable without sharing user state.
+| Situation                                           | Recommended configuration                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------- |
+| Normal runtime use                                  | Keep the default compile cache and compile at module scope                 |
+| Only `is` and `parse` are needed                    | `JIT.validator(User).get("is", "parse")`                                   |
+| Measure cold compilation                            | Pass `{ cache: false }` to the supported factory                           |
+| Repeated equality for nested immutable objects      | Add `.hash()` to the schema                                                |
+| Repeated equality for large immutable entity arrays | Use `.keyed("id")` or `.entity({ key: "id" }).indexBy("id")`               |
+| Arrays are already sorted by a stable key           | Use `.ordered("id", "asc")`                                                |
+| A collection is edited incrementally                | Use `JIT.watchedList()` and invalidate application caches from its changes |
+| Browser, edge or CSP-sensitive production build     | Generate AOT functions and import only the selected operations             |
 
-## Hash strategy
+## Compile cache
 
-Hashes are accelerators, not identity proofs. Use the hash to select a bucket,
-then compiled equality to resolve collisions where correctness matters. Weak
-hash caches are useful for immutable/reused objects; mutation invalidates the
-assumption.
+The compile cache is enabled by default. Schema-only operations cache the
+fully compiled function in a `WeakMap` keyed by the schema object. Query and
+mapper operations cache a pure source factory and bind caller values to a new
+closure on every compilation.
 
-## Index break-even
+```ts
+const User = JIT.object({
+  id: JIT.number().int(),
+  name: JIT.string(),
+});
 
-An index costs O(n) build time and memory. It pays off only across enough
-lookups or range scans. Measure cardinality and mutation rate: a frequently
-rebuilt index over a short list can be worse than direct specialized scans.
+// Compile once when the module loads.
+const isUser = JIT.validator(User).get("is").is;
 
-`JIT.watchedList(..., { key })` maintains identity indexes while an aggregate
-is edited, but it does not expose a version counter. Invalidate an external
-cache when `isChanged()` becomes true or from the change arrays returned by
-`snapshot()`. The [watched lists guide](/docs/runtime/watched-lists) explains
-the state and identity contract.
+export function acceptUser(input: unknown) {
+  return isUser(input) ? input : undefined;
+}
+```
+
+Compiling in a request handler can hit the cache, but it still allocates the
+builder/facade used to request the function. Keep compiled functions in module
+scope whenever their schema and plan are static.
+
+### Schema identity matters
+
+The cache is intentionally based on object identity, not a deep hash of the
+schema:
+
+```ts
+const A = JIT.object({ id: JIT.number() });
+const B = JIT.object({ id: JIT.number() });
+
+const equalA1 = JIT.equal(A).compile();
+const equalA2 = JIT.equal(A).compile(); // reuses A's compilation
+const equalB = JIT.equal(B).compile(); // B is a distinct cache target
+```
+
+Declare reusable schemas once. Rebuilding an equivalent schema for every
+request prevents identity-based reuse and creates needless schema objects.
+Because the keys are weak, a schema that is no longer reachable does not stay
+alive only because it was compiled.
+
+### Tier A: schema-only functions
+
+Validation, equality, clone, diff, hash, serialization, masking and similar
+operations can cache the applied function itself. No caller-specific value is
+stored in the generated source.
+
+```ts
+const { is, parse } = JIT.validator(User).get("is", "parse");
+const equalUser = JIT.equal(User).compile();
+const cloneUser = JIT.clone(User).compile();
+const hashUser = JIT.hash(User).compile();
+```
+
+Selection and caching solve different problems. `.get("is", "parse")`
+prevents unused validator operations from being compiled; the cache reuses the
+selected functions when the same schema and operation are requested again.
+
+### Tier B: plans with external bindings
+
+Queries and mappers can contain values or callbacks supplied by the caller.
+JIT caches the pure source template, then creates a fresh closure with those
+bindings. One tenant's value or callback cannot leak into another compilation.
+
+```ts
+const findNamed = (name: string) =>
+  JIT.query(JIT.array(User))
+    .filter((q) => q.eq("name", name))
+    .compile();
+
+const findAda = findNamed("Ada");
+const findGrace = findNamed("Grace");
+
+// The source plan can be reused; each function owns its bound value.
+```
+
+The same rule applies to mapper callbacks. The template is reusable, while
+the callback bindings remain local to the returned mapper.
+
+## The `cache` option
+
+`cache: true` is the default and normally should be omitted. Use
+`cache: false` only to measure cold compilation, test cache behavior or inspect
+an isolated compilation. It bypasses that compilation call; it does not clear
+entries created previously.
+
+### Validator
+
+```ts
+// Default: selected functions are cached.
+const validator = JIT.validator(User, {
+  is: true,
+  parse: true,
+});
+
+// Diagnostic/cold-compile mode: selected functions bypass the cache.
+const coldValidator = JIT.validator(User, {
+  is: true,
+  parse: true,
+  cache: false,
+});
+
+// `.get()` preserves the facade's cache policy.
+const coldSelection = JIT.validator(User, { cache: false }).get("is", "parse");
+```
+
+The selection flags also accept `safeParse`, `parseAsync` and
+`safeParseAsync`. Aliases `asyncParse` and `asyncSafeParse` are supported for
+the two asynchronous selections.
+
+### Mapper
+
+Mapper cache options are the argument after the override object:
+
+```ts
+const PublicUser = JIT.object({ id: JIT.number(), name: JIT.string() });
+
+const cachedMapper = JIT.mapper(User, PublicUser).get("map", "many");
+
+const coldMapper = JIT.mapper(User, PublicUser, {}, { cache: false }).get(
+  "map",
+  "many",
+);
+```
+
+Keep the explicit `{}` when there are no field overrides but a cache option is
+needed. This makes the position of both configurations unambiguous.
+
+### Serializer, binary codec and security functions
+
+```ts
+const serializer = JIT.serializer(User); // cache enabled
+const coldSerializer = JIT.serializer(User, { cache: false });
+
+const codec = JIT.codec(User, { version: 2 });
+const coldCodec = JIT.codec(User, { version: 2, cache: false });
+
+const mask = JIT.mask(User, { cache: false });
+const sanitize = JIT.sanitize(User, { cache: false });
+```
+
+The binary codec's `version` is part of its compile key. Version 1 and version
+2 therefore never share incompatible generated functions.
+
+### Streams
+
+```ts
+const stream = JIT.stream(User, {
+  format: "ndjson",
+  onItem: (user) => queue.push(user),
+  cache: false,
+});
+```
+
+The option controls reuse of compiled validation helpers. Every stream still
+owns its own parser buffer, item list and `onItem` callback, even when the
+validator was loaded from cache. Never share one stream instance between two
+connections.
+
+### Low-level compiler functions
+
+The ergonomic `JIT.equal(User)`, `JIT.clone(User)` and similar facades use the
+default cache. Compiler tooling and cold-compile benchmarks can bypass it at
+the low-level boundary:
+
+```ts
+const coldEqual = JIT.compileEqual(User.schema, { cache: false });
+const coldClone = JIT.compileClone(User.schema, { cache: false });
+const coldHash = JIT.compileHash(User.schema, { cache: false });
+```
+
+The final options argument is also available on the low-level
+`compileValidator`, `compileValidatorSelection`, `compileDiff`,
+`compileUpdate`, `compileFormat`, `compileSerialize`, `compileMask`,
+`compileSanitize`, `compileCodec`, `compileMapper`,
+`compileMapperSelection`, `compileQuery`, lazy query iterator/visitor
+compilers and `compileBinaryQuery`. Their typed fluent factories should remain
+the normal application API; use these entry points when building compiler
+tooling or controlled benchmarks.
+
+`Compiler.clearCompileCache()` resets the global compile cache. It is intended
+for deterministic tests and benchmark setup, not application lifecycle
+management. Disabling or clearing the cache in a request path converts a
+one-time cost back into recurring code generation.
+
+## Structural hash cache
+
+`JIT.hash(schema)` emits a schema-specialized structural hash and memoizes the
+result for object references. Primitives bypass the `WeakMap` because they
+cannot be weak keys.
+
+```ts
+const HashedUser = JIT.object({
+  id: JIT.number().int(),
+  profile: JIT.object({ name: JIT.string(), roles: JIT.array(JIT.string()) }),
+}).hash();
+
+const hashUser = JIT.hash(HashedUser).compile();
+const equalUser = JIT.equal(HashedUser).compile();
+
+const firstHash = hashUser(user);
+const secondHash = hashUser(user); // same reference: cached traversal
+```
+
+The `.hash()` hint also lets compiled equality reject unequal objects before
+walking every nested field. A matching hash is never accepted as proof:
+compiled equality still compares the real values to resolve collisions.
+
+### Use hash when
+
+- the same immutable object references are compared or hashed repeatedly;
+- values are nested enough that a full traversal is meaningful work;
+- a hash bucket narrows a large memoization or change-detection set;
+- most comparisons are unequal and can exit after the hash check.
+
+### Do not use hash when
+
+- objects are mutated in place;
+- values are tiny and compared once;
+- the hash would be computed only to discard it;
+- a domain key such as `user.id` already gives the exact identity required.
+
+There is no per-object hash invalidation API. Replace changed values instead
+of mutating them:
+
+```ts
+// Unsafe: `user` may already have a cached hash.
+user.profile.name = "Grace";
+
+// Safe: new references receive new hashes.
+const updated = {
+  ...user,
+  profile: { ...user.profile, name: "Grace" },
+};
+```
+
+The strategy names accepted by `.hash(strategy)` currently enable the same
+structural hash short-circuit. Treat names such as `"ordered"` as descriptive
+intent, not as identity/reference hashing semantics.
+
+### Correct memoization with collisions
+
+Use the hash to find a small bucket and compiled equality to confirm a hit:
+
+```ts
+const buckets = new Map<
+  number,
+  Array<{ input: JIT.Typeof<typeof HashedUser>; result: Result }>
+>();
+
+function memoized(input: JIT.Typeof<typeof HashedUser>): Result {
+  const key = hashUser(input);
+  const bucket = buckets.get(key);
+  const hit = bucket?.find((entry) => equalUser(entry.input, input));
+  if (hit) return hit.result;
+
+  const result = compute(input);
+  if (bucket) bucket.push({ input, result });
+  else buckets.set(key, [{ input, result }]);
+  return result;
+}
+```
+
+Application result caches need their own size, TTL and eviction policy. JIT's
+hash cache only avoids recomputing structural hashes and does not retain result
+objects for you.
+
+## Collection index cache
+
+For order-independent equality over entity arrays, a stable key avoids a
+nested search:
+
+```ts
+const Users = JIT.array(User).keyed("id");
+const equalUsers = JIT.equal(Users).compile();
+
+equalUsers(
+  [
+    { id: 1, name: "Ada" },
+    { id: 2, name: "Lin" },
+  ],
+  [
+    { id: 2, name: "Lin" },
+    { id: 1, name: "Ada" },
+  ],
+); // true
+```
+
+`.keyed("id")` is the convenient complete configuration. The explicit form is
+useful when entity and index metadata are composed separately:
+
+```ts
+const Users = JIT.array(User).entity({ key: "id" }).indexBy("id");
+```
+
+For collections shorter than 64 items, generated equality uses a direct scan
+and avoids allocating a `Map`. At 64 items and above it builds or reuses an
+index for the right-hand array. This adaptive threshold keeps the hint useful
+without making small lists pay the index setup cost.
+
+The index cache stores one key/index pair per array reference. Repeating the
+same comparison with the same right-hand array and key reuses its `Map`.
+Requesting another key for that array replaces the previous cached index.
+
+### Index requirements
+
+- keys must be unique and stable;
+- the array and its entities must not be mutated after indexing;
+- repeated operations should amortize the O(n) map build;
+- use a new array reference after insert, remove, reorder or key changes.
+
+```ts
+// Unsafe after the array was indexed.
+users.push(nextUser);
+users[0].id = 99;
+
+// Safe: the new array receives a new index.
+const withNext = [...users, nextUser];
+const renamed = users.map((user) =>
+  user.id === 1 ? { ...user, name: "Grace" } : user,
+);
+```
+
+Duplicate keys are ambiguous and the last value wins while a `Map` is built.
+Use a direct scan or normalize the data first if uniqueness cannot be
+guaranteed.
+
+### Sorted collections
+
+When both sides follow a stable sort contract, use binary-search equality
+instead of a `Map`:
+
+```ts
+const OrderedUsers = JIT.array(User).ordered("id", "asc");
+const equalOrderedUsers = JIT.equal(OrderedUsers).compile();
+```
+
+This avoids index allocation and searches by key in O(log n), but the input
+must actually be sorted in the declared direction. `.ordered()` is not a
+runtime sorting step.
+
+## Queries are not result-cached
+
+A compiled query is reusable code, not a memoized answer:
+
+```ts
+const adaNames = JIT.query(JIT.array(User))
+  .filter((q) => q.eq("name", "Ada"))
+  .select("name")
+  .compile();
+
+adaNames(users); // executes the fused loop
+adaNames(users); // executes it again
+```
+
+Likewise, `.keyed("id")` in a query produces a `Map` as the query output; it
+does not install a persistent result cache. Add an application cache only when
+measurements show that repeated identical inputs justify retention.
+
+For immutable inputs, an application cache can key by input reference. For
+values reconstructed on every request, use a domain version or structural
+hash plus equality confirmation.
+
+## Watched lists and invalidation
+
+Use `JIT.watchedList()` when a collection is intentionally edited over time.
+It owns retained identity indexes and reports exactly what changed:
+
+```ts
+const watched = JIT.watchedList(Users, initialUsers, { key: "id" });
+
+watched.update({ id: 1, name: "Grace" });
+watched.remove(2);
+
+if (watched.isChanged()) {
+  const changes = watched.snapshot();
+  resultCache.delete("users:summary");
+  publish(changes);
+}
+```
+
+A watched list does not automatically invalidate structural hashes, compiled
+functions or your application cache. Use `isChanged()` or the change arrays
+from `snapshot()` as the invalidation signal. See the
+[watched lists guide](/docs/runtime/watched-lists) for update, remove, rollback
+and snapshot behavior.
+
+## AOT and tree shaking
+
+AOT output has no runtime compiler cache because code generation already
+happened during the build. Import only the generated functions selected by the
+application:
+
+```ts
+import { User } from "@jit/generated";
+
+User.is(input);
+```
+
+Generated hash and index helpers are emitted only when a selected operation
+needs them. A validator-only artifact does not carry `__hashCache`,
+`__indexCache` or the runtime compiler. This matters in front-end bundles:
+tree shaking can remove entire unused operation families instead of shipping a
+generic validation engine.
+
+Binary query compilation follows the same template rule: the physical layout
+and query plan can reuse generated source, while each row-set buffer remains
+ordinary input data and is never stored as a query result.
+
+## Production checklist
+
+- Declare schemas and compile static plans at module scope.
+- Keep the default compile cache enabled in runtime mode.
+- Select only the functions used by the route with `.get(...)`.
+- Reserve `cache: false` and `clearCompileCache()` for tests and benchmarks.
+- Treat hash-cached objects and indexed arrays as immutable.
+- Confirm hash collisions with compiled equality.
+- Use unique, stable keys for `.keyed()` and `.indexBy()`.
+- Measure before indexing small or frequently replaced collections.
+- Invalidate application result caches from watched-list changes.
+- Prefer AOT in browser bundles and import only generated operations in use.

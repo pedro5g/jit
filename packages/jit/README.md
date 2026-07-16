@@ -1019,6 +1019,42 @@ for all tools, resources, prompts, errors, and security details.
 
 ---
 
+## Cache and reuse
+
+Runtime compilation is cached by schema identity. Declare schemas and compiled
+operations once at module scope, then reuse the resulting function:
+
+```ts
+const { is, parse } = JIT.validator(User).get("is", "parse");
+
+export function receive(input: unknown) {
+  return is(input) ? parse(input) : undefined;
+}
+```
+
+`cache: true` is the default. Supported compiler factories accept
+`{ cache: false }` for cold-compilation benchmarks and deterministic tests:
+
+```ts
+JIT.validator(User, { is: true, cache: false });
+JIT.mapper(Source, Target, overrides, { cache: false });
+JIT.serializer(User, { cache: false });
+JIT.codec(User, { version: 2, cache: false });
+JIT.stream(User, { format: "ndjson", cache: false });
+```
+
+Do not disable the cache in request paths. Hash and index caches have a
+different contract: `.hash()` benefits repeatedly used immutable objects;
+`.keyed("id")` benefits repeated equality over large immutable arrays with
+unique keys. In-place mutation can leave either cache stale. Compiled queries
+reuse generated code, but never memoize query results.
+
+See the [complete cache, hash and index guide](https://jit-site.vercel.app/docs/runtime/cache-hash-index)
+for configuration placement, the 64-item adaptive index threshold, hash
+collision handling, watched-list invalidation and AOT tree shaking.
+
+---
+
 ## Optimization playbook
 
 Every emitter follows the same set of strategies — this is where the numbers

@@ -32,7 +32,9 @@ offers iterable consumption over the same compiled issue vector.
 
 Hints such as `entity`, `keyed`, `ordered`, `indexBy` and `hash` influence
 strategies for repeated collection operations. Benchmark index construction
-against expected reuse; a single lookup may be cheaper as a scan.
+against expected reuse; a single lookup may be cheaper as a scan. The
+[cache, hash and indexes guide](/docs/runtime/cache-hash-index) documents the
+immutability contract, adaptive threshold and invalidation choices.
 
 ## Collection changes
 
