@@ -112,6 +112,36 @@ describe("JIT AOT generate", () => {
     expect(declarations).not.toContain("readonly parse:");
   });
 
+  it("should emit selected DTO validation, transport, and whitelist mappers", async () => {
+    const User = JIT.object({ id: JIT.number().int32(), fullName: JIT.string(), passwordHash: JIT.string() });
+    const PublicUser = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
+    const Public = JIT.dto(User, PublicUser, { name: { from: "fullName" } }).get("is", "stringify", "from", "many");
+    const result = AOT.generate({ schemas: { Public }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Public: {
+        readonly is: (value: unknown) => boolean;
+        readonly stringify: (value: unknown) => string;
+        readonly from: (value: { id: number; fullName: string; passwordHash: string }) => {
+          id: number;
+          name: string;
+        };
+        readonly many: (
+          value: readonly { id: number; fullName: string; passwordHash: string }[]
+        ) => { id: number; name: string }[];
+      };
+    };
+    const entity = { id: 1, fullName: "Ada", passwordHash: "secret" };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(Object.keys(generated.Public)).toEqual(["is", "stringify", "from", "many"]);
+    expect(generated.Public.from(entity)).toEqual({ id: 1, name: "Ada" });
+    expect(generated.Public.many([entity])).toEqual([{ id: 1, name: "Ada" }]);
+    expect(generated.Public.stringify({ id: 1, name: "Ada" })).toBe('{"id":1,"name":"Ada"}');
+    expect(source).not.toContain("passwordHash");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+  });
+
   it("should generate a standalone runnable module for callback-free operations", async () => {
     const Event = JIT.object({
       id: JIT.number(),

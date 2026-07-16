@@ -122,6 +122,7 @@ const ops: OpConfig[] = [
   { id: "transform", label: "transform", needsB: false, hasSource: true },
   { id: "mapper", label: "mapper", aLabel: "value or array (JSON)", needsB: false, hasSource: true },
   { id: "model", label: "model", needsB: false, hasSource: false },
+  { id: "dto", label: "dto", aLabel: "entity or entities (JSON)", needsB: false, hasSource: false },
 ];
 
 const examples: { id: string; label: string; code: string; a: string; op: PlaygroundOp }[] = [
@@ -431,6 +432,37 @@ const model = JIT.model(schema, {
 `,
     a: `{ "id": 1, "name": "Ada", "email": "ada@lovelace.dev" }`,
     op: "model",
+  },
+  {
+    id: "dto",
+    label: "DTO aggregate",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  fullName: JIT.string(),
+  passwordHash: JIT.string(),
+  profile: JIT.object({ city: JIT.string(), internalScore: JIT.number() }),
+});
+
+const PublicUser = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+  city: JIT.string(),
+});
+
+const dto = JIT.dto(schema, PublicUser, {
+  name: { from: "fullName" },
+  city: (user) => user.profile.city,
+}).get("is", "stringify", "from", "many");
+`,
+    a: `{
+  "id": 1,
+  "fullName": "Ada Lovelace",
+  "passwordHash": "$argon2id$secret",
+  "profile": { "city": "London", "internalScore": 99 }
+}`,
+    op: "dto",
   },
   {
     id: "transform",

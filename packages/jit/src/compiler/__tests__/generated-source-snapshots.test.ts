@@ -300,4 +300,16 @@ describe("generated source snapshots", () => {
       parse: Compiler.emitValidatorSource(Form.schema, { ops: ["parse"] }),
     }).toMatchSnapshot();
   });
+
+  it("dto: selected validation and fused whitelist mapping", () => {
+    const Entity = JIT.object({ id: JIT.number(), fullName: JIT.string(), passwordHash: JIT.string() });
+    const Public = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const DTO = JIT.dto(Entity, Public, { name: { from: "fullName" } }).get("is", "from", "many");
+
+    expect({
+      is: Compiler.emitValidatorSource(Public.schema, { ops: ["is"] }),
+      from: sourceOf(DTO.from),
+      many: sourceOf(DTO.many),
+    }).toMatchSnapshot();
+  });
 });

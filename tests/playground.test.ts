@@ -88,6 +88,28 @@ const model = JIT.model(schema, { is: true, parse: true, clone: true });`,
     });
   });
 
+  it("executes a DTO aggregate without leaking source-only fields", () => {
+    const result = execute(
+      "dto",
+      `const schema = JIT.object({
+  id: JIT.number(), fullName: JIT.string(), passwordHash: JIT.string()
+});
+const PublicUser = JIT.object({ id: JIT.number(), name: JIT.string() });
+const dto = JIT.dto(schema, PublicUser, { name: { from: "fullName" } })
+  .get("is", "stringify", "from", "many");`,
+      { id: 1, fullName: "Ada", passwordHash: "secret" }
+    );
+
+    expect(result.value).toEqual({
+      operations: ["is", "stringify", "from", "many"],
+      dto: { id: 1, name: "Ada" },
+      valid: true,
+      json: '{"id":1,"name":"Ada"}',
+    });
+    expect(JSON.stringify(result.value)).not.toContain("passwordHash");
+    expect(JSON.stringify(result.value)).not.toContain("secret");
+  });
+
   it("executes lazy generators and direct visitors", () => {
     const lazy = execute(
       "lazy",

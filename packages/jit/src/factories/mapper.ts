@@ -52,9 +52,13 @@ export type MapperOverrides<TSource, TTarget> = {
   >;
 };
 
-type MapperOverridesArg<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarget>] extends [never]
+export type MapperOverridesArg<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarget>] extends [never]
   ? [overrides?: MapperOverrides<TSource, TTarget>, options?: CompileCacheOptions]
   : [overrides: MapperOverrides<TSource, TTarget>, options?: CompileCacheOptions];
+
+export type MapperOverridesOnlyArg<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarget>] extends [never]
+  ? [overrides?: MapperOverrides<TSource, TTarget>]
+  : [overrides: MapperOverrides<TSource, TTarget>];
 
 /**
  * Compiles a declarative source→target shape mapper.

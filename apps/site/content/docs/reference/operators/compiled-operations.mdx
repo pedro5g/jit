@@ -118,6 +118,11 @@ omits `many`, `.get("many")` omits `map`, and direct property access compiles
 that operation lazily. `JIT.transform` provides field operations and selection
 over one source schema.
 
+`JIT.dto(Target)` aggregates inbound validation/transport operations.
+`JIT.dto(Source, Target, mapping)` adds whitelist `from` and fused `many`
+projections. See [DTO aggregates](/docs/runtime/dtos) for schema variants,
+security boundaries and AOT behavior.
+
 ## Security operations
 
 ```ts

@@ -1,0 +1,161 @@
+---
+title: DTO aggregates
+description: Validate inbound contracts and compile whitelist projections for outbound transport objects.
+---
+
+A data transfer object is a boundary contract, not a domain entity with fewer
+methods. `JIT.dto` groups the operations needed at that boundary while keeping
+each compiler optional:
+
+- validate untrusted input;
+- project a trusted entity through a target-schema allow-list;
+- parse and serialize JSON;
+- encode/decode the same DTO schema when binary transport is required.
+
+This design follows the usual DTO goals documented by [Microsoft
+Learn](https://learn.microsoft.com/en-us/aspnet/web-api/overview/data/using-web-api-with-entity-framework/part-5):
+hide fields, reduce payloads, flatten graphs, avoid circular references and
+decouple service/database shapes. It also follows the [OWASP mass-assignment
+guidance](https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html):
+bind only explicitly allowed fields instead of passing an entity directly to a
+write operation.
+
+## Inbound DTO
+
+Pass one schema when data already has the DTO shape. `.get()` makes the boundary
+explicit and compiles only those methods.
+
+```ts
+import { JIT } from "@jit-compiler/jit/runtime";
+
+const CreateUserSchema = JIT.object({
+  name: JIT.string().min(2).max(80),
+  email: JIT.string().email(),
+}).strict();
+
+export const CreateUserDTO = JIT.dto(CreateUserSchema).get(
+  "parse",
+  "safeParse",
+  "fromJSON",
+);
+
+const command = CreateUserDTO.parse(request.body);
+const fromQueue = CreateUserDTO.fromJSON(message.data);
+```
+
+Use `strict()` when unexpected keys should be an error. A loose/strip object can
+be appropriate for forward-compatible clients, but authorization must never
+depend on silently ignored fields.
+
+## Outbound DTO
+
+Pass source schema, target schema and mapper rules to add `from` and `many`.
+Mapper output is a whitelist by construction: fields absent from the target
+schema cannot enter the object, even when they exist on the source entity.
+
+```ts
+const UserEntity = JIT.object({
+  id: JIT.number().int32(),
+  fullName: JIT.string(),
+  passwordHash: JIT.string(),
+  profile: JIT.object({ city: JIT.string(), internalScore: JIT.number() }),
+});
+
+const PublicUserSchema = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+  city: JIT.string(),
+});
+
+export const PublicUserDTO = JIT.dto(UserEntity, PublicUserSchema, {
+  name: { from: "fullName" },
+  city: (user) => user.profile.city,
+}).get("from", "many", "stringify");
+
+const publicUser = PublicUserDTO.from(entity);
+const publicUsers = PublicUserDTO.many(entities);
+response.end(PublicUserDTO.stringify(publicUser));
+```
+
+Same-name compatible fields are copied automatically. Renames use `{ from }`,
+conversions use `{ from, via }`, computed fields use callbacks, and constants
+use `{ default }`. Required target fields that cannot be produced are a
+TypeScript error and an `INVALID_MAPPER` runtime error.
+
+`many` is not `sources.map(dto.from)`: its generated source contains one indexed
+loop and inlines every field write. That removes per-item calls and intermediate
+objects while preserving the exact target shape.
+
+## Operations
+
+| Operation        | Input           | Result                  | Typical boundary           |
+| ---------------- | --------------- | ----------------------- | -------------------------- |
+| `is`             | unknown         | type predicate          | cheap routing/gate         |
+| `parse`          | unknown         | DTO or validation error | HTTP/RPC command           |
+| `safeParse`      | unknown         | success/issues union    | forms and APIs             |
+| `parseAsync`     | unknown         | Promise of DTO          | async refinements/promises |
+| `safeParseAsync` | unknown         | Promise of result       | non-throwing async input   |
+| `fromJSON`       | JSON string     | parsed, validated DTO   | queue/cache input          |
+| `stringify`      | DTO             | JSON string             | HTTP/socket output         |
+| `codec`          | DTO/bytes       | binary transport pair   | compact sockets/storage    |
+| `from`           | source entity   | one DTO                 | detail endpoint            |
+| `many`           | source entities | DTO array               | list endpoint              |
+
+`operations` contains the complete DTO selection. `ops` contains standard AOT
+operations; `extras` contains mapper operations (`from`, `many`). This mirrors
+the generated package manifest and makes build inspection straightforward.
+
+## Create, update and view variants
+
+DTO variants are normal immutable schema transforms. There is no second class
+hierarchy or metadata reflection layer.
+
+```ts
+const UserFields = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+  email: JIT.string().email(),
+  role: JIT.string(),
+});
+
+const CreateUserDTO = JIT.dto(UserFields.omit("id", "role")).get("parse");
+const PatchUserDTO = JIT.dto(UserFields.pick("name", "email").partial()).get(
+  "parse",
+);
+const UserViewDTO = JIT.dto(UserEntity, UserFields.omit("role"), {}).get(
+  "from",
+  "stringify",
+);
+```
+
+This is the same role served by `PartialType`, `PickType` and `OmitType` in
+[NestJS mapped types](https://docs.nestjs.com/openapi/mapped-types), but the JIT
+transforms produce schema AST directly and therefore feed every compiler.
+
+## AOT and tree shaking
+
+Every `.get()` result is a grouped AOT marker. Export it from a configured
+`*.jit.ts` file and `jit generate` emits only the selected methods:
+
+```ts
+export const PublicUser = JIT.dto(UserEntity, PublicUserSchema, {
+  name: { from: "fullName" },
+}).get("is", "stringify", "from", "many");
+```
+
+The generated module contains specialized low-level functions and no JIT
+runtime import. Pure copies, nested copies and renames are AOT-safe. Mapping
+callbacks are external bindings at runtime; generation reports them as skipped
+when they cannot be serialized safely. Prefer declarative rename/copy rules for
+portable generated DTOs.
+
+## Correctness boundaries
+
+`parse` validates untrusted DTO-shaped data. `from` assumes a typed/trusted
+source and avoids a second validation pass; TypeScript checks mapper return
+types. If a callback crosses an `unknown` or external-library boundary, validate
+once explicitly with `Dto.parse(Dto.from(entity))`.
+
+A DTO prevents accidental field exposure and mass assignment, but it does not
+authorize the caller. Property-level authorization and business invariants
+still belong in the application/domain layer.

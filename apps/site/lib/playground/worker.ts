@@ -22,7 +22,8 @@ export type PlaygroundOp =
   | "jsonChunks"
   | "transform"
   | "mapper"
-  | "model";
+  | "model"
+  | "dto";
 
 export interface PlaygroundRequest {
   id: number;
@@ -106,6 +107,7 @@ interface UserBindings {
   transform?: unknown;
   mapper?: unknown;
   model?: unknown;
+  dto?: unknown;
   reactiveUpdate?: unknown;
 }
 
@@ -154,6 +156,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         transform: typeof transform === "undefined" ? undefined : transform,
         mapper: typeof mapper === "undefined" ? undefined : mapper,
         model: typeof model === "undefined" ? undefined : model,
+        dto: typeof dto === "undefined" ? undefined : dto,
         reactiveUpdate: typeof reactiveUpdate === "undefined" ? undefined : reactiveUpdate,
       };`
     );
@@ -447,6 +450,32 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
           parsed: model.parse?.(requireA()),
           cloned: model.clone?.(requireA()),
         });
+        break;
+      }
+      case "dto": {
+        const dto = bindings.dto as
+          | {
+              readonly operations?: readonly string[];
+              readonly is?: (value: unknown) => boolean;
+              readonly stringify?: (value: unknown) => string;
+              readonly from?: (value: unknown) => unknown;
+              readonly many?: (values: readonly unknown[]) => unknown[];
+            }
+          | undefined;
+        if (!dto || !Array.isArray(dto.operations)) {
+          throw new Error("define a `dto` binding with `JIT.dto(source, target, mapping).get(...)`");
+        }
+        run = () => {
+          const input = requireA();
+          const output = Array.isArray(input) ? dto.many?.(input) : dto.from?.(input);
+
+          return {
+            operations: dto.operations,
+            dto: output,
+            valid: Array.isArray(output) ? output.every((value) => dto.is?.(value)) : dto.is?.(output),
+            json: Array.isArray(output) ? output.map((value) => dto.stringify?.(value)) : dto.stringify?.(output),
+          };
+        };
         break;
       }
       default:
