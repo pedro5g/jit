@@ -72,7 +72,7 @@ export function emitUpdateSource(schema: ATS.AnyTypeSchema): string {
 export function compileUpdate<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Update<ATS.InferSchema<TSchema>> {
+): Update<ATS.TypeofSchema<TSchema>> {
   assertUpdateable(schema);
   return getCompileCached(
     schema,
@@ -82,7 +82,7 @@ export function compileUpdate<TSchema extends ATS.AnyTypeSchema>(
       const body = emitUpdateBody(program);
 
       return globalThis.Function(`return function update(value, patch) {\n${body}\n};`)() as Update<
-        ATS.InferSchema<TSchema>
+        ATS.TypeofSchema<TSchema>
       >;
     },
     options

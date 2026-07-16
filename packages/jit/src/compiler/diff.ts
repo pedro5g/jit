@@ -10,9 +10,17 @@ import { emitDiff, emitDiffBody } from "./diff/emit-diff.js";
  * @template T - The type of the changed value at `path`.
  */
 export type DiffChange<T = unknown> =
-  | { readonly type: "add"; readonly path: readonly PropertyKey[]; readonly value: T }
+  | {
+      readonly type: "add";
+      readonly path: readonly PropertyKey[];
+      readonly value: T;
+    }
   | { readonly type: "remove"; readonly path: readonly PropertyKey[] }
-  | { readonly type: "update"; readonly path: readonly PropertyKey[]; readonly value: T };
+  | {
+      readonly type: "update";
+      readonly path: readonly PropertyKey[];
+      readonly value: T;
+    };
 
 /**
  * A compiled structural diff function.
@@ -53,7 +61,7 @@ export function emitDiffSource(schema: ATS.AnyTypeSchema): string {
 export function compileDiff<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Diff<ATS.Infer<TSchema>> {
+): Diff<ATS.Typeof<TSchema>> {
   return getCompileCached(
     schema,
     "diff",
@@ -62,10 +70,14 @@ export function compileDiff<TSchema extends ATS.AnyTypeSchema>(
       const body = emitDiffBody(program);
 
       const compiled = globalThis.Function(`return function diff(left, right) {\n${body}\n};`)() as Diff<
-        ATS.Infer<TSchema>
+        ATS.Typeof<TSchema>
       >;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "diff" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "diff",
+      });
       return compiled;
     },
     options

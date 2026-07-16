@@ -19,7 +19,7 @@ describe("Transform object operators", () => {
       expect(User.def.props.id.type).toBe(AST.TypeName.number);
       expect(User.def.props.name.type).toBe(AST.TypeName.string);
 
-      expectTypeOf<AST.Infer<typeof PartialUser>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof PartialUser>>().toEqualTypeOf<{
         id: number | undefined;
         name: string | undefined;
       }>();
@@ -42,7 +42,7 @@ describe("Transform object operators", () => {
       expect(RequiredUser.def.props.name.type).toBe(AST.TypeName.string);
       expect(RequiredUser.def.props.id).toBe(User.def.props.id);
 
-      expectTypeOf<AST.Infer<typeof RequiredUser>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof RequiredUser>>().toEqualTypeOf<{
         id: number;
         name: string;
       }>();
@@ -63,7 +63,7 @@ describe("Transform object operators", () => {
       expect(Object.keys(IdOnly.def.props)).toEqual(["id"]);
       expect(IdOnly.def.props.id).toBe(User.def.props.id);
 
-      expectTypeOf<AST.Infer<typeof IdOnly>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof IdOnly>>().toEqualTypeOf<{
         id: number;
       }>();
     });
@@ -85,7 +85,7 @@ describe("Transform object operators", () => {
       expect(Object.keys(NameOnly.def.props)).toEqual(["name"]);
       expect(NameOnly.def.props.name).toBe(User.def.props.name);
 
-      expectTypeOf<AST.Infer<typeof NameOnly>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof NameOnly>>().toEqualTypeOf<{
         name: string;
       }>();
     });
@@ -104,7 +104,7 @@ describe("Transform object operators", () => {
 
       expect(User.def.props.id.type).toBe(AST.TypeName.number);
 
-      expectTypeOf<AST.Infer<typeof Extended>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof Extended>>().toEqualTypeOf<{
         id: string;
         name: string;
         active: boolean;
@@ -124,7 +124,7 @@ describe("Transform object operators", () => {
       expect(Merged.def.props.name).toBe(User.def.props.name);
       expect(Merged.def.props.role).toBe(Role.def.props.role);
 
-      expectTypeOf<AST.Infer<typeof Merged>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof Merged>>().toEqualTypeOf<{
         id: string;
         name: string;
         role: string;
@@ -156,14 +156,16 @@ describe("Transform object operators", () => {
       const Extra = JIT.string().schema;
       const Catchall = Transform.catchall(User, Extra);
       const Picked = Transform.pick(Catchall, ["id"]);
-      const Extended = Transform.extend(Catchall, { active: JIT.boolean().schema });
+      const Extended = Transform.extend(Catchall, {
+        active: JIT.boolean().schema,
+      });
 
       expect(Catchall.def.unknownKeys).toBe("passthrough");
       expect(Catchall.def.catchall).toBe(Extra);
       expect(Picked.def.catchall).toBe(Extra);
       expect(Extended.def.catchall).toBe(Extra);
 
-      expectTypeOf<AST.Infer<typeof Catchall>>().toEqualTypeOf<
+      expectTypeOf<AST.Typeof<typeof Catchall>>().toEqualTypeOf<
         {
           id: number;
           name: string;
@@ -176,7 +178,7 @@ describe("Transform object operators", () => {
 
       expect(Keys.type).toBe(AST.TypeName.enum);
       expect(Keys.def.values).toEqual(["id", "name"]);
-      expectTypeOf<AST.Infer<typeof Keys>>().toEqualTypeOf<"id" | "name">();
+      expectTypeOf<AST.Typeof<typeof Keys>>().toEqualTypeOf<"id" | "name">();
     });
   });
 });

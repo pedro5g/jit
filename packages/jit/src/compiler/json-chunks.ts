@@ -49,7 +49,7 @@ export function compileStringifyChunks<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   chunks: JsonChunksOptions = {},
   cache?: CompileCacheOptions
-): StringifyChunks<ATS.InferSchema<TSchema>> {
+): StringifyChunks<ATS.TypeofSchema<TSchema>> {
   const chunkBytes = chunks.chunkBytes ?? 16 * 1024;
 
   return getCompileCached(
@@ -57,9 +57,14 @@ export function compileStringifyChunks<TSchema extends ATS.AnyTypeSchema>(
     `stringifyChunks:${chunkBytes}`,
     () => {
       const source = emitStringifyChunksSource(schema, chunks);
-      const compiled = globalThis.Function(`return ${source};`)() as StringifyChunks<ATS.InferSchema<TSchema>>;
+      const compiled = globalThis.Function(`return ${source};`)() as StringifyChunks<ATS.TypeofSchema<TSchema>>;
 
-      registerArtifact(compiled as object, { kind: "query", source, bindingNames: [], bindingValues: [] });
+      registerArtifact(compiled as object, {
+        kind: "query",
+        source,
+        bindingNames: [],
+        bindingValues: [],
+      });
       return compiled;
     },
     cache

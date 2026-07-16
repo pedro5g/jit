@@ -15,8 +15,8 @@ import type { QueryConditionBuilder, QueryConstRef, QueryParamRef, QueryRuntimeP
 import { constant, param } from "./query.js";
 
 type ParamSchemaShape = Readonly<Record<string, SchemaInput>>;
-type InferParamShape<TShape extends ParamSchemaShape> = {
-  readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.InferSchema<TSchema> : never;
+type TypeofParamShape<TShape extends ParamSchemaShape> = {
+  readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.TypeofSchema<TSchema> : never;
 };
 type ProcessPick<TValue, TKey extends keyof TValue> = {
   readonly [TField in TKey]: TValue[TField];
@@ -49,7 +49,7 @@ export interface BinaryProcessBuilder<
 > {
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
-  ): BinaryProcessBuilder<TElement, TOutput, TResult, InferParamShape<TShape>>;
+  ): BinaryProcessBuilder<TElement, TOutput, TResult, TypeofParamShape<TShape>>;
   filter(
     predicate: (query: QueryConditionBuilder<TElement>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
   ): BinaryProcessBuilder<TElement, TOutput, TResult, TParams>;
@@ -79,7 +79,7 @@ export interface BinaryProcessBuilder<
 
 export function process<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): ProcessBuilder<ATS.InferSchema<TSchema>> {
+): ProcessBuilder<ATS.TypeofSchema<TSchema>> {
   const objectSchema = unwrapSchema(schema);
 
   if (objectSchema.type !== TypeName.object) {
@@ -88,13 +88,11 @@ export function process<TSchema extends ATS.AnyTypeSchema>(
 
   return {
     binary(options) {
-      return createBinaryProcessBuilder<ATS.InferSchema<TSchema>, ATS.InferSchema<TSchema>, ATS.InferSchema<TSchema>[]>(
-        objectSchema,
-        options ?? {},
-        [],
-        [],
-        []
-      );
+      return createBinaryProcessBuilder<
+        ATS.TypeofSchema<TSchema>,
+        ATS.TypeofSchema<TSchema>,
+        ATS.TypeofSchema<TSchema>[]
+      >(objectSchema, options ?? {}, [], [], []);
     },
   };
 }
@@ -113,7 +111,7 @@ function createBinaryProcessBuilder<
 ): BinaryProcessBuilder<TElement, TOutput, TResult, TParams> {
   return {
     params(shape) {
-      return createBinaryProcessBuilder<TElement, TOutput, TResult, InferParamShape<typeof shape>>(
+      return createBinaryProcessBuilder<TElement, TOutput, TResult, TypeofParamShape<typeof shape>>(
         objectSchema,
         options,
         nodes,
@@ -197,11 +195,17 @@ function createBinaryProcessBuilder<
 
     compile() {
       const processSchema = createProcessObjectSchema(objectSchema, nodes);
-      const arraySchema = createSchema(TypeName.array, { element: processSchema }) as ATS.ArraySchema;
+      const arraySchema = createSchema(TypeName.array, {
+        element: processSchema,
+      }) as ATS.ArraySchema;
       const binary = compileBinaryArray(arraySchema, options, {
         adaptiveStringFields: collectProjectionOnlyFields(processSchema, nodes),
       }) as BinaryArray<TElement>;
-      const query = compileBinaryQuery<TElement, TResult, TParams>(binary, { nodes, bindings, params: paramNames });
+      const query = compileBinaryQuery<TElement, TResult, TParams>(binary, {
+        nodes,
+        bindings,
+        params: paramNames,
+      });
       const execute = ((values: readonly TElement[], second?: TParams | number, third?: number): TResult => {
         const hasParams = paramNames.length > 0;
         const params = hasParams ? (second as TParams) : undefined;

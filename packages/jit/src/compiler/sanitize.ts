@@ -62,7 +62,7 @@ export function emitSanitizeSource(schema: ATS.AnyTypeSchema): string {
 export function compileSanitize<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Sanitize<ATS.InferSchema<TSchema>> {
+): Sanitize<ATS.TypeofSchema<TSchema>> {
   return getCompileCached(
     schema,
     "sanitize",
@@ -72,9 +72,13 @@ export function compileSanitize<TSchema extends ATS.AnyTypeSchema>(
       const compiled = globalThis.Function(
         ...SANITIZE_BINDINGS,
         `return ${emitted.source.replace("function scrub", "function sanitize")};`
-      )(...SANITIZE_VALUES) as Sanitize<ATS.InferSchema<TSchema>>;
+      )(...SANITIZE_VALUES) as Sanitize<ATS.TypeofSchema<TSchema>>;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "sanitize" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "sanitize",
+      });
       return compiled;
     },
     options

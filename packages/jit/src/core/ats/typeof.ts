@@ -1,22 +1,20 @@
-import type { AnyTypeSchema, InferSchema, OptionalSchema, ReadonlySchema, SchemaShape } from "./type-schema.js";
+import type { AnyTypeSchema, OptionalSchema, ReadonlySchema, SchemaShape, TypeofSchema } from "./type-schema.js";
 
-export type Infer<TSchemaLike> = TSchemaLike extends { readonly schema: infer TSchema extends AnyTypeSchema }
-  ? InferSchema<TSchema>
+/** Resolves the output represented by a schema or builder. */
+export type Typeof<TSchemaLike> = TSchemaLike extends { readonly schema: infer TSchema extends AnyTypeSchema }
+  ? TypeofSchema<TSchema>
   : TSchemaLike extends AnyTypeSchema
-    ? InferSchema<TSchemaLike>
+    ? TypeofSchema<TSchemaLike>
     : never;
-
-/** Public schema output helper used as `JIT.Typeof<typeof Schema>`. */
-export type Typeof<TSchemaLike> = Infer<TSchemaLike>;
 
 export type SchemaLike<TSchema extends AnyTypeSchema = AnyTypeSchema> = TSchema | { readonly schema: TSchema };
 
-export type InferSchemaLike<TSchemaLike extends SchemaLike> = TSchemaLike extends {
+export type TypeofSchemaLike<TSchemaLike extends SchemaLike> = TSchemaLike extends {
   readonly schema: infer TSchema extends AnyTypeSchema;
 }
-  ? InferSchema<TSchema>
+  ? TypeofSchema<TSchema>
   : TSchemaLike extends AnyTypeSchema
-    ? InferSchema<TSchemaLike>
+    ? TypeofSchema<TSchemaLike>
     : never;
 
 export type OptionalShape<TShape extends SchemaShape> = {

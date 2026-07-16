@@ -62,8 +62,8 @@ export interface CompiledModel<T> {
  */
 export function model<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): CompiledModel<ATS.InferSchema<TSchema>> {
-  type TValue = ATS.InferSchema<TSchema>;
+): CompiledModel<ATS.TypeofSchema<TSchema>> {
+  type TValue = ATS.TypeofSchema<TSchema>;
   const unwrapped = unwrapSchema(schema);
 
   return {

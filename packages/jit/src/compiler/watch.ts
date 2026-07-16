@@ -29,7 +29,10 @@ export interface WatchResult<TItem> {
   readonly initialItems: TItem[];
   readonly newItems: TItem[];
   readonly removedItems: TItem[];
-  readonly updatedItems: Array<{ readonly previous: TItem; readonly current: TItem }>;
+  readonly updatedItems: Array<{
+    readonly previous: TItem;
+    readonly current: TItem;
+  }>;
   readonly isChanged: boolean;
 }
 
@@ -76,7 +79,7 @@ interface WatchProgram {
  */
 export function emitWatchSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  options: WatchOptions<CollectionElement<ATS.InferSchema<TSchema>>>
+  options: WatchOptions<CollectionElement<ATS.TypeofSchema<TSchema>>>
 ): string {
   return emitWatchProgram(schema, options).source;
 }
@@ -100,19 +103,19 @@ export function emitWatchSource<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compileWatch<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  options: WatchOptions<CollectionElement<ATS.InferSchema<TSchema>>>
-): Watch<ATS.InferSchema<TSchema>> {
+  options: WatchOptions<CollectionElement<ATS.TypeofSchema<TSchema>>>
+): Watch<ATS.TypeofSchema<TSchema>> {
   const program = emitWatchProgram(schema, options);
   const bindingNames = program.bindings.map((_, index) => `__w${index}`);
 
   return globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings) as Watch<
-    ATS.InferSchema<TSchema>
+    ATS.TypeofSchema<TSchema>
   >;
 }
 
 function emitWatchProgram<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  options: WatchOptions<CollectionElement<ATS.InferSchema<TSchema>>>
+  options: WatchOptions<CollectionElement<ATS.TypeofSchema<TSchema>>>
 ): WatchProgram {
   const target = expectWatchTarget(schema, "emitWatchSource");
   const key = options.key;
@@ -232,7 +235,10 @@ function expectWatchTarget(schema: ATS.AnyTypeSchema, compilerName: string): Wat
     throw new JITError("INVALID_OPERATION", `${compilerName} expects a collection of object schema`);
   }
 
-  return { kind: resolved.type as WatchCollectionKind, objectSchema: element as ObjectSchema };
+  return {
+    kind: resolved.type as WatchCollectionKind,
+    objectSchema: element as ObjectSchema,
+  };
 }
 
 function validateObjectKeys(schema: ObjectSchema, keys: readonly string[], compilerName: string): void {

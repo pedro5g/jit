@@ -12,7 +12,9 @@ type FieldTransform<TValue, TSource> = (value: TValue, source: TSource) => unkno
 type TransformStep<TSource> =
   | { readonly kind: "inline"; readonly emit: (valueExpr: string) => string }
   | { readonly kind: "binding"; readonly fn: FieldTransform<unknown, TSource> };
-type TransformMap<TSource> = Partial<{ readonly [TKey in keyof TSource]: TransformStep<TSource> }>;
+type TransformMap<TSource> = Partial<{
+  readonly [TKey in keyof TSource]: TransformStep<TSource>;
+}>;
 type TransformKeys<TOutput> = Extract<keyof TOutput, string>;
 type TransformMapped<TOutput, TKey extends keyof TOutput, TValue> = Omit<TOutput, TKey> & {
   readonly [TField in TKey]: TValue;
@@ -57,39 +59,45 @@ interface TransformState<TSource> {
 
 export function transform<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): TransformBuilder<ATS.InferSchema<TSchema>, ATS.InferSchema<TSchema>> {
+): TransformBuilder<ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>> {
   const unwrapped = unwrapSchema(schema);
 
-  return createTransformBuilder(unwrapped, { selected: undefined, transforms: {} });
+  return createTransformBuilder(unwrapped, {
+    selected: undefined,
+    transforms: {},
+  });
 }
 
 function createTransformBuilder<TSchema extends ATS.AnyTypeSchema, TOutput>(
   schema: TSchema,
-  state: TransformState<ATS.InferSchema<TSchema>>
-): TransformBuilder<ATS.InferSchema<TSchema>, TOutput> {
+  state: TransformState<ATS.TypeofSchema<TSchema>>
+): TransformBuilder<ATS.TypeofSchema<TSchema>, TOutput> {
   return {
     select(...keys) {
       return createTransformBuilder(schema, { ...state, selected: keys });
     },
     map(key, mapper) {
       const result = mapper(createFieldOps());
-      const step: TransformStep<ATS.InferSchema<TSchema>> = isTransformExpression(result)
+      const step: TransformStep<ATS.TypeofSchema<TSchema>> = isTransformExpression(result)
         ? { kind: "inline", emit: result.emit }
-        : { kind: "binding", fn: result as FieldTransform<unknown, ATS.InferSchema<TSchema>> };
+        : {
+            kind: "binding",
+            fn: result as FieldTransform<unknown, ATS.TypeofSchema<TSchema>>,
+          };
       const transforms = { ...state.transforms, [key]: step };
 
       return createTransformBuilder(schema, { ...state, transforms });
     },
     compile() {
-      return compileTransformFacade(schema, state) as (value: ATS.InferSchema<TSchema>) => TOutput;
+      return compileTransformFacade(schema, state) as (value: ATS.TypeofSchema<TSchema>) => TOutput;
     },
   };
 }
 
 function compileTransformFacade<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  state: TransformState<ATS.InferSchema<TSchema>>
-): (value: ATS.InferSchema<TSchema>) => unknown {
+  state: TransformState<ATS.TypeofSchema<TSchema>>
+): (value: ATS.TypeofSchema<TSchema>) => unknown {
   const objectSchema = resolveWrappers(schema).base;
 
   if (objectSchema.type !== TypeName.object) {
@@ -111,7 +119,7 @@ function compileTransformFacade<TSchema extends ATS.AnyTypeSchema>(
   const bindings = collectBindings(transformKeys, state.transforms);
   const source = emitTransformFacadeSource(keys, state.transforms, bindings.namesByKey);
   const fn = globalThis.Function(...bindings.names, `return ${source};`)(...bindings.values) as (
-    value: ATS.InferSchema<TSchema>
+    value: ATS.TypeofSchema<TSchema>
   ) => unknown;
 
   registerArtifact(fn as object, {

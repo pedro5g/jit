@@ -150,7 +150,7 @@ export interface BinaryArray<TElement = unknown> {
 }
 
 export type BinaryArrayElement<TSchema extends ATS.ArraySchema> =
-  ATS.InferSchema<TSchema> extends (infer TElement)[] ? TElement : never;
+  ATS.TypeofSchema<TSchema> extends (infer TElement)[] ? TElement : never;
 
 interface BinaryArrayState {
   buffer: ArrayBufferLike | undefined;
@@ -691,7 +691,10 @@ function resolveBinaryElement(schema: ATS.AnyTypeSchema, feature: string): Binar
     return { schema: resolved as ObjectSchema, union: undefined };
   }
   if (resolved.type === TypeName.intersection) {
-    return { schema: flattenObjectIntersection(resolved, feature), union: undefined };
+    return {
+      schema: flattenObjectIntersection(resolved, feature),
+      union: undefined,
+    };
   }
   if (resolved.type === TypeName.union || resolved.type === TypeName.discriminatedUnion) {
     return flattenObjectUnion(resolved, feature);
@@ -763,7 +766,11 @@ function flattenObjectUnion(schema: ATS.AnyTypeSchema, feature: string): BinaryE
         `${feature} discriminator ${JSON.stringify(discriminator)} must be a required string or number literal`
       );
     }
-    return { tag, value, keys: Object.keys(option.def.props) } satisfies BinaryUnionVariantLayout;
+    return {
+      tag,
+      value,
+      keys: Object.keys(option.def.props),
+    } satisfies BinaryUnionVariantLayout;
   });
   const values = new Set(variants.map((variant) => `${typeof variant.value}:${String(variant.value)}`));
 
@@ -823,7 +830,11 @@ function flattenObjectUnion(schema: ATS.AnyTypeSchema, feature: string): BinaryE
       present++;
     }
 
-    if (selected) merged.set(key, { ...selected, optional: selected.optional || present !== options.length });
+    if (selected)
+      merged.set(key, {
+        ...selected,
+        optional: selected.optional || present !== options.length,
+      });
   }
 
   return {
@@ -878,7 +889,11 @@ function scalarLiteralValue(schema: ATS.AnyTypeSchema): string | number | undefi
 
 function resolvedObjectField(schema: ATS.AnyTypeSchema): ResolvedObjectField {
   const resolved = resolveWrappers(schema);
-  return { base: resolved.base, optional: resolved.optional, nullable: resolved.nullable };
+  return {
+    base: resolved.base,
+    optional: resolved.optional,
+    nullable: resolved.nullable,
+  };
 }
 
 function createObjectSchema(fields: ReadonlyMap<string, ResolvedObjectField>): ObjectSchema {
@@ -932,7 +947,11 @@ export function createBinaryRowLayout(
     if (fieldAlignment > alignment) alignment = fieldAlignment;
     const guard =
       resolved.optional || resolved.nullable
-        ? { maskOffset: guardIndex >> 2, shift: (guardIndex++ & 3) * 2, maskStride: 0 }
+        ? {
+            maskOffset: guardIndex >> 2,
+            shift: (guardIndex++ & 3) * 2,
+            maskStride: 0,
+          }
         : undefined;
 
     entries[entries.length] = {
@@ -1016,7 +1035,10 @@ export function createBinaryRowLayout(
         : {}),
       ...(columnIndex !== undefined ? { columnIndex } : {}),
       ...(entry.dictionaryIndex !== undefined
-        ? { dictionaryIndex: entry.dictionaryIndex, dictionaryMode: entry.descriptor.dictionary }
+        ? {
+            dictionaryIndex: entry.dictionaryIndex,
+            dictionaryMode: entry.descriptor.dictionary,
+          }
         : {}),
       ...(entry.descriptor.values ? { values: entry.descriptor.values } : {}),
       ...(entry.descriptor.literal !== undefined ? { literal: entry.descriptor.literal } : {}),
@@ -1233,10 +1255,19 @@ function describeField(
     case TypeName.enum: {
       const values = Object.values((schema as ATS.EnumSchema).def.values) as ScalarDictionaryValue[];
 
-      return { kind: "enum", size: values.length <= 255 ? 1 : 4, dictionary: "fixed", values };
+      return {
+        kind: "enum",
+        size: values.length <= 255 ? 1 : 4,
+        dictionary: "fixed",
+        values,
+      };
     }
     case TypeName.literal:
-      return { kind: "literal", size: 0, literal: (schema as ATS.LiteralSchema).def.value };
+      return {
+        kind: "literal",
+        size: 0,
+        literal: (schema as ATS.LiteralSchema).def.value,
+      };
     case TypeName.null:
       return { kind: "null", size: 0 };
     case TypeName.undefined:
@@ -1245,7 +1276,13 @@ function describeField(
     case TypeName.xor: {
       const values = literalUnionValues(schema);
 
-      if (values) return { kind: "literalUnion", size: values.length <= 255 ? 1 : 4, dictionary: "fixed", values };
+      if (values)
+        return {
+          kind: "literalUnion",
+          size: values.length <= 255 ? 1 : 4,
+          dictionary: "fixed",
+          values,
+        };
       break;
     }
   }
@@ -1256,7 +1293,10 @@ function describeField(
   );
 }
 
-function numberField(schema: ATS.AnyTypeSchema): { readonly kind: BinaryFieldKind; readonly size: number } {
+function numberField(schema: ATS.AnyTypeSchema): {
+  readonly kind: BinaryFieldKind;
+  readonly size: number;
+} {
   const checks = ((schema.def as { readonly checks?: readonly ATS.SchemaCheck[] }).checks ?? []).map(
     (check) => check.kind
   );

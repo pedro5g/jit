@@ -52,7 +52,7 @@ export function emitHashSource(schema: ATS.AnyTypeSchema): string {
 export function compileHash<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Hash<ATS.Infer<TSchema>> {
+): Hash<ATS.Typeof<TSchema>> {
   return getCompileCached(
     schema,
     "hash",
@@ -65,17 +65,21 @@ export function compileHash<TSchema extends ATS.AnyTypeSchema>(
         "__hashBigInt",
         "__hashUnknown",
         `return function computeHash(value) {\n${emitHashBody(schema)}\n};`
-      )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Infer<TSchema>>;
+      )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Typeof<TSchema>>;
 
-      const compiled = ((value: ATS.Infer<TSchema>) => {
+      const compiled = ((value: ATS.Typeof<TSchema>) => {
         if (isHashCacheable(value)) {
           return getHash(value, compute as (value: object) => number);
         }
 
         return compute(value);
-      }) as Hash<ATS.Infer<TSchema>>;
+      }) as Hash<ATS.Typeof<TSchema>>;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "hash" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "hash",
+      });
       return compiled;
     },
     options

@@ -50,8 +50,8 @@ type QueryPick<TValue, TKey extends keyof TValue> = {
   readonly [TField in TKey]: TValue[TField];
 };
 type ParamSchemaShape = Readonly<Record<string, SchemaInput>>;
-type InferParamShape<TShape extends ParamSchemaShape> = {
-  readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.InferSchema<TSchema> : never;
+type TypeofParamShape<TShape extends ParamSchemaShape> = {
+  readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.TypeofSchema<TSchema> : never;
 };
 type QueryComparable<TValue> = TValue | QueryConstRef<TValue> | QueryParamRef;
 export type QueryRuntimeParams<TParams extends Readonly<Record<string, unknown>>> = {
@@ -62,8 +62,8 @@ type QueryCompiledFunction<
   TResult,
   TParams extends Readonly<Record<string, unknown>>,
 > = keyof TParams extends never
-  ? (value: ATS.InferSchema<TSchema>) => TResult
-  : (value: ATS.InferSchema<TSchema>, params: TParams) => TResult;
+  ? (value: ATS.TypeofSchema<TSchema>) => TResult
+  : (value: ATS.TypeofSchema<TSchema>, params: TParams) => TResult;
 type BinaryQueryCompiledFunction<
   TElement,
   TResult,
@@ -123,10 +123,10 @@ export interface QueryBuilder<
 > {
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
-  ): QueryBuilder<TSchema, TOutput, TResult, InferParamShape<TShape>>;
+  ): QueryBuilder<TSchema, TOutput, TResult, TypeofParamShape<TShape>>;
   filter(
     predicate: (
-      query: QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+      query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
       params: QueryRuntimeParams<TParams>
     ) => QueryConditionNode
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
@@ -138,16 +138,16 @@ export interface QueryBuilder<
     QuerySelectResult<TResult, QueryPick<TOutput, TKeys[number]>>,
     TParams
   >;
-  unique<TKey extends QueryCollectionKey<ATS.InferSchema<TSchema>>>(
+  unique<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
-  keyed<TKey extends QueryCollectionKey<ATS.InferSchema<TSchema>>>(
+  keyed<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
-  ): QueryBuilder<TSchema, TOutput, Map<QueryKeyValue<ATS.InferSchema<TSchema>, TKey>, TOutput>, TParams>;
-  groupBy<TKey extends QueryCollectionKey<ATS.InferSchema<TSchema>>>(
+  ): QueryBuilder<TSchema, TOutput, Map<QueryKeyValue<ATS.TypeofSchema<TSchema>, TKey>, TOutput>, TParams>;
+  groupBy<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
-  ): QueryBuilder<TSchema, TOutput, Record<QueryGroupKey<ATS.InferSchema<TSchema>, TKey>, TOutput[]>, TParams>;
-  orderBy<TKey extends QueryCollectionKey<ATS.InferSchema<TSchema>>>(
+  ): QueryBuilder<TSchema, TOutput, Record<QueryGroupKey<ATS.TypeofSchema<TSchema>, TKey>, TOutput[]>, TParams>;
+  orderBy<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey,
     direction?: "asc" | "desc"
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
@@ -158,13 +158,13 @@ export interface QueryBuilder<
   drop(count: number): QueryBuilder<TSchema, TOutput, TResult, TParams>;
   takeWhile(
     predicate: (
-      query: QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+      query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
       params: QueryRuntimeParams<TParams>
     ) => QueryConditionNode
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
   dropWhile(
     predicate: (
-      query: QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+      query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
       params: QueryRuntimeParams<TParams>
     ) => QueryConditionNode
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
@@ -178,32 +178,32 @@ export interface QueryBuilder<
   groupAdjacentBy<TKey extends Extract<keyof TOutput, string>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput[], TOutput[][], TParams>;
-  delete(): QueryBuilder<TSchema, TOutput, ATS.InferSchema<TSchema>, TParams>;
+  delete(): QueryBuilder<TSchema, TOutput, ATS.TypeofSchema<TSchema>, TParams>;
   update(
-    patch: QueryUpdatePatch<ATS.InferSchema<TSchema>>
-  ): QueryBuilder<TSchema, TOutput, ATS.InferSchema<TSchema>, TParams>;
+    patch: QueryUpdatePatch<ATS.TypeofSchema<TSchema>>
+  ): QueryBuilder<TSchema, TOutput, ATS.TypeofSchema<TSchema>, TParams>;
   /** Sums a numeric field over the (filtered, unique) items; `0` when empty. */
-  sum<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(
+  sum<TKey extends NumericQueryKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number, TParams>;
   /** Counts the (filtered, unique) items; `0` when empty. */
   count(): QueryBuilder<TSchema, TOutput, number, TParams>;
   /** Averages a numeric field; `undefined` when no item matches. */
-  avg<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(
+  avg<TKey extends NumericQueryKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number | undefined, TParams>;
   /** Minimum of a numeric field; `undefined` when no item matches. */
-  min<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(
+  min<TKey extends NumericQueryKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number | undefined, TParams>;
   /** Maximum of a numeric field; `undefined` when no item matches. */
-  max<TKey extends NumericQueryKey<ATS.InferSchema<TSchema>>>(
+  max<TKey extends NumericQueryKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number | undefined, TParams>;
   compile(): QueryCompiledFunction<TSchema, TResult, TParams>;
-  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
-  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
-  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
   lazy(): LazyQueryBuilder<TSchema, TOutput, TParams>;
   explain(outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
 }
@@ -213,10 +213,10 @@ export interface LazyQueryBuilder<
   TOutput,
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 > {
-  compile(): QueryIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
-  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
-  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
-  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.InferSchema<TSchema>>, TOutput, TParams>;
+  compile(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
   explain(outputMode?: "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
 }
 
@@ -233,7 +233,7 @@ export interface BinaryQueryBuilder<
 > {
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
-  ): BinaryQueryBuilder<TElement, TOutput, TResult, InferParamShape<TShape>>;
+  ): BinaryQueryBuilder<TElement, TOutput, TResult, TypeofParamShape<TShape>>;
   filter(
     predicate: (query: QueryConditionBuilder<TElement>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
   ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
@@ -295,8 +295,8 @@ export function query<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): QueryBuilder<
   TSchema,
-  CollectionElementOf<ATS.InferSchema<TSchema>>,
-  CollectionElementOf<ATS.InferSchema<TSchema>>[]
+  CollectionElementOf<ATS.TypeofSchema<TSchema>>,
+  CollectionElementOf<ATS.TypeofSchema<TSchema>>[]
 >;
 
 export function query(schema: unknown): unknown {
@@ -320,7 +320,7 @@ function createBinaryQueryBuilder<
 ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams> {
   return {
     params(shape) {
-      return createBinaryQueryBuilder<TElement, TOutput, TResult, InferParamShape<typeof shape>>(
+      return createBinaryQueryBuilder<TElement, TOutput, TResult, TypeofParamShape<typeof shape>>(
         target,
         nodes,
         bindings,
@@ -365,7 +365,11 @@ function createBinaryQueryBuilder<
     },
 
     compile() {
-      return compileBinaryQuery<TElement, TResult, TParams>(target, { nodes, bindings, params: paramNames });
+      return compileBinaryQuery<TElement, TResult, TParams>(target, {
+        nodes,
+        bindings,
+        params: paramNames,
+      });
     },
   };
 }
@@ -383,7 +387,7 @@ function createQueryBuilder<
 ): QueryBuilder<TSchema, TOutput, TResult, TParams> {
   return {
     params(shape) {
-      return createQueryBuilder<TSchema, TOutput, TResult, InferParamShape<typeof shape>>(
+      return createQueryBuilder<TSchema, TOutput, TResult, TypeofParamShape<typeof shape>>(
         schema,
         nodes,
         bindings,
@@ -394,7 +398,7 @@ function createQueryBuilder<
     filter(predicate) {
       const state = createConditionBuilder(bindings.length);
       const condition = predicate(
-        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
         createParamRefs(paramNames)
       );
 
@@ -443,7 +447,7 @@ function createQueryBuilder<
     takeWhile(predicate) {
       const state = createConditionBuilder(bindings.length);
       const condition = predicate(
-        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
         createParamRefs(paramNames)
       );
       return createQueryBuilder(
@@ -457,7 +461,7 @@ function createQueryBuilder<
     dropWhile(predicate) {
       const state = createConditionBuilder(bindings.length);
       const condition = predicate(
-        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.InferSchema<TSchema>>>,
+        state.builder as QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
         createParamRefs(paramNames)
       );
       return createQueryBuilder(
@@ -540,8 +544,12 @@ function createQueryBuilder<
           params: paramNames,
         }) as QueryCompiledFunction<TSchema, TResult, TParams>;
       }
-      const iterator = compileQueryIterator(schema, { nodes, bindings, params: paramNames });
-      return ((value: ATS.InferSchema<TSchema>, params?: TParams) =>
+      const iterator = compileQueryIterator(schema, {
+        nodes,
+        bindings,
+        params: paramNames,
+      });
+      return ((value: ATS.TypeofSchema<TSchema>, params?: TParams) =>
         Array.from(
           paramNames.length > 0
             ? (iterator as (input: Iterable<unknown>, params: TParams) => Iterable<unknown>)(
@@ -553,15 +561,27 @@ function createQueryBuilder<
     },
 
     compileIterator() {
-      return compileQueryIterator(schema, { nodes, bindings, params: paramNames });
+      return compileQueryIterator(schema, {
+        nodes,
+        bindings,
+        params: paramNames,
+      });
     },
 
     compileAsyncIterator() {
-      return compileQueryAsyncIterator(schema, { nodes, bindings, params: paramNames });
+      return compileQueryAsyncIterator(schema, {
+        nodes,
+        bindings,
+        params: paramNames,
+      });
     },
 
     compileVisitor() {
-      return compileQueryVisitor(schema, { nodes, bindings, params: paramNames });
+      return compileQueryVisitor(schema, {
+        nodes,
+        bindings,
+        params: paramNames,
+      });
     },
 
     lazy() {

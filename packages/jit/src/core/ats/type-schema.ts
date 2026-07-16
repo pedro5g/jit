@@ -26,14 +26,14 @@ export type AnySchema =
 
 export type SchemaShape = Readonly<Record<string, AnyTypeSchema>>;
 
-export type InferSchema<TSchema extends AnyTypeSchema> = TSchema["_type"];
+export type TypeofSchema<TSchema extends AnyTypeSchema> = TSchema["_type"];
 
-export type InferShape<TShape extends SchemaShape> = {
-  -readonly [TKey in keyof TShape]: InferSchema<TShape[TKey]>;
+export type TypeofShape<TShape extends SchemaShape> = {
+  -readonly [TKey in keyof TShape]: TypeofSchema<TShape[TKey]>;
 };
 
-export type MutableInferShape<TShape extends SchemaShape> = {
-  -readonly [TKey in keyof TShape]: InferSchema<TShape[TKey]>;
+export type MutableTypeofShape<TShape extends SchemaShape> = {
+  -readonly [TKey in keyof TShape]: TypeofSchema<TShape[TKey]>;
 };
 
 export interface EmptyDef {}
@@ -279,13 +279,13 @@ export interface ObjectDef<
 export type AnyCollectionSchema = ArraySchema | SetSchema | MapSchema | RecordSchema | TupleSchema | ObjectSchema;
 
 export type ArraySchema<TElement extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TElement>[],
+  TypeofSchema<TElement>[],
   "array",
   ElementDef<TElement> & ChecksDef<ArrayCheck>
 >;
 
 export type SetSchema<TElement extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  Set<InferSchema<TElement>>,
+  Set<TypeofSchema<TElement>>,
   "set",
   ElementDef<TElement>
 >;
@@ -293,13 +293,13 @@ export type SetSchema<TElement extends AnyTypeSchema = AnyTypeSchema> = BaseSche
 export type MapSchema<
   TKey extends AnyTypeSchema = AnyTypeSchema,
   TValue extends AnyTypeSchema = AnyTypeSchema,
-> = BaseSchema<Map<InferSchema<TKey>, InferSchema<TValue>>, "map", KeyValueDef<TKey, TValue>>;
+> = BaseSchema<Map<TypeofSchema<TKey>, TypeofSchema<TValue>>, "map", KeyValueDef<TKey, TValue>>;
 
 export type RecordSchema<
   TKey extends AnyTypeSchema = TypeSchema<PropertyKey>,
   TValue extends AnyTypeSchema = AnyTypeSchema,
 > = BaseSchema<
-  Record<Extract<InferSchema<TKey>, PropertyKey>, InferSchema<TValue>>,
+  Record<Extract<TypeofSchema<TKey>, PropertyKey>, TypeofSchema<TValue>>,
   "record",
   KeyValueDef<TKey, TValue>
 >;
@@ -307,13 +307,13 @@ export type RecordSchema<
 export type TupleOutput<
   TItems extends readonly AnyTypeSchema[],
   TRest extends AnyTypeSchema | undefined = undefined,
-> = TRest extends TypeSchema ? [...TupleItemsOutput<TItems>, ...InferSchema<TRest>[]] : TupleItemsOutput<TItems>;
+> = TRest extends TypeSchema ? [...TupleItemsOutput<TItems>, ...TypeofSchema<TRest>[]] : TupleItemsOutput<TItems>;
 
 type TupleItemsOutput<TItems extends readonly AnyTypeSchema[]> = TItems extends readonly []
   ? []
   : TItems extends readonly [infer THead extends AnyTypeSchema, ...infer TTail extends readonly AnyTypeSchema[]]
-    ? [InferSchema<THead>, ...TupleItemsOutput<TTail>]
-    : InferSchema<TItems[number]>[];
+    ? [TypeofSchema<THead>, ...TupleItemsOutput<TTail>]
+    : TypeofSchema<TItems[number]>[];
 
 export type TupleSchema<
   TItems extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[],
@@ -324,14 +324,14 @@ export type ObjectOutput<
   TShape extends SchemaShape,
   TUnknownKeys extends ObjectUnknownKeys = undefined,
   TCatchall extends AnyTypeSchema | undefined = undefined,
-> = InferShape<TShape> &
+> = TypeofShape<TShape> &
   (TCatchall extends AnyTypeSchema
-    ? Record<string, InferSchema<TCatchall> | KnownObjectValue<TShape>>
+    ? Record<string, TypeofSchema<TCatchall> | KnownObjectValue<TShape>>
     : TUnknownKeys extends "passthrough"
       ? Record<string, unknown>
       : unknown);
 
-type KnownObjectValue<TShape extends SchemaShape> = InferShape<TShape>[keyof InferShape<TShape>];
+type KnownObjectValue<TShape extends SchemaShape> = TypeofShape<TShape>[keyof TypeofShape<TShape>];
 
 export type ObjectSchema<
   TShape extends SchemaShape = SchemaShape,
@@ -351,13 +351,13 @@ export interface BinaryDef<TLeft extends AnyTypeSchema = AnyTypeSchema, TRight e
 export type AnyCompositionSchema = UnionSchema | XorSchema | IntersectionSchema | DiscriminatedUnionSchema;
 
 export type UnionSchema<TOptions extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[]> = BaseSchema<
-  InferSchema<TOptions[number]>,
+  TypeofSchema<TOptions[number]>,
   "union",
   OptionsDef<TOptions>
 >;
 
 export type XorSchema<TOptions extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[]> = BaseSchema<
-  InferSchema<TOptions[number]>,
+  TypeofSchema<TOptions[number]>,
   "xor",
   OptionsDef<TOptions>
 >;
@@ -369,7 +369,7 @@ type UnionToIntersection<TUnion> = (TUnion extends unknown ? (value: TUnion) => 
   : never;
 
 export type IntersectionSchema<TOptions extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[]> = BaseSchema<
-  UnionToIntersection<InferSchema<TOptions[number]>>,
+  UnionToIntersection<TypeofSchema<TOptions[number]>>,
   "intersection",
   OptionsDef<TOptions>
 >;
@@ -380,7 +380,7 @@ export interface DiscriminatedUnionDef<TOptions extends readonly AnyTypeSchema[]
 }
 
 export type DiscriminatedUnionSchema<TOptions extends readonly AnyTypeSchema[] = readonly AnyTypeSchema[]> = BaseSchema<
-  InferSchema<TOptions[number]>,
+  TypeofSchema<TOptions[number]>,
   "discriminatedUnion",
   DiscriminatedUnionDef<TOptions>
 >;
@@ -403,19 +403,19 @@ export type AnyWrapperSchema =
   | WhenSchema;
 
 export type OptionalSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TInner> | undefined,
+  TypeofSchema<TInner> | undefined,
   "optional",
   InnerTypeDef<TInner>
 >;
 
 export type NullableSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TInner> | null,
+  TypeofSchema<TInner> | null,
   "nullable",
   InnerTypeDef<TInner>
 >;
 
 export type NullishSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TInner> | null | undefined,
+  TypeofSchema<TInner> | null | undefined,
   "nullish",
   InnerTypeDef<TInner>
 >;
@@ -432,23 +432,23 @@ export type ReadonlyOutput<TValue> =
           : TValue;
 
 export type ReadonlySchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  ReadonlyOutput<InferSchema<TInner>>,
+  ReadonlyOutput<TypeofSchema<TInner>>,
   "readonly",
   InnerTypeDef<TInner>
 >;
 
 export type PromiseSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  Promise<InferSchema<TInner>>,
+  Promise<TypeofSchema<TInner>>,
   "promise",
   InnerTypeDef<TInner>
 >;
 
 export interface DefaultDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
-  readonly defaultValue: InferSchema<TInner> | (() => InferSchema<TInner>);
+  readonly defaultValue: TypeofSchema<TInner> | (() => TypeofSchema<TInner>);
 }
 
 export type DefaultSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TInner>,
+  TypeofSchema<TInner>,
   "default",
   DefaultDef<TInner>
 >;
@@ -458,10 +458,12 @@ export interface BrandDef<TInner extends AnyTypeSchema = AnyTypeSchema, TBrand e
   readonly brand: TBrand;
 }
 
-export type Brand<TValue, TBrand extends string> = TValue & { readonly __brand: TBrand };
+export type Brand<TValue, TBrand extends string> = TValue & {
+  readonly __brand: TBrand;
+};
 
 export type BrandSchema<TInner extends AnyTypeSchema = AnyTypeSchema, TBrand extends string = string> = BaseSchema<
-  Brand<InferSchema<TInner>, TBrand>,
+  Brand<TypeofSchema<TInner>, TBrand>,
   "brand",
   BrandDef<TInner, TBrand>
 >;
@@ -485,11 +487,11 @@ export interface TransformDef<TInner extends AnyTypeSchema = AnyTypeSchema, TSpe
 
 export type TransformSchema<
   TInner extends AnyTypeSchema = AnyTypeSchema,
-  TSpec extends TransformSpec<InferSchema<TInner>> = TransformSpec<InferSchema<TInner>>,
-> = BaseSchema<TransformOutput<InferSchema<TInner>, TSpec>, "transform", TransformDef<TInner, TSpec>>;
+  TSpec extends TransformSpec<TypeofSchema<TInner>> = TransformSpec<TypeofSchema<TInner>>,
+> = BaseSchema<TransformOutput<TypeofSchema<TInner>, TSpec>, "transform", TransformDef<TInner, TSpec>>;
 
 export interface PipeDef<TInner extends AnyTypeSchema = AnyTypeSchema, TOutput = unknown> extends InnerTypeDef<TInner> {
-  readonly transform: (value: InferSchema<TInner>) => TOutput;
+  readonly transform: (value: TypeofSchema<TInner>) => TOutput;
 }
 
 export type PipeSchema<TInner extends AnyTypeSchema = AnyTypeSchema, TOutput = unknown> = BaseSchema<
@@ -503,7 +505,7 @@ export interface LazyDef<TInner extends AnyTypeSchema = AnyTypeSchema> {
 }
 
 export type LazySchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TInner>,
+  TypeofSchema<TInner>,
   "lazy",
   LazyDef<TInner>
 >;
@@ -523,7 +525,7 @@ export interface WhenDef<
 export type WhenSchema<
   TThen extends AnyTypeSchema = AnyTypeSchema,
   TOtherwise extends AnyTypeSchema = AnyTypeSchema,
-> = BaseSchema<InferSchema<TThen> | InferSchema<TOtherwise>, "when", WhenDef<TThen, TOtherwise>>;
+> = BaseSchema<TypeofSchema<TThen> | TypeofSchema<TOtherwise>, "when", WhenDef<TThen, TOtherwise>>;
 
 export type AnySpecialSchema =
   | LiteralSchema
@@ -618,7 +620,7 @@ export type TemplateLiteralOutput<TParts extends readonly TemplateLiteralInputPa
 
 type TemplateLiteralPartOutput<TPart extends TemplateLiteralInputPart> = TPart extends string
   ? TPart
-  : SchemaStringValue<InferSchema<SchemaFromInputPart<TPart>>>;
+  : SchemaStringValue<TypeofSchema<SchemaFromInputPart<TPart>>>;
 
 type SchemaFromInputPart<TPart extends TemplateLiteralInputPart> = TPart extends { readonly schema: infer TSchema }
   ? TSchema extends AnyTypeSchema
@@ -644,7 +646,7 @@ export interface FunctionDef<
 export type FunctionArgs<TInput extends FunctionInputSchemas> = TupleOutput<TInput>;
 
 export type FunctionReturn<TOutput extends AnyTypeSchema | undefined> = TOutput extends AnyTypeSchema
-  ? InferSchema<TOutput>
+  ? TypeofSchema<TOutput>
   : unknown;
 
 export type FunctionSchema<
@@ -694,37 +696,37 @@ export type TemporalSchema<
 export interface CodecDef<TInput extends AnyTypeSchema = AnyTypeSchema, TOutput extends AnyTypeSchema = AnyTypeSchema> {
   readonly input: TInput;
   readonly output: TOutput;
-  readonly decode: (value: InferSchema<TInput>) => InferSchema<TOutput>;
-  readonly encode: (value: InferSchema<TOutput>) => InferSchema<TInput>;
+  readonly decode: (value: TypeofSchema<TInput>) => TypeofSchema<TOutput>;
+  readonly encode: (value: TypeofSchema<TOutput>) => TypeofSchema<TInput>;
 }
 
 export type CodecSchema<
   TInput extends AnyTypeSchema = AnyTypeSchema,
   TOutput extends AnyTypeSchema = AnyTypeSchema,
-> = BaseSchema<InferSchema<TOutput>, "codec", CodecDef<TInput, TOutput>>;
+> = BaseSchema<TypeofSchema<TOutput>, "codec", CodecDef<TInput, TOutput>>;
 
 export interface RefineDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
-  readonly predicate: (value: InferSchema<TInner>) => boolean;
+  readonly predicate: (value: TypeofSchema<TInner>) => boolean;
   /** Custom issue message reported when the refinement rejects the value. */
   readonly message?: string;
   /** Optional issue path, relative to the refined value. */
   readonly path?: readonly IssuePathSegment[];
   /** Optional guard that decides if the refinement should run. */
-  readonly when?: (payload: RefineWhenPayload<InferSchema<TInner>>) => boolean;
+  readonly when?: (payload: RefineWhenPayload<TypeofSchema<TInner>>) => boolean;
 }
 
 export type RefineSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TInner>,
+  TypeofSchema<TInner>,
   "refine",
   RefineDef<TInner>
 >;
 
 export interface CoerceDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
-  readonly coercer: (value: unknown) => InferSchema<TInner>;
+  readonly coercer: (value: unknown) => TypeofSchema<TInner>;
 }
 
 export type CoerceSchema<TInner extends AnyTypeSchema = AnyTypeSchema> = BaseSchema<
-  InferSchema<TInner>,
+  TypeofSchema<TInner>,
   "coerce",
   CoerceDef<TInner>
 >;

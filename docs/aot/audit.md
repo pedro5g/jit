@@ -15,7 +15,7 @@ map to the planned split:
 
 Implemented and covered by tests:
 
-- `JIT.Typeof<typeof Schema>`; `JIT.Infer`/`JIT.infer` remain deprecated aliases.
+- `JIT.Typeof<typeof Schema>` is the single public helper for resolving a schema output type.
 - `JIT.validate(schema).is/parse/safeParse/parseAsync/safeParseAsync().compile()`.
 - `JIT.equal/clone/diff/hash(schema).compile()`.
 - `JIT.json(schema).stringify().compile()`.

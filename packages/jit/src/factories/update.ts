@@ -1,5 +1,5 @@
 import { compileUpdate, type UpdatePatch } from "../compiler/update.js";
-import type { AnyTypeSchema, InferSchema, InnerTypeDef, LazyDef } from "../core/ats/index.js";
+import type { AnyTypeSchema, InnerTypeDef, LazyDef, TypeofSchema } from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
@@ -55,7 +55,9 @@ export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
 };
 
 export type UpdatePatchTemplate<T> = T extends object
-  ? { readonly [TKey in keyof T]?: UpdatePatchTemplate<T[TKey]> | QueryParamRef<T[TKey]> | T[TKey] }
+  ? {
+      readonly [TKey in keyof T]?: UpdatePatchTemplate<T[TKey]> | QueryParamRef<T[TKey]> | T[TKey];
+    }
   : T | QueryParamRef<T>;
 
 type UpdatePatchParamNames<TPatch> =
@@ -64,7 +66,9 @@ type UpdatePatchParamNames<TPatch> =
     : TPatch extends readonly unknown[]
       ? UpdatePatchParamNames<TPatch[number]>
       : TPatch extends object
-        ? { [TKey in keyof TPatch]: UpdatePatchParamNames<TPatch[TKey]> }[keyof TPatch]
+        ? {
+            [TKey in keyof TPatch]: UpdatePatchParamNames<TPatch[TKey]>;
+          }[keyof TPatch]
         : never;
 
 export type UpdatePatchParams<TPatch> = [UpdatePatchParamNames<TPatch>] extends [never]
@@ -80,7 +84,7 @@ export type UpdatePatchParams<TPatch> = [UpdatePatchParamNames<TPatch>] extends 
  */
 export function update<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): RuntimeUpdate<InferSchema<TSchema>>;
+): RuntimeUpdate<TypeofSchema<TSchema>>;
 /**
  * Applies an update immediately using a schema.
  *
@@ -92,26 +96,26 @@ export function update<TSchema extends AnyTypeSchema>(
  */
 export function update<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  value: InferSchema<TSchema>,
-  input: UpdateInput<InferSchema<TSchema>>
-): InferSchema<TSchema>;
+  value: TypeofSchema<TSchema>,
+  input: UpdateInput<TypeofSchema<TSchema>>
+): TypeofSchema<TSchema>;
 export function update<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  ...args: [] | [value: InferSchema<TSchema>, input: UpdateInput<InferSchema<TSchema>>]
-): RuntimeUpdate<InferSchema<TSchema>> | InferSchema<TSchema> {
+  ...args: [] | [value: TypeofSchema<TSchema>, input: UpdateInput<TypeofSchema<TSchema>>]
+): RuntimeUpdate<TypeofSchema<TSchema>> | TypeofSchema<TSchema> {
   const unwrapped = unwrapSchema(schema);
 
   assertUpdateable(unwrapped);
 
   const compiled = compileUpdate(unwrapped);
-  const run = ((current: InferSchema<TSchema>, updateInput: UpdateInput<InferSchema<TSchema>>) => {
+  const run = ((current: TypeofSchema<TSchema>, updateInput: UpdateInput<TypeofSchema<TSchema>>) => {
     const patch =
       typeof updateInput === "function"
-        ? captureDraftPatch(updateInput as UpdateRecipe<InferSchema<TSchema>>)
+        ? captureDraftPatch(updateInput as UpdateRecipe<TypeofSchema<TSchema>>)
         : updateInput;
 
     return compiled(current, patch);
-  }) as RuntimeUpdate<InferSchema<TSchema>>;
+  }) as RuntimeUpdate<TypeofSchema<TSchema>>;
 
   Object.defineProperties(run, {
     compile: {
@@ -120,9 +124,9 @@ export function update<TSchema extends AnyTypeSchema>(
     },
     patch: {
       enumerable: false,
-      value: (template: UpdatePatchTemplate<InferSchema<TSchema>>) => ({
-        compile: () => (current: InferSchema<TSchema>, params: Readonly<Record<string, unknown>>) =>
-          run(current, materializeParamPatch(template, params) as UpdatePatch<InferSchema<TSchema>>),
+      value: (template: UpdatePatchTemplate<TypeofSchema<TSchema>>) => ({
+        compile: () => (current: TypeofSchema<TSchema>, params: Readonly<Record<string, unknown>>) =>
+          run(current, materializeParamPatch(template, params) as UpdatePatch<TypeofSchema<TSchema>>),
       }),
     },
   });
@@ -157,7 +161,10 @@ function isParamRef(value: unknown): value is QueryParamRef {
 }
 
 function captureDraftPatch<T>(recipe: UpdateRecipe<T>): UpdatePatch<T> {
-  const writes: Array<{ readonly path: readonly PropertyKey[]; readonly value: unknown }> = [];
+  const writes: Array<{
+    readonly path: readonly PropertyKey[];
+    readonly value: unknown;
+  }> = [];
   const proxies = new Map<string, unknown>();
 
   const createDraft = (path: readonly PropertyKey[]): unknown => {
@@ -193,7 +200,12 @@ function captureDraftPatch<T>(recipe: UpdateRecipe<T>): UpdatePatch<T> {
   return materializePatch(writes) as UpdatePatch<T>;
 }
 
-function materializePatch(writes: Array<{ readonly path: readonly PropertyKey[]; readonly value: unknown }>): unknown {
+function materializePatch(
+  writes: Array<{
+    readonly path: readonly PropertyKey[];
+    readonly value: unknown;
+  }>
+): unknown {
   const root: Record<string, unknown> = {};
 
   for (const write of writes) {

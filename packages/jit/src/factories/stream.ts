@@ -27,6 +27,6 @@ import type { CompileCacheOptions } from "../runtime/cache/compile-cache.js";
 export function stream<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options?: StreamOptions & CompileCacheOptions
-): CompiledStream<ATS.InferSchema<TSchema>> {
+): CompiledStream<ATS.TypeofSchema<TSchema>> {
   return compileStream(unwrapSchema(schema), options);
 }

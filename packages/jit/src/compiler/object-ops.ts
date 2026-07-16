@@ -63,7 +63,9 @@ export type OmitCompiled<T, TKeys extends keyof T> = (value: T) => Omit<T, TKeys
  *
  * @template T - The source object type.
  */
-export type TransformSpec<T> = { readonly [TKey in keyof T]?: (value: T[TKey], source: T) => unknown };
+export type TransformSpec<T> = {
+  readonly [TKey in keyof T]?: (value: T[TKey], source: T) => unknown;
+};
 export type TransformOutput<T, TSpec extends TransformSpec<T>> = {
   -readonly [TKey in keyof T]: TKey extends keyof TSpec
     ? TSpec[TKey] extends (...args: never[]) => infer TOutput
@@ -135,8 +137,8 @@ export function emitMergeSource(schema: ATS.AnyTypeSchema): string {
  * merge(user, { profile: { score: 1 } });   // new object, other keys shared
  * ```
  */
-export function compileMerge<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Merge<ATS.Infer<TSchema>> {
-  return globalThis.Function(`return ${emitMergeSource(schema)};`)() as Merge<ATS.Infer<TSchema>>;
+export function compileMerge<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Merge<ATS.Typeof<TSchema>> {
+  return globalThis.Function(`return ${emitMergeSource(schema)};`)() as Merge<ATS.Typeof<TSchema>>;
 }
 
 /**
@@ -149,7 +151,7 @@ export function compileMerge<TSchema extends ATS.AnyTypeSchema>(schema: TSchema)
  */
 export function emitPickSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  keys: readonly (keyof ATS.Infer<TSchema> & string)[]
+  keys: readonly (keyof ATS.Typeof<TSchema> & string)[]
 ): string {
   const objectSchema = expectObjectSchema(schema, "compilePick");
   const selectedKeys = validateObjectKeys(objectSchema, keys, "compilePick");
@@ -169,10 +171,10 @@ export function emitPickSource<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compilePick<
   TSchema extends ATS.AnyTypeSchema,
-  const TKeys extends readonly (keyof ATS.Infer<TSchema> & string)[],
->(schema: TSchema, keys: TKeys): PickCompiled<ATS.Infer<TSchema>, TKeys[number]> {
+  const TKeys extends readonly (keyof ATS.Typeof<TSchema> & string)[],
+>(schema: TSchema, keys: TKeys): PickCompiled<ATS.Typeof<TSchema>, TKeys[number]> {
   return globalThis.Function(`return ${emitPickSource(schema, keys)};`)() as PickCompiled<
-    ATS.Infer<TSchema>,
+    ATS.Typeof<TSchema>,
     TKeys[number]
   >;
 }
@@ -187,7 +189,7 @@ export function compilePick<
  */
 export function emitOmitSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  keys: readonly (keyof ATS.Infer<TSchema> & string)[]
+  keys: readonly (keyof ATS.Typeof<TSchema> & string)[]
 ): string {
   const objectSchema = expectObjectSchema(schema, "compileOmit");
   const omitted = new Set(validateObjectKeys(objectSchema, keys, "compileOmit"));
@@ -208,10 +210,10 @@ export function emitOmitSource<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compileOmit<
   TSchema extends ATS.AnyTypeSchema,
-  const TKeys extends readonly (keyof ATS.Infer<TSchema> & string)[],
->(schema: TSchema, keys: TKeys): OmitCompiled<ATS.Infer<TSchema>, TKeys[number]> {
+  const TKeys extends readonly (keyof ATS.Typeof<TSchema> & string)[],
+>(schema: TSchema, keys: TKeys): OmitCompiled<ATS.Typeof<TSchema>, TKeys[number]> {
   return globalThis.Function(`return ${emitOmitSource(schema, keys)};`)() as OmitCompiled<
-    ATS.Infer<TSchema>,
+    ATS.Typeof<TSchema>,
     TKeys[number]
   >;
 }
@@ -225,10 +227,10 @@ export function compileOmit<
  * @param transforms - Per-field callbacks.
  * @returns The generated transform source.
  */
-export function emitTransformSource<TSchema extends ATS.AnyTypeSchema, TSpec extends TransformSpec<ATS.Infer<TSchema>>>(
-  schema: TSchema,
-  transforms: TSpec
-): string {
+export function emitTransformSource<
+  TSchema extends ATS.AnyTypeSchema,
+  TSpec extends TransformSpec<ATS.Typeof<TSchema>>,
+>(schema: TSchema, transforms: TSpec): string {
   const objectSchema = expectObjectSchema(schema, "compileTransform");
   const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
   const transformNames = new Map(transformKeys.map((key, index) => [key, `__t${index}`]));
@@ -261,8 +263,8 @@ export function emitTransformSource<TSchema extends ATS.AnyTypeSchema, TSpec ext
  */
 export function compileTransform<
   TSchema extends ATS.AnyTypeSchema,
-  const TSpec extends TransformSpec<ATS.Infer<TSchema>>,
->(schema: TSchema, transforms: TSpec): Transform<ATS.Infer<TSchema>, TSpec> {
+  const TSpec extends TransformSpec<ATS.Typeof<TSchema>>,
+>(schema: TSchema, transforms: TSpec): Transform<ATS.Typeof<TSchema>, TSpec> {
   const objectSchema = expectObjectSchema(schema, "compileTransform");
   const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
   const bindings = transformKeys.map((key) => transforms[key as keyof TSpec]);
@@ -270,7 +272,7 @@ export function compileTransform<
   return globalThis.Function(
     ...transformKeys.map((_, index) => `__t${index}`),
     `return ${emitTransformSource(schema, transforms)};`
-  )(...bindings) as Transform<ATS.Infer<TSchema>, TSpec>;
+  )(...bindings) as Transform<ATS.Typeof<TSchema>, TSpec>;
 }
 
 /**
@@ -283,7 +285,7 @@ export function compileTransform<
  */
 export function emitNormalizeSource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  key?: keyof ElementOf<ATS.Infer<TSchema>> & string
+  key?: keyof ElementOf<ATS.Typeof<TSchema>> & string
 ): string {
   const resolved = resolveWrappers(schema).base;
 
@@ -341,9 +343,9 @@ export function emitNormalizeSource<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compileNormalize<
   TSchema extends ATS.AnyTypeSchema,
-  TKey extends keyof ElementOf<ATS.Infer<TSchema>> & string,
->(schema: TSchema, key?: TKey): Normalize<ATS.Infer<TSchema>, TKey> {
-  return globalThis.Function(`return ${emitNormalizeSource(schema, key)};`)() as Normalize<ATS.Infer<TSchema>, TKey>;
+  TKey extends keyof ElementOf<ATS.Typeof<TSchema>> & string,
+>(schema: TSchema, key?: TKey): Normalize<ATS.Typeof<TSchema>, TKey> {
+  return globalThis.Function(`return ${emitNormalizeSource(schema, key)};`)() as Normalize<ATS.Typeof<TSchema>, TKey>;
 }
 
 /**
@@ -356,7 +358,7 @@ export function compileNormalize<
  */
 export function emitGroupBySource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  key?: keyof ElementOf<ATS.Infer<TSchema>> & string
+  key?: keyof ElementOf<ATS.Typeof<TSchema>> & string
 ): string {
   const { objectSchema, key: groupKey } = expectArrayObjectKey(schema, key, "compileGroupBy", resolveGroupByKey);
   validateObjectKeys(objectSchema, [groupKey], "compileGroupBy");
@@ -400,9 +402,9 @@ export function emitGroupBySource<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compileGroupBy<
   TSchema extends ATS.AnyTypeSchema,
-  TKey extends keyof ElementOf<ATS.Infer<TSchema>> & string,
->(schema: TSchema, key?: TKey): GroupBy<ATS.Infer<TSchema>, TKey> {
-  return globalThis.Function(`return ${emitGroupBySource(schema, key)};`)() as GroupBy<ATS.Infer<TSchema>, TKey>;
+  TKey extends keyof ElementOf<ATS.Typeof<TSchema>> & string,
+>(schema: TSchema, key?: TKey): GroupBy<ATS.Typeof<TSchema>, TKey> {
+  return globalThis.Function(`return ${emitGroupBySource(schema, key)};`)() as GroupBy<ATS.Typeof<TSchema>, TKey>;
 }
 
 /**
@@ -416,7 +418,7 @@ export function compileGroupBy<
  */
 export function emitSortBySource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  key?: keyof ElementOf<ATS.Infer<TSchema>> & string,
+  key?: keyof ElementOf<ATS.Typeof<TSchema>> & string,
   direction?: "asc" | "desc"
 ): string {
   const hints = resolveHints(schema);
@@ -469,10 +471,10 @@ export function emitSortBySource<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compileSortBy<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  key?: keyof ElementOf<ATS.Infer<TSchema>> & string,
+  key?: keyof ElementOf<ATS.Typeof<TSchema>> & string,
   direction?: "asc" | "desc"
-): SortBy<ATS.Infer<TSchema>> {
-  return globalThis.Function(`return ${emitSortBySource(schema, key, direction)};`)() as SortBy<ATS.Infer<TSchema>>;
+): SortBy<ATS.Typeof<TSchema>> {
+  return globalThis.Function(`return ${emitSortBySource(schema, key, direction)};`)() as SortBy<ATS.Typeof<TSchema>>;
 }
 
 /**
@@ -485,7 +487,7 @@ export function compileSortBy<TSchema extends ATS.AnyTypeSchema>(
  */
 export function emitUniqueBySource<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  key?: keyof ElementOf<ATS.Infer<TSchema>> & string
+  key?: keyof ElementOf<ATS.Typeof<TSchema>> & string
 ): string {
   const { objectSchema, key: uniqueKey } = expectArrayObjectKey(schema, key, "compileUniqueBy", resolveNormalizeKey);
 
@@ -528,9 +530,9 @@ export function emitUniqueBySource<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compileUniqueBy<
   TSchema extends ATS.AnyTypeSchema,
-  TKey extends keyof ElementOf<ATS.Infer<TSchema>> & string,
->(schema: TSchema, key?: TKey): UniqueBy<ATS.Infer<TSchema>> {
-  return globalThis.Function(`return ${emitUniqueBySource(schema, key)};`)() as UniqueBy<ATS.Infer<TSchema>>;
+  TKey extends keyof ElementOf<ATS.Typeof<TSchema>> & string,
+>(schema: TSchema, key?: TKey): UniqueBy<ATS.Typeof<TSchema>> {
+  return globalThis.Function(`return ${emitUniqueBySource(schema, key)};`)() as UniqueBy<ATS.Typeof<TSchema>>;
 }
 
 function emitMergeTo(

@@ -55,7 +55,7 @@ export function emitCodecSource(schema: ATS.AnyTypeSchema, options?: CodecEmitOp
 export function compileCodec<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CodecCompileOptions
-): CompiledCodec<ATS.InferSchema<TSchema>> {
+): CompiledCodec<ATS.TypeofSchema<TSchema>> {
   const version = options?.version ?? 1;
 
   return getCompileCached(
@@ -67,9 +67,13 @@ export function compileCodec<TSchema extends ATS.AnyTypeSchema>(
       const compiled = globalThis.Function(
         ...emitted.bindingNames,
         emitted.source
-      )(...emitted.bindingValues) as CompiledCodec<ATS.InferSchema<TSchema>>;
+      )(...emitted.bindingValues) as CompiledCodec<ATS.TypeofSchema<TSchema>>;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "codec" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "codec",
+      });
       return compiled;
     },
     options

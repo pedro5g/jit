@@ -25,7 +25,7 @@ in the compilation path. The emitted function interprets nothing.
 
 | Area           | Responsibility                                                                                                                                                                  |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/ats`     | schema AST: `TypeName`, def shapes, `ChecksDef`, `Infer` type helpers                                                                                                           |
+| `core/ats`     | schema AST: `TypeName`, def shapes, `ChecksDef`, `Typeof` type helpers                                                                                                          |
 | `core/builder` | fluent chain (`.min()`, `.email()`, wrappers, hints); check methods are type-gated per schema kind                                                                              |
 | `core/hints`   | manual strategy hints (`entity`, `indexBy`, `hash`, `ordered`, ...)                                                                                                             |
 | `transforms`   | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers)                                                                                                    |

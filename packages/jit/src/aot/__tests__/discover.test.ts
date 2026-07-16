@@ -21,7 +21,11 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const selected = JIT.validator(User).get("is");
     const packageDir = join(outDir, "node_modules", "@jit", "generated");
-    const result = AOT.generate({ schemas: {}, functions: { User_is: selected.is }, outDir: packageDir });
+    const result = AOT.generate({
+      schemas: {},
+      functions: { User_is: selected.is },
+      outDir: packageDir,
+    });
 
     expect(result.files.map((file) => file.split("/").pop())).toEqual([
       "index.mjs",
@@ -75,7 +79,10 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     const User = JIT.object({ id: JIT.number() });
     const selected = JIT.validator(User).get("is");
 
-    AOT.generate({ schemas: { User: JIT.compile(User, { is: selected.is }) }, outDir });
+    AOT.generate({
+      schemas: { User: JIT.compile(User, { is: selected.is }) },
+      outDir,
+    });
 
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
@@ -104,7 +111,11 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     });
     const files = result.files.map((file) => file.split("/").pop()).sort();
     const manifest = JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8")) as {
-      modules: readonly { readonly name: string; readonly import: string; readonly exports: readonly string[] }[];
+      modules: readonly {
+        readonly name: string;
+        readonly import: string;
+        readonly exports: readonly string[];
+      }[];
       artifacts: readonly { readonly name: string; readonly module: string }[];
       files: readonly string[];
     };
@@ -122,7 +133,12 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     expect(result.files).toContain(join(outDir, "plans", "user.json"));
     expect(readFileSync(join(outDir, "user.js"), "utf8")).toBe('export { User, isUser } from "./index.js";\n');
     expect(manifest.modules).toEqual([
-      { name: "user", source: "./jit/user.jit.ts", import: "./user.js", exports: ["User", "isUser"] },
+      {
+        name: "user",
+        source: "./jit/user.jit.ts",
+        import: "./user.js",
+        exports: ["User", "isUser"],
+      },
     ]);
     expect(manifest.artifacts.map((artifact) => `${artifact.module}:${artifact.name}`)).toEqual([
       "user:User",
@@ -141,7 +157,9 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     const schemaFile = join(outDir, "src", "user.jit.ts");
 
     AOT.generate({
-      schemas: { User: JIT.compile(User, { is: JIT.validator(User).get("is").is }) },
+      schemas: {
+        User: JIT.compile(User, { is: JIT.validator(User).get("is").is }),
+      },
       sources: new Map([["User", schemaFile]]),
       outDir: packageDir,
       emit: { subpathModules: true, manifest: true },
@@ -203,7 +221,9 @@ describe("JIT AOT inference-anchored types", () => {
     const generated = join(outDir, "generated");
 
     AOT.generate({
-      schemas: { User: JIT.compile(User, { is: JIT.validator(User).get("is").is }) },
+      schemas: {
+        User: JIT.compile(User, { is: JIT.validator(User).get("is").is }),
+      },
       sources: new Map([["User", join(outDir, "src", "user.jit.ts")]]),
       outDir: generated,
       types: { package: "jsr:@jit/compiler" },
@@ -239,7 +259,12 @@ describe("JIT AOT inference-anchored types", () => {
     );
 
     AOT.generate({
-      schemas: { User: JIT.compile(UserSchema, { is: selected.is, parse: selected.parse }) },
+      schemas: {
+        User: JIT.compile(UserSchema, {
+          is: selected.is,
+          parse: selected.parse,
+        }),
+      },
       functions: { isUser: selected.is },
       sources: new Map([
         ["User", schemaFile],
@@ -297,12 +322,18 @@ describe("JIT AOT inference-anchored types", () => {
     );
 
     const generated = (await import(pathToFileURL(join(generatedDir, "index.mjs")).href)) as {
-      User: { is: (value: unknown) => boolean; parse: (value: unknown) => unknown };
+      User: {
+        is: (value: unknown) => boolean;
+        parse: (value: unknown) => unknown;
+      };
       isUser: (value: unknown) => boolean;
     };
 
     expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
-    expect(generated.User.parse({ id: 1, name: "Ada" })).toEqual({ id: 1, name: "Ada" });
+    expect(generated.User.parse({ id: 1, name: "Ada" })).toEqual({
+      id: 1,
+      name: "Ada",
+    });
     expect(generated.isUser({ id: "x", name: "Ada" })).toBe(false);
     try {
       execFileSync(process.execPath, [tscBin, "--project", join(outDir, "tsconfig.json"), "--pretty", "false"], {
@@ -310,7 +341,10 @@ describe("JIT AOT inference-anchored types", () => {
         stdio: "pipe",
       });
     } catch (error) {
-      const failed = error as { readonly stdout?: Buffer; readonly stderr?: Buffer };
+      const failed = error as {
+        readonly stdout?: Buffer;
+        readonly stderr?: Buffer;
+      };
 
       throw new Error(
         `generated import typecheck failed\n${failed.stdout?.toString() ?? ""}${failed.stderr?.toString() ?? ""}`
@@ -322,7 +356,10 @@ describe("JIT AOT inference-anchored types", () => {
     const User = JIT.object({ id: JIT.number() });
     const selected = JIT.validator(User).get("is");
 
-    AOT.generate({ schemas: { User: JIT.compile(User, { is: selected.is }) }, outDir });
+    AOT.generate({
+      schemas: { User: JIT.compile(User, { is: selected.is }) },
+      outDir,
+    });
 
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
@@ -331,13 +368,20 @@ describe("JIT AOT inference-anchored types", () => {
   });
 
   it("should expose JIT.Typeof for builders and schemas", () => {
-    const User = JIT.object({ id: JIT.number(), tags: JIT.array(JIT.string()) });
+    const User = JIT.object({
+      id: JIT.number(),
+      tags: JIT.array(JIT.string()),
+    });
 
     expectTypeOf<JIT.Typeof<typeof User>>().toEqualTypeOf<{
       id: number;
       tags: string[];
     }>();
     expectTypeOf<JIT.Typeof<typeof User.schema>>().toEqualTypeOf<JIT.Typeof<typeof User>>();
+    // @ts-expect-error Infer was removed in favor of the single Typeof helper.
+    expectTypeOf<JIT.Infer<typeof User>>();
+    // @ts-expect-error The lowercase compatibility alias was removed too.
+    expectTypeOf<JIT.infer<typeof User>>();
   });
 });
 
@@ -404,7 +448,11 @@ describe("JIT AOT schema discovery", () => {
     const config = AOT.defineConfig({
       entries: ["src/models"],
       patterns: ["**/*.jit.ts"],
-      output: { directory: "node_modules/@acme/models", packageName: "@acme/models", clean: true },
+      output: {
+        directory: "node_modules/@acme/models",
+        packageName: "@acme/models",
+        clean: true,
+      },
     });
 
     expect(config.output.packageName).toBe("@acme/models");

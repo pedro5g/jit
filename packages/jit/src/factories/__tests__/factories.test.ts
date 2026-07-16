@@ -334,7 +334,10 @@ describe("JIT AST builders", () => {
       expect(factory_piped.def.transform).toBe(transformer);
       expectTypeOf(factory_piped._type).toEqualTypeOf<number>();
 
-      const transformed = JIT.object({ id: JIT.number(), name: JIT.string() }).transform({
+      const transformed = JIT.object({
+        id: JIT.number(),
+        name: JIT.string(),
+      }).transform({
         name: (value) => value.toUpperCase(),
       }).schema;
       expect(transformed.type).toBe(AST.TypeName.transform);
@@ -406,7 +409,7 @@ describe("JIT AST builders", () => {
       expectTypeOf(Json._type).toEqualTypeOf<AST.JsonValue>();
       expectTypeOf(Custom._type).toEqualTypeOf<{ cents: number }>();
       expectTypeOf(Greeting._type).toEqualTypeOf<`hello, ${string}!`>();
-      expectTypeOf<AST.Infer<typeof MyFunction>>().toEqualTypeOf<(input: string) => number>();
+      expectTypeOf<AST.Typeof<typeof MyFunction>>().toEqualTypeOf<(input: string) => number>();
       expectTypeOf(computeTrimmedLength).toEqualTypeOf<(input: string) => number>();
       expectTypeOf(returnsBoolean).toEqualTypeOf<(input: string) => boolean>();
     });
@@ -449,8 +452,12 @@ describe("JIT AST builders", () => {
 
       expect(IsoDate.schema.def.checks?.[0]).toMatchObject({ kind: "date" });
       expect(Time.schema.def.checks?.[0]).toMatchObject({ kind: "time" });
-      expect(Datetime.schema.def.checks?.[0]).toMatchObject({ kind: "datetime" });
-      expect(Duration.schema.def.checks?.[0]).toMatchObject({ kind: "duration" });
+      expect(Datetime.schema.def.checks?.[0]).toMatchObject({
+        kind: "datetime",
+      });
+      expect(Duration.schema.def.checks?.[0]).toMatchObject({
+        kind: "duration",
+      });
       expectTypeOf(IsoDate.schema._type).toEqualTypeOf<string>();
       expectTypeOf(Time.schema._type).toEqualTypeOf<string>();
       expectTypeOf(Datetime.schema._type).toEqualTypeOf<string>();
@@ -466,7 +473,7 @@ describe("JIT AST builders", () => {
       expect(StringToDate.schema.type).toBe(AST.TypeName.codec);
       expect(StringToDate.schema.def.input.type).toBe(AST.TypeName.string);
       expect(StringToDate.schema.def.output.type).toBe(AST.TypeName.date);
-      expectTypeOf<AST.Infer<typeof StringToDate>>().toEqualTypeOf<Date>();
+      expectTypeOf<AST.Typeof<typeof StringToDate>>().toEqualTypeOf<Date>();
       expectTypeOf(StringToDate.decode("2020-01-01T00:00:00.000Z")).toEqualTypeOf<Date>();
       expectTypeOf(StringToDate.encode(new Date("2020-01-01T00:00:00.000Z"))).toEqualTypeOf<string>();
     });
@@ -488,12 +495,12 @@ describe("JIT AST builders", () => {
       expect(User.schema).not.toBe(PartialUser.schema);
       expect(PartialUser.schema).not.toBe(RequiredUser.schema);
 
-      expectTypeOf<AST.Infer<typeof PartialUser>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof PartialUser>>().toEqualTypeOf<{
         id: number | undefined;
         name: string | undefined;
       }>();
 
-      expectTypeOf<AST.Infer<typeof RequiredUser>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof RequiredUser>>().toEqualTypeOf<{
         id: number;
         name: string;
       }>();
@@ -509,10 +516,10 @@ describe("JIT AST builders", () => {
       const VarargPicked = User.pick("id", "name");
       expect(Object.keys(Picked.schema.def.props)).toEqual(["id"]);
       expect(Object.keys(VarargPicked.schema.def.props)).toEqual(["id", "name"]);
-      expectTypeOf<AST.Infer<typeof Picked>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof Picked>>().toEqualTypeOf<{
         id: number;
       }>();
-      expectTypeOf<AST.Infer<typeof VarargPicked>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof VarargPicked>>().toEqualTypeOf<{
         id: number;
         name: string;
       }>();
@@ -521,7 +528,7 @@ describe("JIT AST builders", () => {
       const VarargOmitted = User.omit("name");
       expect(Object.keys(Omitted.schema.def.props)).toEqual(["id"]);
       expect(Object.keys(VarargOmitted.schema.def.props)).toEqual(["id"]);
-      expectTypeOf<AST.Infer<typeof Omitted>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof Omitted>>().toEqualTypeOf<{
         id: number;
       }>();
 
@@ -529,7 +536,7 @@ describe("JIT AST builders", () => {
         active: JIT.boolean(),
       });
       expect(Extended.schema.def.props.active.type).toBe(AST.TypeName.boolean);
-      expectTypeOf<AST.Infer<typeof Extended>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof Extended>>().toEqualTypeOf<{
         id: number;
         name: string;
         active: boolean;
@@ -541,7 +548,7 @@ describe("JIT AST builders", () => {
         })
       );
       expect(Merged.schema.def.props.age.type).toBe(AST.TypeName.number);
-      expectTypeOf<AST.Infer<typeof Merged>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof Merged>>().toEqualTypeOf<{
         id: number;
         name: string;
         age: number;
@@ -567,23 +574,23 @@ describe("JIT AST builders", () => {
       expect(Keys.schema.type).toBe(AST.TypeName.enum);
       expect(Keys.schema.def.values).toEqual(["id", "name"]);
 
-      expectTypeOf<AST.Infer<typeof Strict>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof Strict>>().toEqualTypeOf<{
         id: number;
         name: string;
       }>();
-      expectTypeOf<AST.Infer<typeof Loose>>().toEqualTypeOf<
+      expectTypeOf<AST.Typeof<typeof Loose>>().toEqualTypeOf<
         {
           id: number;
           name: string;
         } & Record<string, unknown>
       >();
-      expectTypeOf<AST.Infer<typeof Catchall>>().toEqualTypeOf<
+      expectTypeOf<AST.Typeof<typeof Catchall>>().toEqualTypeOf<
         {
           id: number;
           name: string;
         } & Record<string, string | number>
       >();
-      expectTypeOf<AST.Infer<typeof Keys>>().toEqualTypeOf<"id" | "name">();
+      expectTypeOf<AST.Typeof<typeof Keys>>().toEqualTypeOf<"id" | "name">();
     });
 
     it("should reject object-only operators on primitive builders", () => {

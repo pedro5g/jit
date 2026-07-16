@@ -5,13 +5,21 @@ import { CodeWriter } from "./emitter/code-writer.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
 
-type InnerSchema = ATS.AnyTypeSchema & { readonly def: ATS.InnerTypeDef<ATS.AnyTypeSchema> };
+type InnerSchema = ATS.AnyTypeSchema & {
+  readonly def: ATS.InnerTypeDef<ATS.AnyTypeSchema>;
+};
 type TransformSchema = ATS.AnyTypeSchema & {
   readonly def: ATS.TransformDef<ATS.AnyTypeSchema, Record<string, unknown>>;
 };
-type PipeSchema = ATS.AnyTypeSchema & { readonly def: ATS.PipeDef<ATS.AnyTypeSchema, unknown> };
-type RefineSchema = ATS.AnyTypeSchema & { readonly def: ATS.RefineDef<ATS.AnyTypeSchema> };
-type CoerceSchema = ATS.AnyTypeSchema & { readonly def: ATS.CoerceDef<ATS.AnyTypeSchema> };
+type PipeSchema = ATS.AnyTypeSchema & {
+  readonly def: ATS.PipeDef<ATS.AnyTypeSchema, unknown>;
+};
+type RefineSchema = ATS.AnyTypeSchema & {
+  readonly def: ATS.RefineDef<ATS.AnyTypeSchema>;
+};
+type CoerceSchema = ATS.AnyTypeSchema & {
+  readonly def: ATS.CoerceDef<ATS.AnyTypeSchema>;
+};
 
 /**
  * A compiled value pipeline: applies the schema's transform/pipe/refine/coerce
@@ -78,7 +86,7 @@ export function emitPipelineSource(schema: ATS.AnyTypeSchema): string {
  */
 export function compilePipeline<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema
-): Pipeline<unknown, ATS.InferSchema<TSchema>> {
+): Pipeline<unknown, ATS.TypeofSchema<TSchema>> {
   const program = emitPipelineProgram(schema);
   const bindingNames = program.bindings.map((_, index) => `__p${index}`);
 
@@ -86,7 +94,7 @@ export function compilePipeline<TSchema extends ATS.AnyTypeSchema>(
     ...bindingNames,
     "__JITError",
     `return ${program.source};`
-  )(...program.bindings, JITError) as Pipeline<unknown, ATS.InferSchema<TSchema>>;
+  )(...program.bindings, JITError) as Pipeline<unknown, ATS.TypeofSchema<TSchema>>;
 }
 
 function emitPipelineSteps(writer: CodeWriter, schema: ATS.AnyTypeSchema, bindings: unknown[]): void {

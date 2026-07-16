@@ -30,9 +30,9 @@ export interface CompiledSerializer<T> {
 export function serializer<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options?: CompileCacheOptions
-): CompiledSerializer<ATS.InferSchema<TSchema>> {
+): CompiledSerializer<ATS.TypeofSchema<TSchema>> {
   const unwrapped = unwrapSchema(schema);
-  const stringify: Serialize<ATS.InferSchema<TSchema>> = compileSerialize(unwrapped, options);
+  const stringify: Serialize<ATS.TypeofSchema<TSchema>> = compileSerialize(unwrapped, options);
   const validate = compileValidator(unwrapped, options);
 
   return {
@@ -54,8 +54,8 @@ export function serializer<TSchema extends ATS.AnyTypeSchema>(
  * ```
  */
 export interface ValueCodecOptions<TInput extends ATS.AnyTypeSchema, TOutput extends ATS.AnyTypeSchema> {
-  readonly decode: (value: ATS.InferSchema<TInput>) => ATS.InferSchema<TOutput>;
-  readonly encode: (value: ATS.InferSchema<TOutput>) => ATS.InferSchema<TInput>;
+  readonly decode: (value: ATS.TypeofSchema<TInput>) => ATS.TypeofSchema<TOutput>;
+  readonly encode: (value: ATS.TypeofSchema<TOutput>) => ATS.TypeofSchema<TInput>;
 }
 
 export function codec<TInput extends ATS.AnyTypeSchema, TOutput extends ATS.AnyTypeSchema>(
@@ -67,13 +67,13 @@ export function codec<TInput extends ATS.AnyTypeSchema, TOutput extends ATS.AnyT
 export function codec<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options?: CodecCompileOptions
-): CompiledCodec<ATS.InferSchema<TSchema>>;
+): CompiledCodec<ATS.TypeofSchema<TSchema>>;
 
 export function codec<TSchema extends ATS.AnyTypeSchema, TOutput extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   outputOrOptions?: SchemaInput<TOutput> | CodecCompileOptions,
   valueCodecOptions?: ValueCodecOptions<TSchema, TOutput>
-): CompiledCodec<ATS.InferSchema<TSchema>> | Builder<ATS.CodecSchema<TSchema, TOutput>> {
+): CompiledCodec<ATS.TypeofSchema<TSchema>> | Builder<ATS.CodecSchema<TSchema, TOutput>> {
   if (valueCodecOptions !== undefined && outputOrOptions !== undefined && isSchemaInput(outputOrOptions)) {
     const input = unwrapSchema(schema);
     const output = unwrapSchema(outputOrOptions);

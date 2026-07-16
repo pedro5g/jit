@@ -24,7 +24,7 @@ import type { CompileCacheOptions } from "../runtime/cache/compile-cache.js";
 export function mask<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options?: CompileCacheOptions
-): Mask<ATS.InferSchema<TSchema>> {
+): Mask<ATS.TypeofSchema<TSchema>> {
   return compileMask(unwrapSchema(schema), options);
 }
 
@@ -45,6 +45,6 @@ export function mask<TSchema extends ATS.AnyTypeSchema>(
 export function sanitize<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   options?: CompileCacheOptions
-): Sanitize<ATS.InferSchema<TSchema>> {
+): Sanitize<ATS.TypeofSchema<TSchema>> {
   return compileSanitize(unwrapSchema(schema), options);
 }

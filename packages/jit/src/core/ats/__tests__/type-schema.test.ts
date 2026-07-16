@@ -1,7 +1,4 @@
 import type {
-  Infer,
-  InferSchema,
-  InferShape,
   MergeShape,
   NullishSchema,
   NumberSchema,
@@ -12,6 +9,9 @@ import type {
   PickShape,
   RequiredShape,
   StringSchema,
+  Typeof,
+  TypeofSchema,
+  TypeofShape,
 } from "../index.js";
 
 describe("Core ATS type foundations", () => {
@@ -24,9 +24,9 @@ describe("Core ATS type foundations", () => {
 
       type UserSchema = ObjectSchema<UserShape>;
 
-      expectTypeOf<InferSchema<StringSchema>>().toEqualTypeOf<string>();
-      expectTypeOf<InferSchema<NullishSchema<StringSchema>>>().toEqualTypeOf<string | null | undefined>();
-      expectTypeOf<Infer<UserSchema>>().toEqualTypeOf<{
+      expectTypeOf<TypeofSchema<StringSchema>>().toEqualTypeOf<string>();
+      expectTypeOf<TypeofSchema<NullishSchema<StringSchema>>>().toEqualTypeOf<string | null | undefined>();
+      expectTypeOf<Typeof<UserSchema>>().toEqualTypeOf<{
         id: number;
         name: string;
       }>();
@@ -41,13 +41,13 @@ describe("Core ATS type foundations", () => {
         readonly nickname: OptionalSchema<StringSchema>;
       };
 
-      expectTypeOf<InferShape<PartialShape<Shape>>>().toEqualTypeOf<{
+      expectTypeOf<TypeofShape<PartialShape<Shape>>>().toEqualTypeOf<{
         id: number | undefined;
         name: string | undefined;
         nickname: string | undefined;
       }>();
 
-      expectTypeOf<InferShape<RequiredShape<Shape>>>().toEqualTypeOf<{
+      expectTypeOf<TypeofShape<RequiredShape<Shape>>>().toEqualTypeOf<{
         id: number;
         name: string;
         nickname: string;
@@ -64,15 +64,15 @@ describe("Core ATS type foundations", () => {
         readonly name: OptionalSchema<StringSchema>;
       };
 
-      expectTypeOf<InferShape<PickShape<BaseShape, "id">>>().toEqualTypeOf<{
+      expectTypeOf<TypeofShape<PickShape<BaseShape, "id">>>().toEqualTypeOf<{
         id: number;
       }>();
 
-      expectTypeOf<InferShape<OmitShape<BaseShape, "name">>>().toEqualTypeOf<{
+      expectTypeOf<TypeofShape<OmitShape<BaseShape, "name">>>().toEqualTypeOf<{
         id: number;
       }>();
 
-      expectTypeOf<InferShape<MergeShape<BaseShape, ExtensionShape>>>().toEqualTypeOf<{
+      expectTypeOf<TypeofShape<MergeShape<BaseShape, ExtensionShape>>>().toEqualTypeOf<{
         id: number;
         name: string | undefined;
       }>();

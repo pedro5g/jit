@@ -50,7 +50,7 @@ export type CompiledSelection<
   readonly schema: TSchema;
   readonly ops: TOps;
   readonly extras: readonly Extract<keyof TExtras, string>[];
-} & Pick<CompiledModel<ATS.InferSchema<TSchema>>, TOps[number]> &
+} & Pick<CompiledModel<ATS.TypeofSchema<TSchema>>, TOps[number]> &
   Readonly<TExtras>;
 
 export type CompiledObjectSelection<
@@ -61,7 +61,7 @@ export type CompiledObjectSelection<
   readonly schema: TSchema;
   readonly ops: readonly TOps[];
   readonly extras: readonly Exclude<Extract<keyof TCompiled, string>, CompileOp>[];
-} & Pick<CompiledModel<ATS.InferSchema<TSchema>>, TOps> &
+} & Pick<CompiledModel<ATS.TypeofSchema<TSchema>>, TOps> &
   Readonly<Omit<TCompiled, CompileOp>>;
 
 /**
@@ -112,14 +112,17 @@ export function compile<
   opsOrCompiled: TOps | TExtras,
   extras?: TExtras
 ): CompiledSelection<TSchema, TOps, TExtras> | CompiledObjectSelection<TSchema, TExtras> {
-  type TValue = ATS.InferSchema<TSchema>;
+  type TValue = ATS.TypeofSchema<TSchema>;
   const unwrapped = unwrapSchema(schema);
   if (!Array.isArray(opsOrCompiled)) {
     return compileObjectSelection<TSchema, TExtras>(unwrapped as TSchema, opsOrCompiled as TExtras);
   }
 
   const ops = opsOrCompiled;
-  const selection: Record<string, unknown> = { schema: unwrapped, ops: Object.freeze([...ops]) };
+  const selection: Record<string, unknown> = {
+    schema: unwrapped,
+    ops: Object.freeze([...ops]),
+  };
   const validatorOps = collectValidatorOps(ops);
   let validator: ReturnType<typeof compileValidatorSelection<TSchema, readonly ValidatorOp[]>> | undefined;
   const getValidator = () => {
@@ -148,7 +151,11 @@ export function compile<
         const parse = getValidator().parse;
         const fromJSON = ((json: string) => parse(JSON.parse(json)) as TValue) as (json: string) => TValue;
 
-        registerArtifact(fromJSON as object, { kind: "operation", schema: unwrapped, op: "fromJSON" });
+        registerArtifact(fromJSON as object, {
+          kind: "operation",
+          schema: unwrapped,
+          op: "fromJSON",
+        });
         selection.fromJSON = fromJSON;
         break;
       }
@@ -207,7 +214,11 @@ function compileObjectSelection<
   TSchema extends ATS.AnyTypeSchema,
   const TCompiled extends Readonly<Record<string, unknown>>,
 >(schema: TSchema, compiled: TCompiled): CompiledObjectSelection<TSchema, TCompiled> {
-  const selection: Record<string, unknown> = { schema, ops: Object.freeze([]), extras: Object.freeze([]) };
+  const selection: Record<string, unknown> = {
+    schema,
+    ops: Object.freeze([]),
+    extras: Object.freeze([]),
+  };
   const ops: string[] = [];
   const extras: string[] = [];
 

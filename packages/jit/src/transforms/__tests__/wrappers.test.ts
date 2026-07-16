@@ -20,9 +20,11 @@ describe("Transform wrapper operators", () => {
         expect(Object.keys(wrapped)).toEqual(["type", "_type", "def", "annotations"]);
       }
 
-      expectTypeOf<AST.Infer<ReturnType<typeof Transform.optional<typeof Base>>>>().toEqualTypeOf<string | undefined>();
-      expectTypeOf<AST.Infer<ReturnType<typeof Transform.nullable<typeof Base>>>>().toEqualTypeOf<string | null>();
-      expectTypeOf<AST.Infer<ReturnType<typeof Transform.nullish<typeof Base>>>>().toEqualTypeOf<
+      expectTypeOf<AST.Typeof<ReturnType<typeof Transform.optional<typeof Base>>>>().toEqualTypeOf<
+        string | undefined
+      >();
+      expectTypeOf<AST.Typeof<ReturnType<typeof Transform.nullable<typeof Base>>>>().toEqualTypeOf<string | null>();
+      expectTypeOf<AST.Typeof<ReturnType<typeof Transform.nullish<typeof Base>>>>().toEqualTypeOf<
         string | null | undefined
       >();
     });

@@ -14,7 +14,6 @@ import type {
   FunctionArgs,
   FunctionReturn,
   FunctionSchema,
-  InferSchema,
   IntersectionSchema,
   IntSchema,
   LiteralSchema,
@@ -47,6 +46,7 @@ import type {
   TemporalUnit,
   TransformSchema,
   TransformSpec,
+  TypeofSchema,
   UnionSchema,
   WhenMatcher,
   WhenSchema,
@@ -298,7 +298,9 @@ type DefaultReturn<TDefault> = TDefault extends () => infer TReturn ? TReturn : 
 export type ValidDefault<TSchema extends AnyTypeSchema, TDefault> =
   StaticDefaultPasses<TSchema, DefaultReturn<TDefault>> extends false ? never : TDefault;
 
-export type Strict<TSchemaLike, TValue> = TSchemaLike extends { readonly schema: infer TSchema extends AnyTypeSchema }
+export type Strict<TSchemaLike, TValue> = TSchemaLike extends {
+  readonly schema: infer TSchema extends AnyTypeSchema;
+}
   ? StaticDefaultPasses<TSchema, TValue> extends false
     ? never
     : TValue
@@ -379,23 +381,23 @@ type RequiredKeysShape<TShape extends SchemaShape, TKeys extends keyof TShape> =
 
 export interface BuilderCore<TSchema extends AnyTypeSchema> {
   readonly schema: TSchema;
-  readonly "~standard": StandardSchemaProps<unknown, InferSchema<TSchema>>;
-  is(value: unknown): value is InferSchema<TSchema>;
-  safeParse(value: unknown): SafeParseResult<InferSchema<TSchema>>;
-  parse(value: unknown): InferSchema<TSchema>;
-  safeParseAsync(value: unknown): Promise<SafeParseResult<InferSchema<TSchema>>>;
-  parseAsync(value: unknown): Promise<InferSchema<TSchema>>;
+  readonly "~standard": StandardSchemaProps<unknown, TypeofSchema<TSchema>>;
+  is(value: unknown): value is TypeofSchema<TSchema>;
+  safeParse(value: unknown): SafeParseResult<TypeofSchema<TSchema>>;
+  parse(value: unknown): TypeofSchema<TSchema>;
+  safeParseAsync(value: unknown): Promise<SafeParseResult<TypeofSchema<TSchema>>>;
+  parseAsync(value: unknown): Promise<TypeofSchema<TSchema>>;
   optional(): Builder<OptionalSchema<TSchema>>;
   required(message?: string): Builder<RequiredField<TSchema>>;
   nullable(): Builder<NullableSchema<TSchema>>;
   nullish(): Builder<NullishSchema<TSchema>>;
   readonly(): Builder<ReadonlySchema<TSchema>>;
   promise(): Builder<PromiseSchema<TSchema>>;
-  default<const TDefault extends InferSchema<TSchema> | (() => InferSchema<TSchema>)>(
+  default<const TDefault extends TypeofSchema<TSchema> | (() => TypeofSchema<TSchema>)>(
     defaultValue: TDefault & ValidDefault<TSchema, TDefault>
   ): Builder<DefaultSchema<TSchema>>;
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
-  pipe<TOutput>(transform: (value: InferSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
+  pipe<TOutput>(transform: (value: TypeofSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
   or<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<UnionSchema<[TSchema, TRight]>>;
   and<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<IntersectionSchema<[TSchema, TRight]>>;
   xor<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<XorSchema<[TSchema, TRight]>>;
@@ -413,22 +415,22 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
     TOtherwise extends AnyTypeSchema = TSchema,
   >(key: TKey, options: WhenOptions<TSchema, TContextValue, TThen, TOtherwise>): Builder<WhenSchema<TThen, TOtherwise>>;
   refine(
-    predicate: (value: InferSchema<TSchema>) => boolean,
-    options?: string | RefineOptions<InferSchema<TSchema>>
+    predicate: (value: TypeofSchema<TSchema>) => boolean,
+    options?: string | RefineOptions<TypeofSchema<TSchema>>
   ): Builder<RefineSchema<TSchema>>;
-  coerce(coercer: (value: unknown) => InferSchema<TSchema>): Builder<CoerceSchema<TSchema>>;
+  coerce(coercer: (value: unknown) => TypeofSchema<TSchema>): Builder<CoerceSchema<TSchema>>;
   apply<TNext>(fn: (builder: Builder<TSchema>) => TNext): TNext;
-  entity(options: EntityHint<HintTarget<InferSchema<TSchema>>>): Builder<TSchema>;
-  keyed(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
-  groupBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
+  entity(options: EntityHint<HintTarget<TypeofSchema<TSchema>>>): Builder<TSchema>;
+  keyed(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
+  groupBy(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
   sortBy(
-    key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>,
+    key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>,
     direction?: OrderDirection
   ): Builder<TSchema>;
-  uniqueBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
-  indexBy(key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>): Builder<TSchema>;
+  uniqueBy(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
+  indexBy(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
   ordered(
-    key: Extract<PropertySelector<HintTarget<InferSchema<TSchema>>>, string>,
+    key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>,
     direction?: OrderDirection
   ): Builder<TSchema>;
   hash(strategy?: HashStrategy): Builder<TSchema>;
@@ -467,7 +469,7 @@ export interface ObjectOperators<
     schema: SchemaInput<TCatchallNext>
   ): ObjectBuilder<TShape, "passthrough", TCatchallNext>;
   keyof(): Builder<EnumSchema<KeyOfValues<TShape>>>;
-  transform<const TSpec extends TransformSpec<InferSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>>>>(
+  transform<const TSpec extends TransformSpec<TypeofSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>>>>(
     transforms: TSpec
   ): Builder<TransformSchema<ObjectSchema<TShape, TUnknownKeys, TCatchall>, TSpec>>;
   pick<const TKeys extends readonly (keyof TShape)[]>(
@@ -513,8 +515,8 @@ export interface FunctionOperators<
 }
 
 export interface CodecOperators<TInput extends AnyTypeSchema, TOutput extends AnyTypeSchema> {
-  decode(value: InferSchema<TInput>): InferSchema<TOutput>;
-  encode(value: InferSchema<TOutput>): InferSchema<TInput>;
+  decode(value: TypeofSchema<TInput>): TypeofSchema<TOutput>;
+  encode(value: TypeofSchema<TOutput>): TypeofSchema<TInput>;
 }
 
 /** String constraint methods; every call returns the same builder type. */
@@ -601,7 +603,10 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
    */
   format<const TPattern extends string>(
     pattern: TPattern & ValidFormatPattern<TPattern>,
-    options?: { readonly mode?: StringMaskMode; readonly stripNonDigits?: boolean },
+    options?: {
+      readonly mode?: StringMaskMode;
+      readonly stripNonDigits?: boolean;
+    },
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"format", StringMaskSpec>>>;
   cpf(message?: string): Builder<TSchema>;
@@ -675,7 +680,7 @@ export interface ArrayCheckMethods<TSchema extends AnyTypeSchema> {
   binary(
     options?: BinaryRowSetOptions
   ): TSchema extends { readonly type: "array" }
-    ? BinaryArray<InferSchema<TSchema> extends (infer TElement)[] ? TElement : never>
+    ? BinaryArray<TypeofSchema<TSchema> extends (infer TElement)[] ? TElement : never>
     : never;
 }
 
@@ -703,7 +708,9 @@ export interface DateLikeCheckMethods<TSchema extends AnyTypeSchema> {
   ): Builder<AppendDateLikeCheck<TSchema, SchemaCheck<"truncateTo", TemporalUnit>>>;
 }
 
-type CheckMethods<TSchema extends AnyTypeSchema> = TSchema extends { readonly type: "string" }
+type CheckMethods<TSchema extends AnyTypeSchema> = TSchema extends {
+  readonly type: "string";
+}
   ? StringCheckMethods<TSchema>
   : TSchema extends { readonly type: "number" | "int" }
     ? NumberCheckMethods<TSchema>

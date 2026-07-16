@@ -40,9 +40,7 @@ interface DefineJsonBuilder<T> {
   parse(): DefineStep<(json: string) => T>;
 }
 
-export type Typeof<TSchemaLike> = import("./core/ats/infer.js").Typeof<TSchemaLike>;
-/** @deprecated Use `Typeof<TSchema>` instead. */
-export type Infer<TSchemaLike> = Typeof<TSchemaLike>;
+export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
 export type { Strict } from "./core/builder/types.js";
 
 export const JIT = {
@@ -65,15 +63,13 @@ export const JIT = {
 };
 
 export namespace JIT {
-  export type Typeof<TSchemaLike> = import("./core/ats/infer.js").Typeof<TSchemaLike>;
-  /** @deprecated Use `JIT.Typeof<TSchema>` instead. */
-  export type Infer<TSchemaLike> = import("./core/ats/infer.js").Infer<TSchemaLike>;
+  export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
   export type Strict<TSchemaLike, TValue> = import("./core/builder/types.js").Strict<TSchemaLike, TValue>;
 }
 
 function validate<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): DefineValidateBuilder<ATS.InferSchema<TSchema>> {
+): DefineValidateBuilder<ATS.TypeofSchema<TSchema>> {
   const unwrapped = unwrapSchema(schema);
 
   return Object.freeze({
@@ -87,25 +83,25 @@ function validate<TSchema extends ATS.AnyTypeSchema>(
 
 function equal<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): DefineFunction<Equal<ATS.InferSchema<TSchema>>> {
+): DefineFunction<Equal<ATS.TypeofSchema<TSchema>>> {
   return operationStub(schema, "equal");
 }
 
 function clone<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): DefineFunction<Clone<ATS.InferSchema<TSchema>>> {
+): DefineFunction<Clone<ATS.TypeofSchema<TSchema>>> {
   return operationStub(schema, "clone");
 }
 
 function diff<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): DefineFunction<Diff<ATS.InferSchema<TSchema>>> {
+): DefineFunction<Diff<ATS.TypeofSchema<TSchema>>> {
   return operationStub(schema, "diff");
 }
 
 function hash<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): DefineFunction<Hash<ATS.InferSchema<TSchema>>> {
+): DefineFunction<Hash<ATS.TypeofSchema<TSchema>>> {
   return operationStub(schema, "hash");
 }
 
@@ -116,10 +112,10 @@ function format<TSchema extends ATS.StringSchema>(schema: SchemaInput<TSchema>):
 function json(): Builder<ATS.JsonSchema>;
 function json<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): DefineJsonBuilder<ATS.InferSchema<TSchema>>;
+): DefineJsonBuilder<ATS.TypeofSchema<TSchema>>;
 function json<TSchema extends ATS.AnyTypeSchema>(
   schema?: SchemaInput<TSchema>
-): Builder<ATS.JsonSchema> | DefineJsonBuilder<ATS.InferSchema<TSchema>> {
+): Builder<ATS.JsonSchema> | DefineJsonBuilder<ATS.TypeofSchema<TSchema>> {
   if (schema === undefined) return RuntimeJIT.json();
 
   const unwrapped = unwrapSchema(schema);
@@ -133,7 +129,7 @@ function json<TSchema extends ATS.AnyTypeSchema>(
 function validatorStep<TSchema extends ATS.AnyTypeSchema, TOp extends ValidatorOp>(
   schema: TSchema,
   op: TOp
-): DefineStep<ValidatorFunction<ATS.InferSchema<TSchema>, TOp>> {
+): DefineStep<ValidatorFunction<ATS.TypeofSchema<TSchema>, TOp>> {
   return {
     compile() {
       return createAotStub(schema, { kind: "validate", op }, { kind: "validator", schema, op });
@@ -144,7 +140,7 @@ function validatorStep<TSchema extends ATS.AnyTypeSchema, TOp extends ValidatorO
 function operationStep<
   TSchema extends ATS.AnyTypeSchema,
   TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON" | "format",
->(schema: TSchema, op: TOp): DefineStep<OperationFunction<ATS.InferSchema<TSchema>, TOp>> {
+>(schema: TSchema, op: TOp): DefineStep<OperationFunction<ATS.TypeofSchema<TSchema>, TOp>> {
   return {
     compile() {
       return operationStub(schema, op);
@@ -155,7 +151,7 @@ function operationStep<
 function operationStub<
   TSchema extends ATS.AnyTypeSchema,
   TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON" | "format",
->(schema: SchemaInput<TSchema>, op: TOp): DefineFunction<OperationFunction<ATS.InferSchema<TSchema>, TOp>> {
+>(schema: SchemaInput<TSchema>, op: TOp): DefineFunction<OperationFunction<ATS.TypeofSchema<TSchema>, TOp>> {
   const unwrapped = unwrapSchema(schema);
 
   return createAotStub(unwrapped, { kind: "operation", op }, { kind: "operation", schema: unwrapped, op });

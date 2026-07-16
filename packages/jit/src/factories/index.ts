@@ -15,12 +15,8 @@ export {
 export { compilePipeline } from "../compiler/pipeline.js";
 export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
 export { compileUpdate } from "../compiler/update.js";
-/** Infers the output type of a schema or builder — `JIT.Typeof<typeof User>`. */
-export type Typeof<TSchemaLike> = import("../core/ats/infer.js").Typeof<TSchemaLike>;
-/** @deprecated Use `JIT.Typeof<TSchema>` instead. */
-export type Infer<TSchemaLike> = Typeof<TSchemaLike>;
-/** @deprecated Use `JIT.Typeof<TSchema>` instead. */
-export type infer<TSchemaLike> = Typeof<TSchemaLike>;
+/** Resolves the output type of a schema or builder as `JIT.Typeof<typeof User>`. */
+export type Typeof<TSchemaLike> = import("../core/ats/typeof.js").Typeof<TSchemaLike>;
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export * from "./collection/index.js";
@@ -34,9 +30,18 @@ export type { CompiledModel } from "./model.js";
 export { model } from "./model.js";
 export * from "./object/index.js";
 export * from "./primitive/index.js";
-export type { BinaryProcessBuilder, BinaryProcessCompiled, ProcessBuilder } from "./process.js";
+export type {
+  BinaryProcessBuilder,
+  BinaryProcessCompiled,
+  ProcessBuilder,
+} from "./process.js";
 export { process } from "./process.js";
-export type { BinaryQueryBuilder, LazyQueryBuilder, QueryBuilder, QueryConditionBuilder } from "./query.js";
+export type {
+  BinaryQueryBuilder,
+  LazyQueryBuilder,
+  QueryBuilder,
+  QueryConditionBuilder,
+} from "./query.js";
 export { constant as const, param, query } from "./query.js";
 export type {
   JsonCompileBuilder,
@@ -44,7 +49,15 @@ export type {
   RuntimeFunctionExplain,
   ValidateCompileBuilder,
 } from "./runtime-ops.js";
-export { clone, diff, equal, format, hash, json, validate } from "./runtime-ops.js";
+export {
+  clone,
+  diff,
+  equal,
+  format,
+  hash,
+  json,
+  validate,
+} from "./runtime-ops.js";
 export { mask, sanitize } from "./security.js";
 export type { CompiledSerializer } from "./serialize.js";
 export { codec, serializer } from "./serialize.js";
@@ -52,7 +65,12 @@ export * from "./special/index.js";
 export { stream } from "./stream.js";
 export type { TransformBuilder, TransformFieldOps } from "./transform.js";
 export { transform } from "./transform.js";
-export type { Draft, RuntimeUpdate, UpdateInput, UpdateRecipe } from "./update.js";
+export type {
+  Draft,
+  RuntimeUpdate,
+  UpdateInput,
+  UpdateRecipe,
+} from "./update.js";
 export { update } from "./update.js";
 export { validator } from "./validate.js";
 export type {

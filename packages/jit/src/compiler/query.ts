@@ -26,7 +26,9 @@ type MapSchema = ATS.AnyTypeSchema & { readonly def: ATS.KeyValueDef };
 type QueryCollectionKind = "array" | "set" | "map";
 
 /** Object schema of the collection element a query runs against. @internal */
-export type QueryObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
+export type QueryObjectSchema = ATS.AnyTypeSchema & {
+  readonly def: ATS.ObjectDef;
+};
 
 type ElementOf<T> = T extends readonly (infer TElement)[]
   ? TElement
@@ -99,7 +101,13 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
 
   validateQueryPlan(target.objectSchema, plan);
 
-  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams: Boolean(program.params?.length) })));
+  return emitQuery(
+    optimizeQueryIR(
+      buildQueryIR(target, plan, {
+        hasParams: Boolean(program.params?.length),
+      })
+    )
+  );
 }
 
 /**
@@ -119,11 +127,11 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
  * @throws JITError with code `INVALID_QUERY` when a node references a field
  * the schema does not declare.
  */
-export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = ElementOf<ATS.InferSchema<TSchema>>[]>(
+export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = ElementOf<ATS.TypeofSchema<TSchema>>[]>(
   schema: TSchema,
   program: QueryProgram,
   options?: CompileCacheOptions
-): QueryCompiled<ATS.InferSchema<TSchema>, TOutput> {
+): QueryCompiled<ATS.TypeofSchema<TSchema>, TOutput> {
   const bindingNames = program.bindings.map((_, index) => `__q${index}`);
   // Bindings are user values, so only the pure source template is cached;
   // every compile re-applies its own bindings to a fresh closure.
@@ -140,7 +148,7 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
     },
     options
   );
-  const compiled = template.create(...program.bindings) as QueryCompiled<ATS.InferSchema<TSchema>, TOutput>;
+  const compiled = template.create(...program.bindings) as QueryCompiled<ATS.TypeofSchema<TSchema>, TOutput>;
 
   // Lets AOT re-emit this exact query when aggregated via JIT.compile extras.
   registerArtifact(compiled as object, {
@@ -246,7 +254,15 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
     }
   }
 
-  return { filters, selects, uniques, collectors, orderBys, aggregates, mutations };
+  return {
+    filters,
+    selects,
+    uniques,
+    collectors,
+    orderBys,
+    aggregates,
+    mutations,
+  };
 }
 
 function optimizeQueryPlan(plan: QueryPlan): OptimizedQueryPlan {
@@ -326,7 +342,10 @@ function expectCollectionObjectSchema(schema: ATS.AnyTypeSchema, compilerName: s
     throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
   }
 
-  return { kind: resolved.type as QueryCollectionKind, objectSchema: element as QueryObjectSchema };
+  return {
+    kind: resolved.type as QueryCollectionKind,
+    objectSchema: element as QueryObjectSchema,
+  };
 }
 
 function validateObjectKeys(schema: QueryObjectSchema, keys: readonly string[], compilerName: string): void {

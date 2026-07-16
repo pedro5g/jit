@@ -2,7 +2,6 @@ import type {
   BrandSchema,
   CoerceSchema,
   DefaultSchema,
-  InferSchema,
   NullableSchema,
   NullishSchema,
   OptionalSchema,
@@ -13,6 +12,7 @@ import type {
   RefineSchema,
   TransformSchema,
   TransformSpec,
+  TypeofSchema,
 } from "../../core/ats/index.js";
 import { type AnyTypeSchema, createSchema, TypeName } from "../../core/ats/index.js";
 
@@ -114,7 +114,7 @@ export function promise<TSchema extends AnyTypeSchema>(schema: TSchema): Promise
  */
 function defaultTo<TSchema extends AnyTypeSchema>(
   schema: TSchema,
-  defaultValue: InferSchema<TSchema> | (() => InferSchema<TSchema>)
+  defaultValue: TypeofSchema<TSchema> | (() => TypeofSchema<TSchema>)
 ): DefaultSchema<TSchema> {
   return /* @__PURE__ */ createSchema(
     TypeName.default,
@@ -164,7 +164,7 @@ export function brand<TSchema extends AnyTypeSchema, const TBrand extends string
  */
 export function pipe<TSchema extends AnyTypeSchema, TOutput>(
   schema: TSchema,
-  transform: (value: InferSchema<TSchema>) => TOutput
+  transform: (value: TypeofSchema<TSchema>) => TOutput
 ): PipeSchema<TSchema, TOutput> {
   return /* @__PURE__ */ createSchema(
     TypeName.pipe,
@@ -185,7 +185,7 @@ export function pipe<TSchema extends AnyTypeSchema, TOutput>(
  * @param transforms - Per-field transform callbacks.
  * @returns A new transform schema.
  */
-export function transform<TSchema extends AnyTypeSchema, const TSpec extends TransformSpec<InferSchema<TSchema>>>(
+export function transform<TSchema extends AnyTypeSchema, const TSpec extends TransformSpec<TypeofSchema<TSchema>>>(
   schema: TSchema,
   transforms: TSpec
 ): TransformSchema<TSchema, TSpec> {
@@ -210,8 +210,8 @@ export function transform<TSchema extends AnyTypeSchema, const TSpec extends Tra
  */
 export function refine<TSchema extends AnyTypeSchema>(
   schema: TSchema,
-  predicate: (value: InferSchema<TSchema>) => boolean,
-  options?: string | RefineOptions<InferSchema<TSchema>>
+  predicate: (value: TypeofSchema<TSchema>) => boolean,
+  options?: string | RefineOptions<TypeofSchema<TSchema>>
 ): RefineSchema<TSchema> {
   const normalized = typeof options === "string" ? { message: options } : options;
 
@@ -238,7 +238,7 @@ export function refine<TSchema extends AnyTypeSchema>(
  */
 export function coerce<TSchema extends AnyTypeSchema>(
   schema: TSchema,
-  coercer: (value: unknown) => InferSchema<TSchema>
+  coercer: (value: unknown) => TypeofSchema<TSchema>
 ): CoerceSchema<TSchema> {
   return /* @__PURE__ */ createSchema(
     TypeName.coerce,

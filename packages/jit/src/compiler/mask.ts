@@ -43,7 +43,7 @@ export function emitMaskSource(schema: ATS.AnyTypeSchema): string {
 export function compileMask<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Mask<ATS.InferSchema<TSchema>> {
+): Mask<ATS.TypeofSchema<TSchema>> {
   return getCompileCached(
     schema,
     "mask",
@@ -52,9 +52,13 @@ export function compileMask<TSchema extends ATS.AnyTypeSchema>(
 
       const compiled = globalThis.Function(
         `return ${emitted.source.replace("function scrub", "function mask")};`
-      )() as Mask<ATS.InferSchema<TSchema>>;
+      )() as Mask<ATS.TypeofSchema<TSchema>>;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "mask" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "mask",
+      });
       return compiled;
     },
     options

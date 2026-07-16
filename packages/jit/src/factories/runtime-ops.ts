@@ -61,7 +61,7 @@ interface RuntimeMetadataFactory {
 
 export function validate<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): ValidateCompileBuilder<ATS.InferSchema<TSchema>> {
+): ValidateCompileBuilder<ATS.TypeofSchema<TSchema>> {
   const unwrapped = unwrapSchema(schema);
 
   return Object.freeze({
@@ -90,7 +90,7 @@ export function validate<TSchema extends ATS.AnyTypeSchema>(
 
 export function equal<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): RuntimeCompiledFunction<Equal<ATS.Infer<TSchema>>> {
+): RuntimeCompiledFunction<Equal<ATS.Typeof<TSchema>>> {
   const unwrapped = unwrapSchema(schema);
 
   return attachRuntimeMetadata(compileEqual(unwrapped as TSchema), {
@@ -101,7 +101,7 @@ export function equal<TSchema extends ATS.AnyTypeSchema>(
 
 export function clone<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): RuntimeCompiledFunction<Clone<ATS.Infer<TSchema>>> {
+): RuntimeCompiledFunction<Clone<ATS.Typeof<TSchema>>> {
   const unwrapped = unwrapSchema(schema);
 
   return attachRuntimeMetadata(compileClone(unwrapped as TSchema), {
@@ -112,7 +112,7 @@ export function clone<TSchema extends ATS.AnyTypeSchema>(
 
 export function diff<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): RuntimeCompiledFunction<Diff<ATS.Infer<TSchema>>> {
+): RuntimeCompiledFunction<Diff<ATS.Typeof<TSchema>>> {
   const unwrapped = unwrapSchema(schema);
 
   return attachRuntimeMetadata(compileDiff(unwrapped as TSchema), {
@@ -123,7 +123,7 @@ export function diff<TSchema extends ATS.AnyTypeSchema>(
 
 export function hash<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): RuntimeCompiledFunction<Hash<ATS.Infer<TSchema>>> {
+): RuntimeCompiledFunction<Hash<ATS.Typeof<TSchema>>> {
   const unwrapped = unwrapSchema(schema);
 
   return attachRuntimeMetadata(compileHash(unwrapped as TSchema), {
@@ -147,16 +147,16 @@ export function format<TSchema extends ATS.StringSchema>(
 export function json(): Builder<ATS.JsonSchema>;
 export function json<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): JsonCompileBuilder<ATS.InferSchema<TSchema>>;
+): JsonCompileBuilder<ATS.TypeofSchema<TSchema>>;
 export function json<TSchema extends ATS.AnyTypeSchema>(
   schema?: SchemaInput<TSchema>
-): Builder<ATS.JsonSchema> | JsonCompileBuilder<ATS.InferSchema<TSchema>> {
+): Builder<ATS.JsonSchema> | JsonCompileBuilder<ATS.TypeofSchema<TSchema>> {
   if (schema === undefined) return jsonSchema();
 
   const unwrapped = unwrapSchema(schema);
 
   return Object.freeze({
-    stringify(): RuntimeCompileStep<Serialize<ATS.InferSchema<TSchema>>> {
+    stringify(): RuntimeCompileStep<Serialize<ATS.TypeofSchema<TSchema>>> {
       return {
         compile() {
           return attachRuntimeMetadata(compileSerialize(unwrapped), {
@@ -166,7 +166,7 @@ export function json<TSchema extends ATS.AnyTypeSchema>(
         },
       };
     },
-    stringifyChunks(options?: JsonChunksOptions): RuntimeCompileStep<StringifyChunks<ATS.InferSchema<TSchema>>> {
+    stringifyChunks(options?: JsonChunksOptions): RuntimeCompileStep<StringifyChunks<ATS.TypeofSchema<TSchema>>> {
       return {
         compile() {
           return attachRuntimeMetadata(compileStringifyChunks(unwrapped, options), {
@@ -176,13 +176,19 @@ export function json<TSchema extends ATS.AnyTypeSchema>(
         },
       };
     },
-    parse(): RuntimeCompileStep<(json: string) => ATS.InferSchema<TSchema>> {
+    parse(): RuntimeCompileStep<(json: string) => ATS.TypeofSchema<TSchema>> {
       return {
         compile() {
           const parse = compileValidatorSelection(unwrapped, ["parse"]).parse;
-          const parseJson = ((value: string) => parse(JSON.parse(value))) as (json: string) => ATS.InferSchema<TSchema>;
+          const parseJson = ((value: string) => parse(JSON.parse(value))) as (
+            json: string
+          ) => ATS.TypeofSchema<TSchema>;
 
-          registerArtifact(parseJson as object, { kind: "operation", schema: unwrapped, op: "fromJSON" });
+          registerArtifact(parseJson as object, {
+            kind: "operation",
+            schema: unwrapped,
+            op: "fromJSON",
+          });
           return attachRuntimeMetadata(parseJson, {
             operation: "json.parse",
             source: () => "function parseJson(json) {\n  return __parse(JSON.parse(json));\n}",
@@ -196,7 +202,7 @@ export function json<TSchema extends ATS.AnyTypeSchema>(
 function validatorStep<TSchema extends ATS.AnyTypeSchema, TOp extends ValidatorOp>(
   schema: TSchema,
   op: TOp
-): RuntimeCompileStep<CompiledValidator<ATS.InferSchema<TSchema>>[TOp]> {
+): RuntimeCompileStep<CompiledValidator<ATS.TypeofSchema<TSchema>>[TOp]> {
   return {
     compile() {
       const compiled = compileValidatorSelection(schema, [op])[op];

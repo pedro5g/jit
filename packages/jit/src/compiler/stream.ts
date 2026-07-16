@@ -78,9 +78,15 @@ function rootGate(schema: AnySchema): { test: (code: number) => boolean; expecte
       return { test: (code) => code === 34, expected: "string" };
     case TypeName.number:
     case TypeName.int:
-      return { test: (code) => code === 45 || (code >= 48 && code <= 57), expected: "number" };
+      return {
+        test: (code) => code === 45 || (code >= 48 && code <= 57),
+        expected: "number",
+      };
     case TypeName.boolean:
-      return { test: (code) => code === 116 || code === 102, expected: "boolean" };
+      return {
+        test: (code) => code === 116 || code === 102,
+        expected: "boolean",
+      };
     case TypeName.null:
       return { test: (code) => code === 110, expected: "null" };
     default:
@@ -116,11 +122,11 @@ function prefixIssues(issues: readonly ValidationIssue[], prefix: string): Valid
 export function compileStream<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options: StreamOptions & CompileCacheOptions = {}
-): CompiledStream<ATS.InferSchema<TSchema>> {
+): CompiledStream<ATS.TypeofSchema<TSchema>> {
   const format = options.format ?? "json";
   const root = resolveRoot(schema);
 
-  if (format === "ndjson") return createNdjsonStream(schema, options) as CompiledStream<ATS.InferSchema<TSchema>>;
+  if (format === "ndjson") return createNdjsonStream(schema, options) as CompiledStream<ATS.TypeofSchema<TSchema>>;
   if (root.type === TypeName.array) return createArrayStream<TSchema>(root, options);
   return createValueStream(schema, root, options);
 }
@@ -159,7 +165,7 @@ function gateFirstChar(text: string, gateRef: { pending: ReturnType<typeof rootG
 function createArrayStream<TSchema extends ATS.AnyTypeSchema>(
   root: AnySchema,
   options: StreamOptions
-): CompiledStream<ATS.InferSchema<TSchema>> {
+): CompiledStream<ATS.TypeofSchema<TSchema>> {
   const element = root.def.element as ATS.AnyTypeSchema;
   const checks = ((root.def.checks as readonly SchemaCheckRecord[] | undefined) ?? []).filter(
     (check) => check.kind === "min" || check.kind === "max" || check.kind === "length" || check.kind === "nonEmpty"
@@ -245,7 +251,7 @@ function createArrayStream<TSchema extends ATS.AnyTypeSchema>(
         }
       }
 
-      return items as ATS.InferSchema<TSchema>;
+      return items as ATS.TypeofSchema<TSchema>;
     },
   };
 }
@@ -254,7 +260,7 @@ function createValueStream<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   root: AnySchema,
   options: StreamOptions & CompileCacheOptions
-): CompiledStream<ATS.InferSchema<TSchema>> {
+): CompiledStream<ATS.TypeofSchema<TSchema>> {
   const validator = compileValidator(schema, options);
   const decode = createDecoder();
   const gateRef = { pending: rootGate(root) };
@@ -308,10 +314,10 @@ function createValueStream<TSchema extends ATS.AnyTypeSchema>(
 function createNdjsonStream<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options: StreamOptions & CompileCacheOptions
-): CompiledStream<readonly ATS.InferSchema<TSchema>[], ATS.InferSchema<TSchema>> {
+): CompiledStream<readonly ATS.TypeofSchema<TSchema>[], ATS.TypeofSchema<TSchema>> {
   const validator = compileValidator(schema, options);
   const decode = createDecoder();
-  const items: ATS.InferSchema<TSchema>[] = [];
+  const items: ATS.TypeofSchema<TSchema>[] = [];
   let buffer = "";
   let line = 0;
   let failed = false;

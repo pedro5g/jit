@@ -140,9 +140,9 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 
 ## Schemas
 
-zod-like builders; every schema carries its inferred type
-(`JIT.Typeof<typeof X>` works on builders and raw schemas; `JIT.Infer` and
-`JIT.infer` remain deprecated compatibility aliases).
+zod-like builders; every schema carries its resolved output type.
+`JIT.Typeof<typeof X>` is the only public type helper and works on builders
+and raw schemas.
 
 ```ts
 // primitives
@@ -1064,7 +1064,7 @@ Everything throws typed `JITError`s (`code`, `message`, `meta`):
 jit
 ├── JIT        schema factories + every compile* entry point (main API)
 ├── AOT        generate(), defineConfig(), discovery, CLI backing
-├── AST        schema AST: TypeName, defs, Infer helpers
+├── AST        schema AST: TypeName, defs, Typeof helpers
 ├── Compiler   low-level emitters (emit*Source) and IR utilities
 ├── Errors     JITError / JITValidationError
 ├── Runtime    helpers referenced by generated code (getIndex, hashing)

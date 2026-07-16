@@ -26,7 +26,7 @@ describe("Builder chain", () => {
       expect(User.schema.def.props.name.type).toBe(AST.TypeName.string);
       expect(Object.keys(User.schema)).toEqual(["type", "_type", "def", "annotations"]);
 
-      expectTypeOf<AST.Infer<typeof User>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof User>>().toEqualTypeOf<{
         id: number;
         name: string;
       }>();
@@ -52,15 +52,15 @@ describe("Builder chain", () => {
       expect(User.schema).not.toBe(PartialUser.schema);
       expect(PartialUser.schema).not.toBe(RequiredUser.schema);
 
-      expectTypeOf<AST.Infer<typeof PartialUser>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof PartialUser>>().toEqualTypeOf<{
         id: number | undefined;
       }>();
 
-      expectTypeOf<AST.Infer<typeof RequiredUser>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof RequiredUser>>().toEqualTypeOf<{
         id: number;
       }>();
 
-      expectTypeOf<AST.Infer<typeof ReadonlyUser>>().toEqualTypeOf<
+      expectTypeOf<AST.Typeof<typeof ReadonlyUser>>().toEqualTypeOf<
         Readonly<{
           id: number;
         }>
@@ -76,8 +76,8 @@ describe("Builder chain", () => {
       expect(FactoryNullish.schema.type).toBe(AST.TypeName.nullish);
       expect(FactoryNullish.schema.def.innerType.type).toBe(AST.TypeName.number);
 
-      expectTypeOf<AST.Infer<typeof BuilderNullish>>().toEqualTypeOf<string | null | undefined>();
-      expectTypeOf<AST.Infer<typeof FactoryNullish>>().toEqualTypeOf<number | null | undefined>();
+      expectTypeOf<AST.Typeof<typeof BuilderNullish>>().toEqualTypeOf<string | null | undefined>();
+      expectTypeOf<AST.Typeof<typeof FactoryNullish>>().toEqualTypeOf<number | null | undefined>();
     });
 
     it("rejects object-only operators on primitive builders", () => {
@@ -109,12 +109,12 @@ describe("Builder chain", () => {
       expect(PartialName.schema.def.props.name.type).toBe(AST.TypeName.optional);
       expect(RequiredName.schema.def.props.name.type).toBe(AST.TypeName.string);
       expect(Object.keys(Picked.schema.def.props)).toEqual(["id", "name"]);
-      expectTypeOf<AST.Infer<typeof PartialName>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof PartialName>>().toEqualTypeOf<{
         id: number;
         name: string | undefined;
         email: string;
       }>();
-      expectTypeOf<AST.Infer<typeof RequiredName>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof RequiredName>>().toEqualTypeOf<{
         id: number;
         name: string;
         email: string;
@@ -140,12 +140,12 @@ describe("Builder chain", () => {
       expect(CoercedNumber.schema.type).toBe(AST.TypeName.coerce);
       expect(Object.keys(TransformedUser.schema)).toEqual(["type", "_type", "def", "annotations"]);
 
-      expectTypeOf<AST.Infer<typeof TransformedUser>>().toEqualTypeOf<{
+      expectTypeOf<AST.Typeof<typeof TransformedUser>>().toEqualTypeOf<{
         id: number;
         name: string;
       }>();
-      expectTypeOf<AST.Infer<typeof RefinedName>>().toEqualTypeOf<string>();
-      expectTypeOf<AST.Infer<typeof CoercedNumber>>().toEqualTypeOf<number>();
+      expectTypeOf<AST.Typeof<typeof RefinedName>>().toEqualTypeOf<string>();
+      expectTypeOf<AST.Typeof<typeof CoercedNumber>>().toEqualTypeOf<number>();
     });
 
     it("rejects statically invalid literal defaults", () => {
@@ -186,7 +186,9 @@ describe("Builder chain", () => {
 
     it("rejects invalid literal format patterns", () => {
       const Formatted = JIT.string().format("(##) #####-####");
-      const StrictFormatted = JIT.string().format("(##) #####-####", { mode: "strict" });
+      const StrictFormatted = JIT.string().format("(##) #####-####", {
+        mode: "strict",
+      });
       const assertInvalidFormats = () => {
         // @ts-expect-error format patterns must contain at least one # placeholder
         JIT.string().format("phone");
@@ -195,7 +197,9 @@ describe("Builder chain", () => {
       };
 
       expect(Formatted.schema.type).toBe(AST.TypeName.string);
-      expect(StrictFormatted.schema.def.checks?.[0]?.value).toMatchObject({ mode: "strict" });
+      expect(StrictFormatted.schema.def.checks?.[0]?.value).toMatchObject({
+        mode: "strict",
+      });
       expect(assertInvalidFormats).toBeTypeOf("function");
     });
   });

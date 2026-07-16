@@ -36,14 +36,20 @@ export function emitSerializeSource(schema: ATS.AnyTypeSchema): string {
 export function compileSerialize<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Serialize<ATS.InferSchema<TSchema>> {
+): Serialize<ATS.TypeofSchema<TSchema>> {
   return getCompileCached(
     schema,
     "serialize",
     () => {
-      const compiled = globalThis.Function(`return ${emitSerialize(schema)};`)() as Serialize<ATS.InferSchema<TSchema>>;
+      const compiled = globalThis.Function(`return ${emitSerialize(schema)};`)() as Serialize<
+        ATS.TypeofSchema<TSchema>
+      >;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "stringify" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "stringify",
+      });
       return compiled;
     },
     options

@@ -112,7 +112,9 @@ describe("JIT compiler validator", () => {
     expect(Compiler.emitValidatorSource(MutableUser.schema)).not.toContain("Object.freeze");
     expect(Compiler.emitValidatorSource(ReadonlyUser.schema)).toContain("Object.freeze");
 
-    expectTypeOf<JIT.Typeof<typeof MutableUser>>().toEqualTypeOf<{ id: number }>();
+    expectTypeOf<JIT.Typeof<typeof MutableUser>>().toEqualTypeOf<{
+      id: number;
+    }>();
     expectTypeOf<JIT.Typeof<typeof ReadonlyUser>>().toEqualTypeOf<Readonly<{ id: number }>>();
   });
 
@@ -123,11 +125,19 @@ describe("JIT compiler validator", () => {
       code: JIT.string().pipe((value) => value.toUpperCase()),
     });
     const validate = JIT.validator(Signup);
-    const result = validate.safeParse({ email: "  Ada@Math.org ", plan: undefined, code: "abc" });
+    const result = validate.safeParse({
+      email: "  Ada@Math.org ",
+      plan: undefined,
+      code: "abc",
+    });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data).toEqual({ email: "ada@math.org", plan: "free", code: "ABC" });
+      expect(result.data).toEqual({
+        email: "ada@math.org",
+        plan: "free",
+        code: "ABC",
+      });
     }
   });
 
@@ -160,8 +170,14 @@ describe("JIT compiler validator", () => {
       },
     });
     const validate = JIT.validator(Signup);
-    const mismatch = validate.safeParse({ password: "supersecret", confirmPassword: "otherpass" });
-    const invalidBase = validate.safeParse({ password: "short", confirmPassword: "nope" });
+    const mismatch = validate.safeParse({
+      password: "supersecret",
+      confirmPassword: "otherpass",
+    });
+    const invalidBase = validate.safeParse({
+      password: "short",
+      confirmPassword: "nope",
+    });
 
     expect(mismatch.success).toBe(false);
     if (!mismatch.success) {
@@ -209,7 +225,7 @@ describe("JIT compiler validator", () => {
       expect(missing.issues[0].message).toBe("O cupom é obrigatório");
     }
 
-    expectTypeOf<AST.Infer<typeof Checkout>>().toEqualTypeOf<{
+    expectTypeOf<AST.Typeof<typeof Checkout>>().toEqualTypeOf<{
       temDesconto: boolean;
       cupom: string | undefined;
       code: string | undefined;
@@ -320,11 +336,20 @@ describe("JIT compiler validator", () => {
       required: JIT.string().noEmpty(),
     });
     const validate = JIT.validator(Search);
-    const parsed = validate.safeParse({ query: "", locale: "", required: "ok" });
+    const parsed = validate.safeParse({
+      query: "",
+      locale: "",
+      required: "ok",
+    });
     const failed = validate.safeParse({ query: "", locale: "", required: "" });
 
     expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data).toEqual({ query: undefined, locale: "pt-BR", required: "ok" });
+    if (parsed.success)
+      expect(parsed.data).toEqual({
+        query: undefined,
+        locale: "pt-BR",
+        required: "ok",
+      });
 
     expect(failed.success).toBe(false);
     if (!failed.success) {
@@ -370,7 +395,9 @@ describe("JIT compiler validator", () => {
   });
 
   it("should validate strict masks and omit output formatting from is", () => {
-    const StrictDocument = JIT.string().format("###.###.###-##", { mode: "strict" });
+    const StrictDocument = JIT.string().format("###.###.###-##", {
+      mode: "strict",
+    });
     const TransformDocument = JIT.string().format("###.###.###-##");
     const strict = JIT.validator(StrictDocument).get("is", "parse");
     const transformIs = JIT.validate(TransformDocument).is().compile();
@@ -432,7 +459,11 @@ describe("JIT compiler validator", () => {
 
   it("should validate nested collections, optionals, and discriminated unions", () => {
     const Event = JIT.discriminatedUnion("kind", [
-      JIT.object({ kind: JIT.literal("click"), x: JIT.number(), y: JIT.number() }),
+      JIT.object({
+        kind: JIT.literal("click"),
+        x: JIT.number(),
+        y: JIT.number(),
+      }),
       JIT.object({ kind: JIT.literal("key"), key: JIT.string().min(1) }),
     ]);
     const Payload = JIT.object({
@@ -525,7 +556,10 @@ describe("JIT compiler validator", () => {
 
   it("should propagate transforms through discriminated union branches", () => {
     const Event = JIT.discriminatedUnion("kind", [
-      JIT.object({ kind: JIT.literal("msg"), text: JIT.string().trim().min(1) }),
+      JIT.object({
+        kind: JIT.literal("msg"),
+        text: JIT.string().trim().min(1),
+      }),
       JIT.object({ kind: JIT.literal("ping") }),
     ]);
     const validate = JIT.validator(Event);
@@ -935,8 +969,12 @@ describe("JIT compiler validator", () => {
   });
 
   it("should compile only selected validator functions", () => {
-    const isOnlySource = Compiler.emitValidatorSource(User.schema, { ops: ["is"] });
-    const parseOnlySource = Compiler.emitValidatorSource(User.schema, { ops: ["parse"] });
+    const isOnlySource = Compiler.emitValidatorSource(User.schema, {
+      ops: ["is"],
+    });
+    const parseOnlySource = Compiler.emitValidatorSource(User.schema, {
+      ops: ["parse"],
+    });
     const selected = JIT.validator(User, { is: true, parse: true });
     const fromGet = JIT.validator(User).get("is", "parse");
 

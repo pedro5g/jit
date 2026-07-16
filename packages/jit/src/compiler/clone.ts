@@ -44,7 +44,7 @@ export function emitCloneSource(schema: ATS.AnyTypeSchema): string {
 export function compileClone<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Clone<ATS.Infer<TSchema>> {
+): Clone<ATS.Typeof<TSchema>> {
   return getCompileCached(
     schema,
     "clone",
@@ -53,10 +53,14 @@ export function compileClone<TSchema extends ATS.AnyTypeSchema>(
       const body = emitCloneBody(program);
 
       const compiled = globalThis.Function(`return function clone(value) {\n${body}\n};`)() as Clone<
-        ATS.Infer<TSchema>
+        ATS.Typeof<TSchema>
       >;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "clone" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "clone",
+      });
       return compiled;
     },
     options

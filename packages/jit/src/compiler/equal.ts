@@ -42,7 +42,7 @@ export function emitEqualSource(schema: ATS.AnyTypeSchema): string {
 export function compileEqual<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): Equal<ATS.Infer<TSchema>> {
+): Equal<ATS.Typeof<TSchema>> {
   return getCompileCached(
     schema,
     "equal",
@@ -56,9 +56,13 @@ export function compileEqual<TSchema extends ATS.AnyTypeSchema>(
         "__hash",
         "__getIndex",
         `return function equal(l, r) {\n${body}\n};`
-      )(hash, getIndex) as Equal<ATS.Infer<TSchema>>;
+      )(hash, getIndex) as Equal<ATS.Typeof<TSchema>>;
 
-      registerArtifact(compiled as object, { kind: "operation", schema, op: "equal" });
+      registerArtifact(compiled as object, {
+        kind: "operation",
+        schema,
+        op: "equal",
+      });
       return compiled;
     },
     options

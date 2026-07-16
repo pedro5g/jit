@@ -62,34 +62,34 @@ const facadeCache = new WeakMap<ATS.AnyTypeSchema, ValidatorFacade<unknown>>();
 export function validator<
   TSchema extends ATS.AnyTypeSchema,
   const TOptions extends ValidatorFactoryOptions | undefined = undefined,
->(schema: SchemaInput<TSchema>, options?: TOptions): ValidatorReturn<ATS.InferSchema<TSchema>, TOptions> {
+>(schema: SchemaInput<TSchema>, options?: TOptions): ValidatorReturn<ATS.TypeofSchema<TSchema>, TOptions> {
   const unwrapped = unwrapSchema(schema);
   const ops = selectedOpsFromOptions(options);
 
   if (ops.length > 0) {
     return attachGet(unwrapped, compileValidatorSelection(unwrapped, ops, options), options) as ValidatorReturn<
-      ATS.InferSchema<TSchema>,
+      ATS.TypeofSchema<TSchema>,
       TOptions
     >;
   }
 
   if (options?.cache === false)
-    return createValidatorFacade(unwrapped, options) as ValidatorReturn<ATS.InferSchema<TSchema>, TOptions>;
+    return createValidatorFacade(unwrapped, options) as ValidatorReturn<ATS.TypeofSchema<TSchema>, TOptions>;
 
   const cached = facadeCache.get(unwrapped);
-  if (cached) return cached as ValidatorReturn<ATS.InferSchema<TSchema>, TOptions>;
+  if (cached) return cached as ValidatorReturn<ATS.TypeofSchema<TSchema>, TOptions>;
 
   const facade = createValidatorFacade(unwrapped, options);
   facadeCache.set(unwrapped, facade as ValidatorFacade<unknown>);
-  return facade as ValidatorReturn<ATS.InferSchema<TSchema>, TOptions>;
+  return facade as ValidatorReturn<ATS.TypeofSchema<TSchema>, TOptions>;
 }
 
 function createValidatorFacade<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options: CompileCacheOptions | undefined
-): ValidatorFacade<ATS.InferSchema<TSchema>> {
+): ValidatorFacade<ATS.TypeofSchema<TSchema>> {
   const target = {
-    get<TOp extends ValidatorOp>(...ops: TOp[]): Pick<CompiledValidator<ATS.InferSchema<TSchema>>, TOp> {
+    get<TOp extends ValidatorOp>(...ops: TOp[]): Pick<CompiledValidator<ATS.TypeofSchema<TSchema>>, TOp> {
       return compileValidatorSelection(schema, ops, options);
     },
   };
@@ -103,17 +103,17 @@ function createValidatorFacade<TSchema extends ATS.AnyTypeSchema>(
       },
     });
   }
-  return Object.freeze(target) as ValidatorFacade<ATS.InferSchema<TSchema>>;
+  return Object.freeze(target) as ValidatorFacade<ATS.TypeofSchema<TSchema>>;
 }
 
 function attachGet<TSchema extends ATS.AnyTypeSchema, TSelection extends object>(
   schema: TSchema,
   selection: TSelection,
   options: CompileCacheOptions | undefined
-): TSelection & ValidatorGet<ATS.InferSchema<TSchema>> {
+): TSelection & ValidatorGet<ATS.TypeofSchema<TSchema>> {
   return Object.freeze({
     ...selection,
-    get<TOp extends ValidatorOp>(...ops: TOp[]): Pick<CompiledValidator<ATS.InferSchema<TSchema>>, TOp> {
+    get<TOp extends ValidatorOp>(...ops: TOp[]): Pick<CompiledValidator<ATS.TypeofSchema<TSchema>>, TOp> {
       return compileValidatorSelection(schema, ops, options);
     },
   });

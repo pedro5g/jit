@@ -55,8 +55,8 @@ export { KeyedWatchedList, WatchedList };
  */
 export function watch<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  options: WatchInput<ATS.InferSchema<TSchema>>
-): RuntimeWatch<ATS.InferSchema<TSchema>> {
+  options: WatchInput<ATS.TypeofSchema<TSchema>>
+): RuntimeWatch<ATS.TypeofSchema<TSchema>> {
   return compileWatch(unwrapSchema(schema), options);
 }
 
@@ -74,9 +74,9 @@ export function watch<TSchema extends ATS.AnyTypeSchema>(
  */
 export function watchedList<TSchema extends ATS.AnyTypeSchema>(
   _schema: SchemaInput<TSchema>,
-  initialItems: readonly CollectionElement<ATS.InferSchema<TSchema>>[] = [],
-  options: WatchedListOptions<CollectionElement<ATS.InferSchema<TSchema>>> = {}
-): WatchedList<CollectionElement<ATS.InferSchema<TSchema>>> {
+  initialItems: readonly CollectionElement<ATS.TypeofSchema<TSchema>>[] = [],
+  options: WatchedListOptions<CollectionElement<ATS.TypeofSchema<TSchema>>> = {}
+): WatchedList<CollectionElement<ATS.TypeofSchema<TSchema>>> {
   if (options.key) {
     return new KeyedWatchedList(initialItems, {
       ...options,

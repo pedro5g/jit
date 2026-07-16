@@ -3,7 +3,6 @@ import type {
   BrandSchema,
   CoerceSchema,
   DefaultSchema,
-  InferSchema,
   NullableSchema,
   NullishSchema,
   OptionalSchema,
@@ -14,6 +13,7 @@ import type {
   RefineSchema,
   TransformSchema,
   TransformSpec,
+  TypeofSchema,
 } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
@@ -92,7 +92,7 @@ export function promise<TSchema extends AnyTypeSchema>(schema: SchemaInput<TSche
  */
 function defaultTo<
   TSchema extends AnyTypeSchema,
-  const TDefault extends InferSchema<TSchema> | (() => InferSchema<TSchema>),
+  const TDefault extends TypeofSchema<TSchema> | (() => TypeofSchema<TSchema>),
 >(
   schema: SchemaInput<TSchema>,
   defaultValue: TDefault & ValidDefault<TSchema, TDefault>
@@ -129,7 +129,7 @@ export function brand<TSchema extends AnyTypeSchema, const TBrand extends string
  */
 export function pipe<TSchema extends AnyTypeSchema, TOutput>(
   schema: SchemaInput<TSchema>,
-  transform: (value: InferSchema<TSchema>) => TOutput
+  transform: (value: TypeofSchema<TSchema>) => TOutput
 ): Builder<PipeSchema<TSchema, TOutput>> {
   return /* @__PURE__ */ createBuilder(Transform.pipe(unwrapSchema(schema), transform));
 }
@@ -143,7 +143,7 @@ export function pipe<TSchema extends AnyTypeSchema, TOutput>(
  * @param transforms - Per-field transform callbacks.
  * @returns A builder wrapping a transform schema.
  */
-export function transform<TSchema extends AnyTypeSchema, const TSpec extends TransformSpec<InferSchema<TSchema>>>(
+export function transform<TSchema extends AnyTypeSchema, const TSpec extends TransformSpec<TypeofSchema<TSchema>>>(
   schema: SchemaInput<TSchema>,
   transforms: TSpec
 ): Builder<TransformSchema<TSchema, TSpec>> {
@@ -160,8 +160,8 @@ export function transform<TSchema extends AnyTypeSchema, const TSpec extends Tra
  */
 export function refine<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  predicate: (value: InferSchema<TSchema>) => boolean,
-  options?: string | RefineOptions<InferSchema<TSchema>>
+  predicate: (value: TypeofSchema<TSchema>) => boolean,
+  options?: string | RefineOptions<TypeofSchema<TSchema>>
 ): Builder<RefineSchema<TSchema>> {
   return /* @__PURE__ */ createBuilder(Transform.refine(unwrapSchema(schema), predicate, options));
 }
@@ -176,7 +176,7 @@ export function refine<TSchema extends AnyTypeSchema>(
  */
 function coerceWith<TSchema extends AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  coercer: (value: unknown) => InferSchema<TSchema>
+  coercer: (value: unknown) => TypeofSchema<TSchema>
 ): Builder<CoerceSchema<TSchema>> {
   return /* @__PURE__ */ createBuilder(Transform.coerce(unwrapSchema(schema), coercer));
 }
@@ -191,7 +191,7 @@ function coerceWith<TSchema extends AnyTypeSchema>(
 export interface CoerceFactory extends NativeCoercions {
   <TSchema extends AnyTypeSchema>(
     schema: SchemaInput<TSchema>,
-    coercer: (value: unknown) => InferSchema<TSchema>
+    coercer: (value: unknown) => TypeofSchema<TSchema>
   ): Builder<CoerceSchema<TSchema>>;
 }
 

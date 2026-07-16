@@ -25,7 +25,11 @@ type RenameSources<TSource, TValue> = {
  */
 export type MapperOverride<TSource, TValue> =
   | ((source: TSource) => TValue)
-  | { readonly from: RenameSources<TSource, TValue>; readonly via?: never; readonly default?: never }
+  | {
+      readonly from: RenameSources<TSource, TValue>;
+      readonly via?: never;
+      readonly default?: never;
+    }
   | {
       [TFrom in keyof TSource]-?: {
         readonly from: TFrom;
@@ -77,8 +81,8 @@ type MapperOverridesArg<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarg
 export function mapper<TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends ATS.AnyTypeSchema>(
   source: SchemaInput<TSourceSchema>,
   target: SchemaInput<TTargetSchema>,
-  ...rest: MapperOverridesArg<ATS.InferSchema<TSourceSchema>, ATS.InferSchema<TTargetSchema>>
-): CompiledMapper<ATS.InferSchema<TSourceSchema>, ATS.InferSchema<TTargetSchema>> {
+  ...rest: MapperOverridesArg<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
+): CompiledMapper<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>> {
   const [overrides, options] = rest;
 
   return compileMapper(unwrapSchema(source), unwrapSchema(target), (overrides ?? {}) as MapperOverridesInput, options);

@@ -27,12 +27,10 @@ export * as PipelineAST from "./core/ast/index.js";
 /** Schema AST: node factories, `TypeName`, and type helpers. */
 export * as AST from "./core/ats/index.js";
 /**
- * Infers the TypeScript type of a schema or builder. Root-level export so
+ * Resolves the TypeScript type of a schema or builder. Root-level export so
  * generated declarations can reference `import("@jit-compiler/jit").Typeof<...>`.
  */
-export type Typeof<TSchemaLike> = import("./core/ats/infer.js").Typeof<TSchemaLike>;
-/** @deprecated Use `Typeof<TSchema>` instead. */
-export type Infer<TSchemaLike> = Typeof<TSchemaLike>;
+export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
 /** Fluent builder chain internals (`createBuilder`, builder types). */
 export * as Builder from "./core/builder/index.js";
 export type { Strict } from "./core/builder/types.js";

@@ -87,16 +87,16 @@ export function emitValidatorSource(
 export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   options?: CompileCacheOptions
-): CompiledValidator<ATS.InferSchema<TSchema>> {
-  return compileValidatorSelection(schema, VALIDATOR_OPS, options) as CompiledValidator<ATS.InferSchema<TSchema>>;
+): CompiledValidator<ATS.TypeofSchema<TSchema>> {
+  return compileValidatorSelection(schema, VALIDATOR_OPS, options) as CompiledValidator<ATS.TypeofSchema<TSchema>>;
 }
 
 export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, const TOps extends readonly ValidatorOp[]>(
   schema: TSchema,
   ops: TOps,
   options?: CompileCacheOptions
-): CompiledValidatorSelection<ATS.InferSchema<TSchema>, TOps> {
-  type TValue = ATS.InferSchema<TSchema>;
+): CompiledValidatorSelection<ATS.TypeofSchema<TSchema>, TOps> {
+  type TValue = ATS.TypeofSchema<TSchema>;
   const normalizedOps = normalizeValidatorOps(ops);
   const cacheKey = `validator:${normalizedOps.join(",")}`;
 

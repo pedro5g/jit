@@ -27,7 +27,7 @@ describe("runtime operation facade", () => {
       cache: "identity",
     });
 
-    expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is AST.Infer<typeof User>>();
+    expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is AST.Typeof<typeof User>>();
     expectTypeOf(isUser.source).toEqualTypeOf<string>();
     expectTypeOf(isUser.hash).toEqualTypeOf<string>();
   });
@@ -88,7 +88,10 @@ describe("runtime operation facade", () => {
   });
 
   it("streams validation issues and specialized JSON chunks", () => {
-    const Item = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(3) });
+    const Item = JIT.object({
+      id: JIT.number().int32(),
+      name: JIT.string().min(3),
+    });
     const Items = JIT.array(Item);
     const issues = JIT.validate(Item).issues().compile();
     const stringifyChunks = JIT.json(Items).stringifyChunks({ chunkBytes: 24 }).compile();
@@ -112,7 +115,10 @@ describe("runtime operation facade", () => {
       .map("name", (field) => field.lowercase())
       .compile();
 
-    expect(toPublicUser({ ...ada, name: "ADA" })).toEqual({ id: 1, name: "ada" });
+    expect(toPublicUser({ ...ada, name: "ADA" })).toEqual({
+      id: 1,
+      name: "ada",
+    });
     expectTypeOf(toPublicUser).toMatchTypeOf<
       (value: { id: number; name: string; role: "admin" | "member" }) => {
         readonly id: number;
