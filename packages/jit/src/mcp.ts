@@ -26,7 +26,7 @@ import {
  */
 
 const SERVER_NAME = "jit-mcp";
-const SERVER_VERSION = "1.0.1";
+const SERVER_VERSION = "1.0.2";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([LATEST_PROTOCOL_VERSION]);
 

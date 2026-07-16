@@ -49,7 +49,7 @@ describe("jit MCP server", () => {
         result: {
           protocolVersion: "2025-11-25",
           capabilities: { tools: {}, resources: {}, prompts: {}, completions: {}, logging: {} },
-          serverInfo: { name: "jit-mcp", version: "1.0.1" },
+          serverInfo: { name: "jit-mcp", version: "1.0.2" },
         },
       });
       const listed = messages[1] as { readonly id: number; readonly result: { readonly tools: readonly unknown[] } };
