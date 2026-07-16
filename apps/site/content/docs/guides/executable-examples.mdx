@@ -44,3 +44,16 @@ inclusion.
 Progressive stream state and binary-rowset allocation remain runtime ingestion
 responsibilities. AOT specializes their validators, codecs, and query paths;
 it does not hide live network or memory ownership behind generated code.
+
+## Browser Playground
+
+The [browser playground](/playground) runs the same runtime compiler inside a
+terminable Web Worker. Its presets cover validation, structural operations,
+eager queries, lazy generators, direct visitors, snapshot watchers, stateful
+watched lists, chunked JSON and columnar binary rowsets.
+
+Iterator results are materialized only by the playground so they can be shown
+as JSON. Visitor results are collected by a local sink, watched-list actions
+are applied in order, and binary buffers are released after each run. Select
+the generated-source tab to compare the eager loop, generator, visitor,
+watcher and rowset query emitted for each strategy.

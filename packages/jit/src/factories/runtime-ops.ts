@@ -3,7 +3,12 @@ import { compileDiff, type Diff, emitDiffSource } from "../compiler/diff.js";
 import { compileEqual, type Equal, emitEqualSource } from "../compiler/equal.js";
 import { compileFormat, emitFormatSource, type Format } from "../compiler/format.js";
 import { compileHash, emitHashSource, type Hash } from "../compiler/hash.js";
-import { compileStringifyChunks, type JsonChunksOptions, type StringifyChunks } from "../compiler/json-chunks.js";
+import {
+  compileStringifyChunks,
+  emitStringifyChunksSource,
+  type JsonChunksOptions,
+  type StringifyChunks,
+} from "../compiler/json-chunks.js";
 import { compileSerialize, emitSerializeSource, type Serialize } from "../compiler/serialize.js";
 import {
   type CompiledValidator,
@@ -171,7 +176,7 @@ export function json<TSchema extends ATS.AnyTypeSchema>(
         compile() {
           return attachRuntimeMetadata(compileStringifyChunks(unwrapped, options), {
             operation: "json.stringifyChunks",
-            source: () => "function* stringifyChunks(value) { /* specialized chunk emitter */ }",
+            source: () => emitStringifyChunksSource(unwrapped, options),
           });
         },
       };

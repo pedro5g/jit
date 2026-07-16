@@ -105,6 +105,9 @@ describe("runtime operation facade", () => {
     expect([...issues({ id: 1.5, name: "x" })].map((issue) => issue.code)).toEqual(["not_int32", "too_small"]);
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join("")).toBe(JSON.stringify(values));
+    expect(stringifyChunks.source).toContain("const stringifyElement =");
+    expect(stringifyChunks.source).toContain("chunk.length + part.length > 24");
+    expect(stringifyChunks.source).not.toContain("specialized chunk emitter");
     expectTypeOf(issues).returns.toEqualTypeOf<IterableIterator<Errors.ValidationIssue>>();
     expectTypeOf(stringifyChunks).toMatchTypeOf<(value: JIT.Typeof<typeof Items>) => IterableIterator<string>>();
   });

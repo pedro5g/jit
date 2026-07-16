@@ -13,6 +13,12 @@ export type PlaygroundOp =
   | "sanitize"
   | "codec"
   | "query"
+  | "lazy"
+  | "visitor"
+  | "watch"
+  | "watchedList"
+  | "binary"
+  | "jsonChunks"
   | "transform"
   | "mapper";
 
@@ -46,10 +52,10 @@ export type PlaygroundResponse = PlaygroundSuccess | PlaygroundFailure;
 function safeStringify(value: unknown): string {
   if (value === undefined) return "undefined";
   if (typeof value === "string") return value;
-  const seen = new WeakSet<object>();
+  const ancestors: object[] = [];
   return JSON.stringify(
     value,
-    (_key, entry) => {
+    function stringifyEntry(this: unknown, _key: string, entry: unknown) {
       if (typeof entry === "bigint") return `${entry}n`;
       if (entry instanceof Map) return { "[Map]": Object.fromEntries(entry) };
       if (entry instanceof Set) return { "[Set]": [...entry] };
@@ -57,8 +63,9 @@ function safeStringify(value: unknown): string {
       if (entry instanceof Error) return `${entry.name}: ${entry.message}`;
       if (typeof entry === "function") return `[function ${entry.name || "anonymous"}]`;
       if (entry !== null && typeof entry === "object") {
-        if (seen.has(entry)) return "[circular]";
-        seen.add(entry);
+        while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) ancestors.pop();
+        if (ancestors.includes(entry)) return "[circular]";
+        ancestors[ancestors.length] = entry;
       }
       return entry;
     },
@@ -87,21 +94,44 @@ function sourceOf(fn: unknown): string | null {
 interface UserBindings {
   schema?: unknown;
   query?: unknown;
+  lazy?: unknown;
+  visitor?: unknown;
+  watch?: unknown;
+  watchedList?: unknown;
+  binary?: unknown;
+  binaryQuery?: unknown;
+  stringifyChunks?: unknown;
   transform?: unknown;
   mapper?: unknown;
+}
+
+interface PlaygroundWatchedList {
+  add(item: unknown): void;
+  remove(item: unknown): void;
+  update(items: readonly unknown[]): void;
+  snapshot(): unknown;
+}
+
+interface PlaygroundBinaryRowSet {
+  readonly bytes: Uint8Array;
+  readonly count: number;
+  readonly layout: { readonly memoryLayout: string; readonly rowSize: number };
+  hydrate(): unknown[];
+  release(): void;
+}
+
+interface PlaygroundBinaryArray {
+  load(values: readonly unknown[]): PlaygroundBinaryRowSet;
 }
 
 /**
  * Executes user schema code with JIT in scope, then compiles and runs the
  * selected operation (guide §16: client-only, terminable worker, never on a
  * server, never logged). Import lines are stripped — JIT is injected. Besides
- * `schema`, the snippet may define `query`, `transform` and `mapper` bindings
- * for the pipeline operations.
+ * `schema`, the snippet may define operation-specific bindings returned below.
  */
-self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
-  const { id, code, op, inputA, inputB } = event.data;
-
-  const reply = (response: PlaygroundResponse) => self.postMessage(response);
+export function executePlaygroundRequest(request: PlaygroundRequest): PlaygroundResponse {
+  const { id, code, op, inputA, inputB } = request;
 
   try {
     const body = code.replace(/^\s*import[^\n]*$/gm, "");
@@ -110,6 +140,13 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
       `"use strict";\n${body}\n;return {
         schema: typeof schema === "undefined" ? undefined : schema,
         query: typeof query === "undefined" ? undefined : query,
+        lazy: typeof lazy === "undefined" ? undefined : lazy,
+        visitor: typeof visitor === "undefined" ? undefined : visitor,
+        watch: typeof watch === "undefined" ? undefined : watch,
+        watchedList: typeof watchedList === "undefined" ? undefined : watchedList,
+        binary: typeof binary === "undefined" ? undefined : binary,
+        binaryQuery: typeof binaryQuery === "undefined" ? undefined : binaryQuery,
+        stringifyChunks: typeof stringifyChunks === "undefined" ? undefined : stringifyChunks,
         transform: typeof transform === "undefined" ? undefined : transform,
         mapper: typeof mapper === "undefined" ? undefined : mapper,
       };`
@@ -239,6 +276,123 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
           b === undefined ? query(requireA("a JSON array of rows")) : query(requireA("a JSON array of rows"), b);
         break;
       }
+      case "lazy": {
+        const lazy = bindings.lazy as ((rows: unknown, params?: unknown) => Iterable<unknown>) | undefined;
+        if (typeof lazy !== "function") {
+          throw new Error(
+            "define a `lazy` binding, e.g. `const lazy = JIT.query(JIT.array(schema)).take(10).compileIterator()`"
+          );
+        }
+        source = sourceOf(lazy);
+        run = () => [
+          ...(b === undefined ? lazy(requireA("a JSON array of rows")) : lazy(requireA("a JSON array of rows"), b)),
+        ];
+        break;
+      }
+      case "visitor": {
+        const visitor = bindings.visitor as
+          | ((rows: unknown, consumeOrParams: unknown, consume?: (value: unknown) => void) => number)
+          | undefined;
+        if (typeof visitor !== "function") {
+          throw new Error(
+            "define a `visitor` binding, e.g. `const visitor = JIT.query(JIT.array(schema)).compileVisitor()`"
+          );
+        }
+        source = sourceOf(visitor);
+        run = () => {
+          const values: unknown[] = [];
+          const consume = (value: unknown) => {
+            values[values.length] = value;
+          };
+          const visited =
+            b === undefined
+              ? visitor(requireA("a JSON array of rows"), consume)
+              : visitor(requireA("a JSON array of rows"), b, consume);
+          return { visited, values };
+        };
+        break;
+      }
+      case "watch": {
+        const watch = bindings.watch as ((previous: unknown, current: unknown) => unknown) | undefined;
+        if (typeof watch !== "function") {
+          throw new Error('define a `watch` binding, e.g. `const watch = JIT.watch(JIT.array(schema), { key: "id" })`');
+        }
+        source = sourceOf(watch);
+        run = () => watch(requireA("the previous JSON collection"), requireB("the current JSON collection"));
+        break;
+      }
+      case "watchedList": {
+        const createWatchedList = bindings.watchedList as
+          | ((initialItems: readonly unknown[]) => PlaygroundWatchedList)
+          | undefined;
+        if (typeof createWatchedList !== "function") {
+          throw new Error(
+            'define a `watchedList` factory, e.g. `const watchedList = (initial) => JIT.watchedList(Users, initial, { key: "id" })`'
+          );
+        }
+        run = () => {
+          requireA("a JSON array of initial items");
+          requireB("a JSON array of watched-list actions");
+          if (!Array.isArray(a) || !Array.isArray(b)) {
+            throw new Error("watchedList expects an initial array and an action array");
+          }
+          const list = createWatchedList(a);
+          for (const action of b) {
+            if (action === null || typeof action !== "object") {
+              throw new Error("every watched-list action must be an object");
+            }
+            const entry = action as { readonly type?: unknown; readonly item?: unknown; readonly items?: unknown };
+            if (entry.type === "add") list.add(entry.item);
+            else if (entry.type === "remove") list.remove(entry.item);
+            else if (entry.type === "update" && Array.isArray(entry.items)) list.update(entry.items);
+            else throw new Error('watched-list actions use { type: "add" | "remove" | "update", ... }');
+          }
+          return list.snapshot();
+        };
+        break;
+      }
+      case "binary": {
+        const binary = bindings.binary as PlaygroundBinaryArray | undefined;
+        const binaryQuery = bindings.binaryQuery as ((rowset: PlaygroundBinaryRowSet) => unknown) | undefined;
+        if (!binary || typeof binary.load !== "function" || typeof binaryQuery !== "function") {
+          throw new Error(
+            "define `binary` and `binaryQuery` bindings from an array binary layout and `JIT.query(binary)`"
+          );
+        }
+        source = sourceOf(binaryQuery);
+        run = () => {
+          const rows = requireA("a JSON array of flat rows");
+          if (!Array.isArray(rows)) throw new Error("binary expects a JSON array of flat rows");
+          const rowset = binary.load(rows);
+          try {
+            return {
+              rows: rowset.count,
+              bytes: rowset.bytes.byteLength,
+              layout: rowset.layout.memoryLayout,
+              rowSize: rowset.layout.rowSize,
+              result: binaryQuery(rowset),
+              hydrated: rowset.hydrate(),
+            };
+          } finally {
+            rowset.release();
+          }
+        };
+        break;
+      }
+      case "jsonChunks": {
+        const stringifyChunks = bindings.stringifyChunks as ((value: unknown) => IterableIterator<string>) | undefined;
+        if (typeof stringifyChunks !== "function") {
+          throw new Error(
+            "define a `stringifyChunks` binding with `JIT.json(schema).stringifyChunks({ chunkBytes }).compile()`"
+          );
+        }
+        source = sourceOf(stringifyChunks);
+        run = () => {
+          const chunks = [...stringifyChunks(requireA())];
+          return { chunks, chunkCount: chunks.length, json: chunks.join("") };
+        };
+        break;
+      }
       case "transform": {
         const transform = bindings.transform as ((value: unknown) => unknown) | undefined;
         if (typeof transform !== "function") {
@@ -270,8 +424,14 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
     const result = run();
     const runMs = performance.now() - runStart;
 
-    reply({ id, ok: true, result: safeStringify(result), source, compileMs, runMs });
+    return { id, ok: true, result: safeStringify(result), source, compileMs, runMs };
   } catch (error) {
-    reply({ id, ok: false, error: error instanceof Error ? error.message : String(error) });
+    return { id, ok: false, error: error instanceof Error ? error.message : String(error) };
   }
-};
+}
+
+if (typeof self !== "undefined") {
+  self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
+    self.postMessage(executePlaygroundRequest(event.data));
+  };
+}

@@ -5,7 +5,7 @@ import { Section, SectionHeading } from "@/components/ui/section";
 export const metadata: Metadata = {
   title: "Playground",
   description:
-    "Compile jit schemas in your browser: write a schema, validate JSON input and read the generated specialized source — everything runs locally in a Web Worker.",
+    "Compile jit schemas, lazy queries, watched collections and binary rowsets in your browser, then inspect the specialized source.",
 };
 
 export default function PlaygroundPage() {
@@ -14,7 +14,7 @@ export default function PlaygroundPage() {
       <SectionHeading
         eyebrow="Playground"
         title="The whole engine, in your browser"
-        lead="A real TypeScript editor with full jit type inference, every compiled operation one click away. Define a schema, customize the inputs, run it, and read the exact specialized source the compiler emits."
+        lead="A real TypeScript editor with full jit type inference for schemas, lazy pipelines, watched collections and binary data. Customize the inputs, run locally, and inspect the exact specialized source the compiler emits."
       />
       <PlaygroundClient />
     </Section>

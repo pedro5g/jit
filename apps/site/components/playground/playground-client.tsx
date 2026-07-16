@@ -44,6 +44,24 @@ const usersArrayInput = `[
   { "id": 3, "name": "Barbara", "email": "barbara@mit.edu", "role": "user", "tags": [] }
 ]`;
 
+const currentUsersArrayInput = `[
+  { "id": 1, "name": "Ada Lovelace", "email": "ada@lovelace.dev", "role": "admin", "tags": ["compiler", "math"] },
+  { "id": 3, "name": "Barbara", "email": "barbara@mit.edu", "role": "user", "tags": [] },
+  { "id": 4, "name": "Alan", "email": "alan@bletchley.uk", "role": "user", "tags": ["cryptography"] }
+]`;
+
+const watchedListActionsInput = `[
+  { "type": "remove", "item": { "id": 2, "name": "Grace", "role": "admin" } },
+  { "type": "add", "item": { "id": 4, "name": "Alan", "role": "user" } }
+]`;
+
+const eventRowsInput = `[
+  { "id": 1, "score": 42.5, "active": true, "region": "br" },
+  { "id": 2, "score": 18.0, "active": false, "region": "us" },
+  { "id": 3, "score": 91.5, "active": true, "region": "br" },
+  { "id": 4, "score": 73.0, "active": true, "region": "eu" }
+]`;
+
 const ops: OpConfig[] = [
   { id: "validate", label: "validate", needsB: false, hasSource: true },
   { id: "parse", label: "parse", needsB: false, hasSource: true },
@@ -77,6 +95,24 @@ const ops: OpConfig[] = [
     needsB: { label: "params (optional)", default: `{ "minimumId": 1 }` },
     hasSource: true,
   },
+  { id: "lazy", label: "lazy", aLabel: "rows (JSON array)", needsB: false, hasSource: true },
+  { id: "visitor", label: "visitor", aLabel: "rows (JSON array)", needsB: false, hasSource: true },
+  {
+    id: "watch",
+    label: "watch",
+    aLabel: "previous collection",
+    needsB: { label: "current collection", default: currentUsersArrayInput },
+    hasSource: true,
+  },
+  {
+    id: "watchedList",
+    label: "watchedList",
+    aLabel: "initial collection",
+    needsB: { label: "actions", default: watchedListActionsInput },
+    hasSource: false,
+  },
+  { id: "binary", label: "binary", aLabel: "flat rows (JSON array)", needsB: false, hasSource: true },
+  { id: "jsonChunks", label: "chunks", aLabel: "values (JSON array)", needsB: false, hasSource: true },
   { id: "transform", label: "transform", needsB: false, hasSource: true },
   { id: "mapper", label: "mapper", aLabel: "value or array (JSON)", needsB: false, hasSource: true },
 ];
@@ -147,6 +183,139 @@ const query = JIT.query(JIT.array(schema))
 `,
     a: usersArrayInput,
     op: "query",
+  },
+  {
+    id: "lazy",
+    label: "Lazy generator",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  score: JIT.number().float64(),
+  active: JIT.boolean(),
+  region: JIT.union(JIT.literal("br"), JIT.literal("us"), JIT.literal("eu")),
+});
+
+// Pull-based generator: filter/select/take fuse and stop after two matches.
+const lazy = JIT.query(JIT.array(schema))
+  .filter((q) => q.eq("active", true))
+  .select("id", "score")
+  .take(2)
+  .lazy()
+  .compile();
+`,
+    a: eventRowsInput,
+    op: "lazy",
+  },
+  {
+    id: "visitor",
+    label: "Direct visitor",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  score: JIT.number().float64(),
+  active: JIT.boolean(),
+  region: JIT.union(JIT.literal("br"), JIT.literal("us"), JIT.literal("eu")),
+});
+
+// Push-based sink: no iterator protocol and no result array in the engine.
+const visitor = JIT.query(JIT.array(schema))
+  .filter((q) => q.and(q.eq("active", true), q.gte("score", 40)))
+  .select("id", "score")
+  .compileVisitor();
+`,
+    a: eventRowsInput,
+    op: "visitor",
+  },
+  {
+    id: "watch",
+    label: "Snapshot watcher",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+  email: JIT.string().email(),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+  tags: JIT.array(JIT.string()),
+});
+const Users = JIT.array(schema);
+
+// Stateless O(n) diff specialized to direct item.id access.
+const watch = JIT.watch(Users, { key: "id" });
+`,
+    a: usersArrayInput,
+    op: "watch",
+  },
+  {
+    id: "watched-list",
+    label: "Stateful watched list",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
+});
+const Users = JIT.array(schema);
+
+// The playground applies the JSON actions and returns snapshot().
+const watchedList = (initial: JIT.Typeof<typeof Users>) =>
+  JIT.watchedList(Users, initial, { key: "id" });
+`,
+    a: `[
+  { "id": 1, "name": "Ada", "role": "admin" },
+  { "id": 2, "name": "Grace", "role": "admin" }
+]`,
+    op: "watchedList",
+  },
+  {
+    id: "binary",
+    label: "Columnar binary rowset",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  score: JIT.number().float64(),
+  active: JIT.boolean(),
+  region: JIT.union(JIT.literal("br"), JIT.literal("us"), JIT.literal("eu")),
+});
+
+const binary = JIT.array(schema).binary({
+  strategy: "exact",
+  memoryLayout: "columnar",
+});
+const binaryQuery = JIT.query(binary)
+  .filter((q) => q.and(q.eq("region", "br"), q.eq("active", true)))
+  .select("id", "score")
+  .compile();
+`,
+    a: eventRowsInput,
+    op: "binary",
+  },
+  {
+    id: "json-chunks",
+    label: "Chunked JSON generator",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const Item = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+});
+const schema = JIT.array(Item);
+
+// Bounded output chunks can be written directly to a response or socket.
+const stringifyChunks = JIT.json(schema)
+  .stringifyChunks({ chunkBytes: 48 })
+  .compile();
+`,
+    a: `[
+  { "id": 1, "name": "Ada Lovelace" },
+  { "id": 2, "name": "Grace Hopper" },
+  { "id": 3, "name": "Barbara Liskov" }
+]`,
+    op: "jsonChunks",
   },
   {
     id: "mapper",
