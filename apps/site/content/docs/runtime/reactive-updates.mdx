@@ -1,0 +1,119 @@
+---
+title: Reactive immutable updates
+description: Subscribe to compiled structural updates by root value, typed property path or derived selector.
+---
+
+`JIT.update(schema).reactive(initial)` owns one immutable value and notifies
+consumers only when the compiled updater returns a new root reference. It is a
+small external store, not a proxy-based state system: reads are ordinary
+property reads and writes keep the same structural-sharing guarantees as
+`JIT.update`.
+
+```ts
+import { JIT } from "@jit-compiler/jit/runtime";
+
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+  profile: JIT.object({ score: JIT.number(), active: JIT.boolean() }),
+});
+
+const user = JIT.update(User).reactive({
+  id: 1,
+  name: "Ada",
+  profile: { score: 10, active: true },
+});
+
+user.update({ profile: { score: 11 } });
+user.update((draft) => {
+  draft.profile.active = false;
+});
+```
+
+## Choose the narrowest subscription
+
+Root subscriptions receive the old/new root and a lazy `changes` collection.
+The compiled diff runs only if a listener reads `event.changes`.
+
+```ts
+const stop = user.subscribe((event) => {
+  render(event.value);
+  audit(event.changes); // activates the compiled diff for this event
+});
+
+stop();
+```
+
+Path watchers avoid a full diff. Tuple paths are inferred by TypeScript and the
+store reads each unique subscribed path once per notification.
+
+```ts
+user.watch(["profile", "score"], ({ previous, value }) => {
+  // previous and value are number
+  updateScore(previous, value);
+});
+
+// Dot paths support dynamic configuration; their selected value is unknown.
+user.watch("profile.active", ({ value }) => configure(Boolean(value)));
+```
+
+Selectors are useful when a view depends on multiple fields. `equals` controls
+when the listener runs; `Object.is` is the default for paths and selectors.
+
+```ts
+user.select(
+  (value) => `${value.name}:${value.profile.score}`,
+  ({ value }) => updateLabel(value),
+  { equals: (left, right) => left.toLowerCase() === right.toLowerCase() },
+);
+```
+
+## Batching and scheduling
+
+`batch` applies every compiled update immediately but emits one notification
+from the value before the batch to its final value. `version` still counts each
+effective update.
+
+```ts
+user.batch((state) => {
+  state.update({ name: "Ada Lovelace" });
+  state.update({ profile: { score: 12 } });
+});
+```
+
+Scheduling is `sync` by default. `microtask` coalesces writes in the current
+JavaScript turn. A custom scheduler integrates with animation frames, a UI
+framework or a job queue.
+
+```ts
+const uiState = JIT.update(User).reactive(initial, {
+  schedule: "microtask",
+  onError(error) {
+    reportSubscriberError(error);
+  },
+});
+
+const framed = JIT.update(User).reactive(initial, {
+  schedule: (flush) => requestAnimationFrame(() => flush()),
+});
+```
+
+Call `flush()` to deliver a pending custom/microtask notification immediately.
+Call `dispose()` to clear subscriptions and stop future writes. `set(next)`
+replaces the complete value; `update(patch)` keeps schema-aware merge semantics.
+
+## Cost model
+
+| Usage                           | Work after the compiled update                      |
+| ------------------------------- | --------------------------------------------------- |
+| No effective change             | reference check only; no notification               |
+| Root listener without `changes` | one event object, no structural diff                |
+| Typed path watcher              | direct reads for each unique path                   |
+| Selector                        | one selector call per old/new value                 |
+| `event.changes`                 | one lazy schema-specialized diff and change entries |
+| Batch/microtask                 | one notification for all coalesced writes           |
+
+The controller itself is runtime state and is not an AOT export. Its updater
+and lazy diff are still compiled and cached per schema. Generated AOT update
+functions remain pure; create the reactive controller at the application
+boundary that owns the state.

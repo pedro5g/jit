@@ -8,6 +8,7 @@ export type PlaygroundOp =
   | "diff"
   | "hash"
   | "update"
+  | "reactiveUpdate"
   | "stringify"
   | "mask"
   | "sanitize"
@@ -103,6 +104,7 @@ interface UserBindings {
   stringifyChunks?: unknown;
   transform?: unknown;
   mapper?: unknown;
+  reactiveUpdate?: unknown;
 }
 
 interface PlaygroundWatchedList {
@@ -149,6 +151,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         stringifyChunks: typeof stringifyChunks === "undefined" ? undefined : stringifyChunks,
         transform: typeof transform === "undefined" ? undefined : transform,
         mapper: typeof mapper === "undefined" ? undefined : mapper,
+        reactiveUpdate: typeof reactiveUpdate === "undefined" ? undefined : reactiveUpdate,
       };`
     );
 
@@ -232,6 +235,14 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
           const out = model.update(requireA() as never, requireB("a patch object") as never);
           return { updated: out, untouchedInput: out !== a };
         };
+        break;
+      }
+      case "reactiveUpdate": {
+        const reactiveUpdate = bindings.reactiveUpdate as ((initial: unknown, patches: unknown) => unknown) | undefined;
+        if (typeof reactiveUpdate !== "function") {
+          throw new Error("define a `reactiveUpdate` binding that creates `JIT.update(schema).reactive(initial)`");
+        }
+        run = () => reactiveUpdate(requireA("the initial JSON value"), requireB("a JSON patch array"));
         break;
       }
       case "stringify": {

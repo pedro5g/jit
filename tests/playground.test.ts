@@ -37,6 +37,41 @@ describe("browser playground advanced operations", () => {
     expect(sanitized.source).toContain("rawName.toLowerCase()");
   });
 
+  it("executes reactive updates with path and aggregate notifications", () => {
+    const result = execute(
+      "reactiveUpdate",
+      `const schema = JIT.object({
+  id: JIT.number(),
+  profile: JIT.object({ score: JIT.number(), active: JIT.boolean() }),
+});
+const reactiveUpdate = (initial, patches) => {
+  const store = JIT.update(schema).reactive(initial);
+  const events = [];
+  store.watch(["profile", "score"], ({ previous, value }) => events.push({ previous, value }));
+  store.subscribe((event) => events.push({ version: event.version, changes: event.changes }));
+  store.batch((state) => patches.forEach((patch) => state.update(patch)));
+  return { value: store.value, version: store.version, events };
+};`,
+      { id: 1, profile: { score: 1, active: true } },
+      [{ profile: { score: 2 } }, { profile: { active: false } }]
+    );
+
+    expect(result.value).toEqual({
+      value: { id: 1, profile: { score: 2, active: false } },
+      version: 2,
+      events: [
+        {
+          version: 2,
+          changes: [
+            { type: "update", path: ["profile", "score"], previous: 1, value: 2 },
+            { type: "update", path: ["profile", "active"], previous: true, value: false },
+          ],
+        },
+        { previous: 1, value: 2 },
+      ],
+    });
+  });
+
   it("executes lazy generators and direct visitors", () => {
     const lazy = execute(
       "lazy",

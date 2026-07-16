@@ -53,6 +53,10 @@ AOT function when it has no callbacks. `watchedList` retains state for an
 aggregate or unit of work. See [watched lists and collection
 changes](/docs/runtime/watched-lists) for identity rules and configuration.
 
+For state owned by one process or UI store, `JIT.update(User).reactive(initial)`
+adds typed path watchers, selectors, batching and configurable scheduling over
+the compiled immutable updater. See [reactive updates](/docs/runtime/reactive-updates).
+
 ## JSON and codecs
 
 ```ts

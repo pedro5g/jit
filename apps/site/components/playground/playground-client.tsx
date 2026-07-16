@@ -84,6 +84,12 @@ const ops: OpConfig[] = [
   },
   { id: "hash", label: "hash", needsB: false, hasSource: true },
   { id: "update", label: "update", needsB: { label: "patch", default: `{ "name": "Grace" }` }, hasSource: false },
+  {
+    id: "reactiveUpdate",
+    label: "reactive",
+    needsB: { label: "patches", default: `[{ "profile": { "score": 2 } }]` },
+    hasSource: false,
+  },
   { id: "stringify", label: "stringify", needsB: false, hasSource: true },
   { id: "mask", label: "mask", needsB: false, hasSource: true },
   { id: "sanitize", label: "sanitize", needsB: false, hasSource: true },
@@ -176,6 +182,37 @@ const schema = JIT.object({
   "uploadName": "../avatar?.png"
 }`,
     op: "sanitize",
+  },
+  {
+    id: "reactive-update",
+    label: "Reactive immutable update",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+  profile: JIT.object({ score: JIT.number(), active: JIT.boolean() }),
+});
+
+const reactiveUpdate = (initial: JIT.Typeof<typeof schema>, patches: unknown[]) => {
+  const store = JIT.update(schema).reactive(initial);
+  const events: unknown[] = [];
+
+  store.watch(["profile", "score"], ({ previous, value }) => {
+    events.push({ property: "profile.score", previous, value });
+  });
+  store.subscribe((event) => {
+    events.push({ version: event.version, changes: event.changes });
+  });
+  store.batch((state) => {
+    for (const patch of patches) state.update(patch as never);
+  });
+
+  return { value: store.value, version: store.version, events };
+};
+`,
+    a: `{ "id": 1, "name": "Ada", "profile": { "score": 1, "active": true } }`,
+    op: "reactiveUpdate",
   },
   {
     id: "codec",

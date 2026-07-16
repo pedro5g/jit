@@ -75,6 +75,17 @@ export type { TransformBuilder, TransformFieldOps } from "./transform.js";
 export { transform } from "./transform.js";
 export type {
   Draft,
+  ReactiveChange,
+  ReactivePath,
+  ReactivePathEvent,
+  ReactivePathValue,
+  ReactiveScheduler,
+  ReactiveSelectionEvent,
+  ReactiveSubscribeOptions,
+  ReactiveUpdate,
+  ReactiveUpdateEvent,
+  ReactiveUpdateOptions,
+  ReactiveWatchOptions,
   RuntimeUpdate,
   UpdateInput,
   UpdateRecipe,

@@ -1,10 +1,30 @@
+import { compileDiff, type Diff } from "../compiler/diff.js";
 import { compileUpdate, type UpdatePatch } from "../compiler/update.js";
 import type { AnyTypeSchema, InnerTypeDef, LazyDef, TypeofSchema } from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+import {
+  createReactiveUpdate,
+  type ReactiveUpdateController,
+  type ReactiveUpdateOptions,
+} from "../runtime/update/index.js";
 import type { QueryParamRef } from "./query.js";
+
+export type ReactiveUpdate<T> = ReactiveUpdateController<T, UpdateInput<T>>;
+export type {
+  ReactiveChange,
+  ReactivePath,
+  ReactivePathEvent,
+  ReactivePathValue,
+  ReactiveScheduler,
+  ReactiveSelectionEvent,
+  ReactiveSubscribeOptions,
+  ReactiveUpdateEvent,
+  ReactiveUpdateOptions,
+  ReactiveWatchOptions,
+} from "../runtime/update/index.js";
 
 /**
  * Mutable draft shape accepted by update recipes.
@@ -47,6 +67,7 @@ export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
  */
 export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
   compile(): RuntimeUpdate<T>;
+  reactive(initial: T, options?: ReactiveUpdateOptions): ReactiveUpdate<T>;
   patch<const TPatch extends UpdatePatchTemplate<T>>(
     patch: TPatch
   ): {
@@ -128,6 +149,11 @@ export function update<TSchema extends AnyTypeSchema>(
         compile: () => (current: TypeofSchema<TSchema>, params: Readonly<Record<string, unknown>>) =>
           run(current, materializeParamPatch(template, params) as UpdatePatch<TypeofSchema<TSchema>>),
       }),
+    },
+    reactive: {
+      enumerable: false,
+      value: (initial: TypeofSchema<TSchema>, options?: ReactiveUpdateOptions) =>
+        createReactiveUpdate(initial, run, () => compileDiff(unwrapped) as Diff<TypeofSchema<TSchema>>, options),
     },
   });
 

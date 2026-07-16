@@ -299,6 +299,127 @@ describe("JIT compiler update", () => {
     expect(drafted.profile).not.toBe(input.profile);
   });
 
+  it("should notify reactive updates with lazy structural changes", () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      profile: JIT.object({ name: JIT.string(), age: JIT.number() }),
+    });
+    const store = JIT.update(User).reactive({ id: 1, profile: { name: "Ada", age: 37 } });
+    const events: unknown[] = [];
+    const unsubscribe = store.subscribe((event) => {
+      events.push({ previous: event.previous, value: event.value, version: event.version, changes: event.changes });
+    });
+
+    expect(store.update({ profile: { age: 37 } })).toBe(store.value);
+    expect(events).toHaveLength(0);
+
+    store.update((draft) => {
+      draft.profile.age = 38;
+    });
+
+    expect(events).toEqual([
+      {
+        previous: { id: 1, profile: { name: "Ada", age: 37 } },
+        value: { id: 1, profile: { name: "Ada", age: 38 } },
+        version: 1,
+        changes: [{ type: "update", path: ["profile", "age"], previous: 37, value: 38 }],
+      },
+    ]);
+    unsubscribe();
+    store.update({ id: 2 });
+    expect(events).toHaveLength(1);
+  });
+
+  it("should watch typed paths and selected values independently", () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      profile: JIT.object({ name: JIT.string(), age: JIT.number() }),
+    });
+    const store = JIT.update(User).reactive({ id: 1, profile: { name: "Ada", age: 37 } });
+    const ages: number[] = [];
+    const labels: string[] = [];
+
+    store.watch(["profile", "age"], (event) => {
+      expectTypeOf(event.value).toEqualTypeOf<number>();
+      ages.push(event.value);
+    });
+    store.select(
+      (value) => `${value.profile.name}:${value.profile.age}`,
+      (event) => labels.push(event.value),
+      { equals: (previous, value) => previous.toLowerCase() === value.toLowerCase() }
+    );
+
+    store.update({ id: 2 });
+    store.update({ profile: { age: 38 } });
+
+    expect(ages).toEqual([38]);
+    expect(labels).toEqual(["Ada:38"]);
+
+    const optional = JIT.update(JIT.object({ profile: JIT.object({ age: JIT.number() }).optional() })).reactive({
+      profile: undefined,
+    });
+    optional.watch(["profile", "age"], (event) => {
+      expectTypeOf(event.value).toEqualTypeOf<number | undefined>();
+    });
+  });
+
+  it("should batch sync updates and coalesce microtask notifications", async () => {
+    const Counter = JIT.object({ count: JIT.number(), label: JIT.string() });
+    const syncStore = JIT.update(Counter).reactive({ count: 0, label: "zero" });
+    const syncEvents: Array<{ readonly previous: number; readonly value: number }> = [];
+
+    syncStore.watch(["count"], ({ previous, value }) => syncEvents.push({ previous, value }));
+    syncStore.batch((store) => {
+      store.update({ count: 1 });
+      store.update({ count: 2 });
+      store.update({ label: "two" });
+    });
+
+    expect(syncStore.version).toBe(3);
+    expect(syncEvents).toEqual([{ previous: 0, value: 2 }]);
+
+    const asyncStore = JIT.update(Counter).reactive({ count: 0, label: "zero" }, { schedule: "microtask" });
+    const versions: number[] = [];
+
+    asyncStore.subscribe((event) => versions.push(event.version));
+    asyncStore.update({ count: 1 });
+    asyncStore.update({ count: 2 });
+    expect(versions).toEqual([]);
+    await Promise.resolve();
+    expect(versions).toEqual([2]);
+  });
+
+  it("should support custom scheduling, immediate subscriptions, error handling, and disposal", () => {
+    const Value = JIT.object({ count: JIT.number() });
+    let flush: (() => void) | undefined;
+    const errors: unknown[] = [];
+    const seen: number[] = [];
+    const store = JIT.update(Value).reactive(
+      { count: 0 },
+      {
+        schedule: (next) => {
+          flush = next;
+        },
+        onError: (error) => errors.push(error),
+      }
+    );
+
+    store.subscribe(() => {
+      throw new Error("listener failed");
+    });
+    store.watch(["count"], ({ value }) => seen.push(value), { immediate: true });
+    store.update({ count: 1 });
+    expect(seen).toEqual([0]);
+    flush?.();
+    expect(seen).toEqual([0, 1]);
+    expect(errors).toHaveLength(1);
+
+    store.dispose();
+    store.update({ count: 2 });
+    expect(store.value).toEqual({ count: 1 });
+    expect(seen).toEqual([0, 1]);
+  });
+
   it("should reject updates for readonly schemas", () => {
     const User = JIT.object({ id: JIT.number() }).readonly().schema;
 
