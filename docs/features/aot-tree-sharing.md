@@ -150,7 +150,7 @@ Cache helpers are also conditional:
 - Do not export raw schemas expecting AOT to infer everything. Raw schemas are
   intentionally skipped; export compiled functions or a grouped object.
 - Keep generated output in `node_modules/@jit/generated` when you want package
-  imports. If generating inside the project source tree, set
-  `emitPackageJson: false` to avoid writing a nested package manifest.
+  imports. For project-local output, import `./generated/index.js`; the CLI
+  automatically avoids a nested package manifest and no `#` alias is needed.
 - Run `pnpm clean:artifacts` after local builds if zshy leaves ignored build
   output beside source files.

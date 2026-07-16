@@ -156,13 +156,15 @@ types that future package splits will reuse.
 
 ## AOT generator
 
-`aot/generate.ts` writes a fully self-contained dual package:
+`aot/generate.ts` writes fully self-contained output selected by location:
 
-- `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
-  (exports map, `sideEffects: false`);
-- optional thin subpath entrypoints (`user.mjs`/`user.d.ts`) for
-  `#jit/user`-style imports, plus deterministic `manifest.json` and
-  `plans/*.json` review files when enabled;
+- local directories receive `index.js` + `index.d.ts` for standard relative
+  imports and no nested package boundary;
+- output below `node_modules` receives `index.mjs` + `index.cjs`, dual
+  declarations, and `package.json` (exports map, `sideEffects: false`);
+- optional thin subpath entrypoints use relative `.js` imports locally and the
+  generated package namespace below `node_modules`, plus deterministic
+  `manifest.json` and `plans/*.json` review files when enabled;
 - zero imports — the validation error class and runtime helpers
   (keyed-index cache, hash primitives) are inlined;
 - export shape is explicit and bundle-oriented: standalone compiled functions
@@ -175,7 +177,7 @@ types that future package splits will reuse.
   markers use only the keys present in the compiled object; standalone output
   uses only exported registered functions;
 - `.d.ts` types anchor on the dev's schema file via
-  `import("@jit-compiler/jit").Infer<typeof import("./user.jit.js").User>` — inference is
+  `import("@jit-compiler/jit").Typeof<typeof import("./user.jit.js").User>` — inference is
   the single source of truth (`aot/emit-type.ts` is only the fallback for
   programmatic generation without a source file);
 - `JIT.compile` markers restrict generation to the requested ops and add

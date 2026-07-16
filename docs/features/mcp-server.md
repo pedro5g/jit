@@ -119,8 +119,9 @@ cannot turn an inspection request into a write by omitting a default.
 ```
 
 Config remains the source of defaults. Tool arguments may override `files`,
-`patterns`, `outDir`, `packageName`, `compilerPackageName`, `clean`,
-`emitPackageJson`, and individual `emit` flags for one call.
+`patterns`, `outDir`, `packageName`, `typesPackage`, `clean`, and individual
+`emit` flags for one call. Runtime layout is inferred from whether `outDir`
+is local or below `node_modules`.
 
 ## Resources
 

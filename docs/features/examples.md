@@ -49,22 +49,17 @@ boundary. The example keeps those concerns explicit.
 
 ```text
 compiled/generated/
-├── index.mjs
-├── index.cjs
+├── index.js
 ├── index.d.ts
-├── index.d.cts
-├── catalog.mjs
-├── catalog.cjs
+├── catalog.js
 ├── catalog.d.ts
-├── catalog.d.cts
-├── package.json
 ├── manifest.json
 └── plans/catalog.json
 ```
 
-The JavaScript has zero imports from `@jit-compiler/jit`. The package `imports`
-map exposes it as `#examples`, so TypeScript consumes generated declarations
-while Node executes `index.mjs`.
+The JavaScript has zero imports from `@jit-compiler/jit`. The compiled example
+uses a normal relative `./generated/index.js` import, and TypeScript resolves
+the adjacent generated declaration without a package alias.
 
 Generated files are committed intentionally. `pnpm examples:check` regenerates
 them and rejects a diff, which catches stale snapshots, nondeterministic code,

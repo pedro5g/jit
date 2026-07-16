@@ -13,7 +13,7 @@ describe("runtime and define entrypoints", () => {
     const isUser = RuntimeJIT.validate(User).is().compile();
 
     expect(isUser({ id: 1 })).toBe(true);
-    expectTypeOf<RuntimeJIT.Infer<typeof User>>().toEqualTypeOf<{ id: number }>();
+    expectTypeOf<RuntimeJIT.Typeof<typeof User>>().toEqualTypeOf<{ id: number }>();
   });
 
   it("should create typed AOT stubs that generate standalone output", async () => {
@@ -32,15 +32,15 @@ describe("runtime and define entrypoints", () => {
         outDir,
       });
 
-      const source = readFileSync(join(outDir, "index.mjs"), "utf8");
-      const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+      const source = readFileSync(join(outDir, "index.js"), "utf8");
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
         isUser: (value: unknown) => boolean;
       };
 
       expect(source).not.toContain('from "@jit-compiler/jit"');
       expect(generated.isUser({ id: 1 })).toBe(true);
       expect(generated.isUser({ id: "1" })).toBe(false);
-      expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is DefineJIT.Infer<typeof User>>();
+      expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is DefineJIT.Typeof<typeof User>>();
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }

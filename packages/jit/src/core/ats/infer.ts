@@ -6,6 +6,9 @@ export type Infer<TSchemaLike> = TSchemaLike extends { readonly schema: infer TS
     ? InferSchema<TSchemaLike>
     : never;
 
+/** Public schema output helper used as `JIT.Typeof<typeof Schema>`. */
+export type Typeof<TSchemaLike> = Infer<TSchemaLike>;
+
 export type SchemaLike<TSchema extends AnyTypeSchema = AnyTypeSchema> = TSchema | { readonly schema: TSchema };
 
 export type InferSchemaLike<TSchemaLike extends SchemaLike> = TSchemaLike extends {

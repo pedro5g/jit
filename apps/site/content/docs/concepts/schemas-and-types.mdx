@@ -11,7 +11,7 @@ const User = JIT.object({
   role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
 });
 
-type User = JIT.Infer<typeof User>;
+type User = JIT.Typeof<typeof User>;
 ```
 
 The runtime AST has a stable `{ type, _type, def, annotations }` shape. `_type` is

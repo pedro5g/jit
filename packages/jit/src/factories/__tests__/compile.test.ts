@@ -54,7 +54,7 @@ describe("JIT.compile explicit aggregation", () => {
     expect(Users.extras).toEqual([]);
     expect(Object.keys(Users).sort()).toEqual(["extras", "is", "ops", "parse", "schema"]);
     expectTypeOf<keyof typeof Users>().toEqualTypeOf<"schema" | "ops" | "extras" | "is" | "parse">();
-    expectTypeOf<JIT.infer<typeof Users>>().toEqualTypeOf<JIT.infer<typeof User>>();
+    expectTypeOf<JIT.Typeof<typeof Users>>().toEqualTypeOf<JIT.Typeof<typeof User>>();
   });
 });
 
@@ -78,7 +78,7 @@ describe("AOT generation from JIT.compile markers", () => {
     });
 
     const result = AOT.generate({ schemas: { User: marked }, outDir });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
     expect(source).toContain("const User_is");
@@ -98,7 +98,7 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(types).toContain("readonly stringify");
     expect(types).not.toContain("User_clone");
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       User: {
         is: (value: unknown) => boolean;
         stringify: (value: unknown) => string;
@@ -133,7 +133,7 @@ describe("AOT generation from JIT.compile markers", () => {
     });
 
     AOT.generate({ schemas: { User: marked }, outDir });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
     expect(source).toContain("const User_is");
@@ -146,7 +146,7 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(types).toContain("readonly is: (value: unknown) => value is User;");
     expect(types).toContain("readonly fromJSON: (json: string) => User;");
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       User: {
         is: (value: unknown) => boolean;
         parse: (value: unknown) => typeof ada;
@@ -193,7 +193,7 @@ describe("AOT generation from JIT.compile markers", () => {
       sources: new Map([["User", join(outDir, "user.jit.ts")]]),
       outDir,
     });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
     expect(result.skipped).toHaveLength(0);
@@ -204,7 +204,7 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(types).not.toContain("export declare const User_findAdmins");
     expect(types).toContain('readonly findAdmins: typeof import("./user.jit.js").User["findAdmins"];');
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       User: {
         is: (value: unknown) => boolean;
         findAdmins: (items: unknown[]) => unknown[];
@@ -260,7 +260,7 @@ describe("AOT generation from JIT.compile markers", () => {
 
     AOT.generate({ schemas: { Item: marked }, outDir });
 
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
     expect(source).toContain("const Item_equal");

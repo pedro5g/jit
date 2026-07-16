@@ -23,7 +23,10 @@ export interface CompilationOptions {
 
 export type OperationDescriptor =
   | { readonly kind: "validate"; readonly op: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" }
-  | { readonly kind: "operation"; readonly op: "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON" }
+  | {
+      readonly kind: "operation";
+      readonly op: "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON" | "format";
+    }
   | { readonly kind: "query"; readonly params?: readonly string[] }
   | { readonly kind: "transform" };
 

@@ -85,12 +85,12 @@ describe("JIT AOT generate", () => {
       },
       outDir,
     });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
 
     expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(result.skipped).toHaveLength(0);
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       Event_equal: (left: unknown, right: unknown) => boolean;
       Event_clone: <T>(value: T) => T;
       Event_diff: (left: unknown, right: unknown) => readonly unknown[];
@@ -150,8 +150,8 @@ describe("JIT AOT generate", () => {
       functions: { ActiveAdmins },
       outDir,
     });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       ActiveAdmins: (value: typeof rowset) => { readonly id: number; readonly score: number }[];
     };
 
@@ -178,8 +178,8 @@ describe("JIT AOT generate", () => {
       .select("id")
       .compileVisitor();
     const result = AOT.generate({ schemas: {}, functions: { ActiveIds, VisitActiveIds }, outDir });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       ActiveIds: (input: readonly { id: number; active: boolean }[]) => IterableIterator<{ id: number }>;
       VisitActiveIds: (
         input: readonly { id: number; active: boolean }[],
@@ -221,9 +221,8 @@ describe("JIT AOT generate", () => {
       outDir,
       packageName: "@acme/models",
     });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
-    const manifest = JSON.parse(readFileSync(join(outDir, "package.json"), "utf8")) as { name: string; type: string };
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("const User_is_validator = /*#__PURE__*/ (() => {");
@@ -244,8 +243,7 @@ describe("JIT AOT generate", () => {
     expect(types).toContain("export declare const User_safeParse");
     expect(types).not.toContain("export declare const User: {");
 
-    expect(manifest.name).toBe("@acme/models");
-    expect(manifest.type).toBe("module");
+    expect(existsSync(join(outDir, "package.json"))).toBe(false);
   });
 
   it("should preserve standalone export names when grouped internals would collide", async () => {
@@ -258,9 +256,9 @@ describe("JIT AOT generate", () => {
       outDir,
     });
 
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       User: { is: (value: unknown) => boolean };
       User_is: (value: unknown) => boolean;
     };
@@ -271,6 +269,30 @@ describe("JIT AOT generate", () => {
     expect(types).toContain("export type UserStrict<TValue> = TValue;");
     expect(generated.User.is({ id: 1 })).toBe(true);
     expect(generated.User_is({ id: 1 })).toBe(true);
+  });
+
+  it("should emit standalone and grouped specialized formatters", async () => {
+    const Document = JIT.string().format("###.###.###-##");
+    const formatDocument = JIT.format(Document).compile();
+
+    AOT.generate({
+      schemas: { Document: JIT.compile(Document, { format: formatDocument }) },
+      functions: { formatDocument },
+      outDir,
+    });
+
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      Document: { format: (value: string) => string };
+      formatDocument: (value: string) => string;
+    };
+
+    expect(source).toContain("function format(value)");
+    expect(source).not.toContain("safeParse");
+    expect(types).toContain("readonly format: (value: string) => string");
+    expect(generated.Document.format("12345678901")).toBe("123.456.789-01");
+    expect(generated.formatDocument("12345678901")).toBe("123.456.789-01");
   });
 
   it("should report raw schemas as skipped instead of generating fallback functions", () => {
@@ -297,18 +319,12 @@ describe("JIT AOT generate", () => {
       schemas: {},
       functions: { User_is: selected.is },
       outDir,
-      emitPackageJson: false,
     });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
-    expect(result.files.map((file) => file.split("/").pop()).sort()).toEqual([
-      "index.cjs",
-      "index.d.cts",
-      "index.d.ts",
-      "index.mjs",
-    ]);
-    expect(existsSync(join(outDir, "package.json"))).toBe(false);
+    expect(result.files.map((file) => file.split("/").pop()).sort()).toEqual(["index.d.ts", "index.js"]);
+    expect(readFileSync(join(outDir, "package.json"), "utf8")).toBe('{"stale":true}\n');
     expect(source).toContain("const User_is");
     expect(source).not.toContain("User_parse");
     expect(source).not.toContain("User_equal");
@@ -336,7 +352,7 @@ describe("JIT AOT generate", () => {
       outDir: plainDir,
     });
 
-    const plainSource = readFileSync(join(plainDir, "index.mjs"), "utf8");
+    const plainSource = readFileSync(join(plainDir, "index.js"), "utf8");
 
     expect(plainSource).not.toContain("__indexCache");
     expect(plainSource).not.toContain("__hashCache");
@@ -347,8 +363,8 @@ describe("JIT AOT generate", () => {
       outDir: indexedDir,
     });
 
-    const indexedSource = readFileSync(join(indexedDir, "index.mjs"), "utf8");
-    const indexedGenerated = (await import(pathToFileURL(join(indexedDir, "index.mjs")).href)) as {
+    const indexedSource = readFileSync(join(indexedDir, "index.js"), "utf8");
+    const indexedGenerated = (await import(pathToFileURL(join(indexedDir, "index.js")).href)) as {
       Indexed_equal: (left: readonly unknown[], right: readonly unknown[]) => boolean;
     };
     const left = Array.from({ length: 70 }, (_, index) => ({ id: index, name: `user-${index}` }));
@@ -374,8 +390,8 @@ describe("JIT AOT generate", () => {
       outDir: hashedDir,
     });
 
-    const hashedSource = readFileSync(join(hashedDir, "index.mjs"), "utf8");
-    const hashedGenerated = (await import(pathToFileURL(join(hashedDir, "index.mjs")).href)) as {
+    const hashedSource = readFileSync(join(hashedDir, "index.js"), "utf8");
+    const hashedGenerated = (await import(pathToFileURL(join(hashedDir, "index.js")).href)) as {
       Hashed_equal: (left: unknown, right: unknown) => boolean;
       Hashed_hash: (value: unknown) => number;
     };
@@ -400,7 +416,7 @@ describe("JIT AOT generate", () => {
       },
       outDir,
     });
-    const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
 
     expect(result.skipped.filter((skip) => skip.operation === "equal")).toHaveLength(0);
     expect(source).toContain("const Hashed_hash");
@@ -409,7 +425,7 @@ describe("JIT AOT generate", () => {
     expect(source.match(/const __hashCache = new WeakMap\(\);/g)).toHaveLength(1);
     expect(source).not.toContain("import ");
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       Hashed_equal: (left: unknown, right: unknown) => boolean;
       Hashed_hash: (value: unknown) => number;
     };

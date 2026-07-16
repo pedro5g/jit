@@ -5,7 +5,7 @@ import { registerScenario } from "../shared/scenario.js";
 const COUNT = 1_000_000;
 const Event = JIT.object({ id: JIT.number().int32(), active: JIT.boolean(), score: JIT.number().float32() });
 const Events = JIT.array(Event);
-type Event = JIT.infer<typeof Event>;
+type Event = JIT.Typeof<typeof Event>;
 
 const events = createEvents(COUNT);
 const lazyFirstTen = JIT.query(Events)

@@ -30,7 +30,7 @@ pnpm --filter @jit/examples run compiled
 
 [`compiled/catalog.jit.ts`](compiled/catalog.jit.ts) is the declaration file.
 The CLI discovers only its explicit exports and writes
-[`compiled/generated/index.mjs`](compiled/generated/index.mjs), CommonJS,
+[`compiled/generated/index.js`](compiled/generated/index.js),
 declarations, a manifest, subpath modules, and an operation plan.
 
 The generated application imports validation, equal, clone, diff, hash,

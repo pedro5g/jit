@@ -42,16 +42,19 @@ describe("jit CLI", () => {
     expect(source).toContain('import { AOT } from "@jit-compiler/jit";');
     expect(source).toContain('entries: ["./jit/**/*.jit.ts"]');
     expect(source).toContain('directory: "generated/jit"');
-    expect(source).toContain('importSpecifier: "#jit"');
+    expect(source).not.toContain("importSpecifier");
     expect(source).toContain('patterns: ["**/*.jit.ts"]');
-    expect(source).toContain('packageName: "@jit-compiler/jit"');
+    expect(source).toContain('package: "@jit-compiler/jit"');
     expect(source).toContain("subpathModules: true");
     expect(source).toContain("manifest: true");
     expect(source).toContain("plans: true");
     expect(existsSync(join(projectDir, "jit", "user.jit.ts"))).toBe(true);
     expect(source).not.toContain("operations:");
     expect(source).not.toContain("exportMode:");
-    expect(source).toContain("Use false when generating inside an existing source directory");
+    expect(source).toContain("Local output emits index.js");
+    expect(source).not.toContain("emitPackageJson");
+    expect(source).not.toContain("performance:");
+    expect(source).not.toContain("diagnostics:");
   });
 
   it("should refuse to overwrite an existing config unless forced", async () => {
@@ -107,7 +110,7 @@ describe("jit CLI", () => {
     );
 
     const code = await main(["generate"], runtime);
-    const source = readFileSync(join(projectDir, "generated", "index.mjs"), "utf8");
+    const source = readFileSync(join(projectDir, "generated", "index.js"), "utf8");
     const types = readFileSync(join(projectDir, "generated", "index.d.ts"), "utf8");
 
     expect(code).toBe(0);
@@ -118,7 +121,7 @@ describe("jit CLI", () => {
     expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
     expect(types).toContain('export declare const User_is: typeof import("../src/user.jit.js").User_is;');
     expect(types).not.toContain("export declare const User: {");
-    expect(existsSync(join(projectDir, "generated", "user.mjs"))).toBe(true);
+    expect(existsSync(join(projectDir, "generated", "user.js"))).toBe(true);
     expect(existsSync(join(projectDir, "generated", "manifest.json"))).toBe(true);
     expect(existsSync(join(projectDir, "generated", "plans", "user.json"))).toBe(true);
   });
@@ -198,7 +201,7 @@ describe("jit CLI", () => {
     stderr.length = 0;
 
     expect(await main(["generate"], runtime)).toBe(0);
-    expect(existsSync(join(projectDir, "generated", "index.mjs"))).toBe(true);
+    expect(existsSync(join(projectDir, "generated", "index.js"))).toBe(true);
     expect(await main(["clean"], runtime)).toBe(0);
     expect(stdout.join("")).toContain("removed");
     expect(existsSync(join(projectDir, "generated"))).toBe(false);

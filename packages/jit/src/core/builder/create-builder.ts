@@ -10,6 +10,7 @@ import {
   type FunctionSchema,
   type ObjectSchema,
   type SchemaShape,
+  type StringMaskMode,
   type StringNormalizationForm,
   TypeName,
 } from "../ats/index.js";
@@ -581,13 +582,19 @@ const baseBuilderPrototype = {
   format(
     this: RuntimeBuilder,
     pattern: string,
-    options?: { readonly stripNonDigits?: boolean },
+    options?: { readonly mode?: StringMaskMode; readonly stripNonDigits?: boolean },
     message?: string
   ): AnyBuilder {
+    const mode = options?.mode ?? "transform";
+
     return createBuilder(
       appendCheck(this.schema, {
         kind: "format",
-        value: { pattern, stripNonDigits: options?.stripNonDigits ?? true },
+        value: {
+          pattern,
+          mode,
+          stripNonDigits: options?.stripNonDigits ?? mode === "transform",
+        },
         message,
       })
     );
@@ -597,7 +604,7 @@ const baseBuilderPrototype = {
     return createBuilder(
       appendCheck(this.schema, {
         kind: "format",
-        value: { pattern: "###.###.###-##", stripNonDigits: true },
+        value: { pattern: "###.###.###-##", mode: "transform", stripNonDigits: true },
         message,
       })
     );
@@ -607,7 +614,7 @@ const baseBuilderPrototype = {
     return createBuilder(
       appendCheck(this.schema, {
         kind: "format",
-        value: { pattern: "##.###.###/####-##", stripNonDigits: true },
+        value: { pattern: "##.###.###/####-##", mode: "transform", stripNonDigits: true },
         message,
       })
     );

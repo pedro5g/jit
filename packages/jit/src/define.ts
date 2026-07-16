@@ -7,6 +7,7 @@
 import type { Clone } from "./compiler/clone.js";
 import type { Diff } from "./compiler/diff.js";
 import type { Equal } from "./compiler/equal.js";
+import type { Format } from "./compiler/format.js";
 import type { Hash } from "./compiler/hash.js";
 import type { Serialize } from "./compiler/serialize.js";
 import type { SafeParseResult, ValidatorOp } from "./compiler/validate.js";
@@ -39,7 +40,9 @@ interface DefineJsonBuilder<T> {
   parse(): DefineStep<(json: string) => T>;
 }
 
-export type { Infer } from "./core/ats/infer.js";
+export type Typeof<TSchemaLike> = import("./core/ats/infer.js").Typeof<TSchemaLike>;
+/** @deprecated Use `Typeof<TSchema>` instead. */
+export type Infer<TSchemaLike> = Typeof<TSchemaLike>;
 export type { Strict } from "./core/builder/types.js";
 
 export const JIT = {
@@ -48,6 +51,7 @@ export const JIT = {
   equal,
   clone,
   diff,
+  format,
   hash,
   json,
 } as typeof RuntimeJIT & {
@@ -55,11 +59,14 @@ export const JIT = {
   readonly equal: typeof equal;
   readonly clone: typeof clone;
   readonly diff: typeof diff;
+  readonly format: typeof format;
   readonly hash: typeof hash;
   readonly json: typeof json;
 };
 
 export namespace JIT {
+  export type Typeof<TSchemaLike> = import("./core/ats/infer.js").Typeof<TSchemaLike>;
+  /** @deprecated Use `JIT.Typeof<TSchema>` instead. */
   export type Infer<TSchemaLike> = import("./core/ats/infer.js").Infer<TSchemaLike>;
   export type Strict<TSchemaLike, TValue> = import("./core/builder/types.js").Strict<TSchemaLike, TValue>;
 }
@@ -102,6 +109,10 @@ function hash<TSchema extends ATS.AnyTypeSchema>(
   return operationStub(schema, "hash");
 }
 
+function format<TSchema extends ATS.StringSchema>(schema: SchemaInput<TSchema>): DefineFunction<Format> {
+  return operationStub(schema, "format");
+}
+
 function json(): Builder<ATS.JsonSchema>;
 function json<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
@@ -132,7 +143,7 @@ function validatorStep<TSchema extends ATS.AnyTypeSchema, TOp extends ValidatorO
 
 function operationStep<
   TSchema extends ATS.AnyTypeSchema,
-  TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON",
+  TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON" | "format",
 >(schema: TSchema, op: TOp): DefineStep<OperationFunction<ATS.InferSchema<TSchema>, TOp>> {
   return {
     compile() {
@@ -143,7 +154,7 @@ function operationStep<
 
 function operationStub<
   TSchema extends ATS.AnyTypeSchema,
-  TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON",
+  TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON" | "format",
 >(schema: SchemaInput<TSchema>, op: TOp): DefineFunction<OperationFunction<ATS.InferSchema<TSchema>, TOp>> {
   const unwrapped = unwrapSchema(schema);
 
@@ -193,7 +204,7 @@ type ValidatorFunction<T, TOp extends ValidatorOp> = TOp extends "is"
 
 type OperationFunction<
   T,
-  TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON",
+  TOp extends "equal" | "clone" | "diff" | "hash" | "stringify" | "fromJSON" | "format",
 > = TOp extends "equal"
   ? Equal<T>
   : TOp extends "clone"
@@ -204,4 +215,6 @@ type OperationFunction<
         ? Hash<T>
         : TOp extends "stringify"
           ? Serialize<T>
-          : (json: string) => T;
+          : TOp extends "format"
+            ? Format
+            : (json: string) => T;

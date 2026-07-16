@@ -1,6 +1,6 @@
 # Dual JIT + AOT API Audit
 
-Updated: 2026-07-11
+Updated: 2026-07-15
 
 This audit compares the master dual JIT + AOT plan with the current
 single-package implementation. npm publishes it as `@jit-compiler/jit`, while
@@ -15,7 +15,7 @@ map to the planned split:
 
 Implemented and covered by tests:
 
-- `JIT.Infer<typeof Schema>` and legacy `JIT.infer<typeof Schema>`.
+- `JIT.Typeof<typeof Schema>`; `JIT.Infer`/`JIT.infer` remain deprecated aliases.
 - `JIT.validate(schema).is/parse/safeParse/parseAsync/safeParseAsync().compile()`.
 - `JIT.equal/clone/diff/hash(schema).compile()`.
 - `JIT.json(schema).stringify().compile()`.
@@ -29,8 +29,8 @@ Implemented and covered by tests:
   `jit generate`.
 - `jit init`, `jit doctor`, `jit explain`, `jit list`, `jit inspect`,
   `jit clean`, and `jit generate`.
-- Config accepts the plan-shaped `entries` + `output` block, while legacy
-  `schemas`/`outDir` remains readable.
+- Config exposes only discovery, output, optional artifacts, and declaration
+  type settings. Legacy `schemas`/`outDir` configs remain readable at runtime.
 
 ## Schema Operator Alignment
 
@@ -86,14 +86,18 @@ Currently implemented:
 - standalone compiled exports keep the developer's exact export name;
 - grouped `JIT.compile(schema, { ... })` emits only the grouped object;
 - raw schemas and array-style compile markers are skipped;
-- `diff`, `stringify`, `fromJSON`, validators, equal, clone, hash, mask,
-  sanitize, codec, query extras, mapper extras, and built-in transform extras
-  are re-emitted from registered artifacts when serializable;
+- `diff`, `stringify`, `fromJSON`, validators, equal, clone, hash, specialized
+  string formatters, mask, sanitize, codec, query extras, mapper extras, and
+  built-in transform extras are re-emitted from registered artifacts when
+  serializable;
 - generated JS has no `import "jit"`;
 - generated `.d.ts` anchors types to the user's schema file when source
   metadata is available.
-- optional subpath entrypoints such as `user.mjs`/`user.d.ts` for
-  `#jit/user`-style imports;
+- local output uses `index.js`/`index.d.ts` and normal relative imports;
+- output below `node_modules` uses namespaced package imports plus dual
+  `index.mjs`/`index.cjs` exports;
+- optional subpath entrypoints use `./user.js` locally or
+  `@scope/generated/user` from a generated package;
 - optional deterministic `manifest.json` and `plans/*.json` review artifacts.
 
 Still structural/future work from the plan:

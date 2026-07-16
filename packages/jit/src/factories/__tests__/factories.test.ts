@@ -565,7 +565,7 @@ describe("JIT AST builders", () => {
       expect(Catchall.schema.def.unknownKeys).toBe("passthrough");
       expect(Catchall.schema.def.catchall).toBe(Extra.schema);
       expect(Keys.schema.type).toBe(AST.TypeName.enum);
-      expect(Keys.schema.def.values).toEqual({ id: "id", name: "name" });
+      expect(Keys.schema.def.values).toEqual(["id", "name"]);
 
       expectTypeOf<AST.Infer<typeof Strict>>().toEqualTypeOf<{
         id: number;

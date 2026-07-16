@@ -79,6 +79,14 @@ export type StringFormatKind =
   | "jwt"
   | "digest";
 
+export type StringMaskMode = "transform" | "strict";
+
+export interface StringMaskSpec {
+  readonly pattern: string;
+  readonly mode: StringMaskMode;
+  readonly stripNonDigits: boolean;
+}
+
 export type StringCheck =
   | SchemaCheck<"min", number>
   | SchemaCheck<"max", number>
@@ -100,7 +108,7 @@ export type StringCheck =
   | SchemaCheck<"sanitize">
   | SchemaCheck<"stringFormat", { readonly name: string; readonly pattern: RegExp }>
   | SchemaCheck<"digitsLength", number | readonly number[]>
-  | SchemaCheck<"format", { readonly pattern: string; readonly stripNonDigits: boolean }>
+  | SchemaCheck<"format", StringMaskSpec>
   | SchemaCheck<"phoneBR">
   | SchemaCheck<StringFormatKind, RegExp>;
 

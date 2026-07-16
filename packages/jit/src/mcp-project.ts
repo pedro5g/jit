@@ -31,10 +31,16 @@ interface ResolvedAotProject {
   readonly packageName: string;
   readonly patterns: readonly string[];
   readonly clean: boolean;
-  readonly emitPackageJson: boolean;
-  readonly compilerPackageName: string;
+  readonly typesPackage: string;
   readonly emit?: GenerateEmitOptions;
-  readonly importSpecifier?: string;
+}
+
+interface LegacyJitConfig {
+  readonly schemas?: readonly string[];
+  readonly outDir?: string;
+  readonly packageName?: string;
+  readonly clean?: boolean;
+  readonly compiler?: { readonly packageName?: string };
 }
 
 const DEFAULT_PACKAGE_NAME = "@jit/generated";
@@ -130,16 +136,13 @@ export async function previewAot(args: Readonly<Record<string, unknown>>, worksp
       sources: collected.sources,
       outDir: tempDir,
       packageName: resolved.packageName,
-      compilerPackageName: resolved.compilerPackageName,
+      types: { package: resolved.typesPackage },
       clean: true,
-      emitPackageJson: resolved.emitPackageJson,
       emit: {
         ...resolved.emit,
-        rootBarrel: true,
         ...(stage === "manifest" ? { manifest: true } : {}),
         ...(stage === "plan" ? { plans: true } : {}),
       },
-      ...(resolved.importSpecifier ? { importSpecifier: resolved.importSpecifier } : {}),
     });
     const selected = selectPreviewFile(tempDir, stage, target);
     const content = selected ? readLimitedFile(selected) : undefined;
@@ -177,17 +180,15 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
     sources: collected.sources,
     outDir: resolved.outDir,
     packageName: resolved.packageName,
-    compilerPackageName: resolved.compilerPackageName,
+    types: { package: resolved.typesPackage },
     clean: resolved.clean,
-    emitPackageJson: resolved.emitPackageJson,
     ...(resolved.emit ? { emit: resolved.emit } : {}),
-    ...(resolved.importSpecifier ? { importSpecifier: resolved.importSpecifier } : {}),
   });
   const files = result.files.map((file) => relativePath(resolved.root, file));
   const data = {
     outDir: relativePath(resolved.root, resolved.outDir),
     packageName: resolved.packageName,
-    compilerPackageName: resolved.compilerPackageName,
+    typesPackage: resolved.typesPackage,
     files,
     skipped: jsonSkipped(result.skipped),
   } as JsonValue;
@@ -400,10 +401,9 @@ function outputDescriptor(resolved: ResolvedAotProject): JsonValue {
   return {
     directory: relativePath(resolved.root, resolved.outDir) ?? resolved.outDir,
     packageName: resolved.packageName,
-    compilerPackageName: resolved.compilerPackageName,
-    importSpecifier: resolved.importSpecifier ?? null,
+    typesPackage: resolved.typesPackage,
+    layout: resolved.outDir.split(sep).includes("node_modules") ? "package" : "local",
     clean: resolved.clean,
-    emitPackageJson: resolved.emitPackageJson,
     emit: (resolved.emit ?? {}) as JsonValue,
   };
 }
@@ -422,7 +422,7 @@ async function resolveAotProject(
   const explicitFiles = readOptionalStringArray(args, "files");
   const explicitPatterns = readOptionalStringArray(args, "patterns");
   const emitOverride = readEmit(args.emit);
-  let config: JitConfig = {};
+  let config: JitConfig & LegacyJitConfig = {};
   let configFile: string | undefined;
   let files = explicitFiles?.map((file) => resolveInside(root, file, "declaration file")) ?? [];
   let patterns = explicitPatterns;
@@ -433,7 +433,7 @@ async function resolveAotProject(
     configFile = discoveredConfig ? resolveInside(root, discoveredConfig, "JIT config", root, true) : undefined;
     if (configFile) {
       const loaded = await loadModule(configFile);
-      config = (loaded.default ?? loaded) as JitConfig;
+      config = (loaded.default ?? loaded) as JitConfig & LegacyJitConfig;
       configDir = dirname(configFile);
       patterns = patterns ?? config.patterns;
       files = expandSchemaEntries(config.entries ?? config.schemas, configDir, patterns);
@@ -450,11 +450,12 @@ async function resolveAotProject(
     : resolveInside(configDir, configuredOut, "AOT output directory", root);
   const packageName =
     readOptionalString(args, "packageName") ?? output?.packageName ?? config.packageName ?? DEFAULT_PACKAGE_NAME;
-  const compilerPackageName =
-    readOptionalString(args, "compilerPackageName") ?? config.compiler?.packageName ?? "@jit-compiler/jit";
+  const typesPackage =
+    readOptionalString(args, "typesPackage") ??
+    config.types?.package ??
+    config.compiler?.packageName ??
+    "@jit-compiler/jit";
   const clean = readOptionalBoolean(args, "clean") ?? output?.clean ?? config.clean ?? true;
-  const emitPackageJson =
-    readOptionalBoolean(args, "emitPackageJson") ?? output?.emitPackageJson ?? config.emitPackageJson ?? true;
   const emit = config.emit || emitOverride ? { ...config.emit, ...emitOverride } : undefined;
 
   return {
@@ -464,12 +465,10 @@ async function resolveAotProject(
     files,
     outDir,
     packageName,
-    compilerPackageName,
+    typesPackage,
     patterns: patterns ?? DEFAULT_SCHEMA_PATTERNS,
     clean,
-    emitPackageJson,
     ...(emit ? { emit } : {}),
-    ...(output?.importSpecifier ? { importSpecifier: output.importSpecifier } : {}),
   };
 }
 
@@ -527,7 +526,7 @@ function assertBuildable(
 
 function selectPreviewFile(tempDir: string, stage: string, target: string | undefined): string | undefined {
   if (stage === "summary") return undefined;
-  if (stage === "source") return resolve(tempDir, "index.mjs");
+  if (stage === "source") return resolve(tempDir, "index.js");
   if (stage === "declaration") return resolve(tempDir, "index.d.ts");
   if (stage === "manifest") return resolve(tempDir, "manifest.json");
   if (stage === "plan") {
@@ -621,7 +620,7 @@ function readOps(value: unknown): readonly string[] {
 function readEmit(value: unknown): GenerateEmitOptions | undefined {
   const record = readRecord(value);
   if (!record) return undefined;
-  const keys = ["rootBarrel", "subpathModules", "manifest", "plans", "sourceMaps"] as const;
+  const keys = ["subpathModules", "manifest", "plans"] as const;
   const emit: Record<string, boolean> = {};
   for (const key of keys) {
     const item = record[key];

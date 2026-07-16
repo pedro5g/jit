@@ -4,6 +4,7 @@ import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
 import { emitDiffSource } from "../compiler/diff.js";
 import { emitEqualSource } from "../compiler/equal.js";
+import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
 import { emitMaskSource } from "../compiler/mask.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
@@ -33,6 +34,7 @@ export const AOT_OPERATIONS = [
   "diff",
   "stringify",
   "fromJSON",
+  "format",
   "mask",
   "sanitize",
   "codec",
@@ -45,41 +47,35 @@ export interface GenerateOptions {
   readonly schemas: Readonly<Record<string, SchemaInput>>;
   /** Exported name -> standalone compiled functions/objects. */
   readonly functions?: Readonly<Record<string, unknown>>;
-  /** Output directory; created if missing (e.g. `node_modules/@jit/generated`). */
+  /** Output directory; local directories emit ESM, `node_modules` emits a dual package. */
   readonly outDir: string;
-  /** Generated package name; defaults to `@jit/generated`. */
+  /** Package namespace used when `outDir` is inside `node_modules`. */
   readonly packageName?: string;
-  /** Compiler package used by generated type-only imports. */
-  readonly compilerPackageName?: string;
   /** Remove known generated files before writing; defaults to true. */
   readonly clean?: boolean;
-  /** Write a package.json exports map beside the JS/types; defaults to true. */
-  readonly emitPackageJson?: boolean;
   /**
    * Schema name → source file it was loaded from. When present, the
    * generated `.d.ts` derives the value type from the dev's own schema via
-   * `import("@jit-compiler/jit").Infer<typeof import("<file>").Name>` — the single source
+   * `import("@jit-compiler/jit").Typeof<typeof import("<file>").Name>` — the single source
    * of truth for typing — instead of re-emitting a structural type by hand.
    * Type-only imports erase at runtime, so tree-shaking is unaffected.
    */
   readonly sources?: ReadonlyMap<string, string>;
-  /** Optional file layout artifacts; defaults keep the existing root package. */
+  /** Optional supplementary artifacts. The root module is always emitted. */
   readonly emit?: GenerateEmitOptions;
-  /** Import alias used by generated manifest metadata, e.g. `#jit`. */
-  readonly importSpecifier?: string;
+  /** Type-only package used to resolve `Typeof` and `Strict`. */
+  readonly types?: {
+    readonly package?: string;
+  };
 }
 
 export interface GenerateEmitOptions {
-  /** Emit root `index.*` files; defaults to true. */
-  readonly rootBarrel?: boolean;
-  /** Emit per-declaration subpath modules such as `user.mjs`; defaults to false. */
+  /** Emit per-declaration subpath modules such as local `user.js` or package `user.mjs`. */
   readonly subpathModules?: boolean;
   /** Emit deterministic `manifest.json`; defaults to false. */
   readonly manifest?: boolean;
   /** Emit deterministic `plans/*.json`; defaults to false. */
   readonly plans?: boolean;
-  /** Reserved for the future shared compiler artifact source maps. */
-  readonly sourceMaps?: boolean;
 }
 
 export interface GenerateResult {
@@ -102,8 +98,8 @@ export interface GenerateResult {
  * themselves.
  */
 export function generate(options: GenerateOptions): GenerateResult {
-  const packageName = options.packageName ?? "@jit/generated";
-  const compilerPackageName = options.compilerPackageName ?? "@jit-compiler/jit";
+  const layout = resolveOutputLayout(options.outDir, options.packageName);
+  const compilerPackageName = options.types?.package ?? "@jit-compiler/jit";
   const skipped: SkippedOperation[] = [];
   const js: string[] = [];
   const dts: string[] = [];
@@ -152,7 +148,7 @@ export function generate(options: GenerateOptions): GenerateResult {
       const specifier = typeImportSpecifier(options.outDir, sourceFile);
 
       dts.push(
-        `export type ${name} = import(${JSON.stringify(compilerPackageName)}).Infer<typeof import(${JSON.stringify(specifier)}).${name}>;`
+        `export type ${name} = import(${JSON.stringify(compilerPackageName)}).Typeof<typeof import(${JSON.stringify(specifier)}).${name}>;`
       );
       dts.push(
         `export type ${name}Strict<TValue> = import(${JSON.stringify(compilerPackageName)}).Strict<typeof import(${JSON.stringify(specifier)}).${name}, TValue>;`
@@ -329,6 +325,16 @@ export function generate(options: GenerateOptions): GenerateResult {
         type: `(value: ${name}) => string`,
         binding,
       });
+    }
+
+    // format
+    const formatSource = wants("format") ? tryEmit(name, "format", skipped, () => emitFormatSource(schema)) : undefined;
+
+    if (formatSource) {
+      const binding = internalIdentifier(`${name}_format`);
+
+      js.push(`const ${binding} = (${formatSource});`);
+      operations.push({ prop: "format", type: `(value: string) => string`, binding });
     }
 
     // mask
@@ -655,6 +661,11 @@ export function generate(options: GenerateOptions): GenerateResult {
         js.push(
           `const ${name} = /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
         );
+      } else if (op === "format") {
+        const formatSource = tryEmit(name, "format", skipped, () => emitFormatSource(schema));
+
+        if (!formatSource) return;
+        js.push(`const ${name} = (${formatSource});`);
       } else if (op === "mask") {
         const maskSource = tryEmit(name, "mask", skipped, () => emitMaskSource(schema));
 
@@ -802,8 +813,6 @@ export function generate(options: GenerateOptions): GenerateResult {
   mkdirSync(options.outDir, { recursive: true });
 
   const emit = {
-    rootBarrel:
-      options.emit?.rootBarrel !== false || options.emit?.subpathModules === true || options.emitPackageJson !== false,
     subpathModules: options.emit?.subpathModules === true,
     manifest: options.emit?.manifest === true,
     plans: options.emit?.plans === true,
@@ -815,28 +824,30 @@ export function generate(options: GenerateOptions): GenerateResult {
     exportNames.length > 0 ? `${body}\nmodule.exports = { ${exportList} };\n` : `${body}\nmodule.exports = {};\n`;
   while (dts[dts.length - 1] === "") dts.pop();
   const types = `${dts.join("\n")}\n`;
-  const subpathModules = emit.subpathModules ? buildSubpathModules(options.outDir, exportNames, options.sources) : [];
+  const subpathModules = emit.subpathModules
+    ? buildSubpathModules(options.outDir, exportNames, options.sources, layout)
+    : [];
   const files: string[] = [];
 
-  if (emit.rootBarrel) {
+  if (layout.kind === "package") {
     files.push(
       writeFile(options.outDir, "index.mjs", esm),
       writeFile(options.outDir, "index.cjs", cjs),
       writeFile(options.outDir, "index.d.ts", types),
       writeFile(options.outDir, "index.d.cts", types)
     );
+  } else {
+    files.push(writeFile(options.outDir, "index.js", esm), writeFile(options.outDir, "index.d.ts", types));
   }
 
   files.push(...subpathModules.flatMap((module) => module.files));
 
-  if (options.emitPackageJson !== false) {
-    files.push(writePackageJson(options.outDir, packageName, subpathModules));
+  if (layout.kind === "package") {
+    files.push(writePackageJson(options.outDir, layout.packageName, subpathModules));
   }
 
   if (emit.manifest) {
-    files.push(
-      writeManifest(options.outDir, packageName, options.importSpecifier, exportNames, subpathModules, options)
-    );
+    files.push(writeManifest(options.outDir, layout, exportNames, subpathModules, options));
   }
 
   if (emit.plans) {
@@ -853,10 +864,17 @@ interface SubpathModule {
   readonly files: readonly string[];
 }
 
+interface OutputLayout {
+  readonly kind: "local" | "package";
+  readonly packageName: string;
+  readonly jsExtension: ".js" | ".mjs";
+}
+
 function buildSubpathModules(
   outDir: string,
   exportNames: readonly string[],
-  sources: ReadonlyMap<string, string> | undefined
+  sources: ReadonlyMap<string, string> | undefined,
+  layout: OutputLayout
 ): readonly SubpathModule[] {
   if (!sources) return [];
 
@@ -878,17 +896,20 @@ function buildSubpathModules(
   for (const [sourceFile, names] of bySource) {
     const moduleName = uniqueModuleName(moduleNameFromSource(sourceFile), usedNames);
     const exportList = names.join(", ");
-    const esm = `export { ${exportList} } from "./index.mjs";\n`;
-    const cjsBindings = names.map((name) => `${name}: root.${name}`).join(", ");
-    const cjs = `const root = require("./index.cjs");\nmodule.exports = { ${cjsBindings} };\n`;
-    const dts = `export { ${exportList} } from "./index.mjs";\n`;
-    const dcts = `export { ${exportList} } from "./index.cjs";\n`;
+    const esm = `export { ${exportList} } from "./index${layout.jsExtension}";\n`;
+    const dts = `export { ${exportList} } from "./index${layout.jsExtension}";\n`;
     const files = [
-      writeFile(outDir, `${moduleName}.mjs`, esm),
-      writeFile(outDir, `${moduleName}.cjs`, cjs),
+      writeFile(outDir, `${moduleName}${layout.jsExtension}`, esm),
       writeFile(outDir, `${moduleName}.d.ts`, dts),
-      writeFile(outDir, `${moduleName}.d.cts`, dcts),
     ];
+
+    if (layout.kind === "package") {
+      const cjsBindings = names.map((name) => `${name}: root.${name}`).join(", ");
+      const cjs = `const root = require("./index.cjs");\nmodule.exports = { ${cjsBindings} };\n`;
+      const dcts = `export { ${exportList} } from "./index.cjs";\n`;
+
+      files.push(writeFile(outDir, `${moduleName}.cjs`, cjs), writeFile(outDir, `${moduleName}.d.cts`, dcts));
+    }
 
     modules.push({ name: moduleName, sourceFile, exports: names, files });
   }
@@ -936,8 +957,7 @@ function writePackageJson(outDir: string, packageName: string, modules: readonly
 
 function writeManifest(
   outDir: string,
-  packageName: string,
-  importSpecifier: string | undefined,
+  layout: OutputLayout,
   exportNames: readonly string[],
   modules: readonly SubpathModule[],
   options: GenerateOptions
@@ -949,16 +969,13 @@ function writeManifest(
   }
 
   const manifestFiles = [
-    "index.mjs",
-    "index.cjs",
+    `index${layout.jsExtension}`,
     "index.d.ts",
-    "index.d.cts",
-    ...(options.emitPackageJson === false ? [] : ["package.json"]),
+    ...(layout.kind === "package" ? ["index.cjs", "index.d.cts", "package.json"] : []),
     ...modules.flatMap((module) => [
-      `${module.name}.mjs`,
-      `${module.name}.cjs`,
+      `${module.name}${layout.jsExtension}`,
       `${module.name}.d.ts`,
-      `${module.name}.d.cts`,
+      ...(layout.kind === "package" ? [`${module.name}.cjs`, `${module.name}.d.cts`] : []),
     ]),
   ];
 
@@ -975,18 +992,27 @@ function writeManifest(
     `${JSON.stringify(
       {
         version: 1,
-        packageName,
-        ...(importSpecifier ? { importSpecifier } : {}),
+        layout: layout.kind,
+        ...(layout.kind === "package" ? { packageName: layout.packageName } : {}),
         files: manifestFiles,
         modules:
           modules.length > 0
             ? modules.map((module) => ({
                 name: module.name,
                 source: manifestSourceSpecifier(outDir, module.sourceFile),
-                import: importSpecifier ? `${importSpecifier}/${module.name}` : `./${module.name}.mjs`,
+                import:
+                  layout.kind === "package"
+                    ? `${layout.packageName}/${module.name}`
+                    : `./${module.name}${layout.jsExtension}`,
                 exports: module.exports,
               }))
-            : [{ name: "index", import: importSpecifier ?? ".", exports: exportNames }],
+            : [
+                {
+                  name: "index",
+                  import: layout.kind === "package" ? layout.packageName : `./index${layout.jsExtension}`,
+                  exports: exportNames,
+                },
+              ],
         artifacts: exportNames.map((name) => ({
           ...describeExport(name, options),
           module: moduleByExport.get(name) ?? "index",
@@ -1126,6 +1152,8 @@ function operationType(
       return `(value: ${valueType}) => string`;
     case "fromJSON":
       return `(json: string) => ${valueType}`;
+    case "format":
+      return `(value: string) => string`;
     case "codec":
       return `{ readonly encode: (value: ${valueType}) => Uint8Array; readonly encodeInto: (value: ${valueType}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${valueType} }`;
   }
@@ -1232,15 +1260,31 @@ function uniqueModuleName(preferred: string, used: Set<string>): string {
   return candidate;
 }
 
+function resolveOutputLayout(outDir: string, configuredPackageName: string | undefined): OutputLayout {
+  const segments = resolve(outDir).split(/[\\/]+/);
+  const nodeModulesIndex = segments.lastIndexOf("node_modules");
+
+  if (nodeModulesIndex < 0) {
+    return {
+      kind: "local",
+      packageName: configuredPackageName ?? "@jit/generated",
+      jsExtension: ".js",
+    };
+  }
+
+  const first = segments[nodeModulesIndex + 1];
+  const second = segments[nodeModulesIndex + 2];
+  const inferred = first?.startsWith("@") && second ? `${first}/${second}` : first;
+
+  return {
+    kind: "package",
+    packageName: configuredPackageName ?? inferred ?? "@jit/generated",
+    jsExtension: ".mjs",
+  };
+}
+
 const AOT_OPS = new Set<string>(AOT_OPERATIONS);
-const GENERATED_FILES = [
-  "index.mjs",
-  "index.cjs",
-  "index.d.ts",
-  "index.d.cts",
-  "package.json",
-  "manifest.json",
-] as const;
+const GENERATED_FILES = ["index.js", "index.mjs", "index.cjs", "index.d.ts", "index.d.cts", "manifest.json"] as const;
 
 /** Reads the extras key list from a `JIT.compile(schema, { ... })` marker. */
 function readExtraNames(input: SchemaInput): readonly string[] {
@@ -1291,7 +1335,25 @@ function cleanGeneratedFiles(dir: string): void {
   for (const file of GENERATED_FILES) {
     rmSync(join(dir, file), { force: true });
   }
+  if (isGeneratedPackageJson(dir)) rmSync(join(dir, "package.json"), { force: true });
   rmSync(join(dir, "plans"), { recursive: true, force: true });
+}
+
+function isGeneratedPackageJson(dir: string): boolean {
+  const path = join(dir, "package.json");
+
+  if (!existsSync(path)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
+      readonly version?: unknown;
+      readonly sideEffects?: unknown;
+      readonly exports?: unknown;
+    };
+
+    return parsed.version === "0.0.0" && parsed.sideEffects === false && parsed.exports !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 function readGeneratedManifest(dir: string): { readonly files: readonly string[] } {

@@ -3,16 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "imports": {
-    "#examples": {
-      "types": "./compiled/generated/index.d.ts",
-      "import": "./compiled/generated/index.mjs"
-    },
-    "#examples/catalog": {
-      "types": "./compiled/generated/catalog.d.ts",
-      "import": "./compiled/generated/catalog.mjs"
-    }
-  },
   "scripts": {
     "generate": "tsx --conditions @jit/source ../jit/src/cli.ts generate",
     "check:generated": "pnpm run generate && git diff --exit-code -- compiled/generated && test -z \"$(git ls-files --others --exclude-standard compiled/generated)\"",

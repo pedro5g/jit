@@ -15,10 +15,12 @@ export {
 export { compilePipeline } from "../compiler/pipeline.js";
 export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
 export { compileUpdate } from "../compiler/update.js";
-/**
- * Infers the TypeScript type of a schema or builder — `JIT.infer<typeof User>`.
- */
-export type { Infer, Infer as infer } from "../core/ats/infer.js";
+/** Infers the output type of a schema or builder — `JIT.Typeof<typeof User>`. */
+export type Typeof<TSchemaLike> = import("../core/ats/infer.js").Typeof<TSchemaLike>;
+/** @deprecated Use `JIT.Typeof<TSchema>` instead. */
+export type Infer<TSchemaLike> = Typeof<TSchemaLike>;
+/** @deprecated Use `JIT.Typeof<TSchema>` instead. */
+export type infer<TSchemaLike> = Typeof<TSchemaLike>;
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export * from "./collection/index.js";
@@ -42,7 +44,7 @@ export type {
   RuntimeFunctionExplain,
   ValidateCompileBuilder,
 } from "./runtime-ops.js";
-export { clone, diff, equal, hash, json, validate } from "./runtime-ops.js";
+export { clone, diff, equal, format, hash, json, validate } from "./runtime-ops.js";
 export { mask, sanitize } from "./security.js";
 export type { CompiledSerializer } from "./serialize.js";
 export { codec, serializer } from "./serialize.js";

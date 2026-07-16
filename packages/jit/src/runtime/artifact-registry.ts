@@ -22,7 +22,17 @@ interface ValidatorArtifact {
 interface OperationArtifact {
   readonly kind: "operation";
   readonly schema: ATS.AnyTypeSchema;
-  readonly op: "hash" | "equal" | "clone" | "diff" | "stringify" | "fromJSON" | "mask" | "sanitize" | "codec";
+  readonly op:
+    | "hash"
+    | "equal"
+    | "clone"
+    | "diff"
+    | "stringify"
+    | "fromJSON"
+    | "format"
+    | "mask"
+    | "sanitize"
+    | "codec";
 }
 
 export type CompiledArtifact = SourceArtifact | ValidatorArtifact | OperationArtifact;

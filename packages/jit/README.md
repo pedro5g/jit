@@ -15,9 +15,9 @@ Two execution modes, same generated code:
 - **JIT (runtime)** — operations compile on first use via
   `globalThis.Function` and are cached per schema.
 - **AOT (build time, Prisma-style)** — `pnpm jit init` writes config and
-  `jit generate` writes pure `.mjs` + `.cjs` + `.d.ts` modules with **zero
-  imports**: the engine never ships to production, and the final bundle keeps
-  only the generated low-level functions the app actually imports.
+  `jit generate` writes pure local `.js` + `.d.ts` modules or a dual
+  ESM/CommonJS package below `node_modules`, all with **zero engine imports**.
+  The final bundle keeps only the generated low-level functions the app uses.
 
 ```ts
 import { JIT } from "@jit-compiler/jit/runtime";
@@ -30,7 +30,7 @@ const User = JIT.object({
   tags: JIT.array(JIT.string()).max(8),
 });
 
-type User = JIT.Infer<typeof User>;
+type User = JIT.Typeof<typeof User>;
 
 const Users = JIT.validator(User);
 
@@ -141,8 +141,8 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 ## Schemas
 
 zod-like builders; every schema carries its inferred type
-(`JIT.Infer<typeof X>` and the legacy `JIT.infer<typeof X>` work on builders
-and raw schemas).
+(`JIT.Typeof<typeof X>` works on builders and raw schemas; `JIT.Infer` and
+`JIT.infer` remain deprecated compatibility aliases).
 
 ```ts
 // primitives
@@ -354,7 +354,8 @@ JIT.string().stringFormat("slug", /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 ### String masks
 
 Masks are parse-time transforms. They strip non-digits by default and then
-emit direct low-level string assembly in generated code:
+emit direct low-level string assembly in generated code. Boolean `is()`
+validators omit that assembly because it cannot change the validation result:
 
 ```ts
 const Contact = JIT.object({
@@ -363,10 +364,19 @@ const Contact = JIT.object({
   phone: JIT.string().phoneBR(), // "(11) 98765-4321"
   code: JIT.string().format("##-##"),
 });
+
+const StrictCode = JIT.string().format("##-##", { mode: "strict" });
+StrictCode.is("12-34"); // true: literals and digit positions already match
+StrictCode.is("1234"); // false
+
+const formatCode = JIT.format(JIT.string().format("##-##")).compile();
+formatCode("1234"); // "12-34" without compiling/shipping a validator
 ```
 
 Literal mask patterns are type-checked: they must include at least one `#`
-placeholder and only use supported mask characters.
+placeholder and only use supported mask characters. The dedicated formatter
+can also be exported from `*.jit.ts` as a standalone AOT function or grouped
+with `JIT.compile(Code, { format: formatCode })`.
 
 ### Coercion (zod-style)
 
@@ -771,44 +781,25 @@ Generated `jit.config.ts`:
 import { AOT } from "@jit-compiler/jit";
 
 export default AOT.defineConfig({
-  // Files, directories, or globs containing explicit compiled AOT exports.
+  /** Files, directories, or globs containing explicit compiled AOT exports. */
   entries: ["./jit/**/*.jit.ts"],
-  // Default discovery is **/*.jit.ts; change or add patterns when your
-  // declarations use another shape.
+  /** Patterns used for directory and root discovery. */
   patterns: ["**/*.jit.ts"],
   output: {
-    mode: "directory",
+    /** Local output emits index.js; node_modules output emits a dual package. */
     directory: "generated/jit",
-    importSpecifier: "#jit",
-    packageName: "@jit/generated",
-    // Use false when generating inside an existing source directory.
-    emitPackageJson: true,
-    // Delete only jit's known generated files before writing fresh output.
+    /** Delete only JIT-owned artifacts before writing. */
     clean: true,
   },
-  target: { runtime: "node", engine: "v8", version: "22", module: "esm" },
-  compiler: {
-    // Package used only by type imports in generated declarations.
-    packageName: "@jit-compiler/jit",
-    mode: "production",
-    optimization: "aggressive",
-    sourceMaps: false,
-    declarations: true,
-  },
-  performance: {
-    shapes: true,
-    strings: true,
-    allocation: "auto",
-    strategies: "auto",
-  },
   emit: {
-    rootBarrel: true,
     subpathModules: true,
     manifest: true,
     plans: true,
-    runtimeSchemas: false,
   },
-  diagnostics: { explainPlans: true, generatedSource: true },
+  types: {
+    /** Package used only by Typeof/Strict imports in generated declarations. */
+    package: "@jit-compiler/jit",
+  },
 });
 ```
 
@@ -816,9 +807,8 @@ Discovery rules are intentionally boring:
 
 - if `entries` is omitted, `jit generate` scans from the project root;
 - `entries` accepts files, directories, and globs like `jit/**/*.jit.ts`;
-- legacy `schemas` still works as a compatibility alias for `entries`;
 - `patterns` controls directory scans; the default is `**/*.jit.ts`;
-- `compiler.packageName` defaults to the npm identity `@jit-compiler/jit`;
+- `types.package` defaults to the npm identity `@jit-compiler/jit`;
   Deno/JSR projects can use `jsr:@jit/compiler`;
 - if no buildable functions are exported, the CLI prints a warning and writes
   nothing.
@@ -860,8 +850,8 @@ export const User = JIT.compile(UserSchema, {
 ```
 
 ```ts
-import { User, User_is, User_parse } from "@jit/generated";
-import { User as UserFromSubpath } from "#jit/user";
+import { User, User_is, User_parse } from "./generated/jit/index.js";
+import { User as UserFromSubpath } from "./generated/jit/user.js";
 
 User.is(input);
 User.findAdmins(users);
@@ -882,29 +872,31 @@ pnpm jit inspect User --stage plan
 pnpm jit clean
 ```
 
-With the default config, generation writes the root dual package plus review
-artifacts:
+With the default local config, generation writes standard relative ESM plus
+review artifacts:
 
 ```text
 generated/jit/
-├── index.mjs
-├── index.cjs
+├── index.js
 ├── index.d.ts
-├── user.mjs
-├── user.cjs
+├── user.js
 ├── user.d.ts
 ├── manifest.json
 └── plans/
     └── user.json
 ```
 
-The subpath modules are thin re-export entrypoints over the generated barrel,
-so they contain no `jit` runtime import and keep the developer-facing shape
-aligned with `#jit/user`. The later physical split can make each subpath an
-independent bundle without changing the API.
+The subpath modules are thin re-export entrypoints over the generated barrel
+and contain no `jit` runtime import. No `package.json#imports` entry and no `#`
+alias is needed.
 
-Output: `index.mjs` + `index.cjs` + `index.d.ts`/`.d.cts` + `package.json`
-(exports map, `sideEffects: false`). The module is **fully self-contained**:
+When `output.directory` is below `node_modules`, the generator instead infers
+the namespace and emits `index.mjs` + `index.cjs` + dual declarations +
+`package.json` (exports map, `sideEffects: false`). Consumers then use
+`import { User } from "@jit/generated"` and optional
+`import { User } from "@jit/generated/user"` subpaths.
+
+Every layout is **fully self-contained**:
 compiled functions, tiny error class, hash/index helpers, and codec helpers
 are inlined. There is no `import "jit"` in generated runtime code, so the
 final app bundle carries only the low-level specialized functions it imports.
@@ -913,7 +905,7 @@ Types are derived from your schema file, never re-emitted by hand:
 
 ```ts
 // grouped marker
-export type User = import("@jit-compiler/jit").Infer<
+export type User = import("@jit-compiler/jit").Typeof<
   typeof import("../src/user.jit.js").User
 >;
 export type UserStrict<TValue> = import("@jit-compiler/jit").Strict<

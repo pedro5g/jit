@@ -2,6 +2,7 @@ import { type Clone, compileClone } from "../compiler/clone.js";
 import { type CompiledCodec, compileCodec } from "../compiler/codec.js";
 import { compileDiff, type Diff } from "../compiler/diff.js";
 import { compileEqual, type Equal } from "../compiler/equal.js";
+import { compileFormat, type Format } from "../compiler/format.js";
 import { compileHash, type Hash } from "../compiler/hash.js";
 import { compileMask, type Mask } from "../compiler/mask.js";
 import { compileSanitize, type Sanitize } from "../compiler/sanitize.js";
@@ -35,6 +36,7 @@ export interface CompiledModel<T> {
   readonly update: Update<T>;
   readonly stringify: Serialize<T>;
   readonly fromJSON: (json: string) => T;
+  readonly format: T extends string ? Format : never;
   readonly mask: Mask<T>;
   readonly sanitize: Sanitize<T>;
   readonly codec: CompiledCodec<T>;
@@ -103,6 +105,9 @@ export function model<TSchema extends ATS.AnyTypeSchema>(
       const validate = compileValidator<TSchema>(unwrapped as TSchema);
 
       return (json: string) => validate.parse(JSON.parse(json));
+    },
+    get format() {
+      return compileFormat(unwrapped as ATS.StringSchema) as CompiledModel<TValue>["format"];
     },
     get mask() {
       return compileMask(unwrapped) as Mask<TValue>;

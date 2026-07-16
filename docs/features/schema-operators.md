@@ -17,6 +17,7 @@ const PublicUser = User.pick("id", "name");
 const PatchUser = User.partial("name", "email");
 const RequiredUser = PatchUser.required("name");
 const WithoutEmail = User.omit("email");
+const UserKey = User.keyof(); // enum AST stores ["id", "name", "email"]
 ```
 
 If `partial()` or `required()` receives no fields, it applies to the whole
@@ -24,6 +25,8 @@ object. If fields are passed, only those fields change.
 
 `pick` and `omit` take field names, not `{ field: true }` maps. This keeps the
 API consistent and avoids object allocations just to describe static keys.
+`keyof()` snapshots the known keys into the enum AST, so JIT/AOT validators
+emit literal comparisons and never call `Object.keys` while validating.
 
 ## Conditional Operators
 
@@ -144,9 +147,16 @@ a normal string.
 ### Masks And Documents
 
 ```ts
-const CPF = JIT.string().cpf().format("###.###.###-##");
-const CNPJ = JIT.string().cnpj().format("##.###.###/####-##");
-const Phone = JIT.string().phoneBR().format("(##) #####-####");
+const CPF = JIT.string().cpf();
+const CNPJ = JIT.string().cnpj();
+const Phone = JIT.string().phoneBR();
+
+const Account = JIT.string().format("####-####");
+Account.parse("12345678"); // "1234-5678"
+
+const AlreadyFormatted = JIT.string().format("####-####", { mode: "strict" });
+AlreadyFormatted.is("1234-5678"); // true
+AlreadyFormatted.is("12345678"); // false
 ```
 
 The format pattern is checked by TypeScript: only `#`, spaces and supported
@@ -158,6 +168,35 @@ Mask/format helpers cover common real-world strings such as document numbers
 and Brazilian phone values. Prefer these helpers over custom callbacks when
 you want AOT output, because regexes and static values can be serialized while
 arbitrary callbacks cannot.
+
+The default `transform` mode strips non-digits, validates the placeholder
+count, runs the remaining string checks, and only then constructs the parsed
+output. `is()` never emits that output concatenation because formatting does
+not change the boolean result. Strict mode instead checks every digit and
+literal position with numeric character-code comparisons and returns the
+original string.
+
+When formatting is a separate presentation boundary, compile only that
+operation:
+
+```ts
+const CPF = JIT.string().format("###.###.###-##");
+const formatCPF = JIT.format(CPF).compile();
+
+formatCPF("12345678901"); // "123.456.789-01"
+```
+
+The specialized formatter contains no schema walker, `safeParse`, issue
+objects, or compiler import. AOT can export it flat or aggregate it:
+
+```ts
+export const formatCPF = JIT.format(CPF).compile();
+export const CPFText = JIT.compile(CPF, { format: formatCPF });
+```
+
+Use transform mode at input/display boundaries and strict mode when a wire or
+database contract requires the punctuation to already be present. Avoid
+formatted values as hash/index keys when the canonical digits are available.
 
 ## Number Operators
 

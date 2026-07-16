@@ -86,7 +86,7 @@ describe("JIT.coerce zod-style native coercions", () => {
         },
         outDir,
       });
-      const source = readFileSync(join(outDir, "index.mjs"), "utf8");
+      const source = readFileSync(join(outDir, "index.js"), "utf8");
 
       expect(source).toContain("const Native_safeParse");
       expect(result.skipped.map((skip) => `${skip.schema}.${skip.operation}`)).toContain(

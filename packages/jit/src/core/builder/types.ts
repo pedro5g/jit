@@ -39,6 +39,8 @@ import type {
   SchemaCheck,
   SchemaShape,
   StringCheck,
+  StringMaskMode,
+  StringMaskSpec,
   StringNormalizationForm,
   StringSchema,
   TemporalSchema,
@@ -488,9 +490,7 @@ export interface ObjectOperators<
   ): ObjectBuilder<MergeShape<TShape, TRight>, TUnknownKeys, TCatchall>;
 }
 
-export type KeyOfValues<TShape extends SchemaShape> = {
-  readonly [TKey in Extract<keyof TShape, string>]: TKey;
-};
+export type KeyOfValues<TShape extends SchemaShape> = readonly Extract<keyof TShape, string>[];
 
 export type UnwrapBuilderShape<TShape extends Record<string, SchemaInput>> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema extends AnyTypeSchema>
@@ -601,11 +601,9 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
    */
   format<const TPattern extends string>(
     pattern: TPattern & ValidFormatPattern<TPattern>,
-    options?: { readonly stripNonDigits?: boolean },
+    options?: { readonly mode?: StringMaskMode; readonly stripNonDigits?: boolean },
     message?: string
-  ): Builder<
-    AppendStringCheck<TSchema, SchemaCheck<"format", { readonly pattern: string; readonly stripNonDigits: boolean }>>
-  >;
+  ): Builder<AppendStringCheck<TSchema, SchemaCheck<"format", StringMaskSpec>>>;
   cpf(message?: string): Builder<TSchema>;
   cnpj(message?: string): Builder<TSchema>;
   phoneBR(message?: string): Builder<TSchema>;

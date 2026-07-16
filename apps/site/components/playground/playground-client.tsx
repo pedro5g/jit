@@ -19,7 +19,7 @@ const schema = JIT.object({
 });
 
 // full type inference — hover User:
-type User = JIT.Infer<typeof schema>;
+type User = JIT.Typeof<typeof schema>;
 `;
 
 const adaInput = `{

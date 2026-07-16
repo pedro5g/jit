@@ -175,7 +175,7 @@ describe("Transform object operators", () => {
       const Keys = Transform.keyof(User);
 
       expect(Keys.type).toBe(AST.TypeName.enum);
-      expect(Keys.def.values).toEqual({ id: "id", name: "name" });
+      expect(Keys.def.values).toEqual(["id", "name"]);
       expectTypeOf<AST.Infer<typeof Keys>>().toEqualTypeOf<"id" | "name">();
     });
   });

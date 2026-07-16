@@ -53,7 +53,7 @@ function.
 - `JIT.equal/clone/diff/hash(schema).compile()`.
 - `JIT.json()` still creates the JSON-value schema; `JIT.json(schema)` now
   exposes `.stringify().compile()` and `.parse().compile()`.
-- `JIT.Infer<typeof Schema>` alias.
+- `JIT.Typeof<typeof Schema>` alias.
 - `JIT.update(schema).patch({ field: JIT.param("name") }).compile()`.
 - `JIT.query(schema).params({...})` and `JIT.const(value)` / `q.constant(value)`.
 - `JIT.transform(schema).select(...).map(...).compile()` with inline built-in
@@ -78,7 +78,7 @@ function.
 - AOT:
   - `diff` standalone/grouped generation.
   - `fromJSON` standalone/grouped generation.
-  - optional subpath modules for `#jit/user`-style imports.
+  - optional relative or generated-package subpath modules without `#` aliases.
   - optional deterministic `manifest.json` and `plans/*.json`.
   - regression coverage proving final bundlers drop unused standalone
     generated functions and that grouped exports contain only explicitly

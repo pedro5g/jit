@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
-import { iterateActiveUsers, User, visitActiveUsers } from "#examples";
 import { invalidUser, type ShowcaseResult, users } from "../shared/data.js";
 import { socketRoundTrip } from "../shared/socket.js";
+import { iterateActiveUsers, User, visitActiveUsers } from "./generated/index.js";
 
 export async function runCompiledShowcase(): Promise<ShowcaseResult> {
   const parsedUsers = users.map((user) => User.parse(user));

@@ -319,13 +319,13 @@ describe("binary rowsets", () => {
       .select("id")
       .compile();
 
-    expectTypeOf(binary).toEqualTypeOf<Compiler.BinaryArray<JIT.infer<typeof User>>>();
-    expectTypeOf(rowset).toEqualTypeOf<Compiler.BinaryRowSet<JIT.infer<typeof User>>>();
+    expectTypeOf(binary).toEqualTypeOf<Compiler.BinaryArray<JIT.Typeof<typeof User>>>();
+    expectTypeOf(rowset).toEqualTypeOf<Compiler.BinaryRowSet<JIT.Typeof<typeof User>>>();
     expectTypeOf(query).toEqualTypeOf<
-      (value: Compiler.BinaryRowSet<JIT.infer<typeof User>>) => { readonly id: number; readonly name: string }[]
+      (value: Compiler.BinaryRowSet<JIT.Typeof<typeof User>>) => { readonly id: number; readonly name: string }[]
     >();
     expectTypeOf(pipeline.execute).toEqualTypeOf<
-      (values: readonly JIT.infer<typeof User>[], length?: number) => { readonly id: number }[]
+      (values: readonly JIT.Typeof<typeof User>[], length?: number) => { readonly id: number }[]
     >();
   });
 
@@ -352,7 +352,7 @@ describe("binary rowsets", () => {
       }),
     ]);
     const Shapes = JIT.array(Shape);
-    const values: JIT.infer<typeof Shape>[] = [
+    const values: JIT.Typeof<typeof Shape>[] = [
       { kind: "circle", id: 1, radius: 2.5 },
       { kind: "rectangle", id: 2, width: 4, height: 3 },
       { kind: "circle", id: 3, radius: 1.25 },

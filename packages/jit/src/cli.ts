@@ -47,15 +47,26 @@ interface GenerateArguments {
   readonly watch: boolean;
   readonly patterns: readonly string[] | undefined;
   readonly clean: boolean | undefined;
-  readonly emitPackageJson: boolean | undefined;
   readonly emit: JitConfig["emit"] | undefined;
 }
 
 interface ResolvedAotInputs extends GenerateArguments {
   readonly configFile: string | undefined;
   readonly resolvedOut: string;
-  readonly importSpecifier: string | undefined;
-  readonly compilerPackageName: string | undefined;
+  readonly types: JitConfig["types"] | undefined;
+}
+
+interface LegacyJitConfig {
+  readonly schemas?: readonly string[];
+  readonly outDir?: string;
+  readonly packageName?: string;
+  readonly clean?: boolean;
+  readonly compiler?: { readonly packageName?: string };
+  readonly output?: {
+    readonly directory?: string;
+    readonly packageName?: string;
+    readonly clean?: boolean;
+  };
 }
 
 export interface InitArguments {
@@ -63,7 +74,7 @@ export interface InitArguments {
   readonly force: boolean;
   readonly entries: readonly string[] | undefined;
   readonly outDir: string;
-  readonly packageName: string;
+  readonly packageName: string | undefined;
   readonly patterns: readonly string[];
 }
 
@@ -71,7 +82,7 @@ export type ConfigFormat = (typeof CONFIG_FORMATS)[number];
 
 const USAGE = `Usage:
   jit init [--force] [--format ts|mts|mjs|cjs] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
-  jit generate [files...] [--out <dir>] [--name <package>] [--watch] [--pattern <glob>] [--no-clean] [--no-package-json]
+  jit generate [files...] [--out <dir>] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
   jit doctor [files...] [--pattern <glob>]
   jit explain [files...] [--pattern <glob>]
   jit list [files...] [--pattern <glob>]
@@ -132,8 +143,7 @@ async function runGenerate(
   stderr: (text: string) => void
 ): Promise<number> {
   const resolved = await resolveAotInputs(parsed, cwd);
-  const { files, packageName, clean, emitPackageJson, emit, importSpecifier, compilerPackageName, resolvedOut } =
-    resolved;
+  const { files, packageName, clean, emit, types, resolvedOut } = resolved;
 
   if (resolved.configFile) stdout(`using ${resolved.configFile}\n`);
 
@@ -159,10 +169,8 @@ async function runGenerate(
       outDir: resolvedOut,
       ...(packageName ? { packageName } : {}),
       ...(clean !== undefined ? { clean } : {}),
-      ...(emitPackageJson !== undefined ? { emitPackageJson } : {}),
       ...(emit !== undefined ? { emit } : {}),
-      ...(importSpecifier !== undefined ? { importSpecifier } : {}),
-      ...(compilerPackageName !== undefined ? { compilerPackageName } : {}),
+      ...(types !== undefined ? { types } : {}),
     });
 
     for (const skip of result.skipped) {
@@ -213,11 +221,13 @@ async function runDoctor(parsed: GenerateArguments, cwd: string, stdout: (text: 
   stdout(`cwd: ${cwd}\n`);
   stdout(`config: ${resolved.configFile ?? "not found"}\n`);
   stdout(`outDir: ${resolved.resolvedOut}\n`);
-  stdout(`packageName: ${resolved.packageName ?? DEFAULT_PACKAGE_NAME}\n`);
-  stdout(`importSpecifier: ${resolved.importSpecifier ?? "not configured"}\n`);
+  const packageLayout = resolved.resolvedOut.split(/[\\/]+/).includes("node_modules");
+
+  stdout(`layout: ${packageLayout ? "package" : "local"}\n`);
+  if (packageLayout) stdout(`packageName: ${resolved.packageName ?? DEFAULT_PACKAGE_NAME}\n`);
   stdout(`patterns: ${(resolved.patterns ?? DEFAULT_SCHEMA_PATTERNS).join(", ")}\n`);
   stdout(
-    `emit: rootBarrel=${resolved.emit?.rootBarrel ?? true}, subpathModules=${resolved.emit?.subpathModules ?? false}, manifest=${resolved.emit?.manifest ?? false}, plans=${resolved.emit?.plans ?? false}\n`
+    `emit: subpathModules=${resolved.emit?.subpathModules ?? false}, manifest=${resolved.emit?.manifest ?? false}, plans=${resolved.emit?.plans ?? false}\n`
   );
   stdout(`files: ${resolved.files.length}\n`);
   for (const file of resolved.files) stdout(`  - ${file}\n`);
@@ -357,10 +367,9 @@ async function runInspect(
         functions,
         sources,
         outDir: tempDir,
-        emitPackageJson: false,
         clean: true,
       });
-      const file = parsed.stage === "source" ? "index.mjs" : "index.d.ts";
+      const file = parsed.stage === "source" ? "index.js" : "index.d.ts";
 
       stdout(readFileSync(join(tempDir, file), "utf8"));
     } finally {
@@ -387,10 +396,8 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
   let packageName = parsed.packageName;
   let patterns = parsed.patterns;
   let clean = parsed.clean;
-  let emitPackageJson = parsed.emitPackageJson;
   let emit = parsed.emit;
-  let importSpecifier: string | undefined;
-  let compilerPackageName: string | undefined;
+  let types: JitConfig["types"] | undefined;
   let configFile: string | undefined;
 
   if (files.length === 0) {
@@ -398,7 +405,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
 
     if (configFile) {
       const loaded = await loadModule(configFile);
-      const config = (loaded.default ?? loaded) as JitConfig;
+      const config = (loaded.default ?? loaded) as JitConfig & LegacyJitConfig;
       const configDir = dirname(configFile);
 
       const entries = config.entries ?? config.schemas;
@@ -410,10 +417,8 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
       outDir = outDir ?? (config.outDir ? resolve(configDir, config.outDir) : undefined);
       packageName = packageName ?? output?.packageName ?? config.packageName;
       clean = clean ?? output?.clean ?? config.clean;
-      emitPackageJson = emitPackageJson ?? output?.emitPackageJson ?? config.emitPackageJson;
       emit = mergeEmit(config.emit, emit);
-      importSpecifier = output?.importSpecifier;
-      compilerPackageName = config.compiler?.packageName;
+      types = config.types ?? (config.compiler?.packageName ? { package: config.compiler.packageName } : undefined);
     }
 
     if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
@@ -426,10 +431,8 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     packageName,
     patterns,
     clean,
-    emitPackageJson,
     emit,
-    importSpecifier,
-    compilerPackageName,
+    types,
     configFile,
     resolvedOut: outDir ?? resolve(cwd, DEFAULT_OUT_DIR),
   };
@@ -463,7 +466,6 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
   let watchMode = false;
   let patterns: string[] | undefined;
   let clean: boolean | undefined;
-  let emitPackageJson: boolean | undefined;
   let emit: JitConfig["emit"] | undefined;
 
   for (let index = 0; index < rest.length; index++) {
@@ -496,16 +498,6 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
 
     if (argument === "--no-clean") {
       clean = false;
-      continue;
-    }
-
-    if (argument === "--package-json") {
-      emitPackageJson = true;
-      continue;
-    }
-
-    if (argument === "--no-package-json") {
-      emitPackageJson = false;
       continue;
     }
 
@@ -542,7 +534,7 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
     if (!argument.startsWith("--")) files.push(resolve(cwd, argument));
   }
 
-  return { files, outDir, packageName, watch: watchMode, patterns, clean, emitPackageJson, emit };
+  return { files, outDir, packageName, watch: watchMode, patterns, clean, emit };
 }
 
 function parseInspectArguments(rest: readonly string[], cwd: string): InspectArguments {
@@ -572,7 +564,7 @@ function parseInitArguments(rest: readonly string[]): InitArguments {
   let force = false;
   let entries: string[] | undefined;
   let outDir = DEFAULT_OUT_DIR;
-  let packageName = DEFAULT_PACKAGE_NAME;
+  let packageName: string | undefined;
   let patterns: string[] = [...DEFAULT_SCHEMA_PATTERNS];
 
   for (let index = 0; index < rest.length; index++) {
@@ -620,25 +612,34 @@ function parseInitArguments(rest: readonly string[]): InitArguments {
 
 export function createConfigSource(options: InitArguments): string {
   const lines = [
-    "  // Files, directories, or globs containing explicit compiled AOT exports.",
+    "  /** Files, directories, or globs containing explicit compiled AOT exports. */",
     `  entries: ${formatStringArray(options.entries ?? ["./jit/**/*.jit.ts"])},`,
-    "  // Default discovery is **/*.jit.ts; change or add patterns when your declarations use another shape.",
+    "  /** Patterns used when an entry is a directory or discovery starts at the project root. */",
     `  patterns: ${formatStringArray(options.patterns)},`,
     "  output: {",
-    '    mode: "directory",',
+    "    /** Local output emits index.js; output below node_modules emits a dual package automatically. */",
     `    directory: ${JSON.stringify(options.outDir)},`,
-    '    importSpecifier: "#jit",',
-    `    packageName: ${JSON.stringify(options.packageName)},`,
-    "    // Use false when generating inside an existing source directory.",
-    "    emitPackageJson: true,",
-    "    // Delete only jit's known generated files before writing fresh output.",
+    ...(options.packageName && options.outDir.split(/[\\/]+/).includes("node_modules")
+      ? [
+          "    /** Namespace override for this generated node_modules package. */",
+          `    packageName: ${JSON.stringify(options.packageName)},`,
+        ]
+      : []),
+    "    /** Delete only JIT-owned artifacts before each generation. */",
     "    clean: true,",
     "  },",
-    '  target: { runtime: "node", engine: "v8", version: "22", module: "esm" },',
-    '  compiler: { packageName: "@jit-compiler/jit", mode: "production", optimization: "aggressive", sourceMaps: false, declarations: true },',
-    '  performance: { shapes: true, strings: true, allocation: "auto", strategies: "auto" },',
-    "  emit: { rootBarrel: true, subpathModules: true, manifest: true, plans: true, runtimeSchemas: false },",
-    "  diagnostics: { explainPlans: true, generatedSource: true },",
+    "  emit: {",
+    "    /** Add one tree-shakable entry point per declaration file. */",
+    "    subpathModules: true,",
+    "    /** Describe generated imports and selected operations. */",
+    "    manifest: true,",
+    "    /** Persist deterministic operation plans for inspection and tooling. */",
+    "    plans: true,",
+    "  },",
+    "  types: {",
+    "    /** Package that exports JIT.Typeof and JIT.Strict for generated declarations. */",
+    '    package: "@jit-compiler/jit",',
+    "  },",
   ];
 
   if (options.format === "cjs") {

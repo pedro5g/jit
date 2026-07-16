@@ -87,19 +87,16 @@ const AOT_PROPERTIES = {
 
 const OUTPUT_PROPERTIES = {
   outDir: optionalString("Output directory relative to the project root."),
-  packageName: optionalString("Generated package name. Defaults to config or @jit/generated."),
-  compilerPackageName: optionalString("Package specifier used by generated type-only imports."),
+  packageName: optionalString("Package namespace used when output is below node_modules."),
+  typesPackage: optionalString("Package specifier exporting JIT.Typeof and JIT.Strict."),
   clean: optionalBoolean("Remove known generated files before generation."),
-  emitPackageJson: optionalBoolean("Emit a package.json exports map."),
   emit: {
     type: "object",
     additionalProperties: false,
     properties: {
-      rootBarrel: { type: "boolean" },
       subpathModules: { type: "boolean" },
       manifest: { type: "boolean" },
       plans: { type: "boolean" },
-      sourceMaps: { type: "boolean" },
     },
   },
 } as const;

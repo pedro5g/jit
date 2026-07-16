@@ -13,7 +13,7 @@ const User = JIT.object({
   tags: JIT.array(JIT.string()).max(8),
 });
 
-type User = JIT.Infer<typeof User>;`;
+type User = JIT.Typeof<typeof User>;`;
 
 export const heroUsageSource = `const Users = JIT.validator(User);
 

@@ -17,9 +17,9 @@ pnpm jit clean
 discovery starts at the project root and uses `**/*.jit.ts`. Entries can also be explicit
 files, directories or globs such as `src/schemas/**/*.ts`.
 
-Set `output.emitPackageJson: false` when generation targets an existing project source
-directory. Keep it enabled when the output acts as a standalone package or lives under
-`node_modules`-style resolution.
+Output layout is automatic. A project-local directory emits `index.js` and
+`index.d.ts` for normal relative imports. A directory below `node_modules`
+emits a namespaced dual ESM/CommonJS package and exports map.
 
 If no explicit compiled exports are found, generation prints a diagnostic and writes
 nothing. There is no raw-schema fallback.
@@ -39,9 +39,19 @@ export default AOT.defineConfig({
 
 ## Output modes
 
-Generate a standalone package when consumers import `@jit/generated`; keep
-`emitPackageJson: true`. Generate into an existing application source tree with
-`emitPackageJson: false` so JIT does not create a nested package boundary.
+Generate into `node_modules/@jit/generated` when consumers should import
+`@jit/generated`. Generate into `src/generated/jit` for
+`./generated/jit/index.js`. No `#` import alias or nested-package toggle is
+required.
+
+```ts
+export default AOT.defineConfig({
+  entries: ["src/**/*.jit.ts"],
+  output: { directory: "src/generated/jit", clean: true },
+  emit: { subpathModules: true, manifest: true, plans: true },
+  types: { package: "@jit-compiler/jit" },
+});
+```
 
 `clean: true` removes only known generated files before a new generation. It
 does not recursively delete arbitrary user files.

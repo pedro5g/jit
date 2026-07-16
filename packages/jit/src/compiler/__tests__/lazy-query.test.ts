@@ -9,7 +9,7 @@ describe("lazy query execution", () => {
     tags: JIT.array(JIT.string()),
   });
   const Events = JIT.array(Event);
-  const events: JIT.infer<typeof Events> = [
+  const events: JIT.Typeof<typeof Events> = [
     { id: 1, active: false, score: 20, category: "a", tags: ["cold"] },
     { id: 2, active: true, score: 90, category: "a", tags: ["hot", "new"] },
     { id: 3, active: true, score: 85, category: "b", tags: ["hot"] },
@@ -44,7 +44,7 @@ describe("lazy query execution", () => {
       barriers: [],
     });
     expectTypeOf(iterate).toEqualTypeOf<
-      (input: Iterable<JIT.infer<typeof Event>>) => IterableIterator<{ readonly id: number; readonly score: number }>
+      (input: Iterable<JIT.Typeof<typeof Event>>) => IterableIterator<{ readonly id: number; readonly score: number }>
     >();
   });
 
@@ -101,7 +101,7 @@ describe("lazy query execution", () => {
   });
 
   it("consumes async iterables with backpressure and awaits async scans", async () => {
-    async function* source(): AsyncGenerator<JIT.infer<typeof Event>> {
+    async function* source(): AsyncGenerator<JIT.Typeof<typeof Event>> {
       for (const event of events) yield event;
     }
 

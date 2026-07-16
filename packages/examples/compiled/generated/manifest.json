@@ -1,17 +1,11 @@
 {
   "version": 1,
-  "packageName": "@jit/examples-generated",
-  "importSpecifier": "#examples",
+  "layout": "local",
   "files": [
-    "index.mjs",
-    "index.cjs",
+    "index.js",
     "index.d.ts",
-    "index.d.cts",
-    "package.json",
-    "catalog.mjs",
-    "catalog.cjs",
+    "catalog.js",
     "catalog.d.ts",
-    "catalog.d.cts",
     "manifest.json",
     "plans/catalog.json"
   ],
@@ -19,7 +13,7 @@
     {
       "name": "catalog",
       "source": "../catalog.jit.ts",
-      "import": "#examples/catalog",
+      "import": "./catalog.js",
       "exports": [
         "User",
         "iterateActiveUsers",

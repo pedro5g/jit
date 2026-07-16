@@ -8,57 +8,43 @@ import { getArtifact } from "../runtime/artifact-registry.js";
 /** `jit.config.*` shape — declaration discovery plus generation targets. */
 export interface JitConfig {
   /**
-   * Preferred AOT declaration entries. Accepts files, directories, or globs.
-   * Use this for new projects; `schemas` remains as a compatibility alias.
+   * Declaration files, directories, or glob patterns loaded by the AOT build.
+   * When omitted, discovery starts at the project root using `patterns`.
    */
   readonly entries?: readonly string[];
   /**
-   * Files, directories, or glob patterns to load AOT declarations from. When
-   * omitted, `jit generate` scans from the project root using `patterns`.
-   */
-  readonly schemas?: readonly string[];
-  /** Preferred output block used by `jit init` and future generators. */
-  readonly output?: {
-    readonly mode?: "directory" | "package" | "node-modules";
-    readonly directory?: string;
-    readonly importSpecifier?: string;
-    readonly packageName?: string;
-    readonly clean?: boolean;
-    readonly emitPackageJson?: boolean;
-  };
-  /** Optional generated file layout knobs. */
-  readonly emit?: {
-    readonly rootBarrel?: boolean;
-    readonly subpathModules?: boolean;
-    readonly manifest?: boolean;
-    readonly plans?: boolean;
-    readonly runtimeSchemas?: boolean;
-  };
-  /** Compiler/diagnostic options accepted for forward-compatible configs. */
-  readonly target?: Readonly<Record<string, unknown>>;
-  readonly compiler?: Readonly<Record<string, unknown>> & {
-    /** Package specifier used by generated declaration-only type imports. */
-    readonly packageName?: string;
-  };
-  readonly performance?: Readonly<Record<string, unknown>>;
-  readonly diagnostics?: Readonly<Record<string, unknown>>;
-  /** Output directory; defaults to `node_modules/@jit/generated`. */
-  readonly outDir?: string;
-  /** Generated package name; defaults to `@jit/generated`. */
-  readonly packageName?: string;
-  /**
-   * Glob patterns used when scanning directories or when `schemas` is
-   * omitted. The default matches files ending in `.jit.ts`.
+   * Glob patterns used for directory and root discovery.
+   * By default, matches TypeScript files whose basename ends in `.jit`.
    */
   readonly patterns?: readonly string[];
-  /** Remove known generated files before writing; defaults to true. */
-  readonly clean?: boolean;
-  /**
-   * Write a package.json exports map beside the JS/types; defaults to true.
-   * Use false when generating into an app source folder instead of
-   * `node_modules/@jit/generated`.
-   */
-  readonly emitPackageJson?: boolean;
+  /** Runtime and declaration output. Its location determines the module layout. */
+  readonly output?: {
+    /**
+     * Generated directory relative to the config file. A project directory
+     * emits `index.js` plus `index.d.ts`; a directory below `node_modules`
+     * emits a namespaced dual ESM/CJS package with an exports map.
+     * @default "generated/jit"
+     */
+    readonly directory?: string;
+    /** Package namespace for output below `node_modules`; otherwise inferred from the path. */
+    readonly packageName?: string;
+    /** Remove files from the previous JIT generation before writing. @default true */
+    readonly clean?: boolean;
+  };
+  /** Optional metadata and per-declaration entry points. */
+  readonly emit?: {
+    /** Emit one importable module per declaration file. @default false */
+    readonly subpathModules?: boolean;
+    /** Emit `manifest.json` with imports and selected operations. @default false */
+    readonly manifest?: boolean;
+    /** Emit deterministic compiler plans under `plans/`. @default false */
+    readonly plans?: boolean;
+  };
+  /** Configuration used only by generated TypeScript declarations. */
+  readonly types?: {
+    /** Package exporting `JIT.Typeof` and `JIT.Strict`. @default "@jit-compiler/jit" */
+    readonly package?: string;
+  };
 }
 
 /** Identity helper so `jit.config.ts` gets full typing. */

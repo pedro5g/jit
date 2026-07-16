@@ -31,8 +31,8 @@ const zodUser = z.object({
   score: z.number(),
 });
 
-type User = JIT.infer<typeof User>;
-type PublicUser = JIT.infer<typeof PublicUser>;
+type User = JIT.Typeof<typeof User>;
+type PublicUser = JIT.Typeof<typeof PublicUser>;
 
 const users = createUsers(COUNT);
 const isUser = JIT.validate(User).is().compile();

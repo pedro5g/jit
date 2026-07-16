@@ -1438,9 +1438,6 @@ exports[`generated source snapshots > validator: strict checks, masks, noEmpty, 
   if (v7.length !== 11) {
     return false;
   }
-  if (v7.length === 11) {
-    v7 = v7[0] + v7[1] + v7[2] + "." + v7[3] + v7[4] + v7[5] + "." + v7[6] + v7[7] + v7[8] + "-" + v7[9] + v7[10];
-  }
   let v9 = v1.phone;
   if (typeof v9 !== "string") {
     return false;
@@ -1448,11 +1445,6 @@ exports[`generated source snapshots > validator: strict checks, masks, noEmpty, 
   v9 = v9.replace(/\\D+/g, "");
   if (v9.length !== 10 && v9.length !== 11) {
     return false;
-  }
-  if (v9.length === 10) {
-    v9 = "(" + v9[0] + v9[1] + ")" + " " + v9[2] + v9[3] + v9[4] + v9[5] + "-" + v9[6] + v9[7] + v9[8] + v9[9];
-  } else if (v9.length === 11) {
-    v9 = "(" + v9[0] + v9[1] + ")" + " " + v9[2] + v9[3] + v9[4] + v9[5] + v9[6] + "-" + v9[7] + v9[8] + v9[9] + v9[10];
   }
   let v11 = v1.invite;
   if (v11 === "") {

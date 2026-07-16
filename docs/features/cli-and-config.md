@@ -39,18 +39,16 @@ export default AOT.defineConfig({
   entries: ["src/schemas/**/*.jit.ts"],
   patterns: ["**/*.jit.ts"],
   output: {
-    directory: "node_modules/@jit/generated",
-    packageName: "@jit/generated",
-    emitPackageJson: true,
+    directory: "src/generated/jit",
     clean: true,
-  },
-  compiler: {
-    packageName: "@jit-compiler/jit",
   },
   emit: {
     subpathModules: true,
     manifest: true,
     plans: true,
+  },
+  types: {
+    package: "@jit-compiler/jit",
   },
 });
 ```
@@ -58,7 +56,7 @@ export default AOT.defineConfig({
 If `entries` is omitted, discovery scans from the project root using
 `patterns`. The default pattern is `**/*.jit.ts`.
 
-`compiler.packageName` is used only by generated declaration files. npm users
+`types.package` is used only by generated declaration files. npm users
 should keep `@jit-compiler/jit`; a Deno/JSR project can set
 `jsr:@jit/compiler`. Generated JavaScript remains self-contained and does not
 import either package.
@@ -71,21 +69,45 @@ Use `node_modules/@jit/generated` when you want package-style imports:
 import { User } from "@jit/generated";
 ```
 
-Use a project-local directory when you want checked-in generated source or a
-framework-specific alias:
+The generator recognizes `node_modules` in the output path, infers the package
+namespace from that path, and emits `index.mjs`, `index.cjs`, dual declarations,
+`package.json`, and an exports map. `output.packageName` is only needed to
+override that inferred namespace.
+
+Use a project-local directory when you want checked-in generated source or
+normal relative imports:
 
 ```ts
 export default AOT.defineConfig({
   entries: ["src/**/*.jit.ts"],
   output: {
     directory: "src/generated/jit",
-    emitPackageJson: false,
   },
 });
 ```
 
-Set `emitPackageJson: false` inside application source folders to avoid
-creating a nested package boundary.
+```ts
+import { User } from "./generated/jit/index.js";
+```
+
+Local output automatically emits `index.js` and `index.d.ts` without a nested
+`package.json`. No package `imports` map and no `#jit` alias are required. The
+JavaScript and declaration entrypoints therefore always share the same base
+name and extension relationship.
+
+## Config Reference
+
+| Setting                  | Purpose                                                        | Default            |
+| ------------------------ | -------------------------------------------------------------- | ------------------ |
+| `entries`                | declaration files, directories, or globs                       | root discovery     |
+| `patterns`               | patterns used for directory/root discovery                     | all `.jit.ts` files |
+| `output.directory`       | local directory or package path below `node_modules`            | `generated/jit`    |
+| `output.packageName`     | namespace override for a generated `node_modules` package       | inferred from path |
+| `output.clean`           | remove JIT-owned files from the previous generation             | `true`             |
+| `emit.subpathModules`    | add one entrypoint per declaration source                       | `false`            |
+| `emit.manifest`          | write imports, layout, exports, and selected operations         | `false`            |
+| `emit.plans`             | write deterministic operation plans for inspection/tooling      | `false`            |
+| `types.package`          | package providing `Typeof` and `Strict` to generated `.d.ts`    | npm package name   |
 
 ## Inspection Flow
 
@@ -121,7 +143,8 @@ only the generated functions used by the route.
 - Keep declaration files small and explicit.
 - Export compiled functions, not raw schemas, for AOT output.
 - Turn on `manifest` and `plans` when reviewing generated artifacts in CI.
-- Use subpath modules when teams want stable imports such as `#jit/user`.
+- Use subpath modules for `@jit/generated/user` package imports or
+  `./generated/user.js` local imports.
 - Run `jit explain` after adding new declaration files to verify discovery.
 - Run `jit clean` or `pnpm clean:artifacts` when local generated output is
   polluting the workspace.

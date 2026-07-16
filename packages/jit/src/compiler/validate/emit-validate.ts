@@ -4,6 +4,7 @@ import { Regexes } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { sanitizeChainBindings } from "../sanitize.js";
 import { emitPropertyAccess } from "../source/access.js";
+import { countFormatPlaceholders, emitFormatMaskExpression, emitStrictFormatCondition } from "../source/format-mask.js";
 import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
 
@@ -783,22 +784,27 @@ class ValidatorEmitter {
             );
           }
           if (check.kind === "format") {
-            const spec = check.value as { readonly pattern: string; readonly stripNonDigits: boolean };
+            const spec = check.value as ATS.StringMaskSpec;
             const length = countFormatPlaceholders(spec.pattern);
 
-            if (spec.stripNonDigits) this.writer.line(`${value} = ${value}.replace(/\\D+/g, "");`);
-            this.failIf(
-              `${value}.length !== ${emitLiteral(length)}`,
-              path,
-              "invalid_format",
-              `length === ${length}`,
-              check.message ?? `expected ${length} characters before formatting`
-            );
-            this.writer.line(`if (${value}.length === ${emitLiteral(length)}) {`);
-            this.writer.indent(() => {
-              this.writer.line(`${value} = ${formatMaskExpression(value, spec.pattern)};`);
-            });
-            this.writer.line("}");
+            if (spec.mode === "strict") {
+              this.failIf(
+                emitStrictFormatCondition(value, spec.pattern),
+                path,
+                "invalid_format",
+                spec.pattern,
+                check.message ?? `expected the ${spec.pattern} format`
+              );
+            } else {
+              if (spec.stripNonDigits) this.writer.line(`${value} = ${value}.replace(/\\D+/g, "");`);
+              this.failIf(
+                `${value}.length !== ${emitLiteral(length)}`,
+                path,
+                "invalid_format",
+                `length === ${length}`,
+                check.message ?? `expected ${length} characters before formatting`
+              );
+            }
           }
           if (check.kind === "phoneBR") {
             this.writer.line(`${value} = ${value}.replace(/\\D+/g, "");`);
@@ -809,15 +815,6 @@ class ValidatorEmitter {
               "Brazilian phone with 10 or 11 digits",
               check.message ?? "expected a Brazilian phone number"
             );
-            this.writer.line(`if (${value}.length === 10) {`);
-            this.writer.indent(() => {
-              this.writer.line(`${value} = ${formatMaskExpression(value, "(##) ####-####")};`);
-            });
-            this.writer.line(`} else if (${value}.length === 11) {`);
-            this.writer.indent(() => {
-              this.writer.line(`${value} = ${formatMaskExpression(value, "(##) #####-####")};`);
-            });
-            this.writer.line("}");
           }
         }
 
@@ -987,6 +984,35 @@ class ValidatorEmitter {
                 );
               }
               break;
+          }
+        }
+
+        if (this.rootMode === "parse") {
+          for (const check of checks) {
+            if (check.kind === "format") {
+              const spec = check.value as ATS.StringMaskSpec;
+
+              if (spec.mode === "transform") {
+                const length = countFormatPlaceholders(spec.pattern);
+
+                this.writer.line(`if (${value}.length === ${length}) {`);
+                this.writer.indent(() => {
+                  this.writer.line(`${value} = ${emitFormatMaskExpression(value, spec.pattern)};`);
+                });
+                this.writer.line("}");
+              }
+            }
+            if (check.kind === "phoneBR") {
+              this.writer.line(`if (${value}.length === 10) {`);
+              this.writer.indent(() => {
+                this.writer.line(`${value} = ${emitFormatMaskExpression(value, "(##) ####-####")};`);
+              });
+              this.writer.line(`} else if (${value}.length === 11) {`);
+              this.writer.indent(() => {
+                this.writer.line(`${value} = ${emitFormatMaskExpression(value, "(##) #####-####")};`);
+              });
+              this.writer.line("}");
+            }
           }
         }
       },
@@ -1756,27 +1782,6 @@ function templateLiteralSchemaSource(schema: ATS.AnyTypeSchema): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-}
-
-function countFormatPlaceholders(pattern: string): number {
-  let count = 0;
-
-  for (let index = 0; index < pattern.length; index++) {
-    if (pattern[index] === "#") count++;
-  }
-  return count;
-}
-
-function formatMaskExpression(value: string, pattern: string): string {
-  const parts: string[] = [];
-  let cursor = 0;
-
-  for (let index = 0; index < pattern.length; index++) {
-    const char = pattern[index];
-
-    parts.push(char === "#" ? `${value}[${cursor++}]` : emitLiteral(char));
-  }
-  return parts.length === 0 ? '""' : parts.join(" + ");
 }
 
 function staticChild(path: PathRef, segment: string): PathRef {

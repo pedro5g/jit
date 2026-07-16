@@ -9,7 +9,7 @@ const Shape = JIT.discriminatedUnion("kind", [
   JIT.object({ kind: JIT.literal("triangle"), id: JIT.number().int32(), area: JIT.number().float32() }),
 ]);
 const Shapes = JIT.array(Shape);
-type Shape = JIT.infer<typeof Shape>;
+type Shape = JIT.Typeof<typeof Shape>;
 
 const values = createShapes(COUNT);
 const binary = Shapes.binary({ strategy: "exact", memoryLayout: "columnar" });

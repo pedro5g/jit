@@ -3,7 +3,7 @@ import { CodePanel } from "@/components/code/code-panel";
 import { FeatureCard } from "@/components/ui/feature-card";
 import { Section, SectionHeading } from "@/components/ui/section";
 
-const inferenceSnippet = `type User = JIT.Infer<typeof User>;
+const inferenceSnippet = `type User = JIT.Typeof<typeof User>;
 //   ^? { id: number; name: string; email: string;
 //        role: "admin" | "user"; tags: string[] }`;
 
@@ -18,8 +18,8 @@ export function DxSection() {
       <div className="grid gap-4 sm:grid-cols-2">
         <FeatureCard title="Types inferred end-to-end" icon={<Type aria-hidden className="size-5" />}>
           <p>
-            Schemas carry their TypeScript type — <span className="font-mono">JIT.Infer</span> on builders, typed params
-            on queries, typed DTOs on mappers. A Standard Schema v1 facade covers framework interop.
+            Schemas carry their TypeScript type — <span className="font-mono">JIT.Typeof</span> on builders, typed
+            params on queries, typed DTOs on mappers. A Standard Schema v1 facade covers framework interop.
           </p>
           <CodePanel code={inferenceSnippet} lang="ts" className="mt-4" />
         </FeatureCard>

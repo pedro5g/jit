@@ -112,8 +112,8 @@ describe("JIT compiler validator", () => {
     expect(Compiler.emitValidatorSource(MutableUser.schema)).not.toContain("Object.freeze");
     expect(Compiler.emitValidatorSource(ReadonlyUser.schema)).toContain("Object.freeze");
 
-    expectTypeOf<JIT.infer<typeof MutableUser>>().toEqualTypeOf<{ id: number }>();
-    expectTypeOf<JIT.infer<typeof ReadonlyUser>>().toEqualTypeOf<Readonly<{ id: number }>>();
+    expectTypeOf<JIT.Typeof<typeof MutableUser>>().toEqualTypeOf<{ id: number }>();
+    expectTypeOf<JIT.Typeof<typeof ReadonlyUser>>().toEqualTypeOf<Readonly<{ id: number }>>();
   });
 
   it("should apply defaults, trims, and pipes to parse output", () => {
@@ -367,6 +367,30 @@ describe("JIT compiler validator", () => {
 
     expect(failed.success).toBe(false);
     if (!failed.success) expect(failed.issues.map((issue) => issue.path)).toEqual(["cpf", "phone", "custom"]);
+  });
+
+  it("should validate strict masks and omit output formatting from is", () => {
+    const StrictDocument = JIT.string().format("###.###.###-##", { mode: "strict" });
+    const TransformDocument = JIT.string().format("###.###.###-##");
+    const strict = JIT.validator(StrictDocument).get("is", "parse");
+    const transformIs = JIT.validate(TransformDocument).is().compile();
+
+    expect(strict.is("123.456.789-01")).toBe(true);
+    expect(strict.is("12345678901")).toBe(false);
+    expect(strict.parse("123.456.789-01")).toBe("123.456.789-01");
+    expect(transformIs("12345678901")).toBe(true);
+    expect(transformIs.source).not.toContain('v1[0] + "."');
+  });
+
+  it("should hardcode object keyof values in generated validators", () => {
+    const Key = JIT.object({ id: JIT.number(), name: JIT.string() }).keyof();
+    const isKey = JIT.validate(Key).is().compile();
+
+    expect(isKey("id")).toBe(true);
+    expect(isKey("missing")).toBe(false);
+    expect(isKey.source).toContain('!== "id"');
+    expect(isKey.source).toContain('!== "name"');
+    expect(isKey.source).not.toContain("Object.keys");
   });
 
   it("should expose a lazy optional Standard Schema facade", () => {

@@ -186,6 +186,7 @@ describe("Builder chain", () => {
 
     it("rejects invalid literal format patterns", () => {
       const Formatted = JIT.string().format("(##) #####-####");
+      const StrictFormatted = JIT.string().format("(##) #####-####", { mode: "strict" });
       const assertInvalidFormats = () => {
         // @ts-expect-error format patterns must contain at least one # placeholder
         JIT.string().format("phone");
@@ -194,6 +195,7 @@ describe("Builder chain", () => {
       };
 
       expect(Formatted.schema.type).toBe(AST.TypeName.string);
+      expect(StrictFormatted.schema.def.checks?.[0]?.value).toMatchObject({ mode: "strict" });
       expect(assertInvalidFormats).toBeTypeOf("function");
     });
   });

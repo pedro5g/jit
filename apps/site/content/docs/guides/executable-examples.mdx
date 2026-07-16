@@ -27,12 +27,12 @@ uses a four-byte length prefix because TCP does not preserve message boundaries.
 
 `compiled/catalog.jit.ts` declares validation, equal, clone, diff, hash,
 masking, sanitization, mapper, eager query, lazy iterator, visitor, JSON, and
-codec operations. The CLI emits committed ESM, CommonJS, declarations,
+codec operations. The local output emits committed ESM, declarations,
 manifest, subpath, and plan files.
 
-The compiled application imports `#examples`, which maps directly to generated
-files. Generated JavaScript imports nothing from `@jit-compiler/jit`, including in
-the TCP codec round trip.
+The compiled application imports `./generated/index.js`, which resolves
+directly to generated files. Generated JavaScript imports nothing from
+`@jit-compiler/jit`, including in the TCP codec round trip.
 
 ## Why Generated Files Are Committed
 

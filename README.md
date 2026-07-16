@@ -19,6 +19,8 @@ const User = JIT.object({
 
 const validateUser = JIT.validate(User).safeParse().compile();
 const result = validateUser(input);
+
+type User = JIT.Typeof<typeof User>;
 ```
 
 Runtime JIT compiles and caches an operation on first use. AOT discovers only

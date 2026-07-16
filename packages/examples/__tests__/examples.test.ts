@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCompiledShowcase } from "../compiled/index.js";
@@ -31,7 +30,7 @@ describe("runtime and AOT examples", () => {
 
   it("executes import-free generated AOT operations", async () => {
     const result = await runCompiledShowcase();
-    const source = readFileSync(join(import.meta.dirname, "../compiled/generated/index.mjs"), "utf8");
+    const source = readFileSync(join(import.meta.dirname, "../compiled/generated/index.js"), "utf8");
     const manifest = JSON.parse(
       readFileSync(join(import.meta.dirname, "../compiled/generated/manifest.json"), "utf8")
     ) as {
@@ -71,16 +70,22 @@ describe("runtime and AOT examples", () => {
     ]);
   });
 
-  it("loads the generated CommonJS entrypoint without the compiler", () => {
-    const output = execFileSync(
-      process.execPath,
-      [
-        "-e",
-        'const { User } = require("./compiled/generated/index.cjs"); process.stdout.write(String(User.is({ id: 1, name: "Ada", email: "ada@example.com", role: "admin", active: true, score: 10, tags: ["jit"], createdAt: "2026-07-01T10:00:00Z" })));',
-      ],
-      { cwd: join(import.meta.dirname, ".."), encoding: "utf8" }
-    );
+  it("loads the generated local ESM entrypoint without the compiler", async () => {
+    const { User } = (await import("../compiled/generated/index.js")) as {
+      User: { is: (value: unknown) => boolean };
+    };
 
-    expect(output).toBe("true");
+    expect(
+      User.is({
+        id: 1,
+        name: "Ada",
+        email: "ada@example.com",
+        role: "admin",
+        active: true,
+        score: 10,
+        tags: ["jit"],
+        createdAt: "2026-07-01T10:00:00Z",
+      })
+    ).toBe(true);
   });
 });

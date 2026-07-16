@@ -18,7 +18,7 @@ pnpm jit generate  # emits .mjs + .cjs + .d.ts
 
 # generated modules have zero imports —
 # the engine never ships to production
-import { User } from "#jit";
+import { User } from "@jit/generated";
 User.is(input);`;
 
 export function CompilationModesSection() {

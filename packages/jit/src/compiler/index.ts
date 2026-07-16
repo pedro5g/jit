@@ -7,6 +7,7 @@ export * from "./diff/index.js";
 export * from "./diff.js";
 export * from "./emitter/emit-equal.js";
 export * from "./equal.js";
+export * from "./format.js";
 export * from "./hash.js";
 export * from "./ir/builders/build-equal-ir.js";
 export * from "./ir/ir.js";

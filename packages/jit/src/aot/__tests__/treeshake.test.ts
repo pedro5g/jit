@@ -43,7 +43,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     AOT.generate({ schemas: {}, functions: { User_is: selected.is }, outDir });
 
     const bundled = await bundle(
-      `import { User_is } from "./index.mjs";\nconsole.log(User_is({ id: 1, name: "Ada", email: "ada@math.org" }));\n`
+      `import { User_is } from "./index.js";\nconsole.log(User_is({ id: 1, name: "Ada", email: "ada@math.org" }));\n`
     );
 
     // Only the validator survives; every other compiled operation is gone.
@@ -74,9 +74,9 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
       outDir,
     });
 
-    const generated = readFileSync(join(outDir, "index.mjs"), "utf8");
+    const generated = readFileSync(join(outDir, "index.js"), "utf8");
     const bundled = await bundle(
-      `import { User_is } from "./index.mjs";\nconsole.log(User_is({ id: 1, name: "Ada", email: "ada@math.org" }));\n`
+      `import { User_is } from "./index.js";\nconsole.log(User_is({ id: 1, name: "Ada", email: "ada@math.org" }));\n`
     );
 
     expect(generated).toContain("const User_parse");
@@ -105,7 +105,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     });
 
     const bundled = await bundle(
-      `import { User_equal } from "./index.mjs";\nconsole.log(User_equal({ id: 1 }, { id: 1 }));\n`
+      `import { User_equal } from "./index.js";\nconsole.log(User_equal({ id: 1 }, { id: 1 }));\n`
     );
 
     expect(bundled).toContain("User_equal");
@@ -118,7 +118,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
     AOT.generate({ schemas: { User: JIT.compile(User, { is: selected.is }) }, outDir });
 
-    const bundled = await bundle(`import { User } from "./index.mjs";\nconsole.log(User.is({ id: 1 }));\n`);
+    const bundled = await bundle(`import { User } from "./index.js";\nconsole.log(User.is({ id: 1 }));\n`);
 
     expect(bundled).toContain("Object.freeze");
   });

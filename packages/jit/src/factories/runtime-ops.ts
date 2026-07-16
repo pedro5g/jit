@@ -1,6 +1,7 @@
 import { type Clone, compileClone, emitCloneSource } from "../compiler/clone.js";
 import { compileDiff, type Diff, emitDiffSource } from "../compiler/diff.js";
 import { compileEqual, type Equal, emitEqualSource } from "../compiler/equal.js";
+import { compileFormat, emitFormatSource, type Format } from "../compiler/format.js";
 import { compileHash, emitHashSource, type Hash } from "../compiler/hash.js";
 import { compileStringifyChunks, type JsonChunksOptions, type StringifyChunks } from "../compiler/json-chunks.js";
 import { compileSerialize, emitSerializeSource, type Serialize } from "../compiler/serialize.js";
@@ -128,6 +129,18 @@ export function hash<TSchema extends ATS.AnyTypeSchema>(
   return attachRuntimeMetadata(compileHash(unwrapped as TSchema), {
     operation: "hash",
     source: () => emitHashSource(unwrapped),
+  });
+}
+
+/** Compiles only the string-formatting checks declared on a string schema. */
+export function format<TSchema extends ATS.StringSchema>(
+  schema: SchemaInput<TSchema>
+): RuntimeCompiledFunction<Format> {
+  const unwrapped = unwrapSchema(schema);
+
+  return attachRuntimeMetadata(compileFormat(unwrapped as TSchema), {
+    operation: "format",
+    source: () => emitFormatSource(unwrapped),
   });
 }
 

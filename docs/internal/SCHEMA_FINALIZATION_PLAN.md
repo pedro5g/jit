@@ -9,7 +9,7 @@ stage.
 ## Goal
 
 Finish the schema layer so every public schema feature is represented in the
-stable AST, typed through `JIT.infer`, and compiled by the validator into
+stable AST, typed through `JIT.Typeof`, and compiled by the validator into
 specialized JavaScript. No feature in this plan should rely on runtime schema
 interpretation in hot paths.
 

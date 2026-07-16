@@ -19,7 +19,7 @@ const User = JIT.object({
 });
 const Users = JIT.array(User);
 
-type User = JIT.infer<typeof User>;
+type User = JIT.Typeof<typeof User>;
 type PublicUser = { readonly id: number; readonly name: string; readonly score: number };
 
 const zodUser = z.object({

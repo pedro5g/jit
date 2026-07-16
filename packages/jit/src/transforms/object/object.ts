@@ -278,22 +278,16 @@ export function catchall<TShape extends SchemaShape, TCatchall extends AnyTypeSc
 function keyOf<TShape extends SchemaShape>(
   schema: ObjectSchema<TShape, ObjectUnknownKeys, AnyTypeSchema | undefined>
 ): EnumSchema<KeyOfValues<TShape>> {
-  const values: Record<string, string> = {};
-
-  for (const key in schema.def.props) {
-    values[key] = key;
-  }
+  const values = Object.keys(schema.def.props) as unknown as KeyOfValues<TShape>;
 
   return /* @__PURE__ */ createSchema(TypeName.enum, {
-    values: values as KeyOfValues<TShape>,
+    values,
   });
 }
 
 export { keyOf as keyof };
 
-type KeyOfValues<TShape extends SchemaShape> = {
-  readonly [TKey in Extract<keyof TShape, string>]: TKey;
-};
+type KeyOfValues<TShape extends SchemaShape> = readonly Extract<keyof TShape, string>[];
 
 type MergeUnknownKeys<
   TLeftUnknownKeys extends ObjectUnknownKeys,

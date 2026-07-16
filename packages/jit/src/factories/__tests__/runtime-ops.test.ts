@@ -60,6 +60,19 @@ describe("runtime operation facade", () => {
     expect(hashUser.explain().operation).toBe("hash");
   });
 
+  it("should compile a standalone mask formatter without the validator runtime", () => {
+    const Document = JIT.string().format("###.###.###-##");
+    const formatDocument = JIT.format(Document).compile();
+
+    expect(formatDocument("12345678901")).toBe("123.456.789-01");
+    expect(formatDocument("123.456.789-01")).toBe("123.456.789-01");
+    expect(formatDocument.compile()).toBe(formatDocument);
+    expect(formatDocument.source).toContain("function format(value)");
+    expect(formatDocument.source).not.toContain("safeParse");
+    expect(() => formatDocument("123")).toThrow(RangeError);
+    expectTypeOf(formatDocument).toMatchTypeOf<(value: string) => string>();
+  });
+
   it("should overload json() for schemas and compiled JSON boundaries", () => {
     const JsonValue = JIT.json();
     const stringifyUser = JIT.json(User).stringify().compile();
@@ -90,7 +103,7 @@ describe("runtime operation facade", () => {
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join("")).toBe(JSON.stringify(values));
     expectTypeOf(issues).returns.toEqualTypeOf<IterableIterator<Errors.ValidationIssue>>();
-    expectTypeOf(stringifyChunks).toMatchTypeOf<(value: JIT.infer<typeof Items>) => IterableIterator<string>>();
+    expectTypeOf(stringifyChunks).toMatchTypeOf<(value: JIT.Typeof<typeof Items>) => IterableIterator<string>>();
   });
 
   it("should compile select/map transforms through the fluent facade", () => {

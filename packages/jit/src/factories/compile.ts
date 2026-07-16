@@ -2,6 +2,7 @@ import { compileClone } from "../compiler/clone.js";
 import { compileCodec } from "../compiler/codec.js";
 import { compileDiff } from "../compiler/diff.js";
 import { compileEqual } from "../compiler/equal.js";
+import { compileFormat } from "../compiler/format.js";
 import { compileHash } from "../compiler/hash.js";
 import { compileMask } from "../compiler/mask.js";
 import { compileSanitize } from "../compiler/sanitize.js";
@@ -29,6 +30,7 @@ export const COMPILE_OPS = [
   "update",
   "stringify",
   "fromJSON",
+  "format",
   "mask",
   "sanitize",
   "codec",
@@ -150,6 +152,9 @@ export function compile<
         selection.fromJSON = fromJSON;
         break;
       }
+      case "format":
+        selection.format = compileFormat(unwrapped as ATS.StringSchema);
+        break;
       case "equal":
         selection.equal = compileEqual(unwrapped);
         break;

@@ -101,15 +101,20 @@ documents where clearing a value to an empty string is meaningful.
 
 ```ts
 const Customer = JIT.object({
-  cpf: JIT.string().cpf().format("###.###.###-##"),
-  cnpj: JIT.string().cnpj().format("##.###.###/####-##"),
-  phone: JIT.string().phoneBR().format("(##) #####-####"),
+  cpf: JIT.string().cpf(),
+  cnpj: JIT.string().cnpj(),
+  phone: JIT.string().phoneBR(),
 });
+
+const StrictCPF = JIT.string().format("###.###.###-##", { mode: "strict" });
+const formatCPF = JIT.format(JIT.string().format("###.###.###-##")).compile();
 ```
 
 The format grammar is typed. `#` is a digit placeholder; spaces and supported
-punctuation are literals. By default non-digits are stripped before formatting.
-Set `{ stripNonDigits: false }` when the input must already be canonical.
+punctuation are literals. Transform mode strips non-digits by default and only
+constructs output in parse operations. Strict mode requires every literal and
+digit position to already match. `JIT.format(schema).compile()` creates a pure
+specialized formatter without the validator runtime.
 
 Store/index canonical digits when possible and format at a presentation or
 serialization boundary. Comparing masked strings increases cardinality and can
