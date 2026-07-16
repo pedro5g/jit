@@ -6,6 +6,14 @@ npm and JSR.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-07-16
+
+### Fixed
+
+- Resolve the public runtime entrypoint directly from TypeScript source in the
+  root Vitest project, so release verification succeeds in a clean checkout
+  without relying on ignored build artifacts from an earlier local build.
+
 ## [1.0.2] - 2026-07-16
 
 ### Added
@@ -57,7 +65,8 @@ npm and JSR.
 - MCP stdio server with structured tools, resources, prompts, completions,
   workspace-confined AOT preview/generation, and installed-package smoke tests.
 
-[Unreleased]: https://github.com/pedro5g/jit/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/pedro5g/jit/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/pedro5g/jit/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/pedro5g/jit/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/pedro5g/jit/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/pedro5g/jit/releases/tag/v1.0.0
