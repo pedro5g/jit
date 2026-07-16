@@ -38,15 +38,15 @@ const NullableName = Name.nullable();
 const NullishName = Name.nullish();
 ```
 
-| Wrapper          | Type            |    Missing |     `null` | Runtime note                         |
-| ---------------- | --------------- | ---------: | ---------: | ------------------------------------ | ----------------------------- | ------------------------ |
-| `.optional()`    | `T              | undefined` |   accepted | delegated                            | object property may be absent |
-| `.nullable()`    | `T              |      null` |         no | accepted                             | explicit null only            |
-| `.nullish()`     | `T              |       null | undefined` | accepted                             | accepted                      | combines both boundaries |
-| `.required()`    | removes absence |         no |  unchanged | unwraps optional/default absence     |
-| `.readonly()`    | readonly output |  unchanged |  unchanged | type contract, no extra deep clone   |
-| `.promise()`     | `Promise<T>`    |         no |  delegated | requires async parse to settle input |
-| `.brand("Name")` | nominal `T`     |  unchanged |  unchanged | no runtime payload property          |
+| Wrapper          | Type                     |   Missing |    `null` | Runtime note                         |
+| ---------------- | ------------------------ | --------: | --------: | ------------------------------------ |
+| `.optional()`    | `T \| undefined`         |  accepted | delegated | object property may be absent        |
+| `.nullable()`    | `T \| null`              |        no |  accepted | explicit null only                   |
+| `.nullish()`     | `T \| null \| undefined` |  accepted |  accepted | combines both boundaries             |
+| `.required()`    | removes absence          |        no | unchanged | unwraps optional/default absence     |
+| `.readonly()`    | readonly output          | unchanged | unchanged | type contract, no extra deep clone   |
+| `.promise()`     | `Promise<T>`             |        no | delegated | requires async parse to settle input |
+| `.brand("Name")` | nominal `T`              | unchanged | unchanged | no runtime payload property          |
 
 ## Defaults
 
