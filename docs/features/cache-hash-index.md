@@ -181,6 +181,24 @@ const Users = JIT.array(User).entity({ key: "id" }).indexBy("id");
 const equalUsers = JIT.equal(Users).compile();
 ```
 
+The three schema annotations have distinct contracts:
+
+| API                      | Identity        | Indexed equality | Unique-key intent |
+| ------------------------ | --------------- | ---------------- | ----------------- |
+| `.entity({ key: "id" })` | yes             | no               | no                |
+| `.indexBy("id")`         | lookup identity | yes              | no                |
+| `.keyed("id")`           | yes             | yes              | yes               |
+
+`.entity()` alone supplies a default key to `compileNormalize`,
+`compileUniqueBy`, and the sort fallback, but compiled array equality remains
+positional. `.indexBy()` activates the adaptive map strategy. `.keyed()` is the
+complete shorthand and also stores entity/cache/uniqueness metadata.
+
+The uniqueness hint is not a validator. Duplicate keys overwrite earlier
+entries when a map is built. Query `.keyed("id")` is a separate collector that
+returns a fresh `Map` on every call; it does not read or install the schema
+index cache.
+
 This tells equality that array identity is based on a stable key. For large
 arrays, the generated code can build or reuse an index over the right-hand
 array instead of doing an O(n²) scan.

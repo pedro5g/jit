@@ -37,6 +37,7 @@ work and for production performance. Each page explains:
 | Scan million-row flat batches     | Binary rowsets          | packed/aligned/columnar and memory strategy |
 | Send JSON or binary data          | Serialization and codec | full string, chunks, or versioned bytes     |
 | Reuse expensive lookups           | Cache/hash/index        | build cost vs reuse count                   |
+| Model entity collections          | Cache/hash/index        | identity vs index vs keyed output           |
 | Ship strict-CSP/browser code      | AOT/tree sharing        | grouped object vs standalone export         |
 | Configure generation/CI           | CLI and config          | discovery, output package and diagnostics   |
 | Reproduce performance claims      | Benchmarks/load         | matching fixture, heap and GC               |

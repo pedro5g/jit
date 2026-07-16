@@ -49,6 +49,7 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 - [Package guide](packages/jit/README.md)
 - [Architecture](docs/architecture.md)
 - [Feature guides](docs/features/README.md)
+- [Entity, keyed, and index guide](https://jit-site.vercel.app/docs/reference/operators/entity-keyed-and-indexes)
 - [Executable runtime and AOT examples](packages/examples/README.md)
 - [MCP server](docs/features/mcp-server.md)
 - [AOT audit](docs/aot/audit.md)

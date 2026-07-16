@@ -72,6 +72,19 @@ Array checks: `min`, `max`, `length`, `nonEmpty`.
 JSON cannot represent Set/Map directly. Convert them at a codec/mapper boundary
 or use a transport that defines their representation.
 
+Entity collections can declare identity and lookup strategy independently:
+
+```ts
+const EntityUsers = JIT.array(User).entity({ key: "id" });
+const IndexedUsers = JIT.array(User).indexBy("id");
+const KeyedUsers = JIT.array(User).keyed("id");
+```
+
+`entity` records identity without enabling an index. `indexBy` enables
+adaptive keyed equality. `keyed` combines identity, index and uniqueness
+intent. Read [entity, keyed and indexes](/docs/reference/operators/entity-keyed-and-indexes)
+for operation behavior, complexity, cache lifetime and mutation rules.
+
 For collection identity and change tracking, use a compiled `JIT.watch`
 snapshot diff or a stateful `JIT.watchedList`. The [watched lists
 guide](/docs/runtime/watched-lists) covers keys, update semantics, performance

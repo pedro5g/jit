@@ -1,0 +1,280 @@
+---
+title: Entity, keyed and indexes
+description: Declare entity identity, select indexed equality and build keyed query outputs without confusing their contracts.
+---
+
+`entity`, `indexBy` and `keyed` annotate a collection schema with related but
+different information. They do not change the inferred value type and do not
+perform validation by themselves.
+
+| Operator                   |    Declares identity | Enables indexed equality | Declares unique keys | Produces a `Map` |
+| -------------------------- | -------------------: | -----------------------: | -------------------: | ---------------: |
+| `.entity({ key: "id" })`   |                  yes |                       no |                   no |               no |
+| `.indexBy("id")`           | uses `id` for lookup |                      yes |                   no |               no |
+| `.keyed("id")` on a schema |                  yes |                      yes |                  yes |               no |
+| `.keyed("id")` on a query  |     query-local only |                       no |      last value wins |              yes |
+
+Use string keys for built-in compiler strategies. TypeScript restricts them to
+properties of the array element, so a misspelled key fails before generation:
+
+```ts
+const User = JIT.object({
+  id: JIT.number().int(),
+  email: JIT.string().email(),
+  name: JIT.string(),
+});
+
+JIT.array(User).keyed("id");
+
+// @ts-expect-error - "userId" is not part of User
+JIT.array(User).keyed("userId");
+```
+
+## `.entity()`
+
+`.entity({ key })` declares the field that represents domain identity. It is a
+semantic hint: object operations can reuse the key without receiving it again,
+but no index is allocated and array equality does not become order-independent
+from this hint alone.
+
+```ts
+const Users = JIT.array(User).entity({ key: "id" });
+
+const normalizeUsers = JIT.compileNormalize(Users.schema);
+
+normalizeUsers([
+  { id: 10, email: "ada@example.com", name: "Ada" },
+  { id: 20, email: "grace@example.com", name: "Grace" },
+]);
+// {
+//   byId: {
+//     10: { id: 10, email: "ada@example.com", name: "Ada" },
+//     20: { id: 20, email: "grace@example.com", name: "Grace" },
+//   },
+//   ids: [10, 20],
+// }
+```
+
+The normalizer emits one indexed loop, preallocates `ids` and reads `item.id`
+directly. It does not call `Object.keys`, `.map()` or a generic property
+resolver in the hot path.
+
+### When to use `entity`
+
+- the collection has a meaningful domain identity;
+- normalization, deduplication or sorting should default to the same key;
+- adapters or tooling need to inspect identity metadata;
+- order-sensitive equality is still correct and an index would add no value.
+
+### Entity options
+
+```ts
+const Users = JIT.array(User).entity({
+  key: "id",
+  immutable: true,
+  cacheIndex: true,
+});
+```
+
+| Option       | Meaning                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `key`        | Identity selector. A string property is required by current built-in compiler strategies.                                     |
+| `immutable`  | Metadata declaring the intended mutation contract. It does not freeze values at runtime.                                      |
+| `cacheIndex` | Metadata requesting index reuse. Use `.keyed(key)` or `.indexBy(key)` to activate the current indexed-equality compiler path. |
+
+`immutable` and `cacheIndex` are preserved for compiler hosts, adapters and
+introspection. They are not runtime enforcement switches. If mutation must be
+rejected, freeze values in the application or validate that policy separately.
+
+### Advantage of identity-only metadata
+
+Identity by itself has zero per-value cache cost. It lets specialized
+operations resolve a consistent key while preserving a simple positional loop
+for equality. This is useful for short lists, write-heavy lists, or operations
+that run only once.
+
+## `.indexBy()`
+
+`.indexBy(key)` says that keyed lookup is a profitable equality strategy. It
+also records the key as the collection's identifying field, but it does not
+declare that duplicates are valid or automatically reject them.
+
+```ts
+const IndexedUsers = JIT.array(User).indexBy("id");
+const equalUsers = JIT.equal(IndexedUsers).compile();
+
+const left = [
+  { id: 1, email: "ada@example.com", name: "Ada" },
+  { id: 2, email: "grace@example.com", name: "Grace" },
+];
+
+const right = [
+  { id: 2, email: "grace@example.com", name: "Grace" },
+  { id: 1, email: "ada@example.com", name: "Ada" },
+];
+
+equalUsers(left, right); // true: entities are matched by id, then compared deeply
+```
+
+The generated algorithm is adaptive:
+
+| Collection size     | Generated strategy                      | Extra retained memory     |
+| ------------------- | --------------------------------------- | ------------------------- |
+| Fewer than 64 items | direct nested keyed scan                | none                      |
+| 64 items or more    | build/reuse a `Map` for the right array | one weakly attached index |
+
+For large arrays, the first comparison builds the map in O(n), then performs
+near O(1) key lookups for each left item. Reusing the same right-hand array and
+key reuses the map. The compiled function still compares the complete matched
+entities, so equal IDs do not hide changed fields.
+
+### When to use `indexBy`
+
+- equality should ignore entity order and match items by a stable key;
+- arrays are large enough to avoid repeated O(n squared) searches;
+- the same right-hand array participates in repeated comparisons;
+- the array and its key fields are immutable after indexing.
+
+### When a direct scan is better
+
+- equality is positional and order matters;
+- lists are tiny and compared once;
+- keys are not unique or can change in place;
+- the list is rebuilt so often that no cached index is reused.
+
+### Index cache contract
+
+The cache is a `WeakMap` keyed by the array reference. It stores one key/index
+pair per array. Asking for another key on the same array replaces the previous
+entry. Weak keys allow an unreachable array and its index to be collected.
+
+There is no mutation observer or per-array invalidation API:
+
+```ts
+const IndexedUsers = JIT.array(User).indexBy("id");
+const equalUsers = JIT.equal(IndexedUsers).compile();
+
+equalUsers(previous, users); // `users` may now own a cached index
+
+// Unsafe: the retained index still describes the old array/key state.
+users.push(nextUser);
+users[0].id = 99;
+
+// Safe: changed data receives a new array reference.
+const withNext = [...users, nextUser];
+const changedId = users.map((user) =>
+  user.id === 1 ? { ...user, id: 99 } : user,
+);
+```
+
+## `.keyed()` on a schema
+
+Schema `.keyed(key)` is the convenient complete configuration for entity
+collections. It records all of the following in one operation:
+
+- entity identity by `key`;
+- index strategy by `key`;
+- collection identity and indexed metadata;
+- a unique-key contract;
+- index-cache intent for compiler hosts.
+
+```ts
+const Users = JIT.array(User).keyed("id");
+
+const equalUsers = JIT.equal(Users).compile();
+const normalizeUsers = JIT.compileNormalize(Users.schema);
+const uniqueUsers = JIT.compileUniqueBy(Users.schema);
+```
+
+Use `.keyed("id")` when all entity-oriented operations should agree on one
+stable key. It prevents configuration drift such as normalizing by `id` while
+comparing by `email`.
+
+### Advantages of `keyed`
+
+- one typed declaration configures identity and indexed equality;
+- generated equality uses direct `item.id` access rather than reflective key
+  lookup;
+- large repeated comparisons can reuse the weak index cache;
+- normalize, unique and sort compilers can resolve the key from the schema;
+- AOT can emit the exact keyed loop while omitting generic schema/runtime code.
+
+### Uniqueness is a contract, not a validator
+
+`.keyed("id")` does not scan every parsed collection for duplicate keys. That
+would add O(n) work and a `Set` allocation to every validation, including paths
+that never need keyed behavior.
+
+Keep keys unique at the data boundary. During map construction or a keyed
+query, duplicate keys overwrite the previous value. If input uniqueness must
+be validated, add an explicit refinement or normalize/deduplicate before the
+collection enters the indexed path.
+
+## `.keyed()` on a query
+
+Query `.keyed(key)` is an output collector, not a schema hint or persistent
+cache. It fuses `Map` construction into the query loop:
+
+```ts
+const adaById = JIT.query(JIT.array(User))
+  .filter((q) => q.eq("email", "ada@example.com"))
+  .keyed("id")
+  .select("name")
+  .compile();
+
+const result = adaById(users);
+// Map<number, { name: string }>
+```
+
+No intermediate filtered array is created. The generated loop performs the
+filter, projection and `out.set(item.id, projected)` in one pass. Calling the
+query again builds a new result `Map`; query results are never memoized by the
+compile cache.
+
+| Need                                                 | Use                                     |
+| ---------------------------------------------------- | --------------------------------------- |
+| Annotate domain identity only                        | `JIT.array(User).entity({ key: "id" })` |
+| Optimize order-independent equality                  | `JIT.array(User).indexBy("id")`         |
+| Apply identity, uniqueness and index intent together | `JIT.array(User).keyed("id")`           |
+| Return a `Map` from one query execution              | `JIT.query(Users).keyed("id")`          |
+
+## Operations that consume the hints
+
+| Operation                          |        `entity` |               `indexBy` |          schema `keyed` |
+| ---------------------------------- | --------------: | ----------------------: | ----------------------: |
+| Compiled array equality            | positional loop | adaptive keyed strategy | adaptive keyed strategy |
+| `JIT.compileNormalize` default key |             yes |                     yes |                     yes |
+| `JIT.compileUniqueBy` default key  |             yes |                     yes |                     yes |
+| `JIT.compileSortBy` fallback key   |             yes |                     yes |                     yes |
+| Validator duplicate-key check      |              no |                      no |                      no |
+| Query result memoization           |              no |                      no |                      no |
+
+`JIT.watch()` and `JIT.watchedList()` receive their key explicitly because
+they own change-tracking state rather than compile an equality strategy:
+
+```ts
+const members = JIT.watchedList(Users, initialUsers, { key: "id" });
+const watchUsers = JIT.watch(Users, { key: "id" });
+```
+
+## AOT and front-end bundles
+
+Hints are consumed while generated source is built. A keyed AOT equality
+function contains the specialized key reads and only the index helper it
+needs. If an application generates only `User.is`, index helpers are absent.
+
+This keeps browser bundles small: schema builders, hint resolvers and generic
+collection engines do not need to ship with the generated function. Select
+only the operation used by the route and let the bundler remove the rest.
+
+## Checklist
+
+- Prefer `.keyed(key)` for a conventional immutable entity collection.
+- Use `.entity({ key })` alone when identity metadata is useful but indexed
+  equality is not.
+- Use `.indexBy(key)` when lookup strategy is needed without declaring the
+  complete entity/unique contract.
+- Keep keys stable and unique.
+- Replace arrays and changed entities instead of mutating indexed values.
+- Do not confuse schema `.keyed()` with query `.keyed()`.
+- Benchmark write-heavy or one-shot collections before adding an index hint.

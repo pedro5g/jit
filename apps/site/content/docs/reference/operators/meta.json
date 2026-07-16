@@ -5,6 +5,7 @@
     "strings",
     "numbers-and-dates",
     "objects-and-collections",
+    "entity-keyed-and-indexes",
     "queries",
     "compiled-operations"
   ]

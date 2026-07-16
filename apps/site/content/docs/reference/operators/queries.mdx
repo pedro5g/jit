@@ -37,6 +37,11 @@ interpolated into generated source.
 Filters and projection share a generated loop. Aggregates avoid output arrays.
 `orderBy` necessarily stores accepted elements before sorting.
 
+Query `.keyed(key)` is an output collector that builds a new `Map` per
+invocation. It is different from schema `.keyed(key)`, which annotates entity
+identity and indexed equality. The [entity and index guide](/docs/reference/operators/entity-keyed-and-indexes)
+compares both APIs and their cache behavior.
+
 ## Incremental operators
 
 | Operator                     | Retained state               |   Can stop early? |

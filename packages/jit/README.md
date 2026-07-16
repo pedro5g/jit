@@ -400,7 +400,7 @@ JIT.coerce(JIT.string(), (v) => String(v).toUpperCase());
 ```ts
 JIT.string().pii("mask")       // for JIT.mask: "redact" | "mask" | "hash"
 JIT.string().sanitize()        // XSS stripping, fused into parse
-JIT.object({...}).entity({ key: "id" }).indexBy("id")  // strategy hints
+JIT.array(User).entity({ key: "id" }).indexBy("id")   // strategy hints
 JIT.object({...}).hash("ordered")                      // equal short-circuit
 ```
 
@@ -1048,6 +1048,22 @@ different contract: `.hash()` benefits repeatedly used immutable objects;
 `.keyed("id")` benefits repeated equality over large immutable arrays with
 unique keys. In-place mutation can leave either cache stale. Compiled queries
 reuse generated code, but never memoize query results.
+
+Choose the collection annotation by intent:
+
+```ts
+const EntityUsers = JIT.array(User).entity({ key: "id" }); // identity only
+const IndexedUsers = JIT.array(User).indexBy("id"); // indexed equality
+const KeyedUsers = JIT.array(User).keyed("id"); // identity + index + unique contract
+
+const byId = JIT.query(KeyedUsers).keyed("id").compile(); // fresh Map result
+```
+
+`entity` gives normalize/unique/sort compilers a default key without changing
+array equality. `indexBy` selects order-independent keyed equality and builds a
+weakly cached `Map` only at 64 items or more. Schema `keyed` combines both and
+declares that keys are unique; query `keyed` is a separate one-pass collector,
+not a persistent cache. See the [complete entity and index guide](https://jit-site.vercel.app/docs/reference/operators/entity-keyed-and-indexes).
 
 See the [complete cache, hash and index guide](https://jit-site.vercel.app/docs/runtime/cache-hash-index)
 for configuration placement, the 64-item adaptive index threshold, hash
