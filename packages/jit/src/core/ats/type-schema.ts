@@ -87,6 +87,34 @@ export interface StringMaskSpec {
   readonly stripNonDigits: boolean;
 }
 
+export type StringSanitizePreset = "text" | "htmlEscape" | "sqlIdentifier" | "pathSegment" | "none";
+
+export type StringSanitizeHtmlPolicy =
+  | "strip"
+  | "escape"
+  | "preserve"
+  | {
+      readonly mode: "allow";
+      /** Allowed element names. Attributes are always removed. */
+      readonly tags: readonly string[];
+    };
+
+export interface StringSanitizePattern {
+  readonly pattern: RegExp;
+  readonly replacement?: string;
+}
+
+/** Serializable string-cleaning policy specialized into parse/sanitize code. */
+export interface StringSanitizeSpec {
+  readonly preset?: StringSanitizePreset | readonly StringSanitizePreset[];
+  readonly html?: StringSanitizeHtmlPolicy;
+  readonly controls?: "remove" | "space" | "preserve";
+  readonly normalize?: StringNormalizationForm;
+  readonly trim?: boolean;
+  readonly maxLength?: number;
+  readonly patterns?: readonly StringSanitizePattern[];
+}
+
 export type StringCheck =
   | SchemaCheck<"min", number>
   | SchemaCheck<"max", number>
@@ -105,7 +133,7 @@ export type StringCheck =
   | SchemaCheck<"lowercase">
   | SchemaCheck<"uppercase">
   | SchemaCheck<"normalize", StringNormalizationForm | undefined>
-  | SchemaCheck<"sanitize">
+  | SchemaCheck<"sanitize", StringSanitizeSpec>
   | SchemaCheck<"stringFormat", { readonly name: string; readonly pattern: RegExp }>
   | SchemaCheck<"digitsLength", number | readonly number[]>
   | SchemaCheck<"format", StringMaskSpec>

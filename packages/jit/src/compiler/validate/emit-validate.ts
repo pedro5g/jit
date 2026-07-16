@@ -2,7 +2,7 @@ import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { Regexes } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
-import { sanitizeChainBindings } from "../sanitize.js";
+import { emitSanitizeChain } from "../sanitize.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { countFormatPlaceholders, emitFormatMaskExpression, emitStrictFormatCondition } from "../source/format-mask.js";
 import { emitSchemaGuard } from "../source/guard.js";
@@ -777,10 +777,8 @@ class ValidatorEmitter {
           if (check.kind === "lowercase") this.writer.line(`${value} = ${value}.toLowerCase();`);
           if (check.kind === "uppercase") this.writer.line(`${value} = ${value}.toUpperCase();`);
           if (check.kind === "sanitize") {
-            const [scriptBlocks, htmlTags, lt, gt] = sanitizeChainBindings.values.map((regex) => this.bind(regex));
-
             this.writer.line(
-              `${value} = ${value}.replace(${scriptBlocks}, "").replace(${htmlTags}, "").replace(${lt}, "&lt;").replace(${gt}, "&gt;");`
+              `${value} = ${emitSanitizeChain(value, check.value as ATS.StringSanitizeSpec | undefined, (pattern) => this.bind(pattern))};`
             );
           }
           if (check.kind === "format") {

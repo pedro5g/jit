@@ -12,6 +12,8 @@ import {
   type SchemaShape,
   type StringMaskMode,
   type StringNormalizationForm,
+  type StringSanitizePreset,
+  type StringSanitizeSpec,
   TypeName,
 } from "../ats/index.js";
 import { attachHint, type EntityHint, type HashStrategy, type OrderDirection } from "../hints/index.js";
@@ -470,8 +472,10 @@ const baseBuilderPrototype = {
     return compileBinaryArray(this.schema as never, options);
   },
 
-  sanitize(this: RuntimeBuilder): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "sanitize" }));
+  sanitize(this: RuntimeBuilder, options: StringSanitizePreset | StringSanitizeSpec = "text"): AnyBuilder {
+    const value = normalizeSanitizeOptions(options);
+
+    return createBuilder(appendCheck(this.schema, { kind: "sanitize", value }));
   },
 
   guid(this: RuntimeBuilder, message?: string): AnyBuilder {
@@ -656,6 +660,47 @@ function appendCheck(
     ...schema,
     def: { ...(schema.def as object), checks },
   } as AnyTypeSchema;
+}
+
+const UNSAFE_HTML_TAGS = new Set([
+  "base",
+  "embed",
+  "form",
+  "iframe",
+  "input",
+  "link",
+  "meta",
+  "object",
+  "script",
+  "style",
+]);
+
+function normalizeSanitizeOptions(options: StringSanitizePreset | StringSanitizeSpec): StringSanitizeSpec {
+  const spec: StringSanitizeSpec = typeof options === "string" ? { preset: options } : options;
+
+  if (spec.maxLength !== undefined && (!Number.isSafeInteger(spec.maxLength) || spec.maxLength < 0)) {
+    throw new JITError("INVALID_OPERATION", "sanitize maxLength must be a non-negative safe integer");
+  }
+
+  if (typeof spec.html === "object") {
+    const seen = new Set<string>();
+
+    for (const rawTag of spec.html.tags) {
+      const tag = rawTag.toLowerCase();
+
+      if (!/^[a-z][a-z0-9-]*$/.test(tag)) {
+        throw new JITError("INVALID_OPERATION", `invalid allowed HTML tag ${JSON.stringify(rawTag)}`);
+      }
+      if (UNSAFE_HTML_TAGS.has(tag)) {
+        throw new JITError("INVALID_OPERATION", `unsafe HTML tag ${JSON.stringify(rawTag)} cannot be allowed`);
+      }
+      seen.add(tag);
+    }
+
+    return { ...spec, html: { mode: "allow", tags: Object.freeze([...seen]) } };
+  }
+
+  return spec;
 }
 
 function requiredFieldSchema(schema: AnyTypeSchema, message?: string): AnyTypeSchema {

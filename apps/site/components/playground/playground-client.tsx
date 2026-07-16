@@ -154,6 +154,30 @@ const schema = JIT.object({
     op: "mask",
   },
   {
+    id: "sanitize",
+    label: "Configurable sanitizer",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  title: JIT.string().sanitize("text"),
+  richText: JIT.string().sanitize({
+    preset: "none",
+    html: { mode: "allow", tags: ["b", "em", "code"] },
+    controls: "remove",
+  }),
+  column: JIT.string().sanitize("sqlIdentifier"),
+  uploadName: JIT.string().sanitize("pathSegment"),
+});
+`,
+    a: `{
+  "title": "<script>steal()</script><b>Hello</b>",
+  "richText": "<b onclick='bad()'>Fast</b> <code>JIT</code><img src=x>",
+  "column": "user.name; DROP",
+  "uploadName": "../avatar?.png"
+}`,
+    op: "sanitize",
+  },
+  {
     id: "codec",
     label: "Binary codec (wire v2)",
     code: defaultCode,

@@ -17,6 +17,26 @@ const schema = JIT.object({
 });`;
 
 describe("browser playground advanced operations", () => {
+  it("executes configured sanitizers and exposes generated source", () => {
+    const sanitized = execute(
+      "sanitize",
+      `const schema = JIT.object({
+  text: JIT.string().sanitize(),
+  rich: JIT.string().sanitize({ preset: "none", html: { mode: "allow", tags: ["b"] } }),
+  identifier: JIT.string().sanitize("sqlIdentifier"),
+});`,
+      {
+        text: "<script>bad()</script><b>Hello</b>",
+        rich: '<b onclick="bad()">Hello</b><img src=x>',
+        identifier: "users.name; DROP",
+      }
+    );
+
+    expect(sanitized.value).toEqual({ text: "Hello", rich: "<b>Hello</b>", identifier: "users_name_DROP" });
+    expect(sanitized.source).toContain("function sanitize(value)");
+    expect(sanitized.source).toContain("rawName.toLowerCase()");
+  });
+
   it("executes lazy generators and direct visitors", () => {
     const lazy = execute(
       "lazy",

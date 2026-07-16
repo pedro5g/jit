@@ -41,6 +41,8 @@ import type {
   StringMaskMode,
   StringMaskSpec,
   StringNormalizationForm,
+  StringSanitizePreset,
+  StringSanitizeSpec,
   StringSchema,
   TemporalSchema,
   TemporalUnit,
@@ -567,11 +569,8 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   toLowerCase(): Builder<TSchema>;
   uppercase(): Builder<TSchema>;
   toUpperCase(): Builder<TSchema>;
-  /**
-   * Strips HTML/script content and escapes stray angle brackets. Applied by
-   * `JIT.sanitize` and inside compiled `parse`/`safeParse` output.
-   */
-  sanitize(): Builder<TSchema>;
+  /** Cleans strings through a source-emitted policy in parse and `JIT.sanitize`. */
+  sanitize(options?: StringSanitizePreset | StringSanitizeSpec): Builder<TSchema>;
   guid(message?: string): Builder<TSchema>;
   cuid(message?: string): Builder<TSchema>;
   cuid2(message?: string): Builder<TSchema>;

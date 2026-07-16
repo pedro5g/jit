@@ -112,7 +112,7 @@ Useful checks include:
 | `.toLowerCase/.toUpperCase`          | converts parsed output                                 | yes        | normalization boundaries                      |
 | `.normalize(form)`                   | Unicode normalization                                  | yes        | search keys, user names                       |
 | `.noEmpty()`                         | turns `""` into missing input before wrappers/defaults | yes        | HTML forms and query strings                  |
-| `.sanitize()`                        | removes script/style markup and escapes angle brackets | yes        | defensive text ingestion                      |
+| `.sanitize(policy?)`                 | source-emits HTML/text/identifier/path cleaning rules  | yes        | defensive boundary normalization              |
 | `.format(mask)`                      | applies a typed `#` digit mask                         | yes        | CPF/CNPJ/phone display values                 |
 
 Format checks also include `cuid`, `cuid2`, `ulid`, `xid`, `ksuid`, `nanoid`,

@@ -122,12 +122,49 @@ defeat binary dictionary/index reuse.
 
 ## Sanitization
 
-`.sanitize()` removes script/style blocks and HTML tags, then escapes stray
-angle brackets in parsed output. `JIT.sanitize(schema)` creates a dedicated
-compiled sanitizer over marked fields.
+`.sanitize()` defaults to the fast `text` preset: executable element blocks
+are removed, remaining tags are stripped and stray angle brackets are escaped.
+The same specialized chain runs inside `parse`, while `JIT.sanitize(schema)`
+creates a dedicated immutable sanitizer over only the marked paths.
 
-This is defense in depth, not a complete HTML policy engine. Rich-text input
-should use a dedicated allow-list sanitizer designed for HTML semantics.
+```ts
+const Input = JIT.object({
+  title: JIT.string().sanitize(), // same as "text"
+  visibleMarkup: JIT.string().sanitize("htmlEscape"),
+  column: JIT.string().sanitize("sqlIdentifier"),
+  uploadName: JIT.string().sanitize("pathSegment"),
+});
+```
+
+Use `preset: "none"` to start with no implicit rule and compose an explicit
+policy. Allowed HTML tags are canonicalized and keep no attributes; dangerous
+elements such as `script`, `style`, `iframe`, `object` and `embed` cannot be
+allowed.
+
+```ts
+const Body = JIT.string().sanitize({
+  preset: "none",
+  html: { mode: "allow", tags: ["b", "em", "code"] },
+  controls: "remove",
+  normalize: "NFC",
+  trim: true,
+  maxLength: 10_000,
+  patterns: [{ pattern: /javascript:/gi, replacement: "" }],
+});
+```
+
+The compiler emits only those replacements into the generated function. There
+is no policy interpreter, options object or package dependency in the hot path,
+and untouched object branches retain their references.
+
+`sqlIdentifier` is an allow-list cleaner for dynamic identifiers such as a
+validated report column. It is not SQL-injection protection for values. Always
+send values through prepared/parameterized queries. Likewise, use argument
+arrays for child processes instead of trying to sanitize a shell command.
+
+For rich HTML that must preserve links, attributes, CSS or embedded media, use
+a dedicated HTML parser/sanitizer at that boundary. The built-in allow mode is
+intentionally restricted to simple formatting tags.
 
 ## ISO aliases
 

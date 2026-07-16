@@ -100,6 +100,56 @@ describe("JIT compiler security (mask + sanitize)", () => {
     expect(dirty.body).toContain("<script>");
   });
 
+  it("should compose HTML, identifier, path, and custom sanitize policies", () => {
+    const Input = JIT.object({
+      escaped: JIT.string().sanitize("htmlEscape"),
+      rich: JIT.string().sanitize({
+        preset: "none",
+        html: { mode: "allow", tags: ["b", "em", "B"] },
+      }),
+      sqlIdentifier: JIT.string().sanitize("sqlIdentifier"),
+      path: JIT.string().sanitize("pathSegment"),
+      custom: JIT.string().sanitize({
+        preset: "none",
+        controls: "space",
+        trim: true,
+        maxLength: 16,
+        patterns: [{ pattern: /javascript:/gi, replacement: "blocked:" }],
+      }),
+    });
+    const result = JIT.sanitize(Input)({
+      escaped: '<a href="/">A&B</a>',
+      rich: '<B onclick="steal()">Hello</B><img src=x><script>bad()</script><em>x</em>',
+      sqlIdentifier: " 9 users; DROP",
+      path: "../private\\x?.txt",
+      custom: "\u0000 javascript:run forever ",
+    });
+
+    expect(result).toEqual({
+      escaped: "&lt;a href=&quot;/&quot;&gt;A&amp;B&lt;/a&gt;",
+      rich: "<b>Hello</b><em>x</em>",
+      sqlIdentifier: "_users_DROP",
+      path: "__private_x_.txt",
+      custom: "blocked:run fore",
+    });
+  });
+
+  it("should reject dangerous or malformed allowed HTML tags", () => {
+    expect(() => JIT.string().sanitize({ html: { mode: "allow", tags: ["script"] } })).toThrow(/cannot be allowed/);
+    expect(() => JIT.string().sanitize({ html: { mode: "allow", tags: ["b onclick"] } })).toThrow(
+      /invalid allowed HTML tag/
+    );
+    expect(() => JIT.string().sanitize({ maxLength: -1 })).toThrow(/maxLength/);
+  });
+
+  it("should compile the none preset without extra work", () => {
+    const Passthrough = JIT.object({ body: JIT.string().sanitize("none") });
+    const value = { body: "<b>kept</b>" };
+
+    expect(JIT.sanitize(Passthrough)(value)).toBe(value);
+    expect(Compiler.emitSanitizeSource(Passthrough.schema)).toContain("return value;");
+  });
+
   it("should handle optional pii fields with guards", () => {
     const Account = JIT.object({
       id: JIT.number(),
@@ -125,6 +175,14 @@ describe("JIT compiler security (mask + sanitize)", () => {
 
     expect(stripped.success).toBe(false);
     if (!stripped.success) expect(stripped.issues[0].code).toBe("too_small");
+  });
+
+  it("should emit configured sanitize steps inside parse", () => {
+    const Params = JIT.object({
+      field: JIT.string().sanitize({ preset: "sqlIdentifier", trim: true }).min(1),
+    });
+
+    expect(JIT.validator(Params).parse({ field: " users.name; " })).toEqual({ field: "_users_name_" });
   });
 
   it("should cache compiled mask and sanitize per schema", () => {

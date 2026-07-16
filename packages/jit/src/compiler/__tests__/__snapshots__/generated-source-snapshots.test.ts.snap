@@ -695,6 +695,50 @@ exports[`generated source snapshots > query: groupBy after filter 1`] = `
 }"
 `;
 
+exports[`generated source snapshots > sanitize: configured HTML allow-list and identifier presets 1`] = `
+{
+  "parse": "function safeParse(value) {
+  const issues = [];
+  let v1 = value;
+  let o2 = v1;
+  let b3;
+  if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+    issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+  } else {
+    let v4 = v1.body;
+    let o5 = v4;
+    if (typeof v4 !== "string") {
+      issues[issues.length] = { path: "body", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+    } else {
+      v4 = v4.replace(__v0, "").replace(__v1, (_tag, slash, rawName) => { const name = rawName.toLowerCase(); return name === "b" || name === "code" ? "<" + slash + name + ">" : ""; }).replace(__v2, "");
+    }
+    o5 = v4;
+    let v6 = v1.column;
+    let o7 = v6;
+    if (typeof v6 !== "string") {
+      issues[issues.length] = { path: "column", code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
+    } else {
+      v6 = v6.replace(__v2, "").replace(__v3, "_");
+    }
+    o7 = v6;
+    b3 = { "body": o5, "column": o7 };
+  }
+  if (b3 === undefined) { b3 = v1; }
+  o2 = b3;
+  if (issues.length !== 0) {
+    return { success: false, issues: issues };
+  }
+  return { success: true, data: o2 };
+}
+return { safeParse: safeParse };",
+  "sanitize": "function scrub(value) {
+  const s1 = value.body;
+  const s2 = value.column;
+  return { "body": s1.replace(__scriptBlocks, "").replace(__htmlTagParts, (_tag, slash, rawName) => { const name = rawName.toLowerCase(); return name === "b" || name === "code" ? "<" + slash + name + ">" : ""; }).replace(__controls, ""), "column": s2.replace(__controls, "").replace(__sqlIdentifier, "_") };
+}",
+}
+`;
+
 exports[`generated source snapshots > serializer: nested objects, optionals, records, and arrays 1`] = `
 "(function () {
   const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;

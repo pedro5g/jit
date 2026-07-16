@@ -285,4 +285,19 @@ describe("generated source snapshots", () => {
 
     expect({ map: sourceOf(facade.get("map")), many: sourceOf(facade.get("many")) }).toMatchSnapshot();
   });
+  it("sanitize: configured HTML allow-list and identifier presets", () => {
+    const Form = JIT.object({
+      body: JIT.string().sanitize({
+        preset: "none",
+        html: { mode: "allow", tags: ["b", "code"] },
+        controls: "remove",
+      }),
+      column: JIT.string().sanitize("sqlIdentifier"),
+    });
+
+    expect({
+      sanitize: Compiler.emitSanitizeSource(Form.schema),
+      parse: Compiler.emitValidatorSource(Form.schema, { ops: ["parse"] }),
+    }).toMatchSnapshot();
+  });
 });
