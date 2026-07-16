@@ -4,6 +4,7 @@
     "validation",
     "dates-temporal-codecs",
     "queries",
+    "watched-lists",
     "lazy-execution",
     "binary-rowsets",
     "serialization",

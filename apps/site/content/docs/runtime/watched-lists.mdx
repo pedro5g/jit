@@ -1,0 +1,299 @@
+---
+title: Watched lists and collection changes
+description: Track aggregate children or compile keyed diffs between collection snapshots in runtime JIT and AOT.
+---
+
+JIT exposes two related APIs with different ownership models:
+
+| Need | API | State | Best use |
+| --- | --- | --- | --- |
+| Compare two snapshots | `JIT.watch(schema, options)` | stateless compiled function | sync, events, cache invalidation, change sets |
+| Track changes while editing a list | `JIT.watchedList(schema, initial, options)` | stateful object | DDD aggregates, units of work, forms |
+
+Both APIs classify additions, removals and updates. Neither validates external
+input. Parse untrusted values first, then pass typed collections to the watcher.
+
+## Compile a snapshot watcher
+
+`JIT.watch` specializes one diff function from an Array, Set or Map schema. The
+collection values must be objects, and `key` must name one of their fields.
+
+```ts
+import { JIT } from "@jit-compiler/jit/runtime";
+
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+  role: JIT.string(),
+});
+const Users = JIT.array(User);
+
+const changes = JIT.watch(Users, { key: "id" });
+
+const previous = [
+  { id: 1, name: "Ada", role: "admin" },
+  { id: 2, name: "Grace", role: "member" },
+];
+const current = [
+  { id: 1, name: "Ada Lovelace", role: "admin" },
+  { id: 3, name: "Alan", role: "member" },
+];
+
+const result = changes(previous, current);
+```
+
+The result has a stable shape:
+
+| Property | Meaning |
+| --- | --- |
+| `initialItems` | previous snapshot normalized to an Array |
+| `currentItems` | current snapshot normalized to an Array |
+| `newItems` | keys present only in the current snapshot |
+| `removedItems` | keys present only in the previous snapshot |
+| `updatedItems` | `{ previous, current }` pairs for reused keys with new references |
+| `isChanged` | true when any change collection is non-empty |
+
+```ts
+result.newItems; // [{ id: 3, ... }]
+result.removedItems; // [{ id: 2, ... }]
+result.updatedItems; // [{ previous: { id: 1, ... }, current: { id: 1, ... } }]
+```
+
+## Identity and update semantics
+
+The key establishes identity; object reference establishes whether a retained
+item was updated.
+
+- same key and same object reference: unchanged;
+- same key and different object reference: updated;
+- new key: added;
+- missing key: removed.
+
+This is designed for immutable updates. Mutating an object in place and passing
+the same reference cannot be detected. Use `JIT.update`, a new object literal or
+another immutable update mechanism before comparing snapshots.
+
+Keys must be unique inside each snapshot. Duplicate keys overwrite each other
+in the internal index and make the change set ambiguous.
+
+## Watch configuration
+
+```ts
+const changes = JIT.watch(Users, {
+  key: "id",
+  onAdd(item) {
+    audit.record("user-added", item.id);
+  },
+  onRemove(item) {
+    audit.record("user-removed", item.id);
+  },
+  onUpdate(previous, current) {
+    audit.record("user-updated", { previous, current });
+  },
+});
+```
+
+| Option | Required | Behavior |
+| --- | ---: | --- |
+| `key` | yes | typed object field used to index both snapshots |
+| `onAdd` | no | called once for every item in `newItems` |
+| `onRemove` | no | called once for every item in `removedItems` |
+| `onUpdate` | no | called once for every pair in `updatedItems` |
+
+Callbacks are external bindings, never interpolated into generated source.
+They are useful in runtime JIT. For portable AOT, compile without callbacks and
+perform effects from the returned change set.
+
+## Arrays, Sets and Maps
+
+```ts
+const watchArray = JIT.watch(JIT.array(User), { key: "id" });
+const watchSet = JIT.watch(JIT.set(User), { key: "id" });
+const watchMap = JIT.watch(JIT.map(JIT.number(), User), { key: "id" });
+```
+
+Array order is preserved in `initialItems` and `currentItems`. Sets use
+iteration order. Map watchers compare map values; the native Map key is not the
+watch identity, so `options.key` still refers to a field on the value schema.
+
+## Stateful watched lists
+
+Use `JIT.watchedList` when a domain object changes incrementally before it is
+persisted.
+
+```ts
+const members = JIT.watchedList(Users, previous, { key: "id" });
+
+members.add({ id: 3, name: "Alan", role: "member" });
+members.remove({ id: 2, name: "Grace", role: "member" });
+
+members.getItems();
+members.getNewItems();
+members.getRemovedItems();
+members.getUpdatedItems();
+members.isChanged();
+
+const snapshot = members.snapshot();
+```
+
+When `key` is provided, the factory returns an indexed
+`JIT.KeyedWatchedList`. Identity lookups use Maps instead of scanning the list.
+The schema supplies TypeScript inference; it does not parse items on `add`,
+`remove` or `update`.
+
+### Stateful methods
+
+| Method | Effect |
+| --- | --- |
+| `add(item)` | adds a missing item; re-adding an initial removal cancels that removal |
+| `remove(item)` | removes a current item; removing a newly added item cancels that addition |
+| `update(items)` | replaces the current list and computes the transition from its previous state |
+| `exists(item)` | checks identity in the current list |
+| `compareItems(a, b)` | applies custom comparison, key comparison or `Object.is` |
+| `snapshot()` | returns current, initial and tracked change arrays together |
+
+Returned arrays are owned by the watched list and are immutable by convention.
+Do not mutate `getItems()` or snapshot arrays directly; use the methods so
+indexes and change tracking stay synchronized.
+
+## Identity configuration
+
+```ts
+// Recommended for object collections: indexed identity.
+const keyed = JIT.watchedList(Users, previous, { key: "id" });
+
+// Custom identity when there is no stable field.
+const byEmail = new JIT.WatchedList(previous, {
+  compare: (left, right) => left.email === right.email,
+});
+
+// Primitive values use Object.is by default.
+const tags = new JIT.WatchedList(["compiler", "aot"]);
+```
+
+| Option | Use when | Cost |
+| --- | --- | --- |
+| `key` | objects have a stable unique identity field | indexed O(1) lookup, O(n) bulk update |
+| `compare` | identity needs custom logic and no stable key exists | linear lookup, up to O(n²) bulk update |
+| neither | primitives or reference identity is intentional | O(n) incremental lookup, O(n) bulk update |
+
+Prefer `key` for object collections. A custom comparator is flexible, but it
+prevents the indexed fast path.
+
+## AOT standalone function
+
+Declare a callback-free watcher in a discovered `*.jit.ts` file:
+
+```ts title="src/watchers/users.jit.ts"
+import { JIT } from "@jit-compiler/jit/define";
+
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+});
+const Users = JIT.array(User);
+
+export const UserChanges = JIT.watch(Users, { key: "id" });
+```
+
+Configure a project-local output:
+
+```ts title="jit.config.ts"
+import { AOT } from "@jit-compiler/jit";
+
+export default AOT.defineConfig({
+  entries: ["src/watchers/**/*.jit.ts"],
+  output: {
+    directory: "src/generated/jit",
+    clean: true,
+  },
+  emit: {
+    manifest: true,
+    plans: true,
+  },
+});
+```
+
+```bash
+pnpm jit doctor
+pnpm jit generate
+```
+
+Import the generated function without shipping the schema engine or runtime
+compiler:
+
+```ts
+import { UserChanges } from "./generated/jit/index.js";
+
+const result = UserChanges(previous, current);
+```
+
+The emitted function contains direct key access, indexed loops and local Maps.
+It has no import from JIT and works under strict CSP because production does not
+call `new Function`.
+
+## AOT grouped export
+
+Group the watcher with other explicitly selected collection operations when a
+domain namespace is more convenient:
+
+```ts title="src/watchers/users.jit.ts"
+const changes = JIT.watch(Users, { key: "id" });
+
+export const UserCollection = JIT.compile(Users, {
+  changes,
+});
+```
+
+```ts
+import { UserCollection } from "./generated/jit/index.js";
+
+UserCollection.changes(previous, current);
+```
+
+Standalone exports are the narrowest tree-shaking unit. Grouped exports are
+ergonomic when consumers normally use the operations together.
+
+`JIT.watchedList` itself is stateful runtime infrastructure and is not emitted
+as an AOT function. Use the generated stateless watcher to compare persisted
+snapshots, and keep a runtime watched list only where an in-memory unit of work
+owns its evolving state.
+
+## AOT callback boundary
+
+Arbitrary callbacks cannot be serialized safely. A watcher declared with
+`onAdd`, `onRemove` or `onUpdate` is reported by `jit explain` and skipped by
+generation. Keep the generated watcher pure and execute effects explicitly:
+
+```ts
+const result = UserChanges(previous, current);
+
+for (const item of result.newItems) audit.record("user-added", item.id);
+for (const item of result.removedItems) audit.record("user-removed", item.id);
+for (const update of result.updatedItems) {
+  audit.record("user-updated", update.current.id);
+}
+```
+
+## Performance strategy
+
+The compiled watcher builds key indexes once per comparison and performs three
+straight collection passes. It avoids `filter`, `map`, `reduce`, spread and
+intermediate per-stage arrays. Runtime is O(n) and retained memory is O(n) for
+indexes plus result arrays.
+
+Compile or import the watcher once at module scope and reuse it. Do not call
+`JIT.watch` inside a request loop. For a continuously edited aggregate, reuse
+one keyed watched-list instance so its indexes remain hot. For one comparison
+between immutable snapshots, the stateless compiled watcher is simpler and
+does not retain state after the result becomes unreachable.
+
+## Common mistakes
+
+- Do not mutate retained objects in place and expect an update event.
+- Do not use duplicate identity keys.
+- Do not mutate arrays returned by getters or `snapshot()`.
+- Do not assume the schema validates watched values; validate at the boundary.
+- Do not use a custom comparator for large lists when a stable key exists.
+- Do not place callback-bound watchers in AOT declarations; process the pure
+  result after calling the generated function.

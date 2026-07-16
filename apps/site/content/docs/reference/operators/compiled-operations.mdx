@@ -34,6 +34,23 @@ Hints such as `entity`, `keyed`, `ordered`, `indexBy` and `hash` influence
 strategies for repeated collection operations. Benchmark index construction
 against expected reuse; a single lookup may be cheaper as a scan.
 
+## Collection changes
+
+```ts
+const watchUsers = JIT.watch(JIT.array(User), { key: "id" });
+const changes = watchUsers(previousUsers, currentUsers);
+
+const members = JIT.watchedList(JIT.array(User), previousUsers, {
+  key: "id",
+});
+members.add(newUser);
+```
+
+`watch` compiles a stateless O(n) snapshot diff and can be emitted as a pure
+AOT function when it has no callbacks. `watchedList` retains state for an
+aggregate or unit of work. See [watched lists and collection
+changes](/docs/runtime/watched-lists) for identity rules and configuration.
+
 ## JSON and codecs
 
 ```ts

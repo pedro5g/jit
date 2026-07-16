@@ -72,6 +72,11 @@ Array checks: `min`, `max`, `length`, `nonEmpty`.
 JSON cannot represent Set/Map directly. Convert them at a codec/mapper boundary
 or use a transport that defines their representation.
 
+For collection identity and change tracking, use a compiled `JIT.watch`
+snapshot diff or a stateful `JIT.watchedList`. The [watched lists
+guide](/docs/runtime/watched-lists) covers keys, update semantics, performance
+and AOT generation.
+
 ## Composition versus conditional fields
 
 Prefer discriminated object unions for real variants:

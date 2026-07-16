@@ -11,7 +11,7 @@ pnpm add @jit-compiler/jit
 
 ## Define a schema
 
-zod-like builders; every schema carries its inferred type.
+Zod-like builders preserve the resolved output type through every chain.
 
 ```ts
 import { JIT } from "@jit-compiler/jit/runtime";
@@ -68,5 +68,11 @@ isUser.explain(); // { operation, hash, source, cache }
 ```bash
 pnpm jit init      # writes jit.config.ts
 pnpm jit doctor    # checks the setup
-pnpm jit generate  # emits pure .mjs + .cjs + .d.ts modules
+pnpm jit generate  # emits pure JavaScript and matching .d.ts modules
 ```
+
+Project-local output uses normal relative `index.js` imports. Output below
+`node_modules` becomes a dual ESM/CommonJS package with an exports map. Continue
+with [CLI and configuration](/docs/aot/cli-and-config) for discovery, output
+layouts and CI, or [generation and tree shaking](/docs/aot/generation-and-tree-shaking)
+for standalone and grouped exports.

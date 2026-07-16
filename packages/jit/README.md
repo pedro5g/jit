@@ -553,6 +553,39 @@ const renameUser = JIT.update(User)
 renameUser(user, { name: "Grace" });
 ```
 
+### Watched collections
+
+Use `JIT.watch` for a compiled, stateless diff between immutable collection
+snapshots. A stable object key gives O(n) additions, removals and
+reference-level updates:
+
+```ts
+const Users = JIT.array(UserSchema);
+const watchUsers = JIT.watch(Users, { key: "id" });
+
+const changes = watchUsers(previousUsers, currentUsers);
+changes.newItems;
+changes.removedItems;
+changes.updatedItems;
+changes.isChanged;
+```
+
+Use `JIT.watchedList` when an aggregate owns an evolving list. The keyed form
+maintains identity indexes and tracks canceled additions/removals:
+
+```ts
+const members = JIT.watchedList(Users, previousUsers, { key: "id" });
+
+members.add(newUser);
+members.remove(oldUser);
+members.snapshot();
+```
+
+Schemas provide types here; they do not validate inserted values. Validate
+untrusted input first. Callback-free `JIT.watch` functions can be exported
+standalone from `*.jit.ts` or grouped with `JIT.compile`; the AOT result has no
+runtime compiler import. Stateful watched-list instances remain runtime-owned.
+
 ## Query DSL
 
 Fused single-loop pipelines over collections — no intermediate arrays:

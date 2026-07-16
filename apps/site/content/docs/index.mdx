@@ -7,7 +7,7 @@ jit is a **schema-first data engine** for TypeScript. Describe a data shape once
 compiles specialized JavaScript for **every** operation over it: validation, equality,
 cloning, diffing, hashing, immutable updates, in-memory queries, DTO mapping, PII masking,
 XSS sanitizing, JSON serialization, a versioned binary codec, binary rowsets for massive
-flat-object batches, and progressive streaming validation.
+flat-object batches, keyed collection change tracking, and progressive streaming validation.
 
 ## Why compiled?
 
@@ -35,6 +35,7 @@ AOT output runs under strict CSP, edge runtimes and other locked-down environmen
 
 - [Quick start](/docs/quick-start) — install jit and compile your first schema.
 - [Compilation model](/docs/concepts/compilation-model) — understand runtime JIT and AOT.
+- [Watched lists](/docs/runtime/watched-lists) — compile snapshot diffs or track aggregate children.
 - [Lazy execution](/docs/runtime/lazy-execution) — iterators, async sources and visitors.
 - [Binary rowsets](/docs/runtime/binary-rowsets) — compact million-row analytical scans.
 - [Generation and tree shaking](/docs/aot/generation-and-tree-shaking) — ship only generated code.

@@ -13,9 +13,79 @@ pnpm jit generate
 pnpm jit clean
 ```
 
-`init` writes a typed root config and a starter `*.jit.ts` declaration. Without `entries`,
-discovery starts at the project root and uses `**/*.jit.ts`. Entries can also be explicit
-files, directories or globs such as `src/schemas/**/*.ts`.
+`init` writes a typed `jit.config.ts` in the project root and a starter
+`*.jit.ts` declaration. Review those two files, export only the compiled
+operations the application uses, then run `generate`.
+
+## Complete local setup
+
+```ts title="jit.config.ts"
+import { AOT } from "@jit-compiler/jit";
+
+export default AOT.defineConfig({
+  entries: ["src/aot/**/*.jit.ts"],
+  patterns: ["**/*.jit.ts"],
+  output: {
+    directory: "src/generated/jit",
+    clean: true,
+  },
+  emit: {
+    subpathModules: true,
+    manifest: true,
+    plans: true,
+  },
+  types: {
+    package: "@jit-compiler/jit",
+  },
+});
+```
+
+```ts title="src/aot/users.jit.ts"
+import { JIT } from "@jit-compiler/jit/define";
+
+const UserSchema = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
+});
+const UsersSchema = JIT.array(UserSchema);
+const selected = JIT.validator(UserSchema).get("is", "parse");
+
+// Grouped import: User.is(), User.parse().
+export const User = JIT.compile(UserSchema, {
+  is: selected.is,
+  parse: selected.parse,
+});
+
+// Standalone exports keep these declaration names exactly.
+export const findAdmins = JIT.query(UsersSchema)
+  .filter((q) => q.eq("role", "admin"))
+  .compile();
+export const watchUsers = JIT.watch(UsersSchema, { key: "id" });
+```
+
+```bash
+pnpm jit doctor
+pnpm jit explain
+pnpm jit generate
+```
+
+```ts title="src/service.ts"
+import {
+  User,
+  findAdmins,
+  watchUsers,
+} from "./generated/jit/index.js";
+
+if (User.is(input)) {
+  const admins = findAdmins(users);
+  const changes = watchUsers(previousUsers, users);
+}
+```
+
+The generated JavaScript contains the specialized loops and checks but no
+schema builders or runtime compiler import. Matching declarations preserve the
+schema-derived types at the import site.
 
 Output layout is automatic. A project-local directory emits `index.js` and
 `index.d.ts` for normal relative imports. A directory below `node_modules`
@@ -24,6 +94,20 @@ emits a namespaced dual ESM/CommonJS package and exports map.
 If no explicit compiled exports are found, generation prints a diagnostic and writes
 nothing. There is no raw-schema fallback.
 
+## Configuration reference
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `entries` | project-root scan | declaration files, directories or globs to load |
+| `patterns` | `['**/*.jit.ts']` | patterns applied while scanning a directory |
+| `output.directory` | `generated/jit` | local directory or generated package location |
+| `output.packageName` | inferred | namespace override for output below `node_modules` |
+| `output.clean` | `true` | remove known artifacts from the previous generation |
+| `emit.subpathModules` | `false` | emit one import entry per declaration file |
+| `emit.manifest` | `false` | record modules, imports, exports and generated files |
+| `emit.plans` | `false` | write deterministic plans for review and CI |
+| `types.package` | `@jit-compiler/jit` | source of `JIT.Typeof`/strict helpers in declarations |
+
 ## Discovery
 
 `entries` accepts files, directories and globs. Directory scans use `patterns`
@@ -31,6 +115,8 @@ nothing. There is no raw-schema fallback.
 output. Omit entries to scan from the project root.
 
 ```ts
+import { AOT } from "@jit-compiler/jit";
+
 export default AOT.defineConfig({
   entries: ["src/schemas/**/*.ts", "jit"],
   patterns: ["**/*.jit.ts", "**/*.schema.ts"],
@@ -56,6 +142,33 @@ export default AOT.defineConfig({
 `clean: true` removes only known generated files before a new generation. It
 does not recursively delete arbitrary user files.
 
+### Generated package output
+
+For package-style imports, place output below `node_modules`:
+
+```ts title="jit.config.ts"
+import { AOT } from "@jit-compiler/jit";
+
+export default AOT.defineConfig({
+  entries: ["src/aot/**/*.jit.ts"],
+  output: {
+    directory: "node_modules/@jit/generated",
+    packageName: "@jit/generated",
+    clean: true,
+  },
+  emit: { subpathModules: true, manifest: true },
+});
+```
+
+```ts
+import { User } from "@jit/generated";
+import { watchUsers } from "@jit/generated/users";
+```
+
+This layout writes `index.mjs`, `index.cjs`, matching declarations and a
+generated `package.json` exports map. Run generation after dependency installs,
+because package managers own and may replace `node_modules`.
+
 ## Diagnostics workflow
 
 1. `doctor`: resolved config, patterns, output and discovered files.
@@ -67,8 +180,22 @@ does not recursively delete arbitrary user files.
 
 Use this sequence in CI before generation when config drift should fail early.
 
+`explain` and `inspect` are especially useful for callback-bound operations.
+The CLI reports a serialization boundary instead of silently embedding an
+arbitrary runtime closure into generated code.
+
 ## CI
 
 Run generate in a clean checkout and fail when generated files differ. This
 proves declarations are current and prevents local stale artifacts from hiding
 missing exports.
+
+```bash
+pnpm jit doctor
+pnpm jit generate
+git diff --exit-code -- src/generated/jit
+```
+
+When generated files are intentionally excluded from source control, run
+`pnpm jit generate` before the application build and cache the output directory
+as a build artifact instead.

@@ -11,10 +11,9 @@ This prevents one caller's values from leaking into another compiled operation.
 schema produce the same hash; use it for memoization buckets and change detection, then
 confirm collisions with compiled equality when correctness requires it.
 
-Entity hints and keyed indexes are useful when the same list receives many lookups. Index
-caches are weakly attached to source collections and can be invalidated by watched-list
-versions. A one-off scan should stay a scan: building an index has an upfront time and
-memory cost.
+Entity hints and keyed indexes are useful when the same list receives many
+lookups. Index caches are weakly attached to source collections. A one-off scan
+should stay a scan: building an index has an upfront time and memory cost.
 
 ## Cache tiers
 
@@ -35,5 +34,8 @@ An index costs O(n) build time and memory. It pays off only across enough
 lookups or range scans. Measure cardinality and mutation rate: a frequently
 rebuilt index over a short list can be worse than direct specialized scans.
 
-Watched collections maintain explicit versions so cached indexes can be
-invalidated predictably rather than relying on deep mutation detection.
+`JIT.watchedList(..., { key })` maintains identity indexes while an aggregate
+is edited, but it does not expose a version counter. Invalidate an external
+cache when `isChanged()` becomes true or from the change arrays returned by
+`snapshot()`. The [watched lists guide](/docs/runtime/watched-lists) explains
+the state and identity contract.

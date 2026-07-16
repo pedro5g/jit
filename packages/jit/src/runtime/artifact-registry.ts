@@ -6,7 +6,7 @@
 import type * as ATS from "../core/ats/index.js";
 
 interface SourceArtifact {
-  readonly kind: "query" | "mapper";
+  readonly kind: "query" | "mapper" | "watch";
   /** Expression source: evaluates to the compiled function/object. */
   readonly source: string;
   readonly bindingNames: readonly string[];

@@ -1,6 +1,7 @@
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import { CodeWriter } from "./emitter/code-writer.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
@@ -107,10 +108,17 @@ export function compileWatch<TSchema extends ATS.AnyTypeSchema>(
 ): Watch<ATS.TypeofSchema<TSchema>> {
   const program = emitWatchProgram(schema, options);
   const bindingNames = program.bindings.map((_, index) => `__w${index}`);
-
-  return globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings) as Watch<
+  const compiled = globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings) as Watch<
     ATS.TypeofSchema<TSchema>
   >;
+
+  registerArtifact(compiled as object, {
+    kind: "watch",
+    source: program.source,
+    bindingNames,
+    bindingValues: program.bindings,
+  });
+  return compiled;
 }
 
 function emitWatchProgram<TSchema extends ATS.AnyTypeSchema>(

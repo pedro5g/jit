@@ -396,8 +396,8 @@ export function generate(options: GenerateOptions): GenerateResult {
       }
     }
 
-    // Dev-defined extras (compiled queries/mappers aggregated via
-    // JIT.compile): re-emitted from their registered source + bindings.
+    // Dev-defined source artifacts (queries, mappers, watchers) aggregated
+    // through JIT.compile are re-emitted from registered source + bindings.
     for (const extraName of readExtraNames(options.schemas[name])) {
       const artifact = getArtifact((options.schemas[name] as Record<string, unknown>)[extraName]);
 
@@ -405,7 +405,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         skipped.push({
           schema: name,
           operation: extraName,
-          reason: "extra is not a registered compiled artifact (query/mapper)",
+          reason: "extra is not a registered compiled source artifact",
         });
         continue;
       }

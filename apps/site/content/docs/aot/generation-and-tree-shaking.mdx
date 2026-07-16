@@ -51,11 +51,21 @@ export const User = JIT.compile(UserSchema, {
 });
 ```
 
-## Generated package
+## Generated output
 
-The generator writes ESM, CJS, matching declarations, exports map and
-`sideEffects: false`. Optional subpath modules let route bundles import one
-declaration file without evaluating the root barrel.
+A project-local output writes ESM `index.js` plus matching declarations for
+standard relative imports. Output below `node_modules` writes ESM, CJS, an
+exports map and `sideEffects: false` for package-style imports. Optional
+subpath modules let route bundles import one declaration file without
+evaluating the root barrel.
+
+```ts
+// Local output
+import { User } from "./generated/jit/index.js";
+
+// node_modules/@jit/generated output
+import { User } from "@jit/generated";
+```
 
 ## Helper retention
 
@@ -63,6 +73,11 @@ Operation-specific helpers are emitted only when needed. A validator that does
 not parse cannot retain `JITValidationError`; a query that touches `id` and
 `score` cannot retain an unrelated string dictionary; a standalone `is` cannot
 retain codec or mapper infrastructure.
+
+Callback-free `JIT.watch` functions can also be exported standalone or as a
+`JIT.compile` extra. Their generated module retains only the keyed diff loop;
+stateful `JIT.watchedList` instances remain runtime-owned. See [watched
+lists](/docs/runtime/watched-lists#aot-standalone-function).
 
 ## Proof, not assumption
 

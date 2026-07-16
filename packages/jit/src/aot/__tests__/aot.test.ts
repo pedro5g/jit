@@ -203,6 +203,59 @@ describe("JIT AOT generate", () => {
     expect(visited).toEqual([1, 3, 4]);
   });
 
+  it("should re-emit callback-free watched collection diffs", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const Users = JIT.array(User);
+    const UserChanges = JIT.watch(Users, { key: "id" });
+    const UserCollection = JIT.compile(Users, { changes: UserChanges });
+    const result = AOT.generate({ schemas: { UserCollection }, functions: { UserChanges }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      UserCollection: { changes: typeof UserChanges };
+      UserChanges: typeof UserChanges;
+    };
+    const ada = { id: 1, name: "Ada" };
+    const grace = { id: 2, name: "Grace" };
+    const adaUpdated = { id: 1, name: "Ada Lovelace" };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).toContain("function watch(previous, current)");
+    expect(source).toContain("const previousIndex = new Map();");
+    expect(generated.UserChanges([ada, grace], [adaUpdated])).toEqual({
+      currentItems: [adaUpdated],
+      initialItems: [ada, grace],
+      newItems: [],
+      removedItems: [grace],
+      updatedItems: [{ previous: ada, current: adaUpdated }],
+      isChanged: true,
+    });
+    expect(generated.UserCollection.changes([ada], [ada])).toEqual({
+      currentItems: [ada],
+      initialItems: [ada],
+      newItems: [],
+      removedItems: [],
+      updatedItems: [],
+      isChanged: false,
+    });
+  });
+
+  it("should report watched collection callbacks as runtime-only AOT bindings", () => {
+    const User = JIT.object({ id: JIT.number() });
+    const Users = JIT.array(User);
+    const UserChanges = JIT.watch(Users, { key: "id", onAdd: () => undefined });
+    const result = AOT.generate({ schemas: {}, functions: { UserChanges }, outDir });
+
+    expect(result.files).toHaveLength(0);
+    expect(result.skipped).toEqual([
+      {
+        schema: "UserChanges",
+        operation: "watch",
+        reason: "watch bindings hold callbacks that cannot be serialized ahead of time",
+      },
+    ]);
+  });
+
   it("should generate validator flat exports with inlined regex bindings", () => {
     const User = JIT.object({
       id: JIT.number().int(),
