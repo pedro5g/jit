@@ -23,7 +23,8 @@ export type PlaygroundOp =
   | "transform"
   | "mapper"
   | "model"
-  | "dto";
+  | "dto"
+  | "indexes";
 
 export interface PlaygroundRequest {
   id: number;
@@ -108,6 +109,7 @@ interface UserBindings {
   mapper?: unknown;
   model?: unknown;
   dto?: unknown;
+  indexes?: unknown;
   reactiveUpdate?: unknown;
 }
 
@@ -157,6 +159,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         mapper: typeof mapper === "undefined" ? undefined : mapper,
         model: typeof model === "undefined" ? undefined : model,
         dto: typeof dto === "undefined" ? undefined : dto,
+        indexes: typeof indexes === "undefined" ? undefined : indexes,
         reactiveUpdate: typeof reactiveUpdate === "undefined" ? undefined : reactiveUpdate,
       };`
     );
@@ -474,6 +477,34 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
             dto: output,
             valid: Array.isArray(output) ? output.every((value) => dto.is?.(value)) : dto.is?.(output),
             json: Array.isArray(output) ? output.map((value) => dto.stringify?.(value)) : dto.stringify?.(output),
+          };
+        };
+        break;
+      }
+      case "indexes": {
+        const indexes = bindings.indexes as
+          | {
+              readonly entityEqual: (left: unknown, right: unknown) => boolean;
+              readonly indexedEqual: (left: unknown, right: unknown) => boolean;
+              readonly keyedEqual: (left: unknown, right: unknown) => boolean;
+              readonly normalize: (value: unknown) => unknown;
+              readonly keyedQuery: (value: unknown) => unknown;
+            }
+          | undefined;
+        if (!indexes || typeof indexes.indexedEqual !== "function") {
+          throw new Error("define an `indexes` binding with entity/indexBy/keyed compiled operations");
+        }
+        source = sourceOf(indexes.indexedEqual);
+        run = () => {
+          const left = requireA("the first entity collection");
+          const right = requireB("the reordered entity collection");
+
+          return {
+            entityOnlyEqual: indexes.entityEqual(left, right),
+            indexByEqual: indexes.indexedEqual(left, right),
+            keyedEqual: indexes.keyedEqual(left, right),
+            normalized: indexes.normalize(left),
+            queryMap: indexes.keyedQuery(left),
           };
         };
         break;

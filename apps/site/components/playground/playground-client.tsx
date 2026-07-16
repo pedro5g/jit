@@ -55,6 +55,11 @@ const watchedListActionsInput = `[
   { "type": "add", "item": { "id": 4, "name": "Alan", "role": "user" } }
 ]`;
 
+const reorderedEntityUsersInput = `[
+  { "id": 2, "name": "Grace", "role": "member" },
+  { "id": 1, "name": "Ada", "role": "admin" }
+]`;
+
 const eventRowsInput = `[
   { "id": 1, "score": 42.5, "active": true, "region": "br" },
   { "id": 2, "score": 18.0, "active": false, "region": "us" },
@@ -123,6 +128,13 @@ const ops: OpConfig[] = [
   { id: "mapper", label: "mapper", aLabel: "value or array (JSON)", needsB: false, hasSource: true },
   { id: "model", label: "model", needsB: false, hasSource: false },
   { id: "dto", label: "dto", aLabel: "entity or entities (JSON)", needsB: false, hasSource: false },
+  {
+    id: "indexes",
+    label: "indexes",
+    aLabel: "entity collection",
+    needsB: { label: "reordered collection", default: reorderedEntityUsersInput },
+    hasSource: true,
+  },
 ];
 
 const examples: { id: string; label: string; code: string; a: string; op: PlaygroundOp }[] = [
@@ -463,6 +475,39 @@ const dto = JIT.dto(schema, PublicUser, {
   "profile": { "city": "London", "internalScore": 99 }
 }`,
     op: "dto",
+  },
+  {
+    id: "indexes",
+    label: "Entity, indexBy & keyed",
+    code: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const schema = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string(),
+  role: JIT.string(),
+});
+
+const EntityUsers = JIT.array(schema).entity({ key: "id" });
+const IndexedUsers = JIT.array(schema).indexBy("id");
+const KeyedUsers = JIT.array(schema).keyed("id");
+
+const indexes = {
+  // entity alone keeps positional equality
+  entityEqual: JIT.equal(EntityUsers).compile(),
+  // indexBy/keyed match reordered entities by id
+  indexedEqual: JIT.equal(IndexedUsers).compile(),
+  keyedEqual: JIT.equal(KeyedUsers).compile(),
+  // entity metadata supplies the default normalization key
+  normalize: JIT.compileNormalize(EntityUsers.schema),
+  // query keyed() is a fresh Map collector, not a retained schema index
+  keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name").compile(),
+};
+`,
+    a: `[
+  { "id": 1, "name": "Ada", "role": "admin" },
+  { "id": 2, "name": "Grace", "role": "member" }
+]`,
+    op: "indexes",
   },
   {
     id: "transform",

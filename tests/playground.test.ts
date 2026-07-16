@@ -110,6 +110,40 @@ const dto = JIT.dto(schema, PublicUser, { name: { from: "fullName" } })
     expect(JSON.stringify(result.value)).not.toContain("secret");
   });
 
+  it("demonstrates entity, indexBy, schema keyed, and query keyed semantics", () => {
+    const left = [
+      { id: 1, name: "Ada" },
+      { id: 2, name: "Grace" },
+    ];
+    const right = [left[1], left[0]];
+    const result = execute(
+      "indexes",
+      `const schema = JIT.object({ id: JIT.number(), name: JIT.string() });
+const EntityUsers = JIT.array(schema).entity({ key: "id" });
+const IndexedUsers = JIT.array(schema).indexBy("id");
+const KeyedUsers = JIT.array(schema).keyed("id");
+const indexes = {
+  entityEqual: JIT.equal(EntityUsers).compile(),
+  indexedEqual: JIT.equal(IndexedUsers).compile(),
+  keyedEqual: JIT.equal(KeyedUsers).compile(),
+  normalize: JIT.compileNormalize(EntityUsers.schema),
+  keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name").compile(),
+};`,
+      left,
+      right
+    );
+
+    expect(result.value).toEqual({
+      entityOnlyEqual: false,
+      indexByEqual: true,
+      keyedEqual: true,
+      normalized: { byId: { 1: left[0], 2: left[1] }, ids: [1, 2] },
+      queryMap: { "[Map]": { 1: { name: "Ada" }, 2: { name: "Grace" } } },
+    });
+    expect(result.source).toContain("if (len < 64)");
+    expect(result.source).toContain('__getIndex(r, "id")');
+  });
+
   it("executes lazy generators and direct visitors", () => {
     const lazy = execute(
       "lazy",
