@@ -1,5 +1,5 @@
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
-import { type CompiledMapper, compileMapper } from "../compiler/mapper.js";
+import { createMapperFacade, type MapperFacade } from "../compiler/mapper.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
@@ -72,7 +72,7 @@ type MapperOverridesArg<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarg
  *   email: { from: "emailAddress" },
  *   createdAt: { from: "created_at", via: (date) => date.toISOString() },
  *   active: { default: true },
- * });
+ * }).get("map", "many");
  *
  * toDTO.map(user);   // UserDTO
  * toDTO.many(users); // UserDTO[] — one fused loop, no per-item call
@@ -82,8 +82,13 @@ export function mapper<TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema ex
   source: SchemaInput<TSourceSchema>,
   target: SchemaInput<TTargetSchema>,
   ...rest: MapperOverridesArg<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
-): CompiledMapper<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>> {
+): MapperFacade<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>> {
   const [overrides, options] = rest;
 
-  return compileMapper(unwrapSchema(source), unwrapSchema(target), (overrides ?? {}) as MapperOverridesInput, options);
+  return createMapperFacade(
+    unwrapSchema(source),
+    unwrapSchema(target),
+    (overrides ?? {}) as MapperOverridesInput,
+    options
+  );
 }

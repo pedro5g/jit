@@ -591,6 +591,27 @@ return stringifyChunks;
 }
 `;
 
+exports[`generated source snapshots > mapper: explicit map and many selections 1`] = `
+{
+  "many": "{
+  many: function many(list) {
+    const len = list.length;
+    const out = new Array(len);
+    for (let i = 0; i < len; i++) {
+      const source = list[i];
+      out[i] = { "id": source.id, "label": source.label };
+    }
+    return out;
+  }
+}",
+  "map": "{
+  map: function map(source) {
+    return { "id": source.id, "label": source.label };
+  }
+}",
+}
+`;
+
 exports[`generated source snapshots > mapper: renames, nested objects, and fused many() 1`] = `
 "{
   map: function map(source) {

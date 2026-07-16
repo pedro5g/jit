@@ -1,4 +1,5 @@
 import { Compiler, Errors, JIT } from "../../index.js";
+import { getArtifact } from "../../runtime/artifact-registry.js";
 
 describe("JIT compiler mapper", () => {
   const User = JIT.object({
@@ -71,6 +72,42 @@ describe("JIT compiler mapper", () => {
     expect(source).not.toContain(".map(");
     expect(source).not.toContain(".push(");
     expect(source).not.toContain("map(list[i])");
+  });
+
+  it("should compile only mapper operations selected with get", () => {
+    const facade = JIT.mapper(User, UserDTO, {
+      fullName: (user) => `${user.first} ${user.last}`,
+      email: { from: "emailAddress" },
+    });
+    const mapOnly = facade.get("map");
+    const manyOnly = facade.get("many");
+    const both = facade.get("map", "many");
+    const mapArtifact = getArtifact(mapOnly);
+    const manyArtifact = getArtifact(manyOnly);
+
+    expect(Object.keys(mapOnly)).toEqual(["map"]);
+    expect(Object.keys(manyOnly)).toEqual(["many"]);
+    expect(Object.keys(both)).toEqual(["map", "many"]);
+    expect(mapOnly.map(ada).fullName).toBe("Ada Lovelace");
+    expect(manyOnly.many([ada])).toEqual([mapOnly.map(ada)]);
+    expect(facade.map).toBe(facade.map);
+    expect(facade.many).toBe(facade.many);
+    expect(mapArtifact?.kind).toBe("mapper");
+    expect(manyArtifact?.kind).toBe("mapper");
+
+    if (!mapArtifact || !("source" in mapArtifact) || !manyArtifact || !("source" in manyArtifact)) {
+      throw new Error("mapper source artifact was not registered");
+    }
+
+    expect(mapArtifact.source).toContain("map: function map(source)");
+    expect(mapArtifact.source).not.toContain("many: function many(list)");
+    expect(manyArtifact.source).toContain("many: function many(list)");
+    expect(manyArtifact.source).not.toContain("map: function map(source)");
+    expectTypeOf<keyof typeof mapOnly>().toEqualTypeOf<"map">();
+    expectTypeOf<keyof typeof manyOnly>().toEqualTypeOf<"many">();
+    expectTypeOf<keyof typeof both>().toEqualTypeOf<"map" | "many">();
+
+    expect(() => facade.get("unknown" as never)).toThrow(/unknown mapper operation/);
   });
 
   it("should convert values with via and fill defaults", () => {

@@ -173,7 +173,7 @@ describe("AOT generation from JIT.compile markers", () => {
     const findAdmins = JIT.query(Users)
       .filter((q) => q.eq("role", "admin"))
       .compile();
-    const toDTO = JIT.mapper(User, PublicUser);
+    const toDTO = JIT.mapper(User, PublicUser).get("many");
     const selected = JIT.validator(User).get("is");
     const marked = JIT.compile(User, { is: selected.is, findAdmins, toDTO });
 
@@ -184,7 +184,7 @@ describe("AOT generation from JIT.compile markers", () => {
 
     // Runtime aggregation: same object, no prefixes, fully typed.
     expect(marked.findAdmins(people)).toEqual([people[0]]);
-    expect(marked.toDTO.map(people[1])).toEqual({ id: 2, name: "Grace" });
+    expect(marked.toDTO.many([people[1]])).toEqual([{ id: 2, name: "Grace" }]);
     expect(marked.extras).toEqual(["findAdmins", "toDTO"]);
 
     // AOT: extras are re-emitted from their registered source + bindings.
@@ -199,6 +199,8 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("const User_findAdmins");
     expect(source).toContain("const User_toDTO");
+    expect(source).toContain("many: function many(list)");
+    expect(source).not.toContain("map: function map(source)");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_findAdmins/);
     expect(types).not.toContain("export declare const User_findAdmins");
@@ -208,7 +210,7 @@ describe("AOT generation from JIT.compile markers", () => {
       User: {
         is: (value: unknown) => boolean;
         findAdmins: (items: unknown[]) => unknown[];
-        toDTO: { map: (value: unknown) => unknown; many: (values: unknown[]) => unknown[] };
+        toDTO: { many: (values: unknown[]) => unknown[] };
       };
     };
 

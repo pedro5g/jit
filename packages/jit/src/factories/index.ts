@@ -17,6 +17,14 @@ export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
 export { compileUpdate } from "../compiler/update.js";
 /** Resolves the output type of a schema or builder as `JIT.Typeof<typeof User>`. */
 export type Typeof<TSchemaLike> = import("../core/ats/typeof.js").Typeof<TSchemaLike>;
+export type {
+  CompiledMapper,
+  CompiledMapperSelection,
+  MapperFacade,
+  MapperGet,
+  MapperOp,
+} from "../compiler/mapper.js";
+export { MAPPER_OPS } from "../compiler/mapper.js";
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export * from "./collection/index.js";

@@ -52,15 +52,17 @@ a version byte; binary rowsets are process-local and may evolve independently.
 ```ts
 const toPublic = JIT.mapper(UserEntity, PublicUser, {
   name: { from: "fullName" },
-});
+}).get("map", "many");
 
-toPublic(entity);
+toPublic.map(entity);
 toPublic.many(entities);
 ```
 
 Mapper output is whitelisted by the destination schema. `many()` emits one
-bulk indexed loop. `JIT.transform` provides field operations and selection over
-one source schema.
+bulk indexed loop. Selection controls code generation itself: `.get("map")`
+omits `many`, `.get("many")` omits `map`, and direct property access compiles
+that operation lazily. `JIT.transform` provides field operations and selection
+over one source schema.
 
 ## Security operations
 

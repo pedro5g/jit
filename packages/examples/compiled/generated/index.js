@@ -754,15 +754,6 @@ const User_toPublicUser = /*#__PURE__*/ (() => {
   return ({
   map: function map(source) {
     return { "id": source.id, "name": source.name, "role": source.role };
-  },
-  many: function many(list) {
-    const len = list.length;
-    const out = new Array(len);
-    for (let i = 0; i < len; i++) {
-      const source = list[i];
-      out[i] = { "id": source.id, "name": source.name, "role": source.role };
-    }
-    return out;
   }
 });
 })();

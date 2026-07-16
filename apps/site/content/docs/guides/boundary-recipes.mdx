@@ -82,7 +82,7 @@ as a discriminated union instead of stacking conditions.
 
 ```ts
 const PublicUser = User.pick("id", "name", "avatarUrl");
-const toPublic = JIT.mapper(User, PublicUser);
+const toPublic = JIT.mapper(User, PublicUser).get("many");
 
 return Response.json(toPublic.many(users));
 ```

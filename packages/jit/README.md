@@ -647,11 +647,16 @@ output, so accidental `passwordHash` leaks are impossible:
 const toDTO = JIT.mapper(UserEntity, PublicUser, {
   name: { from: "fullName" }, // rename
   label: (user) => `${user.name}#${user.id}`, // computed
-});
+}).get("map", "many");
 
 toDTO.map(entity); // ~7ns — faster than a hand-written literal
 toDTO.many(entities); // fused indexed loop over the list
 ```
+
+Selection is physical code generation, not an object projection after compile:
+`.get("map")` emits no bulk loop, while `.get("many")` emits only the fused
+indexed loop. Direct `.map` and `.many` access remains lazy and compiles that
+single operation on first use.
 
 ## Security
 
@@ -755,7 +760,7 @@ export const User = JIT.compile(UserSchema, {
   findAdmins: JIT.query(UserList)
     .filter((q) => q.eq("role", "admin"))
     .compile(),
-  toDTO: JIT.mapper(UserSchema, PublicUser),
+  toDTO: JIT.mapper(UserSchema, PublicUser).get("many"),
 });
 
 User.is(input);

@@ -60,11 +60,16 @@ const PublicUser = JIT.object({
 
 const toPublicUser = JIT.mapper(UserEntity, PublicUser, {
   name: (user) => `${user.firstName} ${user.lastName}`,
-});
+}).get("map", "many");
 
 toPublicUser.map(user);
 toPublicUser.many(users);
 ```
+
+Use `.get("map")` for single-record boundaries and `.get("many")` for batch
+pipelines. The mapper compiler emits only the selected function: choosing
+`map` omits the array loop entirely, while choosing `many` keeps the fused loop
+without generating a per-item wrapper.
 
 When mapping can be described with built-in transforms, prefer
 `JIT.transform(...)` because it is easier to re-emit in AOT:
@@ -86,7 +91,7 @@ export const User = JIT.compile(UserSchema, {
   findAdmins: JIT.query(JIT.array(UserSchema))
     .filter((q) => q.eq("role", "admin"))
     .compile(),
-  toPublic: JIT.mapper(UserSchema, PublicUser),
+  toPublic: JIT.mapper(UserSchema, PublicUser).get("many"),
 });
 ```
 

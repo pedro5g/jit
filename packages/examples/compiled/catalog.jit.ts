@@ -37,7 +37,7 @@ const findActiveAdmins = JIT.query(UserListSchema)
   .filter((query) => query.and(query.eq("role", "admin"), query.eq("active", true)))
   .select("id", "name", "score")
   .compile();
-const toPublicUser = JIT.mapper(UserSchema, PublicUserSchema);
+const toPublicUser = JIT.mapper(UserSchema, PublicUserSchema).get("map");
 
 export const User = JIT.compile(UserSchema, {
   is,

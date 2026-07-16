@@ -17,7 +17,7 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
     .compile();
   const mask = JIT.mask(UserSchema);
   const sanitize = JIT.sanitize(UserSchema);
-  const mapper = JIT.mapper(UserSchema, PublicUserSchema);
+  const mapper = JIT.mapper(UserSchema, PublicUserSchema).get("map");
   const stringify = JIT.json(UserSchema).stringify().compile();
   const fromJSON = JIT.json(UserSchema).parse().compile();
   const stringifyChunks = JIT.json(UserListSchema).stringifyChunks({ chunkBytes: 96 }).compile();
