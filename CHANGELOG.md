@@ -6,6 +6,35 @@ npm and JSR.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-07-16
+
+### Added
+
+- Add source-compiled sanitization policies for plain text, escaped HTML, HTML
+  allowlists, SQL identifiers, path segments, control characters,
+  normalization, length limits, and custom replacement patterns.
+- Add reactive immutable update stores with typed path subscriptions,
+  selectors, batching, configurable scheduling, error handling, lazy diffs,
+  and disposal.
+- Add compiled DTO aggregates for inbound validation and outbound whitelist
+  mapping, including fused collection mapping and explicit operation selection.
+- Add runnable playground scenarios for sanitization, reactive updates, DTOs,
+  lazy models, and entity/index/query-keyed collection strategies.
+
+### Changed
+
+- Let `JIT.model` select operations through `.get(...)` or an options object so
+  runtime and AOT builds retain only the requested generated functions.
+- Compile grouped model and DTO selections as typed, import-free AOT objects
+  while keeping standalone declarations as standalone generated exports.
+
+### Fixed
+
+- Keep the MCP initialization handshake synchronized with the package version.
+- Add explicit public DTO and sanitizer types required by JSR's fast type
+  analysis, without enabling the slow-types publishing escape hatch.
+- Refresh the tracked AOT example after the expanded sanitizer bindings.
+
 ## [1.0.3] - 2026-07-16
 
 ### Fixed
@@ -65,7 +94,8 @@ npm and JSR.
 - MCP stdio server with structured tools, resources, prompts, completions,
   workspace-confined AOT preview/generation, and installed-package smoke tests.
 
-[Unreleased]: https://github.com/pedro5g/jit/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/pedro5g/jit/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/pedro5g/jit/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/pedro5g/jit/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/pedro5g/jit/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/pedro5g/jit/compare/v1.0.0...v1.0.1

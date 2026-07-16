@@ -9,7 +9,19 @@ import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import type { MapperOverridesOnlyArg } from "./mapper.js";
 
-const DTO_TRANSPORT_OPS = Object.freeze([
+export type DtoTransportOp =
+  | "is"
+  | "parse"
+  | "safeParse"
+  | "parseAsync"
+  | "safeParseAsync"
+  | "fromJSON"
+  | "stringify"
+  | "codec";
+export type DtoMappingOp = "from" | "many";
+export type DtoOp = DtoTransportOp | DtoMappingOp;
+
+const DTO_TRANSPORT_OPS: readonly DtoTransportOp[] = Object.freeze([
   "is",
   "parse",
   "safeParse",
@@ -19,13 +31,9 @@ const DTO_TRANSPORT_OPS = Object.freeze([
   "stringify",
   "codec",
 ] as const);
-const DTO_MAPPING_OPS = Object.freeze(["from", "many"] as const);
+const DTO_MAPPING_OPS: readonly DtoMappingOp[] = Object.freeze(["from", "many"] as const);
 
-export const DTO_OPS = Object.freeze([...DTO_TRANSPORT_OPS, ...DTO_MAPPING_OPS] as const);
-
-export type DtoTransportOp = (typeof DTO_TRANSPORT_OPS)[number];
-export type DtoMappingOp = (typeof DTO_MAPPING_OPS)[number];
-export type DtoOp = (typeof DTO_OPS)[number];
+export const DTO_OPS: readonly DtoOp[] = Object.freeze([...DTO_TRANSPORT_OPS, ...DTO_MAPPING_OPS]);
 export type DtoAvailableOp<TSource> = DtoTransportOp | ([TSource] extends [never] ? never : DtoMappingOp);
 
 export interface CompiledDtoMethods<TSource, TDto> {

@@ -17,7 +17,7 @@ const GT_REGEX = />/g;
 const QUOTE_REGEX = /"/g;
 const APOSTROPHE_REGEX = /'/g;
 // biome-ignore lint/complexity/useRegexLiterals: constructor avoids literal control-character diagnostics.
-const CONTROL_REGEX = new RegExp("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", "g");
+const CONTROL_REGEX: RegExp = new RegExp("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", "g");
 const SQL_IDENTIFIER_REGEX = /^[^A-Za-z_$]+|[^A-Za-z0-9_$]+/g;
 const PATH_TRAVERSAL_REGEX = /\.\.+/g;
 const PATH_SEGMENT_REGEX = /[\\/:*?"<>|]/g;

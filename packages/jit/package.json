@@ -1,6 +1,6 @@
 {
   "name": "@jit-compiler/jit",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "Pedro5g <pedro.env5@gmail.com>",
   "description": "A compiled TypeScript data engine for validation, queries, transforms, serialization, and binary processing",
   "type": "module",

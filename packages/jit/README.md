@@ -136,6 +136,69 @@ deno add jsr:@jit/compiler
 import { JIT } from "jsr:@jit/compiler/runtime";
 ```
 
+## New in 1.0.4
+
+Sanitization policies are compiled into the same specialized transform pass as
+parsing. Presets cover plain text, escaped HTML, SQL identifiers and path
+segments; an explicit policy can allow a small formatting vocabulary:
+
+```ts
+const Comment = JIT.object({
+  title: JIT.string().sanitize("text"),
+  body: JIT.string().sanitize({
+    preset: "none",
+    html: { mode: "allow", tags: ["p", "strong", "code"] },
+    controls: "remove",
+    normalize: "NFC",
+    trim: true,
+    maxLength: 4_000,
+  }),
+});
+```
+
+Immutable updates can also own reactive state without proxies. Typed path
+watchers read only their selected value, and a batch emits one notification:
+
+```ts
+const state = JIT.update(User).reactive(initialUser, {
+  schedule: "microtask",
+});
+
+const stop = state.watch(["profile", "name"], ({ previous, value }) => {
+  renderName(value, previous);
+});
+
+state.batch((current) => {
+  current.update({ active: true });
+  current.update({ profile: { name: "Ada" } });
+});
+
+stop();
+state.dispose();
+```
+
+Models and DTO boundaries now support explicit operation selection. The same
+selection controls grouped AOT generation, so unused functions do not enter
+the emitted module or final bundle:
+
+```ts
+const ReadUser = JIT.model(User).get("is", "parse", "equal");
+
+const CreateUserDTO = JIT.dto(CreateUserSchema).get(
+  "parse",
+  "safeParse",
+  "fromJSON",
+);
+
+const PublicUserDTO = JIT.dto(UserEntity, PublicUserSchema, {
+  name: { from: "fullName" },
+}).get("from", "many", "stringify");
+```
+
+The browser playground includes executable `sanitize`, `reactiveUpdate`,
+`dto`, `model`, and `indexes` scenarios. The last one contrasts `.entity()`,
+`.indexBy()`, schema `.keyed()`, and query `.keyed()` side by side.
+
 ---
 
 ## Schemas
@@ -399,7 +462,9 @@ JIT.coerce(JIT.string(), (v) => String(v).toUpperCase());
 
 ```ts
 JIT.string().pii("mask")       // for JIT.mask: "redact" | "mask" | "hash"
-JIT.string().sanitize()        // XSS stripping, fused into parse
+JIT.string().sanitize()        // executable HTML removed, fused into parse
+JIT.string().sanitize("htmlEscape")
+JIT.string().sanitize("sqlIdentifier") // identifiers only; bind SQL values
 JIT.array(User).entity({ key: "id" }).indexBy("id")   // strategy hints
 JIT.object({...}).hash("ordered")                      // equal short-circuit
 ```
@@ -697,12 +762,14 @@ single operation on first use.
 const mask = JIT.mask(User); // .pii() fields → "***" / last-4 / FNV hash
 logger.info(mask(user)); // LGPD/GDPR-safe structured logs
 
-const clean = JIT.sanitize(Form); // strips <script>/<style>/tags, escapes <>
+const clean = JIT.sanitize(Form); // applies each field's compiled policy
 ```
 
 Both are surgical: only paths containing marked fields are rebuilt, untouched
 subtrees are shared by reference. Sanitization also runs **inside**
-`parse`/`safeParse` for `.sanitize()` fields — validation + cleanup in one pass.
+`parse`/`safeParse` for `.sanitize()` fields perform validation and cleanup in
+one pass. `sqlIdentifier` only cleans an identifier; always bind SQL values
+through prepared parameters.
 
 ## Serialization
 
