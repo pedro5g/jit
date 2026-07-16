@@ -35,7 +35,7 @@ function __combineHash(left, right) { return ((left << 5) - left + right) | 0; }
 const User_validator = /*#__PURE__*/ (() => {
   const __v0 = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
   const __v1 = /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$/;
-  const __v2 = /<(script|style)[^>]*>[\s\S]*?<\/\1\s*>/gi;
+  const __v2 = /<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1\s*>/gi;
   const __v3 = /<[^>]*>/g;
   const __v4 = /</g;
   const __v5 = />/g;
@@ -554,10 +554,18 @@ const User_mask = (function scrub(value) {
   return { "id": value.id, "name": value.name, "email": (s1.length > 4 ? "***" + s1.slice(-4) : "***"), "role": value.role, "active": value.active, "score": value.score, "tags": value.tags, "createdAt": value.createdAt, "profile": value.profile };
 });
 const User_sanitize = /*#__PURE__*/ (() => {
-  const __scriptBlocks = /<(script|style)[^>]*>[\s\S]*?<\/\1\s*>/gi;
+  const __scriptBlocks = /<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1\s*>/gi;
   const __htmlTags = /<[^>]*>/g;
+  const __htmlTagParts = /<\s*(\/?)\s*([A-Za-z][A-Za-z0-9-]*)(?:\s[^>]*)?>/g;
+  const __amp = /&/g;
   const __lt = /</g;
   const __gt = />/g;
+  const __quote = /"/g;
+  const __apostrophe = /'/g;
+  const __controls = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+  const __sqlIdentifier = /^[^A-Za-z_$]+|[^A-Za-z0-9_$]+/g;
+  const __pathTraversal = /\.\.+/g;
+  const __pathSegment = /[\\/:*?"<>|]/g;
   return (function scrub(value) {
     const s1 = value.profile;
     let r2 = s1;
