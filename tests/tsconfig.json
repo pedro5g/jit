@@ -3,20 +3,9 @@
   "compilerOptions": {
     "noEmit": true,
     "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "paths": {
-      "@/lib/lab/types": [
-        "../apps/site/lib/lab/types.ts"
-      ],
-      "@/*": [
-        "../apps/site/*"
-      ]
-    }
+    "noUnusedParameters": false
   },
-  "include": [
-    "./*.ts",
-    "../apps/site/lib/playground/worker.ts"
-  ],
+  "include": ["./*.ts"],
   "exclude": [
     "../node_modules"
   ]

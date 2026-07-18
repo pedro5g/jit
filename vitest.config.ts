@@ -26,7 +26,7 @@ export default defineConfig({
     externalConditions: ["@jit/source", "default"],
   },
   test: {
-    projects: ["packages/*", "tests"],
+    projects: ["packages/*", "apps/site", "tests"],
     globals: true,
     watch: false,
     isolate: true,

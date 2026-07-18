@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import init, { inspect_token, pack_typescript } from "../apps/site/lib/lab/generated/jit_artifact.js";
+import init, { inspect_token, pack_typescript } from "../generated/jit_artifact.js";
 
 interface PackedArtifact {
   readonly token: string;
@@ -12,9 +12,7 @@ interface PackedArtifact {
 }
 
 beforeAll(async () => {
-  const bytes = new Uint8Array(
-    readFileSync(resolve(import.meta.dirname, "../apps/site/lib/lab/generated/jit_artifact_bg.wasm"))
-  );
+  const bytes = new Uint8Array(readFileSync(resolve(import.meta.dirname, "../generated/jit_artifact_bg.wasm")));
   await init({ module_or_path: bytes });
 });
 

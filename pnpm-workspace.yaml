@@ -1,5 +1,10 @@
 packages:
   - packages/*
+  - "!packages/jit-cli-darwin-arm64"
+  - "!packages/jit-cli-darwin-x64"
+  - "!packages/jit-cli-linux-arm64"
+  - "!packages/jit-cli-linux-x64"
+  - "!packages/jit-cli-win32-x64"
   - apps/*
 
 allowBuilds:
@@ -12,6 +17,13 @@ minimumReleaseAgeExclude:
   - '@fumadocs/tailwind@0.1.1'
   - fumadocs-core@16.11.3
   - fumadocs-ui@16.11.3
+
+overrides:
+  "@jit-compiler/cli-darwin-arm64": "link:./packages/jit-cli-darwin-arm64"
+  "@jit-compiler/cli-darwin-x64": "link:./packages/jit-cli-darwin-x64"
+  "@jit-compiler/cli-linux-arm64": "link:./packages/jit-cli-linux-arm64"
+  "@jit-compiler/cli-linux-x64": "link:./packages/jit-cli-linux-x64"
+  "@jit-compiler/cli-win32-x64": "link:./packages/jit-cli-win32-x64"
 
 onlyBuiltDependencies:
   - esbuild

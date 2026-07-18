@@ -86,6 +86,98 @@ jobs:
           PACKAGE_VERSION: ${{ steps.package.outputs.version }}
         run: echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published; skipping npm publish."
 
+  native-cli:
+    name: Publish native CLI (${{ matrix.target }})
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+            package: packages/jit-cli-linux-x64
+            binary: target/release/jit-artifact
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            package: packages/jit-cli-linux-arm64
+            binary: target/release/jit-artifact
+          - target: darwin-x64
+            runner: macos-15-intel
+            package: packages/jit-cli-darwin-x64
+            binary: target/release/jit-artifact
+          - target: darwin-arm64
+            runner: macos-15
+            package: packages/jit-cli-darwin-arm64
+            binary: target/release/jit-artifact
+          - target: win32-x64
+            runner: windows-latest
+            package: packages/jit-cli-win32-x64
+            binary: target/release/jit-artifact.exe
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: cargo build --locked --release -p jit-artifact-cli
+      - name: Stage native executable
+        shell: bash
+        run: node scripts/package-native-cli.mjs "${{ matrix.package }}" "${{ matrix.binary }}"
+      - name: Publish native package when absent
+        shell: bash
+        working-directory: ${{ matrix.package }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published; skipping."
+          else
+            npm publish
+          fi
+
+  cli:
+    name: Publish CLI wrapper
+    needs: [verify, native-cli]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Publish CLI package when absent
+        working-directory: packages/jit-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published; skipping."
+          else
+            npm publish
+          fi
+
   jsr:
     name: Publish JSR
     needs: verify
@@ -110,7 +202,7 @@ jobs:
 
   github-release:
     name: Create GitHub release
-    needs: [npm, jsr]
+    needs: [npm, jsr, cli]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

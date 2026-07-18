@@ -1,0 +1,33 @@
+{
+  "name": "@jit-compiler/cli",
+  "version": "0.1.0",
+  "description": "Native CLI for authenticating and reconstructing JIT Lab artifacts",
+  "license": "MIT",
+  "author": "Pedro5g <pedro.env5@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pedro5g/jit.git",
+    "directory": "packages/jit-cli"
+  },
+  "homepage": "https://jit-site.vercel.app/lab",
+  "files": [
+    "bin"
+  ],
+  "bin": {
+    "jit-artifact": "bin/jit-artifact.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@jit-compiler/cli-darwin-arm64": "0.1.0",
+    "@jit-compiler/cli-darwin-x64": "0.1.0",
+    "@jit-compiler/cli-linux-arm64": "0.1.0",
+    "@jit-compiler/cli-linux-x64": "0.1.0",
+    "@jit-compiler/cli-win32-x64": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

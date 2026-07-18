@@ -159,5 +159,8 @@ CLAUDE.md
 # Fumadocs generated source
 .source/
 
+# Local content-addressed Lab artifact store
+.jit-lab-store/
+
 # Playground d.ts manifest (generated from packages/jit dist)
 apps/site/public/playground/jit-dts.json

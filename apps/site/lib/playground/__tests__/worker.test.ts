@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { executePlaygroundRequest, type PlaygroundOp } from "../apps/site/lib/playground/worker.js";
+import { executePlaygroundRequest, type PlaygroundOp } from "../worker.js";
 
 const rows = [
   { id: 1, score: 42.5, active: true, region: "br" },

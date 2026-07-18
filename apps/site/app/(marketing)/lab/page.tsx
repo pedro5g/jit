@@ -4,13 +4,13 @@ import { Section, SectionHeading } from "@/components/ui/section";
 
 export const metadata: Metadata = {
   title: "Artifact Lab",
-  description: "Build typed JIT schemas, compile exact TypeScript and create byte-verifiable artifact tokens.",
+  description: "Write any JIT schema, compile exact TypeScript and create a signed reconstruction reference.",
 };
 
 export default function LabPage() {
   return (
     <Section ghostState="typing" ghostLabel="building an artifact…">
-      <SectionHeading eyebrow="Lab" title="Schema to verified artifact" align="left" />
+      <SectionHeading eyebrow="Lab" title="TypeScript to signed AOT" align="left" />
       <ArtifactLab />
     </Section>
   );
