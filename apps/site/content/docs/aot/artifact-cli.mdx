@@ -1,215 +1,224 @@
 ---
-title: Artifact tokens and Rust CLI
-description: Move generated TypeScript as a deterministic token and reconstruct it safely.
+title: Artifact Lab and native CLI
+description: Compile arbitrary JIT declarations in the browser and reconstruct signed AOT output safely.
 ---
 
-The artifact CLI moves the exact files produced by AOT compilation to another
-checkout without running the compiler on that machine.
+The Artifact Lab and native CLI move generated AOT files into an application
+without adding JIT as a development dependency.
 
 ```text
-generated TypeScript
-  -> canonical file tree
-  -> optional Zstandard compression
-  -> BLAKE3 content and envelope digests
-  -> URL-safe jit1_ token
-  -> verify, preview, confirm
-  -> atomic directory replacement
+free-form JIT TypeScript
+  -> Monaco type-check and emit
+  -> real AOT compiler in a terminable browser worker
+  -> typed, import-free generated files
+  -> canonical SHA-256 content address
+  -> private storage + Ed25519 site signature
+  -> compact jlr1_ reference
+  -> native verification and transactional write
 ```
 
-The token contains files and metadata only. It cannot contain commands,
-dependency installs, callbacks, URLs to execute, environment expansion or
-post-apply hooks.
+## Use the Lab
 
-## Build the native CLI
+Open [/lab](/lab). The import is fixed:
 
-The Rust workspace uses a pinned Rebyte revision for canonical encoding,
-portable path validation, bounded decompression and BLAKE3 integrity.
+```ts
+import { JIT } from "@jit-compiler/jit/define";
+```
+
+The rest of the editor is unrestricted TypeScript. Declare as many schemas and
+compiled functions as the generated file needs:
+
+```ts
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
+});
+
+const isUser = JIT.validate(User).is().compile();
+const parseUser = JIT.validate(User).parse().compile();
+```
+
+There is no field form or predefined schema. Monaco loads the package
+declarations used by the Playground, so factory chains, operation selection
+and `JIT.Typeof` inference retain normal IntelliSense and diagnostics.
+
+Configure the left sidebar:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| file name | `schemas.generated` | basename of every generated entry file |
+| output directory | `src/generated/jit` | relative destination used by the CLI |
+| format | `TypeScript` | `.ts`, JS plus declarations, or JS only |
+| package manager | `pnpm` | formats the reconstruction command only |
+
+Press **Generate**. The Output panel is the exact source that the CLI will
+write. TypeScript mode emits structural types and typed functions without an
+import from `@jit-compiler/jit`.
+
+```ts
+export type User = {
+  id: number;
+  name: string;
+  role: "admin" | "member";
+};
+
+export const isUser: (value: unknown) => value is User = function is(value) {
+  // direct specialized checks
+};
+```
+
+## Reconstruct in a project
+
+Run the command shown by the Lab:
+
+```bash
+pnpm dlx @jit-compiler/cli add jlr1_<reference>
+```
+
+Equivalent package-manager forms:
+
+```bash
+npx @jit-compiler/cli add jlr1_<reference>
+yarn dlx @jit-compiler/cli add jlr1_<reference>
+bunx @jit-compiler/cli add jlr1_<reference>
+```
+
+`@jit-compiler/cli` is a small Node launcher with optional native packages for
+Linux x64/ARM64, macOS x64/ARM64 and Windows x64. Validation and filesystem
+work happen in the Rust executable. The target application does not need
+`@jit-compiler/jit`.
+
+The `add` command:
+
+1. accepts only a versioned `jlr1_` reference;
+2. requires the signed registry to match the trusted official origin;
+3. fetches the referenced Ed25519 public key and verifies its content-derived
+   key ID;
+4. verifies the signature before trusting destination metadata;
+5. downloads the immutable artifact and checks its exact SHA-256 address;
+6. validates file count, per-file bytes, total bytes and every relative path;
+7. previews creates and updates;
+8. stages, rereads and atomically swaps the complete output tree;
+9. records the committed transaction under `.jit-artifacts/transactions`.
+
+It does not install dependencies, run scripts, expand environment variables or
+execute content from an artifact.
+
+Preview without writing:
+
+```bash
+pnpm dlx @jit-compiler/cli add jlr1_<reference> --dry-run
+```
+
+Choose another confined destination or conflict policy:
+
+```bash
+pnpm dlx @jit-compiler/cli add jlr1_<reference> \
+  --root . \
+  --output-root src/generated/contracts \
+  --conflict backup
+```
+
+`abort` is the default conflict policy. `overwrite` removes the temporary
+backup after post-write verification. `backup` retains it for
+`jit-artifact rollback <transaction-id>`.
+
+## Why the token is short
+
+A hash cannot reconstruct file bytes by itself. A compact `jlr1_` value is a
+signed content-addressed reference, not a compressed copy of the full output.
+It contains only protocol version, SHA-256, destination, registry origin,
+signing-key ID and signature. Generated bytes live in private object storage
+under their immutable hash.
+
+This has three useful properties:
+
+- repeated output is deduplicated automatically;
+- token size stays nearly constant as schemas grow;
+- the CLI verifies both publisher identity and exact downloaded bytes.
+
+The signature authenticates the registry and bytes it issued. It does not
+certify that arbitrary generated application code is safe, and it does not
+identify the person who created the Lab session. Review the Output panel and
+the CLI diff exactly as you would review generated source in a pull request.
+
+It also means `add` needs network access to the official registry. Use the
+offline format below when a token must carry every byte itself.
+
+## Offline `jit1_` artifacts
+
+The Rust workspace also supports deterministic, self-contained `jit1_` tokens:
 
 ```bash
 pnpm artifact:build
-./target/release/jit-artifact --help
-```
-
-During development:
-
-```bash
-pnpm artifact:test
-pnpm artifact:lint
-```
-
-## Configuration
-
-Create `jit.artifact.json`:
-
-```bash
-jit-artifact init
-```
-
-```json title="jit.artifact.json"
-{
-  "schemaVersion": 1,
-  "outputRoot": "src/generated/jit",
-  "compression": "auto",
-  "profile": "balanced",
-  "dictionary": true,
-  "conflict": "abort"
-}
-```
-
-| Option          | Default        | Behavior                                                         |
-| --------------- | -------------- | ---------------------------------------------------------------- |
-| `schemaVersion` | `1`            | rejects config written for an unknown contract                   |
-| `outputRoot`    | token metadata | relative directory below the authorized project root             |
-| `compression`   | `auto`         | `auto`, `zstd` or `none`                                         |
-| `profile`       | `balanced`     | `fast`, `balanced` or `maximum` encoder effort                   |
-| `dictionary`    | `true`         | trains a dictionary only when the complete token becomes smaller |
-| `conflict`      | `abort`        | `abort`, `overwrite` or retained `backup`                        |
-
-CLI flags override JSON. Unknown JSON properties are rejected so misspelled
-security or output options cannot be silently ignored.
-
-## End-to-end flow
-
-Generate one directly consumable TypeScript tree:
-
-```bash
-pnpm jit generate --output-format ts
-```
-
-Pack it:
-
-```bash
-jit-artifact pack generated/jit \
+./target/release/jit-artifact pack src/generated/jit \
   --output-root src/generated/jit \
   --output user-model.jit
+./target/release/jit-artifact verify --file user-model.jit
+./target/release/jit-artifact apply --file user-model.jit
 ```
 
-`pack` walks paths in canonical order, rejects symbolic links and non-regular
-files, applies file-count/size limits, compresses, then decodes its own output
-before returning it. Equal files and options produce the same token.
+`jit1_` uses the pinned Rebyte envelope, BLAKE3 content/envelope digests and
+optional Zstandard dictionary compression. It is byte-exact and works
+offline, but intentionally unsigned: integrity proves that decoded bytes match
+the token, not that the official site published it.
 
-## Artifact Lab
+Use `jlr1_` for the short Lab-to-project workflow and `jit1_` for air-gapped or
+fully self-contained transport.
 
-Open [/lab](/lab) to build a schema without installing the CLI. The editor
-selects fields, constraints and only the operations that should survive AOT.
-Generation has three explicit stages:
+## Local registry development
 
-1. The browser sends a bounded JSON schema description to the Node route.
-2. The server constructs known JIT factories and emits typed, import-free
-   `index.ts`; it does not evaluate user-provided TypeScript.
-3. The browser WASM package canonicalizes the returned files, computes BLAKE3
-   digests and returns a `jit1_` token.
-
-The TypeScript tab shows the exact bytes inside the token. The digest in the
-status bar is the complete envelope hash; changing a path, byte or metadata
-value changes it. The Token tab can re-inspect pasted tokens entirely in WASM.
-
-Download the token and use it with the native CLI:
+The CLI trusts `https://jit-site.vercel.app` by default. A local Lab must be
+selected explicitly:
 
 ```bash
-jit-artifact inspect --file user-jit-artifact.txt
-jit-artifact diff --file user-jit-artifact.txt --patch
-jit-artifact apply --file user-jit-artifact.txt
+JIT_LAB_REGISTRY=http://localhost:3000 \
+  cargo run -p jit-artifact-cli -- add jlr1_<reference>
 ```
 
-The token's `outputRoot` is only a suggestion. `--root` confines filesystem
-access and `--output-root` lets the developer choose a different relative
-destination:
+HTTP is accepted only for `localhost`, `127.0.0.1` or `::1`. Other registries
+must use HTTPS. The reference and configured origin must match exactly.
+
+## Production registry configuration
+
+The site uses these server-only variables:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `JIT_LAB_SIGNING_PRIVATE_KEY` | production | Ed25519 PKCS#8 PEM used only by Node routes |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob | private content-addressed artifact storage |
+| `JIT_LAB_PUBLIC_ORIGIN` | custom domains | stable bare HTTPS origin embedded in references |
+
+Generate a signing key:
 
 ```bash
-jit-artifact apply --file user-jit-artifact.txt \
-  --root . \
-  --output-root src/generated/jit
+openssl genpkey -algorithm Ed25519 -out jit-lab-signing.pem
 ```
 
-The WASM encoder stores browser files verbatim to keep the module small and
-the interaction responsive. Native `pack` supports adaptive Zstandard and
-dictionary compression for larger generated trees. Both encoders use the same
-versioned envelope and native commands accept browser tokens directly.
+Store the PEM as a protected environment secret. Never expose it with a
+`NEXT_PUBLIC_` name and never bundle it into the worker. Development without
+the variable uses an ephemeral in-memory key and `.jit-lab-store/`; production
+fails closed when the signing key is absent.
 
-Inspect and verify:
+Vercel Blob stores `jit-lab/v1/<sha256>.json` with private access. The public
+artifact route reads through authenticated server storage, revalidates the
+canonical hash and returns immutable bytes to the CLI.
 
-```bash
-jit-artifact inspect --file user-model.jit
-jit-artifact verify --file user-model.jit --json
-```
+## Browser isolation
 
-Both commands perform complete bounded decoding and digest verification.
-`inspect` is not a shallow header parser.
+Lab source runs in a fresh Web Worker because schema declarations and custom
+JavaScript must be evaluated to create compiler artifacts. The worker:
 
-Compare without writing:
+- receives transpiled JavaScript and detected top-level bindings;
+- has the browser bundle of `@jit-compiler/jit/define` and the actual AOT
+  generator;
+- uses an in-memory filesystem;
+- is terminated before every generation and after a five-second timeout.
 
-```bash
-jit-artifact diff --file user-model.jit
-jit-artifact diff --file user-model.jit --patch
-```
+The server never evaluates editor source. It receives only generated file
+paths and source, applies strict limits, canonicalizes the payload and signs
+the resulting content address.
 
-Apply:
-
-```bash
-jit-artifact apply --file user-model.jit
-```
-
-Before confirmation, the CLI displays creates, updates and optional unified
-patches, followed by the guarantee that it installs no dependencies and
-executes no commands.
-
-For CI:
-
-```bash
-jit-artifact apply --file user-model.jit \
-  --yes \
-  --conflict overwrite
-```
-
-`--yes` skips only interactive confirmation. It cannot disable verification,
-resource bounds or path confinement.
-
-## Atomic output and rollback
-
-The CLI stages every verified file in a sibling temporary directory, rereads
-the staged bytes, records a transaction journal, renames the previous output,
-and atomically swaps the complete generated directory. A failed commit restores
-the old directory before returning an error.
-
-Use retained backups when a deploy must be reversible:
-
-```bash
-jit-artifact apply --file user-model.jit --conflict backup
-jit-artifact transactions
-jit-artifact rollback <transaction-id>
-```
-
-`abort` is the default because replacing generated code should always be an
-explicit decision. `overwrite` removes the temporary backup after post-write
-verification. `backup` records it in `.jit-artifacts/transactions`.
-
-## Integrity is not identity
-
-`jit1_` is intentionally an unsigned local token. Its digests answer:
-
-> Are these exactly the bytes represented by this token?
-
-They do not answer:
-
-> Did the official JIT service create this token?
-
-The CLI therefore reports `publisher unauthenticated`. Official tokens require
-a server/native signing boundary with an Ed25519 private key. The Lab and WASM
-module must never receive that key. Browser output may be used locally or sent
-to a controlled backend that recompiles/revalidates before signing.
-
-## Defensive limits
-
-The pinned protocol limits token bytes, compressed bytes, decompressed bytes,
-single-file bytes, path length and entry count before exposing content. Paths
-must be normalized portable relatives; absolute paths, `..`, backslashes,
-Windows device names, control bytes and symlink crossings are rejected.
-
-```bash
-jit-artifact doctor
-jit-artifact hash src/generated/jit/index.ts
-jit-artifact completions zsh
-```
-
-`doctor` prints active limits and makes unsigned publisher status visible.
+The worker boundary limits hangs and isolates execution from React state, but
+it is not a secret boundary: do not paste credentials into the Lab.

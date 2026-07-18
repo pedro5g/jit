@@ -40,6 +40,7 @@ export default AOT.defineConfig({
   patterns: ["**/*.jit.ts"],
   output: {
     directory: "src/generated/jit",
+    format: "typescript",
     clean: true,
   },
   emit: {
@@ -90,10 +91,10 @@ export default AOT.defineConfig({
 import { User } from "./generated/jit/index.js";
 ```
 
-Local output automatically emits `index.js` and `index.d.ts` without a nested
-`package.json`. No package `imports` map and no `#jit` alias are required. The
-JavaScript and declaration entrypoints therefore always share the same base
-name and extension relationship.
+Local output emits a typed, self-contained `index.ts` by default without a
+nested `package.json`. No package `imports` map and no `#jit` alias are
+required. Choose `javascript` for JS plus `.d.ts`, or `javascript-only` when
+the consumer intentionally needs no generated declarations.
 
 ## Config Reference
 
@@ -102,6 +103,7 @@ name and extension relationship.
 | `entries`                | declaration files, directories, or globs                       | root discovery     |
 | `patterns`               | patterns used for directory/root discovery                     | all `.jit.ts` files |
 | `output.directory`       | local directory or package path below `node_modules`            | `generated/jit`    |
+| `output.format`          | TypeScript, JS plus declarations, or JS only                     | `typescript`       |
 | `output.packageName`     | namespace override for a generated `node_modules` package       | inferred from path |
 | `output.clean`           | remove JIT-owned files from the previous generation             | `true`             |
 | `emit.subpathModules`    | add one entrypoint per declaration source                       | `false`            |
@@ -142,6 +144,8 @@ only the generated functions used by the route.
 
 - Keep declaration files small and explicit.
 - Export compiled functions, not raw schemas, for AOT output.
+- Keep the default TypeScript output for application source; it carries
+  structural types without importing JIT.
 - Turn on `manifest` and `plans` when reviewing generated artifacts in CI.
 - Use subpath modules for `@jit/generated/user` package imports or
   `./generated/user.js` local imports.

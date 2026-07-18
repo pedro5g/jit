@@ -27,7 +27,7 @@ export default AOT.defineConfig({
   patterns: ["**/*.jit.ts"],
   output: {
     directory: "src/generated/jit",
-    format: "javascript",
+    format: "typescript",
     clean: true,
   },
   emit: {
@@ -84,13 +84,13 @@ if (User.is(input)) {
 }
 ```
 
-The generated JavaScript contains the specialized loops and checks but no
-schema builders or runtime compiler import. Matching declarations preserve the
-schema-derived types at the import site.
+The generated TypeScript contains structural aliases plus specialized loops
+and checks, but no schema builders or runtime compiler import. The application
+type-checks it like any other source file.
 
-Output layout is automatic. A project-local directory emits `index.js` and
-`index.d.ts` for normal relative imports. A directory below `node_modules`
-emits a namespaced dual ESM/CommonJS package and exports map.
+Output layout is automatic. TypeScript is the default and emits `index.ts`.
+JavaScript plus declarations is opt-in. A directory below `node_modules` can
+emit a namespaced dual ESM/CommonJS package and exports map.
 
 If no explicit compiled exports are found, generation prints a diagnostic and writes
 nothing. There is no raw-schema fallback.
@@ -102,7 +102,7 @@ nothing. There is no raw-schema fallback.
 | `entries` | project-root scan | declaration files, directories or globs to load |
 | `patterns` | `['**/*.jit.ts']` | patterns applied while scanning a directory |
 | `output.directory` | `generated/jit` | local directory or generated package location |
-| `output.format` | `javascript` | emit JavaScript plus declarations or one typed `index.ts` |
+| `output.format` | `typescript` | `typescript`, `javascript` plus declarations, or `javascript-only` |
 | `output.packageName` | inferred | namespace override for output below `node_modules` |
 | `output.clean` | `true` | remove known artifacts from the previous generation |
 | `emit.subpathModules` | `false` | emit one import entry per declaration file |
@@ -149,7 +149,7 @@ export default AOT.defineConfig({
 });
 ```
 
-The equivalent one-off command is:
+This is the default. The equivalent explicit command is:
 
 ```bash
 pnpm jit generate --output-format ts
@@ -161,14 +161,25 @@ parallel `index.d.ts` that can drift from the executable source. Runtime
 helpers remain specialized and import-free. Type-only references back to a
 declaration file are erased by TypeScript.
 
-Generated subpath modules intentionally import `./index.js`, even though the
-source file is `index.ts`. This is the standard ESM/`NodeNext` convention:
-TypeScript resolves the source during development and preserves a valid
-specifier for emitted JavaScript.
+Generated aliases and function signatures are structural. The output does not
+need `JIT.Typeof`, the schema declaration file or a type-only import from JIT.
+Subpath modules intentionally import `./index.js`, even though the source file
+is `index.ts`; TypeScript resolves the source and preserves a valid emitted ESM
+specifier.
 
 Prefer `javascript` for output consumed directly by Node or written below
 `node_modules`. Prefer `typescript` for checked-in/generated source compiled by
 the application.
+
+Use `javascript-only` only when another boundary supplies types or the consumer
+is plain JavaScript:
+
+```bash
+pnpm jit generate --output-format javascript-only
+```
+
+That mode emits no `.d.ts`; it is deliberately explicit so a TypeScript project
+cannot lose generated types accidentally.
 
 ```ts
 export default AOT.defineConfig({

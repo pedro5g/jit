@@ -982,10 +982,8 @@ review artifacts:
 
 ```text
 generated/jit/
-├── index.js
-├── index.d.ts
-├── user.js
-├── user.d.ts
+├── index.ts
+├── user.ts
 ├── manifest.json
 └── plans/
     └── user.json
@@ -1006,9 +1004,8 @@ compiled functions, tiny error class, hash/index helpers, and codec helpers
 are inlined. There is no `import "jit"` in generated runtime code, so the
 final app bundle carries only the low-level specialized functions it imports.
 
-For source-first builds, set `output.format: "typescript"` or pass
-`--output-format ts`. The generator writes one executable and typed
-`index.ts`, plus optional `.ts` subpath modules:
+Source-first TypeScript is the CLI/config default. The generator writes one
+executable and typed `index.ts`, plus optional `.ts` subpath modules:
 
 ```ts
 import { AOT } from "@jit-compiler/jit";
@@ -1034,25 +1031,23 @@ resolves it to `index.ts` during development and emits a valid JavaScript
 specifier. Direct TypeScript output has no parallel declaration file that can
 drift from the implementation.
 
-Types are derived from your schema file, never re-emitted by hand:
+Types are structural and self-contained in TypeScript output:
 
 ```ts
-// grouped marker
-export type User = import("@jit-compiler/jit").Typeof<
-  typeof import("../src/user.jit.js").User
->;
-export type UserStrict<TValue> = import("@jit-compiler/jit").Strict<
-  typeof import("../src/user.jit.js").User,
-  TValue
->;
-export declare const User: {
+export type User = {
+  id: number;
+  name: string;
+  role: "admin" | "member";
+};
+export type UserStrict<TValue> = TValue;
+export const User: {
   readonly is: (value: unknown) => value is User;
   readonly parse: (value: unknown) => User;
 };
-
-// standalone explicit export
-export declare const User_is: typeof import("../src/user.jit.js").User_is;
 ```
+
+Use `output.format: "javascript"` for executable JS plus `.d.ts`, or
+`"javascript-only"` when declarations are intentionally unnecessary.
 
 `User` remains the normal runtime output type. `UserStrict<T>` is for literal
 fixtures/configs where TypeScript can evaluate checks such as string

@@ -156,10 +156,12 @@ types that future package splits will reuse.
 
 ## AOT generator
 
-`aot/generate.ts` writes fully self-contained output selected by location:
+`aot/generate.ts` writes fully self-contained output selected by format and
+location:
 
-- local directories receive `index.js` + `index.d.ts` for standard relative
-  imports and no nested package boundary;
+- CLI/config generation defaults to typed `index.ts` in local directories;
+  opt-in JavaScript receives `index.js` + `index.d.ts`, with
+  `javascript-only` available for deliberately untyped consumers;
 - output below `node_modules` receives `index.mjs` + `index.cjs`, dual
   declarations, and `package.json` (exports map, `sideEffects: false`);
 - optional thin subpath entrypoints use relative `.js` imports locally and the
@@ -176,7 +178,8 @@ types that future package splits will reuse.
 - the generator never emits an operation outside the selected surface: object
   markers use only the keys present in the compiled object; standalone output
   uses only exported registered functions;
-- `.d.ts` types anchor on the dev's schema file via
+- TypeScript output emits structural aliases directly. JavaScript `.d.ts`
+  types can anchor on the dev's schema file via
   `import("@jit-compiler/jit").Typeof<typeof import("./user.jit.js").User>` — inference is
   the single source of truth (`aot/emit-type.ts` is only the fallback for
   programmatic generation without a source file);
@@ -213,16 +216,20 @@ The Rust workspace separates artifact concerns into three packages:
 - `jit-artifact-wasm` exposes only pack and inspect. It has no filesystem,
   process, network, hook, trust-store or signing API.
 
-The web Lab accepts a closed schema description, builds the schema with known
-JIT factories on the server, emits direct TypeScript in a temporary directory
-and returns exact files. WASM packs those bytes locally in the browser. The
-protocol contains files and metadata only; it cannot encode commands,
-dependency installation, URLs to execute or lifecycle hooks.
+The web Lab is a free-form Monaco TypeScript editor. JIT declarations provide
+IntelliSense; Monaco transpiles the source; and a terminable browser worker
+evaluates it with the browser bundle of the real AOT compiler. Arbitrary Lab
+source never executes on the server. The server receives only generated files,
+canonicalizes them, stores them by SHA-256 and signs a compact `jlr1_`
+reference with Ed25519. The private key never enters the browser bundle.
 
-`authenticated: false` is part of the report contract. BLAKE3 proves that
-decoded bytes match the token, not who published it. A future authenticated
-capsule must sign at a server/native boundary; private keys must never enter
-the browser bundle.
+`jit-artifact-cli add` trusts the official HTTPS registry (or an explicit local
+development override), resolves the signing key by its content-derived ID,
+verifies the signature, downloads the immutable payload, verifies its SHA-256,
+then reuses the same path confinement, preview, staging and transaction
+machinery as offline `jit1_` artifacts. A `jlr1_` reference cannot contain
+commands, dependencies or hooks. Offline `jit1_` tokens remain deterministic
+unsigned envelopes that carry their complete files.
 
 ## Optimizer boundaries
 

@@ -30,27 +30,47 @@ bundle.
 
 ## Portable AOT Artifacts
 
-Direct TypeScript output keeps generated code inside the application's normal
-type-check and bundling pipeline:
+Direct TypeScript is the default AOT output. It keeps generated code inside the
+application's normal type-check and bundling pipeline:
 
 ```sh
-pnpm jit generate --output-format ts
+pnpm jit generate
 ```
 
-The Rust `jit-artifact` CLI can then turn the exact generated tree into a
-deterministic `jit1_` token, verify it, preview changes and reconstruct it with
-an atomic directory swap:
+```ts
+// input: src/aot/user.jit.ts
+import { JIT } from "@jit-compiler/jit/define";
+
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+});
+
+export const isUser = JIT.validate(User).is().compile();
+```
+
+```ts
+// output: src/generated/jit/index.ts
+export type User = { id: number; name: string };
+export const isUser: (value: unknown) => value is User = function is(value) {
+  // specialized checks only
+};
+```
+
+The [Artifact Lab](https://jit-site.vercel.app/lab) is a free-form TypeScript
+editor with the complete JIT type surface. It runs the real AOT compiler in a
+terminable browser worker, previews the exact generated files and creates a
+compact signed reference. Reconstruct those files without installing JIT in
+the target project:
 
 ```sh
-pnpm artifact:build
-./target/release/jit-artifact pack generated/jit --output user.jit
-./target/release/jit-artifact apply --file user.jit
+pnpm dlx @jit-compiler/cli add jlr1_<signed-reference>
 ```
 
-The [Artifact Lab](https://jit-site.vercel.app/lab) provides the same token
-format in the browser through a filesystem-free WASM module. Browser tokens
-prove byte integrity with BLAKE3; they intentionally do not claim publisher
-identity.
+The native Rust CLI trusts the official registry, verifies its Ed25519
+signature, checks the SHA-256 content address, confines paths to the project
+root and writes the complete tree transactionally. It installs no dependencies
+and executes no artifact-provided commands.
 
 ## New In 1.0.4
 

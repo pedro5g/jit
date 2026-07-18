@@ -59,9 +59,10 @@ exports map and `sideEffects: false` for package-style imports. Optional
 subpath modules let route bundles import one declaration file without
 evaluating the root barrel.
 
-For source-first builds, `output.format: "typescript"` writes one typed
-`index.ts`. Its public signatures are annotations on the executable exports,
-while internal generated loops remain allocation-conscious low-level code.
+For source-first builds, the default `output.format: "typescript"` writes one
+typed `index.ts`. Its public structural types and signatures are annotations on
+the executable exports, while internal generated loops remain
+allocation-conscious low-level code.
 After the application compiles that file, the bundle contains the same
 specialized JavaScript and no JIT runtime import.
 
