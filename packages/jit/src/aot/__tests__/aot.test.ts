@@ -429,20 +429,54 @@ describe("JIT AOT generate", () => {
     });
   });
 
-  it("should report watched collection callbacks as runtime-only AOT bindings", () => {
+  it("should serialize watched collection callbacks into self-contained AOT bindings", async () => {
     const User = JIT.object({ id: JIT.number() });
     const Users = JIT.array(User);
     const UserChanges = JIT.watch(Users, { key: "id", onAdd: () => undefined });
     const result = AOT.generate({ schemas: {}, functions: { UserChanges }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      UserChanges: typeof UserChanges;
+    };
 
-    expect(result.files).toHaveLength(0);
-    expect(result.skipped).toEqual([
-      {
-        schema: "UserChanges",
-        operation: "watch",
-        reason: "watch bindings hold callbacks that cannot be serialized ahead of time",
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("const __w0 = (() => undefined);");
+    expect(generated.UserChanges([], [{ id: 1 }]).newItems).toEqual([{ id: 1 }]);
+  });
+
+  it("should serialize default, refine, and transform callbacks into AOT validators", async () => {
+    const User = JIT.object({
+      name: JIT.string().default(() => "'"),
+    })
+      .transform({
+        name: (value) => String(value).trim(),
+      })
+      .refine((value) => value.name !== "blocked");
+    const selected = JIT.validator(User).get("is", "parse", "safeParse");
+    const result = AOT.generate({
+      schemas: {},
+      functions: {
+        isUser: selected.is,
+        parseUser: selected.parse,
+        safeParseUser: selected.safeParse,
       },
-    ]);
+      outDir,
+    });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      isUser: (value: unknown) => boolean;
+      parseUser: (value: unknown) => { name: string };
+      safeParseUser: (value: unknown) => { success: boolean };
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain(`(() => "'")`);
+    expect(source).toContain("((value) => String(value).trim())");
+    expect(source).toContain('((value) => value.name !== "blocked")');
+    expect(generated.isUser({ name: " Ada " })).toBe(true);
+    expect(generated.parseUser({ name: " Ada " })).toEqual({ name: "Ada" });
+    expect(generated.parseUser({})).toEqual({ name: "'" });
+    expect(generated.safeParseUser({ name: "blocked" }).success).toBe(false);
   });
 
   it("should generate validator flat exports with inlined regex bindings", () => {

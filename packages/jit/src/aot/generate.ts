@@ -1269,8 +1269,9 @@ function operationSignature(
 }
 
 /**
- * Serializes validator bindings into const declarations. Returns undefined
- * when any value is a function or otherwise not representable as source.
+ * Serializes compiler bindings into const declarations. Developer callbacks
+ * are emitted as source so generated modules stay self-contained and do not
+ * pay a runtime compiler cost.
  */
 function inlineBindings(names: readonly string[], values: readonly unknown[]): string[] | undefined {
   const lines: string[] = [];
@@ -1316,6 +1317,7 @@ function inlineCodecBindings(names: readonly string[], values: readonly unknown[
 
 function serializeBindingValue(value: unknown): string | undefined {
   if (value instanceof RegExp) return String(value);
+  if (typeof value === "function") return serializeBindingFunction(value);
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
@@ -1328,6 +1330,44 @@ function serializeBindingValue(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function serializeBindingFunction(value: Function): string | undefined {
+  let source = Function.prototype.toString.call(value).trim();
+
+  // Native and bound functions do not expose reconstructible source.
+  if (source.includes("[native code]") || source.startsWith("function bound ")) return undefined;
+
+  // Function#toString represents object methods without the `function`
+  // keyword. Normalize those forms into standalone function expressions.
+  if (!isFunctionExpressionSource(source) && !source.includes("=>")) {
+    source = normalizeMethodSource(source);
+  }
+
+  if (source === "") return undefined;
+
+  try {
+    // Syntax validation happens only in the build-time compilation path.
+    Function(`return (${source});`);
+  } catch {
+    return undefined;
+  }
+
+  return `(${source})`;
+}
+
+function isFunctionExpressionSource(source: string): boolean {
+  return /^(?:async\s+)?function(?:\s*\*)?\b/.test(source);
+}
+
+function normalizeMethodSource(source: string): string {
+  const match = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(source);
+
+  if (!match) return "";
+
+  const asyncPrefix = match[1] ?? "";
+  const generator = match[2] ? "*" : "";
+  return `${asyncPrefix}function${generator} ${match[3]}${match[4]}`;
 }
 
 /**
