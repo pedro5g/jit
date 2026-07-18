@@ -27,6 +27,7 @@ export default AOT.defineConfig({
   patterns: ["**/*.jit.ts"],
   output: {
     directory: "src/generated/jit",
+    format: "javascript",
     clean: true,
   },
   emit: {
@@ -101,6 +102,7 @@ nothing. There is no raw-schema fallback.
 | `entries` | project-root scan | declaration files, directories or globs to load |
 | `patterns` | `['**/*.jit.ts']` | patterns applied while scanning a directory |
 | `output.directory` | `generated/jit` | local directory or generated package location |
+| `output.format` | `javascript` | emit JavaScript plus declarations or one typed `index.ts` |
 | `output.packageName` | inferred | namespace override for output below `node_modules` |
 | `output.clean` | `true` | remove known artifacts from the previous generation |
 | `emit.subpathModules` | `false` | emit one import entry per declaration file |
@@ -129,6 +131,44 @@ Generate into `node_modules/@jit/generated` when consumers should import
 `@jit/generated`. Generate into `src/generated/jit` for
 `./generated/jit/index.js`. No `#` import alias or nested-package toggle is
 required.
+
+### Direct TypeScript source
+
+Use direct TypeScript output when generated artifacts live in a source
+directory and should pass through the application's normal TypeScript build:
+
+```ts title="jit.config.ts"
+export default AOT.defineConfig({
+  entries: ["src/aot/**/*.jit.ts"],
+  output: {
+    directory: "src/generated/jit",
+    format: "typescript",
+    clean: true,
+  },
+  emit: { subpathModules: true, manifest: true, plans: true },
+});
+```
+
+The equivalent one-off command is:
+
+```bash
+pnpm jit generate --output-format ts
+```
+
+This mode writes `index.ts` and optional `.ts` subpath modules. The public
+function and grouped-object signatures live in `index.ts` itself; there is no
+parallel `index.d.ts` that can drift from the executable source. Runtime
+helpers remain specialized and import-free. Type-only references back to a
+declaration file are erased by TypeScript.
+
+Generated subpath modules intentionally import `./index.js`, even though the
+source file is `index.ts`. This is the standard ESM/`NodeNext` convention:
+TypeScript resolves the source during development and preserves a valid
+specifier for emitted JavaScript.
+
+Prefer `javascript` for output consumed directly by Node or written below
+`node_modules`. Prefer `typescript` for checked-in/generated source compiled by
+the application.
 
 ```ts
 export default AOT.defineConfig({
@@ -176,7 +216,8 @@ because package managers own and may replace `node_modules`.
 3. `explain`: why each declaration can/cannot build.
 4. `inspect --stage plan`: normalized operation descriptor.
 5. `inspect --stage source`: exact generated JS.
-6. `inspect --stage declaration`: public generated types.
+6. `inspect --stage declaration`: public generated types. In TypeScript mode,
+   this is the typed `index.ts` itself.
 
 Use this sequence in CI before generation when config drift should fail early.
 

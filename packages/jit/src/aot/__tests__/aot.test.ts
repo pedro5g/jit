@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,6 +111,71 @@ describe("JIT AOT generate", () => {
     expect(declarations).toContain("readonly is:");
     expect(declarations).toContain("readonly clone:");
     expect(declarations).not.toContain("readonly parse:");
+  });
+
+  it("should emit one self-contained and directly typed TypeScript module", async () => {
+    const UserSchema = JIT.object({
+      id: JIT.number().int32(),
+      name: JIT.string(),
+    });
+    const User = JIT.model(UserSchema, { is: true, parse: true });
+    const result = AOT.generate({
+      schemas: { User },
+      outDir,
+      format: "typescript",
+    });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
+      readonly User: {
+        readonly is: (value: unknown) => boolean;
+        readonly parse: (value: unknown) => { id: number; name: string };
+      };
+    };
+
+    expect(result.files).toEqual([join(outDir, "index.ts")]);
+    expect(existsSync(join(outDir, "index.js"))).toBe(false);
+    expect(existsSync(join(outDir, "index.d.ts"))).toBe(false);
+    expect(source).toContain("export type User = { id: number; name: string };");
+    expect(source).toContain("const User: {");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).toMatchSnapshot("direct TypeScript AOT");
+    expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.User.parse({ id: 1, name: "Ada" })).toEqual({ id: 1, name: "Ada" });
+
+    writeFileSync(
+      join(outDir, "consumer.ts"),
+      [
+        'import { User, type User as UserValue } from "./index.js";',
+        'const value: UserValue = { id: 1, name: "Ada" };',
+        "User.parse(value);",
+        "// @ts-expect-error name is required",
+        "const invalid: UserValue = { id: 2 };",
+        "void invalid;",
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      join(outDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          exactOptionalPropertyTypes: true,
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmit: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["index.ts", "consumer.ts"],
+      })
+    );
+    writeFileSync(join(outDir, "package.json"), '{"type":"module"}\n');
+
+    expect(() =>
+      execFileSync(process.execPath, [join(process.cwd(), "node_modules", "typescript", "bin", "tsc")], {
+        cwd: outDir,
+        stdio: "pipe",
+      })
+    ).not.toThrow();
   });
 
   it("should emit selected DTO validation, transport, and whitelist mappers", async () => {

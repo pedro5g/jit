@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { SchemaInput } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import { getArtifact } from "../runtime/artifact-registry.js";
+import type { AotOutputFormat } from "./generate.js";
 
 /** `jit.config.*` shape — declaration discovery plus generation targets. */
 export interface JitConfig {
@@ -26,6 +27,11 @@ export interface JitConfig {
      * @default "generated/jit"
      */
     readonly directory?: string;
+    /**
+     * Emit executable JavaScript plus declarations, or one self-contained
+     * TypeScript source module. @default "javascript"
+     */
+    readonly format?: AotOutputFormat;
     /** Package namespace for output below `node_modules`; otherwise inferred from the path. */
     readonly packageName?: string;
     /** Remove files from the previous JIT generation before writing. @default true */

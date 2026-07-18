@@ -32,7 +32,7 @@ describe("jit CLI", () => {
 
   it("should initialize a typed AOT config in the project root", async () => {
     const { runtime, stdout, stderr } = createRuntime();
-    const code = await main(["init"], runtime);
+    const code = await main(["init", "--output-format", "ts"], runtime);
     const configPath = join(projectDir, "jit.config.ts");
     const source = readFileSync(configPath, "utf8");
 
@@ -51,7 +51,7 @@ describe("jit CLI", () => {
     expect(existsSync(join(projectDir, "jit", "user.jit.ts"))).toBe(true);
     expect(source).not.toContain("operations:");
     expect(source).not.toContain("exportMode:");
-    expect(source).toContain("Local output emits index.js");
+    expect(source).toContain('format: "typescript"');
     expect(source).not.toContain("emitPackageJson");
     expect(source).not.toContain("performance:");
     expect(source).not.toContain("diagnostics:");
@@ -106,12 +106,12 @@ describe("jit CLI", () => {
         outDir: "generated",
         packageName: "@acme/generated",
         patterns: ["**/*.jit.ts"],
+        outputFormat: "typescript",
       })
     );
 
     const code = await main(["generate"], runtime);
-    const source = readFileSync(join(projectDir, "generated", "index.js"), "utf8");
-    const types = readFileSync(join(projectDir, "generated", "index.d.ts"), "utf8");
+    const source = readFileSync(join(projectDir, "generated", "index.ts"), "utf8");
 
     expect(code).toBe(0);
     expect(stderr.join("")).toBe("");
@@ -119,9 +119,12 @@ describe("jit CLI", () => {
     expect(source).toContain("const User_is");
     expect(source).not.toContain("const User_parse");
     expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
-    expect(types).toContain('export declare const User_is: typeof import("../src/user.jit.js").User_is;');
-    expect(types).not.toContain("export declare const User: {");
-    expect(existsSync(join(projectDir, "generated", "user.js"))).toBe(true);
+    expect(source).toContain('const User_is: typeof import("../src/user.jit.js").User_is =');
+    expect(existsSync(join(projectDir, "generated", "index.d.ts"))).toBe(false);
+    expect(existsSync(join(projectDir, "generated", "user.ts"))).toBe(true);
+    expect(readFileSync(join(projectDir, "generated", "user.ts"), "utf8")).toBe(
+      'export { User_is } from "./index.js";\n'
+    );
     expect(existsSync(join(projectDir, "generated", "manifest.json"))).toBe(true);
     expect(existsSync(join(projectDir, "generated", "plans", "user.json"))).toBe(true);
   });

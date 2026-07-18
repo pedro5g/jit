@@ -11,7 +11,7 @@ import {
   type JitConfig,
   loadModule,
 } from "./aot/discover.js";
-import { type GenerateEmitOptions, generate } from "./aot/generate.js";
+import { type AotOutputFormat, type GenerateEmitOptions, generate } from "./aot/generate.js";
 import { getArtifact } from "./runtime/artifact-registry.js";
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -32,6 +32,7 @@ interface ResolvedAotProject {
   readonly patterns: readonly string[];
   readonly clean: boolean;
   readonly typesPackage: string;
+  readonly outputFormat: AotOutputFormat;
   readonly emit?: GenerateEmitOptions;
 }
 
@@ -138,13 +139,14 @@ export async function previewAot(args: Readonly<Record<string, unknown>>, worksp
       packageName: resolved.packageName,
       types: { package: resolved.typesPackage },
       clean: true,
+      format: resolved.outputFormat,
       emit: {
         ...resolved.emit,
         ...(stage === "manifest" ? { manifest: true } : {}),
         ...(stage === "plan" ? { plans: true } : {}),
       },
     });
-    const selected = selectPreviewFile(tempDir, stage, target);
+    const selected = selectPreviewFile(tempDir, stage, target, resolved.outputFormat);
     const content = selected ? readLimitedFile(selected) : undefined;
     const files = result.files.map((file) => relativePath(tempDir, file));
     const data = {
@@ -182,6 +184,7 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
     packageName: resolved.packageName,
     types: { package: resolved.typesPackage },
     clean: resolved.clean,
+    format: resolved.outputFormat,
     ...(resolved.emit ? { emit: resolved.emit } : {}),
   });
   const files = result.files.map((file) => relativePath(resolved.root, file));
@@ -189,6 +192,7 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
     outDir: relativePath(resolved.root, resolved.outDir),
     packageName: resolved.packageName,
     typesPackage: resolved.typesPackage,
+    outputFormat: resolved.outputFormat,
     files,
     skipped: jsonSkipped(result.skipped),
   } as JsonValue;
@@ -402,6 +406,7 @@ function outputDescriptor(resolved: ResolvedAotProject): JsonValue {
     directory: relativePath(resolved.root, resolved.outDir) ?? resolved.outDir,
     packageName: resolved.packageName,
     typesPackage: resolved.typesPackage,
+    format: resolved.outputFormat,
     layout: resolved.outDir.split(sep).includes("node_modules") ? "package" : "local",
     clean: resolved.clean,
     emit: (resolved.emit ?? {}) as JsonValue,
@@ -456,6 +461,8 @@ async function resolveAotProject(
     config.compiler?.packageName ??
     "@jit-compiler/jit";
   const clean = readOptionalBoolean(args, "clean") ?? output?.clean ?? config.clean ?? true;
+  const outputFormat =
+    readEnum(args, "outputFormat", ["javascript", "typescript"] as const) ?? output?.format ?? "javascript";
   const emit = config.emit || emitOverride ? { ...config.emit, ...emitOverride } : undefined;
 
   return {
@@ -466,6 +473,7 @@ async function resolveAotProject(
     outDir,
     packageName,
     typesPackage,
+    outputFormat,
     patterns: patterns ?? DEFAULT_SCHEMA_PATTERNS,
     clean,
     ...(emit ? { emit } : {}),
@@ -524,10 +532,17 @@ function assertBuildable(
   }
 }
 
-function selectPreviewFile(tempDir: string, stage: string, target: string | undefined): string | undefined {
+function selectPreviewFile(
+  tempDir: string,
+  stage: string,
+  target: string | undefined,
+  format: AotOutputFormat
+): string | undefined {
   if (stage === "summary") return undefined;
-  if (stage === "source") return resolve(tempDir, "index.js");
-  if (stage === "declaration") return resolve(tempDir, "index.d.ts");
+  if (stage === "source") return resolve(tempDir, format === "typescript" ? "index.ts" : "index.js");
+  if (stage === "declaration") {
+    return resolve(tempDir, format === "typescript" ? "index.ts" : "index.d.ts");
+  }
   if (stage === "manifest") return resolve(tempDir, "manifest.json");
   if (stage === "plan") {
     const plansDir = resolve(tempDir, "plans");

@@ -89,6 +89,11 @@ const OUTPUT_PROPERTIES = {
   outDir: optionalString("Output directory relative to the project root."),
   packageName: optionalString("Package namespace used when output is below node_modules."),
   typesPackage: optionalString("Package specifier exporting JIT.Typeof and JIT.Strict."),
+  outputFormat: {
+    type: "string",
+    enum: ["javascript", "typescript"],
+    description: "Generated runtime source format. Defaults to config or javascript.",
+  },
   clean: optionalBoolean("Remove known generated files before generation."),
   emit: {
     type: "object",

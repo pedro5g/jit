@@ -4,7 +4,7 @@
  *
  * Usage:
  *   jit init [--force] [--format ts|mts|mjs|cjs] [--entries <path-or-glob>] [--pattern <glob>]
- *   jit generate [files...] [--out <dir>] [--name <package-name>] [--watch] [--pattern <glob>]
+ *   jit generate [files...] [--out <dir>] [--output-format js|ts] [--watch] [--pattern <glob>]
  *   jit doctor [files...] [--pattern <glob>]
  *   jit explain [files...] [--pattern <glob>]
  *   jit list [files...] [--pattern <glob>]
@@ -27,7 +27,7 @@ import {
   type JitConfig,
   loadModule,
 } from "./aot/discover.js";
-import { generate } from "./aot/generate.js";
+import { type AotOutputFormat, generate } from "./aot/generate.js";
 import { getArtifact } from "./runtime/artifact-registry.js";
 
 const DEFAULT_OUT_DIR = "generated/jit";
@@ -48,6 +48,7 @@ interface GenerateArguments {
   readonly patterns: readonly string[] | undefined;
   readonly clean: boolean | undefined;
   readonly emit: JitConfig["emit"] | undefined;
+  readonly outputFormat: AotOutputFormat | undefined;
 }
 
 interface ResolvedAotInputs extends GenerateArguments {
@@ -76,13 +77,14 @@ export interface InitArguments {
   readonly outDir: string;
   readonly packageName: string | undefined;
   readonly patterns: readonly string[];
+  readonly outputFormat?: AotOutputFormat;
 }
 
 export type ConfigFormat = (typeof CONFIG_FORMATS)[number];
 
 const USAGE = `Usage:
-  jit init [--force] [--format ts|mts|mjs|cjs] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
-  jit generate [files...] [--out <dir>] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
+  jit init [--force] [--format ts|mts|mjs|cjs] [--output-format js|ts] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
+  jit generate [files...] [--out <dir>] [--output-format js|ts] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
   jit doctor [files...] [--pattern <glob>]
   jit explain [files...] [--pattern <glob>]
   jit list [files...] [--pattern <glob>]
@@ -171,6 +173,7 @@ async function runGenerate(
       ...(clean !== undefined ? { clean } : {}),
       ...(emit !== undefined ? { emit } : {}),
       ...(types !== undefined ? { types } : {}),
+      ...(resolved.outputFormat !== undefined ? { format: resolved.outputFormat } : {}),
     });
 
     for (const skip of result.skipped) {
@@ -221,6 +224,7 @@ async function runDoctor(parsed: GenerateArguments, cwd: string, stdout: (text: 
   stdout(`cwd: ${cwd}\n`);
   stdout(`config: ${resolved.configFile ?? "not found"}\n`);
   stdout(`outDir: ${resolved.resolvedOut}\n`);
+  stdout(`format: ${resolved.outputFormat ?? "javascript"}\n`);
   const packageLayout = resolved.resolvedOut.split(/[\\/]+/).includes("node_modules");
 
   stdout(`layout: ${packageLayout ? "package" : "local"}\n`);
@@ -397,6 +401,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
   let patterns = parsed.patterns;
   let clean = parsed.clean;
   let emit = parsed.emit;
+  let outputFormat = parsed.outputFormat;
   let types: JitConfig["types"] | undefined;
   let configFile: string | undefined;
 
@@ -417,6 +422,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
       outDir = outDir ?? (config.outDir ? resolve(configDir, config.outDir) : undefined);
       packageName = packageName ?? output?.packageName ?? config.packageName;
       clean = clean ?? output?.clean ?? config.clean;
+      outputFormat = outputFormat ?? output?.format;
       emit = mergeEmit(config.emit, emit);
       types = config.types ?? (config.compiler?.packageName ? { package: config.compiler.packageName } : undefined);
     }
@@ -432,6 +438,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     patterns,
     clean,
     emit,
+    outputFormat,
     types,
     configFile,
     resolvedOut: outDir ?? resolve(cwd, DEFAULT_OUT_DIR),
@@ -467,6 +474,7 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
   let patterns: string[] | undefined;
   let clean: boolean | undefined;
   let emit: JitConfig["emit"] | undefined;
+  let outputFormat: AotOutputFormat | undefined;
 
   for (let index = 0; index < rest.length; index++) {
     const argument = rest[index];
@@ -478,6 +486,11 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
 
     if (argument === "--name") {
       packageName = readValue(rest, ++index, "--name");
+      continue;
+    }
+
+    if (argument === "--output-format") {
+      outputFormat = parseOutputFormat(readValue(rest, ++index, "--output-format"));
       continue;
     }
 
@@ -534,7 +547,7 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
     if (!argument.startsWith("--")) files.push(resolve(cwd, argument));
   }
 
-  return { files, outDir, packageName, watch: watchMode, patterns, clean, emit };
+  return { files, outDir, packageName, watch: watchMode, patterns, clean, emit, outputFormat };
 }
 
 function parseInspectArguments(rest: readonly string[], cwd: string): InspectArguments {
@@ -566,6 +579,7 @@ function parseInitArguments(rest: readonly string[]): InitArguments {
   let outDir = DEFAULT_OUT_DIR;
   let packageName: string | undefined;
   let patterns: string[] = [...DEFAULT_SCHEMA_PATTERNS];
+  let outputFormat: AotOutputFormat | undefined;
 
   for (let index = 0; index < rest.length; index++) {
     const argument = rest[index];
@@ -602,12 +616,25 @@ function parseInitArguments(rest: readonly string[]): InitArguments {
       continue;
     }
 
+    if (argument === "--output-format") {
+      outputFormat = parseOutputFormat(readValue(rest, ++index, "--output-format"));
+      continue;
+    }
+
     if (argument === "--pattern") {
       patterns = [readValue(rest, ++index, "--pattern")];
     }
   }
 
-  return { format, force, entries, outDir, packageName, patterns };
+  return {
+    format,
+    force,
+    entries,
+    outDir,
+    packageName,
+    patterns,
+    ...(outputFormat !== undefined ? { outputFormat } : {}),
+  };
 }
 
 export function createConfigSource(options: InitArguments): string {
@@ -617,8 +644,10 @@ export function createConfigSource(options: InitArguments): string {
     "  /** Patterns used when an entry is a directory or discovery starts at the project root. */",
     `  patterns: ${formatStringArray(options.patterns)},`,
     "  output: {",
-    "    /** Local output emits index.js; output below node_modules emits a dual package automatically. */",
+    "    /** Destination relative to this config file. */",
     `    directory: ${JSON.stringify(options.outDir)},`,
+    '    /** Use "typescript" for one directly consumable, typed source module. */',
+    `    format: ${JSON.stringify(options.outputFormat ?? "javascript")},`,
     ...(options.packageName && options.outDir.split(/[\\/]+/).includes("node_modules")
       ? [
           "    /** Namespace override for this generated node_modules package. */",
@@ -684,6 +713,12 @@ function readValue(values: readonly string[], index: number, flag: string): stri
 function parseFormat(value: string): ConfigFormat {
   if ((CONFIG_FORMATS as readonly string[]).includes(value)) return value as ConfigFormat;
   throw new Error(`unknown config format "${value}"`);
+}
+
+function parseOutputFormat(value: string): AotOutputFormat {
+  if (value === "js" || value === "javascript") return "javascript";
+  if (value === "ts" || value === "typescript") return "typescript";
+  throw new Error(`unknown output format "${value}"`);
 }
 
 function formatStringArray(values: readonly string[]): string {
