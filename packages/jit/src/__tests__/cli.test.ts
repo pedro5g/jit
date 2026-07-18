@@ -32,7 +32,7 @@ describe("jit CLI", () => {
 
   it("should initialize a typed AOT config in the project root", async () => {
     const { runtime, stdout, stderr } = createRuntime();
-    const code = await main(["init", "--output-format", "ts"], runtime);
+    const code = await main(["init"], runtime);
     const configPath = join(projectDir, "jit.config.ts");
     const source = readFileSync(configPath, "utf8");
 
@@ -55,6 +55,20 @@ describe("jit CLI", () => {
     expect(source).not.toContain("emitPackageJson");
     expect(source).not.toContain("performance:");
     expect(source).not.toContain("diagnostics:");
+  });
+
+  it("should support JavaScript output without declaration files", async () => {
+    const source = createConfigSource({
+      format: "ts",
+      force: true,
+      entries: ["jit"],
+      outDir: "generated",
+      packageName: undefined,
+      patterns: ["**/*.jit.ts"],
+      outputFormat: "javascript-only",
+    });
+
+    expect(source).toContain('format: "javascript-only"');
   });
 
   it("should refuse to overwrite an existing config unless forced", async () => {
@@ -119,7 +133,9 @@ describe("jit CLI", () => {
     expect(source).toContain("const User_is");
     expect(source).not.toContain("const User_parse");
     expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
-    expect(source).toContain('const User_is: typeof import("../src/user.jit.js").User_is =');
+    expect(source).toContain("export type User = { id: number; name: string };");
+    expect(source).toContain("const User_is: (value: unknown) => value is User =");
+    expect(source).not.toContain('import("@jit-compiler/jit")');
     expect(existsSync(join(projectDir, "generated", "index.d.ts"))).toBe(false);
     expect(existsSync(join(projectDir, "generated", "user.ts"))).toBe(true);
     expect(readFileSync(join(projectDir, "generated", "user.ts"), "utf8")).toBe(
@@ -204,7 +220,7 @@ describe("jit CLI", () => {
     stderr.length = 0;
 
     expect(await main(["generate"], runtime)).toBe(0);
-    expect(existsSync(join(projectDir, "generated", "index.js"))).toBe(true);
+    expect(existsSync(join(projectDir, "generated", "index.ts"))).toBe(true);
     expect(await main(["clean"], runtime)).toBe(0);
     expect(stdout.join("")).toContain("removed");
     expect(existsSync(join(projectDir, "generated"))).toBe(false);

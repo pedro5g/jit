@@ -91,8 +91,8 @@ const OUTPUT_PROPERTIES = {
   typesPackage: optionalString("Package specifier exporting JIT.Typeof and JIT.Strict."),
   outputFormat: {
     type: "string",
-    enum: ["javascript", "typescript"],
-    description: "Generated runtime source format. Defaults to config or javascript.",
+    enum: ["typescript", "javascript", "javascript-only"],
+    description: "Generated source format. Defaults to config or typescript.",
   },
   clean: optionalBoolean("Remove known generated files before generation."),
   emit: {

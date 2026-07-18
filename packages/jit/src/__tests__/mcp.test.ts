@@ -225,7 +225,7 @@ describe("jit MCP server", () => {
       expect(plan.isError).toBeUndefined();
       expect(plan.structuredContent).toMatchObject({ selectedFile: "plans/index.json" });
       expect(plan.content[0].text).toContain('"name": "User_is"');
-      expect(() => readFileSync(join(projectDir, "generated", "index.js"), "utf8")).toThrow();
+      expect(() => readFileSync(join(projectDir, "generated", "index.ts"), "utf8")).toThrow();
     });
 
     it("requires explicit write confirmation and then generates typed package artifacts", async () => {
@@ -237,10 +237,11 @@ describe("jit MCP server", () => {
       expect(generated.isError).toBeUndefined();
       expect(generated.structuredContent).toMatchObject({
         outDir: "generated",
-        files: expect.arrayContaining(["generated/index.js", "generated/index.d.ts", "generated/manifest.json"]),
+        files: expect.arrayContaining(["generated/index.ts", "generated/manifest.json", "generated/plans/index.json"]),
       });
-      expect(readFileSync(join(projectDir, "generated", "index.js"), "utf8")).toContain("const User_is");
-      expect(readFileSync(join(projectDir, "generated", "index.d.ts"), "utf8")).toContain("User_is");
+      const source = readFileSync(join(projectDir, "generated", "index.ts"), "utf8");
+      expect(source).toContain("const User_is");
+      expect(source).toContain("value is");
     });
 
     it("rejects roots, declaration files, and outputs outside the MCP workspace", async () => {

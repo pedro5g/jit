@@ -178,6 +178,43 @@ describe("JIT AOT generate", () => {
     ).not.toThrow();
   });
 
+  it("should emit JavaScript without declaration artifacts when explicitly requested", () => {
+    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
+    const isUser = JIT.validate(User).is().compile();
+    const result = AOT.generate({
+      schemas: {},
+      functions: { isUser },
+      outDir,
+      format: "javascript-only",
+    });
+
+    expect(result.files).toEqual([join(outDir, "index.js")]);
+    expect(existsSync(join(outDir, "index.js"))).toBe(true);
+    expect(existsSync(join(outDir, "index.d.ts"))).toBe(false);
+  });
+
+  it("should emit standalone functions against named structural schema types", () => {
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      name: JIT.string().min(2),
+      role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
+    });
+    const isUser = JIT.validate(User).is().compile();
+
+    AOT.generate({
+      schemas: {},
+      typeSchemas: { User },
+      functions: { isUser },
+      outDir,
+      format: "typescript",
+    });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+
+    expect(source).toContain('export type User = { id: number; name: string; role: "admin" | "member" };');
+    expect(source).toContain("const isUser: (value: unknown) => value is User =");
+    expect(source).not.toContain('import("@jit-compiler/jit")');
+  });
+
   it("should emit selected DTO validation, transport, and whitelist mappers", async () => {
     const User = JIT.object({ id: JIT.number().int32(), fullName: JIT.string(), passwordHash: JIT.string() });
     const PublicUser = JIT.object({ id: JIT.number().int32(), name: JIT.string() });

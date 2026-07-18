@@ -51,7 +51,8 @@ interface GenerateArguments {
   readonly outputFormat: AotOutputFormat | undefined;
 }
 
-interface ResolvedAotInputs extends GenerateArguments {
+interface ResolvedAotInputs extends Omit<GenerateArguments, "outputFormat"> {
+  readonly outputFormat: AotOutputFormat;
   readonly configFile: string | undefined;
   readonly resolvedOut: string;
   readonly types: JitConfig["types"] | undefined;
@@ -83,8 +84,8 @@ export interface InitArguments {
 export type ConfigFormat = (typeof CONFIG_FORMATS)[number];
 
 const USAGE = `Usage:
-  jit init [--force] [--format ts|mts|mjs|cjs] [--output-format js|ts] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
-  jit generate [files...] [--out <dir>] [--output-format js|ts] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
+  jit init [--force] [--format ts|mts|mjs|cjs] [--output-format ts|js|js-only] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
+  jit generate [files...] [--out <dir>] [--output-format ts|js|js-only] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
   jit doctor [files...] [--pattern <glob>]
   jit explain [files...] [--pattern <glob>]
   jit list [files...] [--pattern <glob>]
@@ -155,7 +156,7 @@ async function runGenerate(
   }
 
   const runOnce = async (): Promise<number> => {
-    const { schemas, functions, sources } = await collectSchemas(files);
+    const { schemas, typeSchemas, functions, sources } = await collectSchemas(files);
 
     if (Object.keys(schemas).length === 0 && Object.keys(functions).length === 0) {
       stderr(
@@ -166,6 +167,7 @@ async function runGenerate(
 
     const result = generate({
       schemas,
+      typeSchemas,
       functions,
       sources,
       outDir: resolvedOut,
@@ -224,7 +226,7 @@ async function runDoctor(parsed: GenerateArguments, cwd: string, stdout: (text: 
   stdout(`cwd: ${cwd}\n`);
   stdout(`config: ${resolved.configFile ?? "not found"}\n`);
   stdout(`outDir: ${resolved.resolvedOut}\n`);
-  stdout(`format: ${resolved.outputFormat ?? "javascript"}\n`);
+  stdout(`format: ${resolved.outputFormat ?? "typescript"}\n`);
   const packageLayout = resolved.resolvedOut.split(/[\\/]+/).includes("node_modules");
 
   stdout(`layout: ${packageLayout ? "package" : "local"}\n`);
@@ -331,7 +333,7 @@ async function runInspect(
     return 1;
   }
 
-  const { schemas, functions, sources } = await collectSchemas(resolved.files);
+  const { schemas, typeSchemas, functions, sources } = await collectSchemas(resolved.files);
   const schema = schemas[parsed.target];
   const fn = functions[parsed.target];
 
@@ -368,13 +370,26 @@ async function runInspect(
     try {
       generate({
         schemas,
+        typeSchemas,
         functions,
         sources,
         outDir: tempDir,
         clean: true,
+        format: resolved.outputFormat,
       });
-      const file = parsed.stage === "source" ? "index.js" : "index.d.ts";
+      const file =
+        resolved.outputFormat === "typescript"
+          ? "index.ts"
+          : parsed.stage === "source"
+            ? "index.js"
+            : resolved.outputFormat === "javascript"
+              ? "index.d.ts"
+              : undefined;
 
+      if (!file) {
+        stderr('output format "javascript-only" does not emit declarations\n');
+        return 1;
+      }
       stdout(readFileSync(join(tempDir, file), "utf8"));
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -438,7 +453,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     patterns,
     clean,
     emit,
-    outputFormat,
+    outputFormat: outputFormat ?? "typescript",
     types,
     configFile,
     resolvedOut: outDir ?? resolve(cwd, DEFAULT_OUT_DIR),
@@ -646,8 +661,8 @@ export function createConfigSource(options: InitArguments): string {
     "  output: {",
     "    /** Destination relative to this config file. */",
     `    directory: ${JSON.stringify(options.outDir)},`,
-    '    /** Use "typescript" for one directly consumable, typed source module. */',
-    `    format: ${JSON.stringify(options.outputFormat ?? "javascript")},`,
+    '    /** "typescript" is safest; "javascript" adds .d.ts; "javascript-only" omits declarations. */',
+    `    format: ${JSON.stringify(options.outputFormat ?? "typescript")},`,
     ...(options.packageName && options.outDir.split(/[\\/]+/).includes("node_modules")
       ? [
           "    /** Namespace override for this generated node_modules package. */",
@@ -717,6 +732,7 @@ function parseFormat(value: string): ConfigFormat {
 
 function parseOutputFormat(value: string): AotOutputFormat {
   if (value === "js" || value === "javascript") return "javascript";
+  if (value === "js-only" || value === "javascript-only") return "javascript-only";
   if (value === "ts" || value === "typescript") return "typescript";
   throw new Error(`unknown output format "${value}"`);
 }

@@ -21,15 +21,15 @@ export interface JitConfig {
   /** Runtime and declaration output. Its location determines the module layout. */
   readonly output?: {
     /**
-     * Generated directory relative to the config file. A project directory
-     * emits `index.js` plus `index.d.ts`; a directory below `node_modules`
-     * emits a namespaced dual ESM/CJS package with an exports map.
+     * Generated directory relative to the config file. TypeScript output
+     * emits `index.ts`; JavaScript emits JS plus declarations. A directory
+     * below `node_modules` can emit a namespaced dual ESM/CJS package.
      * @default "generated/jit"
      */
     readonly directory?: string;
     /**
-     * Emit executable JavaScript plus declarations, or one self-contained
-     * TypeScript source module. @default "javascript"
+     * Emit one self-contained TypeScript module, JavaScript plus declarations,
+     * or JavaScript without declarations. @default "typescript"
      */
     readonly format?: AotOutputFormat;
     /** Package namespace for output below `node_modules`; otherwise inferred from the path. */
@@ -187,6 +187,8 @@ export function isSchemaInput(candidate: unknown): candidate is SchemaInput {
 export interface CollectedSchemas {
   /** Export name -> object-style `JIT.compile(schema, { ... })` marker. */
   readonly schemas: Record<string, SchemaInput>;
+  /** Export name -> raw schema used to emit a structural type alias. */
+  readonly typeSchemas: Record<string, SchemaInput>;
   /** Export name -> standalone compiled function/object registered by JIT. */
   readonly functions: Record<string, unknown>;
   /** Export name -> file it came from (collision reporting and d.ts anchoring). */
@@ -196,6 +198,7 @@ export interface CollectedSchemas {
 /** Loads every file and collects AOT-buildable exports; name collisions throw. */
 export async function collectSchemas(files: readonly string[]): Promise<CollectedSchemas> {
   const schemas: Record<string, SchemaInput> = {};
+  const typeSchemas: Record<string, SchemaInput> = {};
   const functions: Record<string, unknown> = {};
   const sources = new Map<string, string>();
 
@@ -206,8 +209,9 @@ export async function collectSchemas(files: readonly string[]): Promise<Collecte
       const value = loaded[name];
       const buildableSchema = isAotObjectInput(value);
       const buildableFunction = getArtifact(value) !== undefined;
+      const typeSchema = isSchemaInput(value) && !buildableSchema;
 
-      if (!buildableSchema && !buildableFunction) continue;
+      if (!buildableSchema && !buildableFunction && !typeSchema) continue;
 
       const previous = sources.get(name);
 
@@ -220,11 +224,15 @@ export async function collectSchemas(files: readonly string[]): Promise<Collecte
 
       if (buildableSchema) schemas[name] = value;
       else functions[name] = value;
+      if (typeSchema) {
+        delete functions[name];
+        typeSchemas[name] = value;
+      }
       sources.set(name, file);
     }
   }
 
-  return { schemas, functions, sources };
+  return { schemas, typeSchemas, functions, sources };
 }
 
 function isAotObjectInput(candidate: unknown): candidate is SchemaInput {

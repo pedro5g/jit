@@ -133,6 +133,7 @@ export async function previewAot(args: Readonly<Record<string, unknown>>, worksp
   try {
     const result = generate({
       schemas: collected.schemas,
+      typeSchemas: collected.typeSchemas,
       functions: collected.functions,
       sources: collected.sources,
       outDir: tempDir,
@@ -178,6 +179,7 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
   assertBuildable(collected.schemas, collected.functions, resolved.files);
   const result = generate({
     schemas: collected.schemas,
+    typeSchemas: collected.typeSchemas,
     functions: collected.functions,
     sources: collected.sources,
     outDir: resolved.outDir,
@@ -462,7 +464,9 @@ async function resolveAotProject(
     "@jit-compiler/jit";
   const clean = readOptionalBoolean(args, "clean") ?? output?.clean ?? config.clean ?? true;
   const outputFormat =
-    readEnum(args, "outputFormat", ["javascript", "typescript"] as const) ?? output?.format ?? "javascript";
+    readEnum(args, "outputFormat", ["typescript", "javascript", "javascript-only"] as const) ??
+    output?.format ??
+    "typescript";
   const emit = config.emit || emitOverride ? { ...config.emit, ...emitOverride } : undefined;
 
   return {
