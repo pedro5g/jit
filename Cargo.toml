@@ -1,0 +1,48 @@
+[workspace]
+resolver = "3"
+members = [
+  "packages/jit-artifact",
+  "packages/jit-artifact-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+authors = ["Pedro Martins (pedro5g)"]
+license = "MIT"
+repository = "https://github.com/pedro5g/jit"
+
+[workspace.dependencies]
+blake3 = "1.8"
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+similar = "2.7"
+tempfile = "3.27"
+thiserror = "2.0"
+rebyte-artifact-token = { git = "https://github.com/pedro5g/Rebyte.git", rev = "63888261256449e545781cdda02d3b39f927018c" }
+rebyte-compression = { git = "https://github.com/pedro5g/Rebyte.git", rev = "63888261256449e545781cdda02d3b39f927018c" }
+rebyte-format = { git = "https://github.com/pedro5g/Rebyte.git", rev = "63888261256449e545781cdda02d3b39f927018c" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

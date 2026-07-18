@@ -1,0 +1,875 @@
+//! Native JIT artifact CLI.
+
+#![forbid(unsafe_code)]
+
+mod config;
+mod fs_ops;
+
+use std::fmt;
+use std::fs;
+use std::io::{self, IsTerminal as _, Read as _, Write as _};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use clap::{Args, CommandFactory as _, Parser, Subcommand, ValueEnum};
+use clap_complete::{Shell, generate};
+use jit_artifact::{
+    ArtifactFile, ArtifactReport, Compression, PackOptions, Profile, VerifiedArtifact, decode, pack,
+};
+use rebyte_format::{RelativeArtifactPath, SecurityLimits};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::config::Config;
+
+const MAX_STDIN_BYTES: u64 = SecurityLimits::SIMPLE_ARTIFACT.max_token_bytes;
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "jit-artifact",
+    version,
+    about = "Verify and reconstruct generated JIT TypeScript exactly",
+    long_about = "Creates deterministic byte-exact JIT tokens and reconstructs them without network access, dependency installation, command execution or lifecycle hooks."
+)]
+struct Cli {
+    /// JSON configuration file. Defaults to ./jit.artifact.json when present.
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Create a documented jit.artifact.json in the project root.
+    Init(InitCommand),
+    /// Pack a generated file tree into a deterministic jit1_ token.
+    Pack(PackCommand),
+    /// Inspect bounded metadata after complete integrity verification.
+    Inspect(ReadCommand),
+    /// Verify structure, decompression and every content digest.
+    Verify(ReadCommand),
+    /// Compare verified artifact bytes with a local output directory.
+    Diff(OutputCommand),
+    /// Preview and atomically reconstruct a verified artifact.
+    Apply(ApplyCommand),
+    /// Compute a BLAKE3 digest for a local file.
+    Hash(HashCommand),
+    /// List retained and completed artifact transactions.
+    Transactions(RootCommand),
+    /// Restore a retained backup from one transaction.
+    Rollback(RollbackCommand),
+    /// Report protocol, config and platform capabilities.
+    Doctor(DoctorCommand),
+    /// Generate shell completion definitions.
+    Completions {
+        /// Target shell.
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+}
+
+#[derive(Debug, Args)]
+struct InitCommand {
+    /// Configuration path.
+    #[arg(default_value = "jit.artifact.json")]
+    path: PathBuf,
+    /// Replace an existing configuration.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Debug, Args)]
+struct PackCommand {
+    /// Generated file or directory to encode.
+    input: PathBuf,
+    /// Suggested relative reconstruction directory.
+    #[arg(long)]
+    output_root: Option<String>,
+    /// Compression strategy.
+    #[arg(long, value_enum)]
+    compression: Option<CompressionArgument>,
+    /// Compression effort.
+    #[arg(long, value_enum)]
+    profile: Option<ProfileArgument>,
+    /// Disable adaptive dictionary training.
+    #[arg(long)]
+    no_dictionary: bool,
+    /// Write the token to a new file instead of stdout.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    /// Emit a stable JSON report.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReadCommand {
+    #[command(flatten)]
+    input: TokenInput,
+    /// Emit a stable JSON report.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct OutputCommand {
+    #[command(flatten)]
+    input: TokenInput,
+    /// Project root that confines every file action.
+    #[arg(long, default_value = ".")]
+    root: PathBuf,
+    /// Relative output directory; overrides token metadata and config.
+    #[arg(long)]
+    output_root: Option<String>,
+    /// Include unified text patches.
+    #[arg(long)]
+    patch: bool,
+    /// Emit a stable JSON report.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ApplyCommand {
+    #[command(flatten)]
+    output: OutputCommand,
+    /// Verify and preview without modifying the filesystem.
+    #[arg(long)]
+    dry_run: bool,
+    /// Skip confirmation; never skips verification or path checks.
+    #[arg(long)]
+    yes: bool,
+    /// Existing-output policy.
+    #[arg(long, value_enum)]
+    conflict: Option<ConflictArgument>,
+}
+
+#[derive(Debug, Args)]
+struct HashCommand {
+    /// Regular file to hash.
+    file: PathBuf,
+    /// Check the digest instead of only printing it.
+    #[arg(long)]
+    expected: Option<String>,
+    /// Emit a stable JSON report.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct RootCommand {
+    /// Project root.
+    #[arg(long, default_value = ".")]
+    root: PathBuf,
+    /// Emit a stable JSON report.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct RollbackCommand {
+    /// Transaction identifier.
+    id: String,
+    /// Project root.
+    #[arg(long, default_value = ".")]
+    root: PathBuf,
+    /// Emit a stable JSON report.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct DoctorCommand {
+    /// Project root.
+    #[arg(long, default_value = ".")]
+    root: PathBuf,
+    /// Emit a stable JSON report.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct TokenInput {
+    /// Inline jit1_ token, or - to read standard input.
+    #[arg(value_name = "TOKEN", conflicts_with = "file")]
+    token: Option<String>,
+    /// Read a token from a file.
+    #[arg(long, value_name = "PATH")]
+    file: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, ValueEnum)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConflictArgument {
+    Abort,
+    Overwrite,
+    Backup,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum CompressionArgument {
+    Auto,
+    Zstd,
+    None,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum ProfileArgument {
+    Fast,
+    Balanced,
+    Maximum,
+}
+
+#[derive(Debug, Error)]
+#[error("{message}")]
+pub(crate) struct CliError {
+    code: u8,
+    message: String,
+}
+
+impl CliError {
+    fn new(code: u8, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn usage(message: impl Into<String>) -> Self {
+        Self::new(2, message)
+    }
+
+    pub(crate) fn config(message: impl Into<String>) -> Self {
+        Self::new(3, message)
+    }
+
+    pub(crate) fn integrity(message: impl Into<String>) -> Self {
+        Self::new(4, message)
+    }
+
+    pub(crate) fn unsafe_path(message: impl Into<String>) -> Self {
+        Self::new(5, message)
+    }
+
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
+        Self::new(6, message)
+    }
+
+    pub(crate) fn io(message: impl Into<String>) -> Self {
+        Self::new(7, message)
+    }
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("jit-artifact error: {error}");
+            ExitCode::from(error.code)
+        }
+    }
+}
+
+fn run() -> Result<(), CliError> {
+    let cli = Cli::parse();
+    let cwd = std::env::current_dir()
+        .map_err(|error| CliError::io(format!("cannot read cwd: {error}")))?;
+    let (config, config_file) = config::load(cli.config.as_deref(), &cwd)?;
+
+    match cli.command {
+        Command::Init(command) => run_init(&command),
+        Command::Pack(command) => run_pack(&command, &config),
+        Command::Inspect(command) => run_inspect(&command),
+        Command::Verify(command) => run_verify(&command),
+        Command::Diff(command) => run_diff(&command, &config),
+        Command::Apply(command) => run_apply(&command, &config),
+        Command::Hash(command) => run_hash(&command),
+        Command::Transactions(command) => run_transactions(&command),
+        Command::Rollback(command) => run_rollback(&command),
+        Command::Doctor(command) => run_doctor(&command, &config, config_file.as_deref()),
+        Command::Completions { shell } => {
+            generate(
+                shell,
+                &mut Cli::command(),
+                "jit-artifact",
+                &mut io::stdout(),
+            );
+            Ok(())
+        }
+    }
+}
+
+fn run_init(command: &InitCommand) -> Result<(), CliError> {
+    if command.path.exists() && !command.force {
+        return Err(CliError::conflict(format!(
+            "{} already exists; pass --force to replace it",
+            command.path.display()
+        )));
+    }
+    let source = concat!(
+        "{\n",
+        "  \"schemaVersion\": 1,\n",
+        "  \"outputRoot\": \"src/generated/jit\",\n",
+        "  \"compression\": \"auto\",\n",
+        "  \"profile\": \"balanced\",\n",
+        "  \"dictionary\": true,\n",
+        "  \"conflict\": \"abort\"\n",
+        "}\n"
+    );
+    if command.force {
+        let parent = command.path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).map_err(|error| {
+            CliError::io(format!("cannot create {}: {error}", parent.display()))
+        })?;
+        fs::write(&command.path, source).map_err(|error| {
+            CliError::io(format!("cannot write {}: {error}", command.path.display()))
+        })?;
+    } else {
+        write_new(&command.path, source.as_bytes())?;
+    }
+    println!("created {}", command.path.display());
+    Ok(())
+}
+
+fn run_pack(command: &PackCommand, config: &Config) -> Result<(), CliError> {
+    let files = read_artifact_files(&command.input)?;
+    let options = PackOptions {
+        suggested_path: command
+            .output_root
+            .clone()
+            .or_else(|| config.output_root.clone()),
+        compression: compression(command.compression, config.compression.as_deref())?,
+        profile: profile(command.profile, config.profile.as_deref())?,
+        dictionary: if command.no_dictionary {
+            false
+        } else {
+            config.dictionary.unwrap_or(true)
+        },
+    };
+    let (token, report) =
+        pack(&files, &options).map_err(|error| CliError::integrity(error.to_string()))?;
+
+    if let Some(output) = &command.output {
+        write_new(output, format!("{token}\n").as_bytes())?;
+    }
+    if command.json {
+        print_json(&PackReport {
+            report,
+            token: command.output.is_none().then_some(token),
+            output: command
+                .output
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+        })
+    } else if command.output.is_none() {
+        println!("{token}");
+        Ok(())
+    } else {
+        println!(
+            "wrote {}",
+            command
+                .output
+                .as_ref()
+                .map_or_else(String::new, |path| path.display().to_string())
+        );
+        Ok(())
+    }
+}
+
+fn run_inspect(command: &ReadCommand) -> Result<(), CliError> {
+    let artifact = read_verified(&command.input)?;
+    if command.json {
+        print_json(&artifact.report())
+    } else {
+        print_report(&artifact.report(), "integrity verified");
+        Ok(())
+    }
+}
+
+fn run_verify(command: &ReadCommand) -> Result<(), CliError> {
+    let artifact = read_verified(&command.input)?;
+    if command.json {
+        print_json(&VerifyReport {
+            valid: true,
+            report: artifact.report(),
+        })
+    } else {
+        print_report(
+            &artifact.report(),
+            "valid, byte-exact, publisher unauthenticated",
+        );
+        Ok(())
+    }
+}
+
+fn run_diff(command: &OutputCommand, config: &Config) -> Result<(), CliError> {
+    let artifact = read_verified(&command.input)?;
+    let output = fs_ops::resolve_output(
+        &command.root,
+        command
+            .output_root
+            .as_deref()
+            .or(config.output_root.as_deref()),
+        &artifact,
+    )?;
+    let mut report = fs_ops::diff(&artifact, &output)?;
+    if !command.patch {
+        for file in &mut report.files {
+            file.patch = None;
+        }
+    }
+    if command.json {
+        print_json(&report)
+    } else {
+        print_diff(&report);
+        Ok(())
+    }
+}
+
+fn run_apply(command: &ApplyCommand, config: &Config) -> Result<(), CliError> {
+    let artifact = read_verified(&command.output.input)?;
+    let output = fs_ops::resolve_output(
+        &command.output.root,
+        command
+            .output
+            .output_root
+            .as_deref()
+            .or(config.output_root.as_deref()),
+        &artifact,
+    )?;
+    let mut report = fs_ops::diff(&artifact, &output)?;
+    if !command.output.patch {
+        for file in &mut report.files {
+            file.patch = None;
+        }
+    }
+
+    if command.output.json {
+        print_json(&report)?;
+    } else {
+        print_report(
+            &artifact.report(),
+            "integrity verified; publisher unauthenticated",
+        );
+        print_diff(&report);
+        println!("No dependencies will be installed. No commands will be executed.");
+    }
+    if command.dry_run {
+        return Ok(());
+    }
+    if !command.yes && !confirm()? {
+        return Err(CliError::conflict("cancelled"));
+    }
+    let conflict = command
+        .conflict
+        .or(config.conflict)
+        .unwrap_or(ConflictArgument::Abort);
+    let applied = fs_ops::apply(&artifact, &output, &command.output.root, conflict)?;
+    if command.output.json {
+        print_json(&applied)
+    } else {
+        println!(
+            "applied {} file(s), {} byte(s) to {}",
+            applied.files_written, applied.bytes_written, applied.output
+        );
+        if let Some(backup) = applied.backup {
+            println!("backup retained at {backup}");
+        }
+        Ok(())
+    }
+}
+
+fn run_hash(command: &HashCommand) -> Result<(), CliError> {
+    let metadata = fs::symlink_metadata(&command.file).map_err(|error| {
+        CliError::io(format!(
+            "cannot inspect {}: {error}",
+            command.file.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CliError::unsafe_path("hash input must be a regular file"));
+    }
+    let bytes = fs::read(&command.file).map_err(|error| {
+        CliError::io(format!("cannot read {}: {error}", command.file.display()))
+    })?;
+    let digest = blake3::hash(&bytes).to_hex().to_string();
+    let matches = command
+        .expected
+        .as_ref()
+        .is_none_or(|expected| expected.eq_ignore_ascii_case(&digest));
+    if !matches {
+        return Err(CliError::integrity(format!("digest mismatch: {digest}")));
+    }
+    if command.json {
+        print_json(&HashReport {
+            file: command.file.to_string_lossy().into_owned(),
+            digest,
+            matches,
+        })
+    } else {
+        println!("{digest}  {}", command.file.display());
+        Ok(())
+    }
+}
+
+fn run_transactions(command: &RootCommand) -> Result<(), CliError> {
+    let transactions = fs_ops::list_transactions(&command.root)?;
+    if command.json {
+        print_json(&transactions)
+    } else {
+        if transactions.is_empty() {
+            println!("no artifact transactions");
+        }
+        for transaction in transactions {
+            println!(
+                "{}\t{}\t{}",
+                transaction.id, transaction.state, transaction.output
+            );
+        }
+        Ok(())
+    }
+}
+
+fn run_rollback(command: &RollbackCommand) -> Result<(), CliError> {
+    let transaction = fs_ops::rollback(&command.root, &command.id)?;
+    if command.json {
+        print_json(&transaction)
+    } else {
+        println!("rolled back {} to {}", transaction.id, transaction.output);
+        Ok(())
+    }
+}
+
+fn run_doctor(
+    command: &DoctorCommand,
+    config: &Config,
+    config_file: Option<&Path>,
+) -> Result<(), CliError> {
+    let report = DoctorReport {
+        schema_version: 1,
+        protocol: "jit1",
+        authenticated_tokens: false,
+        config: config_file.map(|path| path.to_string_lossy().into_owned()),
+        output_root: config.output_root.clone(),
+        root: command.root.to_string_lossy().into_owned(),
+        max_token_bytes: SecurityLimits::SIMPLE_ARTIFACT.max_token_bytes,
+        max_output_bytes: SecurityLimits::SIMPLE_ARTIFACT.max_uncompressed_payload_bytes,
+        max_files: SecurityLimits::SIMPLE_ARTIFACT.max_file_count,
+    };
+    if command.json {
+        print_json(&report)
+    } else {
+        println!("jit-artifact doctor");
+        println!("protocol: {}", report.protocol);
+        println!(
+            "config: {}",
+            report.config.as_deref().unwrap_or("not found")
+        );
+        println!(
+            "outputRoot: {}",
+            report.output_root.as_deref().unwrap_or("not configured")
+        );
+        println!("publisher authentication: unavailable for jit1_ unsigned tokens");
+        println!(
+            "limits: token={} output={} files={}",
+            report.max_token_bytes, report.max_output_bytes, report.max_files
+        );
+        Ok(())
+    }
+}
+
+fn read_verified(input: &TokenInput) -> Result<VerifiedArtifact, CliError> {
+    let token = read_token(input)?;
+    decode(&token).map_err(|error| CliError::integrity(error.to_string()))
+}
+
+fn read_token(input: &TokenInput) -> Result<String, CliError> {
+    let bytes = if let Some(path) = &input.file {
+        read_bounded_file(path, MAX_STDIN_BYTES)?
+    } else {
+        let token = input
+            .token
+            .as_deref()
+            .ok_or_else(|| CliError::usage("TOKEN or --file is required"))?;
+        if token == "-" {
+            read_bounded(io::stdin().lock(), MAX_STDIN_BYTES)?
+        } else {
+            token.as_bytes().to_vec()
+        }
+    };
+    String::from_utf8(bytes)
+        .map(|token| token.trim().to_owned())
+        .map_err(|_| CliError::usage("token is not UTF-8"))
+}
+
+fn read_artifact_files(input: &Path) -> Result<Vec<ArtifactFile>, CliError> {
+    let metadata = fs::symlink_metadata(input)
+        .map_err(|error| CliError::io(format!("cannot inspect {}: {error}", input.display())))?;
+    if metadata.file_type().is_symlink() {
+        return Err(CliError::unsafe_path(
+            "artifact input cannot be a symbolic link",
+        ));
+    }
+    if metadata.is_file() {
+        let name = input
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| CliError::unsafe_path("input filename is not portable UTF-8"))?;
+        return Ok(vec![ArtifactFile::new(
+            name,
+            read_bounded_file(input, SecurityLimits::SIMPLE_ARTIFACT.max_single_file_bytes)?,
+        )]);
+    }
+    if !metadata.is_dir() {
+        return Err(CliError::usage(
+            "artifact input must be a regular file or directory",
+        ));
+    }
+    let mut files = Vec::new();
+    collect_files(input, input, &mut files)?;
+    Ok(files)
+}
+
+fn collect_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<ArtifactFile>,
+) -> Result<(), CliError> {
+    let mut entries = fs::read_dir(directory)
+        .map_err(|error| CliError::io(format!("cannot read {}: {error}", directory.display())))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| CliError::io(format!("cannot read directory entry: {error}")))?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| CliError::io(format!("cannot inspect {}: {error}", path.display())))?;
+        if metadata.file_type().is_symlink() {
+            return Err(CliError::unsafe_path(format!(
+                "symbolic link is forbidden: {}",
+                path.display()
+            )));
+        }
+        if metadata.is_dir() {
+            collect_files(root, &path, files)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(CliError::unsafe_path(format!(
+                "unsupported input: {}",
+                path.display()
+            )));
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| CliError::unsafe_path("input escaped source root"))?
+            .to_str()
+            .ok_or_else(|| CliError::unsafe_path("input path is not UTF-8"))?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        RelativeArtifactPath::new(&relative)
+            .map_err(|error| CliError::unsafe_path(format!("invalid input path: {error}")))?;
+        let bytes =
+            read_bounded_file(&path, SecurityLimits::SIMPLE_ARTIFACT.max_single_file_bytes)?;
+        files.push(ArtifactFile::new(relative, bytes).executable(is_executable(&metadata)));
+    }
+    Ok(())
+}
+
+fn read_bounded_file(path: &Path, maximum: u64) -> Result<Vec<u8>, CliError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| CliError::io(format!("cannot inspect {}: {error}", path.display())))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CliError::unsafe_path(format!(
+            "not a regular file: {}",
+            path.display()
+        )));
+    }
+    if metadata.len() > maximum {
+        return Err(CliError::usage(format!(
+            "{} has {} bytes; maximum is {maximum}",
+            path.display(),
+            metadata.len()
+        )));
+    }
+    let file = fs::File::open(path)
+        .map_err(|error| CliError::io(format!("cannot open {}: {error}", path.display())))?;
+    read_bounded(file, maximum)
+}
+
+fn read_bounded(mut reader: impl io::Read, maximum: u64) -> Result<Vec<u8>, CliError> {
+    let mut bytes = Vec::new();
+    reader
+        .by_ref()
+        .take(maximum.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| CliError::io(format!("cannot read input: {error}")))?;
+    let length =
+        u64::try_from(bytes.len()).map_err(|_| CliError::usage("input length overflow"))?;
+    if length > maximum {
+        return Err(CliError::usage(format!(
+            "input has {length} bytes; maximum is {maximum}"
+        )));
+    }
+    Ok(bytes)
+}
+
+fn write_new(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|error| CliError::io(format!("cannot create {}: {error}", parent.display())))?;
+    let mut file = fs::File::options()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| {
+            CliError::conflict(format!("cannot create {}: {error}", path.display()))
+        })?;
+    file.write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| CliError::io(format!("cannot write {}: {error}", path.display())))
+}
+
+fn compression(
+    value: Option<CompressionArgument>,
+    configured: Option<&str>,
+) -> Result<Compression, CliError> {
+    let value = value.map_or(configured.unwrap_or("auto"), |value| match value {
+        CompressionArgument::Auto => "auto",
+        CompressionArgument::Zstd => "zstd",
+        CompressionArgument::None => "none",
+    });
+    match value {
+        "auto" => Ok(Compression::Auto),
+        "zstd" => Ok(Compression::Zstd),
+        "none" => Ok(Compression::None),
+        other => Err(CliError::config(format!("unknown compression {other:?}"))),
+    }
+}
+
+fn profile(value: Option<ProfileArgument>, configured: Option<&str>) -> Result<Profile, CliError> {
+    let value = value.map_or(configured.unwrap_or("balanced"), |value| match value {
+        ProfileArgument::Fast => "fast",
+        ProfileArgument::Balanced => "balanced",
+        ProfileArgument::Maximum => "maximum",
+    });
+    match value {
+        "fast" => Ok(Profile::Fast),
+        "balanced" => Ok(Profile::Balanced),
+        "maximum" => Ok(Profile::Maximum),
+        other => Err(CliError::config(format!("unknown profile {other:?}"))),
+    }
+}
+
+fn confirm() -> Result<bool, CliError> {
+    if !io::stdin().is_terminal() {
+        return Err(CliError::conflict(
+            "confirmation requires a terminal; pass --yes in automation",
+        ));
+    }
+    eprint!("Apply these verified file changes? (y/N) ");
+    io::stderr()
+        .flush()
+        .map_err(|error| CliError::io(format!("cannot prompt: {error}")))?;
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| CliError::io(format!("cannot read confirmation: {error}")))?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
+}
+
+fn print_report(report: &ArtifactReport, status: &str) {
+    println!("JIT Artifact");
+    println!("  status: {status}");
+    println!("  digest: {}", report.envelope_digest);
+    println!(
+        "  files: {}  bytes: {} -> {}  compression: {}",
+        report.files.len(),
+        report.original_bytes,
+        report.stored_bytes,
+        report.compression
+    );
+    for file in &report.files {
+        println!("  - {} ({} bytes)", file.path, file.bytes);
+    }
+}
+
+fn print_diff(report: &fs_ops::DiffReport) {
+    println!(
+        "changes: {} create, {} update, {} unchanged",
+        report.creates, report.updates, report.unchanged
+    );
+    for file in &report.files {
+        println!("  {:9} {}", file.change.to_uppercase(), file.path);
+        if let Some(patch) = &file.patch {
+            print!("{patch}");
+        }
+    }
+}
+
+fn print_json(value: &impl Serialize) -> Result<(), CliError> {
+    serde_json::to_writer_pretty(io::stdout().lock(), value)
+        .map_err(|error| CliError::io(format!("cannot encode JSON: {error}")))?;
+    println!();
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackReport {
+    report: ArtifactReport,
+    token: Option<String>,
+    output: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyReport {
+    valid: bool,
+    report: ArtifactReport,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HashReport {
+    file: String,
+    digest: String,
+    matches: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DoctorReport {
+    schema_version: u16,
+    protocol: &'static str,
+    authenticated_tokens: bool,
+    config: Option<String>,
+    output_root: Option<String>,
+    root: String,
+    max_token_bytes: u64,
+    max_output_bytes: u64,
+    max_files: u32,
+}
+
+#[cfg(unix)]
+fn is_executable(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_metadata: &fs::Metadata) -> bool {
+    false
+}
+
+impl fmt::Display for ConflictArgument {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Abort => formatter.write_str("abort"),
+            Self::Overwrite => formatter.write_str("overwrite"),
+            Self::Backup => formatter.write_str("backup"),
+        }
+    }
+}

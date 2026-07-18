@@ -150,6 +150,9 @@ bench/results/
 # AOT modules generated at bench time
 bench/**/.generated/
 
+# Native Rust build artifacts
+/target/
+
 # Local agent instructions (machine-specific)
 CLAUDE.md
 

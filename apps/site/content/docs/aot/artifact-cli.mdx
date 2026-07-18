@@ -1,0 +1,176 @@
+---
+title: Artifact tokens and Rust CLI
+description: Move generated TypeScript as a deterministic token and reconstruct it safely.
+---
+
+The artifact CLI moves the exact files produced by AOT compilation to another
+checkout without running the compiler on that machine.
+
+```text
+generated TypeScript
+  -> canonical file tree
+  -> optional Zstandard compression
+  -> BLAKE3 content and envelope digests
+  -> URL-safe jit1_ token
+  -> verify, preview, confirm
+  -> atomic directory replacement
+```
+
+The token contains files and metadata only. It cannot contain commands,
+dependency installs, callbacks, URLs to execute, environment expansion or
+post-apply hooks.
+
+## Build the native CLI
+
+The Rust workspace uses a pinned Rebyte revision for canonical encoding,
+portable path validation, bounded decompression and BLAKE3 integrity.
+
+```bash
+pnpm artifact:build
+./target/release/jit-artifact --help
+```
+
+During development:
+
+```bash
+pnpm artifact:test
+pnpm artifact:lint
+```
+
+## Configuration
+
+Create `jit.artifact.json`:
+
+```bash
+jit-artifact init
+```
+
+```json title="jit.artifact.json"
+{
+  "schemaVersion": 1,
+  "outputRoot": "src/generated/jit",
+  "compression": "auto",
+  "profile": "balanced",
+  "dictionary": true,
+  "conflict": "abort"
+}
+```
+
+| Option          | Default        | Behavior                                                         |
+| --------------- | -------------- | ---------------------------------------------------------------- |
+| `schemaVersion` | `1`            | rejects config written for an unknown contract                   |
+| `outputRoot`    | token metadata | relative directory below the authorized project root             |
+| `compression`   | `auto`         | `auto`, `zstd` or `none`                                         |
+| `profile`       | `balanced`     | `fast`, `balanced` or `maximum` encoder effort                   |
+| `dictionary`    | `true`         | trains a dictionary only when the complete token becomes smaller |
+| `conflict`      | `abort`        | `abort`, `overwrite` or retained `backup`                        |
+
+CLI flags override JSON. Unknown JSON properties are rejected so misspelled
+security or output options cannot be silently ignored.
+
+## End-to-end flow
+
+Generate one directly consumable TypeScript tree:
+
+```bash
+pnpm jit generate --output-format ts
+```
+
+Pack it:
+
+```bash
+jit-artifact pack generated/jit \
+  --output-root src/generated/jit \
+  --output user-model.jit
+```
+
+`pack` walks paths in canonical order, rejects symbolic links and non-regular
+files, applies file-count/size limits, compresses, then decodes its own output
+before returning it. Equal files and options produce the same token.
+
+Inspect and verify:
+
+```bash
+jit-artifact inspect --file user-model.jit
+jit-artifact verify --file user-model.jit --json
+```
+
+Both commands perform complete bounded decoding and digest verification.
+`inspect` is not a shallow header parser.
+
+Compare without writing:
+
+```bash
+jit-artifact diff --file user-model.jit
+jit-artifact diff --file user-model.jit --patch
+```
+
+Apply:
+
+```bash
+jit-artifact apply --file user-model.jit
+```
+
+Before confirmation, the CLI displays creates, updates and optional unified
+patches, followed by the guarantee that it installs no dependencies and
+executes no commands.
+
+For CI:
+
+```bash
+jit-artifact apply --file user-model.jit \
+  --yes \
+  --conflict overwrite
+```
+
+`--yes` skips only interactive confirmation. It cannot disable verification,
+resource bounds or path confinement.
+
+## Atomic output and rollback
+
+The CLI stages every verified file in a sibling temporary directory, rereads
+the staged bytes, records a transaction journal, renames the previous output,
+and atomically swaps the complete generated directory. A failed commit restores
+the old directory before returning an error.
+
+Use retained backups when a deploy must be reversible:
+
+```bash
+jit-artifact apply --file user-model.jit --conflict backup
+jit-artifact transactions
+jit-artifact rollback <transaction-id>
+```
+
+`abort` is the default because replacing generated code should always be an
+explicit decision. `overwrite` removes the temporary backup after post-write
+verification. `backup` records it in `.jit-artifacts/transactions`.
+
+## Integrity is not identity
+
+`jit1_` is intentionally an unsigned local token. Its digests answer:
+
+> Are these exactly the bytes represented by this token?
+
+They do not answer:
+
+> Did the official JIT service create this token?
+
+The CLI therefore reports `publisher unauthenticated`. Official tokens require
+a server/native signing boundary with an Ed25519 private key. The Lab and WASM
+module must never receive that key. Browser output may be used locally or sent
+to a controlled backend that recompiles/revalidates before signing.
+
+## Defensive limits
+
+The pinned protocol limits token bytes, compressed bytes, decompressed bytes,
+single-file bytes, path length and entry count before exposing content. Paths
+must be normalized portable relatives; absolute paths, `..`, backslashes,
+Windows device names, control bytes and symlink crossings are rejected.
+
+```bash
+jit-artifact doctor
+jit-artifact hash src/generated/jit/index.ts
+jit-artifact completions zsh
+```
+
+`doctor` prints active limits and makes unsigned publisher status visible.

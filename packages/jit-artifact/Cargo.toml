@@ -1,0 +1,22 @@
+[package]
+name = "jit-artifact"
+description = "Deterministic byte-exact artifact tokens for generated JIT TypeScript"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["jit", "artifact", "typescript", "codegen"]
+categories = ["encoding"]
+
+[dependencies]
+hex.workspace = true
+rebyte-artifact-token.workspace = true
+rebyte-compression.workspace = true
+rebyte-format.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
