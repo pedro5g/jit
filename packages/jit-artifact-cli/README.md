@@ -54,6 +54,20 @@ jit-artifact transactions
 jit-artifact rollback <transaction-id>
 ```
 
+## Browser Lab
+
+The JIT site Lab emits the same `jit1_` protocol through WebAssembly. Download
+the token, then inspect or apply it without conversion:
+
+```bash
+jit-artifact inspect --file user-jit-artifact.txt
+jit-artifact apply --file user-jit-artifact.txt
+```
+
+The destination embedded by the Lab is an untrusted suggestion. Pass
+`--output-root` to override it; every destination remains confined below
+`--root`.
+
 ## Trust
 
 A `jit1_` token is unsigned. BLAKE3 digests prove that reconstructed bytes

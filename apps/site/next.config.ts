@@ -6,6 +6,7 @@ const withMDX = createMDX();
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  serverExternalPackages: ["@jit-compiler/jit", "@jit-compiler/jit/aot", "@jit-compiler/jit/runtime"],
   experimental: {
     optimizePackageImports: ["lucide-react", "motion"],
   },

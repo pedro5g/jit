@@ -9,6 +9,7 @@ export const navLinks = [
   { href: "/#operations", label: "Operations" },
   { href: "/benchmarks", label: "Benchmarks" },
   { href: "/playground", label: "Playground" },
+  { href: "/lab", label: "Lab" },
   { href: "/docs", label: "Docs" },
 ];
 

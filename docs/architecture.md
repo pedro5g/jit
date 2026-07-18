@@ -199,6 +199,31 @@ functions/objects are found, the CLI warns and writes nothing. TypeScript
 schema files load natively on runtimes that strip types, falling back to
 `jiti` when installed.
 
+## Reconstructive artifact boundary
+
+The Rust workspace separates artifact concerns into three packages:
+
+- `jit-artifact` is the filesystem-free protocol core. It wraps the pinned
+  Rebyte canonical artifact envelope with the `jit1_` prefix, performs bounded
+  decoding, validates portable relative paths and verifies BLAKE3 content and
+  envelope digests.
+- `jit-artifact-cli` owns native filesystem policy: config/flag resolution,
+  symlink rejection, previews, whole-tree staging, atomic swaps, transaction
+  journals and rollback.
+- `jit-artifact-wasm` exposes only pack and inspect. It has no filesystem,
+  process, network, hook, trust-store or signing API.
+
+The web Lab accepts a closed schema description, builds the schema with known
+JIT factories on the server, emits direct TypeScript in a temporary directory
+and returns exact files. WASM packs those bytes locally in the browser. The
+protocol contains files and metadata only; it cannot encode commands,
+dependency installation, URLs to execute or lifecycle hooks.
+
+`authenticated: false` is part of the report contract. BLAKE3 proves that
+decoded bytes match the token, not who published it. A future authenticated
+capsule must sign at a server/native boundary; private keys must never enter
+the browser bundle.
+
 ## Optimizer boundaries
 
 Equal-only passes (inline-vars, optimize-cost, reorder-compares, ...) must

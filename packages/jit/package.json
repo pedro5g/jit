@@ -37,6 +37,7 @@
       "./package.json": "./package.json",
       ".": "./src/index.ts",
       "./cli": "./src/cli.ts",
+      "./aot": "./src/aot/index.ts",
       "./runtime": "./src/runtime.ts",
       "./define": "./src/define.ts",
       "./mcp": "./src/mcp.ts"
@@ -84,6 +85,12 @@
       "types": "./cli.d.cts",
       "import": "./cli.js",
       "require": "./cli.cjs"
+    },
+    "./aot": {
+      "@jit/source": "./src/aot/index.ts",
+      "types": "./aot/index.d.cts",
+      "import": "./aot/index.js",
+      "require": "./aot/index.cjs"
     },
     "./runtime": {
       "@jit/source": "./src/runtime.ts",

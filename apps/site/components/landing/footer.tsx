@@ -10,6 +10,7 @@ const columns = [
       { href: "/docs/quick-start", label: "Quick start", external: false },
       { href: "/benchmarks", label: "Benchmarks", external: false },
       { href: "/playground", label: "Playground", external: false },
+      { href: "/lab", label: "Artifact Lab", external: false },
     ],
   },
   {

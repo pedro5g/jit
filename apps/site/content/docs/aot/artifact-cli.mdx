@@ -88,6 +88,45 @@ jit-artifact pack generated/jit \
 files, applies file-count/size limits, compresses, then decodes its own output
 before returning it. Equal files and options produce the same token.
 
+## Artifact Lab
+
+Open [/lab](/lab) to build a schema without installing the CLI. The editor
+selects fields, constraints and only the operations that should survive AOT.
+Generation has three explicit stages:
+
+1. The browser sends a bounded JSON schema description to the Node route.
+2. The server constructs known JIT factories and emits typed, import-free
+   `index.ts`; it does not evaluate user-provided TypeScript.
+3. The browser WASM package canonicalizes the returned files, computes BLAKE3
+   digests and returns a `jit1_` token.
+
+The TypeScript tab shows the exact bytes inside the token. The digest in the
+status bar is the complete envelope hash; changing a path, byte or metadata
+value changes it. The Token tab can re-inspect pasted tokens entirely in WASM.
+
+Download the token and use it with the native CLI:
+
+```bash
+jit-artifact inspect --file user-jit-artifact.txt
+jit-artifact diff --file user-jit-artifact.txt --patch
+jit-artifact apply --file user-jit-artifact.txt
+```
+
+The token's `outputRoot` is only a suggestion. `--root` confines filesystem
+access and `--output-root` lets the developer choose a different relative
+destination:
+
+```bash
+jit-artifact apply --file user-jit-artifact.txt \
+  --root . \
+  --output-root src/generated/jit
+```
+
+The WASM encoder stores browser files verbatim to keep the module small and
+the interaction responsive. Native `pack` supports adaptive Zstandard and
+dictionary compression for larger generated trees. Both encoders use the same
+versioned envelope and native commands accept browser tokens directly.
+
 Inspect and verify:
 
 ```bash

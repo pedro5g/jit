@@ -954,7 +954,9 @@ function buildSubpathModules(
 }
 
 function writePackageJson(outDir: string, packageName: string, modules: readonly SubpathModule[]): string {
-  const typescript = modules[0]?.files.some((file) => file.endsWith(".ts")) ?? existsSync(join(outDir, "index.ts"));
+  const typescript =
+    modules[0]?.files.some((file) => file.endsWith(".ts")) ??
+    existsSync(join(/* turbopackIgnore: true */ outDir, "index.ts"));
   if (typescript) {
     const exportsMap: Record<string, unknown> = {
       "./package.json": "./package.json",
@@ -1109,7 +1111,7 @@ function writePlans(
   modules: readonly SubpathModule[],
   options: GenerateOptions
 ): readonly string[] {
-  const plansDir = join(outDir, "plans");
+  const plansDir = join(/* turbopackIgnore: true */ outDir, "plans");
 
   mkdirSync(plansDir, { recursive: true });
 
@@ -1306,7 +1308,12 @@ function serializeBindingValue(value: unknown): string | undefined {
  * (nodenext resolves them back to the source at typecheck time).
  */
 function typeImportSpecifier(outDir: string, sourceFile: string): string {
-  const relativePath = relative(resolve(outDir), resolve(sourceFile)).split("\\").join("/");
+  const relativePath = relative(
+    resolve(/* turbopackIgnore: true */ outDir),
+    resolve(/* turbopackIgnore: true */ sourceFile)
+  )
+    .split("\\")
+    .join("/");
   const mapped = relativePath
     .replace(/\.mts$/, ".mjs")
     .replace(/\.cts$/, ".cjs")
@@ -1316,7 +1323,12 @@ function typeImportSpecifier(outDir: string, sourceFile: string): string {
 }
 
 function manifestSourceSpecifier(outDir: string, sourceFile: string): string {
-  const relativePath = relative(resolve(outDir), resolve(sourceFile)).split("\\").join("/");
+  const relativePath = relative(
+    resolve(/* turbopackIgnore: true */ outDir),
+    resolve(/* turbopackIgnore: true */ sourceFile)
+  )
+    .split("\\")
+    .join("/");
 
   return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
 }
@@ -1344,7 +1356,7 @@ function resolveOutputLayout(
   configuredPackageName: string | undefined,
   format: AotOutputFormat
 ): OutputLayout {
-  const segments = resolve(outDir).split(/[\\/]+/);
+  const segments = resolve(/* turbopackIgnore: true */ outDir).split(/[\\/]+/);
   const nodeModulesIndex = segments.lastIndexOf("node_modules");
 
   if (nodeModulesIndex < 0) {
@@ -1412,7 +1424,7 @@ function indentBlock(source: string): string[] {
 }
 
 function writeFile(dir: string, name: string, content: string): string {
-  const path = join(dir, name);
+  const path = join(/* turbopackIgnore: true */ dir, name);
 
   writeFileSync(path, content);
   return path;
@@ -1422,18 +1434,21 @@ function cleanGeneratedFiles(dir: string): void {
   const manifest = readGeneratedManifest(dir);
 
   for (const file of manifest.files) {
-    rmSync(join(dir, file), { force: true });
+    rmSync(join(/* turbopackIgnore: true */ dir, file), { force: true });
   }
 
   for (const file of GENERATED_FILES) {
-    rmSync(join(dir, file), { force: true });
+    rmSync(join(/* turbopackIgnore: true */ dir, file), { force: true });
   }
-  if (isGeneratedPackageJson(dir)) rmSync(join(dir, "package.json"), { force: true });
-  rmSync(join(dir, "plans"), { recursive: true, force: true });
+  if (isGeneratedPackageJson(dir)) {
+    rmSync(join(/* turbopackIgnore: true */ dir, "package.json"), { force: true });
+  }
+  rmSync(join(/* turbopackIgnore: true */ dir, "plans"), { recursive: true, force: true });
 }
 
 function isGeneratedPackageJson(dir: string): boolean {
-  const path = join(dir, "package.json");
+  // Build tools must not trace a caller-selected output directory as an input.
+  const path = join(/* turbopackIgnore: true */ dir, "package.json");
 
   if (!existsSync(path)) return false;
   try {
@@ -1450,7 +1465,8 @@ function isGeneratedPackageJson(dir: string): boolean {
 }
 
 function readGeneratedManifest(dir: string): { readonly files: readonly string[] } {
-  const path = join(dir, "manifest.json");
+  // The manifest is runtime output, never part of the importing app bundle.
+  const path = join(/* turbopackIgnore: true */ dir, "manifest.json");
 
   if (!existsSync(path)) return { files: [] };
 

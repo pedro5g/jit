@@ -28,6 +28,30 @@ the operations explicitly selected by the application and emits standalone,
 typed, import-free functions so the compiler does not ship in the production
 bundle.
 
+## Portable AOT Artifacts
+
+Direct TypeScript output keeps generated code inside the application's normal
+type-check and bundling pipeline:
+
+```sh
+pnpm jit generate --output-format ts
+```
+
+The Rust `jit-artifact` CLI can then turn the exact generated tree into a
+deterministic `jit1_` token, verify it, preview changes and reconstruct it with
+an atomic directory swap:
+
+```sh
+pnpm artifact:build
+./target/release/jit-artifact pack generated/jit --output user.jit
+./target/release/jit-artifact apply --file user.jit
+```
+
+The [Artifact Lab](https://jit-site.vercel.app/lab) provides the same token
+format in the browser through a filesystem-free WASM module. Browser tokens
+prove byte integrity with BLAKE3; they intentionally do not claim publisher
+identity.
+
 ## New In 1.0.4
 
 The `1.0.4` release adds configurable source-compiled sanitization, reactive
@@ -83,6 +107,7 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 - [DTO aggregates](https://jit-site.vercel.app/docs/runtime/dtos)
 - [Entity, keyed, and index guide](https://jit-site.vercel.app/docs/reference/operators/entity-keyed-and-indexes)
 - [Executable runtime and AOT examples](packages/examples/README.md)
+- [Artifact tokens and Rust CLI](apps/site/content/docs/aot/artifact-cli.mdx)
 - [MCP server](docs/features/mcp-server.md)
 - [AOT audit](docs/aot/audit.md)
 - [Release process](docs/maintainers/releases.md)

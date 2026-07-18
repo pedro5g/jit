@@ -1,0 +1,21 @@
+[package]
+name = "jit-artifact-wasm"
+description = "Browser-safe JIT artifact packing and structural verification"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jit-artifact = { path = "../jit-artifact" }
+serde.workspace = true
+serde-wasm-bindgen.workspace = true
+wasm-bindgen.workspace = true
+
+[lints]
+workspace = true

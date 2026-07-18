@@ -1006,6 +1006,34 @@ compiled functions, tiny error class, hash/index helpers, and codec helpers
 are inlined. There is no `import "jit"` in generated runtime code, so the
 final app bundle carries only the low-level specialized functions it imports.
 
+For source-first builds, set `output.format: "typescript"` or pass
+`--output-format ts`. The generator writes one executable and typed
+`index.ts`, plus optional `.ts` subpath modules:
+
+```ts
+import { AOT } from "@jit-compiler/jit";
+
+export default AOT.defineConfig({
+  entries: ["jit/**/*.jit.ts"],
+  output: {
+    directory: "src/generated/jit",
+    format: "typescript",
+    clean: true,
+  },
+});
+```
+
+```ts
+import { User } from "./generated/jit/index.js";
+
+User.is(input);
+```
+
+The `.js` import specifier is intentional for ESM and `NodeNext`: TypeScript
+resolves it to `index.ts` during development and emits a valid JavaScript
+specifier. Direct TypeScript output has no parallel declaration file that can
+drift from the implementation.
+
 Types are derived from your schema file, never re-emitted by hand:
 
 ```ts
@@ -1042,6 +1070,37 @@ no namespace object**. Object-style markers export only the object;
 standalone explicit functions export only those functions. Operations whose
 bindings hold user callbacks (`refine`, computed mapper fields) are skipped
 with a reported reason instead of silently miscompiling.
+
+### Reconstructive artifacts
+
+`jit-artifact` transports the exact generated source without asking the target
+machine to rediscover schemas or run the compiler:
+
+```bash
+pnpm artifact:build
+./target/release/jit-artifact pack src/generated/jit \
+  --output-root src/generated/jit \
+  --output user.jit
+./target/release/jit-artifact verify --file user.jit
+./target/release/jit-artifact diff --file user.jit --patch
+./target/release/jit-artifact apply --file user.jit
+```
+
+The canonical envelope records ordered paths, exact bytes, BLAKE3 content and
+envelope digests, compression metadata and an untrusted destination
+suggestion. Applying always performs bounded decoding before preview, rejects
+unsafe paths and symlink crossings, stages the whole tree, rereads it, then
+uses an atomic directory rename. `--yes` skips only confirmation.
+
+The browser [Artifact Lab](https://jit-site.vercel.app/lab) produces the same
+`jit1_` protocol via WASM. Its schema editor sends a closed JSON description
+to the AOT compiler; arbitrary TypeScript is never evaluated. A Lab token can
+be passed directly to `inspect`, `verify`, `diff` or `apply`.
+
+See the
+[complete artifact guide](../../apps/site/content/docs/aot/artifact-cli.mdx)
+for configuration, rollback, limits and the integrity-versus-identity trust
+model.
 
 ---
 
