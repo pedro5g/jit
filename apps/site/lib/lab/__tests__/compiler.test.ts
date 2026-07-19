@@ -27,4 +27,21 @@ describe("Lab browser AOT compiler", () => {
 
     expect(result.files.map((file) => file.path)).toEqual(["flag.js"]);
   });
+
+  it("embeds serializable callbacks without falling back to the JIT runtime", () => {
+    const Profile = JIT.object({
+      name: JIT.string().default(() => "'"),
+    })
+      .transform({ name: (value) => String(value).trim() })
+      .refine((value) => value.name !== "blocked");
+    const parseProfile = JIT.validator(Profile).get("parse").parse;
+    const result = compileBindings({ Profile, parseProfile }, { format: "typescript", fileName: "profile" });
+    const source = result.files[0]?.source;
+
+    expect(result.skipped).toEqual([]);
+    expect(source).toContain(`(() => "'")`);
+    expect(source).toContain("((value) => String(value).trim())");
+    expect(source).toContain('((value) => value.name !== "blocked")');
+    expect(source).not.toContain("@jit-compiler/jit");
+  });
 });

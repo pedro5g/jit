@@ -10357,9 +10357,7 @@ function generate(options) {
         js.push("})();");
       }
       exportNames.push(name);
-      dts.push(
-        `export declare const ${name}: ${operationType(artifact, typeNames.get(artifact.schema))};`
-      );
+      dts.push(`export declare const ${name}: ${operationType(artifact, typeNames.get(artifact.schema))};`);
       dts.push("");
       return;
     }
@@ -10797,6 +10795,7 @@ function inlineCodecBindings(names, values) {
 }
 function serializeBindingValue(value) {
   if (value instanceof RegExp) return String(value);
+  if (typeof value === "function") return serializeBindingFunction(value);
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
@@ -10807,6 +10806,33 @@ function serializeBindingValue(value) {
     return `[${parts.join(", ")}]`;
   }
   return void 0;
+}
+function serializeBindingFunction(value) {
+  let source = Function.prototype.toString.call(value).trim();
+  if (source.includes("[native code]") || source.startsWith("function bound ")) return void 0;
+  if (!isFunctionExpressionSource(source) && !isArrowFunctionSource(source)) {
+    source = normalizeMethodSource(source);
+  }
+  if (source === "") return void 0;
+  try {
+    Function(`return (${source});`);
+  } catch {
+    return void 0;
+  }
+  return `(${source})`;
+}
+function isFunctionExpressionSource(source) {
+  return /^(?:async\s+)?function(?:\s*\*)?\b/.test(source);
+}
+function isArrowFunctionSource(source) {
+  return /^(?:async\s+)?(?:[A-Za-z_$][A-Za-z0-9_$]*|\([^)]*\))\s*=>/.test(source);
+}
+function normalizeMethodSource(source) {
+  const match = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(source);
+  if (!match) return "";
+  const asyncPrefix = match[1] ?? "";
+  const generator = match[2] ? "*" : "";
+  return `${asyncPrefix}function${generator} ${match[3]}${match[4]}`;
 }
 function typeImportSpecifier(outDir, sourceFile) {
   const relativePath = relative(

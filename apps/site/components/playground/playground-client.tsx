@@ -3,6 +3,7 @@
 import Editor, { type Monaco } from "@monaco-editor/react";
 import { Play, Share2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Select } from "@/components/ui/select";
 import { useCopy } from "@/hooks/use-copy";
 import type { PlaygroundOp, PlaygroundResponse } from "@/lib/playground/worker";
 
@@ -732,12 +733,14 @@ export function PlaygroundClient() {
         <label htmlFor="playground-example" className="text-xs text-fg-subtle">
           Example
         </label>
-        <select
+        <Select
           id="playground-example"
-          className="rounded-control border border-line-subtle bg-night-950 px-3 py-1.5 text-sm text-ghost-100"
+          className="w-52"
           defaultValue="user"
-          onChange={(event) => {
-            const example = examples.find((item) => item.id === event.target.value);
+          ariaLabel="Playground example"
+          options={examples.map((example) => ({ value: example.id, label: example.label }))}
+          onValueChange={(value) => {
+            const example = examples.find((item) => item.id === value);
             if (!example) return;
             setCode(example.code);
             setInputA(example.a);
@@ -749,13 +752,7 @@ export function PlaygroundClient() {
             setRun({ status: "idle" });
             ranOnce.current = false;
           }}
-        >
-          {examples.map((example) => (
-            <option key={example.id} value={example.id}>
-              {example.label}
-            </option>
-          ))}
-        </select>
+        />
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
