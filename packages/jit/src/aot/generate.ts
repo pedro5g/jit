@@ -1340,7 +1340,7 @@ function serializeBindingFunction(value: Function): string | undefined {
 
   // Function#toString represents object methods without the `function`
   // keyword. Normalize those forms into standalone function expressions.
-  if (!isFunctionExpressionSource(source) && !source.includes("=>")) {
+  if (!isFunctionExpressionSource(source) && !isArrowFunctionSource(source)) {
     source = normalizeMethodSource(source);
   }
 
@@ -1358,6 +1358,10 @@ function serializeBindingFunction(value: Function): string | undefined {
 
 function isFunctionExpressionSource(source: string): boolean {
   return /^(?:async\s+)?function(?:\s*\*)?\b/.test(source);
+}
+
+function isArrowFunctionSource(source: string): boolean {
+  return /^(?:async\s+)?(?:[A-Za-z_$][A-Za-z0-9_$]*|\([^)]*\))\s*=>/.test(source);
 }
 
 function normalizeMethodSource(source: string): string {

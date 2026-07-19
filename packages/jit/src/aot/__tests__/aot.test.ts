@@ -432,7 +432,12 @@ describe("JIT AOT generate", () => {
   it("should serialize watched collection callbacks into self-contained AOT bindings", async () => {
     const User = JIT.object({ id: JIT.number() });
     const Users = JIT.array(User);
-    const UserChanges = JIT.watch(Users, { key: "id", onAdd: () => undefined });
+    const hooks = {
+      onAdd(_value: { id: number }) {
+        return undefined;
+      },
+    };
+    const UserChanges = JIT.watch(Users, { key: "id", onAdd: hooks.onAdd });
     const result = AOT.generate({ schemas: {}, functions: { UserChanges }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
@@ -440,7 +445,7 @@ describe("JIT AOT generate", () => {
     };
 
     expect(result.skipped).toHaveLength(0);
-    expect(source).toContain("const __w0 = (() => undefined);");
+    expect(source).toContain("const __w0 = (function onAdd(_value)");
     expect(generated.UserChanges([], [{ id: 1 }]).newItems).toEqual([{ id: 1 }]);
   });
 
