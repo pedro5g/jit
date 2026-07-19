@@ -1,0 +1,73 @@
+---
+title: json
+description: JSON value schemas, specialized stringify, validated parse and bounded chunk output.
+---
+
+## JSON value schema
+
+Without an argument, `JIT.json()` creates a schema accepting any
+JSON-encodable value:
+
+```ts
+const JsonValue = JIT.json();
+
+JIT.validator(JsonValue).parse({
+  ok: true,
+  items: [1, "two", null],
+});
+```
+
+Functions, symbols, bigint, undefined, Map and Set are not JSON values.
+
+## Compiled JSON operations
+
+With a schema argument, `JIT.json(schema)` creates an explicit compile builder:
+
+```ts
+const stringifyUser = JIT.json(User).stringify().compile();
+const parseUserJson = JIT.json(User).parse().compile();
+
+const text = stringifyUser(user);
+const decoded = parseUserJson(text);
+```
+
+`stringify` bakes known object keys and punctuation into generated source.
+It avoids runtime reflection and generic replacer callbacks. `parse` performs
+native `JSON.parse` followed by the schema's compiled parser, including
+defaults, coercions, refinements and transforms.
+
+## Chunked arrays
+
+```ts
+const stringifyUsers = JIT.json(JIT.array(User))
+  .stringifyChunks({ chunkSize: 64 * 1024 })
+  .compile();
+
+for (const chunk of stringifyUsers(users)) {
+  response.write(chunk);
+}
+response.end();
+```
+
+Chunking bounds the size of intermediate strings but does not make the input
+array lazy. Use it when the value already exists in memory but a socket or HTTP
+response should receive bounded writes.
+
+## JSON versus codec
+
+JSON is inspectable, ecosystem-friendly and self-describing through field
+names. `JIT.codec(schema)` is a compact binary wire contract with a version
+byte. Binary rowsets are process-local analytical memory and must not be used
+as a persisted transport.
+
+## Errors
+
+Malformed JSON throws a native syntax error before schema validation. Valid
+JSON with an invalid shape throws `JITValidationError` from `parse`. Use
+`JSON.parse` plus `safeParse` when both error categories must be returned as
+data instead of exceptions.
+
+## AOT
+
+`stringify` and `parse` are independently selectable. AOT output includes only
+the selected function and any validation helper it requires.

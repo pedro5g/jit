@@ -1,0 +1,64 @@
+---
+title: stream
+description: Validate JSON and NDJSON incrementally across arbitrary chunk boundaries.
+---
+
+## JSON array stream
+
+```ts
+const input = JIT.stream(JIT.array(Event), {
+  onItem(event, index) {
+    queue.write({ index, event });
+  },
+});
+
+socket.on("data", (chunk) => input.write(chunk));
+socket.on("end", () => {
+  const events = input.end();
+});
+```
+
+Chunks may split strings, numbers, escapes and UTF-8 sequences. The boundary
+scanner retains only parser state needed to find complete values.
+
+## NDJSON
+
+```ts
+const lines = JIT.stream(Event, {
+  format: "ndjson",
+  onItem: consume,
+});
+```
+
+Each non-empty line is parsed and validated against `Event`. The schema
+describes one line, not an array.
+
+## Interface
+
+| Member        | Behavior                                          |
+| ------------- | ------------------------------------------------- | ----------------------------------------------------- |
+| `write(string | Uint8Array)`                                      | feeds a chunk and fails at the first undeniable error |
+| `end()`       | completes decoding and returns the validated root |
+| `items`       | values validated so far for arrays/NDJSON         |
+
+After a failure or `end()`, do not reuse the stream. Create a stream per
+request or socket message sequence; reuse the schema and compiled validator
+cache.
+
+## Failure paths
+
+Array issue paths are prefixed with their element index. Structural JSON
+failures and schema failures throw `JITValidationError`. Object/scalar roots
+receive early structural supervision and complete validation at `end()`.
+
+## Memory
+
+Incremental validation avoids waiting for one giant input string. The public
+`items` array still retains validated values. Use `onItem` to process early,
+and design ingestion ownership deliberately when retaining all values would
+defeat the memory goal.
+
+## Security
+
+Set transport-level byte and item limits. Schema limits do not replace server
+timeouts, decompression limits or maximum request size.

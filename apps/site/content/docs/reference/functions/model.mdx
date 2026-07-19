@@ -1,0 +1,63 @@
+---
+title: model
+description: Lazy complete models and explicitly configured operation facades.
+---
+
+## Lazy model
+
+```ts
+const UserModel = JIT.model(User);
+
+UserModel.is(input); // compiles validation on first access
+UserModel.equal(a, b); // compiles equality independently
+```
+
+The facade exposes every supported model operation through lazy getters. Each
+getter uses the schema identity cache, so later access reuses the function.
+
+## Narrow selection
+
+```ts
+const Reader = UserModel.get("is", "parse", "fromJSON");
+
+Reader.ops; // normalized operation list
+// Reader.clone is not typed or present
+```
+
+Selections with the same operation set share an object even when call order
+differs. Use `.get()` for libraries and boundaries that should expose a minimal
+surface.
+
+## Boolean configuration
+
+```ts
+const UserBoundary = JIT.model(User, {
+  is: true,
+  parse: true,
+  equal: true,
+  codec: false,
+});
+```
+
+Configuration is useful when a feature flag or generated module decides the
+surface declaratively. `false` operations are absent from both value and type.
+
+## model or compile?
+
+- `model(schema)` is convenient runtime laziness;
+- `model(schema, options)` creates a narrow grouped facade;
+- `compile(schema, ["..."])` compiles a known set immediately;
+- `compile(schema, { ... })` mixes operations with custom queries/mappers and
+  is the clearest explicit AOT export.
+
+## Unsupported operations
+
+Some schemas cannot support every model method, such as JSON serialization of
+an arbitrary Map without a declared representation. Lazy mode throws only when
+the unsupported property is accessed. A configured model makes such choices
+visible during construction and review.
+
+## AOT
+
+Configured models and `.get()` selections are grouped AOT markers. Only their
+selected properties and required helpers are emitted.

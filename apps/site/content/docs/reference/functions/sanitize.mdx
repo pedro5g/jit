@@ -1,0 +1,70 @@
+---
+title: sanitize
+description: Compile configurable cleanup for HTML, SQL-like and custom hostile patterns.
+---
+
+## Mark and compile
+
+```ts
+const Comment = JIT.object({
+  title: JIT.string().sanitize({ trim: true, controls: "remove" }),
+  body: JIT.string().sanitize({
+    html: "strip",
+    controls: "remove",
+  }),
+});
+
+const sanitizeComment = JIT.sanitize(Comment);
+const clean = sanitizeComment(input);
+```
+
+Sanitization rules are attached to string fields. The compiled operation walks
+only marked paths and performs only enabled rules.
+
+## Policies are contextual
+
+HTML text, HTML attributes, SQL parameters, shell arguments and URLs have
+different safety rules. Sanitization is not a universal replacement for
+contextual encoding or parameterized APIs.
+
+```ts
+database.query("select * from comments where title = ?", [clean.title]);
+```
+
+Always use query parameters for SQL. Sanitization can reject or remove known
+hostile patterns before storage, but string concatenation remains unsafe.
+
+## Allow mode
+
+For rich text, use an explicit allow policy:
+
+```ts
+const RichText = JIT.string().sanitize({
+  html: {
+    mode: "allow",
+    tags: ["p", "strong", "em", "a"],
+  },
+});
+```
+
+Keep the allowlist minimal and validate URL-bearing attributes separately.
+For plain text, stripping all markup is simpler and cheaper.
+
+## Custom patterns
+
+Custom regular expressions and replacements are supported as compiler
+bindings. Prefer built-in declarative flags where possible: they are easier to
+audit and can be specialized more aggressively.
+
+## Validation versus sanitization
+
+Validation answers whether a value satisfies a contract. Sanitization changes
+the value. At security-sensitive boundaries, reject data when silent cleanup
+would hide an attack or alter meaning; sanitize when normalized text is an
+intentional product behavior.
+
+## Performance and AOT
+
+Unmarked branches are not rebuilt. Enabled built-ins are emitted in rule order,
+while reusable regular expressions become stable bindings. Self-contained
+callbacks and regex bindings can be emitted in AOT without importing JIT.

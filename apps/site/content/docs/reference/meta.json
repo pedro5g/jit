@@ -1,4 +1,10 @@
 {
   "title": "Reference",
-  "pages": ["operators", "operator-matrix", "library-comparison", "benchmarks"]
+  "pages": [
+    "functions",
+    "operators",
+    "operator-matrix",
+    "library-comparison",
+    "benchmarks"
+  ]
 }

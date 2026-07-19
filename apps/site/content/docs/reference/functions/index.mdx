@@ -1,0 +1,104 @@
+---
+title: API function index
+description: Every public runtime member exported through the JIT namespace, with a direct link to its reference.
+---
+
+This index mirrors the public namespace users import from
+`@jit-compiler/jit/runtime`. Every runtime member must have a destination here.
+The site test suite compares this table with `Object.keys(JIT)` and verifies
+every linked MDX file, so a new export cannot silently ship without
+documentation.
+
+## Compiled operations
+
+| API               | Reference                            | Purpose                                       |
+| ----------------- | ------------------------------------ | --------------------------------------------- |
+| `JIT.validate`    | [Validation](./validation)           | Explicit host-style validator selection       |
+| `JIT.validator`   | [Validation](./validation#validator) | Lazy validator facade and `.get()`            |
+| `JIT.equal`       | [Equal](./equal)                     | Schema-specialized structural equality        |
+| `JIT.clone`       | [Clone](./clone)                     | Shape-specialized deep clone                  |
+| `JIT.diff`        | [Diff](./diff)                       | Typed structural change entries               |
+| `JIT.update`      | [Update](./update)                   | Immutable patches, recipes and reactive state |
+| `JIT.hash`        | [Hash](./hash)                       | Structural numeric hash                       |
+| `JIT.json`        | [JSON](./json)                       | JSON schema or compiled JSON operations       |
+| `JIT.serializer`  | [Serializer](./serializer)           | Aggregated JSON stringify and parse           |
+| `JIT.codec`       | [Codec](./codec)                     | Value codec schema or binary wire codec       |
+| `JIT.format`      | [Format](./format)                   | Standalone string-mask formatter              |
+| `JIT.mask`        | [Mask](./mask)                       | PII-aware output masking                      |
+| `JIT.sanitize`    | [Sanitize](./sanitize)               | Policy-driven hostile string cleanup          |
+| `JIT.compile`     | [Compile](./compile)                 | Explicit grouped operation export             |
+| `JIT.model`       | [Model](./model)                     | Lazy or configured operation facade           |
+| `JIT.mapper`      | [Mapper](./mapper)                   | Whitelist source-to-target mapping            |
+| `JIT.transform`   | [Transform](./transform)             | Select and transform object fields            |
+| `JIT.query`       | [Query](./query)                     | Eager and lazy compiled collection query      |
+| `JIT.process`     | [Process](./process)                 | Fused load-and-query binary pipeline          |
+| `JIT.stream`      | [Stream](./stream)                   | Incremental JSON and NDJSON validation        |
+| `JIT.watch`       | [Watch](./watch)                     | Stateless keyed collection changes            |
+| `JIT.watchedList` | [Watch](./watch#watchedlist)         | Stateful aggregate collection                 |
+| `JIT.dto`         | [DTO](./dto)                         | Validation, transport and mapping aggregate   |
+
+## Schema factories and composition
+
+| API                    | Reference                                     | API                      | Reference                                       |
+| ---------------------- | --------------------------------------------- | ------------------------ | ----------------------------------------------- |
+| `JIT.any`              | [Factories](./schema-factories#any)           | `JIT.array`              | [Factories](./schema-factories#array)           |
+| `JIT.bigint`           | [Factories](./schema-factories#bigint)        | `JIT.boolean`            | [Factories](./schema-factories#boolean)         |
+| `JIT.date`             | [Factories](./schema-factories#date)          | `JIT.enum`               | [Factories](./schema-factories#enum)            |
+| `JIT.file`             | [Factories](./schema-factories#file)          | `JIT.function`           | [Factories](./schema-factories#function)        |
+| `JIT.instanceOf`       | [Factories](./schema-factories#instanceof)    | `JIT.int`                | [Factories](./schema-factories#int)             |
+| `JIT.literal`          | [Factories](./schema-factories#literal)       | `JIT.map`                | [Factories](./schema-factories#map)             |
+| `JIT.nan`              | [Factories](./schema-factories#nan)           | `JIT.never`              | [Factories](./schema-factories#never)           |
+| `JIT.null`             | [Factories](./schema-factories#null)          | `JIT.number`             | [Factories](./schema-factories#number)          |
+| `JIT.object`           | [Factories](./schema-factories#object)        | `JIT.record`             | [Factories](./schema-factories#record)          |
+| `JIT.regex`            | [Factories](./schema-factories#regex)         | `JIT.set`                | [Factories](./schema-factories#set)             |
+| `JIT.string`           | [Factories](./schema-factories#string)        | `JIT.symbol`             | [Factories](./schema-factories#symbol)          |
+| `JIT.temporal`         | [Factories](./schema-factories#temporal)      | `JIT.tuple`              | [Factories](./schema-factories#tuple)           |
+| `JIT.undefined`        | [Factories](./schema-factories#undefined)     | `JIT.unknown`            | [Factories](./schema-factories#unknown)         |
+| `JIT.void`             | [Factories](./schema-factories#void)          | `JIT.coerce`             | [Composition](./composition#coerce)             |
+| `JIT.brand`            | [Composition](./composition#brand)            | `JIT.custom`             | [Composition](./composition#custom)             |
+| `JIT.default`          | [Composition](./composition#default)          | `JIT.discriminatedUnion` | [Composition](./composition#discriminatedunion) |
+| `JIT.intersection`     | [Composition](./composition#intersection)     | `JIT.iso`                | [Composition](./composition#iso)                |
+| `JIT.lazy`             | [Composition](./composition#lazy)             | `JIT.not`                | [Composition](./composition#not)                |
+| `JIT.nullable`         | [Composition](./composition#nullable)         | `JIT.nullish`            | [Composition](./composition#nullish)            |
+| `JIT.optional`         | [Composition](./composition#optional)         | `JIT.param`              | [Query](./query#param)                          |
+| `JIT.pipe`             | [Composition](./composition#pipe)             | `JIT.promise`            | [Composition](./composition#promise)            |
+| `JIT.readonly`         | [Composition](./composition#readonly)         | `JIT.refine`             | [Composition](./composition#refine)             |
+| `JIT.regexes`          | [Composition](./composition#regexes)          | `JIT.templateLiteral`    | [Composition](./composition#templateliteral)    |
+| `JIT.templateLiterals` | [Composition](./composition#templateliterals) | `JIT.union`              | [Composition](./composition#union)              |
+| `JIT.xor`              | [Composition](./composition#xor)              | `JIT.const`              | [Query](./query#const)                          |
+
+## Low-level and introspection exports
+
+These exports are public for advanced compiler integrations. Application code
+normally uses the higher-level function in the second column.
+
+| API                    | Reference                                                     | Prefer                          |
+| ---------------------- | ------------------------------------------------------------- | ------------------------------- |
+| `JIT.compileClone`     | [Low-level compilers](./low-level-compilers#compileclone)     | `JIT.clone`                     |
+| `JIT.compileDiff`      | [Low-level compilers](./low-level-compilers#compilediff)      | `JIT.diff`                      |
+| `JIT.compileEqual`     | [Low-level compilers](./low-level-compilers#compileequal)     | `JIT.equal`                     |
+| `JIT.compileHash`      | [Low-level compilers](./low-level-compilers#compilehash)      | `JIT.hash`                      |
+| `JIT.compileUpdate`    | [Low-level compilers](./low-level-compilers#compileupdate)    | `JIT.update`                    |
+| `JIT.compilePipeline`  | [Low-level compilers](./low-level-compilers#compilepipeline)  | schema parse transforms         |
+| `JIT.compileGroupBy`   | [Low-level compilers](./low-level-compilers#compilegroupby)   | `JIT.query`                     |
+| `JIT.compileMerge`     | [Low-level compilers](./low-level-compilers#compilemerge)     | object schema merge             |
+| `JIT.compileNormalize` | [Low-level compilers](./low-level-compilers#compilenormalize) | `JIT.transform`                 |
+| `JIT.compileOmit`      | [Low-level compilers](./low-level-compilers#compileomit)      | `JIT.transform().select()`      |
+| `JIT.compilePick`      | [Low-level compilers](./low-level-compilers#compilepick)      | `JIT.transform().select()`      |
+| `JIT.compileSortBy`    | [Low-level compilers](./low-level-compilers#compilesortby)    | `JIT.query().orderBy()`         |
+| `JIT.compileTransform` | [Low-level compilers](./low-level-compilers#compiletransform) | `JIT.transform`                 |
+| `JIT.compileUniqueBy`  | [Low-level compilers](./low-level-compilers#compileuniqueby)  | `JIT.query().unique()`          |
+| `JIT.COMPILE_OPS`      | [Operation lists](./low-level-compilers#compile_ops)          | supported `compile()` keys      |
+| `JIT.MODEL_OPS`        | [Operation lists](./low-level-compilers#model_ops)            | supported `model()` keys        |
+| `JIT.MAPPER_OPS`       | [Operation lists](./low-level-compilers#mapper_ops)           | supported mapper selections     |
+| `JIT.DTO_OPS`          | [Operation lists](./low-level-compilers#dto_ops)              | supported DTO selections        |
+| `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)                    | `JIT.watchedList()`             |
+| `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class)               | `JIT.watchedList(..., { key })` |
+
+## Runtime or AOT?
+
+All high-level compilers share one optimizer and emitter. Runtime mode pays
+code generation once and caches the resulting function by schema identity.
+AOT performs that work during `jit generate` and writes an import-free module.
+Use `/runtime` for dynamic schemas and development convenience; use `/define`
+plus generated imports when startup cost, CSP or client bundle weight matters.

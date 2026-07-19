@@ -1,0 +1,56 @@
+---
+title: dto
+description: Aggregate validation, JSON, binary transport and whitelist mapping for DTO boundaries.
+---
+
+## Input DTO
+
+```ts
+const CreateUserDTO = JIT.dto(CreateUser).get("parse", "safeParse", "fromJSON");
+
+const command = CreateUserDTO.parse(request.body);
+```
+
+With one schema, DTO methods cover target validation and transport:
+`is`, `parse`, `safeParse`, async variants, `fromJSON`, `stringify` and
+`codec`.
+
+## Output DTO
+
+```ts
+const PublicUserDTO = JIT.dto(UserEntity, PublicUser, {
+  displayName: { from: "name" },
+}).get("from", "many", "stringify");
+
+const dto = PublicUserDTO.from(entity);
+const list = PublicUserDTO.many(entities);
+const json = PublicUserDTO.stringify(dto);
+```
+
+With source and target schemas, `from` and `many` are added. Mapping is a
+target whitelist, preventing undeclared entity fields from leaking.
+
+## Selection
+
+`.get()` compiles only requested methods and returns a narrow type. The facade
+also supports lazy direct access. Selection metadata separates transport
+`ops` from mapping `extras`.
+
+## DTO versus model
+
+A model aggregates operations around one domain shape. A DTO treats a target
+shape as a boundary and can map from a separate source. Use DTOs to make
+transport exposure explicit, not as aliases for every domain entity.
+
+## Performance
+
+Validation methods share one validator selection. `many` emits a fused indexed
+mapping loop. JSON and binary methods are specialized from the DTO target,
+which avoids serializing private source fields and then deleting them.
+
+## AOT
+
+Selected DTOs are grouped AOT markers. Generated modules preserve the object
+API and emit only selected transport/mapping methods.
+
+See [DTO aggregates](/docs/runtime/dtos) for inbound/outbound design patterns.

@@ -1,0 +1,54 @@
+---
+title: mask
+description: Compile PII-aware output masking from schema annotations.
+---
+
+## Mark sensitive fields
+
+```ts
+const User = JIT.object({
+  id: JIT.number(),
+  email: JIT.string().pii("mask"),
+  password: JIT.string().pii("redact"),
+  document: JIT.string().pii("hash"),
+});
+
+const maskUser = JIT.mask(User);
+logger.info(maskUser(user));
+```
+
+The compiler visits only paths carrying PII annotations and rebuilds the
+necessary containers. Public fields pass through according to the generated
+shape.
+
+## Policies
+
+| Policy   | Result                          | Good for                      |
+| -------- | ------------------------------- | ----------------------------- |
+| `redact` | fixed replacement               | secrets and credentials       |
+| `mask`   | partial recognizable form       | support logs and UI           |
+| `hash`   | stable non-cryptographic digest | correlation without raw value |
+
+PII hashing is not password hashing and is not safe against enumeration of a
+small domain. Use a keyed cryptographic strategy outside this operator when
+that threat exists.
+
+## Boundary placement
+
+Mask immediately before logs, telemetry, support exports or UI responses.
+Authorization still decides whether data may be read at all. Mapping to a DTO
+is stronger when fields must be completely absent:
+
+```ts
+const toPublic = JIT.mapper(User, PublicUser).get("map");
+```
+
+## Cache and mutation
+
+`JIT.mask` uses the schema identity cache. Compile once. It does not mutate the
+input, making it safe to pass the original value to authorized internal code.
+
+## AOT
+
+Mask policies and known paths become specialized assignments. Generated output
+contains no reflective PII walker and no unused sanitizer or validator.

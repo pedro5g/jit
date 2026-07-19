@@ -1,0 +1,71 @@
+---
+title: process
+description: Fuse object-array loading, binary layout and query execution.
+---
+
+## One high-load pipeline
+
+```ts
+const activeRevenue = JIT.process(User)
+  .binary({ memoryLayout: "columnar" })
+  .filter((q) => q.eq("active", true))
+  .sum("revenue")
+  .compile();
+
+const total = activeRevenue.execute(users);
+```
+
+`JIT.process(schema)` starts from an object schema. `.binary()` chooses a
+rowset strategy and the following methods build a binary query. `compile()`
+returns:
+
+```ts
+{
+  binary,  // loader/layout
+  query,   // operates on an existing rowset
+  execute, // load + query convenience function
+}
+```
+
+## Parameters
+
+```ts
+const revenueByRole = JIT.process(User)
+  .binary({ memoryLayout: "columnar" })
+  .params({ role: JIT.string() })
+  .filter((q, params) => q.eq("role", params.role))
+  .sum("revenue")
+  .compile();
+
+revenueByRole.execute(users, { role: "admin" });
+```
+
+## Supported terminal operations
+
+`select`, `count`, `sum`, `avg`, `min` and `max` compile directly against the
+binary memory. Projection-only high-cardinality strings may use identity codes;
+filtered strings retain canonical dictionaries for integer comparison.
+
+## Choosing a layout
+
+- `auto`: chooses packed or aligned from the field layout;
+- `packed`: compact mixed rows;
+- `aligned`: typed views where padding is acceptable;
+- `columnar`: repeated scans over a few fields;
+
+Allocation is configured separately:
+
+- `dynamic`: growable reusable storage, the default;
+- `exact`: one exact-size allocation for a known input;
+- `static`: caller buffer or fixed capacity for stable high-frequency flows.
+
+Columnar is not automatically fastest for loading once and reading every
+field. Benchmark the complete load plus query flow, including allocation
+strategy.
+
+## process or query?
+
+Use normal `JIT.query` for ordinary arrays, nested objects and one-off flows.
+Use `process` for large flat scalar batches where binary memory and repeated
+scans pay for loading cost. Read [binary rowsets](/docs/runtime/binary-rowsets)
+for supported shapes and memory ownership.

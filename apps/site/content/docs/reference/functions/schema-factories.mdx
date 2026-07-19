@@ -1,0 +1,263 @@
+---
+title: Schema factories
+description: Reference for every primitive, object, collection and special-value schema factory.
+---
+
+Factories create immutable builders. `JIT.Typeof<typeof Schema>` resolves the
+output type; `.schema` exposes the stable AST consumed by compilers.
+
+## any
+
+```ts
+const Anything = JIT.any(); // any
+```
+
+Compatibility escape hatch. Prefer `unknown` so callers must narrow values.
+
+## array
+
+```ts
+const Users = JIT.array(User).min(1).max(100);
+```
+
+Validates indexed arrays and supports collection hints, queries and binary
+rowsets. Element inference remains exact.
+
+## bigint
+
+```ts
+const Counter = JIT.bigint();
+```
+
+Accepts native bigint. JSON does not encode bigint without an explicit mapping
+or value codec.
+
+## boolean
+
+```ts
+const Enabled = JIT.boolean();
+```
+
+Accepts native booleans. Use `JIT.coerce.boolean()` only when boundary
+conversion is intentional.
+
+## date
+
+```ts
+const CreatedAt = JIT.date().min(start).max(end);
+```
+
+Validates a real, non-invalid native `Date`. This is not an ISO string; use
+`JIT.iso.datetime()` for textual transport.
+
+## enum
+
+```ts
+const Role = JIT.enum(["admin", "member"] as const);
+```
+
+Accepts a readonly value tuple or enum-like object and infers the value union.
+
+## file
+
+```ts
+const UploadedFile = JIT.file();
+const isFile = JIT.validate(UploadedFile).is().compile();
+```
+
+Validates native `File` instances. Availability depends on the host runtime;
+avoid compiling it for environments without the File API. File-size and MIME
+policies belong at the upload boundary until dedicated declarative checks are
+part of this schema.
+
+## function
+
+```ts
+const Handler = JIT.function({
+  input: [JIT.string()],
+  output: JIT.number(),
+});
+
+const safeHandler = Handler.implement((value) => value.length);
+```
+
+`.implement()` validates input/output around a sync function;
+`.implementAsync()` supports async implementations.
+
+## instanceOf
+
+```ts
+const DecimalValue = JIT.instanceOf(Decimal);
+```
+
+Checks class identity with `instanceof`. Cross-realm values may not share the
+same constructor; use `custom` for structural third-party checks.
+
+## int
+
+```ts
+const Count = JIT.int().min(0);
+```
+
+Integer base schema. `.int32()` on a number schema additionally enforces the
+signed 32-bit range.
+
+## literal
+
+```ts
+const Admin = JIT.literal("admin");
+```
+
+Accepts one exact literal and preserves it in TypeScript inference.
+
+## map
+
+```ts
+const Scores = JIT.map(JIT.string(), JIT.number());
+```
+
+Validates native Map keys and values. Declare a transport mapping because JSON
+does not preserve Map.
+
+## nan
+
+```ts
+const NotANumber = JIT.nan();
+```
+
+Accepts specifically `Number.NaN`. Normal number schemas reject NaN unless
+their contract says otherwise.
+
+## never
+
+```ts
+const Impossible = JIT.never();
+```
+
+Rejects every value and infers `never`. Useful for unreachable union branches
+and exhaustive APIs.
+
+## null
+
+```ts
+const NullOnly = JIT.null();
+```
+
+Accepts exactly null. `nullable(S)` accepts either `S` or null.
+
+## number
+
+```ts
+const Price = JIT.number().finite().nonnegative().float64();
+```
+
+Supports min/max, exclusive bounds, integer/float representations,
+multiple-of, sign, finite and safe-integer checks.
+
+## object
+
+```ts
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+});
+```
+
+Captures static keys in declaration order. Shape transforms include partial,
+required, pick, omit, extend, merge, strict, loose, catchall and keyof.
+
+## record
+
+```ts
+const Labels = JIT.record(JIT.string(), JIT.string());
+```
+
+Validates dynamic object keys and values. Use `object` when keys are known so
+codegen can emit direct access.
+
+## regex
+
+```ts
+const NativePattern = JIT.regex();
+const Slug = JIT.string().regex(/^[a-z0-9-]+$/);
+```
+
+`JIT.regex()` validates native `RegExp` objects. To validate text against a
+pattern, use `JIT.string().regex(pattern)`.
+
+## set
+
+```ts
+const Tags = JIT.set(JIT.string());
+```
+
+Validates native Set values. JavaScript Set identity determines uniqueness.
+
+## string
+
+```ts
+const Email = JIT.string().trim().lowercase().email();
+```
+
+Supports length, pattern, network identifiers, hashes, date/time text,
+normalization, formatting, sanitization and PII annotations. Parse transforms
+run in declaration order.
+
+## symbol
+
+```ts
+const Token = JIT.symbol();
+```
+
+Accepts native symbols. Symbols are not JSON encodable and global/local symbol
+identity differs.
+
+## temporal
+
+```ts
+const Window = JIT.temporal.instant().min(start).max(end);
+```
+
+Factories cover Temporal value types and calendar/time constraints. Tests use
+the Temporal polyfill where the host does not provide the API. Temporal values
+are not ISO strings; encode them explicitly at transport boundaries.
+
+## tuple
+
+```ts
+const Point = JIT.tuple(JIT.number(), JIT.number());
+```
+
+Validates fixed positions and infers a fixed tuple rather than a homogeneous
+array.
+
+## undefined
+
+```ts
+const UndefinedOnly = JIT.undefined();
+```
+
+Accepts exactly undefined. Object absence is usually modeled with `optional`.
+
+## unknown
+
+```ts
+const Input = JIT.unknown();
+```
+
+Accepts every value but keeps the output `unknown`, requiring safe narrowing.
+
+## void
+
+```ts
+const NoReturn = JIT.void();
+```
+
+Models void-returning functions and APIs where the produced value is ignored.
+For an exact data value, prefer `undefined`.
+
+## Choosing a factory
+
+Use the narrowest domain that matches the actual runtime representation. Do
+not use `string` for native Date/Temporal values or `object` for Map/Set merely
+to make JSON convenient. Put conversion in a mapper or codec boundary.

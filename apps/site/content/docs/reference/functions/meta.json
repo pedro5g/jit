@@ -1,0 +1,30 @@
+{
+  "title": "API functions",
+  "pages": [
+    "index",
+    "validation",
+    "equal",
+    "clone",
+    "diff",
+    "update",
+    "hash",
+    "json",
+    "serializer",
+    "codec",
+    "format",
+    "mask",
+    "sanitize",
+    "compile",
+    "model",
+    "mapper",
+    "transform",
+    "query",
+    "process",
+    "stream",
+    "watch",
+    "dto",
+    "schema-factories",
+    "composition",
+    "low-level-compilers"
+  ]
+}

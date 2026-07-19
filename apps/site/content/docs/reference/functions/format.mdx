@@ -1,0 +1,52 @@
+---
+title: format
+description: Compile only a string schema's output-mask formatting work.
+---
+
+## Define a format
+
+```ts
+const Document = JIT.string().format("###.###.###-##");
+const formatDocument = JIT.format(Document);
+
+formatDocument("12345678901"); // "123.456.789-01"
+```
+
+`JIT.format(schema)` compiles formatting as a standalone operation. It does
+not compile validation, parsing or sanitization.
+
+## Validation versus formatting
+
+Formatting is normally an output transformation. `is()` should not allocate or
+format a candidate just to answer a boolean question. When a field must arrive
+already masked, declare strict format behavior on the schema rather than
+assuming output formatting validates the original text.
+
+```ts
+const Phone = JIT.string().format("(##) #####-####", {
+  mode: "strict",
+});
+```
+
+In strict mode the input must match the declared mask. In the default mode the
+formatter can accept raw characters and produce the display form during parse
+or direct `JIT.format` execution.
+
+## Mask tokens
+
+Format patterns are typed string literals. `#` represents a numeric slot;
+literal punctuation is copied into output. Keep domain validation separate
+from presentation when multiple display styles must share one canonical value.
+
+## Usage strategy
+
+- use `JIT.format(S)` for UI display or exported formatter functions;
+- use schema parse when formatting belongs to boundary normalization;
+- use strict mode when the transport contract requires the exact mask;
+- avoid storing display punctuation when searches and equality use canonical
+  digits.
+
+## AOT
+
+The AOT emitter writes the specialized string builder directly. Exporting only
+the formatter does not pull in validation functions or the JIT runtime.

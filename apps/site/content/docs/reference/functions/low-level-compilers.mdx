@@ -1,0 +1,100 @@
+---
+title: Low-level compilers
+description: Direct compiler exports and operation lists for advanced integrations.
+---
+
+These functions operate close to schema AST/compiler internals. High-level
+`JIT.equal`, `JIT.clone`, `JIT.query`, `JIT.transform` and `JIT.update`
+provide metadata, builder ergonomics and the clearest AOT registration.
+
+## compileEqual
+
+Compiles equality directly from an unwrapped schema AST. Prefer `JIT.equal`
+for application exports.
+
+## compileClone
+
+Compiles direct schema-shaped cloning. Prefer `JIT.clone`.
+
+## compileDiff
+
+Compiles direct structural diff. Prefer `JIT.diff`.
+
+## compileHash
+
+Compiles direct structural hashing. Prefer `JIT.hash`.
+
+## compileUpdate
+
+Compiles the low-level structural patch function. It does not add draft
+recipes, parameterized patches or reactive controllers; use `JIT.update` for
+those.
+
+## compilePipeline
+
+Compiles schema parse-pipeline nodes such as coerce, pipe, transform and refine
+into one callable pipeline. Validator compilation already incorporates the
+pipeline, so applications rarely call this directly.
+
+## compilePick
+
+Compiles a runtime object picker from static keys.
+
+## compileOmit
+
+Compiles a runtime object omit operation from static keys.
+
+## compileMerge
+
+Compiles object merge behavior for known inputs.
+
+## compileNormalize
+
+Compiles normalization of a known object shape.
+
+## compileTransform
+
+Compiles low-level field transform operations. `JIT.transform` exposes typed
+selection and inline expressions.
+
+## compileGroupBy
+
+Compiles grouping by a known key. General grouping materializes all groups;
+use query `groupAdjacentBy` when ordered input allows streaming.
+
+## compileSortBy
+
+Compiles sorting by a known key. Sorting materializes/reorders the result and
+is a lazy-query barrier.
+
+## compileUniqueBy
+
+Compiles key-based uniqueness. The operation retains a Set/Map proportional to
+observed identities.
+
+## Operation lists
+
+The readonly arrays are useful for tooling, config validation and generated
+UI. Do not mutate them.
+
+### COMPILE_OPS
+
+`JIT.COMPILE_OPS` lists keys supported by `JIT.compile(schema, ops)`.
+
+### MODEL_OPS
+
+`JIT.MODEL_OPS` lists operations available through `JIT.model`.
+
+### MAPPER_OPS
+
+`JIT.MAPPER_OPS` lists mapper selections (`map` and `many`).
+
+### DTO_OPS
+
+`JIT.DTO_OPS` lists transport and mapping methods available to DTO facades.
+
+## When direct compilers are appropriate
+
+Use them for compiler adapters, benchmarks, generated tooling and compatibility
+layers that already own raw schema ASTs. High-level APIs are more stable for
+normal application code and preserve richer runtime/AOT metadata.

@@ -1,0 +1,75 @@
+---
+title: equal
+description: Compile allocation-free structural equality for one schema.
+---
+
+## Signature
+
+```ts
+const equalUser = JIT.equal(User);
+// (left: User, right: User) => boolean
+```
+
+`JIT.equal(schema)` emits equality code from the known shape. Objects use
+direct field access, arrays use indexed loops, tuples unroll fixed positions
+and tagged unions dispatch before comparing variant fields.
+
+```ts
+equalUser(
+  { id: 1, profile: { name: "Ada" } },
+  { id: 1, profile: { name: "Ada" } },
+); // true
+```
+
+## Semantics
+
+- primitives follow their schema domain;
+- `Date` compares timestamps;
+- arrays and tuples are ordered;
+- `Set` and `Map` follow their compiled collection strategy;
+- optional, nullable and default states remain distinct where the schema says
+  they are distinct;
+- entity/key hints can enable keyed comparison for collections;
+- custom equality hints override only the annotated branch.
+
+Equality expects values already in the schema output domain. Validate an
+unknown value before comparing it.
+
+## Performance
+
+The generated function allocates no result object and exits on the first
+difference. Known keys avoid `Object.keys`, recursive generic dispatch and
+string path construction. Repeated calls therefore contain only the work
+required by the shape.
+
+```ts
+const explain = equalUser.explain();
+explain.operation; // "equal"
+explain.cache; // "identity"
+equalUser.hash; // deterministic source hash
+```
+
+Compile once at module scope. Calling `JIT.equal(User)` again with the same
+schema identity reuses the compiled cache.
+
+## Collections and indexes
+
+```ts
+const Users = JIT.array(User).keyed("id");
+const equalUsers = JIT.equal(Users);
+```
+
+`keyed` is useful when order does not express identity and snapshots are
+compared repeatedly. Index construction has a cost; a plain ordered array is
+usually faster for one small comparison. Never mutate a cached collection
+behind the compiler's back.
+
+## AOT
+
+```ts
+// models.jit.ts
+export const equalUser = JIT.equal(User);
+```
+
+AOT writes the same specialized body as a pure export. No schema object,
+compiler or cache implementation remains in the consumer bundle.

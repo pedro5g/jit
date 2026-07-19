@@ -1,0 +1,64 @@
+---
+title: hash
+description: Compile a deterministic structural hash for cache keys and indexes.
+---
+
+## Signature
+
+```ts
+const hashUser = JIT.hash(User);
+const key = hashUser(user); // number
+```
+
+Equal values under the same schema produce the same structural hash. Hashes
+are intended for in-memory bucketing, cache lookup and change detection, not
+for passwords, signatures or adversarial cryptography.
+
+## Hash and equality
+
+A hash collision is possible. Use the hash to choose a bucket, then use the
+matching compiled equality function when correctness requires confirmation.
+
+```ts
+const hash = JIT.hash(User);
+const equal = JIT.equal(User);
+
+const bucket = cache.get(hash(candidate));
+const match = bucket?.find((value) => equal(value, candidate));
+```
+
+## Strategies
+
+Schema hints can select ordered or structural behavior. Object keys are known
+at compile time, so their names do not need to be rediscovered on every call.
+Literal/enum strings and binary rowsets can use integer representations in hot
+paths.
+
+```ts
+const Ordered = JIT.object({
+  id: JIT.number(),
+  name: JIT.string(),
+}).hash("ordered");
+```
+
+Choose a strategy once and keep it stable for the cache lifetime. Changing a
+schema or strategy changes the hash contract.
+
+## Mutation and cache lifetime
+
+Never mutate a value after storing it under its structural hash. The cache key
+would describe the old state. Immutable updates naturally produce a new value
+and hash.
+
+## AOT and metadata
+
+```ts
+const hashUser = JIT.hash(User);
+
+hashUser.hash; // source fingerprint, not the value hash
+hashUser.explain(); // compiler metadata
+```
+
+The function's `.hash` property fingerprints generated source. Calling the
+function hashes a data value. AOT emits only the value-hash implementation and
+the minimal helpers its schema needs.

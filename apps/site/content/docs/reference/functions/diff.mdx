@@ -1,0 +1,68 @@
+---
+title: diff
+description: Compile structural changes with schema-aware paths and values.
+---
+
+## Signature
+
+```ts
+const diffUser = JIT.diff(User);
+const changes = diffUser(previous, current);
+```
+
+The result is an array of change entries:
+
+```ts
+type Change = {
+  type: "add" | "remove" | "update";
+  path: readonly PropertyKey[];
+  value?: unknown;
+};
+```
+
+```ts
+diffUser(
+  { id: 1, profile: { name: "Ada" } },
+  { id: 1, profile: { name: "Grace" } },
+);
+// [{ type: "update", path: ["profile", "name"], value: "Grace" }]
+```
+
+## Behavior
+
+Objects traverse known fields in declaration order. Equal branches stop
+immediately. Arrays report positional changes unless entity/keyed hints provide
+identity semantics. Tagged unions compare their discriminator first and avoid
+walking fields from unrelated variants.
+
+No entries are allocated for equal branches. The output array grows only for
+actual differences.
+
+## Choosing diff or watch
+
+Use `diff` for one complete value:
+
+```ts
+const changes = JIT.diff(Settings)(before, after);
+```
+
+Use `watch` for collection snapshots where added, removed and updated items
+must be grouped by identity:
+
+```ts
+const changes = JIT.watch(JIT.array(User), { key: "id" })(before, after);
+```
+
+Use `JIT.update(schema).reactive()` when subscribers should be notified as
+updates happen instead of comparing snapshots manually.
+
+## Arrays and mutation
+
+For positional arrays, inserting at the front can produce many updates. Add an
+entity/key hint when stable identity exists. Inputs must remain immutable while
+their indexes or hashes are reused.
+
+## AOT
+
+`JIT.diff(User)` is independently exportable. Generated output contains the
+specialized path writes and comparisons, not a runtime AST interpreter.

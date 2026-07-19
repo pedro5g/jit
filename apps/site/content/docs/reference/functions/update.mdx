@@ -1,0 +1,96 @@
+---
+title: update
+description: Immutable patches, draft recipes, parameterized updates and reactive subscriptions.
+---
+
+## Compile an updater
+
+```ts
+const updateUser = JIT.update(User);
+
+const next = updateUser(current, {
+  profile: { name: "Grace" },
+});
+```
+
+Only changed branches are allocated. Unchanged children retain identity:
+
+```ts
+next !== current;
+next.settings === current.settings;
+```
+
+An immediate overload is available for one-off work:
+
+```ts
+const next = JIT.update(User, current, { active: false });
+```
+
+Compile and reuse the function for repeated updates.
+
+## Draft recipes
+
+```ts
+const next = updateUser(current, (draft) => {
+  draft.profile.name = "Grace";
+  draft.stats.logins = 42;
+});
+```
+
+The draft is a write recorder, not the original object. Reads from the draft
+do not provide current values, so compute dependent values outside the recipe.
+Recipes are convenient for typed paths; plain patches have lower setup cost in
+very hot loops.
+
+## Parameterized patches
+
+```ts
+const setRole = JIT.update(User)
+  .patch({
+    role: JIT.param("role"),
+  })
+  .compile();
+
+const admin = setRole(user, { role: "admin" });
+```
+
+The patch shape is compiled once. Runtime calls only materialize parameter
+slots and execute the specialized updater.
+
+## Reactive mode
+
+```ts
+const users = JIT.update(State).reactive(initialState, {
+  schedule: "microtask",
+});
+
+const unsubscribe = users.watch("profile.name", (event) => {
+  console.log(event.previous, event.value);
+});
+
+users.update({ profile: { name: "Grace" } });
+unsubscribe();
+```
+
+Reactive controllers support tuple or dot-path watchers, selectors, batching,
+custom equality, sync/microtask/custom scheduling, global subscriptions and
+explicit disposal. The expensive diff array is computed lazily only if a
+subscriber reads `event.changes`. Read [reactive
+updates](/docs/runtime/reactive-updates) for the complete event model.
+
+## Readonly schemas
+
+Updates reject readonly branches. Create a mutable command/input schema for
+write operations and expose a readonly view where mutation must be prohibited.
+
+## Performance
+
+The compiler knows every path and emits direct assignments. Structural sharing
+reduces allocations compared with cloning the entire value. Reactive mode adds
+subscription bookkeeping; use the plain updater when no observers exist.
+
+## AOT
+
+Plain compiled updates and parameterized patch functions can be emitted as
+standalone functions. A process-local reactive controller remains a runtime
+state owner and is constructed around the compiled updater.

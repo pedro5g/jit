@@ -1,0 +1,75 @@
+---
+title: compile
+description: Aggregate exactly the compiled operations and custom functions an application exports.
+---
+
+## Explicit operation list
+
+```ts
+const UserOps = JIT.compile(User, ["is", "parse", "equal"]);
+
+UserOps.is(input);
+UserOps.parse(input);
+UserOps.equal(left, right);
+// UserOps.clone does not exist
+```
+
+Only listed operations are compiled, present in the object and exposed in its
+TypeScript type. Validator methods selected together share one generated
+validator where possible.
+
+## Compiled object aggregation
+
+```ts
+const validation = JIT.validator(User).get("is", "parse");
+
+export const UserRuntime = JIT.compile(User, {
+  is: validation.is,
+  parse: validation.parse,
+  equal: JIT.equal(User),
+  findAdmins: JIT.query(JIT.array(User))
+    .filter((q) => q.eq("role", "admin"))
+    .compile(),
+});
+```
+
+Object form is the preferred AOT marker. Every declared property is preserved
+under the grouped export and nothing else is generated:
+
+```ts
+import { UserRuntime } from "./generated/index.js";
+
+UserRuntime.is(value);
+UserRuntime.findAdmins(users);
+```
+
+Standalone compiled exports remain standalone and keep their declaration
+names.
+
+## Metadata
+
+Grouped objects expose:
+
+| Property | Meaning                               |
+| -------- | ------------------------------------- |
+| `schema` | source schema AST                     |
+| `ops`    | recognized built-in operation names   |
+| `extras` | developer-defined compiled properties |
+
+The names `schema`, `ops` and `extras` are reserved. Custom properties cannot
+collide with a selected built-in operation.
+
+## Tree shaking
+
+`compile` controls generation before the bundler runs. AOT never emits omitted
+operations. Bundlers can then remove an entire grouped export or standalone
+function when no import reaches it. This is especially useful in browser code:
+the final bundle contains specialized low-level functions, not the schema DSL,
+compiler or cache.
+
+## Runtime versus AOT
+
+Runtime array form compiles the requested methods immediately. Object form can
+aggregate already compiled functions and records an AOT marker. In definition
+files, export compiled stubs and run `jit generate`; do not execute those stubs
+directly.

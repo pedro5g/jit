@@ -1,0 +1,70 @@
+---
+title: mapper
+description: Compile whitelist mappings between source and target schemas.
+---
+
+## Basic mapping
+
+```ts
+const PublicUser = JIT.object({
+  id: JIT.number(),
+  displayName: JIT.string(),
+});
+
+const toPublic = JIT.mapper(User, PublicUser, {
+  displayName: { from: "name" },
+}).get("map", "many");
+
+toPublic.map(user);
+toPublic.many(users);
+```
+
+The target schema is a whitelist. Source fields not represented in the target
+cannot leak into output.
+
+## Override forms
+
+```ts
+const mapper = JIT.mapper(Entity, DTO, {
+  name: { from: "fullName" },
+  createdAt: {
+    from: "created_at",
+    via: (date) => date.toISOString(),
+  },
+  label: (source) => `${source.id}:${source.fullName}`,
+  active: { default: true },
+});
+```
+
+Same-name compatible fields map automatically. Required target fields with no
+compatible source require an override and TypeScript reports omissions.
+
+## Select only what is used
+
+```ts
+const one = JIT.mapper(Entity, DTO, overrides).get("map");
+const bulk = JIT.mapper(Entity, DTO, overrides).get("many");
+```
+
+`map` emits one object projection. `many` emits one fused indexed loop rather
+than repeatedly calling `map`, reducing call overhead and intermediate
+closures. Direct property access is lazy; `.get()` makes the generated surface
+explicit.
+
+## Cache and callbacks
+
+Mapper structure is cached separately from user callback bindings, preventing a
+callback from one mapper instance from leaking into another. Reuse one mapper
+facade at module scope. Self-contained callback bindings can be serialized into
+AOT output.
+
+## Mapper versus transform versus DTO
+
+- mapper changes from a source schema to a different target schema;
+- transform selects or changes fields while starting from one object schema;
+- DTO aggregates mapping with validation, JSON and binary transport methods.
+
+## AOT
+
+Export a selected mapper standalone or as an extra in `JIT.compile`. Generated
+source contains direct property reads and only selected `map`/`many` methods.

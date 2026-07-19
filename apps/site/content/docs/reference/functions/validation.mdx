@@ -1,0 +1,104 @@
+---
+title: validate and validator
+description: Compile only the validation behavior a boundary needs.
+---
+
+## validate
+
+```ts
+const isUser = JIT.validate(User).is().compile();
+const parseUser = JIT.validate(User).parse().compile();
+const safeParseUser = JIT.validate(User).safeParse().compile();
+```
+
+`JIT.validate(schema)` is the explicit host-style API. Choosing a method does
+not compile it yet; `.compile()` creates the specialized function and attaches
+`source`, `hash`, `compile()` and `explain()` metadata.
+
+| Selection           | Return                | Failure behavior              | Output transforms      |
+| ------------------- | --------------------- | ----------------------------- | ---------------------- |
+| `.is()`             | type predicate        | `false`, first failure        | checks current input   |
+| `.parse()`          | inferred output       | throws `JITValidationError`   | yes                    |
+| `.safeParse()`      | success union         | returns issue vector          | yes                    |
+| `.parseAsync()`     | output promise        | rejects with validation error | yes                    |
+| `.safeParseAsync()` | success-union promise | resolves with issues          | yes                    |
+| `.issues()`         | iterator              | yields only issues            | no extra public vector |
+
+Use `is` in hot filtering and guards. Use `safeParse` at user-controlled
+boundaries where callers need paths and messages. Use `parse` where invalid
+data is exceptional and a central error handler already owns the response.
+
+```ts
+const result = safeParseUser(input);
+
+if (!result.success) {
+  for (const issue of result.issues) {
+    console.error(issue.path, issue.code, issue.message);
+  }
+} else {
+  result.data; // JIT.Typeof<typeof User>
+}
+```
+
+The compiler orders cheap checks before expensive checks and emits direct
+property access for known object fields. `is` returns early and never allocates
+an issue array. `safeParse` rebuilds output only when defaults, coercions or
+transforms require it.
+
+## validator
+
+```ts
+const UserValidator = JIT.validator(User);
+const selected = UserValidator.get("is", "parse");
+
+selected.is(input);
+selected.parse(input);
+```
+
+`JIT.validator(schema)` is the lazy object facade. Direct property access
+compiles that operation on demand; `.get(...ops)` creates a narrow, typed
+selection and normalizes operation order so equivalent selections share the
+cache.
+
+```ts
+const narrow = JIT.validator(User, {
+  is: true,
+  parse: true,
+  safeParse: false,
+});
+```
+
+Prefer `validate` when exporting one standalone function. Prefer `validator`
+when a module owns several validation methods or when `.get()` must control the
+AOT surface.
+
+## Async schemas
+
+Promise wrappers require an async selection:
+
+```ts
+const Job = JIT.object({
+  result: JIT.promise(JIT.object({ id: JIT.string() })),
+});
+
+const parseJob = JIT.validate(Job).parseAsync().compile();
+const job = await parseJob(input);
+```
+
+Sync parsing does not silently await promises.
+
+## Cache and AOT
+
+Validator selections use the schema-identity compile cache. Reuse the schema
+and compiled function; do not construct them per request. In AOT files,
+self-contained `refine`, transform, coerce and default callbacks are emitted as
+local bindings. Generated functions import no JIT runtime.
+
+```ts
+// user.jit.ts
+import { JIT } from "@jit-compiler/jit/define";
+
+export const isUser = JIT.validate(User).is().compile();
+```
+
+After `jit generate`, import `isUser` from the configured output directory.

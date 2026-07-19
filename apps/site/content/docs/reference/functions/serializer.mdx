@@ -1,0 +1,53 @@
+---
+title: serializer
+description: Aggregate a specialized JSON stringify and validated parse boundary.
+---
+
+## Signature
+
+```ts
+const UserJson = JIT.serializer(User);
+
+const body = UserJson.stringify(user);
+const parsed = UserJson.parse(body);
+```
+
+`JIT.serializer(schema)` is the compact runtime facade for callers that always
+need both directions. `stringify` is schema-specialized; `parse` runs native
+`JSON.parse` and then the compiled validator.
+
+## serializer or json?
+
+Use `serializer` when both methods belong to one runtime boundary:
+
+```ts
+export const UserJson = JIT.serializer(User);
+```
+
+Use `JIT.json(User).stringify().compile()` or `.parse().compile()` when each
+operation must be exported and tree-shaken independently, especially for AOT.
+Use `.stringifyChunks()` for very large arrays.
+
+## Cache
+
+Both internal compilers use schema-identity caching. Constructing multiple
+serializer facades is unnecessary; keep one at module scope so application
+code also avoids wrapper allocation.
+
+## Security
+
+Serialization does not perform authorization or PII masking. Apply
+`JIT.mask(User)` or map to a public DTO before stringifying:
+
+```ts
+const toPublic = JIT.mapper(User, PublicUser).get("map");
+const PublicJson = JIT.serializer(PublicUser);
+
+PublicJson.stringify(toPublic.map(user));
+```
+
+## Transport contract
+
+The JSON shape is defined by the schema and remains readable by non-JIT
+clients. Version an API schema deliberately when fields are renamed, removed or
+change meaning.

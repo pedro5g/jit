@@ -1,0 +1,55 @@
+---
+title: transform
+description: Compile object field selection and inline or callback transformations.
+---
+
+## Select fields
+
+```ts
+const toSummary = JIT.transform(User).select("id", "name").compile();
+
+toSummary(user); // { id, name }
+```
+
+Selection is a whitelist projection with statically known keys.
+
+## Inline field operations
+
+```ts
+const normalize = JIT.transform(User)
+  .map("name", (field) => field.trim())
+  .map("email", (field) => field.lowercase())
+  .compile();
+```
+
+Built-in field expressions are emitted directly into the object literal. They
+avoid callback calls in the hot function.
+
+## Custom callbacks
+
+```ts
+const summarize = JIT.transform(User)
+  .select("id", "name")
+  .map("name", (_field) => (value, source) => `${source.role}:${value}`)
+  .compile();
+```
+
+Callbacks are external bindings in runtime JIT, so their source is never
+interpolated into `new Function`. AOT serializes self-contained callbacks into
+the generated module.
+
+## Transform builder versus schema transform
+
+`JIT.transform(User)` produces a standalone object projector. The fluent
+schema `.transform({ field: callback })` changes parse output and becomes part
+of validation. Choose based on boundary ownership:
+
+- schema transform when every parse should normalize;
+- standalone transform when only one output path needs a projection.
+
+## Performance
+
+Known keys become one object literal. Selection does not enumerate the source,
+and inline field operations avoid generic dispatch. The output always
+allocates one projected object; use the original value when no projection is
+needed.

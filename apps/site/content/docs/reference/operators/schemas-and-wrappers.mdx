@@ -125,9 +125,11 @@ const Passwords = JIT.object({
 invalid. Field-level `.when(key, options)` and `.where(key, options)` change a
 field schema based on a sibling.
 
-Callbacks are external bindings. Runtime JIT supports them safely, but AOT can
-emit only callbacks with an explicit serializable/module strategy. Built-in
-operators should be preferred for portable generated artifacts.
+Callbacks are external bindings in runtime JIT. AOT can emit self-contained
+user callbacks into generated modules, including refine, transform and default
+factories. Native/bound functions and callbacks that depend on inaccessible
+closure values are not reconstructible; prefer declarative operators or
+self-contained module-level callbacks for portable artifacts.
 
 ## Custom, apply and lazy
 

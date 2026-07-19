@@ -1,0 +1,75 @@
+---
+title: watch and watchedList
+description: Stateless snapshot changes and stateful aggregate collection tracking.
+---
+
+## watch
+
+```ts
+const watchUsers = JIT.watch(JIT.array(User), {
+  key: "id",
+});
+
+const changes = watchUsers(previous, current);
+```
+
+The compiled O(n) function returns current, initial, new, removed and updated
+items plus `isChanged`. `watch` requires a stable object key and creates
+Map-based identity lookup. Optional callbacks can react to additions, removals
+and updates while the generated pass runs.
+
+Use `watch` for two snapshots with no retained controller state.
+
+## watchedList
+
+```ts
+const members = JIT.watchedList(JIT.array(User), initialUsers, {
+  key: "id",
+});
+
+members.add(user);
+members.remove(user);
+members.update(nextUsers);
+members.snapshot();
+```
+
+Use `watchedList` inside an aggregate, editor session or unit of work that owns
+collection changes over time.
+
+Available methods include `getItems`, `getInitialItems`, `getNewItems`,
+`getRemovedItems`, `getUpdatedItems`, `exists`, `add`, `remove`, `update`,
+`isChanged` and `snapshot`.
+
+## Identity choices
+
+These choices apply to stateful `watchedList`:
+
+- `key`: stable object identity and indexed lookup;
+- `compare`: custom scan-based identity;
+- no option: `Object.is`, useful for primitives/reference identity.
+
+Stateless `watch` always requires `key`. When both scale and stable object
+identity matter, use the key-based form in either API.
+
+## WatchedList class
+
+`JIT.WatchedList` is the public unkeyed/base class. Construct it directly only
+when schema inference is not needed:
+
+```ts
+const list = new JIT.WatchedList<string>(["a"]);
+```
+
+## KeyedWatchedList class
+
+`JIT.KeyedWatchedList` maintains keyed lookup behavior. The factory
+`JIT.watchedList(schema, items, { key })` selects it automatically and is
+normally preferable.
+
+## AOT
+
+Stateless `watch` functions, including self-contained callbacks, can be emitted
+as pure AOT exports. Stateful watched-list instances are runtime ownership
+objects; instantiate them around generated or runtime application code.
+
+The complete aggregate workflow is covered in [watched lists](/docs/runtime/watched-lists).

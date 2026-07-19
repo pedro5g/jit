@@ -1,0 +1,66 @@
+---
+title: clone
+description: Compile a shape-specialized deep clone with predictable allocation.
+---
+
+## Signature
+
+```ts
+const cloneUser = JIT.clone(User);
+const copy = cloneUser(user);
+```
+
+`JIT.clone(schema)` allocates the required output containers and copies only
+the fields represented by the schema. It does not discover shape at runtime.
+
+## What is copied
+
+| Schema            | Clone behavior                             |
+| ----------------- | ------------------------------------------ |
+| primitive/literal | returns the scalar value                   |
+| object            | creates one object and clones known fields |
+| array/tuple       | creates a new array and clones elements    |
+| Date              | creates a Date with the same timestamp     |
+| Set               | creates a new Set with cloned values       |
+| Map               | creates a new Map with cloned keys/values  |
+| optional/nullable | preserves absence and null                 |
+| union             | dispatches and clones the selected branch  |
+
+```ts
+const User = JIT.object({
+  id: JIT.number(),
+  profile: JIT.object({ tags: JIT.array(JIT.string()) }),
+});
+
+const clone = JIT.clone(User);
+const next = clone(current);
+
+next !== current;
+next.profile !== current.profile;
+next.profile.tags !== current.profile.tags;
+```
+
+## Clone is not validation
+
+The clone compiler assumes a value in the schema output domain. Use
+`parse()` first for untrusted data. Unknown object keys are not an implicit
+part of a strict schema clone.
+
+## Defaults and transforms
+
+Defaults and parse transforms define the output domain but are not rerun by
+cloning a parsed value. This prevents fresh default factories or side-effectful
+transforms from unexpectedly executing during a copy.
+
+## Performance and memory
+
+Static keys become object literals or direct assignments. Arrays use indexed
+loops with stable local variables. No generic recursion table, callback per
+field or path array is created. Clone necessarily allocates the cloned
+containers; use `JIT.update` when unchanged branches should retain references.
+
+## AOT
+
+Exporting `JIT.clone(User)` from a definition file emits one pure clone
+function. Tree shaking can remove it independently from validation, equality
+and serialization.

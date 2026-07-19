@@ -1,0 +1,103 @@
+---
+title: query
+description: Compile eager, iterator, async iterator, visitor and binary collection queries.
+---
+
+## Query a collection schema
+
+```ts
+const Users = JIT.array(User);
+
+const findAdmins = JIT.query(Users)
+  .filter((q) => q.eq("role", "admin"))
+  .select("id", "name")
+  .compile();
+
+findAdmins(users);
+```
+
+Predicates build a typed query AST. They are not generic per-item callbacks;
+the compiler fuses field reads, comparisons and projection into generated
+loops.
+
+## Parameters
+
+```ts
+const byRole = JIT.query(Users)
+  .params({ role: JIT.string() })
+  .filter((q, params) => q.eq("role", params.role))
+  .compile();
+
+byRole(users, { role: "member" });
+```
+
+Parameters keep one compiled function reusable across values and prevent
+constants from being accidentally baked into shared cache entries.
+
+## param
+
+`JIT.param(name)` creates a typed parameter reference for APIs such as
+parameterized update patches. Query `.params()` normally provides references
+through its callback.
+
+## const
+
+`JIT.const(value)` marks an intentional literal query value. The condition
+builder also exposes `q.constant(value)`.
+
+## Operators
+
+Incremental operators include `filter`, `select`, `flatMap`, `take`, `drop`,
+`takeWhile`, `dropWhile`, `unique`, `chunk`, `window`, `pairwise`, `scan` and
+`groupAdjacentBy`. Global operators such as `orderBy`, arbitrary `groupBy` and
+some keyed outputs require materialization.
+
+Mutation outputs are explicit:
+
+```ts
+const deactivateAdmins = JIT.query(Users)
+  .filter((q) => q.eq("role", "admin"))
+  .update({ active: false })
+  .compile();
+```
+
+Aggregates include `count`, `sum`, `avg`, `min` and `max`.
+
+## Output backends
+
+| Compiler                  | Result               | Best use                                    |
+| ------------------------- | -------------------- | ------------------------------------------- |
+| `.compile()`              | eager result         | normal arrays and aggregates                |
+| `.compileIterator()`      | generator            | early stop and pull consumption             |
+| `.compileAsyncIterator()` | async generator      | async pipelines                             |
+| `.compileVisitor()`       | direct callback sink | highest throughput without iterator objects |
+| `.lazy().compile()`       | iterator             | explicit lazy API                           |
+
+```ts
+const visit = JIT.query(Users)
+  .filter((q) => q.eq("active", true))
+  .compileVisitor();
+
+visit(users, (user) => consume(user));
+```
+
+## Explain
+
+```ts
+const plan = JIT.query(Users)
+  .filter((q) => q.gt("score", 10))
+  .orderBy("score", "desc")
+  .explain("generator");
+```
+
+`explain()` reports fused stages and materialization barriers. Check it when a
+pipeline expected to stream starts retaining the complete input.
+
+## Binary target
+
+Passing a binary rowset or binary array compiles byte/column scans instead of
+hydrated object loops. Only supported predicates, projections and aggregates
+are available on that builder.
+
+More operator examples are in [queries](/docs/runtime/queries) and [lazy
+execution](/docs/runtime/lazy-execution).

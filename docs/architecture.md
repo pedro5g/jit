@@ -63,8 +63,10 @@ Every schema node keeps this stable runtime shape and property order:
 ## Codegen rules (non-negotiable, every emitter)
 
 1. Runtime values ALWAYS travel as external bindings to `Function`
-   (`__q0`, `__v0`, `__m0`, `__c0`) — never interpolated into source. AOT
-   may inline ONLY RegExp and JSON-primitive values.
+   (`__q0`, `__v0`, `__m0`, `__c0`) — never interpolated into runtime source.
+   AOT may serialize safe literals, RegExp values and self-contained user
+   callbacks after reconstructibility checks; native/bound functions and
+   inaccessible closure dependencies are rejected.
 2. Static keys only — no `for...in` / `Object.keys` on known shapes;
    classic indexed loops; no closures inside generated functions; no
    `push` (use `out[j++]`); checks ordered cheapest-first
@@ -184,8 +186,10 @@ location:
   the single source of truth (`aot/emit-type.ts` is only the fallback for
   programmatic generation without a source file);
 - `JIT.compile` markers restrict generation to the requested ops and add
-  dev-defined extras from the artifact registry; anything whose bindings
-  hold callbacks is skipped with a reported reason, never miscompiled.
+  dev-defined extras from the artifact registry; self-contained callback
+  bindings are emitted into the generated module, while native/bound functions
+  and callbacks with inaccessible closure dependencies are skipped with a
+  reported reason, never miscompiled.
 
 CLI/config: `jit init` writes a typed `jit.config.*` plus a starter
 `jit/user.jit.ts` using `@jit-compiler/jit/define`. `jit doctor` reports resolved

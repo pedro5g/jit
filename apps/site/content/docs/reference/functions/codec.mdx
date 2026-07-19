@@ -1,0 +1,67 @@
+---
+title: codec
+description: Bidirectional value schemas and compact versioned binary encoding.
+---
+
+`JIT.codec` has two distinct overloads. One defines a value transformation;
+the other compiles a binary transport.
+
+## Value codec schema
+
+```ts
+const IsoDate = JIT.codec(JIT.iso.datetime(), JIT.date(), {
+  decode: (value) => new Date(value),
+  encode: (value) => value.toISOString(),
+});
+
+const parseDate = JIT.validator(IsoDate).parse;
+```
+
+The input and output schemas make the direction explicit:
+
+- decode/parse: input schema to output schema;
+- encode: output schema back to input schema.
+
+Use a value codec when input and output TypeScript types differ. For a
+one-direction conversion, a parse transform is simpler.
+
+## Binary codec
+
+```ts
+const EventWire = JIT.codec(Event, { version: 2 });
+
+const bytes = EventWire.encode(event);
+const decoded = EventWire.decode(bytes);
+```
+
+The compiled object exposes:
+
+```ts
+EventWire.encode(value); // Uint8Array
+EventWire.encodeInto(value, target); // bytes written
+EventWire.decode(bytesOrArrayBuffer); // inferred Event
+```
+
+`encodeInto` reuses caller-owned memory and is preferred in high-frequency
+socket loops where allocating a new `Uint8Array` per message is measurable.
+
+## Wire guarantees
+
+The version byte is a breaking-change boundary. Object optionals use a compact
+presence mask, integers are range-guarded and strings are UTF-8 length
+prefixed. Decoder and encoder must use the same schema contract and version.
+
+Do not persist binary rowsets as codec payloads. Rowsets optimize process-local
+query memory and may change layout independently.
+
+## Validation and trust
+
+Binary decode follows the codec's structural contract. Validate external
+envelopes, message size and protocol version before accepting unbounded data.
+Use authenticated transport or signatures when tamper resistance matters.
+
+## AOT and tree shaking
+
+A compiled codec may need small UTF-8 helpers. AOT inlines only those helpers,
+keeps zero imports and omits JSON, validation or query code not selected by the
+export.

@@ -1,0 +1,224 @@
+---
+title: Composition and wrappers
+description: Wrappers, logical composition, callbacks, ISO factories and reusable regex definitions.
+---
+
+Every function here returns a new builder and leaves the input schema
+unchanged. Fluent equivalents are available where they read naturally.
+
+## optional
+
+```ts
+const OptionalName = JIT.optional(JIT.string());
+// JIT.string().optional()
+```
+
+Accepts undefined and permits a corresponding object property to be absent.
+
+## nullable
+
+```ts
+const NullableName = JIT.nullable(JIT.string());
+```
+
+Accepts explicit null, not property absence.
+
+## nullish
+
+```ts
+const MaybeName = JIT.nullish(JIT.string());
+```
+
+Combines nullable and optional: `T | null | undefined`.
+
+## default
+
+```ts
+const Locale = JIT.default(JIT.string(), "pt-BR");
+const Id = JIT.default(JIT.string(), () => crypto.randomUUID());
+```
+
+Defaults apply during parse when input is absent. Factories create a fresh
+value per parse. Statically provable invalid literal defaults are rejected by
+TypeScript.
+
+## readonly
+
+```ts
+const ReadonlyUser = JIT.readonly(User);
+```
+
+Adds a readonly output contract. It is not a deep-clone operation and readonly
+branches reject compiled updates.
+
+## promise
+
+```ts
+const AsyncUser = JIT.promise(User);
+```
+
+Settles and validates through `parseAsync`/`safeParseAsync`. Sync validation
+does not await.
+
+## brand
+
+```ts
+const UserId = JIT.brand(JIT.string().uuid(), "UserId");
+```
+
+Creates a nominal TypeScript output without adding a runtime payload field.
+
+## coerce
+
+```ts
+const Query = JIT.object({
+  page: JIT.coerce.number().int().positive(),
+  active: JIT.coerce.boolean(),
+  since: JIT.coerce.date(),
+});
+```
+
+Native coercion factories emit direct conversion. `JIT.coerce(schema,
+callback)` supports custom conversion. Coercion changes parse output; avoid it
+when silently accepting multiple representations would hide invalid input.
+
+## refine
+
+```ts
+const PositiveEven = JIT.refine(
+  JIT.number().positive(),
+  (value) => value % 2 === 0,
+  "expected an even value",
+);
+```
+
+Refinements run after their inner schema succeeds. Object refinements can
+provide `path`, `message` and `when` for dependent validation.
+
+## pipe
+
+```ts
+const Port = JIT.pipe(JIT.coerce.number(), (value) => Math.trunc(value));
+```
+
+Runs a one-direction output transform in the parse pipeline. Use a codec when
+the reverse transformation is also required.
+
+## custom
+
+```ts
+const DecimalValue = JIT.custom<Decimal>(Decimal.isDecimal, "expected Decimal");
+```
+
+Escape hatch for third-party domains. With no predicate it accepts any value,
+which should be a deliberate compatibility boundary.
+
+## lazy
+
+```ts
+const DeferredSettings = JIT.lazy(() => Settings);
+
+const Settings = JIT.object({
+  theme: JIT.enum(["light", "dark"] as const),
+});
+
+const User = JIT.object({ settings: DeferredSettings });
+```
+
+The getter is resolved only when the compiler needs the schema, so declarations
+can refer to a schema defined later and recursive graphs can break their eager
+construction cycle. TypeScript may require an explicit schema boundary for
+deeply self-recursive shapes. Compile and reuse operations instead of
+rebuilding recursive schemas per call.
+
+## union
+
+```ts
+const Id = JIT.union(JIT.string().uuid(), JIT.number().int32());
+```
+
+Accepts any matching branch. Branch order matters when multiple transformed
+schemas can accept the same input.
+
+## discriminatedUnion
+
+```ts
+const Result = JIT.discriminatedUnion("status", [
+  JIT.object({ status: JIT.literal("ok"), value: Payload }),
+  JIT.object({ status: JIT.literal("error"), message: JIT.string() }),
+]);
+```
+
+Uses a literal object field for direct dispatch, TypeScript narrowing and
+integer tags in compatible binary layouts.
+
+## intersection
+
+```ts
+const PersistedUser = JIT.intersection(Identity, Timestamps);
+```
+
+Requires both schemas. Compatible object intersections can flatten for
+validation and binary layout.
+
+## xor
+
+```ts
+const ExactlyOne = JIT.xor(EmailLogin, TokenLogin);
+```
+
+Requires exactly one branch to validate. It is more expensive than a
+discriminator because overlapping branches must be evaluated.
+
+## not
+
+```ts
+const NonEmptyNonAdmin = JIT.not(JIT.literal("admin"));
+```
+
+Rejects values accepted by the inner schema. Keep the positive outer domain
+clear; broad negation alone often infers less useful types.
+
+## iso
+
+```ts
+const Day = JIT.iso.date();
+const Time = JIT.iso.time({ precision: 3 });
+const Timestamp = JIT.iso.datetime({ offset: true });
+const Duration = JIT.iso.duration();
+```
+
+ISO factories validate strings. They are separate from native Date and
+Temporal value schemas. Precision and offset options become specialized
+regular-expression checks.
+
+## templateLiteral
+
+```ts
+const Greeting = JIT.templateLiteral(["hello, ", JIT.string(), "!"]);
+```
+
+Builds a schema and template-literal output type from static segments and
+schema slots.
+
+## templateLiterals
+
+`JIT.templateLiterals` is the compatibility alias for
+`JIT.templateLiteral`. Prefer the singular name in new code.
+
+## regexes
+
+```ts
+const EmailPattern = JIT.regexes.email;
+```
+
+Exports the reusable format regex library used by built-in string checks.
+Prefer named builder methods for normal schemas; use regexes when integrating
+the same contract with another tool or defining a custom rule.
+
+## Callback portability
+
+Runtime JIT keeps predicates and transforms as external function bindings.
+AOT embeds self-contained callbacks as local generated bindings. A callback
+that depends on an inaccessible closure should be replaced with a declarative
+operator, a literal value or an explicitly generated module-level function.
