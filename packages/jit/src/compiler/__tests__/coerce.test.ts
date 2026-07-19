@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { AOT, Compiler, JIT } from "../../index.js";
 
 describe("JIT.coerce zod-style native coercions", () => {
@@ -69,7 +70,7 @@ describe("JIT.coerce zod-style native coercions", () => {
     expect(source).not.toContain("__v0(");
   });
 
-  it("should survive aot generation, unlike callback coercions", () => {
+  it("should preserve native and callback coercions through aot generation", async () => {
     const outDir = mkdtempSync(join(tmpdir(), "jit-coerce-aot-"));
 
     try {
@@ -87,11 +88,17 @@ describe("JIT.coerce zod-style native coercions", () => {
         outDir,
       });
       const source = readFileSync(join(outDir, "index.js"), "utf8");
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+        Native_safeParse: (value: unknown) => { success: boolean; data?: { page: number } };
+        Callback_safeParse: (value: unknown) => { success: boolean; data?: { page: number } };
+      };
 
       expect(source).toContain("const Native_safeParse");
-      expect(result.skipped.map((skip) => `${skip.schema}.${skip.operation}`)).toContain(
-        "Callback_safeParse.safeParse"
-      );
+      expect(source).toContain("const Callback_safeParse");
+      expect(source).toContain("((value) => Number(value))");
+      expect(result.skipped).toEqual([]);
+      expect(generated.Native_safeParse({ page: "2" })).toMatchObject({ success: true, data: { page: 2 } });
+      expect(generated.Callback_safeParse({ page: "3" })).toMatchObject({ success: true, data: { page: 3 } });
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }

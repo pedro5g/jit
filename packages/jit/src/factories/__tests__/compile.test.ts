@@ -221,7 +221,7 @@ describe("AOT generation from JIT.compile markers", () => {
     ]);
   });
 
-  it("should skip extras whose bindings cannot be serialized", () => {
+  it("should serialize callback bindings used by grouped extras", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const PublicUser = JIT.object({ id: JIT.number(), label: JIT.string() });
     const toLabel = JIT.mapper(User, PublicUser, {
@@ -231,9 +231,19 @@ describe("AOT generation from JIT.compile markers", () => {
     const marked = JIT.compile(User, { is: selected.is, toLabel });
 
     const result = AOT.generate({ schemas: { User: marked }, outDir });
-    const skip = result.skipped.find((entry) => entry.operation === "toLabel");
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      User: {
+        toLabel: {
+          map: (value: { id: number; name: string }) => { id: number; label: string };
+        };
+      };
+    };
 
-    expect(skip?.reason).toMatch(/cannot be serialized/);
+    expect(result.skipped).toEqual([]);
+    expect(source).toContain("((user) =>");
+    expect(source).toContain("user.name");
+    expect(generated.User.toLabel.map({ id: 7, name: "Ada" })).toEqual({ id: 7, label: "Ada#7" });
   });
 
   it("should reject extras colliding with compiled ops", () => {
