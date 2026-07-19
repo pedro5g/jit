@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "JIT artifact CLI native binary for Windows x64",
   "license": "MIT",
+  "author": "Pedro5g <pedro.env5@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pedro5g/jit.git",
+    "directory": "packages/jit-cli/native/win32-x64"
+  },
   "os": ["win32"],
   "cpu": ["x64"],
   "files": ["bin"],

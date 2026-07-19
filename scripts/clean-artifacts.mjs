@@ -13,11 +13,11 @@ const generatedDirectories = [
   "packages/jit/runtime",
   "packages/jit/shared",
   "packages/jit/transforms",
-  "packages/jit-cli-darwin-arm64/bin",
-  "packages/jit-cli-darwin-x64/bin",
-  "packages/jit-cli-linux-arm64/bin",
-  "packages/jit-cli-linux-x64/bin",
-  "packages/jit-cli-win32-x64/bin",
+  "packages/jit-cli/native/darwin-arm64/bin",
+  "packages/jit-cli/native/darwin-x64/bin",
+  "packages/jit-cli/native/linux-arm64/bin",
+  "packages/jit-cli/native/linux-x64/bin",
+  "packages/jit-cli/native/win32-x64/bin",
 ];
 const generatedRootPattern = /\.(?:js|cjs|d\.ts|d\.cts|d\.mts)$/;
 

@@ -100,23 +100,23 @@ jobs:
         include:
           - target: linux-x64
             runner: ubuntu-latest
-            package: packages/jit-cli-linux-x64
+            package: packages/jit-cli/native/linux-x64
             binary: target/release/jit-artifact
           - target: linux-arm64
             runner: ubuntu-24.04-arm
-            package: packages/jit-cli-linux-arm64
+            package: packages/jit-cli/native/linux-arm64
             binary: target/release/jit-artifact
           - target: darwin-x64
             runner: macos-15-intel
-            package: packages/jit-cli-darwin-x64
+            package: packages/jit-cli/native/darwin-x64
             binary: target/release/jit-artifact
           - target: darwin-arm64
             runner: macos-15
-            package: packages/jit-cli-darwin-arm64
+            package: packages/jit-cli/native/darwin-arm64
             binary: target/release/jit-artifact
           - target: win32-x64
             runner: windows-latest
-            package: packages/jit-cli-win32-x64
+            package: packages/jit-cli/native/win32-x64
             binary: target/release/jit-artifact.exe
     steps:
       - uses: actions/checkout@v6
