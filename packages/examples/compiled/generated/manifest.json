@@ -1,6 +1,7 @@
 {
   "version": 1,
   "layout": "local",
+  "format": "javascript",
   "files": [
     "index.js",
     "index.d.ts",
@@ -17,6 +18,7 @@
       "exports": [
         "User",
         "iterateActiveUsers",
+        "toPublicUser",
         "visitActiveUsers"
       ]
     }
@@ -46,6 +48,15 @@
       "kind": "query",
       "operations": [
         "query"
+      ],
+      "module": "catalog"
+    },
+    {
+      "name": "toPublicUser",
+      "kind": "execution",
+      "operations": [
+        "value",
+        "map"
       ],
       "module": "catalog"
     },

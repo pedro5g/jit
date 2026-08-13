@@ -495,10 +495,12 @@ function decode(input) {
 return { encode: encode, encodeInto: encodeInto, decode: decode };"
 `;
 
-exports[`generated source snapshots > dto: selected validation and fused whitelist mapping 1`] = `
+exports[`generated source snapshots > dto annotations retain normal validation and mapper source 1`] = `
 {
-  "from": "function map(source) {
-  return { "id": source.id, "name": source.fullName };
+  "from": "{
+  map: function map(source) {
+    return { "id": source.id, "name": source.fullName };
+  }
 }",
   "is": "function is(value) {
   let v1 = value;
@@ -516,14 +518,16 @@ exports[`generated source snapshots > dto: selected validation and fused whiteli
   return true;
 }
 return { is: is };",
-  "many": "function many(list) {
-  const len = list.length;
-  const out = new Array(len);
-  for (let i = 0; i < len; i++) {
-    const source = list[i];
-    out[i] = { "id": source.id, "name": source.fullName };
+  "many": "{
+  many: function many(list) {
+    const len = list.length;
+    const out = new Array(len);
+    for (let i = 0; i < len; i++) {
+      const source = list[i];
+      out[i] = { "id": source.id, "name": source.fullName };
+    }
+    return out;
   }
-  return out;
 }",
 }
 `;

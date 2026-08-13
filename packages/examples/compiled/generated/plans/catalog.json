@@ -28,6 +28,14 @@
       ]
     },
     {
+      "name": "toPublicUser",
+      "kind": "execution",
+      "operations": [
+        "value",
+        "map"
+      ]
+    },
+    {
       "name": "visitActiveUsers",
       "kind": "query",
       "operations": [

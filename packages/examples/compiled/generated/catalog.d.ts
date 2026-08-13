@@ -1,1 +1,1 @@
-export { User, iterateActiveUsers, visitActiveUsers } from "./index.js";
+export { User, iterateActiveUsers, toPublicUser, visitActiveUsers } from "./index.js";

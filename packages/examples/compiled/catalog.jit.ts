@@ -30,14 +30,14 @@ const selected = JIT.compile(UserSchema, [
   "sanitize",
   "codec",
 ] as const);
-const is = JIT.validate(UserSchema).is().compile();
-const parse = JIT.validate(UserSchema).parse().compile();
-const safeParse = JIT.validate(UserSchema).safeParse().compile();
+const is = JIT.validate.is(UserSchema);
+const parse = JIT.validate.parse(UserSchema);
+const safeParse = JIT.validate.safeParse(UserSchema);
 const findActiveAdmins = JIT.query(UserListSchema)
   .filter((query) => query.and(query.eq("role", "admin"), query.eq("active", true)))
   .select("id", "name", "score")
   .compile();
-const toPublicUser = JIT.mapper(UserSchema, PublicUserSchema).get("map");
+export const toPublicUser = JIT.map(UserSchema, PublicUserSchema, {});
 
 export const User = JIT.compile(UserSchema, {
   is,
@@ -53,7 +53,6 @@ export const User = JIT.compile(UserSchema, {
   sanitize: selected.sanitize,
   codec: selected.codec,
   findActiveAdmins,
-  toPublicUser,
 });
 
 export const iterateActiveUsers = JIT.query(UserListSchema)

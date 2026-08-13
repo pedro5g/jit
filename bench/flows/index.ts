@@ -35,12 +35,12 @@ type User = JIT.Typeof<typeof User>;
 type PublicUser = JIT.Typeof<typeof PublicUser>;
 
 const users = createUsers(COUNT);
-const isUser = JIT.validate(User).is().compile();
+const isUser = JIT.validate.is(User);
 const selectAdmins = JIT.query(Users)
   .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true), q.gt("score", 500)))
   .select("id", "name", "score")
   .compile();
-const stringifyPublicUsers = JIT.json(PublicUsers).stringify().compile();
+const stringifyPublicUsers = JIT.json.stringify(PublicUsers);
 
 function jitFlow(input: readonly unknown[]): string {
   const valid = new Array<User>(input.length);

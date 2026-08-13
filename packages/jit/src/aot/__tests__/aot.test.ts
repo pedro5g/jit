@@ -180,7 +180,7 @@ describe("JIT AOT generate", () => {
 
   it("should emit JavaScript without declaration artifacts when explicitly requested", () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
-    const isUser = JIT.validate(User).is().compile();
+    const isUser = JIT.validate.is(User);
     const result = AOT.generate({
       schemas: {},
       functions: { isUser },
@@ -199,7 +199,7 @@ describe("JIT AOT generate", () => {
       name: JIT.string().min(2),
       role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
     });
-    const isUser = JIT.validate(User).is().compile();
+    const isUser = JIT.validate.is(User);
 
     AOT.generate({
       schemas: {},
@@ -215,34 +215,66 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain('import("@jit-compiler/jit")');
   });
 
-  it("should emit selected DTO validation, transport, and whitelist mappers", async () => {
+  it("should emit DTO-annotated schemas through validation, JSON, and map artifacts", async () => {
     const User = JIT.object({ id: JIT.number().int32(), fullName: JIT.string(), passwordHash: JIT.string() });
-    const PublicUser = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
-    const Public = JIT.dto(User, PublicUser, { name: { from: "fullName" } }).get("is", "stringify", "from", "many");
-    const result = AOT.generate({ schemas: { Public }, outDir });
+    const Public = JIT.dto(JIT.object({ id: JIT.number().int32(), name: JIT.string() }));
+    const result = AOT.generate({
+      schemas: {},
+      functions: {
+        Public_is: JIT.validate.is(Public),
+        Public_stringify: JIT.json.stringify(Public),
+        Public_from: JIT.map(User, Public, { name: { from: "fullName" } }),
+        Public_many: JIT.map.many(User, Public, { name: { from: "fullName" } }),
+      },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
-      readonly Public: {
-        readonly is: (value: unknown) => boolean;
-        readonly stringify: (value: unknown) => string;
-        readonly from: (value: { id: number; fullName: string; passwordHash: string }) => {
-          id: number;
-          name: string;
-        };
-        readonly many: (
-          value: readonly { id: number; fullName: string; passwordHash: string }[]
-        ) => { id: number; name: string }[];
+      readonly Public_is: (value: unknown) => boolean;
+      readonly Public_stringify: (value: unknown) => string;
+      readonly Public_from: (value: { id: number; fullName: string; passwordHash: string }) => {
+        id: number;
+        name: string;
       };
+      readonly Public_many: (value: readonly { id: number; fullName: string; passwordHash: string }[]) => {
+        id: number;
+        name: string;
+      }[];
     };
     const entity = { id: 1, fullName: "Ada", passwordHash: "secret" };
 
     expect(result.skipped).toHaveLength(0);
-    expect(Object.keys(generated.Public)).toEqual(["is", "stringify", "from", "many"]);
-    expect(generated.Public.from(entity)).toEqual({ id: 1, name: "Ada" });
-    expect(generated.Public.many([entity])).toEqual([{ id: 1, name: "Ada" }]);
-    expect(generated.Public.stringify({ id: 1, name: "Ada" })).toBe('{"id":1,"name":"Ada"}');
+    expect(generated.Public_is({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.Public_from(entity)).toEqual({ id: 1, name: "Ada" });
+    expect(generated.Public_many([entity])).toEqual([{ id: 1, name: "Ada" }]);
+    expect(generated.Public_stringify({ id: 1, name: "Ada" })).toBe('{"id":1,"name":"Ada"}');
     expect(source).not.toContain("passwordHash");
     expect(source).not.toContain('from "@jit-compiler/jit"');
+  });
+
+  it("should lower JSON, validation, query, and JSON output from one execution descriptor", async () => {
+    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2), active: JIT.boolean() });
+    const Users = JIT.array(User);
+    const activeUsers = JIT.json
+      .parse(Users)
+      .validate()
+      .filter((query) => query.eq("active", true))
+      .select("id", "name")
+      .to.json();
+    const result = AOT.generate({ schemas: {}, functions: { activeUsers }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const declarations = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly activeUsers: (json: string) => string;
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.activeUsers('[{"id":1,"name":"Ada","active":true},{"id":2,"name":"Grace","active":false}]')).toBe(
+      '[{"id":1,"name":"Ada"}]'
+    );
+    expect(source).toContain("function query(value)");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(declarations).toContain("export declare const activeUsers: (value: string) => string;");
   });
 
   it("should generate a standalone runnable module for callback-free operations", async () => {
@@ -267,7 +299,7 @@ describe("JIT AOT generate", () => {
         Event_clone: selected.clone,
         Event_diff: selected.diff,
         Event_stringify: selected.stringify,
-        Event_fromJSON: JIT.json(WireEvent).parse().compile(),
+        Event_fromJSON: JIT.json.parse(WireEvent).validate(),
         Event_mask: JIT.mask(Event),
         Event_sanitize: JIT.sanitize(Event),
         Event_codec: JIT.codec(Event),

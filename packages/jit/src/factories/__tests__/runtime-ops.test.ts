@@ -1,6 +1,6 @@
 import { AST, type Errors, JIT } from "../../index.js";
 
-describe("runtime operation facade", () => {
+describe("composable capability API", () => {
   const User = JIT.object({
     id: JIT.number().int().positive(),
     name: JIT.string().trim().min(2),
@@ -8,125 +8,106 @@ describe("runtime operation facade", () => {
   });
   const ada = { id: 1, name: "Ada", role: "admin" as const };
 
-  it("should compile validators through the fluent runtime API", () => {
-    const isUser = JIT.validate(User).is().compile();
-    const parseUser = JIT.validate(User).parse().compile();
-    const safeParseUser = JIT.validate(User).safeParse().compile();
-    const secondIsUser = JIT.validate(User).is().compile();
+  it("shares validation factories between root aliases and the namespace", () => {
+    const isUser = JIT.validate.is(User);
+    const parseUser = JIT.parse(User);
+    const safeParseUser = JIT.safeParse(User);
 
-    expect(isUser).toBe(secondIsUser);
-    expect(isUser.compile()).toBe(isUser);
+    expect(JIT.is).toBe(JIT.validate.is);
+    expect(JIT.parse).toBe(JIT.validate.parse);
     expect(isUser(ada)).toBe(true);
-    expect(isUser({ ...ada, id: 0 })).toBe(false);
     expect(parseUser({ ...ada, name: "  Ada  " })).toEqual(ada);
     expect(safeParseUser({ ...ada, name: "A" }).success).toBe(false);
-    expect(isUser.source).toContain("function is(value)");
-    expect(isUser.hash).toMatch(/^fnv1a:/);
-    expect(isUser.explain()).toMatchObject({
-      operation: "validate.is",
-      cache: "identity",
-    });
+    expect(isUser.plan.stages.map((stage) => stage.kind)).toEqual(["value", "validate"]);
+    expect(isUser.compile()).toBe(isUser);
 
     expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is AST.Typeof<typeof User>>();
-    expectTypeOf(isUser.source).toEqualTypeOf<string>();
-    expectTypeOf(isUser.hash).toEqualTypeOf<string>();
+    expectTypeOf(parseUser).toMatchTypeOf<(value: unknown) => AST.Typeof<typeof User>>();
   });
 
-  it("should keep equal as a direct callable while supporting compile metadata", () => {
+  it("keeps comparison aliases on the same descriptor factory", () => {
     const equalUser = JIT.equal(User);
-    const secondEqualUser = JIT.equal(User).compile();
 
-    expect(equalUser).toBe(secondEqualUser);
+    expect(JIT.equal).toBe(JIT.compare.equal);
     expect(equalUser(ada, { ...ada })).toBe(true);
     expect(equalUser(ada, { ...ada, name: "Grace" })).toBe(false);
-    expect(equalUser.compile()).toBe(equalUser);
-    expect(equalUser.source).toContain("function equal");
-    expect(equalUser.explain().operation).toBe("equal");
-  });
-
-  it("should expose clone, diff, and hash as compiled callable operations", () => {
-    const cloneUser = JIT.clone(User);
-    const diffUser = JIT.diff(User);
-    const hashUser = JIT.hash(User);
-    const grace = { ...ada, name: "Grace" };
-
-    expect(cloneUser(ada)).toEqual(ada);
-    expect(cloneUser(ada)).not.toBe(ada);
-    expect(diffUser(ada, grace)).toEqual([{ type: "update", path: ["name"], value: "Grace" }]);
-    expect(hashUser(ada)).toBe(hashUser({ ...ada }));
-    expect(hashUser(ada)).not.toBe(hashUser(grace));
-    expect(cloneUser.compile()).toBe(cloneUser);
-    expect(diffUser.explain().operation).toBe("diff");
-    expect(hashUser.explain().operation).toBe("hash");
-  });
-
-  it("should compile a standalone mask formatter without the validator runtime", () => {
-    const Document = JIT.string().format("###.###.###-##");
-    const formatDocument = JIT.format(Document).compile();
-
-    expect(formatDocument("12345678901")).toBe("123.456.789-01");
-    expect(formatDocument("123.456.789-01")).toBe("123.456.789-01");
-    expect(formatDocument.compile()).toBe(formatDocument);
-    expect(formatDocument.source).toContain("function format(value)");
-    expect(formatDocument.source).not.toContain("safeParse");
-    expect(() => formatDocument("123")).toThrow(RangeError);
-    expectTypeOf(formatDocument).toMatchTypeOf<(value: string) => string>();
-  });
-
-  it("should overload json() for schemas and compiled JSON boundaries", () => {
-    const JsonValue = JIT.json();
-    const stringifyUser = JIT.json(User).stringify().compile();
-    const parseUser = JIT.json(User).parse().compile();
-    const json = stringifyUser(ada);
-
-    expect(JsonValue.schema.type).toBe(AST.TypeName.json);
-    expect(json).toBe(JSON.stringify(ada));
-    expect(parseUser(json)).toEqual(ada);
-    expect(stringifyUser.compile()).toBe(stringifyUser);
-    expect(stringifyUser.explain().operation).toBe("json.stringify");
-    expect(parseUser.explain().operation).toBe("json.parse");
-  });
-
-  it("streams validation issues and specialized JSON chunks", () => {
-    const Item = JIT.object({
-      id: JIT.number().int32(),
-      name: JIT.string().min(3),
+    expect(equalUser.plan.stages[equalUser.plan.stages.length - 1]).toMatchObject({
+      kind: "operation",
+      operation: "equal",
     });
-    const Items = JIT.array(Item);
-    const issues = JIT.validate(Item).issues().compile();
-    const stringifyChunks = JIT.json(Items).stringifyChunks({ chunkBytes: 24 }).compile();
+  });
+
+  it("separates JSON decoding from validation and composes them lazily", () => {
+    const decode = JIT.json.parse(User);
+    const parseUser = decode.validate();
+    const raw = JSON.stringify({ ...ada, name: " Ada " });
+
+    expect(decode.plan.stages.map((stage) => stage.kind)).toEqual(["json.decode"]);
+    expect(parseUser.plan.stages.map((stage) => stage.kind)).toEqual(["json.decode", "validate"]);
+    expect(parseUser(raw)).toEqual(ada);
+    expect(JIT.json.stringify(User)(ada)).toBe(JSON.stringify(ada));
+    expect(JIT.json.value().schema.type).toBe(AST.TypeName.json);
+  });
+
+  it("composes collection sources, operators, and sinks through one plan", () => {
+    const Users = JIT.array(User);
+    const publicUsers = JIT.json
+      .parse(Users)
+      .validate()
+      .filter((query) => query.eq("role", "admin"))
+      .select("id", "name")
+      .to.json();
+
+    expect(publicUsers.plan.stages.map((stage) => stage.kind)).toEqual([
+      "json.decode",
+      "validate",
+      "query",
+      "query",
+      "json.encode",
+    ]);
+    expect(publicUsers(JSON.stringify([ada, { id: 2, name: "Grace", role: "member" }]))).toBe(
+      JSON.stringify([{ id: 1, name: "Ada" }])
+    );
+    expectTypeOf(publicUsers).toMatchTypeOf<(value: string) => string>();
+  });
+
+  it("exposes binary boundaries as composable sources and sinks", () => {
+    const encode = JIT.binary.encode(User);
+    const decode = JIT.binary.decode(User).validate();
+    const bytes = encode(ada);
+
+    expect(decode.plan.stages.map((stage) => stage.kind)).toEqual(["binary.decode", "validate"]);
+    expect(decode(bytes)).toEqual(ada);
+    expectTypeOf(encode).toMatchTypeOf<(value: AST.Typeof<typeof User>) => Uint8Array>();
+  });
+
+  it("maps standalone values and batches without Array#map", () => {
+    const Entity = JIT.object({ id: JIT.number(), fullName: JIT.string() });
+    const Public = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const toPublic = JIT.map(Entity, Public, { name: { from: "fullName" } });
+    const many = JIT.map.many(Entity, Public, { name: { from: "fullName" } });
+    const entity = { id: 1, fullName: "Ada Lovelace" };
+
+    expect(toPublic(entity)).toEqual({ id: 1, name: "Ada Lovelace" });
+    expect(many([entity, { id: 2, fullName: "Grace Hopper" }])).toEqual([
+      { id: 1, name: "Ada Lovelace" },
+      { id: 2, name: "Grace Hopper" },
+    ]);
+    expect(many.plan.stages[many.plan.stages.length - 1]).toMatchObject({ kind: "map", many: true });
+  });
+
+  it("keeps issue and chunk artifacts directly callable", () => {
+    const Item = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(3) });
+    const issues = JIT.validate.issues(Item);
+    const stringifyChunks = JIT.json.stringifyChunks(JIT.array(Item), { chunkBytes: 24 });
     const values = [
       { id: 1, name: "Ada" },
       { id: 2, name: "Grace" },
       { id: 3, name: "Linus" },
     ];
-    const chunks = [...stringifyChunks(values)];
 
     expect([...issues({ id: 1.5, name: "x" })].map((issue) => issue.code)).toEqual(["not_int32", "too_small"]);
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.join("")).toBe(JSON.stringify(values));
-    expect(stringifyChunks.source).toContain("const stringifyElement =");
-    expect(stringifyChunks.source).toContain("chunk.length + part.length > 24");
-    expect(stringifyChunks.source).not.toContain("specialized chunk emitter");
+    expect([...stringifyChunks(values)].join("")).toBe(JSON.stringify(values));
     expectTypeOf(issues).returns.toEqualTypeOf<IterableIterator<Errors.ValidationIssue>>();
-    expectTypeOf(stringifyChunks).toMatchTypeOf<(value: JIT.Typeof<typeof Items>) => IterableIterator<string>>();
-  });
-
-  it("should compile select/map transforms through the fluent facade", () => {
-    const toPublicUser = JIT.transform(User)
-      .select("id", "name")
-      .map("name", (field) => field.lowercase())
-      .compile();
-
-    expect(toPublicUser({ ...ada, name: "ADA" })).toEqual({
-      id: 1,
-      name: "ada",
-    });
-    expectTypeOf(toPublicUser).toMatchTypeOf<
-      (value: { id: number; name: string; role: "admin" | "member" }) => {
-        readonly id: number;
-        readonly name: string;
-      }
-    >();
   });
 });

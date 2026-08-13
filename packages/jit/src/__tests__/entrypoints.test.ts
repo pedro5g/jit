@@ -10,7 +10,7 @@ import { JIT as RuntimeJIT } from "../runtime.js";
 describe("runtime and define entrypoints", () => {
   it("should expose the runtime JIT namespace", () => {
     const User = RuntimeJIT.object({ id: RuntimeJIT.number() });
-    const isUser = RuntimeJIT.validate(User).is().compile();
+    const isUser = RuntimeJIT.validate.is(User);
 
     expect(isUser({ id: 1 })).toBe(true);
     expectTypeOf<RuntimeJIT.Typeof<typeof User>>().toEqualTypeOf<{ id: number }>();
@@ -21,7 +21,7 @@ describe("runtime and define entrypoints", () => {
 
     try {
       const User = DefineJIT.object({ id: DefineJIT.number() });
-      const isUser = DefineJIT.validate(User).is().compile();
+      const isUser = DefineJIT.validate.is(User);
 
       expect(AOT_ARTIFACT in isUser).toBe(true);
       expect(() => isUser({ id: 1 })).toThrow(/AOT artifacts cannot be executed/);
@@ -41,6 +41,32 @@ describe("runtime and define entrypoints", () => {
       expect(generated.isUser({ id: 1 })).toBe(true);
       expect(generated.isUser({ id: "1" })).toBe(false);
       expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is DefineJIT.Typeof<typeof User>>();
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("should keep composed definition pipelines non-executable until AOT lowering", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "jit-define-pipeline-"));
+
+    try {
+      const User = DefineJIT.object({ id: DefineJIT.number(), active: DefineJIT.boolean() });
+      const activeUsers = DefineJIT.json
+        .parse(DefineJIT.array(User))
+        .validate()
+        .filter((query) => query.eq("active", true))
+        .select("id")
+        .to.json();
+
+      expect(() => activeUsers('[{"id":1,"active":true}]')).toThrow(/AOT artifacts cannot be executed/);
+
+      AOT.generate({ schemas: {}, functions: { activeUsers }, outDir });
+
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+        activeUsers: (json: string) => string;
+      };
+
+      expect(generated.activeUsers('[{"id":1,"active":true},{"id":2,"active":false}]')).toBe('[{"id":1}]');
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }

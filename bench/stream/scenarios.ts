@@ -28,7 +28,7 @@ function makeEvents(count: number, badIndex: number): string {
 const validPayload = makeEvents(10_000, -1);
 const earlyBadPayload = makeEvents(10_000, 3);
 
-const validator = JIT.validator(Event);
+const validator = { is: JIT.is(Event) };
 
 /** The status quo: buffer everything, parse everything, then validate. */
 function bufferParseValidate(payload: string): boolean {

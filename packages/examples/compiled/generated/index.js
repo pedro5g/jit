@@ -758,13 +758,6 @@ const User_findActiveAdmins = /*#__PURE__*/ (() => {
   return out;
 });
 })();
-const User_toPublicUser = /*#__PURE__*/ (() => {
-  return ({
-  map: function map(source) {
-    return { "id": source.id, "name": source.name, "role": source.role };
-  }
-});
-})();
 const User = /*#__PURE__*/ Object.freeze({
   is: User_is,
   safeParse: User_safeParse,
@@ -779,7 +772,6 @@ const User = /*#__PURE__*/ Object.freeze({
   sanitize: User_sanitize,
   codec: User_codec,
   findActiveAdmins: User_findActiveAdmins,
-  toPublicUser: User_toPublicUser,
 });
 
 const iterateActiveUsers = /*#__PURE__*/ (() => {
@@ -812,6 +804,13 @@ function query(input) {
 return query;
 })());
 })();
+const toPublicUser = /*#__PURE__*/ ((mapper) => mapper.map)((() => {
+  return ({
+    map: function map(source) {
+      return { "id": source.id, "name": source.name, "role": source.role };
+    }
+  });
+})());
 const visitActiveUsers = /*#__PURE__*/ (() => {
   const __q0 = true;
   return ((function () {
@@ -840,4 +839,4 @@ function visit(input, consume) {
 return visit;
 })());
 })();
-export { User, iterateActiveUsers, visitActiveUsers };
+export { User, iterateActiveUsers, toPublicUser, visitActiveUsers };

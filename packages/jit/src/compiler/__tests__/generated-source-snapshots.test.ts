@@ -102,7 +102,7 @@ describe("generated source snapshots", () => {
 
   it("validator: json, custom, and template literal schemas", () => {
     const Payload = JIT.object({
-      data: JIT.json(),
+      data: JIT.json.value(),
       external: JIT.custom<{ id: string }>(
         (value): value is { id: string } => typeof value === "object" && value !== null && "id" in value
       ),
@@ -256,9 +256,13 @@ describe("generated source snapshots", () => {
       .select("id", "name")
       .take(10)
       .compileIterator();
-    const stringifyChunks = JIT.json(Users).stringifyChunks({ chunkBytes: 1024 }).compile();
+    const stringifyChunks = JIT.json.stringifyChunks(Users, { chunkBytes: 1024 });
 
-    expect({ iterator: sourceOf(iterate), stringifyChunks: sourceOf(stringifyChunks) }).toMatchSnapshot();
+    expect(stringifyChunks.plan.stages.map((stage) => stage.kind)).toEqual(["value", "json.encode"]);
+    expect({
+      iterator: sourceOf(iterate),
+      stringifyChunks: Compiler.emitStringifyChunksSource(Users.schema, { chunkBytes: 1024 }),
+    }).toMatchSnapshot();
   });
 
   it("mapper: renames, nested objects, and fused many()", () => {
@@ -301,15 +305,14 @@ describe("generated source snapshots", () => {
     }).toMatchSnapshot();
   });
 
-  it("dto: selected validation and fused whitelist mapping", () => {
+  it("dto annotations retain normal validation and mapper source", () => {
     const Entity = JIT.object({ id: JIT.number(), fullName: JIT.string(), passwordHash: JIT.string() });
-    const Public = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const DTO = JIT.dto(Entity, Public, { name: { from: "fullName" } }).get("is", "from", "many");
+    const Public = JIT.dto(JIT.object({ id: JIT.number(), name: JIT.string() }));
 
     expect({
       is: Compiler.emitValidatorSource(Public.schema, { ops: ["is"] }),
-      from: sourceOf(DTO.from),
-      many: sourceOf(DTO.many),
+      from: Compiler.emitMapperSource(Entity.schema, Public.schema, { name: { from: "fullName" } }, ["map"]),
+      many: Compiler.emitMapperSource(Entity.schema, Public.schema, { name: { from: "fullName" } }, ["many"]),
     }).toMatchSnapshot();
   });
 });

@@ -17,7 +17,7 @@ const schema = JIT.object({
 });`;
 
 describe("browser playground advanced operations", () => {
-  it("executes configured sanitizers and exposes generated source", () => {
+  it("executes configured sanitizers and exposes the execution plan", () => {
     const sanitized = execute(
       "sanitize",
       `const schema = JIT.object({
@@ -33,8 +33,7 @@ describe("browser playground advanced operations", () => {
     );
 
     expect(sanitized.value).toEqual({ text: "Hello", rich: "<b>Hello</b>", identifier: "users_name_DROP" });
-    expect(sanitized.source).toContain("function sanitize(value)");
-    expect(sanitized.source).toContain("rawName.toLowerCase()");
+    expect(sanitized.source).toContain('"operation": "sanitize"');
   });
 
   it("executes reactive updates with path and aggregate notifications", () => {
@@ -76,7 +75,12 @@ const reactiveUpdate = (initial, patches) => {
     const result = execute(
       "model",
       `const schema = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
-const model = JIT.model(schema, { is: true, parse: true, clone: true });`,
+const model = {
+  ops: ["is", "parse", "clone"],
+  is: JIT.is(schema),
+  parse: JIT.parse(schema),
+  clone: JIT.clone(schema),
+};`,
       { id: 1, name: "Ada" }
     );
 
@@ -88,26 +92,29 @@ const model = JIT.model(schema, { is: true, parse: true, clone: true });`,
     });
   });
 
-  it("executes a DTO aggregate without leaking source-only fields", () => {
+  it("executes a DTO-annotated mapping without leaking source-only fields", () => {
     const result = execute(
       "dto",
       `const schema = JIT.object({
   id: JIT.number(), fullName: JIT.string(), passwordHash: JIT.string()
 });
-const PublicUser = JIT.object({ id: JIT.number(), name: JIT.string() });
-const dto = JIT.dto(schema, PublicUser, { name: { from: "fullName" } })
-  .get("is", "stringify", "from", "many");`,
+const PublicUser = JIT.dto(JIT.object({ id: JIT.number(), name: JIT.string() }));
+const dto = JIT.from(schema).map(PublicUser, { name: { from: "fullName" } });`,
       { id: 1, fullName: "Ada", passwordHash: "secret" }
     );
 
     expect(result.value).toEqual({
-      operations: ["is", "stringify", "from", "many"],
+      plan: expect.objectContaining({
+        stages: expect.arrayContaining([expect.objectContaining({ kind: "map" })]),
+      }),
       dto: { id: 1, name: "Ada" },
       valid: true,
       json: '{"id":1,"name":"Ada"}',
     });
-    expect(JSON.stringify(result.value)).not.toContain("passwordHash");
-    expect(JSON.stringify(result.value)).not.toContain("secret");
+    const dtoResult = result.value as { readonly dto: unknown; readonly json: string };
+    expect(JSON.stringify(dtoResult.dto)).not.toContain("passwordHash");
+    expect(JSON.stringify(dtoResult.dto)).not.toContain("secret");
+    expect(dtoResult.json).not.toContain("passwordHash");
   });
 
   it("demonstrates entity, indexBy, schema keyed, and query keyed semantics", () => {
@@ -140,8 +147,7 @@ const indexes = {
       normalized: { byId: { 1: left[0], 2: left[1] }, ids: [1, 2] },
       queryMap: { "[Map]": { 1: { name: "Ada" }, 2: { name: "Grace" } } },
     });
-    expect(result.source).toContain("if (len < 64)");
-    expect(result.source).toContain('__getIndex(r, "id")');
+    expect(result.source).toContain('"operation": "equal"');
   });
 
   it("executes lazy generators and direct visitors", () => {
@@ -237,7 +243,7 @@ const binaryQuery = JIT.query(binary)
       "jsonChunks",
       `const Item = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
 const schema = JIT.array(Item);
-const stringifyChunks = JIT.json(schema).stringifyChunks({ chunkBytes: 24 }).compile();`,
+const stringifyChunks = JIT.json.stringifyChunks(schema, { chunkBytes: 24 });`,
       [
         { id: 1, name: "Ada Lovelace" },
         { id: 2, name: "Grace Hopper" },
@@ -265,7 +271,7 @@ const stringifyChunks = JIT.json(schema).stringifyChunks({ chunkBytes: 24 }).com
     expect(chunksValue.chunkCount).toBeGreaterThan(1);
     expect(chunksValue.chunks.join("")).toBe(chunksValue.json);
     expect(JSON.parse(chunksValue.json)).toHaveLength(3);
-    expect(chunks.source).toContain("function* stringifyChunks(value)");
+    expect(chunks.source).toContain('"kind": "json.encode"');
   });
 });
 

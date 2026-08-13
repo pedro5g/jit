@@ -386,7 +386,7 @@ describe("JIT AST builders", () => {
     });
 
     it("should construct json, custom, template literal, and function schemas", () => {
-      const Json = JIT.json().schema;
+      const Json = JIT.json.value().schema;
       const Custom = JIT.custom<{ cents: number }>((value) => typeof value === "object" && value !== null).schema;
       const Greeting = JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const).schema;
       const MyFunction = JIT.function({

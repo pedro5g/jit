@@ -13,29 +13,37 @@ documentation.
 
 | API               | Reference                            | Purpose                                       |
 | ----------------- | ------------------------------------ | --------------------------------------------- |
-| `JIT.validate`    | [Validation](./validation)           | Explicit host-style validator selection       |
-| `JIT.validator`   | [Validation](./validation#validator) | Lazy validator facade and `.get()`            |
+| `JIT.validate`    | [Validation](./validation)           | Validation capability namespace               |
+| `JIT.is`          | [Validation](./validation)           | Root alias for `JIT.validate.is`              |
+| `JIT.parse`       | [Validation](./validation)           | Root alias for `JIT.validate.parse`           |
+| `JIT.safeParse`   | [Validation](./validation)           | Root alias for `JIT.validate.safeParse`       |
+| `JIT.validator`   | [Validation](./validation)           | Legacy validator adapter; prefer `JIT.validate` |
 | `JIT.equal`       | [Equal](./equal)                     | Schema-specialized structural equality        |
 | `JIT.clone`       | [Clone](./clone)                     | Shape-specialized deep clone                  |
 | `JIT.diff`        | [Diff](./diff)                       | Typed structural change entries               |
 | `JIT.update`      | [Update](./update)                   | Immutable patches, recipes and reactive state |
 | `JIT.hash`        | [Hash](./hash)                       | Structural numeric hash                       |
-| `JIT.json`        | [JSON](./json)                       | JSON schema or compiled JSON operations       |
-| `JIT.serializer`  | [Serializer](./serializer)           | Aggregated JSON stringify and parse           |
+| `JIT.json`        | [JSON](./json)                       | JSON capability namespace                     |
+| `JIT.jsonValue`   | [JSON](./json)                       | JSON-value schema factory                     |
+| `JIT.binary`      | [Codec](./codec)                     | Persisted binary capability namespace         |
+| `JIT.compare`     | [Equal](./equal)                     | Equality, diff, and hash capability namespace |
+| `JIT.security`    | [Mask](./mask)                       | Masking and sanitization capability namespace |
+| `JIT.serializer`  | [Serializer](./serializer)           | Legacy JSON adapter; prefer `JIT.json`        |
 | `JIT.codec`       | [Codec](./codec)                     | Value codec schema or binary wire codec       |
 | `JIT.format`      | [Format](./format)                   | Standalone string-mask formatter              |
 | `JIT.mask`        | [Mask](./mask)                       | PII-aware output masking                      |
 | `JIT.sanitize`    | [Sanitize](./sanitize)               | Policy-driven hostile string cleanup          |
 | `JIT.compile`     | [Compile](./compile)                 | Explicit grouped operation export             |
-| `JIT.model`       | [Model](./model)                     | Lazy or configured operation facade           |
-| `JIT.mapper`      | [Mapper](./mapper)                   | Whitelist source-to-target mapping            |
+| `JIT.model`       | [Model](./model)                     | Legacy operation adapter; prefer artifacts    |
+| `JIT.mapper`      | [Mapper](./mapper)                   | Legacy mapping adapter; prefer `JIT.map`      |
+| `JIT.from`        | [Query](./query)                     | Starts a value-source execution pipeline      |
 | `JIT.transform`   | [Transform](./transform)             | Select and transform object fields            |
 | `JIT.query`       | [Query](./query)                     | Eager and lazy compiled collection query      |
 | `JIT.process`     | [Process](./process)                 | Fused load-and-query binary pipeline          |
 | `JIT.stream`      | [Stream](./stream)                   | Incremental JSON and NDJSON validation        |
 | `JIT.watch`       | [Watch](./watch)                     | Stateless keyed collection changes            |
 | `JIT.watchedList` | [Watch](./watch#watchedlist)         | Stateful aggregate collection                 |
-| `JIT.dto`         | [DTO](./dto)                         | Validation, transport and mapping aggregate   |
+| `JIT.dto`         | [DTO](./dto)                         | Application-boundary schema annotation        |
 
 ## Schema factories and composition
 
@@ -46,7 +54,8 @@ documentation.
 | `JIT.date`             | [Factories](./schema-factories#date)          | `JIT.enum`               | [Factories](./schema-factories#enum)            |
 | `JIT.file`             | [Factories](./schema-factories#file)          | `JIT.function`           | [Factories](./schema-factories#function)        |
 | `JIT.instanceOf`       | [Factories](./schema-factories#instanceof)    | `JIT.int`                | [Factories](./schema-factories#int)             |
-| `JIT.literal`          | [Factories](./schema-factories#literal)       | `JIT.map`                | [Factories](./schema-factories#map)             |
+| `JIT.literal`          | [Factories](./schema-factories#literal)       | `JIT.map`                | [Mapper](./mapper)                              |
+| `JIT.mapSchema`        | [Factories](./schema-factories#map)           |                          |                                                 |
 | `JIT.nan`              | [Factories](./schema-factories#nan)           | `JIT.never`              | [Factories](./schema-factories#never)           |
 | `JIT.null`             | [Factories](./schema-factories#null)          | `JIT.number`             | [Factories](./schema-factories#number)          |
 | `JIT.object`           | [Factories](./schema-factories#object)        | `JIT.record`             | [Factories](./schema-factories#record)          |
@@ -91,7 +100,6 @@ normally uses the higher-level function in the second column.
 | `JIT.COMPILE_OPS`      | [Operation lists](./low-level-compilers#compile_ops)          | supported `compile()` keys      |
 | `JIT.MODEL_OPS`        | [Operation lists](./low-level-compilers#model_ops)            | supported `model()` keys        |
 | `JIT.MAPPER_OPS`       | [Operation lists](./low-level-compilers#mapper_ops)           | supported mapper selections     |
-| `JIT.DTO_OPS`          | [Operation lists](./low-level-compilers#dto_ops)              | supported DTO selections        |
 | `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)                    | `JIT.watchedList()`             |
 | `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class)               | `JIT.watchedList(..., { key })` |
 

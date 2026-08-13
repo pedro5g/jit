@@ -59,8 +59,8 @@ function resolve(...parts) {
   const joined = parts.filter(Boolean).join("/");
   return normalize2(joined.startsWith("/") ? joined : `/${joined}`);
 }
-function relative(from, to) {
-  const left = resolve(from).split("/").filter(Boolean);
+function relative(from3, to) {
+  const left = resolve(from3).split("/").filter(Boolean);
   const right = resolve(to).split("/").filter(Boolean);
   let shared = 0;
   while (shared < left.length && left[shared] === right[shared]) shared++;
@@ -2688,9 +2688,9 @@ function getIndex(items, key) {
   if (cached && cached.key === key) {
     return cached.map;
   }
-  const map2 = buildIndex(items, key);
-  INDEX_CACHE.set(items, { key, map: map2 });
-  return map2;
+  const map4 = buildIndex(items, key);
+  INDEX_CACHE.set(items, { key, map: map4 });
+  return map4;
 }
 
 // ../../packages/jit/src/compiler/emitter/emit-expr.ts
@@ -3221,7 +3221,7 @@ function mergeHints(left, right) {
   const entity = right.entity ?? left.entity;
   const index = right.index ?? left.index;
   const order = right.order ?? left.order;
-  const compare = mergeOptional(left.compare, right.compare);
+  const compare2 = mergeOptional(left.compare, right.compare);
   const clone3 = mergeOptional(left.clone, right.clone);
   const hash4 = mergeOptional(left.hash, right.hash);
   const diff3 = mergeOptional(left.diff, right.diff);
@@ -3231,7 +3231,7 @@ function mergeHints(left, right) {
     ...index ? { index } : {},
     ...order ? { order } : {},
     ...collection ? { collection } : {},
-    ...compare ? { compare } : {},
+    ...compare2 ? { compare: compare2 } : {},
     ...clone3 ? { clone: clone3 } : {},
     ...hash4 ? { hash: hash4 } : {},
     ...diff3 ? { diff: diff3 } : {},
@@ -4767,6 +4767,405 @@ function compileFormat(schema, options) {
   );
 }
 
+// ../../packages/jit/src/compiler/mapper/build-mapper-plan.ts
+function buildMapperPlan(sourceSchema, targetSchema, overrides = {}) {
+  const source = expectObjectSchema(sourceSchema, "mapper source");
+  const target = expectObjectSchema(targetSchema, "mapper target");
+  const bindings = [];
+  const bindingNames = [];
+  const bind = (value) => {
+    const name = `__m${bindings.length}`;
+    bindings[bindings.length] = value;
+    bindingNames[bindingNames.length] = name;
+    return name;
+  };
+  for (const key of Object.keys(overrides)) {
+    if (!(key in target.def.props)) {
+      throw new JITError("INVALID_MAPPER", `mapper override references unknown target field ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+  const fields = planObjectFields(source, target, overrides, bind, []);
+  return { fields, bindingNames, bindings };
+}
+function planObjectFields(source, target, overrides, bind, path) {
+  const fields = [];
+  for (const key of Object.keys(target.def.props)) {
+    const targetProp = target.def.props[key];
+    const fieldPath = [...path, key];
+    const override = overrides[key];
+    if (override !== void 0) {
+      fields[fields.length] = { key, source: planOverride(source, key, override, bind, fieldPath) };
+      continue;
+    }
+    const planned = planAutoMatch(source, key, targetProp, bind, fieldPath);
+    if (planned) fields[fields.length] = { key, source: planned };
+  }
+  return fields;
+}
+function planOverride(source, key, override, bind, path) {
+  if (typeof override === "function") {
+    return { kind: "computed", binding: bind(override) };
+  }
+  if (typeof override !== "object" || override === null) {
+    throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must be a function or object`, {
+      path
+    });
+  }
+  if (override.via !== void 0) {
+    if (typeof override.from !== "string") {
+      throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} with via requires from`, {
+        path
+      });
+    }
+    expectSourceField(source, override.from, path);
+    return { kind: "via", from: override.from, binding: bind(override.via) };
+  }
+  if (override.from !== void 0) {
+    expectSourceField(source, override.from, path);
+    const planned = planAutoMatch(source, override.from, void 0, bind, path);
+    if (!planned) {
+      throw new JITError(
+        "INVALID_MAPPER",
+        `mapper cannot copy source field ${JSON.stringify(override.from)}; use via to convert it`,
+        { path }
+      );
+    }
+    return planned;
+  }
+  if ("default" in override) {
+    const from3 = key in source.def.props ? key : void 0;
+    return { kind: "default", from: from3, binding: bind(override.default) };
+  }
+  throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must define from, via, or default`, {
+    path
+  });
+}
+function planAutoMatch(source, from3, targetProp, bind, path) {
+  const sourceProp = source.def.props[from3];
+  if (sourceProp === void 0) {
+    if (targetProp !== void 0 && resolveWrappers(targetProp).optional) return void 0;
+    throw new JITError(
+      "INVALID_MAPPER",
+      `mapper target field ${JSON.stringify(path[path.length - 1])} has no source match and no override`,
+      { path }
+    );
+  }
+  const sourceResolved = resolveWrappers(sourceProp);
+  const targetResolved = targetProp === void 0 ? void 0 : resolveWrappers(targetProp);
+  if (targetResolved && sourceResolved.optional && !targetResolved.optional) {
+    throw new JITError(
+      "INVALID_MAPPER",
+      `mapper source field ${JSON.stringify(from3)} is optional but the target field is required; use default or via`,
+      { path }
+    );
+  }
+  const sourceBase = sourceResolved.base;
+  const targetBase = targetResolved?.base;
+  if (sourceBase.type === TypeName.object && (targetBase === void 0 || targetBase.type === TypeName.object)) {
+    const nestedTarget = targetBase ?? sourceBase;
+    const fields = planObjectFields(sourceBase, nestedTarget, {}, bind, path);
+    return { kind: "copy-object", from: from3, fromOptional: sourceResolved.optional, fields };
+  }
+  if (sourceBase.type === TypeName.array && (targetBase === void 0 || targetBase.type === TypeName.array)) {
+    const sourceElement = resolveWrappers(sourceBase.def.element).base;
+    const targetElement = targetBase === void 0 ? sourceElement : resolveWrappers(targetBase.def.element).base;
+    if (sourceElement.type === TypeName.object && targetElement.type === TypeName.object) {
+      const element = planObjectFields(sourceElement, targetElement, {}, bind, path);
+      return { kind: "copy-array", from: from3, fromOptional: sourceResolved.optional, element };
+    }
+    if (isCompatibleBase(sourceElement.type, targetElement.type)) {
+      return { kind: "copy-array", from: from3, fromOptional: sourceResolved.optional, element: void 0 };
+    }
+    if (targetResolved?.optional) return void 0;
+    throw new JITError("INVALID_MAPPER", `mapper array field ${JSON.stringify(from3)} has incompatible element types`, {
+      path
+    });
+  }
+  if (targetBase === void 0 || isCompatibleBase(sourceBase.type, targetBase.type)) {
+    return { kind: "copy", from: from3, fromOptional: sourceResolved.optional };
+  }
+  if (targetResolved?.optional) return void 0;
+  throw new JITError(
+    "INVALID_MAPPER",
+    `mapper field ${JSON.stringify(from3)} has type ${sourceBase.type} but the target expects ${targetBase.type}`,
+    { path }
+  );
+}
+function isCompatibleBase(source, target) {
+  if (source === target) return true;
+  if (source === TypeName.int && target === TypeName.number) return true;
+  return false;
+}
+function expectSourceField(source, from3, path) {
+  if (!(from3 in source.def.props)) {
+    throw new JITError("INVALID_MAPPER", `mapper override references unknown source field ${JSON.stringify(from3)}`, {
+      path
+    });
+  }
+}
+function expectObjectSchema(schema, label) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.object) {
+    throw new JITError("INVALID_MAPPER", `${label} must be an object schema`);
+  }
+  return resolved;
+}
+
+// ../../packages/jit/src/compiler/mapper/build-mapper-ir.ts
+var SOURCE = irVar("source");
+var LIST = irVar("list");
+var LEN = irVar("len");
+var OUT = irVar("out");
+var INDEX = irVar("i");
+function buildMapperIR(fields) {
+  const prelude = [];
+  const output = objectLiteral(buildEntries(fields, SOURCE, "f", prelude));
+  const map4 = {
+    kind: "program",
+    params: [SOURCE],
+    body: [...prelude, { kind: "return", value: output }]
+  };
+  const many = {
+    kind: "program",
+    params: [LIST],
+    body: [
+      { kind: "assign", target: LEN, expr: loadProp(LIST, "length") },
+      { kind: "assign", target: OUT, expr: construct("Array", [LEN]) },
+      forRange(INDEX, LEN, [
+        { kind: "assign", target: SOURCE, expr: loadIndex(LIST, INDEX) },
+        ...prelude,
+        store(loadIndex(OUT, INDEX), output)
+      ]),
+      { kind: "return", value: OUT }
+    ]
+  };
+  return { map: map4, many };
+}
+function buildEntries(fields, base, prefix, prelude) {
+  return fields.map((field) => ({
+    key: field.key,
+    value: buildFieldValue(field, base, `${prefix}_${identifier(field.key)}`, prelude)
+  }));
+}
+function buildFieldValue(field, base, prefix, prelude) {
+  const source = field.source;
+  switch (source.kind) {
+    case "copy":
+      return loadProp(base, source.from);
+    case "copy-object": {
+      if (!source.fromOptional) {
+        return objectLiteral(buildEntries(source.fields, loadProp(base, source.from), prefix, prelude));
+      }
+      const src = irVar(`${prefix}_src`);
+      const value = irVar(`${prefix}_val`);
+      const inner = [];
+      const nested = objectLiteral(buildEntries(source.fields, src, prefix, inner));
+      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
+        kind: "if",
+        test: notStrictEqual(src, literal(void 0)),
+        then: [...inner, store(value, nested)]
+      });
+      return value;
+    }
+    case "copy-array": {
+      const src = irVar(`${prefix}_src`);
+      const len = irVar(`${prefix}_len`);
+      const out = irVar(`${prefix}_out`);
+      const index = irVar(`${prefix}_i`);
+      const item = irVar(`${prefix}_item`);
+      const inner = [];
+      const element = source.element === void 0 ? item : objectLiteral(buildEntries(source.element, item, prefix, inner));
+      const loop = [
+        { kind: "assign", target: len, expr: loadProp(src, "length") },
+        { kind: "assign", target: out, expr: construct("Array", [len]) },
+        forRange(index, len, [
+          { kind: "assign", target: item, expr: loadIndex(src, index) },
+          ...inner,
+          store(loadIndex(out, index), element)
+        ])
+      ];
+      if (!source.fromOptional) {
+        prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, ...loop);
+        return out;
+      }
+      const value = irVar(`${prefix}_val`);
+      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
+        kind: "if",
+        test: notStrictEqual(src, literal(void 0)),
+        then: [...loop, store(value, out)]
+      });
+      return value;
+    }
+    case "via":
+      return { kind: "call", callee: irVar(source.binding), args: [loadProp(SOURCE, source.from), SOURCE] };
+    case "computed":
+      return { kind: "call", callee: irVar(source.binding), args: [SOURCE] };
+    case "default": {
+      if (source.from === void 0) return irVar(source.binding);
+      const value = irVar(`${prefix}_val`);
+      prelude.push(letDecl(value, loadProp(SOURCE, source.from)), {
+        kind: "if",
+        test: strictEqual(value, literal(void 0)),
+        then: [store(value, irVar(source.binding))]
+      });
+      return value;
+    }
+  }
+}
+function identifier(key) {
+  return key.replace(/[^$_a-zA-Z0-9]/g, "_").replace(/^[^$_a-zA-Z]/, "_");
+}
+
+// ../../packages/jit/src/compiler/mapper.ts
+var MAPPER_OPS = ["map", "many"];
+function emitMapperSource(sourceSchema, targetSchema, overrides = {}, operations = MAPPER_OPS) {
+  return emitMapper(buildMapperPlan(sourceSchema, targetSchema, overrides), normalizeMapperOps(operations));
+}
+function createMapperFacade(sourceSchema, targetSchema, overrides = {}, options) {
+  const plan = buildMapperPlan(sourceSchema, targetSchema, overrides);
+  const selections = /* @__PURE__ */ new Map();
+  const select = (operations) => {
+    const normalized = normalizeMapperOps(operations);
+    const key = normalized.join(",");
+    const cached = selections.get(key);
+    if (cached) return cached;
+    const selection = compileMapperPlanSelection(
+      sourceSchema,
+      targetSchema,
+      plan,
+      normalized,
+      options
+    );
+    selections.set(key, selection);
+    return selection;
+  };
+  const target = {
+    get(...operations) {
+      return select(operations);
+    }
+  };
+  for (const operation of MAPPER_OPS) {
+    Object.defineProperty(target, operation, {
+      configurable: false,
+      enumerable: true,
+      get() {
+        return select([operation])[operation];
+      }
+    });
+  }
+  const facade = Object.freeze(target);
+  registerMapperArtifact(facade, plan, MAPPER_OPS);
+  return facade;
+}
+function compileMapperPlanSelection(sourceSchema, targetSchema, plan, operations, options) {
+  const normalized = normalizeMapperOps(operations);
+  const operationKey = normalized.join(",");
+  if (normalized.length === 0) {
+    const empty = Object.freeze({});
+    registerMapperArtifact(empty, plan, normalized, "{}");
+    return empty;
+  }
+  const template = getCompileCached(
+    sourceSchema,
+    `mapper:${targetKey(targetSchema)}:${operationKey}:${serializeFields(plan.fields)}`,
+    () => {
+      const source = emitMapper(plan, normalized);
+      return {
+        source,
+        create: globalThis.Function(...plan.bindingNames, `return ${source};`)
+      };
+    },
+    options
+  );
+  const compiled = Object.freeze(template.create(...plan.bindings));
+  registerMapperArtifact(compiled, plan, normalized, template.source);
+  const compiledOperations = compiled;
+  for (const operation of normalized) {
+    const compiledOperation = compiledOperations[operation];
+    if (compiledOperation) {
+      registerMapperArtifact(compiledOperation, plan, [operation], emitMapperFunction(plan, operation));
+    }
+  }
+  return compiled;
+}
+function emitMapper(plan, operations) {
+  const programs = buildMapperIR(plan.fields);
+  const writer = new CodeWriter();
+  writer.line("{");
+  writer.indent(() => {
+    operations.forEach((operation, index) => {
+      emitMapperFunctionBody(writer, programs, operation, index < operations.length - 1 ? "," : "");
+    });
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitMapperFunction(plan, operation) {
+  const programs = buildMapperIR(plan.fields);
+  const writer = new CodeWriter();
+  emitMapperFunctionBody(writer, programs, operation, "", false);
+  return writer.toString();
+}
+function emitMapperFunctionBody(writer, programs, operation, suffix, property = true) {
+  const parameter = operation === "map" ? "source" : "list";
+  const prefix = property ? `${operation}: ` : "";
+  writer.line(`${prefix}function ${operation}(${parameter}) {`);
+  writer.indent(() => {
+    for (const node of programs[operation].body) emitNode(writer, node);
+  });
+  writer.line(`}${suffix}`);
+}
+function registerMapperArtifact(value, plan, operations, source) {
+  registerArtifact(value, {
+    kind: "mapper",
+    get source() {
+      return source ?? emitMapper(plan, operations);
+    },
+    bindingNames: plan.bindingNames,
+    bindingValues: plan.bindings
+  });
+}
+function normalizeMapperOps(operations) {
+  for (const operation of operations) {
+    if (!MAPPER_OPS.includes(operation)) {
+      throw new JITError("INVALID_OPERATION", `unknown mapper operation: ${String(operation)}`);
+    }
+  }
+  return MAPPER_OPS.filter((operation) => operations.includes(operation));
+}
+var targetKeys = /* @__PURE__ */ new WeakMap();
+var targetKeyCounter = 0;
+function targetKey(schema) {
+  let key = targetKeys.get(schema);
+  if (key === void 0) {
+    key = ++targetKeyCounter;
+    targetKeys.set(schema, key);
+  }
+  return key;
+}
+function serializeFields(fields) {
+  return fields.map(serializeField).join(";");
+}
+function serializeField(field) {
+  const source = field.source;
+  switch (source.kind) {
+    case "copy":
+      return `${field.key}<c:${source.from}:${source.fromOptional ? "?" : ""}>`;
+    case "copy-object":
+      return `${field.key}<o:${source.from}:${source.fromOptional ? "?" : ""}[${serializeFields(source.fields)}]>`;
+    case "copy-array":
+      return `${field.key}<a:${source.from}:${source.fromOptional ? "?" : ""}[${source.element ? serializeFields(source.element) : "*"}]>`;
+    case "via":
+      return `${field.key}<v:${source.from}:${source.binding}>`;
+    case "computed":
+      return `${field.key}<x:${source.binding}>`;
+    case "default":
+      return `${field.key}<d:${source.from ?? ""}:${source.binding}>`;
+  }
+}
+
 // ../../packages/jit/src/compiler/security/emit-scrub.ts
 function emitScrub(schema, selector) {
   const writer = new CodeWriter();
@@ -4955,6 +5354,502 @@ function selectPii(base) {
         return `(${hash4} >>> 0).toString(16)`;
       };
   }
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-query.ts
+function emitQuery(program) {
+  const writer = new CodeWriter();
+  const params = program.params.map((param2) => param2.name).join(", ");
+  writer.line(`function query(${params}) {`);
+  writer.indent(() => {
+    for (const node of program.body) emitNode(writer, node);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+
+// ../../packages/jit/src/compiler/ir/builders/build-query-ir.ts
+var VALUE = irVar("value");
+var PARAMS = irVar("params");
+var LEN2 = irVar("len");
+var OUT2 = irVar("out");
+var CURSOR = irVar("j");
+var INDEX2 = irVar("i");
+var ITEM = irVar("item");
+var ENTRY = irVar("entry");
+var SEEN = irVar("seen");
+var UNIQUE_KEY = irVar("uniqueKey");
+var COLLECT_KEY = irVar("collectKey");
+var GROUP = irVar("group");
+var PROJECTED = irVar("projected");
+var COMPARE_OPERATORS = {
+  eq: "strictEqual",
+  neq: "notStrictEqual",
+  gt: "greaterThan",
+  gte: "greaterThanOrEqual",
+  lt: "lessThan",
+  lte: "lessThanOrEqual"
+};
+function buildQueryIR(target, plan, options = {}) {
+  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
+  return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
+}
+function buildArrayQuery(target, plan) {
+  if (shouldProjectAfterOrder(plan)) return buildArrayQueryWithPostOrderProjection(target, plan);
+  const selected = buildProjection(plan.select);
+  const body = [
+    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
+    letDecl(CURSOR, literal(0)),
+    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, selected)])),
+    store(loadProp(OUT2, "length"), CURSOR)
+  ];
+  if (plan.orderBy) body.push(sortByKey(OUT2, plan.orderBy.key, plan.orderBy.direction));
+  body.push({ kind: "return", value: OUT2 });
+  return body;
+}
+function buildArrayQueryWithPostOrderProjection(target, plan) {
+  const orderBy = plan.orderBy;
+  const body = [
+    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
+    letDecl(CURSOR, literal(0)),
+    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, ITEM)])),
+    store(loadProp(OUT2, "length"), CURSOR)
+  ];
+  if (orderBy) body.push(sortByKey(OUT2, orderBy.key, orderBy.direction));
+  body.push(
+    { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },
+    forRange(INDEX2, CURSOR, [
+      { kind: "assign", target: ITEM, expr: loadIndex(OUT2, INDEX2) },
+      store(loadIndex(PROJECTED, INDEX2), buildProjection(plan.select))
+    ]),
+    { kind: "return", value: PROJECTED }
+  );
+  return body;
+}
+function buildCollectedQuery(target, plan) {
+  const collector = plan.collector;
+  if (!collector) return [];
+  const selected = buildProjection(plan.select);
+  const collect = [{ kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, collector.key) }];
+  if (collector.kind === "keyed") {
+    collect.push(exprStmt(call(loadProp(OUT2, "set"), [COLLECT_KEY, selected])));
+  } else {
+    collect.push(
+      letDecl(GROUP, loadIndex(OUT2, COLLECT_KEY)),
+      {
+        kind: "if",
+        test: strictEqual(GROUP, literal(void 0)),
+        then: [store(GROUP, arrayLiteral()), store(loadIndex(OUT2, COLLECT_KEY), GROUP)]
+      },
+      store(loadIndex(GROUP, loadProp(GROUP, "length")), selected)
+    );
+  }
+  const outInitializer = collector.kind === "keyed" ? construct("Map") : call(loadProp(irVar("Object"), "create"), [literal(null)]);
+  return [
+    ...buildLoopHeader(target, plan, outInitializer),
+    buildInputLoop(target, buildGuardedBody(plan, collect)),
+    { kind: "return", value: OUT2 }
+  ];
+}
+var ACC = irVar("acc");
+var ACC_COUNT = irVar("n");
+function buildAggregateQuery(target, plan, aggregate) {
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  const field = aggregate.key === void 0 ? ITEM : loadProp(ITEM, aggregate.key);
+  switch (aggregate.op) {
+    case "sum":
+    case "count": {
+      const increment = aggregate.op === "count" ? literal(1) : field;
+      body.push(
+        letDecl(ACC, literal(0)),
+        buildInputLoop(target, buildGuardedBody(plan, [store(ACC, binary("add", ACC, increment))])),
+        { kind: "return", value: ACC }
+      );
+      return body;
+    }
+    case "avg":
+      body.push(
+        letDecl(ACC, literal(0)),
+        letDecl(ACC_COUNT, literal(0)),
+        buildInputLoop(
+          target,
+          buildGuardedBody(plan, [
+            store(ACC, binary("add", ACC, field)),
+            store(ACC_COUNT, binary("add", ACC_COUNT, literal(1)))
+          ])
+        ),
+        {
+          kind: "if",
+          test: strictEqual(ACC_COUNT, literal(0)),
+          then: [{ kind: "return", value: literal(void 0) }]
+        },
+        { kind: "return", value: binary("divide", ACC, ACC_COUNT) }
+      );
+      return body;
+    case "min":
+    case "max": {
+      const wins = binary(aggregate.op === "min" ? "lessThan" : "greaterThan", field, ACC);
+      body.push(
+        letDecl(ACC),
+        buildInputLoop(
+          target,
+          buildGuardedBody(plan, [
+            {
+              kind: "if",
+              test: { kind: "nary", op: "or", operands: [strictEqual(ACC, literal(void 0)), wins] },
+              then: [store(ACC, field)]
+            }
+          ])
+        ),
+        { kind: "return", value: ACC }
+      );
+      return body;
+    }
+  }
+}
+function buildMutationQuery(target, plan) {
+  const mutation = plan.mutation;
+  if (!mutation) return [];
+  const condition = buildFilterTest(plan);
+  const test = condition ?? literal(false);
+  const loopBody = mutation.kind === "delete" ? [{ kind: "if", test: not(test), then: buildMutationKeep(target, ITEM) }] : [
+    {
+      kind: "if",
+      test,
+      then: buildMutationKeep(target, buildPatchObject(target.objectSchema, mutation)),
+      otherwise: buildMutationKeep(target, ITEM)
+    }
+  ];
+  const outInitializer = target.kind === "array" ? construct("Array", [LEN2]) : target.kind === "set" ? construct("Set") : construct("Map");
+  const body = [...buildLoopHeader(target, plan, outInitializer)];
+  if (target.kind === "array") body.push(letDecl(CURSOR, literal(0)));
+  body.push(buildInputLoop(target, loopBody));
+  if (target.kind === "array") body.push(store(loadProp(OUT2, "length"), CURSOR));
+  body.push({ kind: "return", value: OUT2 });
+  return body;
+}
+function buildMutationKeep(target, value) {
+  switch (target.kind) {
+    case "array":
+      return [append(OUT2, CURSOR, value)];
+    case "set":
+      return [exprStmt(call(loadProp(OUT2, "add"), [value]))];
+    case "map":
+      return [exprStmt(call(loadProp(OUT2, "set"), [loadIndex(ENTRY, literal(0)), value]))];
+  }
+}
+function buildPatchObject(schema, mutation) {
+  if (mutation.kind !== "update") return ITEM;
+  const entries = Object.keys(schema.def.props).map((key) => {
+    const binding = mutation.patch[key];
+    return { key, value: binding ? irVar(binding.name) : loadProp(ITEM, key) };
+  });
+  return objectLiteral(entries);
+}
+function buildLoopHeader(target, plan, outInitializer) {
+  const header = [
+    { kind: "assign", target: LEN2, expr: loadProp(VALUE, target.kind === "array" ? "length" : "size") }
+  ];
+  if (plan.unique) header.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  header.push({ kind: "assign", target: OUT2, expr: outInitializer });
+  return header;
+}
+function buildInputLoop(target, body) {
+  switch (target.kind) {
+    case "array":
+      return forRange(INDEX2, LEN2, [{ kind: "assign", target: ITEM, expr: loadIndex(VALUE, INDEX2) }, ...body]);
+    case "set":
+      return forOf(ITEM, VALUE, body);
+    case "map":
+      return forOf(ENTRY, VALUE, [{ kind: "assign", target: ITEM, expr: loadIndex(ENTRY, literal(1)) }, ...body]);
+  }
+}
+function buildGuardedBody(plan, accepted) {
+  const unique = plan.unique;
+  const inner = unique ? [
+    { kind: "assign", target: UNIQUE_KEY, expr: loadProp(ITEM, unique.key) },
+    {
+      kind: "if",
+      test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
+      then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted]
+    }
+  ] : accepted;
+  const condition = buildFilterTest(plan);
+  return condition ? [{ kind: "if", test: condition, then: inner }] : inner;
+}
+function buildFilterTest(plan) {
+  if (plan.filters.length === 0) return void 0;
+  return allOf(plan.filters.map((filter) => buildCondition(filter.condition)));
+}
+function buildCondition(condition) {
+  switch (condition.kind) {
+    case "compare":
+      return binary(COMPARE_OPERATORS[condition.op], buildValue(condition.left), buildValue(condition.right));
+    case "logical":
+      return {
+        kind: "nary",
+        op: condition.op,
+        operands: [buildCondition(condition.left), buildCondition(condition.right)]
+      };
+    case "not":
+      return not(buildCondition(condition.inner));
+  }
+}
+function buildValue(value) {
+  switch (value.kind) {
+    case "field":
+      return loadProp(ITEM, value.key);
+    case "binding":
+      return irVar(value.name);
+    case "param":
+      return loadProp(PARAMS, value.name);
+    case "literal":
+      return literal(expectSafeLiteral(value.value));
+  }
+}
+function expectSafeLiteral(value) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean" || value === null || value === void 0) {
+    return value;
+  }
+  throw new JITError("INVALID_QUERY", "query literal values must be primitive compiler literals");
+}
+function buildProjection(select) {
+  if (!select) return ITEM;
+  return objectLiteral(select.fields.map((field) => ({ key: field, value: loadProp(ITEM, field) })));
+}
+function shouldProjectAfterOrder(plan) {
+  return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
+}
+
+// ../../packages/jit/src/compiler/query.ts
+function emitQuerySource(schema, program) {
+  const target = expectCollectionObjectSchema(schema, "emitQuerySource");
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+  validateQueryPlan(target.objectSchema, plan);
+  return emitQuery(
+    optimizeQueryIR(
+      buildQueryIR(target, plan, {
+        hasParams: Boolean(program.params?.length)
+      })
+    )
+  );
+}
+function compileQuery(schema, program, options) {
+  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const template = getCompileCached(
+    schema,
+    `query:${serializeQueryNodes(program.nodes)}`,
+    () => {
+      const source = emitQuerySource(schema, program);
+      return {
+        source,
+        create: globalThis.Function(...bindingNames, `return ${source};`)
+      };
+    },
+    options
+  );
+  const compiled = template.create(...program.bindings);
+  registerArtifact(compiled, {
+    kind: "query",
+    source: template.source,
+    bindingNames,
+    bindingValues: program.bindings
+  });
+  return compiled;
+}
+function serializeQueryNodes(nodes) {
+  return nodes.map(serializeQueryNode).join(";");
+}
+function serializeQueryNode(node) {
+  switch (node.kind) {
+    case "filter":
+      return `f(${serializeCondition(node.condition)})`;
+    case "select:fields":
+      return `s(${node.fields.join(",")})`;
+    case "unique":
+      return `u(${node.key})`;
+    case "keyed":
+      return `k(${node.key})`;
+    case "groupBy":
+      return `g(${node.key})`;
+    case "orderBy":
+      return `o(${node.key},${node.direction})`;
+    case "aggregate":
+      return `a(${node.op},${node.key ?? ""})`;
+    case "delete":
+      return "d()";
+    case "update":
+      return `m(${Object.keys(node.patch).map((key) => `${key}=${node.patch[key]?.name}`).join(",")})`;
+  }
+}
+function serializeCondition(condition) {
+  switch (condition.kind) {
+    case "compare":
+      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
+    case "logical":
+      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
+    case "not":
+      return `not(${serializeCondition(condition.inner)})`;
+  }
+}
+function serializeValue(value) {
+  switch (value.kind) {
+    case "field":
+      return `.${value.key}`;
+    case "binding":
+      return `$${value.name}`;
+    case "param":
+      return `p:${value.name}`;
+    case "literal":
+      return `#${typeof value.value}:${String(value.value)}`;
+  }
+}
+function createQueryPlan(nodes) {
+  const filters = [];
+  const selects = [];
+  const uniques = [];
+  const collectors = [];
+  const orderBys = [];
+  const aggregates = [];
+  const mutations = [];
+  for (const node of nodes) {
+    switch (node.kind) {
+      case "filter":
+        filters[filters.length] = node;
+        break;
+      case "select:fields":
+        selects[selects.length] = node;
+        break;
+      case "unique":
+        uniques[uniques.length] = node;
+        break;
+      case "keyed":
+      case "groupBy":
+        collectors[collectors.length] = node;
+        break;
+      case "orderBy":
+        orderBys[orderBys.length] = node;
+        break;
+      case "aggregate":
+        aggregates[aggregates.length] = node;
+        break;
+      case "delete":
+      case "update":
+        mutations[mutations.length] = node;
+        break;
+    }
+  }
+  return {
+    filters,
+    selects,
+    uniques,
+    collectors,
+    orderBys,
+    aggregates,
+    mutations
+  };
+}
+function optimizeQueryPlan(plan) {
+  return {
+    filters: plan.filters,
+    select: last(plan.selects),
+    unique: last(plan.uniques),
+    collector: last(plan.collectors),
+    orderBy: last(plan.orderBys),
+    aggregate: last(plan.aggregates),
+    mutation: last(plan.mutations)
+  };
+}
+function validateQueryPlan(schema, plan) {
+  for (const filter of plan.filters) {
+    validateCondition(schema, filter.condition);
+  }
+  if (plan.select) validateObjectKeys(schema, plan.select.fields, "query select");
+  if (plan.unique) validateObjectKeys(schema, [plan.unique.key], "query unique");
+  if (plan.collector) validateObjectKeys(schema, [plan.collector.key], `query ${plan.collector.kind}`);
+  if (plan.orderBy) validateObjectKeys(schema, [plan.orderBy.key], "query orderBy");
+  if (plan.collector && plan.orderBy) {
+    throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
+  }
+  if (plan.aggregate) {
+    if (plan.select || plan.collector || plan.orderBy || plan.mutation) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query aggregate cannot be combined with select/keyed/groupBy/orderBy/delete/update in v1"
+      );
+    }
+    if (plan.aggregate.op !== "count") {
+      if (plan.aggregate.key === void 0) {
+        throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
+      }
+      validateObjectKeys(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
+  }
+  if (plan.mutation) {
+    if (plan.filters.length === 0) {
+      throw new JITError("INVALID_QUERY", "query delete/update requires at least one filter in v1");
+    }
+    if (plan.select || plan.collector || plan.orderBy) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query delete/update cannot be combined with select/keyed/groupBy/orderBy in v1"
+      );
+    }
+    if (plan.mutation.kind === "update") {
+      validateObjectKeys(schema, Object.keys(plan.mutation.patch), "query update");
+    }
+  }
+}
+function expectCollectionObjectSchema(schema, compilerName) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
+    throw new JITError("INVALID_QUERY", `${compilerName} expects an array, set, or map schema`);
+  }
+  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
+  }
+  return {
+    kind: resolved.type,
+    objectSchema: element
+  };
+}
+function validateObjectKeys(schema, keys, compilerName) {
+  const props = schema.def.props;
+  for (const key of keys) {
+    if (!(key in props)) {
+      throw new JITError("INVALID_QUERY", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+}
+function validateCondition(schema, condition) {
+  switch (condition.kind) {
+    case "compare":
+      validateValue(schema, condition.left);
+      validateValue(schema, condition.right);
+      return;
+    case "logical":
+      validateCondition(schema, condition.left);
+      validateCondition(schema, condition.right);
+      return;
+    case "not":
+      validateCondition(schema, condition.inner);
+      return;
+  }
+}
+function validateValue(schema, value) {
+  if (value.kind === "field") {
+    validateObjectKeys(schema, [value.key], "query");
+  }
+}
+function last(values) {
+  return values[values.length - 1];
 }
 
 // ../../packages/jit/src/compiler/sanitize.ts
@@ -7258,8 +8153,8 @@ function isBinaryArray(value) {
   return value !== null && typeof value === "object" && value.__jitBinaryArray === true;
 }
 function compileBinaryArray(schema, options = {}, hints = {}) {
-  const arraySchema = schema;
-  const element = resolveBinaryElement(arraySchema.def.element, "binary rowset");
+  const arraySchema2 = schema;
+  const element = resolveBinaryElement(arraySchema2.def.element, "binary rowset");
   const objectSchema = element.schema;
   const layout = createBinaryRowLayout(objectSchema, options.memoryLayout, hints.adaptiveStringFields, element.union);
   const strategy = options.strategy ?? "dynamic";
@@ -7268,7 +8163,7 @@ function compileBinaryArray(schema, options = {}, hints = {}) {
   const hydrate = compileRowHydrator(layout);
   const api = {
     __jitBinaryArray: true,
-    schema: arraySchema,
+    schema: arraySchema2,
     layout,
     strategy,
     load(values, length) {
@@ -7374,7 +8269,7 @@ function compileBinaryQuery(target, program, options) {
   const layout = target.layout;
   const schema = target.schema;
   const bindingNames = program.bindings.map((_, index) => `__q${index}`);
-  const cacheKey = `binary-query:${serializeBinaryLayout(layout)}:${serializeQueryNodes(program.nodes)}`;
+  const cacheKey = `binary-query:${serializeBinaryLayout(layout)}:${serializeQueryNodes2(program.nodes)}`;
   const template = getCompileCached(
     schema,
     cacheKey,
@@ -8305,26 +9200,26 @@ function createFieldLookup(layout) {
   return { fields: new Map(layout.fields.map((field) => [field.key, field])) };
 }
 function validateBinaryQueryPlan(lookup, plan) {
-  for (const filter of plan.filters) validateCondition(lookup, filter.condition);
+  for (const filter of plan.filters) validateCondition2(lookup, filter.condition);
   if (plan.select) validateKeys(lookup, plan.select.fields, "binary query select");
   if (plan.aggregate?.key) validateKeys(lookup, [plan.aggregate.key], `binary query ${plan.aggregate.op}`);
 }
-function validateCondition(lookup, condition) {
+function validateCondition2(lookup, condition) {
   switch (condition.kind) {
     case "compare":
-      validateValue(lookup, condition.left);
-      validateValue(lookup, condition.right);
+      validateValue2(lookup, condition.left);
+      validateValue2(lookup, condition.right);
       return;
     case "logical":
-      validateCondition(lookup, condition.left);
-      validateCondition(lookup, condition.right);
+      validateCondition2(lookup, condition.left);
+      validateCondition2(lookup, condition.right);
       return;
     case "not":
-      validateCondition(lookup, condition.inner);
+      validateCondition2(lookup, condition.inner);
       return;
   }
 }
-function validateValue(lookup, value) {
+function validateValue2(lookup, value) {
   if (value.kind === "field") validateKeys(lookup, [value.key], "binary query filter");
 }
 function validateKeys(lookup, keys, label) {
@@ -8602,8 +9497,8 @@ var PreparedValues = class {
     return this.rawFor(value);
   }
 };
-function serializeQueryNodes(nodes) {
-  return nodes.map(serializeQueryNode).join(";");
+function serializeQueryNodes2(nodes) {
+  return nodes.map(serializeQueryNode2).join(";");
 }
 function serializeBinaryLayout(layout) {
   return JSON.stringify([
@@ -8623,10 +9518,10 @@ function serializeBinaryLayout(layout) {
     ])
   ]);
 }
-function serializeQueryNode(node) {
+function serializeQueryNode2(node) {
   switch (node.kind) {
     case "filter":
-      return `f(${serializeCondition(node.condition)})`;
+      return `f(${serializeCondition2(node.condition)})`;
     case "select:fields":
       return `s(${node.fields.join(",")})`;
     case "aggregate":
@@ -8645,17 +9540,17 @@ function serializeQueryNode(node) {
       return `m(${Object.keys(node.patch).join(",")})`;
   }
 }
-function serializeCondition(condition) {
+function serializeCondition2(condition) {
   switch (condition.kind) {
     case "compare":
-      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
+      return `${condition.op}(${serializeValue2(condition.left)},${serializeValue2(condition.right)})`;
     case "logical":
-      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
+      return `${condition.op}(${serializeCondition2(condition.left)},${serializeCondition2(condition.right)})`;
     case "not":
-      return `not(${serializeCondition(condition.inner)})`;
+      return `not(${serializeCondition2(condition.inner)})`;
   }
 }
-function serializeValue(value) {
+function serializeValue2(value) {
   switch (value.kind) {
     case "field":
       return `.${value.key}`;
@@ -8670,9 +9565,6 @@ function serializeValue(value) {
 
 // ../../packages/jit/src/compiler/validate.ts
 var VALIDATOR_OPS = ["is", "parse", "safeParse", "parseAsync", "safeParseAsync"];
-function emitValidatorSource(schema, options) {
-  return emitValidator(schema, emitOptionsForValidatorOps(options?.ops ?? VALIDATOR_OPS)).source;
-}
 function compileValidator(schema, options) {
   return compileValidatorSelection(schema, VALIDATOR_OPS, options);
 }
@@ -8686,14 +9578,14 @@ function compileValidatorSelection(schema, ops, options) {
       const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps));
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values);
       const selection = {};
-      const safeParse = compiled.safeParse;
-      const parse = (value) => {
-        if (!safeParse) throw new Error("parse requires safeParse generation");
-        const result = safeParse(value);
+      const safeParse2 = compiled.safeParse;
+      const parse2 = (value) => {
+        if (!safeParse2) throw new Error("parse requires safeParse generation");
+        const result = safeParse2(value);
         if (result.success) return result.data;
         throw new JITValidationError(result.issues);
       };
-      const safeParseAsync = compiled.safeParseAsync ?? (safeParse ? async (value) => safeParse(value) : void 0);
+      const safeParseAsync = compiled.safeParseAsync ?? (safeParse2 ? async (value) => safeParse2(value) : void 0);
       const parseAsync = async (value) => {
         if (!safeParseAsync) throw new Error("parseAsync requires async validation generation");
         const result = await safeParseAsync(value);
@@ -8704,13 +9596,13 @@ function compileValidatorSelection(schema, ops, options) {
         selection.is = compiled.is;
         registerValidatorArtifact(compiled.is, schema, "is");
       }
-      if (normalizedOps.includes("safeParse") && safeParse) {
-        selection.safeParse = safeParse;
-        registerValidatorArtifact(safeParse, schema, "safeParse");
+      if (normalizedOps.includes("safeParse") && safeParse2) {
+        selection.safeParse = safeParse2;
+        registerValidatorArtifact(safeParse2, schema, "safeParse");
       }
       if (normalizedOps.includes("parse")) {
-        selection.parse = parse;
-        registerValidatorArtifact(parse, schema, "parse");
+        selection.parse = parse2;
+        registerValidatorArtifact(parse2, schema, "parse");
       }
       if (normalizedOps.includes("safeParseAsync") && safeParseAsync) {
         selection.safeParseAsync = safeParseAsync;
@@ -9648,12 +10540,12 @@ function getStandardSchema(schema) {
   return standard;
 }
 function createStandardSchema(schema) {
-  const safeParse = compileValidatorSelection(schema, ["safeParse"]).safeParse;
+  const safeParse2 = compileValidatorSelection(schema, ["safeParse"]).safeParse;
   return {
     version: 1,
     vendor: "jit",
     validate(value) {
-      const result = safeParse(value);
+      const result = safeParse2(value);
       if (result.success) return { value: result.data };
       return { issues: result.issues.map(toStandardIssue) };
     }
@@ -9973,13 +10865,13 @@ function generate(options) {
     }
     const equalSource = wants("equal") ? tryEmit(name, "equal", skipped, () => emitEqualSource(schema)) : void 0;
     const equalNeedsHash = equalSource?.includes("__hash");
-    const hashSource2 = wants("hash") || equalNeedsHash ? tryEmit(name, "hash", skipped, () => emitHashSource(schema)) : void 0;
+    const hashSource = wants("hash") || equalNeedsHash ? tryEmit(name, "hash", skipped, () => emitHashSource(schema)) : void 0;
     let hashBinding;
-    if (hashSource2) {
+    if (hashSource) {
       needsHashHelpers = true;
       hashBinding = internalIdentifier(`${name}_hash`);
       js.push(`const ${hashBinding} = /*#__PURE__*/ (() => {`);
-      js.push(...indentBlock(`const compute = (${hashSource2});`));
+      js.push(...indentBlock(`const compute = (${hashSource});`));
       js.push("  return (value) => {");
       js.push('    if ((typeof value === "object" && value !== null) || typeof value === "function") {');
       js.push("      const cached = __hashCache.get(value);");
@@ -9996,7 +10888,7 @@ function generate(options) {
     if (equalSource) {
       const needsHash = equalSource.includes("__hash");
       const needsIndex = equalSource.includes("__getIndex");
-      if (needsHash && !hashSource2) {
+      if (needsHash && !hashSource) {
         skipped.push({
           schema: name,
           operation: "equal",
@@ -10116,6 +11008,14 @@ function generate(options) {
           schema: name,
           operation: extraName,
           reason: "operation functions must be compiled on the object or exported as standalone AOT functions"
+        });
+        continue;
+      }
+      if (artifact.kind === "execution") {
+        skipped.push({
+          schema: name,
+          operation: extraName,
+          reason: "execution artifacts must be exported directly so their complete plan can be lowered"
         });
         continue;
       }
@@ -10244,11 +11144,11 @@ function generate(options) {
       const schema = artifact.schema;
       const op = artifact.op;
       if (op === "hash") {
-        const hashSource2 = tryEmit(name, "hash", skipped, () => emitHashSource(schema));
-        if (!hashSource2) return;
+        const hashSource = tryEmit(name, "hash", skipped, () => emitHashSource(schema));
+        if (!hashSource) return;
         needsHashHelpers = true;
         js.push(`${declaration} /*#__PURE__*/ (() => {`);
-        js.push(...indentBlock(`const compute = (${hashSource2});`));
+        js.push(...indentBlock(`const compute = (${hashSource});`));
         js.push("  return (value) => {");
         js.push('    if ((typeof value === "object" && value !== null) || typeof value === "function") {');
         js.push("      const cached = __hashCache.get(value);");
@@ -10267,12 +11167,12 @@ function generate(options) {
         const needsIndex = equalSource.includes("__getIndex");
         if (needsIndex) needsRuntimeGetIndex = true;
         if (needsHash) {
-          const hashSource2 = tryEmit(name, "hash", skipped, () => emitHashSource(schema));
-          if (!hashSource2) return;
+          const hashSource = tryEmit(name, "hash", skipped, () => emitHashSource(schema));
+          if (!hashSource) return;
           needsHashHelpers = true;
           const hashBinding = internalIdentifier(`${name}_hash`);
           js.push(`const ${hashBinding} = /*#__PURE__*/ (() => {`);
-          js.push(...indentBlock(`const compute = (${hashSource2});`));
+          js.push(...indentBlock(`const compute = (${hashSource});`));
           js.push("  return (value) => {");
           js.push('    if ((typeof value === "object" && value !== null) || typeof value === "function") {');
           js.push("      const cached = __hashCache.get(value);");
@@ -10361,6 +11261,10 @@ function generate(options) {
       dts.push("");
       return;
     }
+    if (artifact.kind === "execution") {
+      emitExecutionArtifact(name, artifact.plan, sourceFile);
+      return;
+    }
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
     if (inlined === void 0) {
       skipped.push({
@@ -10379,6 +11283,394 @@ function generate(options) {
       `export declare const ${name}: ${sourceFile ? `typeof import(${JSON.stringify(typeImportSpecifier(options.outDir, sourceFile))}).${name}` : "unknown"};`
     );
     dts.push("");
+  }
+  function emitExecutionArtifact(name, plan, sourceFile) {
+    void sourceFile;
+    const declaredType = executionPlanType(plan, typeNames.get(plan.schema));
+    const declaration = `const ${name}${layout.format === "typescript" ? `: ${declaredType}` : ""} =`;
+    const stages = plan.stages;
+    const validateStage = stages.find((stage2) => stage2.kind === "validate");
+    const hasJsonDecode = stages.some((stage2) => stage2.kind === "json.decode");
+    const hasBinaryDecode = stages.some((stage2) => stage2.kind === "binary.decode");
+    const hasJsonEncode = stages.some((stage2) => stage2.kind === "json.encode");
+    const hasBinaryEncode = stages.some((stage2) => stage2.kind === "binary.encode");
+    const operationStage = stages.find((stage2) => stage2.kind === "operation");
+    const mapStage3 = stages.find((stage2) => stage2.kind === "map");
+    if (stages.some((stage2) => stage2.kind === "query")) {
+      emitQueryExecutionArtifact(name, plan, declaredType, declaration);
+      return;
+    }
+    if (mapStage3?.kind === "map") {
+      const mapping = mapStage3.bindings[0];
+      if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
+        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        return;
+      }
+      const mapperPlan = tryEmit(
+        name,
+        "map",
+        skipped,
+        () => buildMapperPlan(mapStage3.source, mapStage3.target, mapping)
+      );
+      if (!mapperPlan) return;
+      const inlined = inlineBindings(mapperPlan.bindingNames, mapperPlan.bindings);
+      if (inlined === void 0) {
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping callbacks cannot be serialized ahead of time"
+        });
+        return;
+      }
+      const mapperSource = tryEmit(
+        name,
+        "map",
+        skipped,
+        () => emitMapperSource(mapStage3.source, mapStage3.target, mapping, [
+          mapStage3.many ? "many" : "map"
+        ])
+      );
+      if (!mapperSource) return;
+      const method = mapStage3.many ? "many" : "map";
+      if (hasJsonEncode) {
+        const serializeSource = tryEmit(name, "json.encode", skipped, () => emitSerialize(plan.schema));
+        if (!serializeSource) return;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((mapper, stringify) => (value) => stringify(mapper.${method}(value)))((() => {`
+        );
+        js.push(...inlined.map((line) => `  ${line}`));
+        js.push(...indentBlock(`return (${mapperSource});`));
+        js.push(`})()), (${serializeSource}));`);
+      } else {
+        js.push(`${declaration} /*#__PURE__*/ ((mapper) => mapper.${method})((() => {`);
+        js.push(...inlined.map((line) => `  ${line}`));
+        js.push(...indentBlock(`return (${mapperSource});`));
+        js.push("})());");
+      }
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      return;
+    }
+    if (validateStage?.kind === "validate") {
+      if (validateStage.operation === "issues" || validateStage.operation === "parseAsync" || validateStage.operation === "safeParseAsync") {
+        skipped.push({
+          schema: name,
+          operation: validateStage.operation,
+          reason: "this validation sink is runtime-only in AOT output"
+        });
+        return;
+      }
+      const validator2 = tryEmit(
+        name,
+        validateStage.operation,
+        skipped,
+        () => emitValidator(plan.schema, {
+          is: validateStage.operation === "is",
+          safeParse: validateStage.operation !== "is",
+          safeParseAsync: false
+        })
+      );
+      if (!validator2) return;
+      const inlined = inlineBindings(validator2.bindings.names, validator2.bindings.values);
+      if (inlined === void 0) {
+        skipped.push({
+          schema: name,
+          operation: validateStage.operation,
+          reason: "refine/transform/default callbacks cannot be serialized ahead of time"
+        });
+        return;
+      }
+      const validatorName = internalIdentifier(`${name}_validator`);
+      js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(...indentBlock(validator2.source));
+      js.push("})();");
+      if (validateStage.operation === "is") {
+        if (hasJsonDecode || hasBinaryDecode) {
+          skipped.push({ schema: name, operation: "is", reason: "is must receive a value source in AOT output" });
+          return;
+        }
+        js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
+      } else if (validateStage.operation === "safeParse") {
+        if (hasJsonDecode || hasBinaryDecode) {
+          skipped.push({
+            schema: name,
+            operation: "safeParse",
+            reason: "safeParse source composition is not an AOT sink"
+          });
+          return;
+        }
+        js.push(`${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`);
+      } else if (hasJsonDecode) {
+        needsValidationError = true;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+        );
+      } else if (hasBinaryDecode) {
+        const codec2 = tryEmit(name, "binary.decode", skipped, () => emitCodec(plan.schema));
+        if (!codec2) return;
+        const codecBindings = inlineCodecBindings(codec2.bindingNames, codec2.bindingValues);
+        if (codecBindings === void 0) {
+          skipped.push({ schema: name, operation: "binary.decode", reason: "codec bindings cannot be serialized" });
+          return;
+        }
+        needsValidationError = true;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((codec, v) => (bytes) => { const r = v.safeParse(codec.decode(bytes)); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
+        );
+        js.push(...codecBindings.map((line) => `  ${line}`));
+        js.push(...indentBlock(codec2.source));
+        js.push(`})()), ${validatorName});`);
+      } else {
+        needsValidationError = true;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+        );
+      }
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      return;
+    }
+    if (hasJsonDecode) {
+      js.push(`${declaration} JSON.parse;`);
+    } else if (hasJsonEncode) {
+      const source = tryEmit(name, "json.encode", skipped, () => emitSerialize(plan.schema));
+      if (!source) return;
+      js.push(`${declaration} (${source});`);
+    } else if (hasBinaryDecode || hasBinaryEncode) {
+      const codec2 = tryEmit(
+        name,
+        hasBinaryDecode ? "binary.decode" : "binary.encode",
+        skipped,
+        () => emitCodec(plan.schema)
+      );
+      if (!codec2) return;
+      const inlined = inlineCodecBindings(codec2.bindingNames, codec2.bindingValues);
+      if (inlined === void 0) {
+        skipped.push({ schema: name, operation: "binary", reason: "codec bindings cannot be serialized" });
+        return;
+      }
+      const method = hasBinaryDecode ? "decode" : "encode";
+      js.push(`${declaration} /*#__PURE__*/ ((codec) => codec.${method})((() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(...indentBlock(codec2.source));
+      js.push("})());");
+    } else if (operationStage?.kind === "operation") {
+      const source = emitAotOperationSource(operationStage.operation, plan.schema, skipped, name);
+      if (source === void 0) return;
+      if (operationStage.operation === "sanitize") {
+        const regexConsts = sanitizeChainBindings.names.map(
+          (bindingName, position) => `const ${bindingName} = ${String(sanitizeChainBindings.values[position])};`
+        );
+        js.push(`${declaration} /*#__PURE__*/ (() => {`);
+        js.push(...regexConsts.map((line) => `  ${line}`));
+        js.push(...indentBlock(`return (${source});`));
+        js.push("})();");
+      } else {
+        js.push(`${declaration} (${source});`);
+      }
+    } else {
+      skipped.push({ schema: name, operation: "execution", reason: "no AOT backend matches this execution plan" });
+      return;
+    }
+    exportNames.push(name);
+    dts.push(`export declare const ${name}: ${declaredType};`, "");
+  }
+  function emitQueryExecutionArtifact(name, plan, declaredType, declaration) {
+    const setup = [];
+    const body2 = ["let value = input;"];
+    const stages = plan.stages;
+    const emitValidatorBinding = (schema) => {
+      const validator2 = tryEmit(
+        name,
+        "validate",
+        skipped,
+        () => emitValidator(schema, { is: false, safeParse: true, safeParseAsync: false })
+      );
+      if (!validator2) return void 0;
+      const inlined = inlineBindings(validator2.bindings.names, validator2.bindings.values);
+      if (inlined === void 0) {
+        skipped.push({
+          schema: name,
+          operation: "validate",
+          reason: "refine/transform/default callbacks cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
+      const binding = internalIdentifier(`${name}_validator`);
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...inlined.map((line) => `  ${line}`));
+      setup.push(...indentBlock(validator2.source));
+      setup.push("})();");
+      return binding;
+    };
+    const emitCodecBinding = (schema, operation) => {
+      const codec2 = tryEmit(name, operation, skipped, () => emitCodec(schema));
+      if (!codec2) return void 0;
+      const inlined = inlineCodecBindings(codec2.bindingNames, codec2.bindingValues);
+      if (inlined === void 0) {
+        skipped.push({ schema: name, operation, reason: "codec bindings cannot be serialized" });
+        return void 0;
+      }
+      const binding = internalIdentifier(`${name}_codec`);
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...inlined.map((line) => `  ${line}`));
+      setup.push(...indentBlock(codec2.source));
+      setup.push("})();");
+      return binding;
+    };
+    const emitQueryBinding = (stage2) => {
+      const source = tryEmit(name, "query", skipped, () => emitQuerySource(stage2.source, stage2.program));
+      if (!source) return void 0;
+      const bindings = inlineBindings(
+        stage2.program.bindings.map((_, index) => `__q${index}`),
+        stage2.program.bindings
+      );
+      if (bindings === void 0) {
+        skipped.push({ schema: name, operation: "query", reason: "query bindings cannot be serialized ahead of time" });
+        return void 0;
+      }
+      const binding = internalIdentifier(`${name}_query`);
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...bindings.map((line) => `  ${line}`));
+      setup.push(...indentBlock(`return (${source});`));
+      setup.push("})();");
+      return binding;
+    };
+    const emitMapperBinding = (stage2) => {
+      const mapping = stage2.bindings[0];
+      if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
+        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        return void 0;
+      }
+      const mapperPlan = tryEmit(
+        name,
+        "map",
+        skipped,
+        () => buildMapperPlan(stage2.source, stage2.target, mapping)
+      );
+      if (!mapperPlan) return void 0;
+      const inlined = inlineBindings(mapperPlan.bindingNames, mapperPlan.bindings);
+      if (inlined === void 0) {
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping callbacks cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
+      const source = tryEmit(
+        name,
+        "map",
+        skipped,
+        () => emitMapperSource(stage2.source, stage2.target, mapping, [stage2.many ? "many" : "map"])
+      );
+      if (!source) return void 0;
+      const binding = internalIdentifier(`${name}_mapper`);
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...inlined.map((line) => `  ${line}`));
+      setup.push(...indentBlock(`return (${source});`));
+      setup.push("})();");
+      return binding;
+    };
+    for (let index = 0; index < stages.length; index++) {
+      const stage2 = stages[index];
+      switch (stage2.kind) {
+        case "value":
+        case "to.array":
+          break;
+        case "json.decode":
+          body2.push("value = JSON.parse(value);");
+          break;
+        case "binary.decode": {
+          const codec2 = emitCodecBinding(stage2.schema, "binary.decode");
+          if (!codec2) return;
+          body2.push(`value = ${codec2}.decode(value);`);
+          break;
+        }
+        case "validate": {
+          if (stage2.operation !== "parse") {
+            skipped.push({
+              schema: name,
+              operation: stage2.operation,
+              reason: "only parse validation can continue into a collection execution pipeline"
+            });
+            return;
+          }
+          const validator2 = emitValidatorBinding(stage2.schema);
+          if (!validator2) return;
+          needsValidationError = true;
+          body2.push(`const result = ${validator2}.safeParse(value);`);
+          body2.push("if (!result.success) throw new JITValidationError(result.issues);");
+          body2.push("value = result.data;");
+          break;
+        }
+        case "query": {
+          let finalStage = stage2;
+          while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
+            index++;
+            finalStage = stages[index];
+          }
+          const query2 = emitQueryBinding(finalStage);
+          if (!query2) return;
+          body2.push(`value = ${query2}(value);`);
+          break;
+        }
+        case "map": {
+          const mapper2 = emitMapperBinding(stage2);
+          if (!mapper2) return;
+          body2.push(`value = ${mapper2}.${stage2.many ? "many" : "map"}(value);`);
+          break;
+        }
+        case "json.encode": {
+          const stringify = tryEmit(name, "json.encode", skipped, () => emitSerialize(stage2.schema ?? plan.schema));
+          if (!stringify) return;
+          const binding = internalIdentifier(`${name}_stringify`);
+          setup.push(`const ${binding} = (${stringify});`);
+          body2.push(`value = ${binding}(value);`);
+          break;
+        }
+        case "binary.encode": {
+          const codec2 = emitCodecBinding(stage2.schema, "binary.encode");
+          if (!codec2) return;
+          body2.push(`value = ${codec2}.encode(value);`);
+          break;
+        }
+        case "operation":
+          skipped.push({
+            schema: name,
+            operation: stage2.operation,
+            reason: "operation stages cannot follow a collection query"
+          });
+          return;
+      }
+    }
+    body2.push("return value;");
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...setup.map((line) => `  ${line}`));
+    js.push("  return (input) => {");
+    js.push(...body2.map((line) => `    ${line}`));
+    js.push("  };");
+    js.push("})();");
+    exportNames.push(name);
+    dts.push(`export declare const ${name}: ${declaredType};`, "");
+  }
+  function emitAotOperationSource(operation, schema, operationSkipped, name) {
+    if (operation === "clone") return tryEmit(name, operation, operationSkipped, () => emitCloneSource(schema));
+    if (operation === "diff") return tryEmit(name, operation, operationSkipped, () => emitDiffSource(schema));
+    if (operation === "format") return tryEmit(name, operation, operationSkipped, () => emitFormatSource(schema));
+    if (operation === "mask") return tryEmit(name, operation, operationSkipped, () => emitMaskSource(schema));
+    if (operation === "sanitize") return tryEmit(name, operation, operationSkipped, () => emitSanitizeSource(schema));
+    const source = operation === "equal" ? emitEqualSource(schema) : emitHashSource(schema);
+    if (source.includes("__hash") || source.includes("__getIndex")) {
+      operationSkipped.push({
+        schema: name,
+        operation,
+        reason: "this operation requires runtime cache helpers; export it through JIT.compile until its execution backend is available"
+      });
+      return void 0;
+    }
+    return source;
   }
   function internalIdentifier(preferred) {
     let candidate = preferred;
@@ -10699,6 +11991,15 @@ function describeExport(name, options) {
   if (!artifact) return { name, kind: "unknown", operations: [] };
   if (artifact.kind === "validator") return { name, kind: "validator", operations: [artifact.op] };
   if (artifact.kind === "operation") return { name, kind: "operation", operations: [artifact.op] };
+  if (artifact.kind === "execution") {
+    return {
+      name,
+      kind: "execution",
+      operations: artifact.plan.stages.map(
+        (stage2) => stage2.kind === "validate" || stage2.kind === "operation" ? stage2.operation : stage2.kind
+      )
+    };
+  }
   return { name, kind: artifact.kind, operations: [artifact.kind] };
 }
 function tryEmit(schema, operation, skipped, emit) {
@@ -10763,6 +12064,29 @@ function operationSignature(op, valueType) {
     case "codec":
       return `{ readonly encode: (value: ${valueType}) => Uint8Array; readonly encodeInto: (value: ${valueType}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${valueType} }`;
   }
+}
+function executionPlanType(plan, namedType) {
+  const valueType = namedType ?? emitTypeScriptType(plan.schema);
+  const last2 = plan.stages[plan.stages.length - 1];
+  const operation = plan.stages.find((stage2) => stage2.kind === "operation");
+  const map4 = plan.stages.find((stage2) => stage2.kind === "map");
+  const query2 = plan.stages.find((stage2) => stage2.kind === "query");
+  const hasJsonDecode = plan.stages.some((stage2) => stage2.kind === "json.decode");
+  const hasBinaryDecode = plan.stages.some((stage2) => stage2.kind === "binary.decode");
+  if (operation?.kind === "operation") return operationSignature(operation.operation, valueType);
+  if (last2?.kind === "validate") {
+    if (last2.operation === "parse" && hasJsonDecode) return `(json: string) => ${valueType}`;
+    if (last2.operation === "parse" && hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
+    return validatorType(last2.operation === "issues" ? "safeParse" : last2.operation, valueType);
+  }
+  const inputType = hasJsonDecode ? "string" : hasBinaryDecode ? "Uint8Array | ArrayBuffer" : map4?.kind === "map" ? map4.many ? `readonly ${emitTypeScriptType(map4.source)}[]` : emitTypeScriptType(map4.source) : query2?.kind === "query" ? emitTypeScriptType(query2.source) : valueType;
+  if (last2?.kind === "json.encode") return `(value: ${inputType}) => string`;
+  if (last2?.kind === "binary.encode") return `(value: ${inputType}) => Uint8Array`;
+  if (hasJsonDecode) return `(json: string) => ${valueType}`;
+  if (hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
+  if (map4?.kind === "map") return `(value: ${inputType}) => ${valueType}`;
+  if (query2?.kind === "query") return `(value: ${inputType}) => ${valueType}`;
+  return "unknown";
 }
 function inlineBindings(names, values) {
   const lines = [];
@@ -11003,7 +12327,6 @@ var AOT_ARTIFACT = /* @__PURE__ */ Symbol.for("@jit/aot-artifact");
 var factories_exports = {};
 __export(factories_exports, {
   COMPILE_OPS: () => COMPILE_OPS,
-  DTO_OPS: () => DTO_OPS,
   KeyedWatchedList: () => KeyedWatchedList,
   MAPPER_OPS: () => MAPPER_OPS,
   MODEL_OPS: () => MODEL_OPS,
@@ -11011,11 +12334,13 @@ __export(factories_exports, {
   any: () => any,
   array: () => array,
   bigint: () => bigint2,
+  binary: () => binary2,
   boolean: () => boolean2,
   brand: () => brand2,
   clone: () => clone,
   codec: () => codec,
   coerce: () => coerce2,
+  compare: () => compare,
   compile: () => compile,
   compileClone: () => compileClone,
   compileDiff: () => compileDiff,
@@ -11042,16 +12367,20 @@ __export(factories_exports, {
   equal: () => equal,
   file: () => file,
   format: () => format,
+  from: () => from,
   function: () => functionSchema,
   hash: () => hash2,
   instanceOf: () => instanceOf,
   int: () => int,
   intersection: () => intersection,
+  is: () => is,
   iso: () => iso,
-  json: () => json2,
+  json: () => json,
+  jsonValue: () => jsonValue,
   lazy: () => lazy,
   literal: () => literal2,
-  map: () => map,
+  map: () => map2,
+  mapSchema: () => map,
   mapper: () => mapper,
   mask: () => mask,
   model: () => model,
@@ -11065,6 +12394,7 @@ __export(factories_exports, {
   object: () => object,
   optional: () => optional2,
   param: () => param,
+  parse: () => parse,
   pipe: () => pipe2,
   process: () => process,
   promise: () => promise2,
@@ -11074,7 +12404,9 @@ __export(factories_exports, {
   refine: () => refine2,
   regex: () => regex,
   regexes: () => regexes_exports,
+  safeParse: () => safeParse,
   sanitize: () => sanitize,
+  security: () => security,
   serializer: () => serializer,
   set: () => set,
   stream: () => stream,
@@ -11100,7 +12432,7 @@ __export(factories_exports, {
 // ../../packages/jit/src/compiler/object-ops.ts
 function emitMergeSource(schema) {
   const writer = new CodeWriter();
-  const objectSchema = expectObjectSchema(schema, "compileMerge");
+  const objectSchema = expectObjectSchema2(schema, "compileMerge");
   writer.line("function merge(left, right) {");
   writer.indent(() => {
     emitMergeTo(writer, createEmitState(), objectSchema, "left", "right", "out");
@@ -11113,16 +12445,16 @@ function compileMerge(schema) {
   return globalThis.Function(`return ${emitMergeSource(schema)};`)();
 }
 function emitPickSource(schema, keys) {
-  const objectSchema = expectObjectSchema(schema, "compilePick");
-  const selectedKeys = validateObjectKeys(objectSchema, keys, "compilePick");
+  const objectSchema = expectObjectSchema2(schema, "compilePick");
+  const selectedKeys = validateObjectKeys2(objectSchema, keys, "compilePick");
   return emitProjectSource("pick", selectedKeys);
 }
 function compilePick(schema, keys) {
   return globalThis.Function(`return ${emitPickSource(schema, keys)};`)();
 }
 function emitOmitSource(schema, keys) {
-  const objectSchema = expectObjectSchema(schema, "compileOmit");
-  const omitted = new Set(validateObjectKeys(objectSchema, keys, "compileOmit"));
+  const objectSchema = expectObjectSchema2(schema, "compileOmit");
+  const omitted = new Set(validateObjectKeys2(objectSchema, keys, "compileOmit"));
   const selectedKeys = Object.keys(objectSchema.def.props).filter((key) => !omitted.has(key));
   return emitProjectSource("omit", selectedKeys);
 }
@@ -11130,8 +12462,8 @@ function compileOmit(schema, keys) {
   return globalThis.Function(`return ${emitOmitSource(schema, keys)};`)();
 }
 function emitTransformSource(schema, transforms) {
-  const objectSchema = expectObjectSchema(schema, "compileTransform");
-  const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
+  const objectSchema = expectObjectSchema2(schema, "compileTransform");
+  const transformKeys = validateObjectKeys2(objectSchema, Object.keys(transforms), "compileTransform");
   const transformNames = new Map(transformKeys.map((key, index) => [key, `__t${index}`]));
   const entries = Object.keys(objectSchema.def.props).map((key) => {
     const source = emitPropertyAccess("value", key);
@@ -11146,8 +12478,8 @@ function emitTransformSource(schema, transforms) {
   return writer.toString();
 }
 function compileTransform(schema, transforms) {
-  const objectSchema = expectObjectSchema(schema, "compileTransform");
-  const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
+  const objectSchema = expectObjectSchema2(schema, "compileTransform");
+  const transformKeys = validateObjectKeys2(objectSchema, Object.keys(transforms), "compileTransform");
   const bindings = transformKeys.map((key) => transforms[key]);
   return globalThis.Function(
     ...transformKeys.map((_, index) => `__t${index}`),
@@ -11168,7 +12500,7 @@ function emitNormalizeSource(schema, key) {
   if (!normalizeKey2) {
     throw new JITError("INVALID_OPERATION", "compileNormalize requires a key or a .keyed()/index/entity hint");
   }
-  validateObjectKeys(objectSchema, [normalizeKey2], "compileNormalize");
+  validateObjectKeys2(objectSchema, [normalizeKey2], "compileNormalize");
   const idAccess = emitPropertyAccess("item", normalizeKey2);
   const writer = new CodeWriter();
   writer.line("function normalize(value) {");
@@ -11194,7 +12526,7 @@ function compileNormalize(schema, key) {
 }
 function emitGroupBySource(schema, key) {
   const { objectSchema, key: groupKey } = expectArrayObjectKey(schema, key, "compileGroupBy", resolveGroupByKey);
-  validateObjectKeys(objectSchema, [groupKey], "compileGroupBy");
+  validateObjectKeys2(objectSchema, [groupKey], "compileGroupBy");
   const keyAccess = emitPropertyAccess("item", groupKey);
   const writer = new CodeWriter();
   writer.line("function groupBy(value) {");
@@ -11234,7 +12566,7 @@ function emitSortBySource(schema, key, direction) {
   const leftAccess = emitPropertyAccess("left", sortKey);
   const rightAccess = emitPropertyAccess("right", sortKey);
   const writer = new CodeWriter();
-  validateObjectKeys(objectSchema, [sortKey], "compileSortBy");
+  validateObjectKeys2(objectSchema, [sortKey], "compileSortBy");
   writer.line("function sortBy(value) {");
   writer.indent(() => {
     writer.line("const out = value.slice();");
@@ -11260,7 +12592,7 @@ function compileSortBy(schema, key, direction) {
 }
 function emitUniqueBySource(schema, key) {
   const { objectSchema, key: uniqueKey } = expectArrayObjectKey(schema, key, "compileUniqueBy", resolveNormalizeKey);
-  validateObjectKeys(objectSchema, [uniqueKey], "compileUniqueBy");
+  validateObjectKeys2(objectSchema, [uniqueKey], "compileUniqueBy");
   const keyAccess = emitPropertyAccess("item", uniqueKey);
   const writer = new CodeWriter();
   writer.line("function uniqueBy(value) {");
@@ -11335,14 +12667,14 @@ function emitProjectSource(name, selectedKeys) {
   writer.line("}");
   return writer.toString();
 }
-function expectObjectSchema(schema, compilerName) {
+function expectObjectSchema2(schema, compilerName) {
   const resolved = resolveWrappers(schema).base;
   if (resolved.type !== TypeName.object) {
     throw new JITError("INVALID_OPERATION", `${compilerName} expects an object schema`);
   }
   return resolved;
 }
-function validateObjectKeys(schema, keys, compilerName) {
+function validateObjectKeys2(schema, keys, compilerName) {
   const props = schema.def.props;
   for (const key of keys) {
     if (!(key in props)) {
@@ -11863,402 +13195,6 @@ function hasInnerType2(schema) {
   return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
 }
 
-// ../../packages/jit/src/compiler/mapper/build-mapper-ir.ts
-var SOURCE = irVar("source");
-var LIST = irVar("list");
-var LEN = irVar("len");
-var OUT = irVar("out");
-var INDEX = irVar("i");
-function buildMapperIR(fields) {
-  const prelude = [];
-  const output = objectLiteral(buildEntries(fields, SOURCE, "f", prelude));
-  const map2 = {
-    kind: "program",
-    params: [SOURCE],
-    body: [...prelude, { kind: "return", value: output }]
-  };
-  const many = {
-    kind: "program",
-    params: [LIST],
-    body: [
-      { kind: "assign", target: LEN, expr: loadProp(LIST, "length") },
-      { kind: "assign", target: OUT, expr: construct("Array", [LEN]) },
-      forRange(INDEX, LEN, [
-        { kind: "assign", target: SOURCE, expr: loadIndex(LIST, INDEX) },
-        ...prelude,
-        store(loadIndex(OUT, INDEX), output)
-      ]),
-      { kind: "return", value: OUT }
-    ]
-  };
-  return { map: map2, many };
-}
-function buildEntries(fields, base, prefix, prelude) {
-  return fields.map((field) => ({
-    key: field.key,
-    value: buildFieldValue(field, base, `${prefix}_${identifier(field.key)}`, prelude)
-  }));
-}
-function buildFieldValue(field, base, prefix, prelude) {
-  const source = field.source;
-  switch (source.kind) {
-    case "copy":
-      return loadProp(base, source.from);
-    case "copy-object": {
-      if (!source.fromOptional) {
-        return objectLiteral(buildEntries(source.fields, loadProp(base, source.from), prefix, prelude));
-      }
-      const src = irVar(`${prefix}_src`);
-      const value = irVar(`${prefix}_val`);
-      const inner = [];
-      const nested = objectLiteral(buildEntries(source.fields, src, prefix, inner));
-      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
-        kind: "if",
-        test: notStrictEqual(src, literal(void 0)),
-        then: [...inner, store(value, nested)]
-      });
-      return value;
-    }
-    case "copy-array": {
-      const src = irVar(`${prefix}_src`);
-      const len = irVar(`${prefix}_len`);
-      const out = irVar(`${prefix}_out`);
-      const index = irVar(`${prefix}_i`);
-      const item = irVar(`${prefix}_item`);
-      const inner = [];
-      const element = source.element === void 0 ? item : objectLiteral(buildEntries(source.element, item, prefix, inner));
-      const loop = [
-        { kind: "assign", target: len, expr: loadProp(src, "length") },
-        { kind: "assign", target: out, expr: construct("Array", [len]) },
-        forRange(index, len, [
-          { kind: "assign", target: item, expr: loadIndex(src, index) },
-          ...inner,
-          store(loadIndex(out, index), element)
-        ])
-      ];
-      if (!source.fromOptional) {
-        prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, ...loop);
-        return out;
-      }
-      const value = irVar(`${prefix}_val`);
-      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
-        kind: "if",
-        test: notStrictEqual(src, literal(void 0)),
-        then: [...loop, store(value, out)]
-      });
-      return value;
-    }
-    case "via":
-      return { kind: "call", callee: irVar(source.binding), args: [loadProp(SOURCE, source.from), SOURCE] };
-    case "computed":
-      return { kind: "call", callee: irVar(source.binding), args: [SOURCE] };
-    case "default": {
-      if (source.from === void 0) return irVar(source.binding);
-      const value = irVar(`${prefix}_val`);
-      prelude.push(letDecl(value, loadProp(SOURCE, source.from)), {
-        kind: "if",
-        test: strictEqual(value, literal(void 0)),
-        then: [store(value, irVar(source.binding))]
-      });
-      return value;
-    }
-  }
-}
-function identifier(key) {
-  return key.replace(/[^$_a-zA-Z0-9]/g, "_").replace(/^[^$_a-zA-Z]/, "_");
-}
-
-// ../../packages/jit/src/compiler/mapper/build-mapper-plan.ts
-function buildMapperPlan(sourceSchema, targetSchema, overrides = {}) {
-  const source = expectObjectSchema2(sourceSchema, "mapper source");
-  const target = expectObjectSchema2(targetSchema, "mapper target");
-  const bindings = [];
-  const bindingNames = [];
-  const bind = (value) => {
-    const name = `__m${bindings.length}`;
-    bindings[bindings.length] = value;
-    bindingNames[bindingNames.length] = name;
-    return name;
-  };
-  for (const key of Object.keys(overrides)) {
-    if (!(key in target.def.props)) {
-      throw new JITError("INVALID_MAPPER", `mapper override references unknown target field ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
-  const fields = planObjectFields(source, target, overrides, bind, []);
-  return { fields, bindingNames, bindings };
-}
-function planObjectFields(source, target, overrides, bind, path) {
-  const fields = [];
-  for (const key of Object.keys(target.def.props)) {
-    const targetProp = target.def.props[key];
-    const fieldPath = [...path, key];
-    const override = overrides[key];
-    if (override !== void 0) {
-      fields[fields.length] = { key, source: planOverride(source, key, override, bind, fieldPath) };
-      continue;
-    }
-    const planned = planAutoMatch(source, key, targetProp, bind, fieldPath);
-    if (planned) fields[fields.length] = { key, source: planned };
-  }
-  return fields;
-}
-function planOverride(source, key, override, bind, path) {
-  if (typeof override === "function") {
-    return { kind: "computed", binding: bind(override) };
-  }
-  if (typeof override !== "object" || override === null) {
-    throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must be a function or object`, {
-      path
-    });
-  }
-  if (override.via !== void 0) {
-    if (typeof override.from !== "string") {
-      throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} with via requires from`, {
-        path
-      });
-    }
-    expectSourceField(source, override.from, path);
-    return { kind: "via", from: override.from, binding: bind(override.via) };
-  }
-  if (override.from !== void 0) {
-    expectSourceField(source, override.from, path);
-    const planned = planAutoMatch(source, override.from, void 0, bind, path);
-    if (!planned) {
-      throw new JITError(
-        "INVALID_MAPPER",
-        `mapper cannot copy source field ${JSON.stringify(override.from)}; use via to convert it`,
-        { path }
-      );
-    }
-    return planned;
-  }
-  if ("default" in override) {
-    const from = key in source.def.props ? key : void 0;
-    return { kind: "default", from, binding: bind(override.default) };
-  }
-  throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must define from, via, or default`, {
-    path
-  });
-}
-function planAutoMatch(source, from, targetProp, bind, path) {
-  const sourceProp = source.def.props[from];
-  if (sourceProp === void 0) {
-    if (targetProp !== void 0 && resolveWrappers(targetProp).optional) return void 0;
-    throw new JITError(
-      "INVALID_MAPPER",
-      `mapper target field ${JSON.stringify(path[path.length - 1])} has no source match and no override`,
-      { path }
-    );
-  }
-  const sourceResolved = resolveWrappers(sourceProp);
-  const targetResolved = targetProp === void 0 ? void 0 : resolveWrappers(targetProp);
-  if (targetResolved && sourceResolved.optional && !targetResolved.optional) {
-    throw new JITError(
-      "INVALID_MAPPER",
-      `mapper source field ${JSON.stringify(from)} is optional but the target field is required; use default or via`,
-      { path }
-    );
-  }
-  const sourceBase = sourceResolved.base;
-  const targetBase = targetResolved?.base;
-  if (sourceBase.type === TypeName.object && (targetBase === void 0 || targetBase.type === TypeName.object)) {
-    const nestedTarget = targetBase ?? sourceBase;
-    const fields = planObjectFields(sourceBase, nestedTarget, {}, bind, path);
-    return { kind: "copy-object", from, fromOptional: sourceResolved.optional, fields };
-  }
-  if (sourceBase.type === TypeName.array && (targetBase === void 0 || targetBase.type === TypeName.array)) {
-    const sourceElement = resolveWrappers(sourceBase.def.element).base;
-    const targetElement = targetBase === void 0 ? sourceElement : resolveWrappers(targetBase.def.element).base;
-    if (sourceElement.type === TypeName.object && targetElement.type === TypeName.object) {
-      const element = planObjectFields(sourceElement, targetElement, {}, bind, path);
-      return { kind: "copy-array", from, fromOptional: sourceResolved.optional, element };
-    }
-    if (isCompatibleBase(sourceElement.type, targetElement.type)) {
-      return { kind: "copy-array", from, fromOptional: sourceResolved.optional, element: void 0 };
-    }
-    if (targetResolved?.optional) return void 0;
-    throw new JITError("INVALID_MAPPER", `mapper array field ${JSON.stringify(from)} has incompatible element types`, {
-      path
-    });
-  }
-  if (targetBase === void 0 || isCompatibleBase(sourceBase.type, targetBase.type)) {
-    return { kind: "copy", from, fromOptional: sourceResolved.optional };
-  }
-  if (targetResolved?.optional) return void 0;
-  throw new JITError(
-    "INVALID_MAPPER",
-    `mapper field ${JSON.stringify(from)} has type ${sourceBase.type} but the target expects ${targetBase.type}`,
-    { path }
-  );
-}
-function isCompatibleBase(source, target) {
-  if (source === target) return true;
-  if (source === TypeName.int && target === TypeName.number) return true;
-  return false;
-}
-function expectSourceField(source, from, path) {
-  if (!(from in source.def.props)) {
-    throw new JITError("INVALID_MAPPER", `mapper override references unknown source field ${JSON.stringify(from)}`, {
-      path
-    });
-  }
-}
-function expectObjectSchema2(schema, label) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.object) {
-    throw new JITError("INVALID_MAPPER", `${label} must be an object schema`);
-  }
-  return resolved;
-}
-
-// ../../packages/jit/src/compiler/mapper.ts
-var MAPPER_OPS = ["map", "many"];
-function createMapperFacade(sourceSchema, targetSchema, overrides = {}, options) {
-  const plan = buildMapperPlan(sourceSchema, targetSchema, overrides);
-  const selections = /* @__PURE__ */ new Map();
-  const select = (operations) => {
-    const normalized = normalizeMapperOps(operations);
-    const key = normalized.join(",");
-    const cached = selections.get(key);
-    if (cached) return cached;
-    const selection = compileMapperPlanSelection(
-      sourceSchema,
-      targetSchema,
-      plan,
-      normalized,
-      options
-    );
-    selections.set(key, selection);
-    return selection;
-  };
-  const target = {
-    get(...operations) {
-      return select(operations);
-    }
-  };
-  for (const operation of MAPPER_OPS) {
-    Object.defineProperty(target, operation, {
-      configurable: false,
-      enumerable: true,
-      get() {
-        return select([operation])[operation];
-      }
-    });
-  }
-  const facade = Object.freeze(target);
-  registerMapperArtifact(facade, plan, MAPPER_OPS);
-  return facade;
-}
-function compileMapperPlanSelection(sourceSchema, targetSchema, plan, operations, options) {
-  const normalized = normalizeMapperOps(operations);
-  const operationKey = normalized.join(",");
-  if (normalized.length === 0) {
-    const empty = Object.freeze({});
-    registerMapperArtifact(empty, plan, normalized, "{}");
-    return empty;
-  }
-  const template = getCompileCached(
-    sourceSchema,
-    `mapper:${targetKey(targetSchema)}:${operationKey}:${serializeFields(plan.fields)}`,
-    () => {
-      const source = emitMapper(plan, normalized);
-      return {
-        source,
-        create: globalThis.Function(...plan.bindingNames, `return ${source};`)
-      };
-    },
-    options
-  );
-  const compiled = Object.freeze(template.create(...plan.bindings));
-  registerMapperArtifact(compiled, plan, normalized, template.source);
-  const compiledOperations = compiled;
-  for (const operation of normalized) {
-    const compiledOperation = compiledOperations[operation];
-    if (compiledOperation) {
-      registerMapperArtifact(compiledOperation, plan, [operation], emitMapperFunction(plan, operation));
-    }
-  }
-  return compiled;
-}
-function emitMapper(plan, operations) {
-  const programs = buildMapperIR(plan.fields);
-  const writer = new CodeWriter();
-  writer.line("{");
-  writer.indent(() => {
-    operations.forEach((operation, index) => {
-      emitMapperFunctionBody(writer, programs, operation, index < operations.length - 1 ? "," : "");
-    });
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function emitMapperFunction(plan, operation) {
-  const programs = buildMapperIR(plan.fields);
-  const writer = new CodeWriter();
-  emitMapperFunctionBody(writer, programs, operation, "", false);
-  return writer.toString();
-}
-function emitMapperFunctionBody(writer, programs, operation, suffix, property = true) {
-  const parameter = operation === "map" ? "source" : "list";
-  const prefix = property ? `${operation}: ` : "";
-  writer.line(`${prefix}function ${operation}(${parameter}) {`);
-  writer.indent(() => {
-    for (const node of programs[operation].body) emitNode(writer, node);
-  });
-  writer.line(`}${suffix}`);
-}
-function registerMapperArtifact(value, plan, operations, source) {
-  registerArtifact(value, {
-    kind: "mapper",
-    get source() {
-      return source ?? emitMapper(plan, operations);
-    },
-    bindingNames: plan.bindingNames,
-    bindingValues: plan.bindings
-  });
-}
-function normalizeMapperOps(operations) {
-  for (const operation of operations) {
-    if (!MAPPER_OPS.includes(operation)) {
-      throw new JITError("INVALID_OPERATION", `unknown mapper operation: ${String(operation)}`);
-    }
-  }
-  return MAPPER_OPS.filter((operation) => operations.includes(operation));
-}
-var targetKeys = /* @__PURE__ */ new WeakMap();
-var targetKeyCounter = 0;
-function targetKey(schema) {
-  let key = targetKeys.get(schema);
-  if (key === void 0) {
-    key = ++targetKeyCounter;
-    targetKeys.set(schema, key);
-  }
-  return key;
-}
-function serializeFields(fields) {
-  return fields.map(serializeField).join(";");
-}
-function serializeField(field) {
-  const source = field.source;
-  switch (source.kind) {
-    case "copy":
-      return `${field.key}<c:${source.from}:${source.fromOptional ? "?" : ""}>`;
-    case "copy-object":
-      return `${field.key}<o:${source.from}:${source.fromOptional ? "?" : ""}[${serializeFields(source.fields)}]>`;
-    case "copy-array":
-      return `${field.key}<a:${source.from}:${source.fromOptional ? "?" : ""}[${source.element ? serializeFields(source.element) : "*"}]>`;
-    case "via":
-      return `${field.key}<v:${source.from}:${source.binding}>`;
-    case "computed":
-      return `${field.key}<x:${source.binding}>`;
-    case "default":
-      return `${field.key}<d:${source.from ?? ""}:${source.binding}>`;
-  }
-}
-
 // ../../packages/jit/src/factories/collection/collection.ts
 function array(element) {
   return /* @__PURE__ */ createBuilder(
@@ -12396,8 +13332,8 @@ function compile(schema, opsOrCompiled, extras) {
         selection.safeParseAsync = getValidator().safeParseAsync;
         break;
       case "fromJSON": {
-        const parse = getValidator().parse;
-        const fromJSON = ((json4) => parse(JSON.parse(json4)));
+        const parse2 = getValidator().parse;
+        const fromJSON = ((json3) => parse2(JSON.parse(json3)));
         registerArtifact(fromJSON, {
           kind: "operation",
           schema: unwrapped,
@@ -12530,134 +13466,18 @@ function discriminatedUnion(discriminator, options) {
 }
 
 // ../../packages/jit/src/factories/dto.ts
-var DTO_TRANSPORT_OPS = Object.freeze([
-  "is",
-  "parse",
-  "safeParse",
-  "parseAsync",
-  "safeParseAsync",
-  "fromJSON",
-  "stringify",
-  "codec"
-]);
-var DTO_MAPPING_OPS = Object.freeze(["from", "many"]);
-var DTO_OPS = Object.freeze([...DTO_TRANSPORT_OPS, ...DTO_MAPPING_OPS]);
-function dto(sourceOrTarget, maybeTarget, ...rest) {
-  const hasSource = maybeTarget !== void 0;
-  const overrides = rest[0] ?? {};
-  const sourceSchema = hasSource ? unwrapSchema(sourceOrTarget) : void 0;
-  const targetSchema = unwrapSchema(
-    hasSource ? maybeTarget : sourceOrTarget
+function dto(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const annotations = unwrapped.annotations;
+  return createBuilder(
+    createSchema(unwrapped.type, unwrapped.def, {
+      ...annotations,
+      metadata: {
+        ...annotations?.metadata,
+        custom: { ...annotations?.metadata?.custom, dto: true }
+      }
+    })
   );
-  const availableOps = hasSource ? DTO_OPS : DTO_TRANSPORT_OPS;
-  const selections = /* @__PURE__ */ new Map();
-  let mapper2;
-  const getMapper = () => {
-    if (!sourceSchema) throw new JITError("INVALID_OPERATION", "DTO mapping requires a source schema");
-    mapper2 ??= createMapperFacade(sourceSchema, targetSchema, overrides);
-    return mapper2;
-  };
-  const select = (ops) => {
-    const normalized = normalizeDtoOps(ops, hasSource);
-    const key = normalized.join(",");
-    const cached = selections.get(key);
-    if (cached) return cached;
-    const transportOps = normalized.filter(isDtoTransportOp);
-    const mappingOps = normalized.filter(isDtoMappingOp);
-    const validatorOps = collectValidatorOps2(transportOps);
-    const validator2 = validatorOps.length > 0 ? compileValidatorSelection(targetSchema, validatorOps) : void 0;
-    const selectedMapper = mappingOps.length > 0 ? getMapper().get(...mappingOps.map((op) => op === "from" ? "map" : "many")) : void 0;
-    const selection = {
-      schema: targetSchema,
-      ops: Object.freeze([...transportOps]),
-      extras: Object.freeze([...mappingOps])
-    };
-    Object.defineProperty(selection, "operations", {
-      enumerable: false,
-      value: Object.freeze([...normalized])
-    });
-    for (const op of normalized) {
-      switch (op) {
-        case "is":
-        case "parse":
-        case "safeParse":
-        case "parseAsync":
-        case "safeParseAsync":
-          selection[op] = validator2?.[op];
-          break;
-        case "fromJSON": {
-          const parse = validator2?.parse;
-          if (!parse) throw new JITError("INVALID_OPERATION", "DTO fromJSON requires parse generation");
-          selection.fromJSON = (json4) => parse(JSON.parse(json4));
-          break;
-        }
-        case "stringify":
-          selection.stringify = compileSerialize(targetSchema);
-          break;
-        case "codec":
-          selection.codec = compileCodec(targetSchema);
-          break;
-        case "from":
-          selection.from = selectedMapper?.map;
-          break;
-        case "many":
-          selection.many = selectedMapper?.many;
-          break;
-      }
-    }
-    Object.defineProperty(selection, "__jitAot", { enumerable: false, value: "grouped" });
-    const compiled = Object.freeze(selection);
-    selections.set(key, compiled);
-    return compiled;
-  };
-  const target = {
-    schema: targetSchema,
-    ops: DTO_TRANSPORT_OPS,
-    extras: hasSource ? DTO_MAPPING_OPS : Object.freeze([]),
-    get(...ops) {
-      return select(ops);
-    }
-  };
-  Object.defineProperty(target, "operations", { enumerable: false, value: availableOps });
-  Object.defineProperty(target, "__jitAot", { enumerable: false, value: "grouped" });
-  for (const op of availableOps) {
-    Object.defineProperty(target, op, {
-      configurable: false,
-      enumerable: true,
-      get() {
-        return select([op])[op];
-      }
-    });
-  }
-  return Object.freeze(target);
-}
-function normalizeDtoOps(ops, hasSource) {
-  for (const op of ops) {
-    if (!DTO_OPS.includes(op)) {
-      throw new JITError("INVALID_OPERATION", `unknown DTO operation ${JSON.stringify(op)}`);
-    }
-    if (!hasSource && isDtoMappingOp(op)) {
-      throw new JITError("INVALID_OPERATION", `DTO operation ${JSON.stringify(op)} requires a source schema`);
-    }
-  }
-  return DTO_OPS.filter((op) => ops.includes(op) && (hasSource || !isDtoMappingOp(op)));
-}
-function collectValidatorOps2(ops) {
-  const selected = /* @__PURE__ */ new Set();
-  for (const op of ops) {
-    if (isValidatorOp(op)) selected.add(op);
-    else if (op === "fromJSON") selected.add("parse");
-  }
-  return [...selected];
-}
-function isValidatorOp(value) {
-  return value === "is" || value === "parse" || value === "safeParse" || value === "parseAsync" || value === "safeParseAsync";
-}
-function isDtoTransportOp(value) {
-  return DTO_TRANSPORT_OPS.includes(value);
-}
-function isDtoMappingOp(value) {
-  return value === "from" || value === "many";
 }
 
 // ../../packages/jit/src/factories/primitive/empty-def.ts
@@ -12720,7 +13540,7 @@ function model(schema, options) {
       schema: unwrapped,
       ops: Object.freeze([...normalized])
     };
-    const validatorOps = collectValidatorOps3(normalized);
+    const validatorOps = collectValidatorOps2(normalized);
     const validator2 = validatorOps.length > 0 ? compileValidatorSelection(unwrapped, validatorOps) : void 0;
     for (const op of normalized) {
       selection[op] = compileModelOperation(op, unwrapped, validator2);
@@ -12784,9 +13604,9 @@ function compileModelOperation(op, schema, validator2) {
     case "stringify":
       return compileSerialize(schema);
     case "fromJSON": {
-      const parse = validator2?.parse;
-      if (!parse) throw new JITError("INVALID_OPERATION", "fromJSON requires the parse compiler");
-      return (json4) => parse(JSON.parse(json4));
+      const parse2 = validator2?.parse;
+      if (!parse2) throw new JITError("INVALID_OPERATION", "fromJSON requires the parse compiler");
+      return (json3) => parse2(JSON.parse(json3));
     }
     case "format":
       return compileFormat(schema);
@@ -12811,13 +13631,13 @@ function normalizeModelOps(ops) {
 function isModelOp(value) {
   return MODEL_OPS.includes(value);
 }
-function isValidatorOp2(value) {
+function isValidatorOp(value) {
   return value === "is" || value === "parse" || value === "safeParse" || value === "parseAsync" || value === "safeParseAsync";
 }
-function collectValidatorOps3(ops) {
+function collectValidatorOps2(ops) {
   const selected = /* @__PURE__ */ new Set();
   for (const op of ops) {
-    if (isValidatorOp2(op)) selected.add(op);
+    if (isValidatorOp(op)) selected.add(op);
     else if (op === "fromJSON") selected.add("parse");
   }
   return [...selected];
@@ -13102,7 +13922,7 @@ function emitPipelineSource(schema, program, async) {
     lines.push(`  ${forAwait} (const entry of input) yield entry[1];`);
     lines.push("}");
   }
-  let stage = collection.kind === "map" ? "source(input)" : "input";
+  let stage2 = collection.kind === "map" ? "source(input)" : "input";
   let stageIndex = 0;
   for (let nodeIndex = 0; nodeIndex < program.nodes.length; ) {
     const name = `stage${stageIndex++}`;
@@ -13119,10 +13939,10 @@ function emitPipelineSource(schema, program, async) {
       nodeIndex++;
     }
     lines.push("}");
-    stage = `${name}(${stage}, ${hasParams ? "params" : "undefined"})`;
+    stage2 = `${name}(${stage2}, ${hasParams ? "params" : "undefined"})`;
   }
   lines.push(`function query(input${hasParams ? ", params" : ""}) {`);
-  lines.push(`  return ${stage};`);
+  lines.push(`  return ${stage2};`);
   lines.push("}");
   lines.push("return query;");
   return `(function() {
@@ -13338,503 +14158,8 @@ function serializePipeline(nodes) {
   return JSON.stringify(nodes, (_key, value) => typeof value === "bigint" ? `${value}n` : value);
 }
 
-// ../../packages/jit/src/compiler/emitter/emit-query.ts
-function emitQuery(program) {
-  const writer = new CodeWriter();
-  const params = program.params.map((param2) => param2.name).join(", ");
-  writer.line(`function query(${params}) {`);
-  writer.indent(() => {
-    for (const node of program.body) emitNode(writer, node);
-  });
-  writer.line("}");
-  return writer.toString();
-}
-
-// ../../packages/jit/src/compiler/ir/builders/build-query-ir.ts
-var VALUE = irVar("value");
-var PARAMS = irVar("params");
-var LEN2 = irVar("len");
-var OUT2 = irVar("out");
-var CURSOR = irVar("j");
-var INDEX2 = irVar("i");
-var ITEM = irVar("item");
-var ENTRY = irVar("entry");
-var SEEN = irVar("seen");
-var UNIQUE_KEY = irVar("uniqueKey");
-var COLLECT_KEY = irVar("collectKey");
-var GROUP = irVar("group");
-var PROJECTED = irVar("projected");
-var COMPARE_OPERATORS = {
-  eq: "strictEqual",
-  neq: "notStrictEqual",
-  gt: "greaterThan",
-  gte: "greaterThanOrEqual",
-  lt: "lessThan",
-  lte: "lessThanOrEqual"
-};
-function buildQueryIR(target, plan, options = {}) {
-  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
-  return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
-}
-function buildArrayQuery(target, plan) {
-  if (shouldProjectAfterOrder(plan)) return buildArrayQueryWithPostOrderProjection(target, plan);
-  const selected = buildProjection(plan.select);
-  const body = [
-    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
-    letDecl(CURSOR, literal(0)),
-    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, selected)])),
-    store(loadProp(OUT2, "length"), CURSOR)
-  ];
-  if (plan.orderBy) body.push(sortByKey(OUT2, plan.orderBy.key, plan.orderBy.direction));
-  body.push({ kind: "return", value: OUT2 });
-  return body;
-}
-function buildArrayQueryWithPostOrderProjection(target, plan) {
-  const orderBy = plan.orderBy;
-  const body = [
-    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
-    letDecl(CURSOR, literal(0)),
-    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, ITEM)])),
-    store(loadProp(OUT2, "length"), CURSOR)
-  ];
-  if (orderBy) body.push(sortByKey(OUT2, orderBy.key, orderBy.direction));
-  body.push(
-    { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },
-    forRange(INDEX2, CURSOR, [
-      { kind: "assign", target: ITEM, expr: loadIndex(OUT2, INDEX2) },
-      store(loadIndex(PROJECTED, INDEX2), buildProjection(plan.select))
-    ]),
-    { kind: "return", value: PROJECTED }
-  );
-  return body;
-}
-function buildCollectedQuery(target, plan) {
-  const collector = plan.collector;
-  if (!collector) return [];
-  const selected = buildProjection(plan.select);
-  const collect = [{ kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, collector.key) }];
-  if (collector.kind === "keyed") {
-    collect.push(exprStmt(call(loadProp(OUT2, "set"), [COLLECT_KEY, selected])));
-  } else {
-    collect.push(
-      letDecl(GROUP, loadIndex(OUT2, COLLECT_KEY)),
-      {
-        kind: "if",
-        test: strictEqual(GROUP, literal(void 0)),
-        then: [store(GROUP, arrayLiteral()), store(loadIndex(OUT2, COLLECT_KEY), GROUP)]
-      },
-      store(loadIndex(GROUP, loadProp(GROUP, "length")), selected)
-    );
-  }
-  const outInitializer = collector.kind === "keyed" ? construct("Map") : call(loadProp(irVar("Object"), "create"), [literal(null)]);
-  return [
-    ...buildLoopHeader(target, plan, outInitializer),
-    buildInputLoop(target, buildGuardedBody(plan, collect)),
-    { kind: "return", value: OUT2 }
-  ];
-}
-var ACC = irVar("acc");
-var ACC_COUNT = irVar("n");
-function buildAggregateQuery(target, plan, aggregate) {
-  const body = [];
-  if (target.kind === "array") {
-    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
-  }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  const field = aggregate.key === void 0 ? ITEM : loadProp(ITEM, aggregate.key);
-  switch (aggregate.op) {
-    case "sum":
-    case "count": {
-      const increment = aggregate.op === "count" ? literal(1) : field;
-      body.push(
-        letDecl(ACC, literal(0)),
-        buildInputLoop(target, buildGuardedBody(plan, [store(ACC, binary("add", ACC, increment))])),
-        { kind: "return", value: ACC }
-      );
-      return body;
-    }
-    case "avg":
-      body.push(
-        letDecl(ACC, literal(0)),
-        letDecl(ACC_COUNT, literal(0)),
-        buildInputLoop(
-          target,
-          buildGuardedBody(plan, [
-            store(ACC, binary("add", ACC, field)),
-            store(ACC_COUNT, binary("add", ACC_COUNT, literal(1)))
-          ])
-        ),
-        {
-          kind: "if",
-          test: strictEqual(ACC_COUNT, literal(0)),
-          then: [{ kind: "return", value: literal(void 0) }]
-        },
-        { kind: "return", value: binary("divide", ACC, ACC_COUNT) }
-      );
-      return body;
-    case "min":
-    case "max": {
-      const wins = binary(aggregate.op === "min" ? "lessThan" : "greaterThan", field, ACC);
-      body.push(
-        letDecl(ACC),
-        buildInputLoop(
-          target,
-          buildGuardedBody(plan, [
-            {
-              kind: "if",
-              test: { kind: "nary", op: "or", operands: [strictEqual(ACC, literal(void 0)), wins] },
-              then: [store(ACC, field)]
-            }
-          ])
-        ),
-        { kind: "return", value: ACC }
-      );
-      return body;
-    }
-  }
-}
-function buildMutationQuery(target, plan) {
-  const mutation = plan.mutation;
-  if (!mutation) return [];
-  const condition = buildFilterTest(plan);
-  const test = condition ?? literal(false);
-  const loopBody = mutation.kind === "delete" ? [{ kind: "if", test: not(test), then: buildMutationKeep(target, ITEM) }] : [
-    {
-      kind: "if",
-      test,
-      then: buildMutationKeep(target, buildPatchObject(target.objectSchema, mutation)),
-      otherwise: buildMutationKeep(target, ITEM)
-    }
-  ];
-  const outInitializer = target.kind === "array" ? construct("Array", [LEN2]) : target.kind === "set" ? construct("Set") : construct("Map");
-  const body = [...buildLoopHeader(target, plan, outInitializer)];
-  if (target.kind === "array") body.push(letDecl(CURSOR, literal(0)));
-  body.push(buildInputLoop(target, loopBody));
-  if (target.kind === "array") body.push(store(loadProp(OUT2, "length"), CURSOR));
-  body.push({ kind: "return", value: OUT2 });
-  return body;
-}
-function buildMutationKeep(target, value) {
-  switch (target.kind) {
-    case "array":
-      return [append(OUT2, CURSOR, value)];
-    case "set":
-      return [exprStmt(call(loadProp(OUT2, "add"), [value]))];
-    case "map":
-      return [exprStmt(call(loadProp(OUT2, "set"), [loadIndex(ENTRY, literal(0)), value]))];
-  }
-}
-function buildPatchObject(schema, mutation) {
-  if (mutation.kind !== "update") return ITEM;
-  const entries = Object.keys(schema.def.props).map((key) => {
-    const binding = mutation.patch[key];
-    return { key, value: binding ? irVar(binding.name) : loadProp(ITEM, key) };
-  });
-  return objectLiteral(entries);
-}
-function buildLoopHeader(target, plan, outInitializer) {
-  const header = [
-    { kind: "assign", target: LEN2, expr: loadProp(VALUE, target.kind === "array" ? "length" : "size") }
-  ];
-  if (plan.unique) header.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  header.push({ kind: "assign", target: OUT2, expr: outInitializer });
-  return header;
-}
-function buildInputLoop(target, body) {
-  switch (target.kind) {
-    case "array":
-      return forRange(INDEX2, LEN2, [{ kind: "assign", target: ITEM, expr: loadIndex(VALUE, INDEX2) }, ...body]);
-    case "set":
-      return forOf(ITEM, VALUE, body);
-    case "map":
-      return forOf(ENTRY, VALUE, [{ kind: "assign", target: ITEM, expr: loadIndex(ENTRY, literal(1)) }, ...body]);
-  }
-}
-function buildGuardedBody(plan, accepted) {
-  const unique = plan.unique;
-  const inner = unique ? [
-    { kind: "assign", target: UNIQUE_KEY, expr: loadProp(ITEM, unique.key) },
-    {
-      kind: "if",
-      test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
-      then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted]
-    }
-  ] : accepted;
-  const condition = buildFilterTest(plan);
-  return condition ? [{ kind: "if", test: condition, then: inner }] : inner;
-}
-function buildFilterTest(plan) {
-  if (plan.filters.length === 0) return void 0;
-  return allOf(plan.filters.map((filter) => buildCondition(filter.condition)));
-}
-function buildCondition(condition) {
-  switch (condition.kind) {
-    case "compare":
-      return binary(COMPARE_OPERATORS[condition.op], buildValue(condition.left), buildValue(condition.right));
-    case "logical":
-      return {
-        kind: "nary",
-        op: condition.op,
-        operands: [buildCondition(condition.left), buildCondition(condition.right)]
-      };
-    case "not":
-      return not(buildCondition(condition.inner));
-  }
-}
-function buildValue(value) {
-  switch (value.kind) {
-    case "field":
-      return loadProp(ITEM, value.key);
-    case "binding":
-      return irVar(value.name);
-    case "param":
-      return loadProp(PARAMS, value.name);
-    case "literal":
-      return literal(expectSafeLiteral(value.value));
-  }
-}
-function expectSafeLiteral(value) {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean" || value === null || value === void 0) {
-    return value;
-  }
-  throw new JITError("INVALID_QUERY", "query literal values must be primitive compiler literals");
-}
-function buildProjection(select) {
-  if (!select) return ITEM;
-  return objectLiteral(select.fields.map((field) => ({ key: field, value: loadProp(ITEM, field) })));
-}
-function shouldProjectAfterOrder(plan) {
-  return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
-}
-
-// ../../packages/jit/src/compiler/query.ts
-function emitQuerySource(schema, program) {
-  const target = expectCollectionObjectSchema(schema, "emitQuerySource");
-  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
-  validateQueryPlan(target.objectSchema, plan);
-  return emitQuery(
-    optimizeQueryIR(
-      buildQueryIR(target, plan, {
-        hasParams: Boolean(program.params?.length)
-      })
-    )
-  );
-}
-function compileQuery(schema, program, options) {
-  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
-  const template = getCompileCached(
-    schema,
-    `query:${serializeQueryNodes2(program.nodes)}`,
-    () => {
-      const source = emitQuerySource(schema, program);
-      return {
-        source,
-        create: globalThis.Function(...bindingNames, `return ${source};`)
-      };
-    },
-    options
-  );
-  const compiled = template.create(...program.bindings);
-  registerArtifact(compiled, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings
-  });
-  return compiled;
-}
-function serializeQueryNodes2(nodes) {
-  return nodes.map(serializeQueryNode2).join(";");
-}
-function serializeQueryNode2(node) {
-  switch (node.kind) {
-    case "filter":
-      return `f(${serializeCondition2(node.condition)})`;
-    case "select:fields":
-      return `s(${node.fields.join(",")})`;
-    case "unique":
-      return `u(${node.key})`;
-    case "keyed":
-      return `k(${node.key})`;
-    case "groupBy":
-      return `g(${node.key})`;
-    case "orderBy":
-      return `o(${node.key},${node.direction})`;
-    case "aggregate":
-      return `a(${node.op},${node.key ?? ""})`;
-    case "delete":
-      return "d()";
-    case "update":
-      return `m(${Object.keys(node.patch).map((key) => `${key}=${node.patch[key]?.name}`).join(",")})`;
-  }
-}
-function serializeCondition2(condition) {
-  switch (condition.kind) {
-    case "compare":
-      return `${condition.op}(${serializeValue2(condition.left)},${serializeValue2(condition.right)})`;
-    case "logical":
-      return `${condition.op}(${serializeCondition2(condition.left)},${serializeCondition2(condition.right)})`;
-    case "not":
-      return `not(${serializeCondition2(condition.inner)})`;
-  }
-}
-function serializeValue2(value) {
-  switch (value.kind) {
-    case "field":
-      return `.${value.key}`;
-    case "binding":
-      return `$${value.name}`;
-    case "param":
-      return `p:${value.name}`;
-    case "literal":
-      return `#${typeof value.value}:${String(value.value)}`;
-  }
-}
-function createQueryPlan(nodes) {
-  const filters = [];
-  const selects = [];
-  const uniques = [];
-  const collectors = [];
-  const orderBys = [];
-  const aggregates = [];
-  const mutations = [];
-  for (const node of nodes) {
-    switch (node.kind) {
-      case "filter":
-        filters[filters.length] = node;
-        break;
-      case "select:fields":
-        selects[selects.length] = node;
-        break;
-      case "unique":
-        uniques[uniques.length] = node;
-        break;
-      case "keyed":
-      case "groupBy":
-        collectors[collectors.length] = node;
-        break;
-      case "orderBy":
-        orderBys[orderBys.length] = node;
-        break;
-      case "aggregate":
-        aggregates[aggregates.length] = node;
-        break;
-      case "delete":
-      case "update":
-        mutations[mutations.length] = node;
-        break;
-    }
-  }
-  return {
-    filters,
-    selects,
-    uniques,
-    collectors,
-    orderBys,
-    aggregates,
-    mutations
-  };
-}
-function optimizeQueryPlan(plan) {
-  return {
-    filters: plan.filters,
-    select: last(plan.selects),
-    unique: last(plan.uniques),
-    collector: last(plan.collectors),
-    orderBy: last(plan.orderBys),
-    aggregate: last(plan.aggregates),
-    mutation: last(plan.mutations)
-  };
-}
-function validateQueryPlan(schema, plan) {
-  for (const filter of plan.filters) {
-    validateCondition2(schema, filter.condition);
-  }
-  if (plan.select) validateObjectKeys2(schema, plan.select.fields, "query select");
-  if (plan.unique) validateObjectKeys2(schema, [plan.unique.key], "query unique");
-  if (plan.collector) validateObjectKeys2(schema, [plan.collector.key], `query ${plan.collector.kind}`);
-  if (plan.orderBy) validateObjectKeys2(schema, [plan.orderBy.key], "query orderBy");
-  if (plan.collector && plan.orderBy) {
-    throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
-  }
-  if (plan.aggregate) {
-    if (plan.select || plan.collector || plan.orderBy || plan.mutation) {
-      throw new JITError(
-        "INVALID_QUERY",
-        "query aggregate cannot be combined with select/keyed/groupBy/orderBy/delete/update in v1"
-      );
-    }
-    if (plan.aggregate.op !== "count") {
-      if (plan.aggregate.key === void 0) {
-        throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
-      }
-      validateObjectKeys2(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
-    }
-  }
-  if (plan.mutation) {
-    if (plan.filters.length === 0) {
-      throw new JITError("INVALID_QUERY", "query delete/update requires at least one filter in v1");
-    }
-    if (plan.select || plan.collector || plan.orderBy) {
-      throw new JITError(
-        "INVALID_QUERY",
-        "query delete/update cannot be combined with select/keyed/groupBy/orderBy in v1"
-      );
-    }
-    if (plan.mutation.kind === "update") {
-      validateObjectKeys2(schema, Object.keys(plan.mutation.patch), "query update");
-    }
-  }
-}
-function expectCollectionObjectSchema(schema, compilerName) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects an array, set, or map schema`);
-  }
-  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
-  if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
-  }
-  return {
-    kind: resolved.type,
-    objectSchema: element
-  };
-}
-function validateObjectKeys2(schema, keys, compilerName) {
-  const props = schema.def.props;
-  for (const key of keys) {
-    if (!(key in props)) {
-      throw new JITError("INVALID_QUERY", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
-}
-function validateCondition2(schema, condition) {
-  switch (condition.kind) {
-    case "compare":
-      validateValue2(schema, condition.left);
-      validateValue2(schema, condition.right);
-      return;
-    case "logical":
-      validateCondition2(schema, condition.left);
-      validateCondition2(schema, condition.right);
-      return;
-    case "not":
-      validateCondition2(schema, condition.inner);
-      return;
-  }
-}
-function validateValue2(schema, value) {
-  if (value.kind === "field") {
-    validateObjectKeys2(schema, [value.key], "query");
-  }
-}
-function last(values) {
-  return values[values.length - 1];
-}
-
 // ../../packages/jit/src/factories/query.ts
+var QUERY_PROGRAMS = /* @__PURE__ */ new WeakMap();
 function param(name) {
   return { __jitQueryValue: "param", name, _type: null };
 }
@@ -13846,6 +14171,9 @@ function query(schema) {
     return createBinaryQueryBuilder(schema, [], [], []);
   }
   return createQueryBuilder(unwrapSchema(schema), [], [], []);
+}
+function getQueryProgram(builder) {
+  return QUERY_PROGRAMS.get(builder);
 }
 function createBinaryQueryBuilder(target, nodes, bindings, paramNames) {
   return {
@@ -13895,7 +14223,7 @@ function createBinaryQueryBuilder(target, nodes, bindings, paramNames) {
   };
 }
 function createQueryBuilder(schema, nodes, bindings, paramNames) {
-  return {
+  const builder = {
     params(shape) {
       return createQueryBuilder(
         schema,
@@ -14068,6 +14396,12 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
       return explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
     }
   };
+  QUERY_PROGRAMS.set(builder, {
+    nodes,
+    bindings,
+    params: paramNames
+  });
+  return builder;
 }
 function createLazyQueryBuilder(schema, nodes, bindings, paramNames) {
   const program = { nodes, bindings, params: paramNames };
@@ -14123,7 +14457,7 @@ function createConditionBuilder(startIndex) {
     bindings[bindings.length] = value;
     return { kind: "binding", name: `__q${index}` };
   };
-  const compare = (op, key, value) => ({
+  const compare2 = (op, key, value) => ({
     kind: "compare",
     op,
     left: { kind: "field", key },
@@ -14133,12 +14467,12 @@ function createConditionBuilder(startIndex) {
     bindings,
     builder: {
       constant,
-      eq: (key, value) => compare("eq", key, value),
-      neq: (key, value) => compare("neq", key, value),
-      gt: (key, value) => compare("gt", key, value),
-      gte: (key, value) => compare("gte", key, value),
-      lt: (key, value) => compare("lt", key, value),
-      lte: (key, value) => compare("lte", key, value),
+      eq: (key, value) => compare2("eq", key, value),
+      neq: (key, value) => compare2("neq", key, value),
+      gt: (key, value) => compare2("gt", key, value),
+      gte: (key, value) => compare2("gte", key, value),
+      lt: (key, value) => compare2("lt", key, value),
+      lte: (key, value) => compare2("lte", key, value),
       and: (left, right) => ({ kind: "logical", op: "and", left, right }),
       or: (left, right) => ({ kind: "logical", op: "or", left, right }),
       not: (inner) => ({ kind: "not", inner })
@@ -14247,13 +14581,13 @@ function createBinaryProcessBuilder(objectSchema, options, nodes, bindings, para
     },
     compile() {
       const processSchema = createProcessObjectSchema(objectSchema, nodes);
-      const arraySchema = createSchema(TypeName.array, {
+      const arraySchema2 = createSchema(TypeName.array, {
         element: processSchema
       });
-      const binary2 = compileBinaryArray(arraySchema, options, {
+      const binary4 = compileBinaryArray(arraySchema2, options, {
         adaptiveStringFields: collectProjectionOnlyFields(processSchema, nodes)
       });
-      const query2 = compileBinaryQuery(binary2, {
+      const query2 = compileBinaryQuery(binary4, {
         nodes,
         bindings,
         params: paramNames
@@ -14262,12 +14596,12 @@ function createBinaryProcessBuilder(objectSchema, options, nodes, bindings, para
         const hasParams = paramNames.length > 0;
         const params = hasParams ? second : void 0;
         const length = hasParams ? third : second;
-        const rowset = binary2.load(values, length);
+        const rowset = binary4.load(values, length);
         if (hasParams)
           return query2(rowset, params);
         return query2(rowset);
       });
-      return Object.freeze({ binary: binary2, query: query2, execute });
+      return Object.freeze({ binary: binary4, query: query2, execute });
     }
   };
 }
@@ -14350,7 +14684,7 @@ function createConditionBuilder2(startIndex) {
     bindings[bindings.length] = value;
     return { kind: "binding", name: `__q${index}` };
   };
-  const compare = (op, key, value) => ({
+  const compare2 = (op, key, value) => ({
     kind: "compare",
     op,
     left: { kind: "field", key },
@@ -14360,12 +14694,12 @@ function createConditionBuilder2(startIndex) {
     bindings,
     builder: {
       constant,
-      eq: (key, value) => compare("eq", key, value),
-      neq: (key, value) => compare("neq", key, value),
-      gt: (key, value) => compare("gt", key, value),
-      gte: (key, value) => compare("gte", key, value),
-      lt: (key, value) => compare("lt", key, value),
-      lte: (key, value) => compare("lte", key, value),
+      eq: (key, value) => compare2("eq", key, value),
+      neq: (key, value) => compare2("neq", key, value),
+      gt: (key, value) => compare2("gt", key, value),
+      gte: (key, value) => compare2("gte", key, value),
+      lt: (key, value) => compare2("lt", key, value),
+      lte: (key, value) => compare2("lte", key, value),
       and: (left, right) => ({ kind: "logical", op: "and", left, right }),
       or: (left, right) => ({ kind: "logical", op: "or", left, right }),
       not: (inner) => ({ kind: "not", inner })
@@ -14434,6 +14768,552 @@ function compileStringifyChunks(schema, chunks = {}, cache) {
   );
 }
 
+// ../../packages/jit/src/compiler/execution-plan.ts
+var NO_EFFECTS = Object.freeze({
+  mayThrow: false,
+  mayAllocate: false,
+  usesExternalBindings: false
+});
+var THROWING_EFFECTS = Object.freeze({
+  mayThrow: true,
+  mayAllocate: false,
+  usesExternalBindings: false
+});
+
+// ../../packages/jit/src/factories/execution.ts
+var OPERATION_ARTIFACTS = /* @__PURE__ */ new WeakMap();
+function freezePlan(schema, stages) {
+  return Object.freeze({
+    version: 1,
+    schema,
+    stages: Object.freeze(stages.map((stage2) => Object.freeze(stage2)))
+  });
+}
+function createExecutionArtifact(plan, lower) {
+  let compiled;
+  const artifact = function executionArtifact(...args) {
+    compiled ??= lower();
+    return compiled(...args);
+  };
+  Object.defineProperties(artifact, {
+    plan: { enumerable: true, value: plan },
+    compile: {
+      enumerable: false,
+      value: () => {
+        compiled ??= lower();
+        return artifact;
+      }
+    },
+    explain: { enumerable: false, value: () => plan }
+  });
+  registerArtifact(artifact, { kind: "execution", plan });
+  return artifact;
+}
+function from(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = freezePlan(unwrapped, [
+    {
+      kind: "value",
+      input: "value",
+      output: "value",
+      schema: unwrapped,
+      requires: [],
+      provides: [],
+      effects: NO_EFFECTS
+    }
+  ]);
+  const source = createExecutionArtifact(
+    plan,
+    () => (value) => value
+  );
+  return artifactForSchema(source, unwrapped);
+}
+function jsonParse(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = freezePlan(unwrapped, [
+    {
+      kind: "json.decode",
+      input: "json-text",
+      output: "value",
+      schema: unwrapped,
+      requires: [],
+      provides: ["json-syntax-valid"],
+      effects: THROWING_EFFECTS
+    }
+  ]);
+  const source = createExecutionArtifact(
+    plan,
+    () => (value) => JSON.parse(value)
+  );
+  return artifactForSchema(source, unwrapped);
+}
+function binaryDecode(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = freezePlan(unwrapped, [
+    {
+      kind: "binary.decode",
+      input: "binary",
+      output: "value",
+      schema: unwrapped,
+      requires: [],
+      provides: ["binary-layout-valid"],
+      effects: THROWING_EFFECTS
+    }
+  ]);
+  const source = createExecutionArtifact(
+    plan,
+    () => compileCodec(unwrapped).decode
+  );
+  return artifactForSchema(source, unwrapped);
+}
+function validationArtifact(schema, operation) {
+  const unwrapped = unwrapSchema(schema);
+  const output = operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value";
+  const plan = freezePlan(unwrapped, [
+    {
+      kind: "value",
+      input: "value",
+      output: "value",
+      schema: unwrapped,
+      requires: [],
+      provides: [],
+      effects: NO_EFFECTS
+    },
+    {
+      kind: "validate",
+      input: "value",
+      output,
+      schema: unwrapped,
+      operation,
+      requires: [],
+      provides: operation === "is" ? [] : ["schema-validated"],
+      effects: THROWING_EFFECTS
+    }
+  ]);
+  return createExecutionArtifact(plan, () => {
+    const validator2 = compileValidator(unwrapped);
+    switch (operation) {
+      case "is":
+        return validator2.is;
+      case "parse":
+        return validator2.parse;
+      case "safeParse":
+        return validator2.safeParse;
+      case "parseAsync":
+        return validator2.parseAsync;
+      case "safeParseAsync":
+        return validator2.safeParseAsync;
+      case "issues":
+        return function* issues(value) {
+          const result = validator2.safeParse(value);
+          if (!result.success) yield* result.issues;
+        };
+    }
+  });
+}
+function appendValidation(artifact, schema) {
+  const plan = freezePlan(schema, [
+    ...artifact.plan.stages,
+    {
+      kind: "validate",
+      input: "value",
+      output: "value",
+      schema,
+      operation: "parse",
+      requires: [],
+      provides: ["schema-validated"],
+      effects: THROWING_EFFECTS
+    }
+  ]);
+  const next = createExecutionArtifact(
+    plan,
+    () => lowerExecutionPlan(plan)
+  );
+  return artifactForSchema(next, schema);
+}
+function jsonStringify(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = freezePlan(unwrapped, [
+    {
+      kind: "value",
+      input: "value",
+      output: "value",
+      schema: unwrapped,
+      requires: [],
+      provides: [],
+      effects: NO_EFFECTS
+    },
+    {
+      kind: "json.encode",
+      input: "value",
+      output: "json-text",
+      schema: unwrapped,
+      requires: [],
+      provides: ["materialized"],
+      effects: { ...THROWING_EFFECTS, mayAllocate: true }
+    }
+  ]);
+  return createExecutionArtifact(plan, () => compileSerialize(unwrapped));
+}
+function binaryEncode(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = freezePlan(unwrapped, [
+    {
+      kind: "value",
+      input: "value",
+      output: "value",
+      schema: unwrapped,
+      requires: [],
+      provides: [],
+      effects: NO_EFFECTS
+    },
+    {
+      kind: "binary.encode",
+      input: "value",
+      output: "binary",
+      schema: unwrapped,
+      requires: [],
+      provides: ["materialized"],
+      effects: { ...THROWING_EFFECTS, mayAllocate: true }
+    }
+  ]);
+  return createExecutionArtifact(plan, () => compileCodec(unwrapped).encode);
+}
+function operationArtifact(schema, operation, input, output, lower) {
+  const unwrapped = unwrapSchema(schema);
+  const cached = OPERATION_ARTIFACTS.get(unwrapped)?.get(operation);
+  if (cached) return cached;
+  const plan = freezePlan(unwrapped, [
+    {
+      kind: "value",
+      input: "value",
+      output: "value",
+      schema: unwrapped,
+      requires: [],
+      provides: [],
+      effects: NO_EFFECTS
+    },
+    {
+      kind: "operation",
+      input,
+      output,
+      schema: unwrapped,
+      operation,
+      requires: [],
+      provides: [],
+      effects: THROWING_EFFECTS
+    }
+  ]);
+  const artifact = createExecutionArtifact(plan, () => lower(unwrapped));
+  const operations = OPERATION_ARTIFACTS.get(unwrapped);
+  if (operations) operations.set(operation, artifact);
+  else OPERATION_ARTIFACTS.set(unwrapped, /* @__PURE__ */ new Map([[operation, artifact]]));
+  return artifact;
+}
+function mappedValue(source, sourceSchema, target, mapping = {}) {
+  const targetSchema = unwrapSchema(target);
+  const plan = freezePlan(targetSchema, [...source.plan.stages, mapStage(sourceSchema, targetSchema, false, mapping)]);
+  const artifact = createExecutionArtifact(
+    plan,
+    () => lowerExecutionPlan(plan)
+  );
+  return artifactForSchema(artifact, targetSchema);
+}
+function mappedCollection(state, target, mapping = {}) {
+  const targetSchema = unwrapSchema(target);
+  const resultSchema = arraySchema(targetSchema);
+  const plan = freezePlan(resultSchema, [
+    ...state.plan.stages,
+    mapStage(state.schema.def.element, targetSchema, true, mapping)
+  ]);
+  const source = createExecutionArtifact(
+    plan,
+    () => lowerExecutionPlan(plan)
+  );
+  return createCollectionArtifact({
+    source,
+    schema: resultSchema,
+    querySource: resultSchema,
+    builder: query(resultSchema),
+    plan
+  });
+}
+function artifactForSchema(artifact, schema) {
+  if (schema.type === TypeName.array) {
+    return createCollectionArtifact({
+      source: artifact,
+      schema,
+      querySource: schema,
+      builder: query(schema),
+      plan: artifact.plan
+    });
+  }
+  return createValueArtifact(artifact, schema);
+}
+function createValueArtifact(artifact, schema) {
+  const target = artifact;
+  const to = valueSinks(artifact, schema);
+  Object.defineProperties(target, {
+    schema: { enumerable: true, value: schema },
+    validate: { enumerable: false, value: () => appendValidation(artifact, schema) },
+    map: {
+      enumerable: false,
+      value: (targetSchema, mapping) => mappedValue(artifact, schema, targetSchema, mapping)
+    },
+    to: { enumerable: true, value: to }
+  });
+  return Object.freeze(target);
+}
+function createCollectionArtifact(state) {
+  const compiled = createExecutionArtifact(
+    state.plan,
+    () => lowerExecutionPlan(state.plan)
+  );
+  const artifact = compiled;
+  Object.defineProperties(artifact, {
+    schema: { enumerable: true, value: state.schema },
+    validate: { enumerable: false, value: () => appendValidation(artifact, state.schema) },
+    filter: {
+      enumerable: false,
+      value: (predicate) => {
+        const builder = state.builder.filter(predicate);
+        return createCollectionArtifact({
+          source: state.source,
+          schema: state.schema,
+          querySource: state.querySource,
+          builder,
+          plan: appendQueryStage(state.plan, state.querySource, state.schema, "filter", builder)
+        });
+      }
+    },
+    select: {
+      enumerable: false,
+      value: (...fields) => {
+        const selectedSchema = selectArraySchema(state.schema, fields);
+        const builder = state.builder.select(...fields);
+        return createCollectionArtifact({
+          source: state.source,
+          schema: selectedSchema,
+          querySource: state.querySource,
+          builder,
+          plan: appendQueryStage(state.plan, state.querySource, selectedSchema, "select", builder)
+        });
+      }
+    },
+    map: {
+      enumerable: false,
+      value: (target, mapping) => mappedCollection(
+        state,
+        target,
+        mapping
+      )
+    },
+    to: { enumerable: true, value: collectionSinks(compiled, state.schema) }
+  });
+  return Object.freeze(artifact);
+}
+function valueSinks(source, schema) {
+  return Object.freeze({
+    array: () => appendArraySink(source, schema),
+    json: () => appendJsonSink(source, schema),
+    binary: () => appendBinarySink(source, schema)
+  });
+}
+function collectionSinks(source, schema) {
+  return Object.freeze({
+    array: () => appendArraySink(source, schema),
+    json: () => appendJsonSink(source, schema),
+    binary: () => appendBinarySink(source, schema)
+  });
+}
+function appendArraySink(source, schema) {
+  const plan = freezePlan(schema, [
+    ...source.plan.stages,
+    {
+      kind: "to.array",
+      input: "value",
+      output: "value",
+      requires: [],
+      provides: ["materialized"],
+      effects: NO_EFFECTS
+    }
+  ]);
+  return createExecutionArtifact(plan, () => lowerExecutionPlan(plan));
+}
+function appendJsonSink(source, schema) {
+  const plan = freezePlan(schema, [
+    ...source.plan.stages,
+    {
+      kind: "json.encode",
+      input: "value",
+      output: "json-text",
+      schema,
+      requires: [],
+      provides: ["materialized"],
+      effects: { ...THROWING_EFFECTS, mayAllocate: true }
+    }
+  ]);
+  return createExecutionArtifact(plan, () => lowerExecutionPlan(plan));
+}
+function appendBinarySink(source, schema) {
+  const plan = freezePlan(schema, [
+    ...source.plan.stages,
+    {
+      kind: "binary.encode",
+      input: "value",
+      output: "binary",
+      schema,
+      requires: [],
+      provides: ["materialized"],
+      effects: { ...THROWING_EFFECTS, mayAllocate: true }
+    }
+  ]);
+  return createExecutionArtifact(plan, () => lowerExecutionPlan(plan));
+}
+function lowerExecutionPlan(plan) {
+  let run = (value) => value;
+  const stages = plan.stages;
+  for (let index = 0; index < stages.length; index++) {
+    const stage2 = stages[index];
+    switch (stage2.kind) {
+      case "value":
+      case "to.array":
+        break;
+      case "json.decode": {
+        const previous = run;
+        run = (value) => JSON.parse(previous(value));
+        break;
+      }
+      case "binary.decode": {
+        const previous = run;
+        const decode = compileCodec(stage2.schema).decode;
+        run = (value) => decode(previous(value));
+        break;
+      }
+      case "validate": {
+        const previous = run;
+        const validator2 = compileValidator(stage2.schema);
+        switch (stage2.operation) {
+          case "is":
+            run = (value) => validator2.is(previous(value));
+            break;
+          case "parse":
+            run = (value) => validator2.parse(previous(value));
+            break;
+          case "safeParse":
+            run = (value) => validator2.safeParse(previous(value));
+            break;
+          case "parseAsync":
+            run = (value) => validator2.parseAsync(previous(value));
+            break;
+          case "safeParseAsync":
+            run = (value) => validator2.safeParseAsync(previous(value));
+            break;
+          case "issues":
+            run = (value) => {
+              const result = validator2.safeParse(previous(value));
+              return (function* issueIterator() {
+                if (!result.success) yield* result.issues;
+              })();
+            };
+            break;
+        }
+        break;
+      }
+      case "query": {
+        let finalStage = stage2;
+        while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
+          index++;
+          finalStage = stages[index];
+        }
+        const previous = run;
+        const query2 = compileQuery(finalStage.source, finalStage.program);
+        run = (value) => query2(previous(value));
+        break;
+      }
+      case "map": {
+        const previous = run;
+        const mapper2 = createMapperFacade(stage2.source, stage2.target, stage2.bindings[0]);
+        run = stage2.many ? (value) => mapper2.many(previous(value)) : (value) => mapper2.map(previous(value));
+        break;
+      }
+      case "json.encode": {
+        const previous = run;
+        const stringify = compileSerialize(stage2.schema ?? plan.schema);
+        run = (value) => stringify(previous(value));
+        break;
+      }
+      case "binary.encode": {
+        const previous = run;
+        const encode = compileCodec(stage2.schema).encode;
+        run = (value) => encode(previous(value));
+        break;
+      }
+      case "operation":
+        throw new JITError("INVALID_OPERATION", `operation ${stage2.operation} requires its dedicated runtime lowering`);
+    }
+  }
+  return run;
+}
+function appendQueryStage(plan, source, schema, operation, builder) {
+  const program = getQueryProgram(builder);
+  if (!program) throw new JITError("INVALID_OPERATION", "query pipeline lost its declarative program");
+  return freezePlan(schema, [
+    ...plan.stages,
+    {
+      kind: "query",
+      input: "value",
+      output: "value",
+      source,
+      schema,
+      operation,
+      program,
+      requires: [],
+      provides: operation === "filter" ? ["filtered"] : ["projected"],
+      effects: { ...NO_EFFECTS, mayAllocate: operation === "select" }
+    }
+  ]);
+}
+function mapStage(source, target, many, mapping) {
+  return {
+    kind: "map",
+    input: "value",
+    output: "value",
+    schema: target,
+    source,
+    target,
+    many,
+    bindings: [mapping],
+    requires: [],
+    provides: ["mapped"],
+    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: Object.keys(mapping).length > 0 }
+  };
+}
+function arraySchema(element) {
+  return createSchema(TypeName.array, { element });
+}
+function selectArraySchema(schema, fields) {
+  const element = schema.def.element;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "select pipelines require an array of object schemas");
+  }
+  const object2 = element;
+  const props = {};
+  for (const field of fields) {
+    const value = object2.def.props[field];
+    if (value === void 0) throw new JITError("INVALID_OPERATION", `unknown selected field ${JSON.stringify(field)}`);
+    props[field] = value;
+  }
+  const selectedObject = createSchema(TypeName.object, {
+    ...object2.def,
+    props
+  });
+  return createSchema(TypeName.array, {
+    ...schema.def,
+    element: selectedObject
+  });
+}
+
 // ../../packages/jit/src/factories/special/special.ts
 function literal2(value) {
   return /* @__PURE__ */ createBuilder(
@@ -14463,7 +15343,7 @@ function instanceOf(ctor) {
     })
   );
 }
-function json() {
+function jsonValue() {
   return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, {}));
 }
 function custom(predicate, message) {
@@ -14516,171 +15396,88 @@ var temporal = {
 };
 
 // ../../packages/jit/src/factories/runtime-ops.ts
-function validate(schema) {
-  const unwrapped = unwrapSchema(schema);
-  return Object.freeze({
-    is: () => validatorStep(unwrapped, "is"),
-    parse: () => validatorStep(unwrapped, "parse"),
-    safeParse: () => validatorStep(unwrapped, "safeParse"),
-    parseAsync: () => validatorStep(unwrapped, "parseAsync"),
-    safeParseAsync: () => validatorStep(unwrapped, "safeParseAsync"),
-    issues: () => ({
-      compile() {
-        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
-        const issues = function* issues2(value) {
-          const result = safeParse(value);
-          if (!result.success) yield* result.issues;
-        };
-        return attachRuntimeMetadata(issues, {
-          operation: "validate.issues",
-          source: () => "function* issues(value) {\n  const result = __safeParse(value);\n  if (!result.success) yield* result.issues;\n}"
-        });
-      }
-    })
-  });
-}
+var validate = Object.freeze({
+  is(schema) {
+    return validationArtifact(schema, "is");
+  },
+  parse(schema) {
+    return validationArtifact(schema, "parse");
+  },
+  safeParse(schema) {
+    return validationArtifact(schema, "safeParse");
+  },
+  parseAsync(schema) {
+    return validationArtifact(schema, "parseAsync");
+  },
+  safeParseAsync(schema) {
+    return validationArtifact(schema, "safeParseAsync");
+  },
+  issues(schema) {
+    return validationArtifact(schema, "issues");
+  }
+});
+var is = validate.is;
+var parse = validate.parse;
+var safeParse = validate.safeParse;
+var json = Object.freeze({
+  value: jsonValue,
+  parse: jsonParse,
+  stringify: jsonStringify,
+  stringifyChunks(schema, options) {
+    const unwrapped = unwrapSchema(schema);
+    const base = jsonStringify(unwrapped);
+    return createExecutionArtifact(base.plan, () => compileStringifyChunks(unwrapped, options));
+  }
+});
+var binary2 = Object.freeze({
+  encode: binaryEncode,
+  decode: binaryDecode
+});
 function equal(schema) {
-  const unwrapped = unwrapSchema(schema);
-  return attachRuntimeMetadata(compileEqual(unwrapped), {
-    operation: "equal",
-    source: () => emitEqualSource(unwrapped)
-  });
+  return operationArtifact(schema, "equal", "value", "boolean", compileEqual);
 }
 function clone(schema) {
-  const unwrapped = unwrapSchema(schema);
-  return attachRuntimeMetadata(compileClone(unwrapped), {
-    operation: "clone",
-    source: () => emitCloneSource(unwrapped)
-  });
+  return operationArtifact(schema, "clone", "value", "value", compileClone);
 }
 function diff(schema) {
-  const unwrapped = unwrapSchema(schema);
-  return attachRuntimeMetadata(compileDiff(unwrapped), {
-    operation: "diff",
-    source: () => emitDiffSource(unwrapped)
-  });
+  return operationArtifact(schema, "diff", "value", "value", compileDiff);
 }
 function hash2(schema) {
-  const unwrapped = unwrapSchema(schema);
-  return attachRuntimeMetadata(compileHash(unwrapped), {
-    operation: "hash",
-    source: () => emitHashSource(unwrapped)
-  });
+  return operationArtifact(schema, "hash", "value", "value", compileHash);
 }
 function format(schema) {
-  const unwrapped = unwrapSchema(schema);
-  return attachRuntimeMetadata(compileFormat(unwrapped), {
-    operation: "format",
-    source: () => emitFormatSource(unwrapped)
-  });
+  return operationArtifact(schema, "format", "value", "value", compileFormat);
 }
-function json2(schema) {
-  if (schema === void 0) return json();
-  const unwrapped = unwrapSchema(schema);
-  return Object.freeze({
-    stringify() {
-      return {
-        compile() {
-          return attachRuntimeMetadata(compileSerialize(unwrapped), {
-            operation: "json.stringify",
-            source: () => emitSerializeSource(unwrapped)
-          });
-        }
-      };
-    },
-    stringifyChunks(options) {
-      return {
-        compile() {
-          return attachRuntimeMetadata(compileStringifyChunks(unwrapped, options), {
-            operation: "json.stringifyChunks",
-            source: () => emitStringifyChunksSource(unwrapped, options)
-          });
-        }
-      };
-    },
-    parse() {
-      return {
-        compile() {
-          const parse = compileValidatorSelection(unwrapped, ["parse"]).parse;
-          const parseJson = ((value) => parse(JSON.parse(value)));
-          registerArtifact(parseJson, {
-            kind: "operation",
-            schema: unwrapped,
-            op: "fromJSON"
-          });
-          return attachRuntimeMetadata(parseJson, {
-            operation: "json.parse",
-            source: () => "function parseJson(json) {\n  return __parse(JSON.parse(json));\n}"
-          });
-        }
-      };
-    }
-  });
+function mask(schema) {
+  return operationArtifact(schema, "mask", "value", "value", compileMask);
 }
-function validatorStep(schema, op) {
+function sanitize(schema) {
+  return operationArtifact(schema, "sanitize", "value", "value", compileSanitize);
+}
+var compare = Object.freeze({ equal, diff, hash: hash2 });
+var security = Object.freeze({ mask, sanitize });
+function mapCapability(source, target, ...rest) {
+  if (rest.length === 0) return map(source, target);
+  const sourceSchema = unwrapSchema(source);
+  return mappedValue(from(sourceSchema), sourceSchema, target, rest[0] ?? {});
+}
+function mapMany(source, target, mapping) {
+  const sourceSchema = unwrapSchema(source);
+  const sourceCollection = from(arrayOf(sourceSchema));
+  if (sourceCollection.schema.type !== "array") {
+    throw new Error("unreachable collection schema");
+  }
+  return sourceCollection.map(target, mapping);
+}
+function arrayOf(schema) {
   return {
-    compile() {
-      const compiled = compileValidatorSelection(schema, [op])[op];
-      return attachRuntimeMetadata(compiled, {
-        operation: `validate.${op}`,
-        source: () => emitValidatorSource(schema, { ops: [op] })
-      });
-    }
+    type: "array",
+    _type: null,
+    def: { element: schema },
+    annotations: void 0
   };
 }
-function attachRuntimeMetadata(fn, metadata) {
-  const target = fn;
-  const existing = Object.getOwnPropertyDescriptor(target, "compile");
-  if (existing) return target;
-  let source;
-  let hash4;
-  Object.defineProperties(target, {
-    compile: {
-      enumerable: false,
-      value: () => target
-    },
-    source: {
-      enumerable: false,
-      get() {
-        source = source ?? metadata.source();
-        return source;
-      }
-    },
-    hash: {
-      enumerable: false,
-      get() {
-        hash4 = hash4 ?? hashSource(target.source);
-        return hash4;
-      }
-    },
-    explain: {
-      enumerable: false,
-      value: () => ({
-        operation: metadata.operation,
-        hash: target.hash,
-        source: target.source,
-        cache: "identity"
-      })
-    }
-  });
-  return target;
-}
-function hashSource(source) {
-  let hash4 = 2166136261;
-  for (let index = 0; index < source.length; index++) {
-    hash4 ^= source.charCodeAt(index);
-    hash4 = Math.imul(hash4, 16777619);
-  }
-  return `fnv1a:${(hash4 >>> 0).toString(36)}`;
-}
-
-// ../../packages/jit/src/factories/security.ts
-function mask(schema, options) {
-  return compileMask(unwrapSchema(schema), options);
-}
-function sanitize(schema, options) {
-  return compileSanitize(unwrapSchema(schema), options);
-}
+var map2 = Object.assign(mapCapability, { many: mapMany });
 
 // ../../packages/jit/src/factories/serialize.ts
 function serializer(schema, options) {
@@ -14689,7 +15486,7 @@ function serializer(schema, options) {
   const validate3 = compileValidator(unwrapped, options);
   return {
     stringify,
-    parse: (json4) => validate3.parse(JSON.parse(json4))
+    parse: (json3) => validate3.parse(JSON.parse(json3))
   };
 }
 function codec(schema, outputOrOptions, valueCodecOptions) {
@@ -16082,92 +16879,241 @@ function coerceWith(schema, coercer) {
 var coerce2 = Object.assign(coerceWith, nativeCoercions);
 
 // ../../packages/jit/src/define.ts
-var JIT = {
-  ...factories_exports,
-  validate: validate2,
-  equal: equal2,
-  clone: clone2,
-  diff: diff2,
-  format: format2,
-  hash: hash3,
-  json: json3
-};
-function validate2(schema) {
-  const unwrapped = unwrapSchema(schema);
-  return Object.freeze({
-    is: () => validatorStep2(unwrapped, "is"),
-    parse: () => validatorStep2(unwrapped, "parse"),
-    safeParse: () => validatorStep2(unwrapped, "safeParse"),
-    parseAsync: () => validatorStep2(unwrapped, "parseAsync"),
-    safeParseAsync: () => validatorStep2(unwrapped, "safeParseAsync")
-  });
+var NO_EFFECTS2 = Object.freeze({ mayThrow: false, mayAllocate: false, usesExternalBindings: false });
+var THROWING_EFFECTS2 = Object.freeze({ mayThrow: true, mayAllocate: false, usesExternalBindings: false });
+var validate2 = Object.freeze({
+  is(schema) {
+    return validationStub(schema, "is");
+  },
+  parse(schema) {
+    return validationStub(schema, "parse");
+  },
+  safeParse(schema) {
+    return validationStub(schema, "safeParse");
+  },
+  parseAsync(schema) {
+    return validationStub(schema, "parseAsync");
+  },
+  safeParseAsync(schema) {
+    return validationStub(schema, "safeParseAsync");
+  },
+  issues(schema) {
+    return validationStub(schema, "issues");
+  }
+});
+var json2 = Object.freeze({
+  value: json.value,
+  parse(schema) {
+    return executionStub(schema, [
+      {
+        ...stage("json.decode", "json-text", "value"),
+        schema: unwrapSchema(schema),
+        provides: ["json-syntax-valid"]
+      }
+    ]);
+  },
+  stringify(schema) {
+    return executionStub(schema, [
+      stage("value", "value", "value"),
+      stage("json.encode", "value", "json-text")
+    ]);
+  }
+});
+var binary3 = Object.freeze({
+  encode(schema) {
+    return executionStub(schema, [
+      stage("value", "value", "value"),
+      stage("binary.encode", "value", "binary")
+    ]);
+  },
+  decode(schema) {
+    return executionStub(schema, [
+      {
+        ...stage("binary.decode", "binary", "value"),
+        schema: unwrapSchema(schema),
+        provides: ["binary-layout-valid"]
+      }
+    ]);
+  }
+});
+function from2(schema) {
+  return executionStub(schema, [
+    { ...stage("value", "value", "value"), schema: unwrapSchema(schema) }
+  ]);
+}
+function map3(source, target, mapping) {
+  const sourceSchema = unwrapSchema(source);
+  const targetSchema = unwrapSchema(target);
+  return executionStub(targetSchema, [
+    { ...stage("value", "value", "value"), schema: sourceSchema },
+    mapStage2(sourceSchema, targetSchema, false, mapping)
+  ]);
+}
+function mapMany2(source, target, mapping) {
+  const sourceSchema = unwrapSchema(source);
+  const targetSchema = unwrapSchema(target);
+  const collection = unwrapSchema(array(sourceSchema));
+  const result = unwrapSchema(array(targetSchema));
+  return executionStub(
+    result,
+    [
+      { ...stage("value", "value", "value"), schema: collection },
+      mapStage2(sourceSchema, targetSchema, true, mapping)
+    ]
+  );
 }
 function equal2(schema) {
-  return operationStub(schema, "equal");
+  return operationStub(schema, "equal", "boolean");
 }
 function clone2(schema) {
-  return operationStub(schema, "clone");
+  return operationStub(schema, "clone", "value");
 }
 function diff2(schema) {
-  return operationStub(schema, "diff");
+  return operationStub(schema, "diff", "value");
 }
 function hash3(schema) {
-  return operationStub(schema, "hash");
+  return operationStub(schema, "hash", "value");
 }
 function format2(schema) {
-  return operationStub(schema, "format");
+  return operationStub(schema, "format", "value");
 }
-function json3(schema) {
-  if (schema === void 0) return json2();
-  const unwrapped = unwrapSchema(schema);
-  return Object.freeze({
-    stringify: () => operationStep(unwrapped, "stringify"),
-    parse: () => operationStep(unwrapped, "fromJSON")
-  });
-}
-function validatorStep2(schema, op) {
-  return {
-    compile() {
-      return createAotStub(schema, { kind: "validate", op }, { kind: "validator", schema, op });
+function validationStub(schema, operation) {
+  return executionStub(schema, [
+    stage("value", "value", "value"),
+    {
+      ...stage("validate", "value", operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value"),
+      operation,
+      provides: operation === "is" ? [] : ["schema-validated"]
     }
-  };
+  ]);
 }
-function operationStep(schema, op) {
-  return {
-    compile() {
-      return operationStub(schema, op);
-    }
-  };
+function operationStub(schema, operation, output) {
+  return executionStub(schema, [
+    stage("value", "value", "value"),
+    { ...stage("operation", "value", output), operation }
+  ]);
 }
-function operationStub(schema, op) {
+function executionStub(schema, stages, queryBuilder) {
   const unwrapped = unwrapSchema(schema);
-  return createAotStub(unwrapped, { kind: "operation", op }, { kind: "operation", schema: unwrapped, op });
-}
-function createAotStub(schema, operation, artifact) {
-  const descriptor = {
-    artifactId: `${operation.kind}:${"op" in operation ? operation.op : "query"}`,
-    schemaId: schema.type,
-    operation
-  };
-  const stub = function aotArtifactStub() {
+  const plan = Object.freeze({ version: 1, schema: unwrapped, stages: Object.freeze(stages) });
+  const operation = { kind: "operation", op: "fromJSON" };
+  const stub = function aotExecutionArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
-      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated function instead."
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
     );
   };
   Object.defineProperties(stub, {
-    compile: {
-      enumerable: false,
-      value: () => stub
-    },
+    plan: { enumerable: true, value: plan },
+    compile: { enumerable: false, value: () => stub },
+    explain: { enumerable: false, value: () => plan },
     [AOT_ARTIFACT]: {
       enumerable: false,
-      value: descriptor
+      value: {
+        artifactId: `execution:${stages.map((item) => item.kind).join(">")}`,
+        schemaId: unwrapped.type,
+        operation
+      }
     }
   });
-  registerArtifact(stub, artifact);
-  return stub;
+  const artifact = stub;
+  const append2 = (nextSchema, nextStage, nextQuery) => executionStub(nextSchema, [...plan.stages, nextStage], nextQuery);
+  Object.defineProperties(artifact, {
+    schema: { enumerable: true, value: unwrapped },
+    validate: {
+      enumerable: false,
+      value: () => append2(unwrapped, {
+        ...stage("validate", "value", "value"),
+        schema: unwrapped,
+        operation: "parse",
+        provides: ["schema-validated"]
+      })
+    },
+    map: {
+      enumerable: false,
+      value: (target, mapping = {}) => {
+        const targetSchema = unwrapSchema(target);
+        const many = unwrapped.type === "array";
+        const source = many ? unwrapped.def.element : unwrapped;
+        const output = many ? unwrapSchema(array(targetSchema)) : targetSchema;
+        return append2(output, mapStage2(source, targetSchema, many, mapping));
+      }
+    },
+    to: {
+      enumerable: true,
+      value: Object.freeze({
+        array: () => append2(unwrapped, stage("to.array", "value", "value")),
+        json: () => append2(unwrapped, { ...stage("json.encode", "value", "json-text"), schema: unwrapped }),
+        binary: () => append2(unwrapped, { ...stage("binary.encode", "value", "binary"), schema: unwrapped })
+      })
+    }
+  });
+  if (unwrapped.type === "array") {
+    const source = queryBuilder ?? from(unwrapped);
+    Object.defineProperties(artifact, {
+      filter: {
+        enumerable: false,
+        value: (predicate) => {
+          const next = source.filter(predicate);
+          const query2 = next.plan.stages[next.plan.stages.length - 1];
+          return append2(next.schema, query2, next);
+        }
+      },
+      select: {
+        enumerable: false,
+        value: (...fields) => {
+          const next = source.select(...fields);
+          const query2 = next.plan.stages[next.plan.stages.length - 1];
+          return append2(next.schema, query2, next);
+        }
+      }
+    });
+  }
+  registerArtifact(stub, { kind: "execution", plan });
+  return Object.freeze(stub);
 }
+function mapStage2(source, target, many, mapping) {
+  return {
+    ...stage("map", "value", "value"),
+    schema: target,
+    source,
+    target,
+    many,
+    bindings: [mapping],
+    provides: ["mapped"],
+    effects: { ...NO_EFFECTS2, mayAllocate: true, usesExternalBindings: Object.keys(mapping).length > 0 }
+  };
+}
+function stage(kind, input, output) {
+  return {
+    kind,
+    input,
+    output,
+    requires: [],
+    provides: [],
+    effects: kind === "value" ? NO_EFFECTS2 : THROWING_EFFECTS2
+  };
+}
+var JIT = {
+  ...factories_exports,
+  validate: validate2,
+  is: validate2.is,
+  parse: validate2.parse,
+  safeParse: validate2.safeParse,
+  json: json2,
+  binary: binary3,
+  from: from2,
+  map: Object.assign(
+    ((source, target, mapping) => mapping === void 0 ? map2(source, target) : map3(source, target, mapping)),
+    { many: mapMany2 }
+  ),
+  equal: equal2,
+  clone: clone2,
+  diff: diff2,
+  hash: hash3,
+  format: format2,
+  compare: Object.freeze({ equal: equal2, diff: diff2, hash: hash3 })
+};
 
 // lib/lab/compiler/entry.ts
 function compileBindings(bindings, options) {

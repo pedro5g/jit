@@ -14,7 +14,7 @@ export interface OperationSnippet {
   result: string;
 }
 
-const isInput = `const isUser = JIT.validate(User).is().compile();
+const isInput = `const isUser = JIT.validate.is(User);
 
 isUser(value); // (value: unknown) => value is User
 isUser.source; // the generated function below`;
@@ -122,7 +122,7 @@ const cloneOutput = `function clone(value) {
   return out;
 }`;
 
-const stringifyInput = `const toJSON = JIT.json(User).stringify().compile();
+const stringifyInput = `const toJSON = JIT.json.stringify(User);
 
 toJSON(user); // static keys baked in, escape fast path`;
 
@@ -230,12 +230,12 @@ const queryOutput = `function query(value) {
   return out;
 }`;
 
-const mapperInput = `const toDTO = JIT.mapper(UserEntity, PublicUser, {
+const mapperInput = `const toDTO = JIT.map(UserEntity, PublicUser, {
   name: { from: "fullName" }, // rename
 });
 
-toDTO.map(entity);   // single object
-toDTO.many(entities); // fused indexed loop`;
+toDTO(entity); // single object
+JIT.map.many(UserEntity, PublicUser, { name: { from: "fullName" } })(entities); // fused indexed loop`;
 
 const mapperOutput = `{
   map: function map(source) {

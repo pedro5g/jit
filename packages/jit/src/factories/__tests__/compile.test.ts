@@ -129,7 +129,7 @@ describe("AOT generation from JIT.compile markers", () => {
     const marked = JIT.compile(User, {
       is: selected.is,
       parse: selected.parse,
-      fromJSON: JIT.json(User).parse().compile(),
+      fromJSON: JIT.json.parse(User).validate(),
     });
 
     AOT.generate({ schemas: { User: marked }, outDir });

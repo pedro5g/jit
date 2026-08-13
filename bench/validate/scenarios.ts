@@ -90,14 +90,14 @@ interface AotUserModule {
  */
 async function loadAotUser(): Promise<AotUserModule> {
   const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
-  const selected = JIT.validator(UserSchema).get("is", "safeParse");
+  const selected = { is: JIT.is(UserSchema), safeParse: JIT.safeParse(UserSchema) };
 
   AOT.generate({ schemas: {}, functions: { User_is: selected.is, User_safeParse: selected.safeParse }, outDir });
   return (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as AotUserModule;
 }
 
 export async function registerValidateScenarios(): Promise<void> {
-  const validate = JIT.validator(UserSchema);
+  const validate = { is: JIT.is(UserSchema), safeParse: JIT.safeParse(UserSchema) };
   const aot = await loadAotUser();
 
   registerScenario({

@@ -17,7 +17,7 @@ const User = JIT.object({
   role: JIT.oneOf("admin", "user"),
 });
 
-const validateUser = JIT.validate(User).safeParse().compile();
+const validateUser = JIT.safeParse(User);
 const result = validateUser(input);
 
 type User = JIT.Typeof<typeof User>;
@@ -46,7 +46,7 @@ const User = JIT.object({
   name: JIT.string().min(2),
 });
 
-export const isUser = JIT.validate(User).is().compile();
+export const isUser = JIT.is(User);
 ```
 
 ```ts
@@ -75,8 +75,8 @@ and executes no artifact-provided commands.
 ## New In 1.0.4
 
 The `1.0.4` release adds configurable source-compiled sanitization, reactive
-immutable update stores, explicitly selected model operations, and DTO
-boundary aggregates:
+immutable update stores, composable execution artifacts, and DTO boundary
+annotations:
 
 ```ts
 const Comment = JIT.object({
@@ -89,8 +89,11 @@ const Comment = JIT.object({
   }),
 });
 
-const ReadUser = JIT.model(User).get("is", "parse", "equal");
-const CreateUserDTO = JIT.dto(CreateUserSchema).get("parse", "fromJSON");
+const isUser = JIT.is(User);
+const parseUser = JIT.parse(User);
+const equalUser = JIT.equal(User);
+const CreateUserDTO = JIT.dto(CreateUserSchema);
+const parseCreateUser = JIT.json.parse(CreateUserDTO).validate();
 const userState = JIT.update(User).reactive(initialUser);
 
 userState.watch(["profile", "name"], ({ value }) => renderName(value));
@@ -98,7 +101,7 @@ userState.update({ profile: { name: "Ada" } });
 ```
 
 The browser playground now includes executable `sanitize`, `reactiveUpdate`,
-`dto`, `model`, and `indexes` scenarios. The indexes scenario contrasts
+`dto`, explicit artifact groups, and `indexes` scenarios. The indexes scenario contrasts
 `.entity()`, `.indexBy()`, schema `.keyed()`, and query `.keyed()` directly.
 
 ## Install

@@ -5,13 +5,13 @@ description: JSON value schemas, specialized stringify, validated parse and boun
 
 ## JSON value schema
 
-Without an argument, `JIT.json()` creates a schema accepting any
+`JIT.json.value()` creates a schema accepting any
 JSON-encodable value:
 
 ```ts
-const JsonValue = JIT.json();
+const JsonValue = JIT.json.value();
 
-JIT.validator(JsonValue).parse({
+JIT.parse(JsonValue)({
   ok: true,
   items: [1, "two", null],
 });
@@ -21,11 +21,13 @@ Functions, symbols, bigint, undefined, Map and Set are not JSON values.
 
 ## Compiled JSON operations
 
-With a schema argument, `JIT.json(schema)` creates an explicit compile builder:
+`JIT.json` is a capability namespace. Decoding and validation are deliberately
+separate stages that can be composed into one artifact:
 
 ```ts
-const stringifyUser = JIT.json(User).stringify().compile();
-const parseUserJson = JIT.json(User).parse().compile();
+const stringifyUser = JIT.json.stringify(User);
+const decodeUserJson = JIT.json.parse(User);
+const parseUserJson = decodeUserJson.validate();
 
 const text = stringifyUser(user);
 const decoded = parseUserJson(text);
@@ -39,9 +41,7 @@ defaults, coercions, refinements and transforms.
 ## Chunked arrays
 
 ```ts
-const stringifyUsers = JIT.json(JIT.array(User))
-  .stringifyChunks({ chunkSize: 64 * 1024 })
-  .compile();
+const stringifyUsers = JIT.json.stringifyChunks(JIT.array(User), { chunkBytes: 64 * 1024 });
 
 for (const chunk of stringifyUsers(users)) {
   response.write(chunk);
@@ -56,9 +56,9 @@ response should receive bounded writes.
 ## JSON versus codec
 
 JSON is inspectable, ecosystem-friendly and self-describing through field
-names. `JIT.codec(schema)` is a compact binary wire contract with a version
-byte. Binary rowsets are process-local analytical memory and must not be used
-as a persisted transport.
+names. `JIT.binary.encode(schema)` and `.decode(schema)` are compact persisted
+wire boundaries. Binary rowsets are process-local analytical memory and must
+not be used as a persisted transport.
 
 ## Errors
 

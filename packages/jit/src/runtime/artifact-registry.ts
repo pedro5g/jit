@@ -3,6 +3,8 @@
  * produced them. `jit generate` uses it for object-style `JIT.compile` extras
  * and for explicitly exported standalone functions.
  */
+
+import type { ExecutionPlan } from "../compiler/execution-plan.js";
 import type * as ATS from "../core/ats/index.js";
 
 interface SourceArtifact {
@@ -35,7 +37,17 @@ interface OperationArtifact {
     | "codec";
 }
 
-export type CompiledArtifact = SourceArtifact | ValidatorArtifact | OperationArtifact;
+/**
+ * Public capability artifacts register their immutable descriptor directly.
+ * Runtime and AOT therefore see the same API-free program, rather than a
+ * namespace-specific wrapper function.
+ */
+interface ExecutionArtifact {
+  readonly kind: "execution";
+  readonly plan: ExecutionPlan;
+}
+
+export type CompiledArtifact = SourceArtifact | ValidatorArtifact | OperationArtifact | ExecutionArtifact;
 
 const REGISTRY = new WeakMap<object, CompiledArtifact>();
 

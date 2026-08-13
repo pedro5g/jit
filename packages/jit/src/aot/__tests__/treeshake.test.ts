@@ -62,7 +62,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
       email: JIT.string().email(),
     });
     const selected = JIT.validator(User).get("is", "parse");
-    const stringify = JIT.json(User).stringify().compile();
+    const stringify = JIT.json.stringify(User);
 
     AOT.generate({
       schemas: {},
@@ -87,6 +87,27 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("User_stringify");
     expect(bundled).not.toContain("JITValidationError");
     expect(bundled).not.toContain("function stringify");
+  });
+
+  it("should keep only the stages used by a composed JSON collection pipeline", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string(), active: JIT.boolean() });
+    const activeUsers = JIT.json
+      .parse(JIT.array(User))
+      .validate()
+      .filter((query) => query.eq("active", true))
+      .select("id", "name")
+      .to.json();
+
+    AOT.generate({ schemas: {}, functions: { activeUsers }, outDir });
+    const bundled = await bundle(
+      `import { activeUsers } from "./index.js";\nconsole.log(activeUsers('[{"id":1,"name":"Ada","active":true}]'));\n`
+    );
+
+    expect(bundled).toContain("function query(value)");
+    expect(bundled).toContain("function stringify");
+    expect(bundled).not.toContain("encodeInto");
+    expect(bundled).not.toContain("function clone");
+    expect(bundled).not.toContain("function map(source)");
   });
 
   it("should drop entire schemas that are never imported", async () => {

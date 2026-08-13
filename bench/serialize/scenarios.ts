@@ -93,7 +93,7 @@ const fjsArticle = fastJson({
 });
 
 export function registerSerializeScenarios(): void {
-  const stringify = JIT.serializer(UserSchema).stringify;
+  const stringify = JIT.json.stringify(UserSchema);
 
   registerScenario({
     op: "serialize stringify",
@@ -106,7 +106,7 @@ export function registerSerializeScenarios(): void {
     ],
   });
 
-  const stringifyArticle = JIT.serializer(ArticleSchema).stringify;
+  const stringifyArticle = JIT.json.stringify(ArticleSchema);
 
   registerScenario({
     op: "serialize stringify",
@@ -119,7 +119,7 @@ export function registerSerializeScenarios(): void {
     ],
   });
 
-  const codec = JIT.codec(EventSchema);
+  const codec = { encode: JIT.binary.encode(EventSchema), decode: JIT.binary.decode(EventSchema) };
   const encodedEvent = codec.encode(event);
   const eventJson = JSON.stringify(event);
 

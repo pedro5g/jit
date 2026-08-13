@@ -164,7 +164,7 @@ describe("jit CLI", () => {
         "  id: JIT.number(),",
         "  name: JIT.string(),",
         "});",
-        "export const User_is = JIT.validate(User).is().compile();",
+        "export const User_is = JIT.validate.is(User);",
         "export const UserModel = JIT.compile(User, {",
         "  is: User_is,",
         "  diff: JIT.diff(User).compile(),",
@@ -197,7 +197,7 @@ describe("jit CLI", () => {
     expect(stdout.join("")).toContain("grouped objects: 1");
     expect(stdout.join("")).toContain("UserModel: is, diff");
     expect(stdout.join("")).toContain("standalone functions: 1");
-    expect(stdout.join("")).toContain("User_is: validator:is");
+    expect(stdout.join("")).toContain("User_is: execution");
 
     stdout.length = 0;
     stderr.length = 0;

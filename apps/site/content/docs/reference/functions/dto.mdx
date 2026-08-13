@@ -1,56 +1,49 @@
 ---
 title: dto
-description: Aggregate validation, JSON, binary transport and whitelist mapping for DTO boundaries.
+description: Mark a schema as an application boundary without adding a compiler facade.
 ---
 
 ## Input DTO
 
 ```ts
-const CreateUserDTO = JIT.dto(CreateUser).get("parse", "safeParse", "fromJSON");
+const CreateUserDTO = JIT.dto(CreateUser);
+const parseCreateUser = JIT.json.parse(CreateUserDTO).validate();
 
-const command = CreateUserDTO.parse(request.body);
+const command = parseCreateUser(request.body);
 ```
 
-With one schema, DTO methods cover target validation and transport:
-`is`, `parse`, `safeParse`, async variants, `fromJSON`, `stringify` and
-`codec`.
+DTO is ordinary schema metadata. Use it with every capability namespace:
+`JIT.is`, `JIT.parse`, `JIT.json`, `JIT.binary`, and `JIT.hash`.
 
 ## Output DTO
 
 ```ts
-const PublicUserDTO = JIT.dto(UserEntity, PublicUser, {
-  displayName: { from: "name" },
-}).get("from", "many", "stringify");
+const PublicUserDTO = JIT.dto(PublicUser);
+const encodePublicUser = JIT.from(UserEntity)
+  .map(PublicUserDTO, { displayName: { from: "name" } })
+  .to.json();
 
-const dto = PublicUserDTO.from(entity);
-const list = PublicUserDTO.many(entities);
-const json = PublicUserDTO.stringify(dto);
+const json = encodePublicUser(entity);
 ```
 
-With source and target schemas, `from` and `many` are added. Mapping is a
-target whitelist, preventing undeclared entity fields from leaking.
+Mapping is a target whitelist, preventing undeclared entity fields from
+leaking. `JIT.map.many` provides the specialized bulk form.
 
-## Selection
+## DTO metadata
 
-`.get()` compiles only requested methods and returns a narrow type. The facade
-also supports lazy direct access. Selection metadata separates transport
-`ops` from mapping `extras`.
-
-## DTO versus model
-
-A model aggregates operations around one domain shape. A DTO treats a target
-shape as a boundary and can map from a separate source. Use DTOs to make
-transport exposure explicit, not as aliases for every domain entity.
+The annotation identifies an application boundary without creating a second
+DTO compiler, execution IR, optimizer, or operation aggregator. The same
+ExecutionPlan is used whether the target schema is DTO-annotated or not.
 
 ## Performance
 
-Validation methods share one validator selection. `many` emits a fused indexed
-mapping loop. JSON and binary methods are specialized from the DTO target,
-which avoids serializing private source fields and then deleting them.
+`many` emits a fused indexed mapping loop. JSON and binary sinks are
+specialized from the DTO target, which avoids serializing private source fields
+and then deleting them.
 
 ## AOT
 
-Selected DTOs are grouped AOT markers. Generated modules preserve the object
-API and emit only selected transport/mapping methods.
+Export a composed artifact from a `*.jit.ts` file. AOT consumes its descriptor
+and emits only the transport/mapping stages it uses.
 
 See [DTO aggregates](/docs/runtime/dtos) for inbound/outbound design patterns.

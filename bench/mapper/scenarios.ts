@@ -66,7 +66,7 @@ export function registerMapperScenarios(): void {
   const users = createSourceUsers(10_000);
   const one = users[0];
 
-  const toDTO = JIT.mapper(SourceUserSchema, UserDTOSchema, {
+  const toDTO = JIT.map(SourceUserSchema, UserDTOSchema, {
     fullName: (user) => `${user.first} ${user.last}`,
     email: { from: "emailAddress" },
   });
@@ -91,7 +91,7 @@ export function registerMapperScenarios(): void {
     op: "mapper map",
     name: "single user",
     args: [one],
-    jit: toDTO.map,
+    jit: toDTO,
     competitors: [
       { name: "handwritten mapper", fn: handwritten, biased: GENERIC_BIAS },
       { name: "reflective field-config mapper", fn: reflective },
@@ -102,7 +102,10 @@ export function registerMapperScenarios(): void {
     op: "mapper many",
     name: "users 10000",
     args: [users],
-    jit: toDTO.many,
+    jit: JIT.map.many(SourceUserSchema, UserDTOSchema, {
+      fullName: (user) => `${user.first} ${user.last}`,
+      email: { from: "emailAddress" },
+    }),
     competitors: [
       {
         name: "native map + handwritten",

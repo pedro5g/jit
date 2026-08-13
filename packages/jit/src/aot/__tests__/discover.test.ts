@@ -251,8 +251,8 @@ describe("JIT AOT inference-anchored types", () => {
         'import { JIT } from "@jit-compiler/jit/define";',
         "",
         "export const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });",
-        "export const isUser = JIT.validate(UserSchema).is().compile();",
-        "export const parseUser = JIT.validate(UserSchema).parse().compile();",
+        "export const isUser = JIT.validate.is(UserSchema);",
+        "export const parseUser = JIT.validate.parse(UserSchema);",
         "export const User = JIT.compile(UserSchema, { is: isUser, parse: parseUser });",
         "",
       ].join("\n")

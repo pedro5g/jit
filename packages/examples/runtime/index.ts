@@ -5,7 +5,11 @@ import { socketRoundTrip } from "../shared/socket.js";
 import { EventSchema, PublicUserSchema, UserListSchema, UserSchema } from "./schemas.js";
 
 export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
-  const validator = JIT.validator(UserSchema).get("is", "parse", "safeParse");
+  const validator = {
+    is: JIT.is(UserSchema),
+    parse: JIT.parse(UserSchema),
+    safeParse: JIT.safeParse(UserSchema),
+  };
   const parsedUsers = users.map((user) => validator.parse(user));
   const invalid = validator.safeParse(invalidUser);
   const equal = JIT.equal(UserSchema).compile();
@@ -17,11 +21,14 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
     .compile();
   const mask = JIT.mask(UserSchema);
   const sanitize = JIT.sanitize(UserSchema);
-  const mapper = JIT.mapper(UserSchema, PublicUserSchema).get("map");
-  const stringify = JIT.json(UserSchema).stringify().compile();
-  const fromJSON = JIT.json(UserSchema).parse().compile();
-  const stringifyChunks = JIT.json(UserListSchema).stringifyChunks({ chunkBytes: 96 }).compile();
-  const codec = JIT.codec(UserSchema, { version: 1 });
+  const mapper = JIT.map(UserSchema, PublicUserSchema, {});
+  const stringify = JIT.json.stringify(UserSchema);
+  const fromJSON = JIT.json.parse(UserSchema).validate();
+  const stringifyChunks = JIT.json.stringifyChunks(UserListSchema, { chunkBytes: 96 });
+  const codec = {
+    encode: JIT.binary.encode(UserSchema),
+    decode: JIT.binary.decode(UserSchema),
+  };
   const cloned = clone(parsedUsers[0]);
   const changed = update(parsedUsers[0], { name: "Ada Byron" });
   const json = stringify(parsedUsers[0]);
@@ -65,7 +72,7 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   const socketResponse = await socketRoundTrip(encoded, (bytes) => codec.encode(codec.decode(bytes)));
   const socketUser = codec.decode(socketResponse);
   const sanitized = sanitize(parsedUsers[0]);
-  const publicUser = mapper.map(parsedUsers[0]);
+  const publicUser = mapper(parsedUsers[0]);
   const result: ShowcaseResult = {
     mode: "runtime",
     validUsers: parsedUsers.filter((user) => validator.is(user)).length,

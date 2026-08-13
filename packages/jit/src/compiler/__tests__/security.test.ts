@@ -77,8 +77,8 @@ describe("JIT compiler security (mask + sanitize)", () => {
   it("should reject pii on unsupported field types", () => {
     const Bad = JIT.object({ flags: JIT.array(JIT.string()).pii() });
 
-    expect(() => JIT.mask(Bad)).toThrow(Errors.JITError);
-    expect(() => JIT.mask(Bad)).toThrow(/string and number/);
+    expect(() => JIT.mask(Bad).compile()).toThrow(Errors.JITError);
+    expect(() => JIT.mask(Bad).compile()).toThrow(/string and number/);
   });
 
   it("should strip scripts, tags, and stray brackets with sanitize", () => {

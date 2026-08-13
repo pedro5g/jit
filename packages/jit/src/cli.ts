@@ -266,9 +266,7 @@ async function runExplain(
   for (const [name, value] of Object.entries(functions)) {
     const artifact = getArtifact(value);
 
-    stdout(
-      `  - ${name}: ${artifact ? artifact.kind : "unknown"}${artifact && "op" in artifact ? `:${artifact.op}` : ""}\n`
-    );
+    stdout(`  - ${name}: ${artifactLabel(artifact)}\n`);
   }
 
   if (Object.keys(schemas).length === 0 && Object.keys(functions).length === 0) {
@@ -301,9 +299,7 @@ async function runList(
   for (const name of functionNames) {
     const artifact = getArtifact(functions[name]);
 
-    stdout(
-      `${name}: ${artifact ? artifact.kind : "unknown"}${artifact && "op" in artifact ? `:${artifact.op}` : ""}\n`
-    );
+    stdout(`${name}: ${artifactLabel(artifact)}\n`);
   }
 
   if (schemaNames.length === 0 && functionNames.length === 0) {
@@ -473,6 +469,28 @@ function readFunctionOps(value: unknown): readonly string[] {
 
   if (!artifact) return [];
   if ("op" in artifact) return [artifact.op];
+  if (artifact.kind === "execution") {
+    return artifact.plan.stages.map((stage) =>
+      stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
+    );
+  }
+  return [artifact.kind];
+}
+
+function artifactLabel(artifact: ReturnType<typeof getArtifact>): string {
+  if (!artifact) return "unknown";
+  if ("op" in artifact) return `${artifact.kind}:${artifact.op}`;
+  if (artifact.kind === "execution") return `execution:${readFunctionOpsFromArtifact(artifact).join(">")}`;
+  return artifact.kind;
+}
+
+function readFunctionOpsFromArtifact(artifact: Exclude<ReturnType<typeof getArtifact>, undefined>): readonly string[] {
+  if ("op" in artifact) return [artifact.op];
+  if (artifact.kind === "execution") {
+    return artifact.plan.stages.map((stage) =>
+      stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
+    );
+  }
   return [artifact.kind];
 }
 
@@ -710,9 +728,9 @@ function writeExampleDeclaration(cwd: string): void {
       "  name: JIT.string().trim().min(1),",
       "});",
       "",
-      "export const isUser = JIT.validate(User).is().compile();",
-      "export const parseUser = JIT.validate(User).parse().compile();",
-      "export const stringifyUser = JIT.json(User).stringify().compile();",
+      "export const isUser = JIT.validate.is(User);",
+      "export const parseUser = JIT.validate.parse(User);",
+      "export const stringifyUser = JIT.json.stringify(User);",
       "",
     ].join("\n")
   );

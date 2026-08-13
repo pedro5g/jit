@@ -109,11 +109,13 @@ values). Unions validate deeply through hoisted sync predicates;
 discriminated unions dispatch on the literal tag. Output is returned by
 reference when nothing rebuilds (`needsBuild` gates every allocation).
 
-The public runtime facade `JIT.validate(schema).is().compile()` is a thin
-host-style layer over the same validator compiler and cache. It does not
-introduce a second validation implementation. `JIT.validator(schema)` remains
-the object facade, while builder `schema["~standard"]` closes over the
-compiled `safeParse` function for Standard Schema interop.
+The public runtime capabilities `JIT.validate.is(schema)`, `JIT.parse(schema)`,
+and `JIT.safeParse(schema)` lower to a shared ExecutionPlan and the same
+validator compiler/cache. A composed source such as
+`JIT.json.parse(schema).validate()` adds stages to that descriptor; it does
+not introduce a second validation implementation. The legacy object facade is
+kept only as a compatibility adapter, while builder `schema["~standard"]`
+closes over the compiled `safeParse` function for Standard Schema interop.
 
 Query output is a physical-plan choice. `.compile()` keeps the specialized
 eager-array backend; `.compileIterator()`, `.compileAsyncIterator()`, and

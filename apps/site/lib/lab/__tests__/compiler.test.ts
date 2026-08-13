@@ -8,7 +8,7 @@ describe("Lab browser AOT compiler", () => {
       name: JIT.string().min(2),
       role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
     });
-    const isUser = JIT.validate(User).is().compile();
+    const isUser = JIT.validate.is(User);
     const result = compileBindings({ User, isUser }, { format: "typescript", fileName: "user.generated" });
     const file = result.files[0];
 
@@ -22,7 +22,7 @@ describe("Lab browser AOT compiler", () => {
 
   it("honors JavaScript-only output without declaration files", () => {
     const Flag = JIT.object({ enabled: JIT.boolean() });
-    const isFlag = JIT.validate(Flag).is().compile();
+    const isFlag = JIT.validate.is(Flag);
     const result = compileBindings({ Flag, isFlag }, { format: "javascript-only", fileName: "flag" });
 
     expect(result.files.map((file) => file.path)).toEqual(["flag.js"]);
@@ -34,7 +34,7 @@ describe("Lab browser AOT compiler", () => {
     })
       .transform({ name: (value) => String(value).trim() })
       .refine((value) => value.name !== "blocked");
-    const parseProfile = JIT.validator(Profile).get("parse").parse;
+    const parseProfile = JIT.parse(Profile);
     const result = compileBindings({ Profile, parseProfile }, { format: "typescript", fileName: "profile" });
     const source = result.files[0]?.source;
 

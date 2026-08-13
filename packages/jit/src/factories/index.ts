@@ -31,17 +31,7 @@ export * from "./collection/index.js";
 export type { CompiledSelection, CompileOp } from "./compile.js";
 export { COMPILE_OPS, compile } from "./compile.js";
 export * from "./composition/index.js";
-export type {
-  CompiledDtoMethods,
-  DtoAvailableOp,
-  DtoFacade,
-  DtoGet,
-  DtoMappingOp,
-  DtoOp,
-  DtoSelection,
-  DtoTransportOp,
-} from "./dto.js";
-export { DTO_OPS, dto } from "./dto.js";
+export { dto } from "./dto.js";
 export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export { mapper } from "./mapper.js";
@@ -70,22 +60,26 @@ export type {
   QueryConditionBuilder,
 } from "./query.js";
 export { constant as const, param, query } from "./query.js";
-export type {
-  JsonCompileBuilder,
-  RuntimeCompiledFunction,
-  RuntimeFunctionExplain,
-  ValidateCompileBuilder,
-} from "./runtime-ops.js";
+export type { RuntimeCompiledFunction } from "./runtime-ops.js";
 export {
+  binary,
   clone,
+  compare,
   diff,
   equal,
   format,
+  from,
   hash,
+  is,
   json,
+  map,
+  mask,
+  parse,
+  safeParse,
+  sanitize,
+  security,
   validate,
 } from "./runtime-ops.js";
-export { mask, sanitize } from "./security.js";
 export type { CompiledSerializer } from "./serialize.js";
 export { codec, serializer } from "./serialize.js";
 export * from "./special/index.js";

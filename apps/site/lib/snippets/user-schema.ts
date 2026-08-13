@@ -15,11 +15,13 @@ const User = JIT.object({
 
 type User = JIT.Typeof<typeof User>;`;
 
-export const heroUsageSource = `const Users = JIT.validator(User);
+export const heroUsageSource = `const isUser = JIT.is(User);
+const parseUser = JIT.parse(User);
+const safeParseUser = JIT.safeParse(User);
 
-Users.is(input);        // pure boolean guard
-Users.parse(input);     // throws with every issue
-Users.safeParse(input); // { success, data | issues }`;
+isUser(input);        // pure boolean guard
+parseUser(input);     // throws with every issue
+safeParseUser(input); // { success, data | issues }`;
 
 export const heroGeneratedExcerpt = `// Users.is — generated source (excerpt)
 function is(value) {

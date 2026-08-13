@@ -83,12 +83,13 @@ function hex(bytes: Uint8Array, limit = 48): string {
 }
 
 /**
- * Compiled artifacts are named functions produced by `new Function`, so their
- * toString() IS the real generated source. Runtime wrappers (arrow closures)
- * are rejected so we never present glue code as generated output.
+ * Capability artifacts expose their API-free execution plan before lowering.
+ * Legacy compiled functions still report their generated source directly.
  */
 function sourceOf(fn: unknown): string | null {
   if (typeof fn !== "function") return null;
+  const withPlan = fn as { plan?: unknown };
+  if (withPlan.plan !== undefined) return JSON.stringify(withPlan.plan, null, 2);
   const withSource = fn as { source?: unknown };
   if (typeof withSource.source === "string") return withSource.source;
   const text = Function.prototype.toString.call(fn);
@@ -190,14 +191,14 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
 
     switch (op) {
       case "validate": {
-        const is = JIT.validate(requireSchema()).is().compile();
-        const validator = JIT.validator(requireSchema());
+        const is = JIT.validate.is(requireSchema());
+        const safeParse = JIT.validate.safeParse(requireSchema());
         source = sourceOf(is);
-        run = () => ({ is: is(requireA()), safeParse: validator.safeParse(requireA()) });
+        run = () => ({ is: is(requireA()), safeParse: safeParse(requireA()) });
         break;
       }
       case "parse": {
-        const parse = JIT.validate(requireSchema()).parse().compile();
+        const parse = JIT.validate.parse(requireSchema());
         source = sourceOf(parse);
         run = () => {
           try {
@@ -239,9 +240,9 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "update": {
-        const model = JIT.model(requireSchema());
+        const update = JIT.update(requireSchema()).compile();
         run = () => {
-          const out = model.update(requireA() as never, requireB("a patch object") as never);
+          const out = update(requireA() as never, requireB("a patch object") as never);
           return { updated: out, untouchedInput: out !== a };
         };
         break;
@@ -255,7 +256,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "stringify": {
-        const stringify = JIT.json(requireSchema()).stringify().compile();
+        const stringify = JIT.json.stringify(requireSchema());
         source = sourceOf(stringify);
         run = () => stringify(requireA() as never);
         break;
@@ -276,11 +277,12 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "codec": {
-        const codec = JIT.codec(requireSchema(), { version: 2 });
-        source = sourceOf(codec.encode);
+        const encode = JIT.binary.encode(requireSchema());
+        const decode = JIT.binary.decode(requireSchema());
+        source = sourceOf(encode);
         run = () => {
-          const bytes = codec.encode(requireA() as never);
-          return { byteLength: bytes.length, wire: hex(bytes), decoded: codec.decode(bytes) };
+          const bytes = encode(requireA() as never);
+          return { byteLength: bytes.length, wire: hex(bytes), decoded: decode(bytes) };
         };
         break;
       }
@@ -402,9 +404,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
       case "jsonChunks": {
         const stringifyChunks = bindings.stringifyChunks as ((value: unknown) => IterableIterator<string>) | undefined;
         if (typeof stringifyChunks !== "function") {
-          throw new Error(
-            "define a `stringifyChunks` binding with `JIT.json(schema).stringifyChunks({ chunkBytes }).compile()`"
-          );
+          throw new Error("define a `stringifyChunks` binding with `JIT.json.stringifyChunks(schema, { chunkBytes })`");
         }
         source = sourceOf(stringifyChunks);
         run = () => {
@@ -425,14 +425,12 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "mapper": {
-        const mapper = bindings.mapper as
-          | { map: (value: unknown) => unknown; many: (values: unknown[]) => unknown }
-          | undefined;
-        if (!mapper || typeof mapper.map !== "function") {
-          throw new Error("define a `mapper` binding, e.g. `const mapper = JIT.mapper(schema, Target, { … })`");
+        const mapper = bindings.mapper as ((value: unknown) => unknown) | undefined;
+        if (typeof mapper !== "function") {
+          throw new Error("define a map artifact, e.g. `const mapper = JIT.map(schema, Target, { … })`");
         }
-        source = sourceOf(mapper.map);
-        run = () => (Array.isArray(a) ? mapper.many(a) : mapper.map(requireA()));
+        source = sourceOf(mapper);
+        run = () => mapper(requireA());
         break;
       }
       case "model": {
@@ -445,7 +443,9 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
             }
           | undefined;
         if (!model || !Array.isArray(model.ops)) {
-          throw new Error("define a narrow `model` binding with `JIT.model(schema, { is: true, ... })`");
+          throw new Error(
+            'define a `model` object with explicit artifacts, e.g. `{ ops: ["is"], is: JIT.is(schema) }`'
+          );
         }
         run = () => ({
           operations: model.ops,
@@ -457,26 +457,24 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
       }
       case "dto": {
         const dto = bindings.dto as
-          | {
-              readonly operations?: readonly string[];
-              readonly is?: (value: unknown) => boolean;
-              readonly stringify?: (value: unknown) => string;
-              readonly from?: (value: unknown) => unknown;
-              readonly many?: (values: readonly unknown[]) => unknown[];
-            }
+          | (((value: unknown) => unknown) & {
+              readonly schema?: unknown;
+              readonly plan?: unknown;
+            })
           | undefined;
-        if (!dto || !Array.isArray(dto.operations)) {
-          throw new Error("define a `dto` binding with `JIT.dto(source, target, mapping).get(...)`");
+        if (!dto || typeof dto !== "function" || dto.schema === undefined) {
+          throw new Error("define a map artifact with `JIT.from(source).map(JIT.dto(target), mapping)`");
         }
         run = () => {
-          const input = requireA();
-          const output = Array.isArray(input) ? dto.many?.(input) : dto.from?.(input);
+          const output = dto(requireA());
+          const is = JIT.validate.is(dto.schema as never);
+          const stringify = JIT.json.stringify(dto.schema as never);
 
           return {
-            operations: dto.operations,
+            plan: dto.plan,
             dto: output,
-            valid: Array.isArray(output) ? output.every((value) => dto.is?.(value)) : dto.is?.(output),
-            json: Array.isArray(output) ? output.map((value) => dto.stringify?.(value)) : dto.stringify?.(output),
+            valid: is(output),
+            json: stringify(output as never),
           };
         };
         break;

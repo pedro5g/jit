@@ -97,7 +97,16 @@ export async function inspectAot(args: Readonly<Record<string, unknown>>, worksp
     return {
       name,
       kind: artifact?.kind ?? "unknown",
-      operations: artifact && "op" in artifact ? [artifact.op] : artifact ? [artifact.kind] : [],
+      operations:
+        artifact && "op" in artifact
+          ? [artifact.op]
+          : artifact?.kind === "execution"
+            ? artifact.plan.stages.map((stage) =>
+                stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
+              )
+            : artifact
+              ? [artifact.kind]
+              : [],
       source: relativePath(resolved.root, collected.sources.get(name)),
     };
   });

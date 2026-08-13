@@ -6,7 +6,7 @@ import { Section, SectionHeading } from "@/components/ui/section";
 const runtimeSnippet = `import { JIT } from "@jit-compiler/jit/runtime";
 
 // compiles on first use, cached per schema
-const isUser = JIT.validate(User).is().compile();
+const isUser = JIT.validate.is(User);
 
 isUser(input);
 isUser.source;    // inspect the generated code

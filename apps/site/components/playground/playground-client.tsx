@@ -126,7 +126,7 @@ const ops: OpConfig[] = [
   { id: "binary", label: "binary", aLabel: "flat rows (JSON array)", needsB: false, hasSource: true },
   { id: "jsonChunks", label: "chunks", aLabel: "values (JSON array)", needsB: false, hasSource: true },
   { id: "transform", label: "transform", needsB: false, hasSource: true },
-  { id: "mapper", label: "mapper", aLabel: "value or array (JSON)", needsB: false, hasSource: true },
+  { id: "mapper", label: "map", aLabel: "value (JSON)", needsB: false, hasSource: true },
   { id: "model", label: "model", needsB: false, hasSource: false },
   { id: "dto", label: "dto", aLabel: "entity or entities (JSON)", needsB: false, hasSource: false },
   {
@@ -382,9 +382,7 @@ const Item = JIT.object({
 const schema = JIT.array(Item);
 
 // Bounded output chunks can be written directly to a response or socket.
-const stringifyChunks = JIT.json(schema)
-  .stringifyChunks({ chunkBytes: 48 })
-  .compile();
+const stringifyChunks = JIT.json.stringifyChunks(schema, { chunkBytes: 48 });
 `,
     a: `[
   { "id": 1, "name": "Ada Lovelace" },
@@ -412,7 +410,7 @@ const PublicUser = JIT.object({
 });
 
 // whitelist by construction — passwordHash cannot leak
-const mapper = JIT.mapper(schema, PublicUser, {
+const mapper = JIT.map(schema, PublicUser, {
   name: { from: "fullName" },
   label: (user) => user.fullName + "#" + user.id,
 });
@@ -437,11 +435,12 @@ const schema = JIT.object({
 });
 
 // Only these methods exist, compile, and enter the runtime bundle.
-const model = JIT.model(schema, {
-  is: true,
-  parse: true,
-  clone: true,
-});
+const model = {
+  ops: ["is", "parse", "clone"],
+  is: JIT.is(schema),
+  parse: JIT.parse(schema),
+  clone: JIT.clone(schema),
+};
 `,
     a: `{ "id": 1, "name": "Ada", "email": "ada@lovelace.dev" }`,
     op: "model",
@@ -458,16 +457,16 @@ const schema = JIT.object({
   profile: JIT.object({ city: JIT.string(), internalScore: JIT.number() }),
 });
 
-const PublicUser = JIT.object({
+const PublicUser = JIT.dto(JIT.object({
   id: JIT.number().int32(),
   name: JIT.string(),
   city: JIT.string(),
-});
+}));
 
-const dto = JIT.dto(schema, PublicUser, {
+const dto = JIT.from(schema).map(PublicUser, {
   name: { from: "fullName" },
   city: (user) => user.profile.city,
-}).get("is", "stringify", "from", "many");
+});
 `,
     a: `{
   "id": 1,

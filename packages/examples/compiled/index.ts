@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { invalidUser, type ShowcaseResult, users } from "../shared/data.js";
 import { socketRoundTrip } from "../shared/socket.js";
-import { iterateActiveUsers, User, visitActiveUsers } from "./generated/index.js";
+import { iterateActiveUsers, toPublicUser, User, visitActiveUsers } from "./generated/index.js";
 
 export async function runCompiledShowcase(): Promise<ShowcaseResult> {
   const parsedUsers = users.map((user) => User.parse(user));
@@ -20,7 +20,7 @@ export async function runCompiledShowcase(): Promise<ShowcaseResult> {
   const socketResponse = await socketRoundTrip(encoded, (bytes) => User.codec.encode(User.codec.decode(bytes)));
   const socketUser = User.codec.decode(socketResponse);
   const sanitized = User.sanitize(parsedUsers[0]);
-  const publicUser = User.toPublicUser.map(parsedUsers[0]);
+  const publicUser = toPublicUser(parsedUsers[0]);
 
   return {
     mode: "aot",

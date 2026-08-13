@@ -6,6 +6,7 @@ export default AOT.defineConfig({
   output: {
     directory: "compiled/generated",
     clean: true,
+    format: "javascript",
   },
   emit: {
     subpathModules: true,

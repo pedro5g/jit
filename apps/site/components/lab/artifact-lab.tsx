@@ -38,7 +38,7 @@ const STARTER_SOURCE = `const User = JIT.object({
   ),
 });
 
-const isUser = JIT.validator(User).get("is").is;`;
+const isUser = JIT.is(User);`;
 const COMPILER_TIMEOUT_MS = 5_000;
 
 type PackageManager = "pnpm" | "npm" | "yarn" | "bun";

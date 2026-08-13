@@ -15,7 +15,7 @@ import {
   type QueryIteratorCompiled,
   type QueryVisitorCompiled,
 } from "../compiler/lazy-query.js";
-import { compileQuery } from "../compiler/query.js";
+import { compileQuery, type QueryProgram } from "../compiler/query.js";
 import type {
   QueryCompareNode,
   QueryCompareOperator,
@@ -28,6 +28,8 @@ import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+
+const QUERY_PROGRAMS = new WeakMap<object, QueryProgram>();
 
 type CollectionElementOf<TValue> = TValue extends readonly (infer TElement)[]
   ? TElement
@@ -307,6 +309,11 @@ export function query(schema: unknown): unknown {
   return createQueryBuilder(unwrapSchema(schema as SchemaInput<ATS.AnyTypeSchema>), [], [], []);
 }
 
+/** Internal bridge used by composable execution artifacts to retain query IR. */
+export function getQueryProgram(builder: object): QueryProgram | undefined {
+  return QUERY_PROGRAMS.get(builder);
+}
+
 function createBinaryQueryBuilder<
   TElement,
   TOutput,
@@ -385,7 +392,7 @@ function createQueryBuilder<
   bindings: readonly unknown[],
   paramNames: readonly string[]
 ): QueryBuilder<TSchema, TOutput, TResult, TParams> {
-  return {
+  const builder: QueryBuilder<TSchema, TOutput, TResult, TParams> = {
     params(shape) {
       return createQueryBuilder<TSchema, TOutput, TResult, TypeofParamShape<typeof shape>>(
         schema,
@@ -592,6 +599,13 @@ function createQueryBuilder<
       return explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
     },
   };
+
+  QUERY_PROGRAMS.set(builder, {
+    nodes: nodes as readonly QueryNode[],
+    bindings,
+    params: paramNames,
+  });
+  return builder;
 }
 
 function createLazyQueryBuilder<

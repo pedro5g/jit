@@ -400,24 +400,25 @@ describe("JIT compiler validator", () => {
     });
     const TransformDocument = JIT.string().format("###.###.###-##");
     const strict = JIT.validator(StrictDocument).get("is", "parse");
-    const transformIs = JIT.validate(TransformDocument).is().compile();
+    const transformIs = JIT.validate.is(TransformDocument);
 
     expect(strict.is("123.456.789-01")).toBe(true);
     expect(strict.is("12345678901")).toBe(false);
     expect(strict.parse("123.456.789-01")).toBe("123.456.789-01");
     expect(transformIs("12345678901")).toBe(true);
-    expect(transformIs.source).not.toContain('v1[0] + "."');
+    expect(Compiler.emitValidatorSource(TransformDocument.schema, { ops: ["is"] })).not.toContain('v1[0] + "."');
   });
 
   it("should hardcode object keyof values in generated validators", () => {
     const Key = JIT.object({ id: JIT.number(), name: JIT.string() }).keyof();
-    const isKey = JIT.validate(Key).is().compile();
+    const isKey = JIT.validate.is(Key);
 
     expect(isKey("id")).toBe(true);
     expect(isKey("missing")).toBe(false);
-    expect(isKey.source).toContain('!== "id"');
-    expect(isKey.source).toContain('!== "name"');
-    expect(isKey.source).not.toContain("Object.keys");
+    const source = Compiler.emitValidatorSource(Key.schema, { ops: ["is"] });
+    expect(source).toContain('!== "id"');
+    expect(source).toContain('!== "name"');
+    expect(source).not.toContain("Object.keys");
   });
 
   it("should expose a lazy optional Standard Schema facade", () => {
@@ -754,7 +755,7 @@ describe("JIT compiler validator", () => {
   });
 
   it("should validate JSON-encodable values recursively", () => {
-    const Json = JIT.json();
+    const Json = JIT.json.value();
     const validate = JIT.validator(Json);
 
     expect(validate.is({ user: "Ada", scores: [1, true, null] })).toBe(true);

@@ -15,9 +15,10 @@ export declare const User: {
   readonly sanitize: (value: User) => User;
   readonly codec: { readonly encode: (value: User) => Uint8Array; readonly encodeInto: (value: User, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => User };
   readonly findActiveAdmins: typeof import("../catalog.jit.js").User["findActiveAdmins"];
-  readonly toPublicUser: typeof import("../catalog.jit.js").User["toPublicUser"];
 };
 
 export declare const iterateActiveUsers: typeof import("../catalog.jit.js").iterateActiveUsers;
+
+export declare const toPublicUser: (value: { id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; createdAt: string; profile?: { bio: string | null } | undefined }) => { id: number; name: string; role: "admin" | "member" };
 
 export declare const visitActiveUsers: typeof import("../catalog.jit.js").visitActiveUsers;

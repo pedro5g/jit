@@ -84,8 +84,8 @@ export function instanceOf<TCtor extends abstract new (...args: any[]) => unknow
   );
 }
 
-/** Creates a schema that accepts JSON-encodable values. */
-export function json(): Builder<JsonSchema> {
+/** Creates a schema that accepts JSON-encodable values. Kept under `JIT.json.value()`. */
+export function jsonValue(): Builder<JsonSchema> {
   return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, {}));
 }
 

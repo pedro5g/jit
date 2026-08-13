@@ -4,9 +4,13 @@ import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
 import { emitDiffSource } from "../compiler/diff.js";
 import { emitEqualSource } from "../compiler/equal.js";
+import type { ExecutionPlan } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
+import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
+import { emitMapperSource } from "../compiler/mapper.js";
 import { emitMaskSource } from "../compiler/mask.js";
+import { emitQuerySource } from "../compiler/query.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitValidator } from "../compiler/validate/emit-validate.js";
@@ -456,6 +460,15 @@ export function generate(options: GenerateOptions): GenerateResult {
         continue;
       }
 
+      if (artifact.kind === "execution") {
+        skipped.push({
+          schema: name,
+          operation: extraName,
+          reason: "execution artifacts must be exported directly so their complete plan can be lowered",
+        });
+        continue;
+      }
+
       const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
 
       if (inlined === undefined) {
@@ -756,6 +769,11 @@ export function generate(options: GenerateOptions): GenerateResult {
       return;
     }
 
+    if (artifact.kind === "execution") {
+      emitExecutionArtifact(name, artifact.plan, sourceFile);
+      return;
+    }
+
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
 
     if (inlined === undefined) {
@@ -777,6 +795,429 @@ export function generate(options: GenerateOptions): GenerateResult {
       `export declare const ${name}: ${sourceFile ? `typeof import(${JSON.stringify(typeImportSpecifier(options.outDir, sourceFile))}).${name}` : "unknown"};`
     );
     dts.push("");
+  }
+
+  function emitExecutionArtifact(name: string, plan: ExecutionPlan, sourceFile: string | undefined): void {
+    void sourceFile;
+    const declaredType = executionPlanType(plan, typeNames.get(plan.schema));
+    const declaration = `const ${name}${layout.format === "typescript" ? `: ${declaredType}` : ""} =`;
+    const stages = plan.stages;
+    const validateStage = stages.find((stage) => stage.kind === "validate");
+    const hasJsonDecode = stages.some((stage) => stage.kind === "json.decode");
+    const hasBinaryDecode = stages.some((stage) => stage.kind === "binary.decode");
+    const hasJsonEncode = stages.some((stage) => stage.kind === "json.encode");
+    const hasBinaryEncode = stages.some((stage) => stage.kind === "binary.encode");
+    const operationStage = stages.find((stage) => stage.kind === "operation");
+    const mapStage = stages.find((stage) => stage.kind === "map");
+
+    if (stages.some((stage) => stage.kind === "query")) {
+      emitQueryExecutionArtifact(name, plan, declaredType, declaration);
+      return;
+    }
+
+    if (mapStage?.kind === "map") {
+      const mapping = mapStage.bindings[0];
+      if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
+        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        return;
+      }
+      const mapperPlan = tryEmit(name, "map", skipped, () =>
+        buildMapperPlan(mapStage.source, mapStage.target, mapping as MapperOverridesInput)
+      );
+      if (!mapperPlan) return;
+      const inlined = inlineBindings(mapperPlan.bindingNames, mapperPlan.bindings);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping callbacks cannot be serialized ahead of time",
+        });
+        return;
+      }
+      const mapperSource = tryEmit(name, "map", skipped, () =>
+        emitMapperSource(mapStage.source, mapStage.target, mapping as MapperOverridesInput, [
+          mapStage.many ? "many" : "map",
+        ])
+      );
+      if (!mapperSource) return;
+      const method = mapStage.many ? "many" : "map";
+
+      if (hasJsonEncode) {
+        const serializeSource = tryEmit(name, "json.encode", skipped, () => emitSerialize(plan.schema));
+        if (!serializeSource) return;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((mapper, stringify) => (value) => stringify(mapper.${method}(value)))((() => {`
+        );
+        js.push(...inlined.map((line) => `  ${line}`));
+        js.push(...indentBlock(`return (${mapperSource});`));
+        js.push(`})()), (${serializeSource}));`);
+      } else {
+        js.push(`${declaration} /*#__PURE__*/ ((mapper) => mapper.${method})((() => {`);
+        js.push(...inlined.map((line) => `  ${line}`));
+        js.push(...indentBlock(`return (${mapperSource});`));
+        js.push("})());");
+      }
+
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      return;
+    }
+
+    if (validateStage?.kind === "validate") {
+      if (
+        validateStage.operation === "issues" ||
+        validateStage.operation === "parseAsync" ||
+        validateStage.operation === "safeParseAsync"
+      ) {
+        skipped.push({
+          schema: name,
+          operation: validateStage.operation,
+          reason: "this validation sink is runtime-only in AOT output",
+        });
+        return;
+      }
+
+      const validator = tryEmit(name, validateStage.operation, skipped, () =>
+        emitValidator(plan.schema, {
+          is: validateStage.operation === "is",
+          safeParse: validateStage.operation !== "is",
+          safeParseAsync: false,
+        })
+      );
+      if (!validator) return;
+
+      const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: name,
+          operation: validateStage.operation,
+          reason: "refine/transform/default callbacks cannot be serialized ahead of time",
+        });
+        return;
+      }
+
+      const validatorName = internalIdentifier(`${name}_validator`);
+      js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(...indentBlock(validator.source));
+      js.push("})();");
+
+      if (validateStage.operation === "is") {
+        if (hasJsonDecode || hasBinaryDecode) {
+          skipped.push({ schema: name, operation: "is", reason: "is must receive a value source in AOT output" });
+          return;
+        }
+        js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
+      } else if (validateStage.operation === "safeParse") {
+        if (hasJsonDecode || hasBinaryDecode) {
+          skipped.push({
+            schema: name,
+            operation: "safeParse",
+            reason: "safeParse source composition is not an AOT sink",
+          });
+          return;
+        }
+        js.push(`${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`);
+      } else if (hasJsonDecode) {
+        needsValidationError = true;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+        );
+      } else if (hasBinaryDecode) {
+        const codec = tryEmit(name, "binary.decode", skipped, () => emitCodec(plan.schema));
+        if (!codec) return;
+        const codecBindings = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
+        if (codecBindings === undefined) {
+          skipped.push({ schema: name, operation: "binary.decode", reason: "codec bindings cannot be serialized" });
+          return;
+        }
+        needsValidationError = true;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((codec, v) => (bytes) => { const r = v.safeParse(codec.decode(bytes)); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
+        );
+        js.push(...codecBindings.map((line) => `  ${line}`));
+        js.push(...indentBlock(codec.source));
+        js.push(`})()), ${validatorName});`);
+      } else {
+        needsValidationError = true;
+        js.push(
+          `${declaration} /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+        );
+      }
+
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      return;
+    }
+
+    if (hasJsonDecode) {
+      js.push(`${declaration} JSON.parse;`);
+    } else if (hasJsonEncode) {
+      const source = tryEmit(name, "json.encode", skipped, () => emitSerialize(plan.schema));
+      if (!source) return;
+      js.push(`${declaration} (${source});`);
+    } else if (hasBinaryDecode || hasBinaryEncode) {
+      const codec = tryEmit(name, hasBinaryDecode ? "binary.decode" : "binary.encode", skipped, () =>
+        emitCodec(plan.schema)
+      );
+      if (!codec) return;
+      const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
+      if (inlined === undefined) {
+        skipped.push({ schema: name, operation: "binary", reason: "codec bindings cannot be serialized" });
+        return;
+      }
+      const method = hasBinaryDecode ? "decode" : "encode";
+      js.push(`${declaration} /*#__PURE__*/ ((codec) => codec.${method})((() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(...indentBlock(codec.source));
+      js.push("})());");
+    } else if (operationStage?.kind === "operation") {
+      const source = emitAotOperationSource(operationStage.operation, plan.schema, skipped, name);
+      if (source === undefined) return;
+      if (operationStage.operation === "sanitize") {
+        const regexConsts = sanitizeChainBindings.names.map(
+          (bindingName, position) => `const ${bindingName} = ${String(sanitizeChainBindings.values[position])};`
+        );
+        js.push(`${declaration} /*#__PURE__*/ (() => {`);
+        js.push(...regexConsts.map((line) => `  ${line}`));
+        js.push(...indentBlock(`return (${source});`));
+        js.push("})();");
+      } else {
+        js.push(`${declaration} (${source});`);
+      }
+    } else {
+      skipped.push({ schema: name, operation: "execution", reason: "no AOT backend matches this execution plan" });
+      return;
+    }
+
+    exportNames.push(name);
+    dts.push(`export declare const ${name}: ${declaredType};`, "");
+  }
+
+  /**
+   * Lowers a composable collection plan as one generated closure. Consecutive
+   * query descriptors share their final declarative program, so a
+   * filter/select sequence remains one fused query loop rather than a chain
+   * of intermediate arrays.
+   */
+  function emitQueryExecutionArtifact(
+    name: string,
+    plan: ExecutionPlan,
+    declaredType: string,
+    declaration: string
+  ): void {
+    const setup: string[] = [];
+    const body: string[] = ["let value = input;"];
+    const stages = plan.stages;
+
+    const emitValidatorBinding = (schema: ATS.AnyTypeSchema): string | undefined => {
+      const validator = tryEmit(name, "validate", skipped, () =>
+        emitValidator(schema, { is: false, safeParse: true, safeParseAsync: false })
+      );
+      if (!validator) return undefined;
+      const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: name,
+          operation: "validate",
+          reason: "refine/transform/default callbacks cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      const binding = internalIdentifier(`${name}_validator`);
+
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...inlined.map((line) => `  ${line}`));
+      setup.push(...indentBlock(validator.source));
+      setup.push("})();");
+      return binding;
+    };
+
+    const emitCodecBinding = (
+      schema: ATS.AnyTypeSchema,
+      operation: "binary.decode" | "binary.encode"
+    ): string | undefined => {
+      const codec = tryEmit(name, operation, skipped, () => emitCodec(schema));
+      if (!codec) return undefined;
+      const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
+      if (inlined === undefined) {
+        skipped.push({ schema: name, operation, reason: "codec bindings cannot be serialized" });
+        return undefined;
+      }
+      const binding = internalIdentifier(`${name}_codec`);
+
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...inlined.map((line) => `  ${line}`));
+      setup.push(...indentBlock(codec.source));
+      setup.push("})();");
+      return binding;
+    };
+
+    const emitQueryBinding = (
+      stage: Extract<(typeof stages)[number], { readonly kind: "query" }>
+    ): string | undefined => {
+      const source = tryEmit(name, "query", skipped, () => emitQuerySource(stage.source, stage.program));
+      if (!source) return undefined;
+      const bindings = inlineBindings(
+        stage.program.bindings.map((_, index) => `__q${index}`),
+        stage.program.bindings
+      );
+      if (bindings === undefined) {
+        skipped.push({ schema: name, operation: "query", reason: "query bindings cannot be serialized ahead of time" });
+        return undefined;
+      }
+      const binding = internalIdentifier(`${name}_query`);
+
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...bindings.map((line) => `  ${line}`));
+      setup.push(...indentBlock(`return (${source});`));
+      setup.push("})();");
+      return binding;
+    };
+
+    const emitMapperBinding = (
+      stage: Extract<(typeof stages)[number], { readonly kind: "map" }>
+    ): string | undefined => {
+      const mapping = stage.bindings[0];
+      if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
+        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        return undefined;
+      }
+      const mapperPlan = tryEmit(name, "map", skipped, () =>
+        buildMapperPlan(stage.source, stage.target, mapping as MapperOverridesInput)
+      );
+      if (!mapperPlan) return undefined;
+      const inlined = inlineBindings(mapperPlan.bindingNames, mapperPlan.bindings);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping callbacks cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      const source = tryEmit(name, "map", skipped, () =>
+        emitMapperSource(stage.source, stage.target, mapping as MapperOverridesInput, [stage.many ? "many" : "map"])
+      );
+      if (!source) return undefined;
+      const binding = internalIdentifier(`${name}_mapper`);
+
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...inlined.map((line) => `  ${line}`));
+      setup.push(...indentBlock(`return (${source});`));
+      setup.push("})();");
+      return binding;
+    };
+
+    for (let index = 0; index < stages.length; index++) {
+      const stage = stages[index];
+
+      switch (stage.kind) {
+        case "value":
+        case "to.array":
+          break;
+        case "json.decode":
+          body.push("value = JSON.parse(value);");
+          break;
+        case "binary.decode": {
+          const codec = emitCodecBinding(stage.schema, "binary.decode");
+          if (!codec) return;
+          body.push(`value = ${codec}.decode(value);`);
+          break;
+        }
+        case "validate": {
+          if (stage.operation !== "parse") {
+            skipped.push({
+              schema: name,
+              operation: stage.operation,
+              reason: "only parse validation can continue into a collection execution pipeline",
+            });
+            return;
+          }
+          const validator = emitValidatorBinding(stage.schema);
+          if (!validator) return;
+          needsValidationError = true;
+          body.push(`const result = ${validator}.safeParse(value);`);
+          body.push("if (!result.success) throw new JITValidationError(result.issues);");
+          body.push("value = result.data;");
+          break;
+        }
+        case "query": {
+          let finalStage = stage;
+
+          while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
+            index++;
+            finalStage = stages[index] as typeof finalStage;
+          }
+          const query = emitQueryBinding(finalStage);
+          if (!query) return;
+          body.push(`value = ${query}(value);`);
+          break;
+        }
+        case "map": {
+          const mapper = emitMapperBinding(stage);
+          if (!mapper) return;
+          body.push(`value = ${mapper}.${stage.many ? "many" : "map"}(value);`);
+          break;
+        }
+        case "json.encode": {
+          const stringify = tryEmit(name, "json.encode", skipped, () => emitSerialize(stage.schema ?? plan.schema));
+          if (!stringify) return;
+          const binding = internalIdentifier(`${name}_stringify`);
+          setup.push(`const ${binding} = (${stringify});`);
+          body.push(`value = ${binding}(value);`);
+          break;
+        }
+        case "binary.encode": {
+          const codec = emitCodecBinding(stage.schema, "binary.encode");
+          if (!codec) return;
+          body.push(`value = ${codec}.encode(value);`);
+          break;
+        }
+        case "operation":
+          skipped.push({
+            schema: name,
+            operation: stage.operation,
+            reason: "operation stages cannot follow a collection query",
+          });
+          return;
+      }
+    }
+
+    body.push("return value;");
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...setup.map((line) => `  ${line}`));
+    js.push("  return (input) => {");
+    js.push(...body.map((line) => `    ${line}`));
+    js.push("  };");
+    js.push("})();");
+    exportNames.push(name);
+    dts.push(`export declare const ${name}: ${declaredType};`, "");
+  }
+
+  function emitAotOperationSource(
+    operation: "equal" | "clone" | "diff" | "hash" | "format" | "mask" | "sanitize",
+    schema: ATS.AnyTypeSchema,
+    operationSkipped: SkippedOperation[],
+    name: string
+  ): string | undefined {
+    if (operation === "clone") return tryEmit(name, operation, operationSkipped, () => emitCloneSource(schema));
+    if (operation === "diff") return tryEmit(name, operation, operationSkipped, () => emitDiffSource(schema));
+    if (operation === "format") return tryEmit(name, operation, operationSkipped, () => emitFormatSource(schema));
+    if (operation === "mask") return tryEmit(name, operation, operationSkipped, () => emitMaskSource(schema));
+    if (operation === "sanitize") return tryEmit(name, operation, operationSkipped, () => emitSanitizeSource(schema));
+
+    const source = operation === "equal" ? emitEqualSource(schema) : emitHashSource(schema);
+    if (source.includes("__hash") || source.includes("__getIndex")) {
+      operationSkipped.push({
+        schema: name,
+        operation,
+        reason:
+          "this operation requires runtime cache helpers; export it through JIT.compile until its execution backend is available",
+      });
+      return undefined;
+    }
+    return source;
   }
 
   function internalIdentifier(preferred: string): string {
@@ -1181,6 +1622,15 @@ function describeExport(
   if (!artifact) return { name, kind: "unknown", operations: [] };
   if (artifact.kind === "validator") return { name, kind: "validator", operations: [artifact.op] };
   if (artifact.kind === "operation") return { name, kind: "operation", operations: [artifact.op] };
+  if (artifact.kind === "execution") {
+    return {
+      name,
+      kind: "execution",
+      operations: artifact.plan.stages.map((stage) =>
+        stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
+      ),
+    };
+  }
   return { name, kind: artifact.kind, operations: [artifact.kind] };
 }
 
@@ -1266,6 +1716,44 @@ function operationSignature(
     case "codec":
       return `{ readonly encode: (value: ${valueType}) => Uint8Array; readonly encodeInto: (value: ${valueType}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${valueType} }`;
   }
+}
+
+function executionPlanType(plan: ExecutionPlan, namedType?: string): string {
+  const valueType = namedType ?? emitTypeScriptType(plan.schema);
+  const last = plan.stages[plan.stages.length - 1];
+  const operation = plan.stages.find((stage) => stage.kind === "operation");
+  const map = plan.stages.find((stage) => stage.kind === "map");
+  const query = plan.stages.find((stage) => stage.kind === "query");
+  const hasJsonDecode = plan.stages.some((stage) => stage.kind === "json.decode");
+  const hasBinaryDecode = plan.stages.some((stage) => stage.kind === "binary.decode");
+
+  if (operation?.kind === "operation") return operationSignature(operation.operation, valueType);
+
+  if (last?.kind === "validate") {
+    if (last.operation === "parse" && hasJsonDecode) return `(json: string) => ${valueType}`;
+    if (last.operation === "parse" && hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
+    return validatorType(last.operation === "issues" ? "safeParse" : last.operation, valueType);
+  }
+
+  const inputType = hasJsonDecode
+    ? "string"
+    : hasBinaryDecode
+      ? "Uint8Array | ArrayBuffer"
+      : map?.kind === "map"
+        ? map.many
+          ? `readonly ${emitTypeScriptType(map.source)}[]`
+          : emitTypeScriptType(map.source)
+        : query?.kind === "query"
+          ? emitTypeScriptType(query.source)
+          : valueType;
+
+  if (last?.kind === "json.encode") return `(value: ${inputType}) => string`;
+  if (last?.kind === "binary.encode") return `(value: ${inputType}) => Uint8Array`;
+  if (hasJsonDecode) return `(json: string) => ${valueType}`;
+  if (hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
+  if (map?.kind === "map") return `(value: ${inputType}) => ${valueType}`;
+  if (query?.kind === "query") return `(value: ${inputType}) => ${valueType}`;
+  return "unknown";
 }
 
 /**

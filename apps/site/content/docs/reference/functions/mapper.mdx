@@ -11,12 +11,12 @@ const PublicUser = JIT.object({
   displayName: JIT.string(),
 });
 
-const toPublic = JIT.mapper(User, PublicUser, {
+const toPublic = JIT.map(User, PublicUser, {
   displayName: { from: "name" },
-}).get("map", "many");
+});
 
-toPublic.map(user);
-toPublic.many(users);
+toPublic(user);
+JIT.map.many(User, PublicUser, { displayName: { from: "name" } })(users);
 ```
 
 The target schema is a whitelist. Source fields not represented in the target
@@ -25,7 +25,7 @@ cannot leak into output.
 ## Override forms
 
 ```ts
-const mapper = JIT.mapper(Entity, DTO, {
+const mapper = JIT.map(Entity, DTO, {
   name: { from: "fullName" },
   createdAt: {
     from: "created_at",
@@ -42,14 +42,14 @@ compatible source require an override and TypeScript reports omissions.
 ## Select only what is used
 
 ```ts
-const one = JIT.mapper(Entity, DTO, overrides).get("map");
-const bulk = JIT.mapper(Entity, DTO, overrides).get("many");
+const one = JIT.map(Entity, DTO, overrides);
+const bulk = JIT.map.many(Entity, DTO, overrides);
 ```
 
 `map` emits one object projection. `many` emits one fused indexed loop rather
 than repeatedly calling `map`, reducing call overhead and intermediate
-closures. Direct property access is lazy; `.get()` makes the generated surface
-explicit.
+closures. Both results are callable artifacts with `.plan` and optional
+`.compile()` warm-up.
 
 ## Cache and callbacks
 
@@ -60,9 +60,9 @@ AOT output.
 
 ## Mapper versus transform versus DTO
 
-- mapper changes from a source schema to a different target schema;
+- `JIT.map` changes from a source schema to a different target schema;
 - transform selects or changes fields while starting from one object schema;
-- DTO aggregates mapping with validation, JSON and binary transport methods.
+- DTO marks a boundary schema; map it into JSON or binary pipelines explicitly.
 
 ## AOT
 
