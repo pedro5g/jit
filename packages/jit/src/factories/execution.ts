@@ -1,9 +1,10 @@
 import { compileCodec } from "../compiler/codec.js";
+import { lowerExecutionPlan } from "../compiler/execution-lower.js";
 import { type ExecutionPlan, type ExecutionStage, NO_EFFECTS, THROWING_EFFECTS } from "../compiler/execution-plan.js";
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
-import { createMapperFacade } from "../compiler/mapper.js";
-import { compileQuery } from "../compiler/query.js";
+import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { compileSerialize } from "../compiler/serialize.js";
+import type { UpdatePatch } from "../compiler/update.js";
 import { compileValidator } from "../compiler/validate.js";
 import type { QueryConditionNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
@@ -34,6 +35,13 @@ export type ValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema> = 
     target: SchemaInput<TTarget>,
     mapping?: MapperOverridesInput
   ): SchemaArtifact<TInput, TTarget>;
+  transform<TTarget extends ATS.AnyTypeSchema>(
+    target: SchemaInput<TTarget>,
+    transforms: ATS.TransformSpec<TOutput>
+  ): SchemaArtifact<TInput, TTarget>;
+  update(patch: UpdatePatch<TOutput>): SchemaArtifact<TInput, TSchema>;
+  mask(): SchemaArtifact<TInput, TSchema>;
+  sanitize(): SchemaArtifact<TInput, TSchema>;
   readonly to: ValueSinks<TInput, TOutput>;
 };
 
@@ -54,6 +62,13 @@ export type CollectionArtifact<
     target: SchemaInput<TTarget>,
     mapping?: MapperOverridesInput
   ): CollectionArtifact<TInput, ATS.TypeofSchema<TTarget>, ATS.ArraySchema<TTarget>>;
+  transform<TTarget extends ATS.AnyTypeSchema>(
+    target: SchemaInput<TTarget>,
+    transforms: ATS.TransformSpec<TElement>
+  ): CollectionArtifact<TInput, ATS.TypeofSchema<TTarget>, ATS.ArraySchema<TTarget>>;
+  update(patch: UpdatePatch<TElement>): CollectionArtifact<TInput, TElement, TSchema>;
+  mask(): CollectionArtifact<TInput, TElement, TSchema>;
+  sanitize(): CollectionArtifact<TInput, TElement, TSchema>;
   readonly to: CollectionSinks<TInput, TElement>;
 };
 
@@ -225,7 +240,7 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
     },
   ]);
 
-  return createExecutionArtifact(plan, () => {
+  const artifact = createExecutionArtifact(plan, () => {
     const validator = compileValidator(unwrapped);
 
     switch (operation) {
@@ -246,6 +261,15 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
         } as FunctionLike;
     }
   });
+
+  if (operation === "parse") {
+    return artifactForSchema(
+      artifact as unknown as ExecutionArtifact<unknown, ATS.TypeofSchema<TSchema>>,
+      unwrapped
+    ) as unknown as CallableArtifact<FunctionLike>;
+  }
+
+  return artifact;
 }
 
 /** Appends validation as a plan stage; construction never executes the preceding artifact. */
@@ -412,6 +436,107 @@ export function mappedCollection<TInput, TSource extends ATS.AnyTypeSchema, TTar
   });
 }
 
+function transformedValue<TInput, TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchema>(
+  source: ExecutionArtifact<TInput, ATS.TypeofSchema<TSource>>,
+  sourceSchema: TSource,
+  target: SchemaInput<TTarget>,
+  transforms: ATS.TransformSpec<ATS.TypeofSchema<TSource>>
+): SchemaArtifact<TInput, TTarget> {
+  const targetSchema = unwrapSchema(target);
+  const plan = freezePlan(targetSchema, [
+    ...source.plan.stages,
+    transformStage(sourceSchema, targetSchema, false, transforms),
+  ]);
+  const artifact = createExecutionArtifact<(value: TInput) => ATS.TypeofSchema<TTarget>>(
+    plan,
+    () => lowerExecutionPlan(plan) as (value: TInput) => ATS.TypeofSchema<TTarget>
+  );
+
+  return artifactForSchema(artifact, targetSchema) as SchemaArtifact<TInput, TTarget>;
+}
+
+function transformedCollection<TInput, TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchema>(
+  state: CollectionState<TInput, ATS.TypeofSchema<TSource>, ATS.ArraySchema<TSource>>,
+  target: SchemaInput<TTarget>,
+  transforms: ATS.TransformSpec<ATS.TypeofSchema<TSource>>
+): CollectionArtifact<TInput, ATS.TypeofSchema<TTarget>, ATS.ArraySchema<TTarget>> {
+  const targetSchema = unwrapSchema(target);
+  const resultSchema = arraySchema(targetSchema);
+  const plan = freezePlan(resultSchema, [
+    ...state.plan.stages,
+    transformStage(state.schema.def.element, targetSchema, true, transforms),
+  ]);
+  const source = createExecutionArtifact<(value: TInput) => ATS.TypeofSchema<TTarget>[]>(
+    plan,
+    () => lowerExecutionPlan(plan) as (value: TInput) => ATS.TypeofSchema<TTarget>[]
+  );
+
+  return createCollectionArtifact({
+    source,
+    schema: resultSchema,
+    querySource: resultSchema,
+    builder: query(resultSchema) as unknown as RuntimeQueryBuilder,
+    plan,
+  });
+}
+
+function updatedValue<TInput, TSchema extends ATS.AnyTypeSchema>(
+  source: ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>,
+  schema: TSchema,
+  patch: UpdatePatch<ATS.TypeofSchema<TSchema>>
+): SchemaArtifact<TInput, TSchema> {
+  const plan = freezePlan(schema, [...source.plan.stages, updateStage(schema, false, patch)]);
+  const artifact = createExecutionArtifact<(value: TInput) => ATS.TypeofSchema<TSchema>>(
+    plan,
+    () => lowerExecutionPlan(plan) as (value: TInput) => ATS.TypeofSchema<TSchema>
+  );
+
+  return artifactForSchema(artifact, schema) as SchemaArtifact<TInput, TSchema>;
+}
+
+function updatedCollection<TInput, TElement, TSchema extends ATS.ArraySchema<ATS.AnyTypeSchema>>(
+  state: CollectionState<TInput, TElement, TSchema>,
+  patch: UpdatePatch<TElement>
+): CollectionArtifact<TInput, TElement, TSchema> {
+  const plan = freezePlan(state.schema, [...state.plan.stages, updateStage(state.schema.def.element, true, patch)]);
+  const source = createExecutionArtifact<(value: TInput) => TElement[]>(
+    plan,
+    () => lowerExecutionPlan(plan) as (value: TInput) => TElement[]
+  );
+
+  return createCollectionArtifact({ ...state, source, plan });
+}
+
+function securedValue<TInput, TSchema extends ATS.AnyTypeSchema>(
+  source: ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>,
+  schema: TSchema,
+  operation: "mask" | "sanitize"
+): SchemaArtifact<TInput, TSchema> {
+  const plan = freezePlan(schema, [...source.plan.stages, securityStage(schema, operation, false)]);
+  const artifact = createExecutionArtifact<(value: TInput) => ATS.TypeofSchema<TSchema>>(
+    plan,
+    () => lowerExecutionPlan(plan) as (value: TInput) => ATS.TypeofSchema<TSchema>
+  );
+
+  return artifactForSchema(artifact, schema) as SchemaArtifact<TInput, TSchema>;
+}
+
+function securedCollection<TInput, TElement, TSchema extends ATS.ArraySchema<ATS.AnyTypeSchema>>(
+  state: CollectionState<TInput, TElement, TSchema>,
+  operation: "mask" | "sanitize"
+): CollectionArtifact<TInput, TElement, TSchema> {
+  const plan = freezePlan(state.schema, [
+    ...state.plan.stages,
+    securityStage(state.schema.def.element, operation, true),
+  ]);
+  const source = createExecutionArtifact<(value: TInput) => TElement[]>(
+    plan,
+    () => lowerExecutionPlan(plan) as (value: TInput) => TElement[]
+  );
+
+  return createCollectionArtifact({ ...state, source, plan });
+}
+
 function artifactForSchema<TInput, TSchema extends ATS.AnyTypeSchema>(
   artifact: ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>,
   schema: TSchema
@@ -443,6 +568,36 @@ function createValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema>
       enumerable: false,
       value: <TTarget extends ATS.AnyTypeSchema>(targetSchema: SchemaInput<TTarget>, mapping?: MapperOverridesInput) =>
         mappedValue(artifact as ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>, schema, targetSchema, mapping),
+    },
+    transform: {
+      enumerable: false,
+      value: <TTarget extends ATS.AnyTypeSchema>(
+        targetSchema: SchemaInput<TTarget>,
+        transforms: ATS.TransformSpec<TOutput>
+      ) =>
+        transformedValue(
+          artifact as ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>,
+          schema,
+          targetSchema,
+          transforms as ATS.TransformSpec<ATS.TypeofSchema<TSchema>>
+        ),
+    },
+    update: {
+      enumerable: false,
+      value: (patch: UpdatePatch<TOutput>) =>
+        updatedValue(
+          artifact as ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>,
+          schema,
+          patch as UpdatePatch<ATS.TypeofSchema<TSchema>>
+        ),
+    },
+    mask: {
+      enumerable: false,
+      value: () => securedValue(artifact as ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>, schema, "mask"),
+    },
+    sanitize: {
+      enumerable: false,
+      value: () => securedValue(artifact as ExecutionArtifact<TInput, ATS.TypeofSchema<TSchema>>, schema, "sanitize"),
     },
     to: { enumerable: true, value: to },
   });
@@ -503,6 +658,34 @@ function createCollectionArtifact<TInput, TElement, TSchema extends ATS.ArraySch
           target,
           mapping
         ),
+    },
+    transform: {
+      enumerable: false,
+      value: <TTarget extends ATS.AnyTypeSchema>(
+        target: SchemaInput<TTarget>,
+        transforms: ATS.TransformSpec<TElement>
+      ) =>
+        transformedCollection(
+          state as unknown as CollectionState<
+            TInput,
+            ATS.TypeofSchema<ATS.AnyTypeSchema>,
+            ATS.ArraySchema<ATS.AnyTypeSchema>
+          >,
+          target,
+          transforms as ATS.TransformSpec<ATS.TypeofSchema<ATS.AnyTypeSchema>>
+        ),
+    },
+    update: {
+      enumerable: false,
+      value: (patch: UpdatePatch<TElement>) => updatedCollection(state, patch),
+    },
+    mask: {
+      enumerable: false,
+      value: () => securedCollection(state, "mask"),
+    },
+    sanitize: {
+      enumerable: false,
+      value: () => securedCollection(state, "sanitize"),
     },
     to: { enumerable: true, value: collectionSinks(compiled, state.schema) },
   });
@@ -587,105 +770,6 @@ function appendBinarySink<TInput, TOutput>(
   return createExecutionArtifact(plan, () => lowerExecutionPlan(plan) as (value: TInput) => Uint8Array);
 }
 
-/**
- * Chooses one runtime lowering for the complete descriptor. This is
- * intentionally called only by the final artifact, so composing stages never
- * compiles executable functions for intermediate artifacts.
- */
-function lowerExecutionPlan(plan: ExecutionPlan): FunctionLike {
-  let run: (value: unknown) => unknown = (value) => value;
-  const stages = plan.stages;
-
-  for (let index = 0; index < stages.length; index++) {
-    const stage = stages[index];
-
-    switch (stage.kind) {
-      case "value":
-      case "to.array":
-        break;
-      case "json.decode": {
-        const previous = run;
-        run = (value) => JSON.parse(previous(value) as string);
-        break;
-      }
-      case "binary.decode": {
-        const previous = run;
-        const decode = compileCodec(stage.schema).decode;
-        run = (value) => decode(previous(value) as Uint8Array | ArrayBuffer);
-        break;
-      }
-      case "validate": {
-        const previous = run;
-        const validator = compileValidator(stage.schema);
-
-        switch (stage.operation) {
-          case "is":
-            run = (value) => validator.is(previous(value));
-            break;
-          case "parse":
-            run = (value) => validator.parse(previous(value));
-            break;
-          case "safeParse":
-            run = (value) => validator.safeParse(previous(value));
-            break;
-          case "parseAsync":
-            run = (value) => validator.parseAsync(previous(value));
-            break;
-          case "safeParseAsync":
-            run = (value) => validator.safeParseAsync(previous(value));
-            break;
-          case "issues":
-            run = (value) => {
-              const result = validator.safeParse(previous(value));
-
-              return (function* issueIterator() {
-                if (!result.success) yield* result.issues;
-              })();
-            };
-            break;
-        }
-        break;
-      }
-      case "query": {
-        let finalStage = stage;
-
-        while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
-          index++;
-          finalStage = stages[index] as typeof finalStage;
-        }
-        const previous = run;
-        const query = compileQuery(finalStage.source, finalStage.program);
-        run = (value) => query(previous(value) as never);
-        break;
-      }
-      case "map": {
-        const previous = run;
-        const mapper = createMapperFacade(stage.source, stage.target, stage.bindings[0] as MapperOverridesInput);
-        run = stage.many
-          ? (value) => mapper.many(previous(value) as readonly never[])
-          : (value) => mapper.map(previous(value) as never);
-        break;
-      }
-      case "json.encode": {
-        const previous = run;
-        const stringify = compileSerialize(stage.schema ?? plan.schema);
-        run = (value) => stringify(previous(value) as never);
-        break;
-      }
-      case "binary.encode": {
-        const previous = run;
-        const encode = compileCodec(stage.schema).encode;
-        run = (value) => encode(previous(value) as never);
-        break;
-      }
-      case "operation":
-        throw new JITError("INVALID_OPERATION", `operation ${stage.operation} requires its dedicated runtime lowering`);
-    }
-  }
-
-  return run as FunctionLike;
-}
-
 function appendQueryStage(
   plan: ExecutionPlan,
   source: ATS.AnyTypeSchema,
@@ -732,6 +816,97 @@ function mapStage(
     requires: [],
     provides: ["mapped"],
     effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: Object.keys(mapping).length > 0 },
+  };
+}
+
+function transformStage(
+  source: ATS.AnyTypeSchema,
+  target: ATS.AnyTypeSchema,
+  many: boolean,
+  transforms: ATS.TransformSpec<unknown>
+): ExecutionStage {
+  assertTransformTarget(source, target, transforms);
+
+  return {
+    kind: "transform",
+    input: "value",
+    output: "value",
+    schema: target,
+    source,
+    target,
+    many,
+    transforms: transforms as Readonly<Record<string, unknown>>,
+    requires: [],
+    provides: ["transformed"],
+    effects: {
+      ...NO_EFFECTS,
+      mayAllocate: true,
+      usesExternalBindings: Object.keys(transforms).length > 0,
+    },
+  };
+}
+
+function assertTransformTarget(
+  source: ATS.AnyTypeSchema,
+  target: ATS.AnyTypeSchema,
+  transforms: ATS.TransformSpec<unknown>
+): void {
+  if (transforms === null || typeof transforms !== "object" || Array.isArray(transforms)) {
+    throw new JITError("INVALID_OPERATION", "execution transforms must be a field-to-callback object");
+  }
+
+  const sourceObject = resolveWrappers(source).base;
+  const targetObject = resolveWrappers(target).base;
+
+  if (sourceObject.type !== TypeName.object || targetObject.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "execution transforms require object source and target schemas");
+  }
+
+  const sourceKeys = Object.keys((sourceObject as ATS.ObjectSchema).def.props);
+  const targetKeys = Object.keys((targetObject as ATS.ObjectSchema).def.props);
+
+  if (sourceKeys.length !== targetKeys.length || sourceKeys.some((key) => !targetKeys.includes(key))) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      "execution transform targets must preserve the source object's field set; use .map() for projections or renames"
+    );
+  }
+
+  for (const key of Object.keys(transforms)) {
+    if (!sourceKeys.includes(key)) {
+      throw new JITError("INVALID_OPERATION", `execution transform selected unknown field ${JSON.stringify(key)}`);
+    }
+    if (typeof transforms[key as keyof typeof transforms] !== "function") {
+      throw new JITError("INVALID_OPERATION", `execution transform for ${JSON.stringify(key)} must be a function`);
+    }
+  }
+}
+
+function updateStage(schema: ATS.AnyTypeSchema, many: boolean, patch: unknown): ExecutionStage {
+  return {
+    kind: "update",
+    input: "value",
+    output: "value",
+    schema,
+    many,
+    patch,
+    requires: [],
+    provides: ["updated"],
+    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: true },
+  };
+}
+
+function securityStage(schema: ATS.AnyTypeSchema, operation: "mask" | "sanitize", many: boolean): ExecutionStage {
+  return {
+    kind: "security",
+    input: "value",
+    output: "value",
+    schema,
+    operation,
+    many,
+    requires: [],
+    provides: [operation === "mask" ? "masked" : "sanitized"],
+    effects: { ...NO_EFFECTS, mayAllocate: true },
   };
 }
 

@@ -68,6 +68,27 @@ parseUser.explain(); // same descriptor
 parseUser.compile(); // optional eager warm-up
 ```
 
+## Compose a boundary pipeline
+
+```ts
+const PublicUsers = JIT.json
+  .parse(JIT.array(User))
+  .validate()
+  .update({ role: "user" })
+  .filter((q) => q.eq("role", "user"))
+  .select("id", "name")
+  .to.json();
+
+PublicUsers(requestBody);
+```
+
+The final callable lowers the whole descriptor once. Native `JSON.parse` and
+the schema-specific validator run in the same generated execution function;
+adjacent query stages share one indexed loop. Add `.transform(target, fields)`,
+`.sanitize()`, `.mask()`, or `.map(target, overrides)` as needed. See
+[composable execution](/docs/runtime/composable-execution) for exact fusion
+and allocation boundaries.
+
 ## Go ahead-of-time
 
 ```bash

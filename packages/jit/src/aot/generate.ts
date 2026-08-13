@@ -4,15 +4,17 @@ import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
 import { emitDiffSource } from "../compiler/diff.js";
 import { emitEqualSource } from "../compiler/equal.js";
-import type { ExecutionPlan } from "../compiler/execution-plan.js";
+import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
 import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { emitMapperSource } from "../compiler/mapper.js";
 import { emitMaskSource } from "../compiler/mask.js";
+import { emitTransformSource } from "../compiler/object-ops.js";
 import { emitQuerySource } from "../compiler/query.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
+import { emitUpdateSource } from "../compiler/update.js";
 import { emitValidator } from "../compiler/validate/emit-validate.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
@@ -810,8 +812,8 @@ export function generate(options: GenerateOptions): GenerateResult {
     const operationStage = stages.find((stage) => stage.kind === "operation");
     const mapStage = stages.find((stage) => stage.kind === "map");
 
-    if (stages.some((stage) => stage.kind === "query")) {
-      emitQueryExecutionArtifact(name, plan, declaredType, declaration);
+    if (stages.some((stage) => isComposedExecutionStage(stage))) {
+      emitComposedExecutionArtifact(name, plan, declaredType, declaration);
       return;
     }
 
@@ -995,12 +997,13 @@ export function generate(options: GenerateOptions): GenerateResult {
   }
 
   /**
-   * Lowers a composable collection plan as one generated closure. Consecutive
+   * Lowers a composable execution plan as one generated closure. Consecutive
    * query descriptors share their final declarative program, so a
    * filter/select sequence remains one fused query loop rather than a chain
-   * of intermediate arrays.
+   * of intermediate arrays. Transform, update and security stages then stay
+   * in this same compiled closure in their declared order.
    */
-  function emitQueryExecutionArtifact(
+  function emitComposedExecutionArtifact(
     name: string,
     plan: ExecutionPlan,
     declaredType: string,
@@ -1076,7 +1079,8 @@ export function generate(options: GenerateOptions): GenerateResult {
     };
 
     const emitMapperBinding = (
-      stage: Extract<(typeof stages)[number], { readonly kind: "map" }>
+      stage: Extract<(typeof stages)[number], { readonly kind: "map" }>,
+      operation: "map" | "many" = stage.many ? "many" : "map"
     ): string | undefined => {
       const mapping = stage.bindings[0];
       if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
@@ -1097,7 +1101,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         return undefined;
       }
       const source = tryEmit(name, "map", skipped, () =>
-        emitMapperSource(stage.source, stage.target, mapping as MapperOverridesInput, [stage.many ? "many" : "map"])
+        emitMapperSource(stage.source, stage.target, mapping as MapperOverridesInput, [operation])
       );
       if (!source) return undefined;
       const binding = internalIdentifier(`${name}_mapper`);
@@ -1107,6 +1111,117 @@ export function generate(options: GenerateOptions): GenerateResult {
       setup.push(...indentBlock(`return (${source});`));
       setup.push("})();");
       return binding;
+    };
+
+    const emitTransformBinding = (
+      stage: Extract<(typeof stages)[number], { readonly kind: "transform" }>
+    ): string | undefined => {
+      const keys = Object.keys(stage.transforms);
+      const callbacks = keys.map((key) => stage.transforms[key]);
+      const bindings = inlineBindings(
+        keys.map((_, index) => `__t${index}`),
+        callbacks
+      );
+      if (bindings === undefined) {
+        skipped.push({
+          schema: name,
+          operation: "transform",
+          reason: "transform callbacks cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      const source = tryEmit(name, "transform", skipped, () =>
+        emitTransformSource(stage.source, stage.transforms as never)
+      );
+      if (!source) return undefined;
+      const binding = internalIdentifier(`${name}_transform`);
+
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...bindings.map((line) => `  ${line}`));
+      setup.push(...indentBlock(`return (${source});`));
+      setup.push("})();");
+      return binding;
+    };
+
+    const emitUpdateBinding = (
+      stage: Extract<(typeof stages)[number], { readonly kind: "update" }>
+    ): { readonly update: string; readonly patch: string } | undefined => {
+      const patch = serializeStaticData(stage.patch);
+      if (patch === undefined) {
+        skipped.push({
+          schema: name,
+          operation: "update",
+          reason: "update patches must be serializable static data for AOT output",
+        });
+        return undefined;
+      }
+      const source = tryEmit(name, "update", skipped, () => emitUpdateSource(stage.schema));
+      if (!source) return undefined;
+      const update = internalIdentifier(`${name}_update`);
+      const patchName = internalIdentifier(`${name}_patch`);
+
+      setup.push(`const ${update} = (${source});`);
+      setup.push(`const ${patchName} = ${patch};`);
+      return { update, patch: patchName };
+    };
+
+    const emitSecurityBinding = (
+      stage: Extract<(typeof stages)[number], { readonly kind: "security" }>
+    ): string | undefined => {
+      const source = tryEmit(name, stage.operation, skipped, () =>
+        stage.operation === "mask" ? emitMaskSource(stage.schema) : emitSanitizeSource(stage.schema)
+      );
+      if (!source) return undefined;
+      const binding = internalIdentifier(`${name}_${stage.operation}`);
+
+      if (stage.operation === "sanitize") {
+        setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+        setup.push(
+          ...sanitizeChainBindings.names.map(
+            (bindingName, position) => `  const ${bindingName} = ${String(sanitizeChainBindings.values[position])};`
+          )
+        );
+        setup.push(...indentBlock(`return (${source.replace("function scrub", "function sanitize")});`));
+        setup.push("})();");
+      } else {
+        setup.push(`const ${binding} = (${source.replace("function scrub", "function mask")});`);
+      }
+      return binding;
+    };
+
+    let manyIndex = 0;
+    const emitManyApplication = (binding: string, patch?: string): void => {
+      const list = `list${manyIndex}`;
+      const length = `len${manyIndex}`;
+      const out = `out${manyIndex}`;
+      const index = `i${manyIndex++}`;
+
+      body.push(`const ${list} = value;`);
+      body.push(`const ${length} = ${list}.length;`);
+      body.push(`const ${out} = new Array(${length});`);
+      body.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+      body.push(`  ${out}[${index}] = ${binding}(${list}[${index}]${patch ? `, ${patch}` : ""});`);
+      body.push("}");
+      body.push(`value = ${out};`);
+    };
+
+    const emitMappedJsonArray = (mapper: string, stringify: string): void => {
+      const list = `mappedList${manyIndex}`;
+      const length = `mappedLen${manyIndex}`;
+      const item = `mappedItem${manyIndex}`;
+      const index = `mappedIndex${manyIndex++}`;
+      const json = `mappedJson${manyIndex}`;
+
+      body.push(`const ${list} = value;`);
+      body.push(`const ${length} = ${list}.length;`);
+      body.push(`let ${json} = "[";`);
+      body.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+      body.push(`  if (${index} !== 0) ${json} += ",";`);
+      body.push(`  const ${item} = ${mapper}.map(${list}[${index}]);`);
+      body.push(`  ${json} += ${stringify}(${item});`);
+      body.push("}");
+      body.push(`${json} += "]";`);
+      body.push(`value = ${json};`);
     };
 
     for (let index = 0; index < stages.length; index++) {
@@ -1155,9 +1270,43 @@ export function generate(options: GenerateOptions): GenerateResult {
           break;
         }
         case "map": {
-          const mapper = emitMapperBinding(stage);
+          const nextStage = stages[index + 1];
+          const fuseJsonEncode = nextStage?.kind === "json.encode";
+          const mapper = emitMapperBinding(stage, fuseJsonEncode || !stage.many ? "map" : "many");
           if (!mapper) return;
-          body.push(`value = ${mapper}.${stage.many ? "many" : "map"}(value);`);
+          if (fuseJsonEncode) {
+            const stringify = tryEmit(name, "json.encode", skipped, () => emitSerialize(stage.target));
+            if (!stringify) return;
+            const binding = internalIdentifier(`${name}_stringify`);
+
+            setup.push(`const ${binding} = (${stringify});`);
+            if (stage.many) emitMappedJsonArray(mapper, binding);
+            else body.push(`value = ${binding}(${mapper}.map(value));`);
+            index++;
+          } else {
+            body.push(`value = ${mapper}.${stage.many ? "many" : "map"}(value);`);
+          }
+          break;
+        }
+        case "transform": {
+          const transform = emitTransformBinding(stage);
+          if (!transform) return;
+          if (stage.many) emitManyApplication(transform);
+          else body.push(`value = ${transform}(value);`);
+          break;
+        }
+        case "update": {
+          const update = emitUpdateBinding(stage);
+          if (!update) return;
+          if (stage.many) emitManyApplication(update.update, update.patch);
+          else body.push(`value = ${update.update}(value, ${update.patch});`);
+          break;
+        }
+        case "security": {
+          const security = emitSecurityBinding(stage);
+          if (!security) return;
+          if (stage.many) emitManyApplication(security);
+          else body.push(`value = ${security}(value);`);
           break;
         }
         case "json.encode": {
@@ -1726,6 +1875,7 @@ function executionPlanType(plan: ExecutionPlan, namedType?: string): string {
   const query = plan.stages.find((stage) => stage.kind === "query");
   const hasJsonDecode = plan.stages.some((stage) => stage.kind === "json.decode");
   const hasBinaryDecode = plan.stages.some((stage) => stage.kind === "binary.decode");
+  const valueSource = plan.stages.find((stage) => stage.kind === "value");
 
   if (operation?.kind === "operation") return operationSignature(operation.operation, valueType);
 
@@ -1739,13 +1889,15 @@ function executionPlanType(plan: ExecutionPlan, namedType?: string): string {
     ? "string"
     : hasBinaryDecode
       ? "Uint8Array | ArrayBuffer"
-      : map?.kind === "map"
-        ? map.many
-          ? `readonly ${emitTypeScriptType(map.source)}[]`
-          : emitTypeScriptType(map.source)
-        : query?.kind === "query"
-          ? emitTypeScriptType(query.source)
-          : valueType;
+      : valueSource?.kind === "value"
+        ? emitTypeScriptType(valueSource.schema)
+        : map?.kind === "map"
+          ? map.many
+            ? `readonly ${emitTypeScriptType(map.source)}[]`
+            : emitTypeScriptType(map.source)
+          : query?.kind === "query"
+            ? emitTypeScriptType(query.source)
+            : valueType;
 
   if (last?.kind === "json.encode") return `(value: ${inputType}) => string`;
   if (last?.kind === "binary.encode") return `(value: ${inputType}) => Uint8Array`;
@@ -1753,6 +1905,9 @@ function executionPlanType(plan: ExecutionPlan, namedType?: string): string {
   if (hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
   if (map?.kind === "map") return `(value: ${inputType}) => ${valueType}`;
   if (query?.kind === "query") return `(value: ${inputType}) => ${valueType}`;
+  if (plan.stages.some((stage) => stage.kind === "transform" || stage.kind === "update" || stage.kind === "security")) {
+    return `(value: ${inputType}) => ${valueType}`;
+  }
   return "unknown";
 }
 
@@ -1818,6 +1973,75 @@ function serializeBindingValue(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+/** Serializes data-only update patches without evaluating getters or prototypes. */
+function serializeStaticData(value: unknown, seen = new Set<object>()): string | undefined {
+  if (value === null) return "null";
+
+  switch (typeof value) {
+    case "string":
+      return JSON.stringify(value);
+    case "boolean":
+      return value ? "true" : "false";
+    case "undefined":
+      return "undefined";
+    case "bigint":
+      return `${value}n`;
+    case "number":
+      if (Number.isNaN(value)) return "NaN";
+      if (value === Infinity) return "Infinity";
+      if (value === -Infinity) return "-Infinity";
+      if (Object.is(value, -0)) return "-0";
+      return String(value);
+    case "object":
+      break;
+    default:
+      return undefined;
+  }
+
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+
+  try {
+    if (value instanceof Date) {
+      const time = value.getTime();
+      return Number.isNaN(time) ? "new Date(NaN)" : `new Date(${time})`;
+    }
+
+    if (Array.isArray(value)) {
+      const items = value.map((item) => serializeStaticData(item, seen));
+
+      if (items.some((item) => item === undefined)) return undefined;
+      return `[${items.join(", ")}]`;
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return undefined;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const entries: string[] = [];
+
+    for (const key of Object.keys(descriptors)) {
+      const descriptor = descriptors[key];
+      if (descriptor === undefined || !("value" in descriptor)) return undefined;
+      const entry = serializeStaticData(descriptor.value, seen);
+      if (entry === undefined) return undefined;
+      entries.push(`${JSON.stringify(key)}: ${entry}`);
+    }
+    return `{ ${entries.join(", ")} }`;
+  } finally {
+    seen.delete(value);
+  }
+}
+
+function isComposedExecutionStage(stage: ExecutionStage): boolean {
+  return (
+    stage.kind === "query" ||
+    stage.kind === "map" ||
+    stage.kind === "transform" ||
+    stage.kind === "update" ||
+    stage.kind === "security"
+  );
 }
 
 function serializeBindingFunction(value: Function): string | undefined {

@@ -1,0 +1,80 @@
+---
+title: Composable execution
+description: Build one typed runtime or AOT pipeline from decoding through serialization.
+---
+
+Every source, operator, and sink contributes to one immutable execution plan.
+The final artifact is directly callable; it lowers once on first use and can
+also be emitted ahead of time.
+
+```ts
+const PublicUsers = JIT.json
+  .parse(JIT.array(User))
+  .validate()
+  .transform(PublicUser, { name: (name) => name.trim() })
+  .update({ visible: true })
+  .sanitize()
+  .mask()
+  .filter((q) => q.eq("active", true))
+  .select("id", "name", "email")
+  .to.json();
+
+const response = PublicUsers(requestBody);
+```
+
+`PublicUsers.plan` and `PublicUsers.explain()` expose the immutable descriptor.
+`PublicUsers.compile()` only warms it up; it returns the same callable.
+
+## What is fused
+
+The runtime and AOT backends lower sources, validation, queries, mapping,
+transforms, updates, security rewrites, and sinks into one generated
+`execution(input)` function. This removes the old chain of wrapper closures.
+
+Adjacent `filter` and `select` stages become one specialized indexed loop.
+Collection `transform`, `update`, `mask`, and `sanitize` stages also use
+indexed loops rather than `Array#map`.
+
+A terminal `.map(target, overrides).to.json()` maps and serializes each item
+in one output loop, so it does not allocate a mapped collection. Individual
+target objects may still be needed for mapper callbacks or nested values.
+
+There are deliberate materialization boundaries: native `JSON.parse`, binary
+decode, query output, mapper batches, and serializers must produce their
+semantic output. The planner never reorders observable operations just to make
+a plan look fused.
+
+## JSON decode plus validation
+
+```ts
+const parseUser = JIT.json.parse(User).validate();
+```
+
+This is one generated public callable. It calls the engine-native
+`JSON.parse`, then immediately runs the schema-specific validator in that same
+generated execution function. JIT intentionally does not replace native JSON
+parsing with a JavaScript token parser without a benchmark proving that it
+wins; the decoded JavaScript value is therefore a real boundary.
+
+## Transform and update
+
+`transform(targetSchema, fields)` makes the next schema explicit while
+preserving the source object's field set. Use `.map(targetSchema, overrides)`
+for a projection, rename, or different shape. If a callback can produce an
+invalid target, call `.validate()` after the transform.
+
+`update(patch)` uses the schema-aware immutable update compiler. On a
+collection it applies the patch to each element; original input values remain
+unchanged. `mask()` and `sanitize()` behave the same way and preserve the
+current schema.
+
+## Ahead of time
+
+Use the exact pipeline with `@jit-compiler/jit/define`, export it from a
+`*.jit.ts` file, and run `pnpm jit generate`. The generated module is
+import-free and preserves stage order. Callback transforms must be
+reconstructible, and update patches must be static data; otherwise generation
+reports a skip reason.
+
+See the full [execution-pipeline contract](https://github.com/pedro5g/jit/blob/main/docs/features/composable-execution.md)
+for stage-level boundaries and test requirements.

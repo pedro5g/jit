@@ -9,7 +9,9 @@ import type { Equal } from "./compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
 import type { Format } from "./compiler/format.js";
 import type { Hash } from "./compiler/hash.js";
+import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
 import type { Serialize } from "./compiler/serialize.js";
+import type { UpdatePatch } from "./compiler/update.js";
 import type { SafeParseResult } from "./compiler/validate.js";
 import type * as ATS from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
@@ -254,6 +256,46 @@ function executionStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...
         return append(output, mapStage(source, targetSchema, many, mapping));
       },
     },
+    transform: {
+      enumerable: false,
+      value: (target: SchemaInput<ATS.AnyTypeSchema>, transforms: ATS.TransformSpec<unknown>) => {
+        const targetSchema = unwrapSchema(target);
+        const many = unwrapped.type === "array";
+        const source = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
+        const output = many
+          ? (unwrapSchema(RuntimeJIT.array(targetSchema)) as ATS.ArraySchema<ATS.AnyTypeSchema>)
+          : targetSchema;
+
+        return append(output, transformStage(source, targetSchema, many, transforms));
+      },
+    },
+    update: {
+      enumerable: false,
+      value: (patch: UpdatePatch<unknown>) => {
+        const many = unwrapped.type === "array";
+        const schema = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
+
+        return append(unwrapped, updateStage(schema, many, patch));
+      },
+    },
+    mask: {
+      enumerable: false,
+      value: () => {
+        const many = unwrapped.type === "array";
+        const schema = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
+
+        return append(unwrapped, securityStage(schema, "mask", many));
+      },
+    },
+    sanitize: {
+      enumerable: false,
+      value: () => {
+        const many = unwrapped.type === "array";
+        const schema = many ? (unwrapped as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : unwrapped;
+
+        return append(unwrapped, securityStage(schema, "sanitize", many));
+      },
+    },
     to: {
       enumerable: true,
       value: Object.freeze({
@@ -309,6 +351,84 @@ function mapStage(
     bindings: [mapping],
     provides: ["mapped"],
     effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: Object.keys(mapping).length > 0 },
+  } as ExecutionStage;
+}
+
+function transformStage(
+  source: ATS.AnyTypeSchema,
+  target: ATS.AnyTypeSchema,
+  many: boolean,
+  transforms: ATS.TransformSpec<unknown>
+): ExecutionStage {
+  assertTransformTarget(source, target, transforms);
+
+  return {
+    ...stage("transform", "value", "value"),
+    schema: target,
+    source,
+    target,
+    many,
+    transforms: transforms as Readonly<Record<string, unknown>>,
+    provides: ["transformed"],
+    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: Object.keys(transforms).length > 0 },
+  } as ExecutionStage;
+}
+
+function assertTransformTarget(
+  source: ATS.AnyTypeSchema,
+  target: ATS.AnyTypeSchema,
+  transforms: ATS.TransformSpec<unknown>
+): void {
+  if (transforms === null || typeof transforms !== "object" || Array.isArray(transforms)) {
+    throw new JITError("INVALID_OPERATION", "execution transforms must be a field-to-callback object");
+  }
+
+  const sourceObject = resolveWrappers(source).base;
+  const targetObject = resolveWrappers(target).base;
+
+  if (sourceObject.type !== "object" || targetObject.type !== "object") {
+    throw new JITError("INVALID_OPERATION", "execution transforms require object source and target schemas");
+  }
+
+  const sourceKeys = Object.keys((sourceObject as ATS.ObjectSchema).def.props);
+  const targetKeys = Object.keys((targetObject as ATS.ObjectSchema).def.props);
+
+  if (sourceKeys.length !== targetKeys.length || sourceKeys.some((key) => !targetKeys.includes(key))) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      "execution transform targets must preserve the source object's field set; use .map() for projections or renames"
+    );
+  }
+
+  for (const key of Object.keys(transforms)) {
+    if (!sourceKeys.includes(key)) {
+      throw new JITError("INVALID_OPERATION", `execution transform selected unknown field ${JSON.stringify(key)}`);
+    }
+    if (typeof transforms[key as keyof typeof transforms] !== "function") {
+      throw new JITError("INVALID_OPERATION", `execution transform for ${JSON.stringify(key)} must be a function`);
+    }
+  }
+}
+
+function updateStage(schema: ATS.AnyTypeSchema, many: boolean, patch: unknown): ExecutionStage {
+  return {
+    ...stage("update", "value", "value"),
+    schema,
+    many,
+    patch,
+    provides: ["updated"],
+    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: true },
+  } as ExecutionStage;
+}
+
+function securityStage(schema: ATS.AnyTypeSchema, operation: "mask" | "sanitize", many: boolean): ExecutionStage {
+  return {
+    ...stage("security", "value", "value"),
+    schema,
+    operation,
+    many,
+    provides: [operation === "mask" ? "masked" : "sanitized"],
+    effects: { ...NO_EFFECTS, mayAllocate: true },
   } as ExecutionStage;
 }
 

@@ -277,6 +277,73 @@ describe("JIT AOT generate", () => {
     expect(declarations).toContain("export declare const activeUsers: (value: string) => string;");
   });
 
+  it("should preserve transform, update, and security stages in an import-free composed pipeline", async () => {
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      role: JIT.enum(["admin", "member"] as const),
+      name: JIT.string(),
+      email: JIT.string().pii("mask"),
+      note: JIT.string().sanitize(),
+    });
+    const publicUsers = JIT.json
+      .parse(JIT.array(User))
+      .validate()
+      .transform(User, { name: (name) => name.trim().toUpperCase() })
+      .update({ name: "PUBLIC" })
+      .sanitize()
+      .mask()
+      .filter((query) => query.eq("role", "admin"))
+      .select("id", "name", "email", "note")
+      .to.json();
+    const result = AOT.generate({ schemas: {}, functions: { publicUsers }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly publicUsers: (json: string) => string;
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("function update(value, patch)");
+    expect(source).toContain("function transform(value)");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(
+      generated.publicUsers('[{"id":1,"role":"admin","name":" Ada ","email":"ada@math.org","note":"<b>ok</b>"}]')
+    ).toBe('[{"id":1,"name":"PUBLIC","email":"***.org","note":"ok"}]');
+  });
+
+  it("should emit the source input and target output types for a transformed value artifact", async () => {
+    const Wire = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const Domain = JIT.object({ id: JIT.string(), name: JIT.string() });
+    const toDomain = JIT.from(Wire).transform(Domain, { id: (id) => String(id) });
+
+    const result = AOT.generate({ schemas: {}, functions: { toDomain }, outDir });
+    const declarations = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly toDomain: (value: { id: number; name: string }) => { id: string; name: string };
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.toDomain({ id: 1, name: "Ada" })).toEqual({ id: "1", name: "Ada" });
+    expect(declarations).toContain(
+      "export declare const toDomain: (value: { id: number; name: string }) => { id: string; name: string };"
+    );
+  });
+
+  it("should fuse terminal batch mapping and JSON encoding without a mapped output array", async () => {
+    const Entity = JIT.object({ id: JIT.number(), fullName: JIT.string() });
+    const Public = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const publicJson = JIT.map.many(Entity, Public, { name: { from: "fullName" } }).to.json();
+    const result = AOT.generate({ schemas: {}, functions: { publicJson }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly publicJson: (value: readonly { id: number; fullName: string }[]) => string;
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.publicJson([{ id: 1, fullName: "Ada" }])).toBe('[{"id":1,"name":"Ada"}]');
+    expect(source).toContain("let mappedJson");
+    expect(source).not.toContain("function many(list)");
+  });
+
   it("should generate a standalone runnable module for callback-free operations", async () => {
     const Event = JIT.object({
       id: JIT.number(),

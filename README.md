@@ -100,6 +100,28 @@ userState.watch(["profile", "name"], ({ value }) => renderName(value));
 userState.update({ profile: { name: "Ada" } });
 ```
 
+Boundary work uses one typed execution artifact instead of manually wiring
+individual compilers:
+
+```ts
+const PublicUsers = JIT.json
+  .parse(JIT.array(User))
+  .validate()
+  .update({ role: "user" })
+  .filter((q) => q.eq("role", "user"))
+  .select("id", "email")
+  .to.json();
+
+const response = PublicUsers(requestBody);
+```
+
+Runtime and AOT lower that plan once. Native `JSON.parse` and the
+schema-specific validator run in the same generated entry function; adjacent
+query stages share one indexed loop. `.transform(target, fields)`, `.map`,
+`.update`, `.sanitize`, and `.mask` can participate in the same pipeline.
+The [composable execution guide](docs/features/composable-execution.md)
+documents deliberate allocation boundaries and AOT constraints.
+
 The browser playground now includes executable `sanitize`, `reactiveUpdate`,
 `dto`, explicit artifact groups, and `indexes` scenarios. The indexes scenario contrasts
 `.entity()`, `.indexBy()`, schema `.keyed()`, and query `.keyed()` directly.

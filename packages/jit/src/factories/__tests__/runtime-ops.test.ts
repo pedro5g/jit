@@ -1,4 +1,4 @@
-import { AST, type Errors, JIT } from "../../index.js";
+import { AST, Compiler, type Errors, JIT } from "../../index.js";
 
 describe("composable capability API", () => {
   const User = JIT.object({
@@ -71,6 +71,80 @@ describe("composable capability API", () => {
     expectTypeOf(publicUsers).toMatchTypeOf<(value: string) => string>();
   });
 
+  it("fuses transforms, updates, security rewrites, queries, and sinks in one runtime program", () => {
+    const Input = JIT.object({
+      id: JIT.number().int(),
+      role: JIT.enum(["admin", "member"] as const),
+      name: JIT.string(),
+      email: JIT.string().pii("mask"),
+      note: JIT.string().sanitize(),
+    });
+    const Output = JIT.object({
+      id: JIT.number().int(),
+      role: JIT.enum(["admin", "member"] as const),
+      name: JIT.string(),
+      email: JIT.string().pii("mask"),
+      note: JIT.string().sanitize(),
+    });
+    const pipeline = JIT.json
+      .parse(JIT.array(Input))
+      .validate()
+      .transform(Output, { name: (name) => name.trim().toUpperCase() })
+      .update({ name: "PUBLIC" })
+      .sanitize()
+      .mask()
+      .filter((query) => query.eq("role", "admin"))
+      .select("id", "name", "email", "note")
+      .to.json();
+    const source = Compiler.emitExecutionPlan(pipeline.plan).source;
+
+    expect(pipeline.plan.stages.map((stage) => stage.kind)).toEqual([
+      "json.decode",
+      "validate",
+      "transform",
+      "update",
+      "security",
+      "security",
+      "query",
+      "query",
+      "json.encode",
+    ]);
+    expect(source).toContain("return function execution(input)");
+    expect(source).not.toContain("previous(value)");
+    expect(
+      pipeline(JSON.stringify([{ id: 1, role: "admin", name: " Ada ", email: "ada@math.org", note: "<b>ok</b>" }]))
+    ).toBe(JSON.stringify([{ id: 1, name: "PUBLIC", email: "***.org", note: "ok" }]));
+    expectTypeOf(pipeline).toMatchTypeOf<(value: string) => string>();
+  });
+
+  it("tracks an explicit transform target and rejects shape-changing transforms", () => {
+    const Wire = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const Domain = JIT.object({ id: JIT.string(), name: JIT.string() });
+    const transformed = JIT.from(Wire).transform(Domain, { id: (id) => String(id) });
+
+    expect(transformed({ id: 1, name: "Ada" })).toEqual({ id: "1", name: "Ada" });
+    expect(JIT.parse(Wire).transform(Domain, { id: (id) => String(id) })({ id: 2, name: "Grace" })).toEqual({
+      id: "2",
+      name: "Grace",
+    });
+    expect(() => JIT.from(Wire).transform(JIT.object({ id: JIT.string() }), { id: (id) => String(id) })).toThrow(
+      /preserve the source object's field set/
+    );
+    expectTypeOf(transformed).toMatchTypeOf<(value: { id: number; name: string }) => { id: string; name: string }>();
+  });
+
+  it("keeps pipeline updates immutable for values and collection elements", () => {
+    const User = JIT.object({ id: JIT.number(), profile: JIT.object({ name: JIT.string() }) });
+    const value = { id: 1, profile: { name: "Ada" } };
+    const updated = JIT.from(User).update({ profile: { name: "Grace" } });
+    const updatedMany = JIT.from(JIT.array(User)).update({ profile: { name: "Grace" } });
+
+    expect(updated(value)).toEqual({ id: 1, profile: { name: "Grace" } });
+    expect(value).toEqual({ id: 1, profile: { name: "Ada" } });
+    expect(updatedMany([value])).toEqual([{ id: 1, profile: { name: "Grace" } }]);
+    expect(value.profile.name).toBe("Ada");
+  });
+
   it("exposes binary boundaries as composable sources and sinks", () => {
     const encode = JIT.binary.encode(User);
     const decode = JIT.binary.decode(User).validate();
@@ -94,6 +168,23 @@ describe("composable capability API", () => {
       { id: 2, name: "Grace Hopper" },
     ]);
     expect(many.plan.stages[many.plan.stages.length - 1]).toMatchObject({ kind: "map", many: true });
+  });
+
+  it("fuses terminal batch mapping and JSON encoding without a mapped output array", () => {
+    const Entity = JIT.object({ id: JIT.number(), fullName: JIT.string() });
+    const Public = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const encoded = JIT.map.many(Entity, Public, { name: { from: "fullName" } }).to.json();
+    const source = Compiler.emitExecutionPlan(encoded.plan).source;
+
+    expect(
+      encoded([
+        { id: 1, fullName: "Ada" },
+        { id: 2, fullName: "Grace" },
+      ])
+    ).toBe('[{"id":1,"name":"Ada"},{"id":2,"name":"Grace"}]');
+    expect(source).toContain("let __json");
+    expect(source).toContain(".map(__list");
+    expect(source).not.toContain("function many(list)");
   });
 
   it("keeps issue and chunk artifacts directly callable", () => {

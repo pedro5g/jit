@@ -71,4 +71,40 @@ describe("runtime and define entrypoints", () => {
       rmSync(outDir, { recursive: true, force: true });
     }
   });
+
+  it("should preserve transform, update, and security stages in definition pipelines", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "jit-define-full-pipeline-"));
+
+    try {
+      const User = DefineJIT.object({
+        id: DefineJIT.number(),
+        role: DefineJIT.enum(["admin", "member"] as const),
+        name: DefineJIT.string(),
+        email: DefineJIT.string().pii("mask"),
+        note: DefineJIT.string().sanitize(),
+      });
+      const publicUsers = DefineJIT.json
+        .parse(DefineJIT.array(User))
+        .validate()
+        .transform(User, { name: (name) => name.trim().toUpperCase() })
+        .update({ name: "PUBLIC" })
+        .sanitize()
+        .mask()
+        .filter((query) => query.eq("role", "admin"))
+        .select("id", "name", "email", "note")
+        .to.json();
+
+      AOT.generate({ schemas: {}, functions: { publicUsers }, outDir });
+
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+        publicUsers: (json: string) => string;
+      };
+
+      expect(
+        generated.publicUsers('[{"id":1,"role":"admin","name":" Ada ","email":"ada@math.org","note":"<b>ok</b>"}]')
+      ).toBe('[{"id":1,"name":"PUBLIC","email":"***.org","note":"ok"}]');
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
 });

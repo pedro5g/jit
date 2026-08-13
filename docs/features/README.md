@@ -13,6 +13,7 @@ work and for production performance. Each page explains:
 
 - [AOT generation and tree sharing](./aot-tree-sharing.md)
 - [Runtime validation](./runtime-validation.md)
+- [Composable execution pipelines](./composable-execution.md)
 - [CLI and config](./cli-and-config.md)
 - [Cache, hash, and index strategies](./cache-hash-index.md)
 - [Schema operators](./schema-operators.md)
@@ -30,6 +31,7 @@ work and for production performance. Each page explains:
 | Goal                              | Start here              | Main decision                               |
 | --------------------------------- | ----------------------- | ------------------------------------------- |
 | Validate one request/config value | Runtime validation      | `is` vs `parse` vs `safeParse`              |
+| Compose a request/response flow   | Composable execution    | stages, boundaries, and AOT-safe bindings   |
 | Define constraints and transforms | Schema operators        | built-in operator vs callback refinement    |
 | Model date/time boundaries        | Temporal, ISO, codecs   | ISO string vs Date vs Temporal              |
 | Filter/project application arrays | Queries and mappers     | eager result vs iterator/visitor            |
@@ -47,14 +49,20 @@ work and for production performance. Each page explains:
 The public website mirrors these guides with smaller task-oriented pages and a
 complete operator reference under `apps/site/content/docs`.
 
+Historical pages may show the retained `validator`, `mapper`, `model`, or
+`serializer` facades while migration coverage exists. Treat those as
+compatibility material; new code should use the composable runtime surface
+documented above.
+
 ## Recommended Path
 
 For application code, prefer this order:
 
 1. Define schemas with `JIT.object`, `JIT.string`, `JIT.number`, and the
    typed operator chain.
-2. Compile only the operations you need with `JIT.validate(...).is().compile()`,
-   `JIT.json(...).stringify().compile()`, `JIT.query(...).compile()`, etc.
+2. Use direct artifacts such as `JIT.is(schema)`, `JIT.parse(schema)`, and
+   `JIT.json.stringify(schema)`. Compose boundary work with
+   `JIT.json.parse(schema).validate().filter(...).to.json()`.
 3. For runtime-only apps, import from `@jit-compiler/jit/runtime`.
 4. For generated production bundles, export compiled artifacts from
    `*.jit.ts` files and run `jit generate`.

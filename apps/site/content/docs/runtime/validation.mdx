@@ -4,20 +4,27 @@ description: Generate only is, parse, safeParse or asynchronous validation when 
 ---
 
 ```ts
-const selected = JIT.validator(User).get("is", "parse");
+const isUser = JIT.is(User);
+const parseUser = JIT.parse(User);
+const safeParseUser = JIT.safeParse(User);
 
-selected.is(input);
-selected.parse(input);
+isUser(input);
+parseUser(input);
+safeParseUser(input);
 ```
 
-Selection is explicit: requesting `is` and `parse` does not compile serializers, hash
-functions or unused validator variants.
+Each artifact lowers only the requested validator operation; it does not compile
+serializers, hash functions, or unrelated variants.
 
 ```ts
-const isUser = JIT.validate(User).is().compile();
-const safeParseUser = JIT.validate(User).safeParse().compile();
-const issues = JIT.validate(User).issues().compile();
+const isUser = JIT.validate.is(User);
+const safeParseUser = JIT.validate.safeParse(User);
+const issues = JIT.validate.issues(User);
 ```
+
+`JIT.is`, `JIT.parse`, and `JIT.safeParse` are exact aliases for the
+corresponding `JIT.validate.*` factories. The old `JIT.validator(schema)`
+facade remains a compatibility adapter, not the preferred API.
 
 `is` is fail-fast and allocation-free on the normal path. `safeParse` collects stable
 issues with `path`, `code`, `expected` and `message`. `parse` throws
@@ -59,6 +66,18 @@ users. `path` is a root-relative string suitable for logs/forms.
 Defaults, coercion, trim/case conversion, masks and pipes make output differ
 from input. The generated validator tracks whether rebuilding is necessary and
 returns the original reference when no transform changed the value.
+
+For a JSON boundary, compose decoding and validation without another public
+wrapper:
+
+```ts
+const parseUserJson = JIT.json.parse(User).validate();
+```
+
+This lowers to one generated execution function. It calls native `JSON.parse`
+and immediately invokes the schema-specific validator; see
+[composable execution](/docs/runtime/composable-execution) for the physical
+fusion boundaries.
 
 ## Standard Schema
 

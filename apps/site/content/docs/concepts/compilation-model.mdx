@@ -8,7 +8,7 @@ strategy selection, optimization and source generation happen once; hot calls ru
 plain JavaScript specialized for one known shape.
 
 ```text
-JIT builders -> schema AST -> operation plan -> optimizer -> code generator
+JIT builders -> schema AST -> execution plan -> optimizer -> code generator
                                                        -> runtime Function
                                                        -> pure AOT module
 ```
@@ -20,11 +20,11 @@ identity and operation plan. External values such as predicates and query consta
 are passed as bindings, never interpolated into generated source.
 
 ```ts
-const isUser = JIT.validate(User).is().compile();
+const parseUser = JIT.json.parse(User).validate();
 
-isUser.source;
-isUser.hash;
-isUser.explain();
+parseUser.plan;
+parseUser.explain();
+parseUser.compile(); // optional warm-up; returns the same callable
 ```
 
 The default cache, cold-compilation configuration and the separate hash/index
@@ -41,9 +41,17 @@ schema builders and compiler do not ship in the production bundle.
 - known properties use direct access;
 - arrays use indexed loops;
 - validators order cheap checks before regex and transforms;
-- queries fuse filtering and projection;
+- one execution plan lowers source, validation, query, map, transform, update,
+  security, and sink stages together;
+- adjacent queries fuse filtering and projection;
 - binary rowsets replace string discriminators and booleans with integer codes;
 - unused operations are never generated.
+
+Native `JSON.parse` remains a deliberate materialization boundary. JIT runs
+the generated validator immediately after it in the same execution callable
+rather than assuming a JavaScript token parser would be faster. Read the
+[composable execution guide](/docs/runtime/composable-execution) before
+interpreting “fused” as “zero allocation”.
 
 Compile cost and execution cost are reported separately in benchmarks. A complicated
 optimization is accepted only when the hot-path result justifies it.

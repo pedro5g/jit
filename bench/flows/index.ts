@@ -41,6 +41,12 @@ const selectAdmins = JIT.query(Users)
   .select("id", "name", "score")
   .compile();
 const stringifyPublicUsers = JIT.json.stringify(PublicUsers);
+const composedFlow = JIT.from(Users)
+  .validate()
+  .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true), q.gt("score", 500)))
+  .select("id", "name", "score")
+  .map(PublicUser)
+  .to.json();
 
 function jitFlow(input: readonly unknown[]): string {
   const valid = new Array<User>(input.length);
@@ -126,6 +132,17 @@ registerScenario({
   jit: jitFlow,
   competitors: [
     { name: "zod safeParse + native filter/map/stringify", fn: zodFlow },
+    { name: "handwritten fused loop", fn: handwrittenFlow, biased: GENERIC_BIAS },
+  ],
+});
+
+registerScenario({
+  op: "flow composed validate+query+map+json",
+  name: `users ${COUNT}`,
+  args: [users],
+  jit: composedFlow,
+  competitors: [
+    { name: "separate JIT validate + query + stringify", fn: jitFlow },
     { name: "handwritten fused loop", fn: handwrittenFlow, biased: GENERIC_BIAS },
   ],
 });

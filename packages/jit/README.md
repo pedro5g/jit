@@ -32,12 +32,43 @@ const User = JIT.object({
 
 type User = JIT.Typeof<typeof User>;
 
-const Users = JIT.validator(User);
+const isUser = JIT.is(User);
+const parseUser = JIT.parse(User);
+const safeParseUser = JIT.safeParse(User);
 
-Users.is(input); // pure boolean guard — compiled specialized code
-Users.parse(input); // throws JITValidationError with every issue
-Users.safeParse(input); // { success, data | issues } — no exceptions
+isUser(input); // pure boolean guard — compiled specialized code
+parseUser(input); // throws JITValidationError with every issue
+safeParseUser(input); // { success, data | issues } — no exceptions
 ```
+
+The primary runtime API is composable. Sources, operators, and sinks form one
+immutable execution plan that lowers once at the final callable:
+
+```ts
+const PublicUsers = JIT.json
+  .parse(JIT.array(User))
+  .validate()
+  .transform(User, { name: (name) => name.trim() })
+  .update({ role: "user" })
+  .sanitize()
+  .mask()
+  .filter((q) => q.eq("role", "user"))
+  .select("id", "name", "email")
+  .to.json();
+```
+
+Native JSON decoding, schema validation, query, mapping, transform, update,
+security, and sink stages lower into one generated execution closure. Native
+`JSON.parse` remains a real materialization boundary; JIT validates it
+immediately rather than assuming a JavaScript token parser is faster. Read
+[Composable execution pipelines](../../docs/features/composable-execution.md)
+for ordering, physical fusion, AOT constraints, and test requirements.
+
+> **Migration note:** the `validator`, `mapper`, `model`, and `serializer`
+> facades described in historical sections below remain exported for source
+> compatibility. New code should start from the aliases/capability namespaces
+> and execution artifacts above; compatibility facades are not the API model
+> used by new features.
 
 ## Why compiled?
 

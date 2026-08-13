@@ -10,8 +10,12 @@ export type ExecutionFact =
   | "binary-layout-valid"
   | "schema-validated"
   | "mapped"
+  | "transformed"
+  | "updated"
   | "filtered"
   | "projected"
+  | "masked"
+  | "sanitized"
   | "materialized";
 
 /** Side effects relevant to reordering and backend selection. */
@@ -89,6 +93,38 @@ export interface MapStage extends StageDescriptor {
   readonly bindings: readonly unknown[];
 }
 
+/** A schema-aware per-field transform. `many` applies it in one indexed loop. */
+export interface TransformStage extends StageDescriptor {
+  readonly kind: "transform";
+  readonly input: "value";
+  readonly output: "value";
+  readonly source: ATS.AnyTypeSchema;
+  readonly target: ATS.AnyTypeSchema;
+  readonly many: boolean;
+  /** Per-field callbacks are bindings, never source text. */
+  readonly transforms: Readonly<Record<string, unknown>>;
+}
+
+/** An immutable structural patch bound once when the execution plan is built. */
+export interface UpdateStage extends StageDescriptor {
+  readonly kind: "update";
+  readonly input: "value";
+  readonly output: "value";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly many: boolean;
+  readonly patch: unknown;
+}
+
+/** Security rewrites preserve the schema shape and can be applied per collection item. */
+export interface SecurityStage extends StageDescriptor {
+  readonly kind: "security";
+  readonly input: "value";
+  readonly output: "value";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly operation: "mask" | "sanitize";
+  readonly many: boolean;
+}
+
 export interface QueryStage extends StageDescriptor {
   readonly kind: "query";
   readonly input: "value";
@@ -122,6 +158,9 @@ export type ExecutionStage =
   | JsonEncodeStage
   | BinaryEncodeStage
   | MapStage
+  | TransformStage
+  | UpdateStage
+  | SecurityStage
   | QueryStage
   | ArraySinkStage
   | OperationStage;
