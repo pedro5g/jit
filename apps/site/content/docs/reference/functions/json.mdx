@@ -34,9 +34,11 @@ const decoded = parseUserJson(text);
 ```
 
 `stringify` bakes known object keys and punctuation into generated source.
-It avoids runtime reflection and generic replacer callbacks. `parse` performs
-native `JSON.parse` followed by the schema's compiled parser, including
-defaults, coercions, refinements and transforms.
+It avoids runtime reflection and generic replacer callbacks. Adjacent
+`parse(...).validate()` emits a schema-directed token scanner for supported
+schemas, including defaults, string transforms, constraints, and object key
+policies in the same traversal. Unsupported semantics use the explicit native
+parse + compiled-validator compatibility path.
 
 ## Chunked arrays
 
@@ -62,8 +64,8 @@ not be used as a persisted transport.
 
 ## Errors
 
-Malformed JSON throws a native syntax error before schema validation. Valid
-JSON with an invalid shape throws `JITValidationError` from `parse`. Use
+Malformed JSON throws `SyntaxError`. Valid JSON with an invalid shape throws
+`JITValidationError` from `parse`. Use
 `JSON.parse` plus `safeParse` when both error categories must be returned as
 data instead of exceptions.
 

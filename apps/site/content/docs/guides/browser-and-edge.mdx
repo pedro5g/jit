@@ -11,11 +11,9 @@ AOT performs that work during the build and emits only ordinary JavaScript.
 
 ```ts
 // jit/user.jit.ts
-const selected = JIT.validator(UserSchema).get("is", "safeParse");
-
 export const User = JIT.compile(UserSchema, {
-  is: selected.is,
-  safeParse: selected.safeParse,
+  is: JIT.validate.is(UserSchema),
+  safeParse: JIT.validate.safeParse(UserSchema),
 });
 ```
 

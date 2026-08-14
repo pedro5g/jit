@@ -7,6 +7,7 @@ import { emitEqualSource } from "../compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
+import { tryEmitJsonDecoder } from "../compiler/json-decode.js";
 import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { emitMapperSource } from "../compiler/mapper.js";
 import { emitMaskSource } from "../compiler/mask.js";
@@ -158,7 +159,11 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     const schema = unwrapSchema(options.schemas[name] as SchemaInput<ATS.AnyTypeSchema>);
-    const operations: { readonly prop: string; readonly type: string; readonly binding: string }[] = [];
+    const operations: {
+      readonly prop: string;
+      readonly type: string;
+      readonly binding: string;
+    }[] = [];
     const sourceFile = options.sources?.get(name);
     // Object-style `JIT.compile(schema, { ... })` markers restrict generation
     // to the compiled functions the developer explicitly put on that object.
@@ -195,7 +200,13 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // is / parse / safeParse
-    const wantsValidator = wants("is") || wants("parse") || wants("safeParse") || wants("fromJSON");
+    const fromJsonDecoder = wants("fromJSON") ? tryEmitJsonDecoder(schema) : undefined;
+    const fromJsonDecoderBindings = fromJsonDecoder
+      ? inlineBindings(fromJsonDecoder.bindingNames, fromJsonDecoder.bindingValues)
+      : undefined;
+    const hasDirectFromJson = fromJsonDecoder !== undefined && fromJsonDecoderBindings !== undefined;
+    const wantsValidator =
+      wants("is") || wants("parse") || wants("safeParse") || (wants("fromJSON") && !hasDirectFromJson);
     const validator = wantsValidator ? tryEmit(name, "validator", skipped, () => emitValidator(schema)) : undefined;
 
     if (validator) {
@@ -235,7 +246,7 @@ export function generate(options: GenerateOptions): GenerateResult {
             binding,
           });
         }
-        if (wants("parse") || wants("fromJSON")) {
+        if (wants("parse") || (wants("fromJSON") && !hasDirectFromJson)) {
           const parseBinding = internalIdentifier(`${name}_parse`);
 
           needsValidationError = true;
@@ -249,9 +260,8 @@ export function generate(options: GenerateOptions): GenerateResult {
               binding: parseBinding,
             });
           }
-          if (wants("fromJSON")) {
+          if (wants("fromJSON") && !hasDirectFromJson) {
             const binding = internalIdentifier(`${name}_fromJSON`);
-
             js.push(
               `const ${binding} = /*#__PURE__*/ ((parse) => (json) => parse(JSON.parse(json)))(${parseBinding});`
             );
@@ -263,6 +273,24 @@ export function generate(options: GenerateOptions): GenerateResult {
           }
         }
       }
+    }
+
+    if (wants("fromJSON") && fromJsonDecoder && fromJsonDecoderBindings) {
+      const binding = internalIdentifier(`${name}_fromJSON`);
+
+      needsValidationError = true;
+      js.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      js.push(...fromJsonDecoderBindings.map((line) => `  ${line}`));
+      js.push(...indentBlock(`const decode = (${fromJsonDecoder.source});`));
+      js.push(
+        "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
+      );
+      js.push("})();");
+      operations.push({
+        prop: "fromJSON",
+        type: `(json: string) => ${name}`,
+        binding,
+      });
     }
 
     // equal source first: it decides whether hash helpers are required.
@@ -290,7 +318,12 @@ export function generate(options: GenerateOptions): GenerateResult {
       js.push("    return compute(value);");
       js.push("  };");
       js.push("})();");
-      if (wants("hash")) operations.push({ prop: "hash", type: `(value: ${name}) => number`, binding: hashBinding });
+      if (wants("hash"))
+        operations.push({
+          prop: "hash",
+          type: `(value: ${name}) => number`,
+          binding: hashBinding,
+        });
     }
 
     // equal
@@ -328,7 +361,11 @@ export function generate(options: GenerateOptions): GenerateResult {
       const binding = internalIdentifier(`${name}_clone`);
 
       js.push(`const ${binding} = (${cloneSource});`);
-      operations.push({ prop: "clone", type: `(value: ${name}) => ${name}`, binding });
+      operations.push({
+        prop: "clone",
+        type: `(value: ${name}) => ${name}`,
+        binding,
+      });
     }
 
     // diff
@@ -368,7 +405,11 @@ export function generate(options: GenerateOptions): GenerateResult {
       const binding = internalIdentifier(`${name}_format`);
 
       js.push(`const ${binding} = (${formatSource});`);
-      operations.push({ prop: "format", type: `(value: string) => string`, binding });
+      operations.push({
+        prop: "format",
+        type: `(value: string) => string`,
+        binding,
+      });
     }
 
     // mask
@@ -378,7 +419,11 @@ export function generate(options: GenerateOptions): GenerateResult {
       const binding = internalIdentifier(`${name}_mask`);
 
       js.push(`const ${binding} = (${maskSource});`);
-      operations.push({ prop: "mask", type: `(value: ${name}) => ${name}`, binding });
+      operations.push({
+        prop: "mask",
+        type: `(value: ${name}) => ${name}`,
+        binding,
+      });
     }
 
     // sanitize
@@ -695,6 +740,23 @@ export function generate(options: GenerateOptions): GenerateResult {
         if (!serializeSource) return;
         js.push(`${declaration} (${serializeSource});`);
       } else if (op === "fromJSON") {
+        const decoder = tryEmitJsonDecoder(schema);
+        const decoderBindings = decoder ? inlineBindings(decoder.bindingNames, decoder.bindingValues) : undefined;
+
+        if (decoder && decoderBindings) {
+          needsValidationError = true;
+          js.push(`${declaration} /*#__PURE__*/ (() => {`);
+          js.push(...decoderBindings.map((line) => `  ${line}`));
+          js.push(...indentBlock(`const decode = (${decoder.source});`));
+          js.push(
+            "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
+          );
+          js.push("})();");
+          exportNames.push(name);
+          dts.push(`export declare const ${name}: ${operationType(artifact, typeNames.get(artifact.schema))};`);
+          dts.push("");
+          return;
+        }
         const validator = tryEmit(name, "fromJSON", skipped, () => emitValidator(schema));
 
         if (!validator) return;
@@ -820,7 +882,11 @@ export function generate(options: GenerateOptions): GenerateResult {
     if (mapStage?.kind === "map") {
       const mapping = mapStage.bindings[0];
       if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping descriptor is malformed",
+        });
         return;
       }
       const mapperPlan = tryEmit(name, "map", skipped, () =>
@@ -879,6 +945,25 @@ export function generate(options: GenerateOptions): GenerateResult {
         return;
       }
 
+      if (validateStage.operation === "parse" && hasJsonDecode) {
+        const decoder = tryEmitJsonDecoder(validateStage.schema);
+        const decoderBindings = decoder ? inlineBindings(decoder.bindingNames, decoder.bindingValues) : undefined;
+
+        if (decoder && decoderBindings) {
+          needsValidationError = true;
+          js.push(`${declaration} /*#__PURE__*/ (() => {`);
+          js.push(...decoderBindings.map((line) => `  ${line}`));
+          js.push(...indentBlock(`const decode = (${decoder.source});`));
+          js.push(
+            "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
+          );
+          js.push("})();");
+          exportNames.push(name);
+          dts.push(`export declare const ${name}: ${declaredType};`, "");
+          return;
+        }
+      }
+
       const validator = tryEmit(name, validateStage.operation, skipped, () =>
         emitValidator(plan.schema, {
           is: validateStage.operation === "is",
@@ -906,7 +991,11 @@ export function generate(options: GenerateOptions): GenerateResult {
 
       if (validateStage.operation === "is") {
         if (hasJsonDecode || hasBinaryDecode) {
-          skipped.push({ schema: name, operation: "is", reason: "is must receive a value source in AOT output" });
+          skipped.push({
+            schema: name,
+            operation: "is",
+            reason: "is must receive a value source in AOT output",
+          });
           return;
         }
         js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
@@ -930,7 +1019,11 @@ export function generate(options: GenerateOptions): GenerateResult {
         if (!codec) return;
         const codecBindings = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
         if (codecBindings === undefined) {
-          skipped.push({ schema: name, operation: "binary.decode", reason: "codec bindings cannot be serialized" });
+          skipped.push({
+            schema: name,
+            operation: "binary.decode",
+            reason: "codec bindings cannot be serialized",
+          });
           return;
         }
         needsValidationError = true;
@@ -965,7 +1058,11 @@ export function generate(options: GenerateOptions): GenerateResult {
       if (!codec) return;
       const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
       if (inlined === undefined) {
-        skipped.push({ schema: name, operation: "binary", reason: "codec bindings cannot be serialized" });
+        skipped.push({
+          schema: name,
+          operation: "binary",
+          reason: "codec bindings cannot be serialized",
+        });
         return;
       }
       const method = hasBinaryDecode ? "decode" : "encode";
@@ -988,7 +1085,11 @@ export function generate(options: GenerateOptions): GenerateResult {
         js.push(`${declaration} (${source});`);
       }
     } else {
-      skipped.push({ schema: name, operation: "execution", reason: "no AOT backend matches this execution plan" });
+      skipped.push({
+        schema: name,
+        operation: "execution",
+        reason: "no AOT backend matches this execution plan",
+      });
       return;
     }
 
@@ -1015,7 +1116,11 @@ export function generate(options: GenerateOptions): GenerateResult {
 
     const emitValidatorBinding = (schema: ATS.AnyTypeSchema): string | undefined => {
       const validator = tryEmit(name, "validate", skipped, () =>
-        emitValidator(schema, { is: false, safeParse: true, safeParseAsync: false })
+        emitValidator(schema, {
+          is: false,
+          safeParse: true,
+          safeParseAsync: false,
+        })
       );
       if (!validator) return undefined;
       const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
@@ -1036,6 +1141,22 @@ export function generate(options: GenerateOptions): GenerateResult {
       return binding;
     };
 
+    const emitJsonDecoderBinding = (schema: ATS.AnyTypeSchema): string | undefined => {
+      const decoder = tryEmitJsonDecoder(schema);
+
+      if (!decoder) return undefined;
+      const inlined = inlineBindings(decoder.bindingNames, decoder.bindingValues);
+
+      if (inlined === undefined) return undefined;
+      const binding = internalIdentifier(`${name}_jsonDecoder`);
+
+      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
+      setup.push(...inlined.map((line) => `  ${line}`));
+      setup.push(...indentBlock(`return (${decoder.source});`));
+      setup.push("})();");
+      return binding;
+    };
+
     const emitCodecBinding = (
       schema: ATS.AnyTypeSchema,
       operation: "binary.decode" | "binary.encode"
@@ -1044,7 +1165,11 @@ export function generate(options: GenerateOptions): GenerateResult {
       if (!codec) return undefined;
       const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
       if (inlined === undefined) {
-        skipped.push({ schema: name, operation, reason: "codec bindings cannot be serialized" });
+        skipped.push({
+          schema: name,
+          operation,
+          reason: "codec bindings cannot be serialized",
+        });
         return undefined;
       }
       const binding = internalIdentifier(`${name}_codec`);
@@ -1066,7 +1191,11 @@ export function generate(options: GenerateOptions): GenerateResult {
         stage.program.bindings
       );
       if (bindings === undefined) {
-        skipped.push({ schema: name, operation: "query", reason: "query bindings cannot be serialized ahead of time" });
+        skipped.push({
+          schema: name,
+          operation: "query",
+          reason: "query bindings cannot be serialized ahead of time",
+        });
         return undefined;
       }
       const binding = internalIdentifier(`${name}_query`);
@@ -1084,7 +1213,11 @@ export function generate(options: GenerateOptions): GenerateResult {
     ): string | undefined => {
       const mapping = stage.bindings[0];
       if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping descriptor is malformed",
+        });
         return undefined;
       }
       const mapperPlan = tryEmit(name, "map", skipped, () =>
@@ -1231,9 +1364,31 @@ export function generate(options: GenerateOptions): GenerateResult {
         case "value":
         case "to.array":
           break;
-        case "json.decode":
+        case "json.decode": {
+          const validation = stages[index + 1];
+
+          if (
+            validation?.kind === "validate" &&
+            validation.operation === "parse" &&
+            validation.schema === stage.schema
+          ) {
+            const decoder = emitJsonDecoderBinding(stage.schema);
+
+            if (decoder) {
+              needsValidationError = true;
+              body.push("try {");
+              body.push(`  value = ${decoder}(value);`);
+              body.push("} catch (error) {");
+              body.push("  if (Array.isArray(error)) throw new JITValidationError(error);");
+              body.push("  throw error;");
+              body.push("}");
+              index++;
+              break;
+            }
+          }
           body.push("value = JSON.parse(value);");
           break;
+        }
         case "binary.decode": {
           const codec = emitCodecBinding(stage.schema, "binary.decode");
           if (!codec) return;
@@ -1763,7 +1918,11 @@ function describeExport(
   const schema = options.schemas[name];
 
   if (schema !== undefined) {
-    return { name, kind: "grouped", operations: readRequestedOps(schema) ?? [] };
+    return {
+      name,
+      kind: "grouped",
+      operations: readRequestedOps(schema) ?? [],
+    };
   }
 
   const artifact = getArtifact(options.functions?.[name]);
@@ -2225,9 +2384,14 @@ function cleanGeneratedFiles(dir: string): void {
     rmSync(join(/* turbopackIgnore: true */ dir, file), { force: true });
   }
   if (isGeneratedPackageJson(dir)) {
-    rmSync(join(/* turbopackIgnore: true */ dir, "package.json"), { force: true });
+    rmSync(join(/* turbopackIgnore: true */ dir, "package.json"), {
+      force: true,
+    });
   }
-  rmSync(join(/* turbopackIgnore: true */ dir, "plans"), { recursive: true, force: true });
+  rmSync(join(/* turbopackIgnore: true */ dir, "plans"), {
+    recursive: true,
+    force: true,
+  });
 }
 
 function isGeneratedPackageJson(dir: string): boolean {
@@ -2248,17 +2412,23 @@ function isGeneratedPackageJson(dir: string): boolean {
   }
 }
 
-function readGeneratedManifest(dir: string): { readonly files: readonly string[] } {
+function readGeneratedManifest(dir: string): {
+  readonly files: readonly string[];
+} {
   // The manifest is runtime output, never part of the importing app bundle.
   const path = join(/* turbopackIgnore: true */ dir, "manifest.json");
 
   if (!existsSync(path)) return { files: [] };
 
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as { files?: unknown };
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
+      files?: unknown;
+    };
 
     if (!Array.isArray(parsed.files)) return { files: [] };
-    return { files: parsed.files.filter((file): file is string => typeof file === "string" && !file.includes("..")) };
+    return {
+      files: parsed.files.filter((file): file is string => typeof file === "string" && !file.includes("..")),
+    };
   } catch {
     return { files: [] };
   }

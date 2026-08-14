@@ -16,8 +16,8 @@ Compiled functions are cached by schema object identity:
 This means:
 
 ```ts
-const isUserA = JIT.validate(User).is().compile();
-const isUserB = JIT.validate(User).is().compile();
+const isUserA = JIT.validate.is(User);
+const isUserB = JIT.validate.is(User);
 ```
 
 can reuse compilation work for the same schema identity. If you rebuild a new
@@ -39,7 +39,7 @@ schema alive, and it has no TTL or maximum-size configuration.
 Compile at module scope:
 
 ```ts
-const isUser = JIT.validate(User).is().compile();
+const isUser = JIT.validate.is(User);
 
 export function handle(input: unknown) {
   if (!isUser(input)) return null;
@@ -52,52 +52,38 @@ Avoid compiling inside hot paths:
 ```ts
 // Avoid this.
 function handle(input: unknown) {
-  return JIT.validate(User).is().compile()(input);
+  return JIT.validate.is(User)(input);
 }
 ```
 
 The cache will reduce repeated compile cost, but creating fluent builders and
 closures inside a hot function is still unnecessary work.
 
-## Compile Cache Configuration
+## Compile Cache Diagnostics
 
-Caching is enabled by default. The supported public configuration points are:
+Capability artifacts cache automatically and keep cache policy out of the
+public dataflow syntax. Tests and cold-compilation benchmarks can reset the
+compiler cache explicitly:
 
 ```ts
-JIT.validator(User, { is: true, parse: true, cache: false });
-JIT.validator(User, { cache: false }).get("is", "parse");
+Compiler.clearCompileCache();
 
-JIT.mapper(Source, Target, overrides, { cache: false });
-JIT.serializer(User, { cache: false });
-JIT.codec(User, { version: 2, cache: false });
-JIT.mask(User, { cache: false });
-JIT.sanitize(User, { cache: false });
-JIT.stream(User, { format: "ndjson", onItem, cache: false });
-
-JIT.compileEqual(User.schema, { cache: false });
-JIT.compileClone(User.schema, { cache: false });
-JIT.compileHash(User.schema, { cache: false });
+const isUser = JIT.validate.is(User);
+isUser.compile(); // optional artifact warm-up
 ```
 
-The same final options argument exists on the low-level validator selection,
-diff, update, format, serialize, mask, sanitize, codec, mapper selection,
-query, lazy iterator/visitor, and binary-query compilers. These are compiler
-tooling boundaries; typed fluent factories remain the preferred application
-API.
-
-Use `cache: false` only for cold-compilation benchmarks, cache behavior tests,
-or isolated compiler diagnostics. It bypasses one call and does not clear
-existing entries. `Compiler.clearCompileCache()` resets the global store and
-is reserved for deterministic tests and benchmark setup.
+Normal calls compile lazily. Keep low-level cache controls inside compiler
+tests and benchmark harnesses rather than application request paths.
 
 Validator operation selection is independent from caching:
 
 ```ts
-const { is, parse } = JIT.validator(User).get("is", "parse");
+const is = JIT.validate.is(User);
+const parse = JIT.validate.parse(User);
 ```
 
 This compiles only the requested operations and caches those operations. The
-same principle applies to `JIT.mapper(...).get("map", "many")`.
+same principle applies to choosing `JIT.map(...)` or `JIT.map.many(...)`.
 
 Codec `version` is included in the cache key, so incompatible wire versions
 cannot share an applied codec. Stream instances never share parser buffers,

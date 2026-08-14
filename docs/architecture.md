@@ -127,21 +127,21 @@ its lexical scope. It does **not** create the historical nesting of
 
 The current stage surface is deliberately explicit:
 
-| Stage family | Composition and physical behavior |
-| --- | --- |
-| JSON / binary source | Native `JSON.parse` or emitted codec decodes at the source boundary. JSON values are materialized before schema validation. |
-| Validation | The schema-specific emitted `safeParse` runs immediately after its source in the generated entry function. |
-| Query | Consecutive filter/select descriptors retain the final program and emit one indexed output loop. |
-| Mapping | Shape-specific single/batch mapper. A terminal batch map plus JSON sink serializes in the mapper loop and avoids the mapped output array. |
-| Transform | Per-field emitted transform; collection mode emits an indexed loop. The target schema is explicit. |
-| Update | Schema-aware immutable patch; collection mode applies the static patch to each element in an indexed loop. |
-| Security | `sanitize` and `mask` are emitted source rewrites, applied per value or per collection element. |
-| JSON / binary sink | Specialized serializer or codec creates the final transport representation. |
+| Stage family         | Composition and physical behavior                                                                                                                               |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JSON / binary source | Adjacent JSON decode + parse validation uses the schema-directed token scanner when the complete schema has a lossless lowering; binary uses the emitted codec. |
+| Validation           | Supported JSON schemas validate while tokens are consumed. Other sources and unsupported JSON semantics use the schema-specific emitted `safeParse`.            |
+| Query                | Consecutive filter/select descriptors retain the final program and emit one indexed output loop.                                                                |
+| Mapping              | Shape-specific single/batch mapper. A terminal batch map plus JSON sink serializes in the mapper loop and avoids the mapped output array.                       |
+| Transform            | Per-field emitted transform; collection mode emits an indexed loop. The target schema is explicit.                                                              |
+| Update               | Schema-aware immutable patch; collection mode applies the static patch to each element in an indexed loop.                                                      |
+| Security             | `sanitize` and `mask` are emitted source rewrites, applied per value or per collection element.                                                                 |
+| JSON / binary sink   | Specialized serializer or codec creates the final transport representation.                                                                                     |
 
-“One execution function” must not be misread as “no allocations” or as a
-schema-tokenizing JSON parser. Native JSON parsing, codec decoding, query
-output, mapper batches, collection rewrite stages, and sinks are materializing
-boundaries when their semantics require values. In particular,
+“One execution function” must not be misread as “no allocations.” The
+schema-directed JSON backend still materializes its result, while codec
+decoding, query output, mapper batches, collection rewrite stages, and sinks
+are materializing boundaries when their semantics require values. In particular,
 `filter(...).map(...)` may need the filtered array before the target-mapping
 loop. Terminal map/JSON fusion removes the mapped collection, but does not yet
 claim to remove every per-item target object. The planner preserves user order

@@ -5,7 +5,7 @@ description: Choose the correct eager, lazy, binary or streaming execution path.
 
 | Need                             | Recommended API                              | Materializes output?   |
 | -------------------------------- | -------------------------------------------- | ---------------------- |
-| Validate one value               | `JIT.validate(S).is/parse/safeParse()`       | only issues/transforms |
+| Validate one value               | `JIT.validate.is/parse/safeParse(S)`         | only issues/transforms |
 | Query an in-memory array         | `JIT.query(List).compile()`                  | yes                    |
 | Diff keyed collection snapshots | `JIT.watch(List, { key })`                   | change arrays          |
 | Track aggregate child mutations | `JIT.watchedList(List, items, { key })`      | retained state         |
@@ -13,7 +13,7 @@ description: Choose the correct eager, lazy, binary or streaming execution path.
 | Consume async cursor             | `compileAsyncIterator()`                     | no                     |
 | Highest-throughput callback sink | `compileVisitor()`                           | no                     |
 | Repeated million-row scans       | `array.binary({ memoryLayout: "columnar" })` | compact rowset         |
-| Serialize one value              | `JIT.json(S).stringify()`                    | final string           |
+| Serialize one value              | `JIT.json.stringify(S)`                      | final string           |
 | Write a huge JSON array          | `stringifyChunks()`                          | bounded chunks         |
 | Validate a transport stream      | `JIT.stream()`                               | item-by-item           |
 | Strict-CSP/browser production    | explicit AOT exports                         | only imported code     |

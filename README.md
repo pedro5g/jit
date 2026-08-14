@@ -115,9 +115,9 @@ const PublicUsers = JIT.json
 const response = PublicUsers(requestBody);
 ```
 
-Runtime and AOT lower that plan once. Native `JSON.parse` and the
-schema-specific validator run in the same generated entry function; adjacent
-query stages share one indexed loop. `.transform(target, fields)`, `.map`,
+Runtime and AOT lower that plan once. Supported JSON-safe schemas use an
+emitted decoder that parses and validates in the same token traversal;
+adjacent query stages share one indexed loop. `.transform(target, fields)`, `.map`,
 `.update`, `.sanitize`, and `.mask` can participate in the same pipeline.
 The [composable execution guide](docs/features/composable-execution.md)
 documents deliberate allocation boundaries and AOT constraints.

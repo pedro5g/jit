@@ -40,7 +40,7 @@ Authorization still decides whether data may be read at all. Mapping to a DTO
 is stronger when fields must be completely absent:
 
 ```ts
-const toPublic = JIT.mapper(User, PublicUser).get("map");
+const toPublic = JIT.map(User, PublicUser, {});
 ```
 
 ## Cache and mutation

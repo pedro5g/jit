@@ -58,17 +58,20 @@ const PublicUser = JIT.object({
   name: JIT.string(),
 });
 
-const toPublicUser = JIT.mapper(UserEntity, PublicUser, {
+const toPublicUser = JIT.map(UserEntity, PublicUser, {
   name: (user) => `${user.firstName} ${user.lastName}`,
-}).get("map", "many");
+});
+const toPublicUsers = JIT.map.many(UserEntity, PublicUser, {
+  name: (user) => `${user.firstName} ${user.lastName}`,
+});
 
-toPublicUser.map(user);
-toPublicUser.many(users);
+toPublicUser(user);
+toPublicUsers(users);
 ```
 
-Use `.get("map")` for single-record boundaries and `.get("many")` for batch
-pipelines. The mapper compiler emits only the selected function: choosing
-`map` omits the array loop entirely, while choosing `many` keeps the fused loop
+Use `JIT.map(...)` for single-record boundaries and `JIT.map.many(...)` for
+batch pipelines. The mapper compiler emits only the selected function: the
+single form omits the array loop entirely, while `many` keeps the fused loop
 without generating a per-item wrapper.
 
 When mapping can be described with built-in transforms, prefer
@@ -87,11 +90,11 @@ Queries and mappers can be attached as extras to a grouped object:
 
 ```ts
 export const User = JIT.compile(UserSchema, {
-  is: JIT.validate(UserSchema).is().compile(),
+  is: JIT.validate.is(UserSchema),
   findAdmins: JIT.query(JIT.array(UserSchema))
     .filter((q) => q.eq("role", "admin"))
     .compile(),
-  toPublic: JIT.mapper(UserSchema, PublicUser).get("many"),
+  toPublic: JIT.map.many(UserSchema, PublicUser, {}),
 });
 ```
 
@@ -102,7 +105,7 @@ import { User } from "@jit/generated";
 
 User.is(input);
 User.findAdmins(users);
-User.toPublic.many(users);
+User.toPublic(users);
 ```
 
 Extras with serializable bindings can be re-emitted AOT. Extras that close
@@ -136,12 +139,12 @@ const output = JSON.stringify(
 The JIT version compiles each stage and keeps the hot loops direct:
 
 ```ts
-const isUser = JIT.validate(User).is().compile();
+const isUser = JIT.validate.is(User);
 const selectAdmins = JIT.query(Users)
   .filter((q) => q.eq("role", "admin"))
   .select("id", "name")
   .compile();
-const stringifyPublicUsers = JIT.json(PublicUsers).stringify().compile();
+const stringifyPublicUsers = JIT.json.stringify(PublicUsers);
 ```
 
 ## Why It Is Faster

@@ -57,10 +57,13 @@ const PublicUsers = JIT.json
   .to.json();
 ```
 
-Native JSON decoding, schema validation, query, mapping, transform, update,
-security, and sink stages lower into one generated execution closure. Native
-`JSON.parse` remains a real materialization boundary; JIT validates it
-immediately rather than assuming a JavaScript token parser is faster. Read
+JSON decoding, schema validation, query, mapping, transform, update, security,
+and sink stages lower into one generated execution closure. For supported
+JSON-safe schemas, adjacent `.parse(...).validate()` stages select an emitted
+schema-directed scanner: it consumes tokens, builds the value, and runs field
+checks in the same traversal without calling `JSON.parse`. Unsupported schema
+semantics use an explicit compatibility fallback until they have an equivalent
+lowering. Read
 [Composable execution pipelines](../../docs/features/composable-execution.md)
 for ordering, physical fusion, AOT constraints, and test requirements.
 
@@ -269,7 +272,7 @@ Objects are mutable by default for normal TypeScript ergonomics. Use
 ### Advanced schemas
 
 ```ts
-JIT.json(); // any JSON-encodable value
+JIT.json.value(); // any JSON-encodable value
 JIT.custom<Decimal>((value) => Decimal.isDecimal(value), "expected Decimal");
 JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const);
 // inferred type: `hello, ${string}!`
@@ -521,8 +524,8 @@ const BaseKeys = Base.keyof(); // enum of known object keys
 ## Validation
 
 ```ts
-const isUser = JIT.validate(User).is().compile();
-const parseUser = JIT.validate(User).parse().compile();
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
 
 isUser(x); // (x: unknown) => x is User
 parseUser(x); // User or throws JITValidationError
@@ -532,30 +535,35 @@ isUser.hash; // deterministic source hash
 isUser.explain(); // { operation, hash, source, cache }
 ```
 
-`JIT.validator` remains available when an object facade is more convenient:
+Every validation operation is an independent callable artifact:
 
 ```ts
-const Users = JIT.validator(User);
+const isUser = JIT.validate.is(User);
+const safeParseUser = JIT.validate.safeParse(User);
+const parseUser = JIT.validate.parse(User);
 
-Users.is(x); // (x: unknown) => x is User — zero allocation
-Users.safeParse(x); // { success: true, data } | { success: false, issues }
-Users.parse(x); // data or throws JITValidationError
+isUser(x); // (x: unknown) => x is User — zero allocation
+safeParseUser(x); // { success: true, data } | { success: false, issues }
+parseUser(x); // data or throws JITValidationError
 
 // async: settles promise wrappers, then validates the resolved value
 const Job = JIT.object({ result: JIT.string().min(3).promise() });
-await JIT.validator(Job).parseAsync({ result: fetchResult() });
+await JIT.validate.parseAsync(Job)({ result: fetchResult() });
 ```
 
 Validators can be compiled selectively. The compiler emits only the requested
 surface plus the minimum shared internals needed by that surface:
 
 ```ts
-const Selected = JIT.validator(User, { is: true, parse: true });
+const Selected = JIT.compile(User, {
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
+});
 Selected.is(input);
 Selected.parse(input);
 Selected.safeParse; // ✗ not compiled
 
-const { is, parse } = JIT.validator(User).get("is", "parse");
+const { is, parse } = Selected;
 ```
 
 Builders expose the same validator conveniences for local checks and
@@ -613,7 +621,7 @@ User.diff(a, b); // structural diff entries
 User.hash(a); // inline FNV-1a — no JSON.stringify
 User.update(a, { name: "Ada" }); // immutable surgical update (no Proxy)
 User.stringify(a); // compiled JSON — beats native
-User.fromJSON(json); // JSON.parse + compiled validation
+User.fromJSON(json); // schema-directed decode + inline validation when supported
 User.mask(a); // PII-safe copy for logs
 User.sanitize(a); // XSS-stripped copy
 User.codec.encode(a); // binary wire format
@@ -773,18 +781,22 @@ Whitelist by construction — only target-schema fields can exist in the
 output, so accidental `passwordHash` leaks are impossible:
 
 ```ts
-const toDTO = JIT.mapper(UserEntity, PublicUser, {
+const toDTO = JIT.map(UserEntity, PublicUser, {
   name: { from: "fullName" }, // rename
   label: (user) => `${user.name}#${user.id}`, // computed
-}).get("map", "many");
+});
+const toManyDTOs = JIT.map.many(UserEntity, PublicUser, {
+  name: { from: "fullName" },
+  label: (user) => `${user.name}#${user.id}`,
+});
 
-toDTO.map(entity); // ~7ns — faster than a hand-written literal
-toDTO.many(entities); // fused indexed loop over the list
+toDTO(entity);
+toManyDTOs(entities); // fused indexed loop over the list
 ```
 
 Selection is physical code generation, not an object projection after compile:
-`.get("map")` emits no bulk loop, while `.get("many")` emits only the fused
-indexed loop. Direct `.map` and `.many` access remains lazy and compiles that
+`JIT.map` emits no bulk loop, while `JIT.map.many` emits only the fused indexed
+loop. Artifact creation remains lazy and compiles that
 single operation on first use.
 
 ## Security
@@ -810,14 +822,14 @@ through prepared parameters.
 const json = JIT.serializer(User);
 
 json.stringify(user); // static keys baked in; escape fast path
-json.parse(body); // JSON.parse + compiled validation
+json.parse(body); // schema-directed decode + inline validation when supported
 
-const stringifyUser = JIT.json(User).stringify().compile();
-const parseUserJson = JIT.json(User).parse().compile();
+const stringifyUser = JIT.json.stringify(User);
+const parseUserJson = JIT.json.parse(User).validate();
 
-const stringifyChunks = JIT.json(UserList)
-  .stringifyChunks({ chunkBytes: 16 * 1024 })
-  .compile();
+const stringifyChunks = JIT.json.stringifyChunks(UserList, {
+  chunkBytes: 16 * 1024,
+});
 
 for (const chunk of stringifyChunks(users)) writable.write(chunk);
 ```
@@ -825,7 +837,7 @@ for (const chunk of stringifyChunks(users)) writable.write(chunk);
 Validation issues can also be consumed through an iterator:
 
 ```ts
-const issues = JIT.validate(User).issues().compile();
+const issues = JIT.validate.issues(User);
 for (const issue of issues(input)) log(issue);
 ```
 
@@ -883,20 +895,18 @@ const UserSchema = JIT.object({
   role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
 });
 
-const selected = JIT.validator(UserSchema).get("is", "parse");
-
 export const User = JIT.compile(UserSchema, {
-  is: selected.is,
-  parse: selected.parse,
+  is: JIT.validate.is(UserSchema),
+  parse: JIT.validate.parse(UserSchema),
   findAdmins: JIT.query(UserList)
     .filter((q) => q.eq("role", "admin"))
     .compile(),
-  toDTO: JIT.mapper(UserSchema, PublicUser).get("many"),
+  toDTO: JIT.map.many(UserSchema, PublicUser, {}),
 });
 
 User.is(input);
 User.findAdmins(users); // your query, no prefixes, fully typed
-User.toDTO.many(users);
+User.toDTO(users);
 User.clone(x); // ✗ does not exist — not requested, not compiled
 ```
 
@@ -968,17 +978,17 @@ const UserSchema = JIT.object({
   role: JIT.string(),
 });
 
-const selected = JIT.validator(UserSchema).get("parse");
-const isUser = JIT.validate(UserSchema).is().compile();
+const isUser = JIT.validate.is(UserSchema);
+const parseUser = JIT.validate.parse(UserSchema);
 
 // Standalone functions keep their declared export names exactly.
 export const User_is = isUser;
-export const User_parse = selected.parse;
+export const User_parse = parseUser;
 
 // Object-style aggregation exports one object: User.is, User.parse, ...
 export const User = JIT.compile(UserSchema, {
-  is: selected.is,
-  parse: selected.parse,
+  is: isUser,
+  parse: parseUser,
   findAdmins: JIT.query(JIT.array(UserSchema))
     .filter((q) => q.eq("role", "admin"))
     .compile(),
@@ -1177,22 +1187,21 @@ Runtime compilation is cached by schema identity. Declare schemas and compiled
 operations once at module scope, then reuse the resulting function:
 
 ```ts
-const { is, parse } = JIT.validator(User).get("is", "parse");
+const is = JIT.validate.is(User);
+const parse = JIT.validate.parse(User);
 
 export function receive(input: unknown) {
   return is(input) ? parse(input) : undefined;
 }
 ```
 
-`cache: true` is the default. Supported compiler factories accept
-`{ cache: false }` for cold-compilation benchmarks and deterministic tests:
+Capability artifacts cache automatically. Cold-compilation benchmarks and
+deterministic tests reset the compiler cache explicitly:
 
 ```ts
-JIT.validator(User, { is: true, cache: false });
-JIT.mapper(Source, Target, overrides, { cache: false });
-JIT.serializer(User, { cache: false });
-JIT.codec(User, { version: 2, cache: false });
-JIT.stream(User, { format: "ndjson", cache: false });
+Compiler.clearCompileCache();
+const isUser = JIT.validate.is(User);
+isUser.compile(); // optional artifact warm-up
 ```
 
 Do not disable the cache in request paths. Hash and index caches have a

@@ -804,13 +804,20 @@ function query(input) {
 return query;
 })());
 })();
-const toPublicUser = /*#__PURE__*/ ((mapper) => mapper.map)((() => {
-  return ({
-    map: function map(source) {
-      return { "id": source.id, "name": source.name, "role": source.role };
-    }
-  });
-})());
+const toPublicUser = /*#__PURE__*/ (() => {
+  const toPublicUser_mapper = /*#__PURE__*/ (() => {
+    return ({
+      map: function map(source) {
+        return { "id": source.id, "name": source.name, "role": source.role };
+      }
+    });
+  })();
+  return (input) => {
+    let value = input;
+    value = toPublicUser_mapper.map(value);
+    return value;
+  };
+})();
 const visitActiveUsers = /*#__PURE__*/ (() => {
   const __q0 = true;
   return ((function () {

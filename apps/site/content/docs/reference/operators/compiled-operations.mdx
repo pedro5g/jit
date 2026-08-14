@@ -9,11 +9,11 @@ application imports.
 ## Validation
 
 ```ts
-JIT.validate(User).is().compile();
-JIT.validate(User).parse().compile();
-JIT.validate(User).safeParse().compile();
-JIT.validate(User).parseAsync().compile();
-JIT.validate(User).issues().compile();
+JIT.validate.is(User);
+JIT.validate.parse(User);
+JIT.validate.safeParse(User);
+JIT.validate.parseAsync(User);
+JIT.validate.issues(User);
 ```
 
 `is` is fail-fast. `safeParse` collects issues and transformed output. `parse`
@@ -91,9 +91,9 @@ the compiled immutable updater. See [reactive updates](/docs/runtime/reactive-up
 ## JSON and codecs
 
 ```ts
-JIT.json(User).stringify().compile();
-JIT.json(User).parse().compile();
-JIT.json(Users).stringifyChunks().compile();
+JIT.json.stringify(User);
+JIT.json.parse(User).validate();
+JIT.json.stringifyChunks(Users);
 JIT.codec(Event, { version: 2 });
 ```
 
@@ -104,18 +104,20 @@ a version byte; binary rowsets are process-local and may evolve independently.
 ## Mapper and transform
 
 ```ts
-const toPublic = JIT.mapper(UserEntity, PublicUser, {
+const toPublic = JIT.map(UserEntity, PublicUser, {
   name: { from: "fullName" },
-}).get("map", "many");
+});
+const toPublicMany = JIT.map.many(UserEntity, PublicUser, {
+  name: { from: "fullName" },
+});
 
-toPublic.map(entity);
-toPublic.many(entities);
+toPublic(entity);
+toPublicMany(entities);
 ```
 
-Mapper output is whitelisted by the destination schema. `many()` emits one
-bulk indexed loop. Selection controls code generation itself: `.get("map")`
-omits `many`, `.get("many")` omits `map`, and direct property access compiles
-that operation lazily. `JIT.transform` provides field operations and selection
+Mapper output is whitelisted by the destination schema. `JIT.map.many()` emits
+one bulk indexed loop while `JIT.map()` omits the array loop entirely.
+`JIT.transform` provides field operations and selection
 over one source schema.
 
 `JIT.dto(Target)` aggregates inbound validation/transport operations.
@@ -138,11 +140,9 @@ responsibilities.
 ## Aggregated exports
 
 ```ts
-const selected = JIT.validator(UserSchema).get("is", "parse");
-
 export const User = JIT.compile(UserSchema, {
-  is: selected.is,
-  parse: selected.parse,
+  is: JIT.validate.is(UserSchema),
+  parse: JIT.validate.parse(UserSchema),
   equal: JIT.equal(UserSchema),
 });
 ```

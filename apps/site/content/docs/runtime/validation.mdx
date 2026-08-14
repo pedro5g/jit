@@ -74,10 +74,11 @@ wrapper:
 const parseUserJson = JIT.json.parse(User).validate();
 ```
 
-This lowers to one generated execution function. It calls native `JSON.parse`
-and immediately invokes the schema-specific validator; see
-[composable execution](/docs/runtime/composable-execution) for the physical
-fusion boundaries.
+This lowers to one generated execution function. Supported schemas use a
+schema-directed scanner that validates as it consumes JSON tokens; unsupported
+semantics retain the compatibility parser + validator backend. See
+[composable execution](/docs/runtime/composable-execution) for support and
+physical fusion boundaries.
 
 ## Standard Schema
 

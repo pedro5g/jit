@@ -21,9 +21,9 @@ export const UserSchema = JIT.object({
   email: JIT.string().email(),
 });
 
-export const isUser = JIT.validate(UserSchema).is().compile();
-export const parseUser = JIT.validate(UserSchema).parse().compile();
-export const stringifyUser = JIT.json(UserSchema).stringify().compile();
+export const isUser = JIT.validate.is(UserSchema);
+export const parseUser = JIT.validate.parse(UserSchema);
+export const stringifyUser = JIT.json.stringify(UserSchema);
 ```
 
 After `jit generate`, standalone exports stay flat:
@@ -38,8 +38,8 @@ If the developer wants an aggregated object, group explicit functions:
 
 ```ts
 const selected = {
-  is: JIT.validate(UserSchema).is().compile(),
-  parse: JIT.validate(UserSchema).parse().compile(),
+  is: JIT.validate.is(UserSchema),
+  parse: JIT.validate.parse(UserSchema),
 };
 
 export const User = JIT.compile(UserSchema, selected);
@@ -59,7 +59,7 @@ User.parse(input);
 Standalone exports preserve the exact export name:
 
 ```ts
-export const isUser = JIT.validate(User).is().compile();
+export const isUser = JIT.validate.is(User);
 ```
 
 emits:

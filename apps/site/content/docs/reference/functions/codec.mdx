@@ -14,7 +14,7 @@ const IsoDate = JIT.codec(JIT.iso.datetime(), JIT.date(), {
   encode: (value) => value.toISOString(),
 });
 
-const parseDate = JIT.validator(IsoDate).parse;
+const parseDate = JIT.parse(IsoDate);
 ```
 
 The input and output schemas make the direction explicit:

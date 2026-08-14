@@ -4,6 +4,7 @@ import { compileDiff } from "../compiler/diff.js";
 import { compileEqual } from "../compiler/equal.js";
 import { compileFormat } from "../compiler/format.js";
 import { compileHash } from "../compiler/hash.js";
+import { jsonDecoderSupport, tryCompileJsonDecoder } from "../compiler/json-decode.js";
 import { compileMask } from "../compiler/mask.js";
 import { compileSanitize } from "../compiler/sanitize.js";
 import { compileSerialize } from "../compiler/serialize.js";
@@ -123,7 +124,7 @@ export function compile<
     schema: unwrapped,
     ops: Object.freeze([...ops]),
   };
-  const validatorOps = collectValidatorOps(ops);
+  const validatorOps = collectValidatorOps(ops, jsonDecoderSupport(unwrapped).supported);
   let validator: ReturnType<typeof compileValidatorSelection<TSchema, readonly ValidatorOp[]>> | undefined;
   const getValidator = () => {
     validator = validator ?? compileValidatorSelection(unwrapped as TSchema, validatorOps);
@@ -148,8 +149,9 @@ export function compile<
         selection.safeParseAsync = getValidator().safeParseAsync;
         break;
       case "fromJSON": {
-        const parse = getValidator().parse;
-        const fromJSON = ((json: string) => parse(JSON.parse(json)) as TValue) as (json: string) => TValue;
+        const decoder = tryCompileJsonDecoder<TValue>(unwrapped);
+        const fromJSON =
+          decoder ?? (((json: string) => getValidator().parse(JSON.parse(json)) as TValue) as (json: string) => TValue);
 
         registerArtifact(fromJSON as object, {
           kind: "operation",
@@ -244,14 +246,14 @@ function isCompileOp(value: string): value is CompileOp {
   return (COMPILE_OPS as readonly string[]).includes(value);
 }
 
-function collectValidatorOps(ops: readonly CompileOp[]): readonly ValidatorOp[] {
+function collectValidatorOps(ops: readonly CompileOp[], hasJsonDecoder: boolean): readonly ValidatorOp[] {
   const validatorOps = new Set<ValidatorOp>();
 
   for (const op of ops) {
     if (op === "is" || op === "parse" || op === "safeParse" || op === "parseAsync" || op === "safeParseAsync") {
       validatorOps.add(op);
     }
-    if (op === "fromJSON") validatorOps.add("parse");
+    if (op === "fromJSON" && !hasJsonDecoder) validatorOps.add("parse");
   }
   return [...validatorOps];
 }

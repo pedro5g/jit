@@ -12,9 +12,10 @@ const body = UserJson.stringify(user);
 const parsed = UserJson.parse(body);
 ```
 
-`JIT.serializer(schema)` is the compact runtime facade for callers that always
-need both directions. `stringify` is schema-specialized; `parse` runs native
-`JSON.parse` and then the compiled validator.
+`JIT.serializer(schema)` is the retained compact runtime facade for callers
+that always need both directions. `stringify` is schema-specialized;
+supported `parse` schemas use the same token-level decode + validation backend
+as the composable API.
 
 ## serializer or json?
 
@@ -24,9 +25,10 @@ Use `serializer` when both methods belong to one runtime boundary:
 export const UserJson = JIT.serializer(User);
 ```
 
-Use `JIT.json(User).stringify().compile()` or `.parse().compile()` when each
-operation must be exported and tree-shaken independently, especially for AOT.
-Use `.stringifyChunks()` for very large arrays.
+For new code, use `JIT.json.stringify(User)` and
+`JIT.json.parse(User).validate()` when each operation must be exported and
+tree-shaken independently, especially for AOT. Use
+`JIT.json.stringifyChunks()` for very large arrays.
 
 ## Cache
 
@@ -40,10 +42,10 @@ Serialization does not perform authorization or PII masking. Apply
 `JIT.mask(User)` or map to a public DTO before stringifying:
 
 ```ts
-const toPublic = JIT.mapper(User, PublicUser).get("map");
+const toPublic = JIT.map(User, PublicUser, {});
 const PublicJson = JIT.serializer(PublicUser);
 
-PublicJson.stringify(toPublic.map(user));
+PublicJson.stringify(toPublic(user));
 ```
 
 ## Transport contract

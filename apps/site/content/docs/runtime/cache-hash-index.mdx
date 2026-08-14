@@ -20,7 +20,7 @@ hashes and indexes remove repeated traversal work.
 | Situation                                           | Recommended configuration                                                  |
 | --------------------------------------------------- | -------------------------------------------------------------------------- |
 | Normal runtime use                                  | Keep the default compile cache and compile at module scope                 |
-| Only `is` and `parse` are needed                    | `JIT.validator(User).get("is", "parse")`                                   |
+| Only `is` and `parse` are needed                    | `JIT.validate.is(User)` and `JIT.validate.parse(User)`                       |
 | Measure cold compilation                            | Pass `{ cache: false }` to the supported factory                           |
 | Repeated equality for nested immutable objects      | Add `.hash()` to the schema                                                |
 | Repeated equality for large immutable entity arrays | Use `.keyed("id")` or `.entity({ key: "id" }).indexBy("id")`               |
@@ -42,7 +42,7 @@ const User = JIT.object({
 });
 
 // Compile once when the module loads.
-const isUser = JIT.validator(User).get("is").is;
+const isUser = JIT.validate.is(User);
 
 export function acceptUser(input: unknown) {
   return isUser(input) ? input : undefined;
@@ -79,7 +79,8 @@ operations can cache the applied function itself. No caller-specific value is
 stored in the generated source.
 
 ```ts
-const { is, parse } = JIT.validator(User).get("is", "parse");
+const is = JIT.validate.is(User);
+const parse = JIT.validate.parse(User);
 const equalUser = JIT.equal(User).compile();
 const cloneUser = JIT.clone(User).compile();
 const hashUser = JIT.hash(User).compile();
@@ -110,54 +111,19 @@ const findGrace = findNamed("Grace");
 The same rule applies to mapper callbacks. The template is reusable, while
 the callback bindings remain local to the returned mapper.
 
-## The `cache` option
+## Cache diagnostics
 
-`cache: true` is the default and normally should be omitted. Use
-`cache: false` only to measure cold compilation, test cache behavior or inspect
-an isolated compilation. It bypasses that compilation call; it does not clear
-entries created previously.
-
-### Validator
+Capability artifacts cache automatically and keep cache policy out of the
+public dataflow syntax. Application code creates them once at module scope:
 
 ```ts
-// Default: selected functions are cached.
-const validator = JIT.validator(User, {
-  is: true,
-  parse: true,
-});
-
-// Diagnostic/cold-compile mode: selected functions bypass the cache.
-const coldValidator = JIT.validator(User, {
-  is: true,
-  parse: true,
-  cache: false,
-});
-
-// `.get()` preserves the facade's cache policy.
-const coldSelection = JIT.validator(User, { cache: false }).get("is", "parse");
+const isUser = JIT.validate.is(User);
+const mapPublicUser = JIT.map(User, PublicUser, {});
 ```
 
-The selection flags also accept `safeParse`, `parseAsync` and
-`safeParseAsync`. Aliases `asyncParse` and `asyncSafeParse` are supported for
-the two asynchronous selections.
-
-### Mapper
-
-Mapper cache options are the argument after the override object:
-
-```ts
-const PublicUser = JIT.object({ id: JIT.number(), name: JIT.string() });
-
-const cachedMapper = JIT.mapper(User, PublicUser).get("map", "many");
-
-const coldMapper = JIT.mapper(User, PublicUser, {}, { cache: false }).get(
-  "map",
-  "many",
-);
-```
-
-Keep the explicit `{}` when there are no field overrides but a cache option is
-needed. This makes the position of both configurations unambiguous.
+Tests and benchmark harnesses can call `Compiler.clearCompileCache()` before
+creating fresh artifacts. `.compile()` remains an optional per-artifact
+warm-up; normal calls compile lazily.
 
 ### Serializer, binary codec and security functions
 

@@ -115,7 +115,7 @@ contract permits true streaming.
 ## Incremental Validation Issues
 
 ```ts
-const issues = JIT.validate(User).issues().compile();
+const issues = JIT.validate.issues(User);
 
 for (const issue of issues(input)) {
   log(issue.path, issue.code, issue.message);
@@ -131,9 +131,9 @@ emitter may remove that internal vector for extremely large invalid trees.
 ## Chunked JSON
 
 ```ts
-const stringifyChunks = JIT.json(Users)
-  .stringifyChunks({ chunkBytes: 16 * 1024 })
-  .compile();
+const stringifyChunks = JIT.json.stringifyChunks(Users, {
+  chunkBytes: 16 * 1024,
+});
 
 for (const chunk of stringifyChunks(users)) writable.write(chunk);
 ```

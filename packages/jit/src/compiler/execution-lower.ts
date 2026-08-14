@@ -1,6 +1,7 @@
 import { JITError, JITValidationError } from "../errors/index.js";
 import { emitCodec } from "./codec/emit-codec.js";
 import type { ExecutionPlan } from "./execution-plan.js";
+import { tryEmitJsonDecoder } from "./json-decode.js";
 import { buildMapperPlan, type MapperOverridesInput } from "./mapper/build-mapper-plan.js";
 import { emitMapperSource } from "./mapper.js";
 import { emitMaskSource } from "./mask.js";
@@ -87,9 +88,36 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
       case "value":
       case "to.array":
         break;
-      case "json.decode":
+      case "json.decode": {
+        const validation = stages[index + 1];
+
+        if (validation?.kind === "validate" && validation.operation === "parse" && stage.schema === validation.schema) {
+          const decoder = tryEmitJsonDecoder(stage.schema);
+
+          if (decoder) {
+            const decoderName = emitBoundBlock(
+              "jsonDecoder",
+              decoder.bindingNames,
+              decoder.bindingValues,
+              decoder.source,
+              true
+            );
+            const error = bind(JITValidationError);
+            const caught = `__caught${valueIndex++}`;
+
+            body.push("try {");
+            body.push(`  value = ${decoderName}(value);`);
+            body.push(`} catch (${caught}) {`);
+            body.push(`  if (Array.isArray(${caught})) throw new ${error}(${caught});`);
+            body.push(`  throw ${caught};`);
+            body.push("}");
+            index++;
+            break;
+          }
+        }
         body.push("value = JSON.parse(value);");
         break;
+      }
       case "binary.decode": {
         const codec = emitCodec(stage.schema);
         const codecName = emitBoundBlock("codec", codec.bindingNames, codec.bindingValues, codec.source);

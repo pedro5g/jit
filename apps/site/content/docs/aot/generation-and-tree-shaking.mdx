@@ -4,14 +4,12 @@ description: Export grouped objects or standalone functions without shipping the
 ---
 
 ```ts
-const selected = JIT.validator(UserSchema).get("is", "parse");
-
 export const User = JIT.compile(UserSchema, {
-  is: selected.is,
-  parse: selected.parse,
+  is: JIT.validate.is(UserSchema),
+  parse: JIT.validate.parse(UserSchema),
 });
 
-export const User_is = selected.is;
+export const User_is = JIT.validate.is(UserSchema);
 ```
 
 Grouped declarations generate one object import:

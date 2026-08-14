@@ -1,4 +1,7 @@
-export { type CompileCacheOptions, clearCompileCache } from "../runtime/cache/compile-cache.js";
+export {
+  type CompileCacheOptions,
+  clearCompileCache,
+} from "../runtime/cache/compile-cache.js";
 export * from "./binary-rowset.js";
 export * from "./clone/index.js";
 export * from "./clone.js";
@@ -18,6 +21,7 @@ export * from "./ir/optimizer/cost/optimize-cost.js";
 export * from "./ir/optimizer/optimize-ir.js";
 export * from "./ir/scope.js";
 export * from "./json-chunks.js";
+export * from "./json-decode.js";
 export * from "./lazy-query.js";
 export * from "./mapper/build-mapper-plan.js";
 export * from "./mapper.js";

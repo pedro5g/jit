@@ -39,10 +39,10 @@ A terminal `.map(target, overrides).to.json()` maps and serializes each item
 in one output loop, so it does not allocate a mapped collection. Individual
 target objects may still be needed for mapper callbacks or nested values.
 
-There are deliberate materialization boundaries: native `JSON.parse`, binary
-decode, query output, mapper batches, and serializers must produce their
-semantic output. The planner never reorders observable operations just to make
-a plan look fused.
+There are deliberate materialization boundaries: schema-directed JSON decode,
+binary decode, query output, mapper batches, and serializers must produce
+their semantic output. The planner never reorders observable operations just
+to make a plan look fused.
 
 ## JSON decode plus validation
 
@@ -50,11 +50,21 @@ a plan look fused.
 const parseUser = JIT.json.parse(User).validate();
 ```
 
-This is one generated public callable. It calls the engine-native
-`JSON.parse`, then immediately runs the schema-specific validator in that same
-generated execution function. JIT intentionally does not replace native JSON
-parsing with a JavaScript token parser without a benchmark proving that it
-wins; the decoded JavaScript value is therefore a real boundary.
+For supported JSON-safe schemas this is one generated schema-directed scanner.
+It consumes tokens, builds fields/items, and applies validation checks and
+declarative transforms during the same traversal; its hot source contains no
+`JSON.parse`. Runtime JIT and import-free AOT use the same emitter.
+
+The compiler only selects this path when it can preserve the complete schema
+semantics. Refines, callback pipes/transforms, coercions, unions, and other
+not-yet-lowered nodes retain the explicit native parse + compiled-validator
+compatibility path. `Compiler.jsonDecoderSupport(schema)` reports why. The
+decoded JavaScript value remains a real materialization boundary.
+
+Performance is shape-dependent: the checked-in `pnpm bench:json-decode`
+suite compares small objects and large arrays against `JSON.parse` plus JIT,
+generated Typia, and Zod validation. Parse-only and fail-fast baselines that do
+less work are labeled as non-comparable.
 
 ## Transform and update
 

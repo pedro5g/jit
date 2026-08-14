@@ -35,8 +35,8 @@ const User = JIT.object({
   role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
 });
 
-const isUser = JIT.validate(User).is().compile();
-const parseUser = JIT.validate(User).parse().compile();
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
 ```
 
 There is no field form or predefined schema. Monaco loads the package

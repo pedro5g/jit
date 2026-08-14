@@ -50,12 +50,11 @@ const UserSchema = JIT.object({
   role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
 });
 const UsersSchema = JIT.array(UserSchema);
-const selected = JIT.validator(UserSchema).get("is", "parse");
 
 // Grouped import: User.is(), User.parse().
 export const User = JIT.compile(UserSchema, {
-  is: selected.is,
-  parse: selected.parse,
+  is: JIT.validate.is(UserSchema),
+  parse: JIT.validate.parse(UserSchema),
 });
 
 // Standalone exports keep these declaration names exactly.

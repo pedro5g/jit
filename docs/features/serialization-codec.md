@@ -19,7 +19,7 @@ const User = JIT.object({
   active: JIT.boolean(),
 });
 
-const stringifyUser = JIT.json(User).stringify().compile();
+const stringifyUser = JIT.json.stringify(User);
 
 stringifyUser({ id: 1, name: "Ada", active: true });
 ```
@@ -27,7 +27,7 @@ stringifyUser({ id: 1, name: "Ada", active: true });
 In AOT declarations:
 
 ```ts
-export const stringifyUser = JIT.json(User).stringify().compile();
+export const stringifyUser = JIT.json.stringify(User);
 ```
 
 Generated output imports as:
@@ -39,13 +39,15 @@ import { stringifyUser } from "@jit/generated";
 ## JSON Parse With Validation
 
 ```ts
-const parseUserJson = JIT.json(User).parse().compile();
+const parseUserJson = JIT.json.parse(User).validate();
 
 const user = parseUserJson('{"id":1,"name":"Ada","active":true}');
 ```
 
-This parses JSON and validates the resulting value. It is useful at external
-boundaries where JSON input must become trusted domain data.
+For supported schemas this parses tokens and validates each field/item in the
+same generated traversal, without native `JSON.parse`. Schemas whose full
+semantics are not lowered use the compatibility parser + validator path. It is
+useful at external boundaries where JSON input must become trusted domain data.
 
 ## Binary Codec
 
@@ -113,8 +115,8 @@ together:
 
 ```ts
 export const User = JIT.compile(UserSchema, {
-  is: JIT.validate(UserSchema).is().compile(),
-  stringify: JIT.json(UserSchema).stringify().compile(),
+  is: JIT.validate.is(UserSchema),
+  stringify: JIT.json.stringify(UserSchema),
 });
 ```
 

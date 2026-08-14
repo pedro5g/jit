@@ -62,7 +62,7 @@ Accepts a readonly value tuple or enum-like object and infers the value union.
 
 ```ts
 const UploadedFile = JIT.file();
-const isFile = JIT.validate(UploadedFile).is().compile();
+const isFile = JIT.validate.is(UploadedFile);
 ```
 
 Validates native `File` instances. Availability depends on the host runtime;

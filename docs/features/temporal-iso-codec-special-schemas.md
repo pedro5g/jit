@@ -183,11 +183,11 @@ native support.
 
 ## JSON Value
 
-Use `JIT.json()` to validate JSON-encodable values:
+Use `JIT.json.value()` to validate JSON-encodable values:
 
 ```ts
-const JsonValue = JIT.json();
-const isJson = JIT.validate(JsonValue).is().compile();
+const JsonValue = JIT.json.value();
+const isJson = JIT.validate.is(JsonValue);
 ```
 
 This is useful at storage, message, or RPC boundaries where unknown values must

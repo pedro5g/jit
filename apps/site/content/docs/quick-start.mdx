@@ -82,9 +82,9 @@ const PublicUsers = JIT.json
 PublicUsers(requestBody);
 ```
 
-The final callable lowers the whole descriptor once. Native `JSON.parse` and
-the schema-specific validator run in the same generated execution function;
-adjacent query stages share one indexed loop. Add `.transform(target, fields)`,
+The final callable lowers the whole descriptor once. Supported JSON schemas
+decode and validate in one generated token traversal; adjacent query stages
+share one indexed loop. Add `.transform(target, fields)`,
 `.sanitize()`, `.mask()`, or `.map(target, overrides)` as needed. See
 [composable execution](/docs/runtime/composable-execution) for exact fusion
 and allocation boundaries.

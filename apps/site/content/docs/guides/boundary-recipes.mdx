@@ -12,7 +12,7 @@ const CreateUser = JIT.object({
   birthday: JIT.iso.date(),
 }).strict();
 
-const parse = JIT.json(CreateUser).parse().compile();
+const parse = JIT.json.parse(CreateUser).validate();
 const input = parse(await request.text());
 ```
 
@@ -82,9 +82,9 @@ as a discriminated union instead of stacking conditions.
 
 ```ts
 const PublicUser = User.pick("id", "name", "avatarUrl");
-const toPublic = JIT.mapper(User, PublicUser).get("many");
+const toPublic = JIT.map.many(User, PublicUser, {});
 
-return Response.json(toPublic.many(users));
+return Response.json(toPublic(users));
 ```
 
 Destination-schema whitelisting prevents accidental password/token leakage.

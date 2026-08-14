@@ -21,11 +21,9 @@ validator where possible.
 ## Compiled object aggregation
 
 ```ts
-const validation = JIT.validator(User).get("is", "parse");
-
 export const UserRuntime = JIT.compile(User, {
-  is: validation.is,
-  parse: validation.parse,
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
   equal: JIT.equal(User),
   findAdmins: JIT.query(JIT.array(User))
     .filter((q) => q.eq("role", "admin"))

@@ -6,7 +6,8 @@ development and generated production builds.
 
 ## API
 
-Use the operation builder when you want a single compiled function:
+Use the capability namespace (or the common root aliases) when you want one
+callable artifact:
 
 ```ts
 import { JIT } from "@jit-compiler/jit/runtime";
@@ -17,16 +18,20 @@ const User = JIT.object({
   email: JIT.string().email(),
 });
 
-const isUser = JIT.validate(User).is().compile();
-const parseUser = JIT.validate(User).parse().compile();
-const safeParseUser = JIT.validate(User).safeParse().compile();
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.parse(User);
+const safeParseUser = JIT.safeParse(User);
 ```
 
-Use `JIT.validator(schema).get(...)` when selecting several validator
-functions at once:
+Use `JIT.compile(schema, { ... })` when several operations should ship as one
+object:
 
 ```ts
-const UserValidator = JIT.validator(User).get("is", "parse", "safeParse");
+const UserValidator = JIT.compile(User, {
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
+  safeParse: JIT.validate.safeParse(User),
+});
 
 UserValidator.is(input);
 UserValidator.parse(input);
@@ -37,11 +42,9 @@ Use `JIT.compile(schema, { ... })` when you want an object-shaped runtime and
 AOT marker:
 
 ```ts
-const selected = JIT.validator(User).get("is", "parse");
-
 export const UserModel = JIT.compile(User, {
-  is: selected.is,
-  parse: selected.parse,
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
 });
 ```
 

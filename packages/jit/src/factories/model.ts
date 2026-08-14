@@ -4,6 +4,7 @@ import { compileDiff, type Diff } from "../compiler/diff.js";
 import { compileEqual, type Equal } from "../compiler/equal.js";
 import { compileFormat, type Format } from "../compiler/format.js";
 import { compileHash, type Hash } from "../compiler/hash.js";
+import { jsonDecoderSupport, tryCompileJsonDecoder } from "../compiler/json-decode.js";
 import { compileMask, type Mask } from "../compiler/mask.js";
 import { compileSanitize, type Sanitize } from "../compiler/sanitize.js";
 import { compileSerialize, type Serialize } from "../compiler/serialize.js";
@@ -113,7 +114,7 @@ export function model<TSchema extends ATS.AnyTypeSchema>(
       schema: unwrapped,
       ops: Object.freeze([...normalized]),
     };
-    const validatorOps = collectValidatorOps(normalized);
+    const validatorOps = collectValidatorOps(normalized, jsonDecoderSupport(unwrapped).supported);
     const validator =
       validatorOps.length > 0 ? compileValidatorSelection(unwrapped as TSchema, validatorOps) : undefined;
 
@@ -191,6 +192,9 @@ function compileModelOperation<TSchema extends ATS.AnyTypeSchema, TValue>(
     case "stringify":
       return compileSerialize(schema) as Serialize<TValue>;
     case "fromJSON": {
+      const decoder = tryCompileJsonDecoder<TValue>(schema);
+
+      if (decoder) return decoder;
       const parse = validator?.parse as ((value: unknown) => TValue) | undefined;
 
       if (!parse) throw new JITError("INVALID_OPERATION", "fromJSON requires the parse compiler");
@@ -230,12 +234,12 @@ function isValidatorOp(value: ModelOp): value is ValidatorOp {
   );
 }
 
-function collectValidatorOps(ops: readonly ModelOp[]): readonly ValidatorOp[] {
+function collectValidatorOps(ops: readonly ModelOp[], hasJsonDecoder: boolean): readonly ValidatorOp[] {
   const selected = new Set<ValidatorOp>();
 
   for (const op of ops) {
     if (isValidatorOp(op)) selected.add(op);
-    else if (op === "fromJSON") selected.add("parse");
+    else if (op === "fromJSON" && !hasJsonDecoder) selected.add("parse");
   }
   return [...selected];
 }

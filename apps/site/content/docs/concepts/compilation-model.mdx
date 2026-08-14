@@ -47,11 +47,12 @@ schema builders and compiler do not ship in the production bundle.
 - binary rowsets replace string discriminators and booleans with integer codes;
 - unused operations are never generated.
 
-Native `JSON.parse` remains a deliberate materialization boundary. JIT runs
-the generated validator immediately after it in the same execution callable
-rather than assuming a JavaScript token parser would be faster. Read the
-[composable execution guide](/docs/runtime/composable-execution) before
-interpreting “fused” as “zero allocation”.
+Supported adjacent JSON decode + parse validation uses an emitted
+schema-directed scanner, so fields and items are validated while their tokens
+are consumed. Unsupported semantics retain an explicit native parser plus
+compiled-validator fallback. Either backend materializes the decoded value;
+read the [composable execution guide](/docs/runtime/composable-execution)
+before interpreting “fused” as “zero allocation”.
 
 Compile cost and execution cost are reported separately in benchmarks. A complicated
 optimization is accepted only when the hot-path result justifies it.

@@ -111,6 +111,7 @@ describe("composable capability API", () => {
     ]);
     expect(source).toContain("return function execution(input)");
     expect(source).not.toContain("previous(value)");
+    expect(source).not.toContain("JSON.parse");
     expect(
       pipeline(JSON.stringify([{ id: 1, role: "admin", name: " Ada ", email: "ada@math.org", note: "<b>ok</b>" }]))
     ).toBe(JSON.stringify([{ id: 1, name: "PUBLIC", email: "***.org", note: "ok" }]));

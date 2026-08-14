@@ -139,6 +139,8 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(source).toContain("const User_is");
     expect(source).toContain("const User_parse");
     expect(source).toContain("const User_fromJSON");
+    expect(source).toContain("function decode(input)");
+    expect(source).not.toContain("JSON.parse");
     expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_is/);

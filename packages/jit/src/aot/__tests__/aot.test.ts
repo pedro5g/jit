@@ -113,6 +113,24 @@ describe("JIT AOT generate", () => {
     expect(declarations).not.toContain("readonly parse:");
   });
 
+  it("emits fromJSON as only the schema-directed decoder when selected alone", async () => {
+    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
+    const Json = JIT.model(User, { fromJSON: true });
+
+    AOT.generate({ schemas: { Json }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+
+    expect(source).toContain("function decode(input)");
+    expect(source).not.toContain("JSON.parse");
+    expect(source).not.toContain("safeParse");
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      Json: { fromJSON: (json: string) => { id: number; name: string } };
+    };
+
+    expect(generated.Json.fromJSON('{"id":1,"name":"Ada"}')).toEqual({ id: 1, name: "Ada" });
+  });
+
   it("should emit one self-contained and directly typed TypeScript module", async () => {
     const UserSchema = JIT.object({
       id: JIT.number().int32(),
@@ -376,6 +394,7 @@ describe("JIT AOT generate", () => {
     const source = readFileSync(join(outDir, "index.js"), "utf8");
 
     expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).toContain("function decode(input)");
     expect(result.skipped).toHaveLength(0);
 
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {

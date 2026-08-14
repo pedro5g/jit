@@ -28,16 +28,16 @@ same immutable descriptor for diagnostics and AOT generation.
 Every stage has an input/output representation, schema, effects, and facts it
 establishes. This lets runtime and AOT use the same semantic program.
 
-| Stage | Input → output | Lowering |
-| --- | --- | --- |
-| `json.decode` | JSON text → value | Native `JSON.parse` in the generated entry function. |
-| `validate` | value → validated value | Schema-specific validator emitted in that entry function. |
-| `query` | array → array | Adjacent `filter`/`select` nodes collapse into one indexed query loop. |
-| `map` | value or array → target | Shape-specific mapper; `many` is an indexed loop. |
-| `transform` | value or array → target | Per-field transform source; collection mode is an indexed loop. |
-| `update` | value or array → same schema | Immutable structural update; a static patch is bound once. |
-| `security` | value or array → same schema | Compiled `sanitize` or PII `mask` rewrite. |
-| `to.json` / `to.binary` | value → boundary text/bytes | Specialized serializer or codec. |
+| Stage                   | Input → output               | Lowering                                                                                                           |
+| ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `json.decode`           | JSON text → value            | Schema-directed scanner for a supported adjacent parse validation; explicit native fallback otherwise.             |
+| `validate`              | value → validated value      | Runs during token consumption in the specialized JSON backend, or through the emitted validator for other sources. |
+| `query`                 | array → array                | Adjacent `filter`/`select` nodes collapse into one indexed query loop.                                             |
+| `map`                   | value or array → target      | Shape-specific mapper; `many` is an indexed loop.                                                                  |
+| `transform`             | value or array → target      | Per-field transform source; collection mode is an indexed loop.                                                    |
+| `update`                | value or array → same schema | Immutable structural update; a static patch is bound once.                                                         |
+| `security`              | value or array → same schema | Compiled `sanitize` or PII `mask` rewrite.                                                                         |
+| `to.json` / `to.binary` | value → boundary text/bytes  | Specialized serializer or codec.                                                                                   |
 
 The resulting hot call is one generated `execution(input)` function with
 emitted helpers in its lexical scope. It does not invoke a chain of
@@ -45,18 +45,29 @@ emitted helpers in its lexical scope. It does not invoke a chain of
 
 ## JSON parsing and validation
 
-`JIT.json.parse(schema).validate()` deliberately uses the engine's native
-`JSON.parse`, then passes its result immediately to the schema-specific
-validator in the same generated execution function. Native parsers are highly
-optimized C++/Rust VM code in supported engines; replacing them with a
-JavaScript token parser would add a second parser and is not assumed to be
-faster.
+`JIT.json.parse(schema).validate()` inspects the complete schema before
+lowering. Objects, arrays, tuples, records, JSON primitives, literal/enum
+values, the common nullable/optional/default/readonly wrappers, and their
+supported declarative checks use an emitted scanner. Strings, numbers, fields,
+array items, defaults, and unknown-key policies are checked or applied as the
+corresponding token is consumed. The generated hot source contains no
+`JSON.parse` and throws the same `JITValidationError` shape after collecting
+validation issues.
 
-This guarantees one public callable and one lowering decision, but JSON text
-is still materialized into a JavaScript value before validation. That is a
-physical boundary, not a hidden claim of streaming or zero-allocation token
-validation. Use the streaming APIs for chunked input, and benchmark a
-schema-directed parser separately before adding one.
+The compiler selects this backend only when it can preserve the full parse
+semantics. Refines, callback transforms/pipes, coercions, unions and other
+not-yet-lowered nodes retain `JSON.parse` plus the generic compiled validator;
+`Compiler.jsonDecoderSupport(schema)` exposes the reason. This is an explicit
+compatibility boundary, not silent partial validation. The resulting value is
+still materialized. Chunked/incremental input remains the job of the streaming
+API.
+
+Performance is shape-dependent. Fixed small objects can beat `JSON.parse` plus
+validation because the second traversal disappears; native parsing can still
+win for large numeric arrays. `pnpm bench:json-decode` records both cases and
+also compares generated Typia validation and Zod, while labeling parse-only
+and fail-fast baselines that do less work. Backend expansion and selection must
+follow those measurements rather than a universal speed claim.
 
 ## Ordering and type safety
 
@@ -90,13 +101,13 @@ The current backend guarantees the following:
   JSON-output loop, avoiding the mapped collection allocation;
 - sources, validators, queries, mappers, transforms, updates, security
   rewrites, and sinks live in one generated execution closure;
-- `JSON.parse`, binary decode, query materialization, mapper batches,
-  collection transforms/updates/security rewrites, and serialization are
-  allocation boundaries when their semantics require output values.
+- schema-directed JSON decode, binary decode, query materialization, mapper
+  batches, collection transforms/updates/security rewrites, and serialization
+  are allocation boundaries when their semantics require output values.
 
 In particular, `filter(...).map(...)` can require a filtered array before the
-mapper's target object loop, and `JSON.parse` must materialize the input value.
-The terminal map/JSON backend avoids the target *array*, but mapper callbacks
+mapper's target object loop, and JSON decoding must materialize the input value.
+The terminal map/JSON backend avoids the target _array_, but mapper callbacks
 and nested target values can still require a per-item target object. A direct
 field-to-serializer emitter is a separate optimization and must not be claimed
 until it has measurements and regression coverage.
