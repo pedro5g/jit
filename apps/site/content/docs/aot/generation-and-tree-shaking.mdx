@@ -51,10 +51,10 @@ export const User = JIT.compile(UserSchema, {
 
 ## Generated output
 
-A project-local output writes ESM `index.js` plus matching declarations for
-standard relative imports. Output below `node_modules` writes ESM, CJS, an
-exports map and `sideEffects: false` for package-style imports. Optional
-subpath modules let route bundles import one declaration file without
+A project-local output writes exactly `index.js` or `index.ts`. Output below
+`node_modules` keeps that source format and adds an exports map with
+`sideEffects: false` for package-style imports. Optional subpath modules let
+route bundles import one declaration group without
 evaluating the root barrel.
 
 For source-first builds, the default `output.format: "typescript"` writes one

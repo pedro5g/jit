@@ -18,7 +18,7 @@
  * ```
  */
 
-/** Prisma-style AOT generator: writes pure `.js` + `.d.ts` modules for schemas. */
+/** AOT generator: writes one self-contained `.js` or directly typed `.ts` module. */
 export * as AOT from "./aot/index.js";
 /** Low-level compilers and IR utilities (`compileEqual`, `emitEqualSource`, IR builders/optimizer). */
 export * as Compiler from "./compiler/index.js";
@@ -28,7 +28,7 @@ export * as PipelineAST from "./core/ast/index.js";
 export * as AST from "./core/ats/index.js";
 /**
  * Resolves the TypeScript type of a schema or builder. Root-level export so
- * generated declarations can reference `import("@jit-compiler/jit").Typeof<...>`.
+ * generated TypeScript source and application code can resolve schema output.
  */
 export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
 /** Fluent builder chain internals (`createBuilder`, builder types). */

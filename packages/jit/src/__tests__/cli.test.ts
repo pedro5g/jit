@@ -44,7 +44,7 @@ describe("jit CLI", () => {
     expect(source).toContain('directory: "generated/jit"');
     expect(source).not.toContain("importSpecifier");
     expect(source).toContain('patterns: ["**/*.jit.ts"]');
-    expect(source).toContain('package: "@jit-compiler/jit"');
+    expect(source).not.toContain("types:");
     expect(source).toContain("subpathModules: true");
     expect(source).toContain("manifest: true");
     expect(source).toContain("plans: true");
@@ -57,7 +57,7 @@ describe("jit CLI", () => {
     expect(source).not.toContain("diagnostics:");
   });
 
-  it("should support JavaScript output without declaration files", async () => {
+  it("should configure ready-to-run JavaScript output", () => {
     const source = createConfigSource({
       format: "ts",
       force: true,
@@ -65,10 +65,25 @@ describe("jit CLI", () => {
       outDir: "generated",
       packageName: undefined,
       patterns: ["**/*.jit.ts"],
-      outputFormat: "javascript-only",
+      outputFormat: "javascript",
     });
 
-    expect(source).toContain('format: "javascript-only"');
+    expect(source).toContain('format: "javascript"');
+    expect(source).not.toContain(".d.ts");
+  });
+
+  it("should reject removed multi-artifact output formats", async () => {
+    const { runtime, stderr } = createRuntime();
+
+    expect(await main(["init", "--output-format", "javascript-only"], runtime)).toBe(1);
+    expect(stderr.join("")).toContain('expected "typescript" or "javascript"');
+  });
+
+  it("should reject the removed declaration inspection stage", async () => {
+    const { runtime, stderr } = createRuntime();
+
+    expect(await main(["inspect", "User", "--stage", "declaration"], runtime)).toBe(1);
+    expect(stderr.join("")).toContain('expected "plan" or "source"');
   });
 
   it("should refuse to overwrite an existing config unless forced", async () => {
@@ -137,9 +152,10 @@ describe("jit CLI", () => {
     expect(source).not.toContain('import("@jit-compiler/jit")');
     expect(existsSync(join(projectDir, "generated", "index.d.ts"))).toBe(false);
     expect(existsSync(join(projectDir, "generated", "user.ts"))).toBe(true);
-    expect(readFileSync(join(projectDir, "generated", "user.ts"), "utf8")).toBe(
-      'export { User_is } from "./index.js";\n'
-    );
+    const subpath = readFileSync(join(projectDir, "generated", "user.ts"), "utf8");
+    expect(subpath).toContain("const User_is:");
+    expect(subpath).toContain("export { User_is };");
+    expect(subpath).not.toContain('from "./index.js"');
     expect(existsSync(join(projectDir, "generated", "manifest.json"))).toBe(true);
     expect(existsSync(join(projectDir, "generated", "plans", "user.json"))).toBe(true);
   });

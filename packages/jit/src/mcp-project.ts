@@ -31,7 +31,6 @@ interface ResolvedAotProject {
   readonly packageName: string;
   readonly patterns: readonly string[];
   readonly clean: boolean;
-  readonly typesPackage: string;
   readonly outputFormat: AotOutputFormat;
   readonly emit?: GenerateEmitOptions;
 }
@@ -41,14 +40,13 @@ interface LegacyJitConfig {
   readonly outDir?: string;
   readonly packageName?: string;
   readonly clean?: boolean;
-  readonly compiler?: { readonly packageName?: string };
 }
 
 const DEFAULT_PACKAGE_NAME = "@jit/generated";
 const DEFAULT_OUT_DIR = "generated/jit";
 const MAX_RESOURCE_BYTES = 512 * 1024;
 const DOC_FILES = ["README.md", "packages/jit/README.md"] as const;
-const GENERATED_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".cts", ".json"]);
+const GENERATED_EXTENSIONS = new Set([".js", ".ts", ".json"]);
 
 export function projectContext(args: Readonly<Record<string, unknown>>, workspace: string): McpPayload {
   const root = resolveProjectRoot(args, workspace);
@@ -135,7 +133,7 @@ export async function previewAot(args: Readonly<Record<string, unknown>>, worksp
   const resolved = await resolveAotProject(args, workspace);
   const collected = await collectSchemas(resolved.files);
   assertBuildable(collected.schemas, collected.functions, resolved.files);
-  const stage = readEnum(args, "stage", ["summary", "source", "declaration", "manifest", "plan"] as const) ?? "summary";
+  const stage = readEnum(args, "stage", ["summary", "source", "types", "manifest", "plan"] as const) ?? "summary";
   const target = readOptionalString(args, "target");
   const tempDir = mkdtempSync(join(tmpdir(), "jit-mcp-preview-"));
 
@@ -147,7 +145,6 @@ export async function previewAot(args: Readonly<Record<string, unknown>>, worksp
       sources: collected.sources,
       outDir: tempDir,
       packageName: resolved.packageName,
-      types: { package: resolved.typesPackage },
       clean: true,
       format: resolved.outputFormat,
       emit: {
@@ -193,7 +190,6 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
     sources: collected.sources,
     outDir: resolved.outDir,
     packageName: resolved.packageName,
-    types: { package: resolved.typesPackage },
     clean: resolved.clean,
     format: resolved.outputFormat,
     ...(resolved.emit ? { emit: resolved.emit } : {}),
@@ -202,7 +198,6 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
   const data = {
     outDir: relativePath(resolved.root, resolved.outDir),
     packageName: resolved.packageName,
-    typesPackage: resolved.typesPackage,
     outputFormat: resolved.outputFormat,
     files,
     skipped: jsonSkipped(result.skipped),
@@ -351,7 +346,7 @@ export function resourceTemplates(): readonly JsonValue[] {
       uriTemplate: "jit://generated/{path}",
       name: "jit-generated-artifact",
       title: "Generated JIT artifact",
-      description: "A source, declaration, manifest, or plan from the configured AOT output",
+      description: "Generated JavaScript/TypeScript source, manifest, or plan from the configured AOT output",
       mimeType: "text/plain",
     },
   ];
@@ -416,7 +411,6 @@ function outputDescriptor(resolved: ResolvedAotProject): JsonValue {
   return {
     directory: relativePath(resolved.root, resolved.outDir) ?? resolved.outDir,
     packageName: resolved.packageName,
-    typesPackage: resolved.typesPackage,
     format: resolved.outputFormat,
     layout: resolved.outDir.split(sep).includes("node_modules") ? "package" : "local",
     clean: resolved.clean,
@@ -466,16 +460,10 @@ async function resolveAotProject(
     : resolveInside(configDir, configuredOut, "AOT output directory", root);
   const packageName =
     readOptionalString(args, "packageName") ?? output?.packageName ?? config.packageName ?? DEFAULT_PACKAGE_NAME;
-  const typesPackage =
-    readOptionalString(args, "typesPackage") ??
-    config.types?.package ??
-    config.compiler?.packageName ??
-    "@jit-compiler/jit";
   const clean = readOptionalBoolean(args, "clean") ?? output?.clean ?? config.clean ?? true;
   const outputFormat =
-    readEnum(args, "outputFormat", ["typescript", "javascript", "javascript-only"] as const) ??
-    output?.format ??
-    "typescript";
+    readEnum(args, "outputFormat", ["typescript", "javascript"] as const) ??
+    validateOutputFormat(output?.format ?? "typescript");
   const emit = config.emit || emitOverride ? { ...config.emit, ...emitOverride } : undefined;
 
   return {
@@ -485,12 +473,16 @@ async function resolveAotProject(
     files,
     outDir,
     packageName,
-    typesPackage,
     outputFormat,
     patterns: patterns ?? DEFAULT_SCHEMA_PATTERNS,
     clean,
     ...(emit ? { emit } : {}),
   };
+}
+
+function validateOutputFormat(value: unknown): AotOutputFormat {
+  if (value === "typescript" || value === "javascript") return value;
+  throw new Error(`unknown output format ${JSON.stringify(value)}; expected "typescript" or "javascript"`);
 }
 
 function resolveProjectRoot(args: Readonly<Record<string, unknown>>, workspace: string): string {
@@ -553,8 +545,9 @@ function selectPreviewFile(
 ): string | undefined {
   if (stage === "summary") return undefined;
   if (stage === "source") return resolve(tempDir, format === "typescript" ? "index.ts" : "index.js");
-  if (stage === "declaration") {
-    return resolve(tempDir, format === "typescript" ? "index.ts" : "index.d.ts");
+  if (stage === "types") {
+    if (format !== "typescript") throw new Error('output format "javascript" has no separate type artifact');
+    return resolve(tempDir, "index.ts");
   }
   if (stage === "manifest") return resolve(tempDir, "manifest.json");
   if (stage === "plan") {

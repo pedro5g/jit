@@ -8,7 +8,7 @@
  *   jit doctor [files...] [--pattern <glob>]
  *   jit explain [files...] [--pattern <glob>]
  *   jit list [files...] [--pattern <glob>]
- *   jit inspect <export> [files...] [--stage source|declaration|plan]
+ *   jit inspect <export> [files...] [--stage source|plan]
  *   jit clean [--out <dir>]
  *
  * `init` writes a typed `jit.config.*` in the current project root.
@@ -55,7 +55,6 @@ interface ResolvedAotInputs extends Omit<GenerateArguments, "outputFormat"> {
   readonly outputFormat: AotOutputFormat;
   readonly configFile: string | undefined;
   readonly resolvedOut: string;
-  readonly types: JitConfig["types"] | undefined;
 }
 
 interface LegacyJitConfig {
@@ -63,7 +62,6 @@ interface LegacyJitConfig {
   readonly outDir?: string;
   readonly packageName?: string;
   readonly clean?: boolean;
-  readonly compiler?: { readonly packageName?: string };
   readonly output?: {
     readonly directory?: string;
     readonly packageName?: string;
@@ -84,12 +82,12 @@ export interface InitArguments {
 export type ConfigFormat = (typeof CONFIG_FORMATS)[number];
 
 const USAGE = `Usage:
-  jit init [--force] [--format ts|mts|mjs|cjs] [--output-format ts|js|js-only] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
-  jit generate [files...] [--out <dir>] [--output-format ts|js|js-only] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
+  jit init [--force] [--format ts|mts|mjs|cjs] [--output-format ts|js] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
+  jit generate [files...] [--out <dir>] [--output-format ts|js] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
   jit doctor [files...] [--pattern <glob>]
   jit explain [files...] [--pattern <glob>]
   jit list [files...] [--pattern <glob>]
-  jit inspect <export> [files...] [--stage source|declaration|plan]
+  jit inspect <export> [files...] [--stage source|plan]
   jit clean [--out <dir>]
 `;
 
@@ -146,7 +144,7 @@ async function runGenerate(
   stderr: (text: string) => void
 ): Promise<number> {
   const resolved = await resolveAotInputs(parsed, cwd);
-  const { files, packageName, clean, emit, types, resolvedOut } = resolved;
+  const { files, packageName, clean, emit, resolvedOut } = resolved;
 
   if (resolved.configFile) stdout(`using ${resolved.configFile}\n`);
 
@@ -174,7 +172,6 @@ async function runGenerate(
       ...(packageName ? { packageName } : {}),
       ...(clean !== undefined ? { clean } : {}),
       ...(emit !== undefined ? { emit } : {}),
-      ...(types !== undefined ? { types } : {}),
       ...(resolved.outputFormat !== undefined ? { format: resolved.outputFormat } : {}),
     });
 
@@ -360,7 +357,7 @@ async function runInspect(
     return 0;
   }
 
-  if (parsed.stage === "source" || parsed.stage === "declaration") {
+  if (parsed.stage === "source") {
     const tempDir = mkdtempSync(join(tmpdir(), "jit-inspect-"));
 
     try {
@@ -373,19 +370,7 @@ async function runInspect(
         clean: true,
         format: resolved.outputFormat,
       });
-      const file =
-        resolved.outputFormat === "typescript"
-          ? "index.ts"
-          : parsed.stage === "source"
-            ? "index.js"
-            : resolved.outputFormat === "javascript"
-              ? "index.d.ts"
-              : undefined;
-
-      if (!file) {
-        stderr('output format "javascript-only" does not emit declarations\n');
-        return 1;
-      }
+      const file = resolved.outputFormat === "typescript" ? "index.ts" : "index.js";
       stdout(readFileSync(join(tempDir, file), "utf8"));
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -413,7 +398,6 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
   let clean = parsed.clean;
   let emit = parsed.emit;
   let outputFormat = parsed.outputFormat;
-  let types: JitConfig["types"] | undefined;
   let configFile: string | undefined;
 
   if (files.length === 0) {
@@ -435,7 +419,6 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
       clean = clean ?? output?.clean ?? config.clean;
       outputFormat = outputFormat ?? output?.format;
       emit = mergeEmit(config.emit, emit);
-      types = config.types ?? (config.compiler?.packageName ? { package: config.compiler.packageName } : undefined);
     }
 
     if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
@@ -449,8 +432,7 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     patterns,
     clean,
     emit,
-    outputFormat: outputFormat ?? "typescript",
-    types,
+    outputFormat: validateOutputFormat(outputFormat ?? "typescript"),
     configFile,
     resolvedOut: outDir ?? resolve(cwd, DEFAULT_OUT_DIR),
   };
@@ -602,6 +584,10 @@ function parseInspectArguments(rest: readonly string[], cwd: string): InspectArg
     forwarded.push(argument);
   }
 
+  if (stage !== "plan" && stage !== "source") {
+    throw new Error(`unknown inspect stage "${stage}"; expected "plan" or "source"`);
+  }
+
   return { target, stage, generate: parseGenerateArguments(forwarded, cwd) };
 }
 
@@ -679,7 +665,7 @@ export function createConfigSource(options: InitArguments): string {
     "  output: {",
     "    /** Destination relative to this config file. */",
     `    directory: ${JSON.stringify(options.outDir)},`,
-    '    /** "typescript" is safest; "javascript" adds .d.ts; "javascript-only" omits declarations. */',
+    '    /** "typescript" emits typed source; "javascript" emits ready-to-run ESM. */',
     `    format: ${JSON.stringify(options.outputFormat ?? "typescript")},`,
     ...(options.packageName && options.outDir.split(/[\\/]+/).includes("node_modules")
       ? [
@@ -697,10 +683,6 @@ export function createConfigSource(options: InitArguments): string {
     "    manifest: true,",
     "    /** Persist deterministic operation plans for inspection and tooling. */",
     "    plans: true,",
-    "  },",
-    "  types: {",
-    "    /** Package that exports JIT.Typeof and JIT.Strict for generated declarations. */",
-    '    package: "@jit-compiler/jit",',
     "  },",
   ];
 
@@ -750,9 +732,13 @@ function parseFormat(value: string): ConfigFormat {
 
 function parseOutputFormat(value: string): AotOutputFormat {
   if (value === "js" || value === "javascript") return "javascript";
-  if (value === "js-only" || value === "javascript-only") return "javascript-only";
   if (value === "ts" || value === "typescript") return "typescript";
-  throw new Error(`unknown output format "${value}"`);
+  throw new Error(`unknown output format "${value}"; expected "typescript" or "javascript"`);
+}
+
+function validateOutputFormat(value: unknown): AotOutputFormat {
+  if (value === "typescript" || value === "javascript") return value;
+  throw new Error(`unknown output format ${JSON.stringify(value)}; expected "typescript" or "javascript"`);
 }
 
 function formatStringArray(values: readonly string[]): string {

@@ -1,6 +1,6 @@
 # Dual JIT + AOT API Audit
 
-Updated: 2026-07-15
+Updated: 2026-08-14
 
 This audit compares the master dual JIT + AOT plan with the current
 single-package implementation. npm publishes it as `@jit-compiler/jit`, while
@@ -29,8 +29,8 @@ Implemented and covered by tests:
   `jit generate`.
 - `jit init`, `jit doctor`, `jit explain`, `jit list`, `jit inspect`,
   `jit clean`, and `jit generate`.
-- Config exposes only discovery, output, optional artifacts, and declaration
-  type settings. Legacy `schemas`/`outDir` configs remain readable at runtime.
+- Config exposes only discovery, one output format, and optional review
+  artifacts. Legacy `schemas`/`outDir` configs remain readable at runtime.
 
 ## Schema Operator Alignment
 
@@ -90,23 +90,21 @@ Currently implemented:
   string formatters, mask, sanitize, codec, query extras, mapper extras, and
   built-in transform extras are re-emitted from registered artifacts when
   serializable;
-- generated JS has no `import "jit"`;
-- generated `.d.ts` anchors types to the user's schema file when source
-  metadata is available.
-- local output uses `index.js`/`index.d.ts` and normal relative imports;
-- output below `node_modules` uses namespaced package imports plus dual
-  `index.mjs`/`index.cjs` exports;
-- optional subpath entrypoints use `./user.js` locally or
-  `@scope/generated/user` from a generated package;
-- optional deterministic `manifest.json` and `plans/*.json` review artifacts.
+- generated JS has no `import "jit"` and is ready-to-run ESM;
+- generated TypeScript contains the executable optimized functions plus their
+  public types in one `.ts` source;
+- local output uses exactly `index.js` or `index.ts` and normal relative imports;
+- output below `node_modules` keeps the chosen extension and adds only the
+  package metadata required for namespaced imports;
+- optional subpath entrypoints are independently compiled and use `./user.js`
+  locally or `@scope/generated/user` from a generated package;
+- optional deterministic manifest v2 and `plans/*.json` review artifacts.
 
 Still structural/future work from the plan:
 
-- fully independent package-per-module output (`user.js`,
-  `queries/admins.js`) rather than today's thin subpath re-export modules;
 - source maps and atomic directory swaps;
 - generation worker isolation and incremental cache;
-- full Declaration IR independent of source-file type imports;
+- complete artifact type metadata independent of source-file type imports;
 - `jit check` and deeper stage inspection for logical/physical IR.
 
 ## Known Architectural Gap

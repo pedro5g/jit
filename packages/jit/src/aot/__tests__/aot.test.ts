@@ -21,7 +21,6 @@ describe("JIT AOT generate", () => {
     const UserRuntime = JIT.compile(User, { is: JIT.is(User), clone: JIT.clone(User) });
     const result = AOT.generate({ schemas: { User: UserRuntime }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const declarations = readFileSync(join(outDir, "index.d.ts"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly User: {
         readonly is: (value: unknown) => boolean;
@@ -35,10 +34,9 @@ describe("JIT AOT generate", () => {
     expect(generated.User.clone({ id: 1, name: "Ada" })).toEqual({ id: 1, name: "Ada" });
     expect(source).toContain("function is(value)");
     expect(source).toContain("function clone(value)");
+    expect(source).not.toContain("function safeParse(value)");
     expect(source).not.toContain("function stringify");
-    expect(declarations).toContain("readonly is:");
-    expect(declarations).toContain("readonly clone:");
-    expect(declarations).not.toContain("readonly parse:");
+    expect(result.files).toEqual([join(outDir, "index.js")]);
   });
 
   it("emits fromJSON as native parsing followed by specialized validation", async () => {
@@ -50,6 +48,7 @@ describe("JIT AOT generate", () => {
 
     expect(source).toContain("JSON.parse");
     expect(source).toContain("safeParse");
+    expect(source).not.toContain("const Json_parse");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       Json: { fromJSON: (json: string) => { id: number; name: string } };
@@ -123,19 +122,30 @@ describe("JIT AOT generate", () => {
     ).not.toThrow();
   });
 
-  it("should emit JavaScript without declaration artifacts when explicitly requested", () => {
+  it("should emit one ready-to-run JavaScript module without declaration artifacts", () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
     const isUser = JIT.validate.is(User);
     const result = AOT.generate({
       schemas: {},
       functions: { isUser },
       outDir,
-      format: "javascript-only",
+      format: "javascript",
     });
 
     expect(result.files).toEqual([join(outDir, "index.js")]);
     expect(existsSync(join(outDir, "index.js"))).toBe(true);
     expect(existsSync(join(outDir, "index.d.ts"))).toBe(false);
+  });
+
+  it("should reject removed output formats at the programmatic boundary", () => {
+    expect(() =>
+      AOT.generate({
+        schemas: {},
+        functions: { isValue: JIT.is(JIT.string()) },
+        outDir,
+        format: "javascript-only" as never,
+      })
+    ).toThrow(/expected "typescript" or "javascript"/);
   });
 
   it("should emit standalone functions against named structural schema types", () => {
@@ -208,7 +218,6 @@ describe("JIT AOT generate", () => {
       .to.json();
     const result = AOT.generate({ schemas: {}, functions: { activeUsers }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const declarations = readFileSync(join(outDir, "index.d.ts"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly activeUsers: (json: string) => string;
     };
@@ -219,7 +228,6 @@ describe("JIT AOT generate", () => {
     );
     expect(source).toContain("function query(value)");
     expect(source).not.toContain('from "@jit-compiler/jit"');
-    expect(declarations).toContain("export declare const activeUsers: (value: string) => string;");
   });
 
   it("should preserve transform, update, and security stages in an import-free composed pipeline", async () => {
@@ -260,17 +268,15 @@ describe("JIT AOT generate", () => {
     const Domain = JIT.object({ id: JIT.string(), name: JIT.string() });
     const toDomain = JIT.from(Wire).transform(Domain, { id: (id) => String(id) });
 
-    const result = AOT.generate({ schemas: {}, functions: { toDomain }, outDir });
-    const declarations = readFileSync(join(outDir, "index.d.ts"), "utf8");
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const result = AOT.generate({ schemas: {}, functions: { toDomain }, outDir, format: "typescript" });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       readonly toDomain: (value: { id: number; name: string }) => { id: string; name: string };
     };
 
     expect(result.skipped).toHaveLength(0);
     expect(generated.toDomain({ id: 1, name: "Ada" })).toEqual({ id: "1", name: "Ada" });
-    expect(declarations).toContain(
-      "export declare const toDomain: (value: { id: number; name: string }) => { id: string; name: string };"
-    );
+    expect(source).toContain("const toDomain: (value: { id: number; name: string }) => { id: string; name: string } =");
   });
 
   it("should fuse terminal batch mapping and JSON encoding without a mapped output array", async () => {
@@ -528,6 +534,19 @@ describe("JIT AOT generate", () => {
     expect(generated.safeParseUser({ name: "blocked" }).success).toBe(false);
   });
 
+  it("should reject callbacks with inaccessible closure dependencies", () => {
+    const minimum = 2;
+    const Name = JIT.string().refine((value) => value.length >= minimum);
+    const result = AOT.generate({ schemas: {}, functions: { isName: JIT.is(Name) }, outDir });
+
+    expect(result.files).toEqual([]);
+    expect(result.skipped).toContainEqual({
+      schema: "isName",
+      operation: "is",
+      reason: "refine/transform/default callbacks cannot be serialized ahead of time",
+    });
+  });
+
   it("should generate validator flat exports with inlined regex bindings", () => {
     const User = JIT.object({
       id: JIT.number().int(),
@@ -544,9 +563,9 @@ describe("JIT AOT generate", () => {
       },
       outDir,
       packageName: "@acme/models",
+      format: "typescript",
     });
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("const User_is_validator = /*#__PURE__*/ (() => {");
@@ -556,16 +575,16 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("function safeParse(value)");
     expect(source).toContain("class JITValidationError extends Error");
     expect(source).not.toContain("import ");
-    expect(source).toContain("const User_is = /*#__PURE__*/ ((v) => v.is)(User_is_validator);");
+    expect(source).toContain("= /*#__PURE__*/ ((v) => v.is)(User_is_validator);");
     expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
 
-    expect(types).not.toContain("export type User =");
-    expect(types).toContain("id: number");
-    expect(types).toContain("plan?: string");
-    expect(types).toContain("export declare const User_is");
-    expect(types).toContain("export declare const User_parse");
-    expect(types).toContain("export declare const User_safeParse");
-    expect(types).not.toContain("export declare const User: {");
+    expect(source).not.toContain("export type User =");
+    expect(source).toContain("id: number");
+    expect(source).toContain("plan: string");
+    expect(source).toContain("const User_is:");
+    expect(source).toContain("const User_parse:");
+    expect(source).toContain("const User_safeParse:");
+    expect(source).not.toContain("const User: {");
 
     expect(existsSync(join(outDir, "package.json"))).toBe(false);
   });
@@ -578,19 +597,19 @@ describe("JIT AOT generate", () => {
       schemas: { User: JIT.compile(UserSchema, { is: isUser }) },
       functions: { User_is: isUser },
       outDir,
+      format: "typescript",
     });
 
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       User: { is: (value: unknown) => boolean };
       User_is: (value: unknown) => boolean;
     };
 
     expect(source).toContain("const User_is_1");
     expect(source).toContain("is: User_is_1");
-    expect(source).toContain("const User_is =");
-    expect(types).toContain("export type UserStrict<TValue> = TValue;");
+    expect(source).toContain("const User_is:");
+    expect(source).toContain("export type UserStrict<TValue> = TValue;");
     expect(generated.User.is({ id: 1 })).toBe(true);
     expect(generated.User_is({ id: 1 })).toBe(true);
   });
@@ -603,18 +622,18 @@ describe("JIT AOT generate", () => {
       schemas: { Document: JIT.compile(Document, { format: formatDocument }) },
       functions: { formatDocument },
       outDir,
+      format: "typescript",
     });
 
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       Document: { format: (value: string) => string };
       formatDocument: (value: string) => string;
     };
 
     expect(source).toContain("function format(value)");
     expect(source).not.toContain("safeParse");
-    expect(types).toContain("readonly format: (value: string) => string");
+    expect(source).toContain("readonly format: (value: string) => string");
     expect(generated.Document.format("12345678901")).toBe("123.456.789-01");
     expect(generated.formatDocument("12345678901")).toBe("123.456.789-01");
   });
@@ -645,9 +664,8 @@ describe("JIT AOT generate", () => {
       outDir,
     });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
 
-    expect(result.files.map((file) => file.split("/").pop()).sort()).toEqual(["index.d.ts", "index.js"]);
+    expect(result.files.map((file) => file.split("/").pop()).sort()).toEqual(["index.js"]);
     expect(readFileSync(join(outDir, "package.json"), "utf8")).toBe('{"stale":true}\n');
     expect(source).toContain("const User_is");
     expect(source).not.toContain("User_parse");
@@ -657,8 +675,6 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain("__indexCache");
     expect(source).not.toContain("__getIndex");
     expect(source).not.toContain('from "@jit-compiler/jit"');
-    expect(types).toContain("export declare const User_is");
-    expect(types).not.toContain("export declare const User_parse");
   });
 
   it("should inline cache helpers only for operations that need them", async () => {
@@ -774,7 +790,7 @@ describe("JIT AOT generate", () => {
     );
 
     expect(type).toBe(
-      '{ id: number; nick?: string | undefined; role: "admin" | "user"; status: "active" | "blocked"; level: 1 | 2 | 3; items: { sku: string }[] }'
+      '{ id: number; nick: string | undefined; role: "admin" | "user"; status: "active" | "blocked"; level: 1 | 2 | 3; items: { sku: string }[] }'
     );
 
     expect(AOT.emitTypeScriptType(JIT.object({ id: JIT.number() }).readonly().schema)).toBe("Readonly<{ id: number }>");

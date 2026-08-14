@@ -1,12 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { AOT, JIT } from "../../index.js";
 
-describe("JIT AOT dual output and tree-shakable exports", () => {
+describe("JIT AOT source output and tree-shakable exports", () => {
   let outDir: string;
 
   beforeEach(() => {
@@ -17,7 +16,7 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     rmSync(outDir, { recursive: true, force: true });
   });
 
-  it("should emit esm + cjs + dual type declarations with an exports map", async () => {
+  it("should emit one ready-to-run JavaScript package with an exports map", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const isUser = JIT.is(User);
     const packageDir = join(outDir, "node_modules", "@jit", "generated");
@@ -27,52 +26,38 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
       outDir: packageDir,
     });
 
-    expect(result.files.map((file) => file.split("/").pop())).toEqual([
-      "index.mjs",
-      "index.cjs",
-      "index.d.ts",
-      "index.d.cts",
-      "package.json",
-    ]);
+    expect(result.files.map((file) => file.split("/").pop())).toEqual(["index.js", "package.json"]);
 
     const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as {
-      exports: Record<string, { import?: string; require?: string }>;
+      exports: Record<string, string>;
       sideEffects: boolean;
     };
 
-    expect(manifest.exports["."].import).toBe("./index.mjs");
-    expect(manifest.exports["."].require).toBe("./index.cjs");
+    expect(manifest.exports["."]).toBe("./index.js");
     expect(manifest.sideEffects).toBe(false);
 
-    // Both formats load and agree.
-    const esm = (await import(pathToFileURL(join(packageDir, "index.mjs")).href)) as Record<string, unknown>;
-    const require = createRequire(import.meta.url);
-    const cjs = require(join(packageDir, "index.cjs")) as Record<string, unknown>;
+    const generated = (await import(pathToFileURL(join(packageDir, "index.js")).href)) as Record<string, unknown>;
     const ada = { id: 1, name: "Ada" };
+    const flat = generated.User_is as (value: unknown) => boolean;
 
-    for (const loaded of [esm, cjs]) {
-      const flat = loaded.User_is as (value: unknown) => boolean;
-
-      expect(flat(ada)).toBe(true);
-      expect(flat({ id: "x" })).toBe(false);
-      expect(loaded.User).toBeUndefined();
-    }
+    expect(flat(ada)).toBe(true);
+    expect(flat({ id: "x" })).toBe(false);
+    expect(generated.User).toBeUndefined();
   });
 
   it("should expose flat per-operation exports by default", () => {
     const User = JIT.object({ id: JIT.number() });
     const isUser = JIT.is(User);
 
-    AOT.generate({ schemas: {}, functions: { User_is: isUser }, outDir });
+    AOT.generate({ schemas: {}, functions: { User_is: isUser }, outDir, format: "typescript" });
 
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
     expect(source).toMatch(/export \{ .*User_is.* \};/);
     expect(source).not.toMatch(/export \{[^}]*, User \};/);
     expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
-    expect(types).toContain("export declare const User_is: (value: unknown) => value is { id: number };");
-    expect(types).not.toContain("export declare const User: {");
+    expect(source).toContain("const User_is: (value: unknown) => value is { id: number } =");
+    expect(source).not.toContain("const User: {");
   });
 
   it("should expose grouped objects only for object-style compile markers", () => {
@@ -82,16 +67,16 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     AOT.generate({
       schemas: { User: JIT.compile(User, { is: isUser }) },
       outDir,
+      format: "typescript",
     });
 
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
-    expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(source).toContain("} = /*#__PURE__*/ Object.freeze({");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_is/);
-    expect(types).not.toContain("export declare const User_is");
-    expect(types).toContain("readonly is: (value: unknown) => value is User;");
+    expect(source).not.toContain("const User_is:");
+    expect(source).toContain("readonly is: (value: unknown) => value is User;");
   });
 
   it("should emit subpath modules, manifest, and plans when requested", async () => {
@@ -111,6 +96,7 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     });
     const files = result.files.map((file) => file.split("/").pop()).sort();
     const manifest = JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8")) as {
+      version: number;
       modules: readonly {
         readonly name: string;
         readonly import: string;
@@ -129,9 +115,13 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     };
 
     expect(files).toContain("user.js");
+    expect(manifest.version).toBe(2);
     expect(files).toContain("manifest.json");
     expect(result.files).toContain(join(outDir, "plans", "user.json"));
-    expect(readFileSync(join(outDir, "user.js"), "utf8")).toBe('export { User, isUser } from "./index.js";\n');
+    const subpath = readFileSync(join(outDir, "user.js"), "utf8");
+    expect(subpath).toContain("function is(value)");
+    expect(subpath).toContain("export { User, isUser };");
+    expect(subpath).not.toContain('from "./index.js"');
     expect(manifest.modules).toEqual([
       {
         name: "user",
@@ -179,9 +169,37 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
     expect(packageJson.name).toBe("@acme/generated");
     expect(packageJson.exports).toHaveProperty("./user");
   });
+
+  it("should compile subpaths as physically isolated modules", () => {
+    const User = JIT.object({ id: JIT.number() });
+    const Order = JIT.object({ sku: JIT.string() });
+
+    AOT.generate({
+      schemas: {},
+      functions: {
+        User_is: JIT.is(User),
+        Order_stringify: JIT.json.stringify(Order),
+      },
+      sources: new Map([
+        ["User_is", join(outDir, "user.jit.ts")],
+        ["Order_stringify", join(outDir, "order.jit.ts")],
+      ]),
+      outDir,
+      emit: { subpathModules: true },
+    });
+
+    const user = readFileSync(join(outDir, "user.js"), "utf8");
+    const order = readFileSync(join(outDir, "order.js"), "utf8");
+
+    expect(user).toContain("User_is");
+    expect(user).not.toContain("Order_stringify");
+    expect(user).not.toContain('from "./index.js"');
+    expect(order).toContain("Order_stringify");
+    expect(order).not.toContain("User_is");
+  });
 });
 
-describe("JIT AOT inference-anchored types", () => {
+describe("JIT AOT self-contained types", () => {
   let outDir: string;
 
   beforeEach(() => {
@@ -192,7 +210,7 @@ describe("JIT AOT inference-anchored types", () => {
     rmSync(outDir, { recursive: true, force: true });
   });
 
-  it('should derive .d.ts types from the dev schema file via import("@jit-compiler/jit").Typeof', () => {
+  it("should embed structural types without depending on the declaration file", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const isUser = JIT.is(User);
     const generated = join(outDir, "generated");
@@ -202,36 +220,15 @@ describe("JIT AOT inference-anchored types", () => {
       schemas: { User: JIT.compile(User, { is: isUser }) },
       sources: new Map([["User", schemaFile]]),
       outDir: generated,
+      format: "typescript",
     });
 
-    const types = readFileSync(join(generated, "index.d.ts"), "utf8");
+    const source = readFileSync(join(generated, "index.ts"), "utf8");
 
-    expect(types).toContain(
-      'export type User = import("@jit-compiler/jit").Typeof<typeof import("../src/user.jit.js").User>;'
-    );
-    expect(types).toContain(
-      'export type UserStrict<TValue> = import("@jit-compiler/jit").Strict<typeof import("../src/user.jit.js").User, TValue>;'
-    );
-    // No hand-emitted structural type when the source anchors the inference.
-    expect(types).not.toContain("readonly id: number");
-  });
-
-  it("should support a registry-specific compiler specifier in generated declarations", () => {
-    const User = JIT.object({ id: JIT.number() });
-    const generated = join(outDir, "generated");
-
-    AOT.generate({
-      schemas: {
-        User: JIT.compile(User, { is: JIT.is(User) }),
-      },
-      sources: new Map([["User", join(outDir, "src", "user.jit.ts")]]),
-      outDir: generated,
-      types: { package: "jsr:@jit/compiler" },
-    });
-
-    const types = readFileSync(join(generated, "index.d.ts"), "utf8");
-    expect(types).toContain('import("jsr:@jit/compiler").Typeof');
-    expect(types).not.toContain('import("@jit-compiler/jit").Typeof');
+    expect(source).toContain("export type User = { id: number; name: string };");
+    expect(source).toContain("export type UserStrict<TValue> = TValue;");
+    expect(source).not.toContain("../src/user.jit.js");
+    expect(source).not.toContain("@jit-compiler/jit");
   });
 
   it("should typecheck real imports from generated files after generation", async () => {
@@ -272,6 +269,7 @@ describe("JIT AOT inference-anchored types", () => {
         ["isUser", schemaFile],
       ]),
       outDir: generatedDir,
+      format: "typescript",
     });
 
     writeFileSync(
@@ -322,7 +320,7 @@ describe("JIT AOT inference-anchored types", () => {
       )
     );
 
-    const generated = (await import(pathToFileURL(join(generatedDir, "index.mjs")).href)) as {
+    const generated = (await import(pathToFileURL(join(generatedDir, "index.ts")).href)) as {
       User: {
         is: (value: unknown) => boolean;
         parse: (value: unknown) => unknown;
@@ -360,12 +358,13 @@ describe("JIT AOT inference-anchored types", () => {
     AOT.generate({
       schemas: { User: JIT.compile(User, { is: isUser }) },
       outDir,
+      format: "typescript",
     });
 
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
-    expect(types).toContain("export type User = { id: number };");
-    expect(types).toContain("export type UserStrict<TValue> = TValue;");
+    expect(source).toContain("export type User = { id: number };");
+    expect(source).toContain("export type UserStrict<TValue> = TValue;");
   });
 
   it("should expose JIT.Typeof for builders and schemas", () => {

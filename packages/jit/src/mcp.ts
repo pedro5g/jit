@@ -88,10 +88,9 @@ const AOT_PROPERTIES = {
 const OUTPUT_PROPERTIES = {
   outDir: optionalString("Output directory relative to the project root."),
   packageName: optionalString("Package namespace used when output is below node_modules."),
-  typesPackage: optionalString("Package specifier exporting JIT.Typeof and JIT.Strict."),
   outputFormat: {
     type: "string",
-    enum: ["typescript", "javascript", "javascript-only"],
+    enum: ["typescript", "javascript"],
     description: "Generated source format. Defaults to config or typescript.",
   },
   clean: optionalBoolean("Remove known generated files before generation."),
@@ -148,13 +147,13 @@ const TOOLS: readonly ToolDefinition[] = [
   tool(
     "jit_aot_preview",
     "Preview AOT output",
-    "Compile into a temporary directory and inspect source, declarations, manifest, or plans without changing the project.",
+    "Compile into a temporary directory and inspect source, embedded TypeScript types, manifest, or plans without changing the project.",
     objectSchema({
       ...AOT_PROPERTIES,
       ...OUTPUT_PROPERTIES,
       stage: {
         type: "string",
-        enum: ["summary", "source", "declaration", "manifest", "plan"],
+        enum: ["summary", "source", "types", "manifest", "plan"],
         description: "Artifact to return. Defaults to summary.",
       },
       target: optionalString("Export name used to select a plan when stage is plan."),

@@ -27,18 +27,19 @@ uses a four-byte length prefix because TCP does not preserve message boundaries.
 
 `compiled/catalog.jit.ts` declares validation, equal, clone, diff, hash,
 masking, sanitization, mapper, eager query, lazy iterator, visitor, JSON, and
-codec operations. The local output emits committed ESM, declarations,
+codec operations. The local output emits committed typed source,
 manifest, subpath, and plan files.
 
 The compiled application imports `./generated/index.js`, which resolves
-directly to generated files. Generated JavaScript imports nothing from
+to the generated `index.ts` during the TypeScript build. Generated source has
+no runtime import from
 `@jit-compiler/jit`, including in the TCP codec round trip.
 
 ## Why Generated Files Are Committed
 
 The generated source is part of the compiler's behavioral contract. CI
 regenerates it and rejects any diff, exposing changes in source shape,
-tree-shaking surface, declarations, manifest paths, operation plans, or helper
+tree-shaking surface, public signatures, manifest paths, operation plans, or helper
 inclusion.
 
 Progressive stream state and binary-rowset allocation remain runtime ingestion

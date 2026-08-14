@@ -8,5 +8,5 @@
     "types": ["node", "vitest/globals"],
     "customConditions": ["@jit/source"]
   },
-  "include": ["**/*.ts", "compiled/generated/**/*.d.ts"]
+  "include": ["**/*.ts"]
 }

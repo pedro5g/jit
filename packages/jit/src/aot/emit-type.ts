@@ -5,8 +5,8 @@ import { Parse } from "../shared/index.js";
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 
 /**
- * Emits the TypeScript type literal for a schema — powers the generated
- * `.d.ts` files. Unknown or unrepresentable kinds degrade to `unknown`.
+ * Emits the TypeScript type literal for a schema — powers generated `.ts`
+ * files. Unknown or unrepresentable kinds degrade to `unknown`.
  */
 export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
   const current = schema as AnySchema;
@@ -54,10 +54,9 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
       const props = current.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
       const entries = Object.keys(props).map((key) => {
         const prop = props[key] as AnySchema;
-        const optional = isOptional(prop);
         const safeKey = Parse.isValidIdentifier(key) ? key : JSON.stringify(key);
 
-        return `${safeKey}${optional ? "?" : ""}: ${emitTypeScriptType(prop)}`;
+        return `${safeKey}: ${emitTypeScriptType(prop)}`;
       });
 
       return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
@@ -133,26 +132,6 @@ function emitReadonlyType(schema: ATS.AnyTypeSchema): string {
     default:
       return `Readonly<${emitTypeScriptType(schema)}>`;
   }
-}
-
-function isOptional(schema: AnySchema): boolean {
-  // Defaults make the field omittable on input.
-  if (schema.type === TypeName.optional || schema.type === TypeName.nullish || schema.type === TypeName.default) {
-    return true;
-  }
-  if (
-    schema.type === TypeName.brand ||
-    schema.type === TypeName.readonly ||
-    schema.type === TypeName.refine ||
-    schema.type === TypeName.coerce ||
-    schema.type === TypeName.pipe ||
-    schema.type === TypeName.transform ||
-    schema.type === TypeName.nullable
-  ) {
-    return isOptional(schema.def.innerType as AnySchema);
-  }
-
-  return false;
 }
 
 function emitOneOfType(schema: AnySchema, fallback: "string" | "number"): string {

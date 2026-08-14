@@ -32,8 +32,8 @@ caches are covered in [cache, hash and indexes](/docs/runtime/cache-hash-index).
 
 ## Build-time AOT
 
-`jit generate` evaluates explicit declarations and writes self-contained ESM, CJS and
-declaration files. Generated operations have zero imports from the JIT engine, so the
+`jit generate` evaluates explicit declarations and writes one self-contained `.js` or
+directly typed `.ts` source. Generated operations have zero runtime imports from the JIT engine, so the
 schema builders and compiler do not ship in the production bundle.
 
 ## Why the generated path is fast

@@ -66,8 +66,6 @@ function isSchema(value: unknown): value is SchemaInput {
 
 function outputName(generated: string, requested: string): string {
   const base = requested.replace(/\.(?:d\.)?(?:ts|cts|mts|js|cjs|mjs)$/, "");
-  if (generated === "index.d.ts") return `${base}.d.ts`;
-  if (generated === "index.d.cts") return `${base}.d.cts`;
   const extension = generated.slice("index".length);
   return `${base}${extension}`;
 }

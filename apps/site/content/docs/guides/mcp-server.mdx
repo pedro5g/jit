@@ -30,7 +30,7 @@ environment.
 | `jit_project_doctor`  | No     | Config, declarations, exports, Node, and output validation |
 | `jit_docs_search`     | No     | Markdown search with file/line matches                     |
 | `jit_aot_inspect`     | No     | Explicit grouped and standalone AOT inventory              |
-| `jit_aot_preview`     | No     | Temporary source, declaration, manifest, or plan build     |
+| `jit_aot_preview`     | No     | Temporary source, embedded types, manifest, or plan build  |
 | `jit_aot_generate`    | Yes    | Write the configured generated package                     |
 
 Every result includes text and structured content. Read-only and mutating
@@ -41,23 +41,21 @@ explicit `{ "write": true }`; omission is an error.
 
 1. Run `jit_project_doctor`.
 2. Inspect explicit exports with `jit_aot_inspect`.
-3. Preview `source` and `declaration` stages.
+3. Preview `source` and, for TypeScript output, `types` stages.
 4. Preview a `manifest` or named `plan` when needed.
 5. Generate with `write: true` only after review.
 6. Run tests and bundle/tree-shaking checks.
 
 Preview compiles in a temporary directory and cleans it afterwards. Config is
 the default source for files, patterns, output, package identity, cleanup, and
-emit settings; a tool call can override those values for one run. The optional
-`compilerPackageName` override changes only the type import used by generated
-declarations, which is useful when consuming JIT through JSR.
+emit settings; a tool call can override those values for one run.
 
 ## Resources and prompts
 
 Project context, READMEs, architecture, local status, config, and the dynamic
 AOT inventory are available under `jit://project/*` and `jit://aot/*`.
 `jit://docs/{path}` reads Markdown below `docs/`, while
-`jit://generated/{path}` reads generated source, types, manifests, and plans.
+`jit://generated/{path}` reads generated source, manifests, and plans.
 
 Prompts cover schema design, AOT migration/generation, and measured performance
 review. Completion suggests execution modes, operation names, and docs paths.

@@ -74,7 +74,7 @@ mutated by `update`, `mask`, or `sanitize`.
 `transform(targetSchema, fields)` is explicit about the output schema. A
 transform preserves the source object's field set and changes field values;
 use `.map(targetSchema, overrides)` for projections, renames, or a different
-shape. This makes the next stage, JSON sink, and generated declaration
+shape. This makes the next stage, JSON sink, and generated TypeScript source
 type-safe. If a callback can create a value outside `targetSchema`, append
 `.validate()` after the transform; callbacks remain external bindings and are
 not trusted by the compiler.

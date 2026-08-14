@@ -76,13 +76,12 @@ describe("AOT generation from JIT.compile markers", () => {
       stringify: selected.stringify,
     });
 
-    const result = AOT.generate({ schemas: { User: marked }, outDir });
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const result = AOT.generate({ schemas: { User: marked }, outDir, format: "typescript" });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
     expect(source).toContain("const User_is");
     expect(source).toContain("const User_stringify");
-    expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(source).toContain("} = /*#__PURE__*/ Object.freeze({");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_is/);
     expect(source).not.toContain("User_clone");
@@ -93,11 +92,11 @@ describe("AOT generation from JIT.compile markers", () => {
     // parse not requested → no error class needed → still zero-import.
     expect(source).not.toContain("class JITValidationError");
 
-    expect(types).toContain("readonly is");
-    expect(types).toContain("readonly stringify");
-    expect(types).not.toContain("User_clone");
+    expect(source).toContain("readonly is");
+    expect(source).toContain("readonly stringify");
+    expect(source).not.toContain("User_clone");
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       User: {
         is: (value: unknown) => boolean;
         stringify: (value: unknown) => string;
@@ -130,22 +129,21 @@ describe("AOT generation from JIT.compile markers", () => {
       fromJSON: JIT.json.parse(User).validate(),
     });
 
-    AOT.generate({ schemas: { User: marked }, outDir });
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    AOT.generate({ schemas: { User: marked }, outDir, format: "typescript" });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
     expect(source).toContain("const User_is");
     expect(source).toContain("const User_parse");
     expect(source).toContain("const User_fromJSON");
     expect(source).toContain("JSON.parse");
-    expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
+    expect(source).toContain("} = /*#__PURE__*/ Object.freeze({");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_is/);
-    expect(types).not.toContain("export declare const User_is");
-    expect(types).toContain("readonly is: (value: unknown) => value is User;");
-    expect(types).toContain("readonly fromJSON: (json: string) => User;");
+    expect(source).not.toContain("export declare const User_is");
+    expect(source).toContain("readonly is: (value: unknown) => value is User;");
+    expect(source).toContain("readonly fromJSON: (json: string) => User;");
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       User: {
         is: (value: unknown) => boolean;
         parse: (value: unknown) => typeof ada;
@@ -190,9 +188,9 @@ describe("AOT generation from JIT.compile markers", () => {
       schemas: { User: marked },
       sources: new Map([["User", join(outDir, "user.jit.ts")]]),
       outDir,
+      format: "typescript",
     });
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("const User_findAdmins");
@@ -201,10 +199,10 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(source).toContain("function many(list)");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_findAdmins/);
-    expect(types).not.toContain("export declare const User_findAdmins");
-    expect(types).toContain('readonly findAdmins: typeof import("./user.jit.js").User["findAdmins"];');
+    expect(source).not.toContain("export declare const User_findAdmins");
+    expect(source).toContain('readonly findAdmins: typeof import("./user.jit.js").User["findAdmins"];');
 
-    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       User: {
         is: (value: unknown) => boolean;
         findAdmins: (items: unknown[]) => unknown[];
@@ -265,13 +263,12 @@ describe("AOT generation from JIT.compile markers", () => {
     const selected = JIT.compile(Item, ["equal"]);
     const marked = JIT.compile(Item, { equal: selected.equal });
 
-    AOT.generate({ schemas: { Item: marked }, outDir });
+    AOT.generate({ schemas: { Item: marked }, outDir, format: "typescript" });
 
-    const source = readFileSync(join(outDir, "index.js"), "utf8");
-    const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
     expect(source).toContain("const Item_equal");
-    expect(types).not.toContain("Item_hash:");
+    expect(source).not.toContain("Item_hash:");
     expect(source).toMatch(/export \{ Item \};/);
     expect(source).not.toMatch(/export \{[^}]*Item_equal/);
   });

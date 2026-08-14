@@ -15,8 +15,8 @@ Two execution modes, same generated code:
 - **JIT (runtime)** — operations compile on first use via
   `globalThis.Function` and are cached per schema.
 - **AOT (build time, Prisma-style)** — `pnpm jit init` writes config and
-  `jit generate` writes pure local `.js` + `.d.ts` modules or a dual
-  ESM/CommonJS package below `node_modules`, all with **zero engine imports**.
+  `jit generate` writes exactly one self-contained `.js` or directly typed
+  `.ts` module, both with **zero runtime engine imports**.
   The final bundle keeps only the generated low-level functions the app uses.
 
 ```ts
@@ -931,8 +931,9 @@ export default AOT.defineConfig({
   /** Patterns used for directory and root discovery. */
   patterns: ["**/*.jit.ts"],
   output: {
-    /** Local output emits index.js; node_modules output emits a dual package. */
+    /** Emit one directly typed .ts source (use "javascript" for ready ESM). */
     directory: "generated/jit",
+    format: "typescript",
     /** Delete only JIT-owned artifacts before writing. */
     clean: true,
   },
@@ -940,10 +941,6 @@ export default AOT.defineConfig({
     subpathModules: true,
     manifest: true,
     plans: true,
-  },
-  types: {
-    /** Package used only by Typeof/Strict imports in generated declarations. */
-    package: "@jit-compiler/jit",
   },
 });
 ```
@@ -953,16 +950,14 @@ Discovery rules are intentionally boring:
 - if `entries` is omitted, `jit generate` scans from the project root;
 - `entries` accepts files, directories, and globs like `jit/**/*.jit.ts`;
 - `patterns` controls directory scans; the default is `**/*.jit.ts`;
-- `types.package` defaults to the npm identity `@jit-compiler/jit`;
-  Deno/JSR projects can use `jsr:@jit/compiler`;
 - if no buildable functions are exported, the CLI prints a warning and writes
   nothing.
 - `jit doctor` prints resolved config, output directory, patterns, and files;
 - `jit explain` loads declaration files and lists grouped objects plus
   standalone compiled exports without writing generated files.
 - `jit list` prints buildable exports in a compact format;
-- `jit inspect <export> --stage plan|source|declaration` shows the collected
-  descriptor or the generated source/types for review;
+- `jit inspect <export> --stage plan|source` shows the collected descriptor or
+  exact generated source for review;
 - `jit clean` removes the configured generated directory.
 
 There is no raw-schema fallback. AOT builds only what you explicitly export.
@@ -1029,12 +1024,13 @@ generated/jit/
     └── user.json
 ```
 
-The subpath modules are thin re-export entrypoints over the generated barrel
-and contain no `jit` runtime import. No `package.json#imports` entry and no `#`
+Each requested subpath is compiled as an independent, self-contained module
+containing only exports from that declaration file. It does not import or
+initialize the generated barrel. No `package.json#imports` entry and no `#`
 alias is needed.
 
-When `output.directory` is below `node_modules`, the generator instead infers
-the namespace and emits `index.mjs` + `index.cjs` + dual declarations +
+When `output.directory` is below `node_modules`, the generator infers the
+namespace, keeps exactly the selected `.ts` or `.js` source, and adds
 `package.json` (exports map, `sideEffects: false`). Consumers then use
 `import { User } from "@jit/generated"` and optional
 `import { User } from "@jit/generated/user"` subpaths.
@@ -1071,7 +1067,7 @@ resolves it to `index.ts` during development and emits a valid JavaScript
 specifier. Direct TypeScript output has no parallel declaration file that can
 drift from the implementation.
 
-Types are structural and self-contained in TypeScript output:
+Schema and execution-plan types are structural in TypeScript output:
 
 ```ts
 export type User = {
@@ -1086,8 +1082,9 @@ export const User: {
 };
 ```
 
-Use `output.format: "javascript"` for executable JS plus `.d.ts`, or
-`"javascript-only"` when declarations are intentionally unnecessary.
+Use `output.format: "javascript"` for one ready-to-run ESM `.js` file without
+declaration overhead. Use `"typescript"` for the same specialized functions
+with public types embedded in the executable `.ts` source.
 
 `User` remains the normal runtime output type. `UserStrict<T>` is for literal
 fixtures/configs where TypeScript can evaluate checks such as string
@@ -1170,7 +1167,7 @@ Recommended agent sequence:
 
 1. `jit_project_doctor`
 2. `jit_aot_inspect`
-3. `jit_aot_preview` for source and declarations
+3. `jit_aot_preview` for source and embedded TypeScript types
 4. `jit_aot_generate` with explicit write confirmation
 
 The MCP implementation has no SDK dependency, so installing the compiler does

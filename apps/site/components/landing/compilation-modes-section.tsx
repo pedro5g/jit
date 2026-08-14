@@ -14,7 +14,7 @@ isUser.explain(); // { operation, hash, source, cache }`;
 
 const aotSnippet = `# Prisma-style workflow
 pnpm jit init      # writes jit.config.ts
-pnpm jit generate  # emits .mjs + .cjs + .d.ts
+pnpm jit generate  # emits one typed .ts (or ready .js)
 
 # generated modules have zero imports —
 # the engine never ships to production
@@ -51,7 +51,7 @@ export function CompilationModesSection() {
           </div>
           <CodePanel code={aotSnippet} lang="bash" title="jit generate" />
           <ul className="mt-5 flex flex-col gap-2 text-sm leading-relaxed text-fg-muted">
-            <li>· pure .mjs + .cjs + .d.ts output with zero imports — error class and helpers inlined</li>
+            <li>· one pure .ts or .js output with zero runtime imports — error class and helpers inlined</li>
             <li>· no compile cost at runtime, predictable deploys</li>
             <li>· works under strict CSP, edge runtimes and locked-down environments</li>
             <li>· the final bundle keeps only the generated functions you import</li>

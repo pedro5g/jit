@@ -48,19 +48,11 @@ export default AOT.defineConfig({
     manifest: true,
     plans: true,
   },
-  types: {
-    package: "@jit-compiler/jit",
-  },
 });
 ```
 
 If `entries` is omitted, discovery scans from the project root using
 `patterns`. The default pattern is `**/*.jit.ts`.
-
-`types.package` is used only by generated declaration files. npm users
-should keep `@jit-compiler/jit`; a Deno/JSR project can set
-`jsr:@jit/compiler`. Generated JavaScript remains self-contained and does not
-import either package.
 
 ## Output Directory Choices
 
@@ -71,9 +63,10 @@ import { User } from "@jit/generated";
 ```
 
 The generator recognizes `node_modules` in the output path, infers the package
-namespace from that path, and emits `index.mjs`, `index.cjs`, dual declarations,
-`package.json`, and an exports map. `output.packageName` is only needed to
-override that inferred namespace.
+namespace, keeps the selected `index.ts` or `index.js`, and adds `package.json`
+with an exports map. `output.packageName` is only needed to override the
+inferred namespace. The path never silently creates CJS, `.mjs`, or declaration
+variants.
 
 Use a project-local directory when you want checked-in generated source or
 normal relative imports:
@@ -93,8 +86,8 @@ import { User } from "./generated/jit/index.js";
 
 Local output emits a typed, self-contained `index.ts` by default without a
 nested `package.json`. No package `imports` map and no `#jit` alias are
-required. Choose `javascript` for JS plus `.d.ts`, or `javascript-only` when
-the consumer intentionally needs no generated declarations.
+required. Choose `javascript` when the consumer needs ready-to-run ESM and
+does not need generated TypeScript types.
 
 ## Config Reference
 
@@ -103,13 +96,12 @@ the consumer intentionally needs no generated declarations.
 | `entries`                | declaration files, directories, or globs                       | root discovery     |
 | `patterns`               | patterns used for directory/root discovery                     | all `.jit.ts` files |
 | `output.directory`       | local directory or package path below `node_modules`            | `generated/jit`    |
-| `output.format`          | TypeScript, JS plus declarations, or JS only                     | `typescript`       |
+| `output.format`          | exactly `typescript` (`.ts`) or `javascript` (`.js`)             | `typescript`       |
 | `output.packageName`     | namespace override for a generated `node_modules` package       | inferred from path |
 | `output.clean`           | remove JIT-owned files from the previous generation             | `true`             |
 | `emit.subpathModules`    | add one entrypoint per declaration source                       | `false`            |
 | `emit.manifest`          | write imports, layout, exports, and selected operations         | `false`            |
 | `emit.plans`             | write deterministic operation plans for inspection/tooling      | `false`            |
-| `types.package`          | package providing `Typeof` and `Strict` to generated `.d.ts`    | npm package name   |
 
 ## Inspection Flow
 
@@ -119,7 +111,6 @@ Before generating, use:
 pnpm jit doctor
 pnpm jit explain
 pnpm jit inspect User --stage source
-pnpm jit inspect User --stage declaration
 ```
 
 This matters because AOT is explicit. Raw schemas do not generate output by
@@ -145,7 +136,7 @@ only the generated functions used by the route.
 - Keep declaration files small and explicit.
 - Export compiled functions, not raw schemas, for AOT output.
 - Keep the default TypeScript output for application source; it carries
-  structural types without importing JIT.
+  structural types and public signatures in the executable file itself.
 - Turn on `manifest` and `plans` when reviewing generated artifacts in CI.
 - Use subpath modules for `@jit/generated/user` package imports or
   `./generated/user.js` local imports.

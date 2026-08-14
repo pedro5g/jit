@@ -27,7 +27,7 @@ monomorphic code a performance engineer would write by hand:
 cached per schema. Ideal for dynamic schemas and long-lived processes.
 
 **AOT (build time, Prisma-style)** — `pnpm jit init` writes config and `jit generate`
-emits pure `.mjs` + `.cjs` + `.d.ts` modules with **zero imports**: the engine never ships
+emits exactly one self-contained `.js` or directly typed `.ts` module with **zero runtime imports**: the engine never ships
 to production, and the final bundle keeps only the generated functions your app imports.
 AOT output runs under strict CSP, edge runtimes and other locked-down environments.
 

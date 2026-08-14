@@ -1,12 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "layout": "local",
-  "format": "javascript",
+  "format": "typescript",
   "files": [
-    "index.js",
-    "index.d.ts",
-    "catalog.js",
-    "catalog.d.ts",
+    "index.ts",
+    "catalog.ts",
     "manifest.json",
     "plans/catalog.json"
   ],

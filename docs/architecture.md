@@ -14,7 +14,7 @@ DSL (JIT.* builders)
   -> per-operation plan / IR (compiler/ir, query plans, mapper plans)
   -> optimizer passes (equal and query only — separate cost models)
   -> codegen (one emitter per operation)
-  -> globalThis.Function (runtime JIT)  |  pure .mjs/.cjs/.d.ts (AOT)
+  -> globalThis.Function (runtime JIT)  |  one self-contained .js or typed .ts (AOT)
 ```
 
 Everything expensive — schema traversal, wrapper resolution, hint
@@ -204,17 +204,18 @@ types that future package splits will reuse.
 
 ## AOT generator
 
-`aot/generate.ts` writes fully self-contained output selected by format and
-location:
+`aot/generate.ts` writes one executable source representation selected by
+format. Output location never changes the code format:
 
 - CLI/config generation defaults to typed `index.ts` in local directories;
-  opt-in JavaScript receives `index.js` + `index.d.ts`, with
-  `javascript-only` available for deliberately untyped consumers;
-- output below `node_modules` receives `index.mjs` + `index.cjs`, dual
-  declarations, and `package.json` (exports map, `sideEffects: false`);
-- optional thin subpath entrypoints use relative `.js` imports locally and the
-  generated package namespace below `node_modules`, plus deterministic
-  `manifest.json` and `plans/*.json` review files when enabled;
+  opt-in JavaScript receives one ready-to-run ESM `index.js` with no parallel
+  declaration artifact;
+- output below `node_modules` keeps the chosen `.ts` or `.js` source and adds
+  only `package.json` (exports map, `sideEffects: false`); there is no implicit
+  ESM/CJS/declaration fan-out;
+- optional subpath entrypoints are independently compiled from one declaration
+  source and never import/initialize the root barrel, plus deterministic
+  manifest v2 and `plans/*.json` review files when enabled;
 - zero imports — the validation error class and runtime helpers
   (keyed-index cache, hash primitives) are inlined;
 - export shape is explicit and bundle-oriented: standalone compiled functions
@@ -226,11 +227,16 @@ location:
 - the generator never emits an operation outside the selected surface: object
   markers use only the keys present in the compiled object; standalone output
   uses only exported registered functions;
-- TypeScript output emits structural aliases directly. JavaScript `.d.ts`
-  types can anchor on the dev's schema file via
-  `import("@jit-compiler/jit").Typeof<typeof import("./user.jit.js").User>` — inference is
-  the single source of truth (`aot/emit-type.ts` is only the fallback for
-  programmatic generation without a source file);
+- TypeScript output emits structural aliases and public function signatures in
+  the executable `.ts` source. JavaScript deliberately emits no types. This
+  removes the second hand-maintained representation that could drift from the
+  code developers actually execute. Legacy source artifacts without complete
+  runtime type metadata keep an erased type-only reference to their declaration
+  module rather than degrading public types;
+- validator codegen is selection-aware: an `is`-only artifact does not carry
+  `safeParse`, async validation is absent unless it is the selected runtime
+  capability, and `fromJSON` lowers native `JSON.parse` plus specialized
+  validation directly without an intermediate parse wrapper;
 - `JIT.compile` markers restrict generation to the requested ops and add
   dev-defined extras from the artifact registry; self-contained callback
   bindings are emitted into the generated module, while native/bound functions
@@ -241,7 +247,7 @@ CLI/config: `jit init` writes a typed `jit.config.*` plus a starter
 `jit/user.jit.ts` using `@jit-compiler/jit/define`. `jit doctor` reports resolved
 config/discovery without generating; `jit explain` and `jit list` load
 declaration files and list buildable grouped objects plus standalone
-functions; `jit inspect <export> --stage plan|source|declaration` prints the
+functions; `jit inspect <export> --stage plan|source` prints the
 collected descriptor or generated review output; `jit clean` removes the
 configured generated directory. `entries` is optional; when omitted,
 `jit generate` scans from the project root. `entries` accepts files,

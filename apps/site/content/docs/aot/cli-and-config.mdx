@@ -35,9 +35,6 @@ export default AOT.defineConfig({
     manifest: true,
     plans: true,
   },
-  types: {
-    package: "@jit-compiler/jit",
-  },
 });
 ```
 
@@ -87,9 +84,10 @@ The generated TypeScript contains structural aliases plus specialized loops
 and checks, but no schema builders or runtime compiler import. The application
 type-checks it like any other source file.
 
-Output layout is automatic. TypeScript is the default and emits `index.ts`.
-JavaScript plus declarations is opt-in. A directory below `node_modules` can
-emit a namespaced dual ESM/CommonJS package and exports map.
+TypeScript is the default and emits one typed `index.ts`. JavaScript is opt-in
+and emits one ready-to-run ESM `index.js`. A directory below `node_modules`
+keeps that selected source and adds a namespaced exports map; it does not fan
+out into parallel module or declaration formats.
 
 If no explicit compiled exports are found, generation prints a diagnostic and writes
 nothing. There is no raw-schema fallback.
@@ -101,13 +99,12 @@ nothing. There is no raw-schema fallback.
 | `entries` | project-root scan | declaration files, directories or globs to load |
 | `patterns` | `['**/*.jit.ts']` | patterns applied while scanning a directory |
 | `output.directory` | `generated/jit` | local directory or generated package location |
-| `output.format` | `typescript` | `typescript`, `javascript` plus declarations, or `javascript-only` |
+| `output.format` | `typescript` | exactly `typescript` (`.ts`) or `javascript` (`.js`) |
 | `output.packageName` | inferred | namespace override for output below `node_modules` |
 | `output.clean` | `true` | remove known artifacts from the previous generation |
 | `emit.subpathModules` | `false` | emit one import entry per declaration file |
 | `emit.manifest` | `false` | record modules, imports, exports and generated files |
 | `emit.plans` | `false` | write deterministic plans for review and CI |
-| `types.package` | `@jit-compiler/jit` | source of `JIT.Typeof`/strict helpers in declarations |
 
 ## Discovery
 
@@ -160,32 +157,30 @@ parallel `index.d.ts` that can drift from the executable source. Runtime
 helpers remain specialized and import-free. Type-only references back to a
 declaration file are erased by TypeScript.
 
-Generated aliases and function signatures are structural. The output does not
-need `JIT.Typeof`, the schema declaration file or a type-only import from JIT.
+Schema and execution-plan signatures are emitted structurally and do not need
+`JIT.Typeof` or a type-only import from JIT. A legacy registered query/mapper/
+watch callback whose runtime metadata cannot reconstruct its full generic
+signature keeps a type-only reference to its declaration file; TypeScript
+erases that reference from the emitted JavaScript.
 Subpath modules intentionally import `./index.js`, even though the source file
 is `index.ts`; TypeScript resolves the source and preserves a valid emitted ESM
 specifier.
 
-Prefer `javascript` for output consumed directly by Node or written below
-`node_modules`. Prefer `typescript` for checked-in/generated source compiled by
-the application.
-
-Use `javascript-only` only when another boundary supplies types or the consumer
-is plain JavaScript:
+Prefer `javascript` for output consumed directly by Node or plain JavaScript:
 
 ```bash
-pnpm jit generate --output-format javascript-only
+pnpm jit generate --output-format javascript
 ```
 
-That mode emits no `.d.ts`; it is deliberately explicit so a TypeScript project
-cannot lose generated types accidentally.
+That mode emits exactly `index.js` and optional `.js` subpaths. It deliberately
+emits no `.d.ts`; choose `typescript` when the generated artifact belongs to
+the application's TypeScript build.
 
 ```ts
 export default AOT.defineConfig({
   entries: ["src/**/*.jit.ts"],
   output: { directory: "src/generated/jit", clean: true },
   emit: { subpathModules: true, manifest: true, plans: true },
-  types: { package: "@jit-compiler/jit" },
 });
 ```
 
@@ -215,9 +210,9 @@ import { User } from "@jit/generated";
 import { watchUsers } from "@jit/generated/users";
 ```
 
-This layout writes `index.mjs`, `index.cjs`, matching declarations and a
-generated `package.json` exports map. Run generation after dependency installs,
-because package managers own and may replace `node_modules`.
+This layout writes the selected `index.ts` or `index.js` plus a generated
+`package.json` exports map. Run generation after dependency installs, because
+package managers own and may replace `node_modules`.
 
 ## Diagnostics workflow
 
@@ -226,8 +221,6 @@ because package managers own and may replace `node_modules`.
 3. `explain`: why each declaration can/cannot build.
 4. `inspect --stage plan`: normalized operation descriptor.
 5. `inspect --stage source`: exact generated JS.
-6. `inspect --stage declaration`: public generated types. In TypeScript mode,
-   this is the typed `index.ts` itself.
 
 Use this sequence in CI before generation when config drift should fail early.
 
@@ -238,7 +231,7 @@ arbitrary runtime closure into generated code.
 ## CI
 
 Run generate in a clean checkout and fail when generated files differ. This
-proves declarations are current and prevents local stale artifacts from hiding
+proves generated source is current and prevents local stale artifacts from hiding
 missing exports.
 
 ```bash

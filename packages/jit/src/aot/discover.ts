@@ -18,18 +18,18 @@ export interface JitConfig {
    * By default, matches TypeScript files whose basename ends in `.jit`.
    */
   readonly patterns?: readonly string[];
-  /** Runtime and declaration output. Its location determines the module layout. */
+  /** Generated executable source. */
   readonly output?: {
     /**
-     * Generated directory relative to the config file. TypeScript output
-     * emits `index.ts`; JavaScript emits JS plus declarations. A directory
-     * below `node_modules` can emit a namespaced dual ESM/CJS package.
+     * Generated directory relative to the config file. TypeScript emits one
+     * typed `index.ts`; JavaScript emits one ready-to-run ESM `index.js`.
+     * A directory below `node_modules` also receives a package manifest.
      * @default "generated/jit"
      */
     readonly directory?: string;
     /**
-     * Emit one self-contained TypeScript module, JavaScript plus declarations,
-     * or JavaScript without declarations. @default "typescript"
+     * Emit one self-contained TypeScript or JavaScript module.
+     * @default "typescript"
      */
     readonly format?: AotOutputFormat;
     /** Package namespace for output below `node_modules`; otherwise inferred from the path. */
@@ -45,11 +45,6 @@ export interface JitConfig {
     readonly manifest?: boolean;
     /** Emit deterministic compiler plans under `plans/`. @default false */
     readonly plans?: boolean;
-  };
-  /** Configuration used only by generated TypeScript declarations. */
-  readonly types?: {
-    /** Package exporting `JIT.Typeof` and `JIT.Strict`. @default "@jit-compiler/jit" */
-    readonly package?: string;
   };
 }
 
@@ -191,7 +186,7 @@ export interface CollectedSchemas {
   readonly typeSchemas: Record<string, SchemaInput>;
   /** Export name -> standalone compiled function/object registered by JIT. */
   readonly functions: Record<string, unknown>;
-  /** Export name -> file it came from (collision reporting and d.ts anchoring). */
+  /** Export name -> file it came from (collision reporting and subpath grouping). */
   readonly sources: ReadonlyMap<string, string>;
 }
 

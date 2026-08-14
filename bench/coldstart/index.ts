@@ -26,7 +26,15 @@ const UserSchema = JIT.object({
   }),
 });
 
-AOT.generate({ schemas: { User: UserSchema }, outDir: join(here, ".generated") });
+AOT.generate({
+  schemas: {
+    User: JIT.compile(UserSchema, {
+      is: JIT.is(UserSchema),
+      stringify: JIT.json.stringify(UserSchema),
+    }),
+  },
+  outDir: join(here, ".generated"),
+});
 
 interface ColdStats {
   readonly median: number;

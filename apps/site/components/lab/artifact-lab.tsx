@@ -70,13 +70,8 @@ const formatOptions: readonly SelectOption[] = [
   },
   {
     value: "javascript",
-    label: "JavaScript + types",
-    description: "Runtime .js plus a matching .d.ts",
-  },
-  {
-    value: "javascript-only",
-    label: "JavaScript only",
-    description: "Smallest output without declarations",
+    label: "JavaScript",
+    description: "Ready-to-run ESM .js without declaration overhead",
   },
 ];
 

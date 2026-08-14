@@ -112,7 +112,7 @@ async function loadAotUsers(): Promise<AotUsersModule> {
   const selected = { is: JIT.is(UsersSchema), safeParse: JIT.safeParse(UsersSchema) };
 
   AOT.generate({ schemas: {}, functions: { Users_is: selected.is, Users_safeParse: selected.safeParse }, outDir });
-  return (await import(pathToFileURL(join(outDir, "index.mjs")).href)) as AotUsersModule;
+  return (await import(pathToFileURL(join(outDir, "index.js")).href)) as AotUsersModule;
 }
 
 const typeboxValueCheck = (value: unknown): boolean => Value.Check(typeboxUsers, value);

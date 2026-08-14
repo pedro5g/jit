@@ -20,10 +20,10 @@ describe("Lab browser AOT compiler", () => {
     expect(file?.source).not.toContain("@jit-compiler/jit");
   });
 
-  it("honors JavaScript-only output without declaration files", () => {
+  it("emits one ready-to-run JavaScript file without declaration files", () => {
     const Flag = JIT.object({ enabled: JIT.boolean() });
     const isFlag = JIT.validate.is(Flag);
-    const result = compileBindings({ Flag, isFlag }, { format: "javascript-only", fileName: "flag" });
+    const result = compileBindings({ Flag, isFlag }, { format: "javascript", fileName: "flag" });
 
     expect(result.files.map((file) => file.path)).toEqual(["flag.js"]);
   });

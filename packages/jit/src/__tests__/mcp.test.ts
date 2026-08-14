@@ -216,16 +216,31 @@ describe("jit MCP server", () => {
 
     it("previews generated source without writing to the configured output", async () => {
       const preview = asTool(await callTool({ name: "jit_aot_preview", arguments: { stage: "source" } }, projectDir));
+      const types = asTool(await callTool({ name: "jit_aot_preview", arguments: { stage: "types" } }, projectDir));
       const plan = asTool(
         await callTool({ name: "jit_aot_preview", arguments: { stage: "plan", target: "User_is" } }, projectDir)
       );
 
       expect(preview.isError).toBeUndefined();
       expect(preview.content[0].text).toContain("const User_is");
+      expect(types.isError).toBeUndefined();
+      expect(types.content[0].text).toContain("value is");
       expect(plan.isError).toBeUndefined();
       expect(plan.structuredContent).toMatchObject({ selectedFile: "plans/index.json" });
       expect(plan.content[0].text).toContain('"name": "User_is"');
       expect(() => readFileSync(join(projectDir, "generated", "index.ts"), "utf8")).toThrow();
+    });
+
+    it("rejects a separate types preview for JavaScript output", async () => {
+      const preview = asTool(
+        await callTool(
+          { name: "jit_aot_preview", arguments: { stage: "types", outputFormat: "javascript" } },
+          projectDir
+        )
+      );
+
+      expect(preview.isError).toBe(true);
+      expect(preview.content[0].text).toContain("has no separate type artifact");
     });
 
     it("requires explicit write confirmation and then generates typed package artifacts", async () => {
@@ -288,7 +303,6 @@ function writeAotFixture(projectDir: string): void {
       "export default {",
       '  entries: ["src/**/*.jit.ts"],',
       '  output: { directory: "generated", clean: true },',
-      '  types: { package: "@fixture/compiler" },',
       "  emit: { manifest: true, plans: true },",
       "};",
       "",

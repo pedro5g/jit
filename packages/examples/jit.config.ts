@@ -6,12 +6,11 @@ export default AOT.defineConfig({
   output: {
     directory: "compiled/generated",
     clean: true,
-    format: "javascript",
+    format: "typescript",
   },
   emit: {
     subpathModules: true,
     manifest: true,
     plans: true,
   },
-  types: { package: "@jit-compiler/jit" },
 });

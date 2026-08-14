@@ -22,7 +22,7 @@ socket round trip.
 
 | Capability                  | Runtime JIT | Generated AOT | Notes                                                       |
 | --------------------------- | ----------- | ------------- | ----------------------------------------------------------- |
-| Schema inference            | Yes         | Yes           | Generated declarations anchor types on `catalog.jit.ts`     |
+| Schema inference            | Yes         | Yes           | Types live directly in generated `catalog.ts`               |
 | `is`, `parse`, `safeParse`  | Yes         | Yes           | AOT emits one specialized validator scope                   |
 | Equal, clone, diff, hash    | Yes         | Yes           | No reflective object traversal at execution time            |
 | Update                      | Yes         | No            | Parameterized update is currently a runtime-only artifact   |
@@ -49,21 +49,19 @@ boundary. The example keeps those concerns explicit.
 
 ```text
 compiled/generated/
-├── index.js
-├── index.d.ts
-├── catalog.js
-├── catalog.d.ts
+├── index.ts
+├── catalog.ts
 ├── manifest.json
 └── plans/catalog.json
 ```
 
-The JavaScript has zero imports from `@jit-compiler/jit`. The compiled example
-uses a normal relative `./generated/index.js` import, and TypeScript resolves
-the adjacent generated declaration without a package alias.
+The TypeScript has zero runtime imports from `@jit-compiler/jit`. The compiled
+example uses the normal emitted-path `./generated/index.js` specifier, and the
+TypeScript build resolves it to the generated `index.ts` source.
 
 Generated files are committed intentionally. `pnpm examples:check` regenerates
 them and rejects a diff, which catches stale snapshots, nondeterministic code,
-absolute machine paths, changed tree-shaking surfaces, and declaration drift.
+absolute machine paths, changed tree-shaking surfaces, and generated-source drift.
 
 ## Socket Strategy
 

@@ -73,6 +73,6 @@ pnpm jit generate
 pnpm build
 ```
 
-The repository's AOT tests import generated ESM/CJS modules, execute typed
-functions and bundle selected exports with esbuild to prove unused operations
-are removed.
+The repository's AOT tests import both generated `.js` and `.ts` modules,
+execute typed functions, and bundle selected exports with esbuild to prove
+unused operations are removed.

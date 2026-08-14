@@ -94,11 +94,11 @@ and allocation boundaries.
 ```bash
 pnpm jit init      # writes jit.config.ts
 pnpm jit doctor    # checks the setup
-pnpm jit generate  # emits pure JavaScript and matching .d.ts modules
+pnpm jit generate  # emits one directly typed, self-contained .ts module
 ```
 
 Project-local output uses normal relative `index.js` imports. Output below
-`node_modules` becomes a dual ESM/CommonJS package with an exports map. Continue
+`node_modules` keeps the selected `.ts` or `.js` source and adds an exports map. Continue
 with [CLI and configuration](/docs/aot/cli-and-config) for discovery, output
 layouts and CI, or [generation and tree shaking](/docs/aot/generation-and-tree-shaking)
 for standalone and grouped exports.

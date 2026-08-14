@@ -82,8 +82,8 @@ client can distinguish read-only calls from writes.
 
 1. Call `jit_project_doctor` to catch missing config, declarations, or exports.
 2. Call `jit_aot_inspect` to verify that every output is explicitly selected.
-3. Call `jit_aot_preview` with `stage: "source"` and
-   `stage: "declaration"` to review runtime code and types.
+3. Call `jit_aot_preview` with `stage: "source"` and, for TypeScript output,
+   `stage: "types"` to review runtime code and embedded types.
 4. Preview `manifest` or a named `plan` when those artifacts are enabled.
 5. Call `jit_aot_generate` only after review, with `{ "write": true }`.
 6. Run the project's tests and bundle/tree-shaking checks.
@@ -119,7 +119,7 @@ cannot turn an inspection request into a write by omitting a default.
 ```
 
 Config remains the source of defaults. Tool arguments may override `files`,
-`patterns`, `outDir`, `packageName`, `typesPackage`, `clean`, and individual
+`patterns`, `outDir`, `packageName`, `outputFormat`, `clean`, and individual
 `emit` flags for one call. Runtime layout is inferred from whether `outDir`
 is local or below `node_modules`.
 
@@ -138,7 +138,7 @@ Fixed resources are listed only when their backing file exists:
 Two templates provide targeted reads:
 
 - `jit://docs/{path}` reads Markdown below `docs/`;
-- `jit://generated/{path}` reads source, declarations, manifests, and plans
+- `jit://generated/{path}` reads generated source, manifests, and plans
   below the resolved AOT output directory.
 
 Resources are capped at 512 KiB per read. This keeps accidental generated
