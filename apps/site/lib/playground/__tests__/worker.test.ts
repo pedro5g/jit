@@ -71,16 +71,15 @@ const reactiveUpdate = (initial, patches) => {
     });
   });
 
-  it("executes an explicitly configured model", () => {
+  it("executes an explicit artifact group", () => {
     const result = execute(
-      "model",
+      "compile",
       `const schema = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
-const model = {
-  ops: ["is", "parse", "clone"],
+const compiled = JIT.compile(schema, {
   is: JIT.is(schema),
   parse: JIT.parse(schema),
   clone: JIT.clone(schema),
-};`,
+});`,
       { id: 1, name: "Ada" }
     );
 

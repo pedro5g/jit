@@ -1119,7 +1119,7 @@ class ValidatorEmitter {
               break;
             case "int32":
               this.failIf(
-                `!Number.isInteger(${value}) || ${value} < -2147483648 || ${value} > 2147483647`,
+                `(${value} | 0) !== ${value}`,
                 path,
                 "not_int32",
                 "int32",
@@ -2068,6 +2068,81 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
     }
     default:
       return false;
+  }
+}
+
+/**
+ * True when `is(value)` can be used as the allocation-free success path for
+ * `parse(value)`. Invalid values may then run the issue emitter, so schemas
+ * with observable predicates or stateful regular expressions stay single-pass.
+ */
+export function canUseFastParse(schema: ATS.AnyTypeSchema, seen = new Set<ATS.AnyTypeSchema>()): boolean {
+  if (seen.has(schema)) return true;
+  if (needsBuild(schema) || rootHasReadonly(schema)) return false;
+  seen.add(schema);
+  const current = schema as AnySchema;
+
+  switch (current.type) {
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.custom:
+    case TypeName.codec:
+    case TypeName.instanceof:
+      return false;
+    case TypeName.lazy:
+      return canUseFastParse((current.def.getter as () => ATS.AnyTypeSchema)(), seen);
+    case TypeName.when:
+      return (
+        typeof current.def.is !== "function" &&
+        canUseFastParse(current.def.thenType as ATS.AnyTypeSchema, seen) &&
+        canUseFastParse(current.def.otherwiseType as ATS.AnyTypeSchema, seen)
+      );
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.not:
+      return canUseFastParse(current.def.innerType as ATS.AnyTypeSchema, seen);
+    case TypeName.string: {
+      const checks = (current.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
+
+      return !checks.some((check) => check.value instanceof RegExp && (check.value.global || check.value.sticky));
+    }
+    case TypeName.array:
+    case TypeName.set:
+      return canUseFastParse(current.def.element as ATS.AnyTypeSchema, seen);
+    case TypeName.map:
+      return (
+        canUseFastParse(current.def.key as ATS.AnyTypeSchema, seen) &&
+        canUseFastParse(current.def.value as ATS.AnyTypeSchema, seen)
+      );
+    case TypeName.record:
+      return canUseFastParse(current.def.value as ATS.AnyTypeSchema, seen);
+    case TypeName.tuple: {
+      const items = (current.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
+      const rest = current.def.rest as ATS.AnyTypeSchema | undefined;
+
+      return items.every((item) => canUseFastParse(item, seen)) && (rest === undefined || canUseFastParse(rest, seen));
+    }
+    case TypeName.union:
+    case TypeName.xor:
+    case TypeName.discriminatedUnion:
+    case TypeName.intersection:
+      return (current.def.options as readonly ATS.AnyTypeSchema[]).every((option) => canUseFastParse(option, seen));
+    case TypeName.object: {
+      const props = current.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
+      const catchall = current.def.catchall as ATS.AnyTypeSchema | undefined;
+
+      return (
+        Object.keys(props).every((key) => canUseFastParse(props[key], seen)) &&
+        (catchall === undefined || canUseFastParse(catchall, seen))
+      );
+    }
+    default:
+      return true;
   }
 }
 

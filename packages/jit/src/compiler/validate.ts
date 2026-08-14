@@ -2,7 +2,7 @@ import type * as ATS from "../core/ats/index.js";
 import { JITValidationError, type ValidationIssue } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
-import { emitValidator } from "./validate/emit-validate.js";
+import { canUseFastParse, emitValidator } from "./validate/emit-validate.js";
 
 export const VALIDATOR_OPS = ["is", "parse", "safeParse", "parseAsync", "safeParseAsync"] as const;
 
@@ -63,7 +63,10 @@ export function emitValidatorSource(
   schema: ATS.AnyTypeSchema,
   options?: { readonly ops?: readonly ValidatorOp[] }
 ): string {
-  return emitValidator(schema, emitOptionsForValidatorOps(options?.ops ?? VALIDATOR_OPS)).source;
+  const ops = options?.ops ?? VALIDATOR_OPS;
+
+  return emitValidator(schema, emitOptionsForValidatorOps(ops, ops.includes("parse") && canUseFastParse(schema)))
+    .source;
 }
 
 /**
@@ -98,21 +101,24 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
 ): CompiledValidatorSelection<ATS.TypeofSchema<TSchema>, TOps> {
   type TValue = ATS.TypeofSchema<TSchema>;
   const normalizedOps = normalizeValidatorOps(ops);
+  const fastParse = normalizedOps.includes("parse") && canUseFastParse(schema);
   const cacheKey = `validator:${normalizedOps.join(",")}`;
 
   return getCompileCached(
     schema,
     cacheKey,
     () => {
-      const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps));
+      const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps, fastParse));
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values) as {
         readonly is?: (value: unknown) => value is TValue;
         readonly safeParse?: (value: unknown) => SafeParseResult<TValue>;
         readonly safeParseAsync?: (value: unknown) => Promise<SafeParseResult<TValue>>;
       };
       const selection: MutableCompiledValidatorSelection<TValue> = {};
+      const is = compiled.is;
       const safeParse = compiled.safeParse;
       const parse = (value: unknown): TValue => {
+        if (fastParse && is?.(value)) return value;
         if (!safeParse) throw new Error("parse requires safeParse generation");
         const result = safeParse(value);
 
@@ -177,9 +183,9 @@ function normalizeValidatorOps(ops: readonly ValidatorOp[]): readonly ValidatorO
   return normalized;
 }
 
-function emitOptionsForValidatorOps(ops: readonly ValidatorOp[]) {
+function emitOptionsForValidatorOps(ops: readonly ValidatorOp[], fastParse = false) {
   return {
-    is: ops.includes("is"),
+    is: ops.includes("is") || fastParse,
     safeParse:
       ops.includes("safeParse") ||
       ops.includes("parse") ||

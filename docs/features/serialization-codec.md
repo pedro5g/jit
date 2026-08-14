@@ -44,9 +44,9 @@ const parseUserJson = JIT.json.parse(User).validate();
 const user = parseUserJson('{"id":1,"name":"Ada","active":true}');
 ```
 
-For supported schemas this parses tokens and validates each field/item in the
-same generated traversal, without native `JSON.parse`. Schemas whose full
-semantics are not lowered use the compatibility parser + validator path. It is
+This always delegates JSON syntax and object materialization to native
+`JSON.parse`, then immediately runs the schema-specialized generated validator.
+Runtime compilation performs a bounded best-effort shape warm-up first. It is
 useful at external boundaries where JSON input must become trusted domain data.
 
 ## Binary Codec

@@ -1,5 +1,5 @@
 // Cold start, runtime-JIT path: import the engine, build the schema, compile
-// the validator + serializer, run one call of each. Prints elapsed ns.
+// validation + serialization artifacts, run one call of each. Prints elapsed ns.
 const start = process.hrtime.bigint();
 
 const { JIT } = await import("@jit-compiler/jit");
@@ -16,8 +16,8 @@ const UserSchema = JIT.object({
   }),
 });
 
-const validate = JIT.validator(UserSchema);
-const serializer = JIT.serializer(UserSchema);
+const isUser = JIT.is(UserSchema);
+const stringifyUser = JIT.json.stringify(UserSchema);
 
 const user = {
   id: 42,
@@ -28,8 +28,8 @@ const user = {
   profile: { age: 36, score: 99.5 },
 };
 
-if (!validate.is(user)) throw new Error("unexpected invalid user");
-if (serializer.stringify(user).length === 0) throw new Error("empty json");
+if (!isUser(user)) throw new Error("unexpected invalid user");
+if (stringifyUser(user).length === 0) throw new Error("empty json");
 
 const end = process.hrtime.bigint();
 

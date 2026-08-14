@@ -17,7 +17,6 @@ documentation.
 | `JIT.is`          | [Validation](./validation)           | Root alias for `JIT.validate.is`              |
 | `JIT.parse`       | [Validation](./validation)           | Root alias for `JIT.validate.parse`           |
 | `JIT.safeParse`   | [Validation](./validation)           | Root alias for `JIT.validate.safeParse`       |
-| `JIT.validator`   | [Validation](./validation)           | Legacy validator adapter; prefer `JIT.validate` |
 | `JIT.equal`       | [Equal](./equal)                     | Schema-specialized structural equality        |
 | `JIT.clone`       | [Clone](./clone)                     | Shape-specialized deep clone                  |
 | `JIT.diff`        | [Diff](./diff)                       | Typed structural change entries               |
@@ -28,14 +27,11 @@ documentation.
 | `JIT.binary`      | [Codec](./codec)                     | Persisted binary capability namespace         |
 | `JIT.compare`     | [Equal](./equal)                     | Equality, diff, and hash capability namespace |
 | `JIT.security`    | [Mask](./mask)                       | Masking and sanitization capability namespace |
-| `JIT.serializer`  | [Serializer](./serializer)           | Legacy JSON adapter; prefer `JIT.json`        |
 | `JIT.codec`       | [Codec](./codec)                     | Value codec schema or binary wire codec       |
 | `JIT.format`      | [Format](./format)                   | Standalone string-mask formatter              |
 | `JIT.mask`        | [Mask](./mask)                       | PII-aware output masking                      |
 | `JIT.sanitize`    | [Sanitize](./sanitize)               | Policy-driven hostile string cleanup          |
 | `JIT.compile`     | [Compile](./compile)                 | Explicit grouped operation export             |
-| `JIT.model`       | [Model](./model)                     | Legacy operation adapter; prefer artifacts    |
-| `JIT.mapper`      | [Mapper](./mapper)                   | Legacy mapping adapter; prefer `JIT.map`      |
 | `JIT.from`        | [Query](./query)                     | Starts a value-source execution pipeline      |
 | `JIT.transform`   | [Transform](./transform)             | Select and transform object fields            |
 | `JIT.query`       | [Query](./query)                     | Eager and lazy compiled collection query      |
@@ -98,8 +94,6 @@ normally uses the higher-level function in the second column.
 | `JIT.compileTransform` | [Low-level compilers](./low-level-compilers#compiletransform) | `JIT.transform`                 |
 | `JIT.compileUniqueBy`  | [Low-level compilers](./low-level-compilers#compileuniqueby)  | `JIT.query().unique()`          |
 | `JIT.COMPILE_OPS`      | [Operation lists](./low-level-compilers#compile_ops)          | supported `compile()` keys      |
-| `JIT.MODEL_OPS`        | [Operation lists](./low-level-compilers#model_ops)            | supported `model()` keys        |
-| `JIT.MAPPER_OPS`       | [Operation lists](./low-level-compilers#mapper_ops)           | supported mapper selections     |
 | `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)                    | `JIT.watchedList()`             |
 | `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class)               | `JIT.watchedList(..., { key })` |
 

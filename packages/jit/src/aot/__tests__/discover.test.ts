@@ -19,11 +19,11 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
 
   it("should emit esm + cjs + dual type declarations with an exports map", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
     const packageDir = join(outDir, "node_modules", "@jit", "generated");
     const result = AOT.generate({
       schemas: {},
-      functions: { User_is: selected.is },
+      functions: { User_is: isUser },
       outDir: packageDir,
     });
 
@@ -61,9 +61,9 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
 
   it("should expose flat per-operation exports by default", () => {
     const User = JIT.object({ id: JIT.number() });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
 
-    AOT.generate({ schemas: {}, functions: { User_is: selected.is }, outDir });
+    AOT.generate({ schemas: {}, functions: { User_is: isUser }, outDir });
 
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const types = readFileSync(join(outDir, "index.d.ts"), "utf8");
@@ -77,10 +77,10 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
 
   it("should expose grouped objects only for object-style compile markers", () => {
     const User = JIT.object({ id: JIT.number() });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
 
     AOT.generate({
-      schemas: { User: JIT.compile(User, { is: selected.is }) },
+      schemas: { User: JIT.compile(User, { is: isUser }) },
       outDir,
     });
 
@@ -96,12 +96,12 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
 
   it("should emit subpath modules, manifest, and plans when requested", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
     const schemaFile = join(outDir, "jit", "user.jit.ts");
 
     const result = AOT.generate({
-      schemas: { User: JIT.compile(User, { is: selected.is }) },
-      functions: { isUser: selected.is },
+      schemas: { User: JIT.compile(User, { is: isUser }) },
+      functions: { isUser: isUser },
       sources: new Map([
         ["User", schemaFile],
         ["isUser", schemaFile],
@@ -158,7 +158,7 @@ describe("JIT AOT dual output and tree-shakable exports", () => {
 
     AOT.generate({
       schemas: {
-        User: JIT.compile(User, { is: JIT.validator(User).get("is").is }),
+        User: JIT.compile(User, { is: JIT.is(User) }),
       },
       sources: new Map([["User", schemaFile]]),
       outDir: packageDir,
@@ -194,12 +194,12 @@ describe("JIT AOT inference-anchored types", () => {
 
   it('should derive .d.ts types from the dev schema file via import("@jit-compiler/jit").Typeof', () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
     const generated = join(outDir, "generated");
     const schemaFile = join(outDir, "src", "user.jit.ts");
 
     AOT.generate({
-      schemas: { User: JIT.compile(User, { is: selected.is }) },
+      schemas: { User: JIT.compile(User, { is: isUser }) },
       sources: new Map([["User", schemaFile]]),
       outDir: generated,
     });
@@ -222,7 +222,7 @@ describe("JIT AOT inference-anchored types", () => {
 
     AOT.generate({
       schemas: {
-        User: JIT.compile(User, { is: JIT.validator(User).get("is").is }),
+        User: JIT.compile(User, { is: JIT.is(User) }),
       },
       sources: new Map([["User", join(outDir, "src", "user.jit.ts")]]),
       outDir: generated,
@@ -236,7 +236,8 @@ describe("JIT AOT inference-anchored types", () => {
 
   it("should typecheck real imports from generated files after generation", async () => {
     const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const selected = JIT.validator(UserSchema).get("is", "parse");
+    const isUser = JIT.is(UserSchema);
+    const parseUser = JIT.parse(UserSchema);
     const srcDir = join(outDir, "src");
     const generatedDir = join(outDir, "node_modules", "@jit", "generated");
     const schemaFile = join(srcDir, "user.jit.ts");
@@ -261,11 +262,11 @@ describe("JIT AOT inference-anchored types", () => {
     AOT.generate({
       schemas: {
         User: JIT.compile(UserSchema, {
-          is: selected.is,
-          parse: selected.parse,
+          is: isUser,
+          parse: parseUser,
         }),
       },
-      functions: { isUser: selected.is },
+      functions: { isUser },
       sources: new Map([
         ["User", schemaFile],
         ["isUser", schemaFile],
@@ -354,10 +355,10 @@ describe("JIT AOT inference-anchored types", () => {
 
   it("should fall back to structural types for programmatic schemas without sources", () => {
     const User = JIT.object({ id: JIT.number() });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
 
     AOT.generate({
-      schemas: { User: JIT.compile(User, { is: selected.is }) },
+      schemas: { User: JIT.compile(User, { is: isUser }) },
       outDir,
     });
 
@@ -418,8 +419,8 @@ describe("JIT AOT schema discovery", () => {
     const schemaModule = [
       `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
       "const User = JIT.object({ id: JIT.number() });",
-      "const selected = JIT.validator(User).get('is');",
-      "export const User_is = selected.is;",
+      "const isUser = JIT.is(User);",
+      "export const User_is = isUser;",
       "export const UserSchema = User;",
       "export const notASchema = 42;",
       "",

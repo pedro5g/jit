@@ -17,14 +17,6 @@ export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
 export { compileUpdate } from "../compiler/update.js";
 /** Resolves the output type of a schema or builder as `JIT.Typeof<typeof User>`. */
 export type Typeof<TSchemaLike> = import("../core/ats/typeof.js").Typeof<TSchemaLike>;
-export type {
-  CompiledMapper,
-  CompiledMapperSelection,
-  MapperFacade,
-  MapperGet,
-  MapperOp,
-} from "../compiler/mapper.js";
-export { MAPPER_OPS } from "../compiler/mapper.js";
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export * from "./collection/index.js";
@@ -34,17 +26,6 @@ export * from "./composition/index.js";
 export { dto } from "./dto.js";
 export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
-export { mapper } from "./mapper.js";
-export type {
-  CompiledModel,
-  ConfiguredModel,
-  ModelFacade,
-  ModelGet,
-  ModelOp,
-  ModelOptions,
-  ModelSelection,
-} from "./model.js";
-export { MODEL_OPS, model } from "./model.js";
 export * from "./object/index.js";
 export * from "./primitive/index.js";
 export type {
@@ -80,8 +61,7 @@ export {
   security,
   validate,
 } from "./runtime-ops.js";
-export type { CompiledSerializer } from "./serialize.js";
-export { codec, serializer } from "./serialize.js";
+export { codec } from "./serialize.js";
 export * from "./special/index.js";
 export { stream } from "./stream.js";
 export type { TransformBuilder, TransformFieldOps } from "./transform.js";
@@ -104,7 +84,6 @@ export type {
   UpdateRecipe,
 } from "./update.js";
 export { update } from "./update.js";
-export { validator } from "./validate.js";
 export type {
   RuntimeWatch,
   WatchedListOptions,

@@ -16,7 +16,7 @@ describe("Lab browser AOT compiler", () => {
     expect(file?.path).toBe("user.generated.ts");
     expect(file?.source).toContain('export type User = { id: number; name: string; role: "admin" | "member" };');
     expect(file?.source).toContain("const isUser: (value: unknown) => value is User =");
-    expect(file?.source).toContain("Number.isInteger");
+    expect(file?.source).toContain("(v3 | 0) !== v3");
     expect(file?.source).not.toContain("@jit-compiler/jit");
   });
 

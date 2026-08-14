@@ -1,4 +1,5 @@
 import { Errors, JIT } from "../../index.js";
+import { validation } from "./validation-helper.js";
 
 describe("JIT async validation (parseAsync / safeParseAsync)", () => {
   it("should settle promise wrappers and validate the resolved value", async () => {
@@ -6,7 +7,7 @@ describe("JIT async validation (parseAsync / safeParseAsync)", () => {
       id: JIT.number().int(),
       result: JIT.string().min(3).promise(),
     });
-    const validate = JIT.validator(Job);
+    const validate = validation(Job);
 
     const good = await validate.safeParseAsync({ id: 1, result: Promise.resolve("done") });
 
@@ -23,7 +24,7 @@ describe("JIT async validation (parseAsync / safeParseAsync)", () => {
   });
 
   it("should accept plain values where promises are expected, like zod", async () => {
-    const Wrapped = JIT.validator(JIT.string().min(2).promise());
+    const Wrapped = validation(JIT.string().min(2).promise());
 
     await expect(Wrapped.parseAsync("ada")).resolves.toBe("ada");
     await expect(Wrapped.parseAsync(Promise.resolve("ada"))).resolves.toBe("ada");
@@ -34,14 +35,14 @@ describe("JIT async validation (parseAsync / safeParseAsync)", () => {
     const Report = JIT.object({
       title: JIT.string().trim().promise(),
     });
-    const data = await JIT.validator(Report).parseAsync({ title: Promise.resolve("  spaced  ") });
+    const data = await validation(Report).parseAsync({ title: Promise.resolve("  spaced  ") });
 
     expect(data.title).toBe("spaced");
   });
 
   it("should fall back to the sync path for promise-free schemas", async () => {
     const Plain = JIT.object({ id: JIT.number() });
-    const validate = JIT.validator(Plain);
+    const validate = validation(Plain);
 
     await expect(validate.safeParseAsync({ id: 1 })).resolves.toEqual({ success: true, data: { id: 1 } });
     await expect(validate.parseAsync({ id: "x" })).rejects.toBeInstanceOf(Errors.JITValidationError);
@@ -49,18 +50,18 @@ describe("JIT async validation (parseAsync / safeParseAsync)", () => {
 
   it("should keep sync safeParse behavior unchanged (thenable guard only)", () => {
     const Job = JIT.object({ result: JIT.string().promise() });
-    const validate = JIT.validator(Job);
+    const validate = validation(Job);
 
     expect(validate.is({ result: Promise.resolve("x") })).toBe(true);
     expect(validate.is({ result: "not a promise" })).toBe(false);
   });
 
-  it("should expose the async pair on JIT.model and JIT.compile", async () => {
+  it("should expose the async pair on the validation namespace and JIT.compile", async () => {
     const Task = JIT.object({ output: JIT.string().promise() });
-    const model = JIT.model(Task);
+    const parseAsync = JIT.validate.parseAsync(Task);
     const compiled = JIT.compile(Task, ["parseAsync", "safeParseAsync"]);
 
-    await expect(model.parseAsync({ output: Promise.resolve("ok") })).resolves.toEqual({ output: "ok" });
+    await expect(parseAsync({ output: Promise.resolve("ok") })).resolves.toEqual({ output: "ok" });
 
     const result = await compiled.safeParseAsync({ output: Promise.resolve(42) });
 

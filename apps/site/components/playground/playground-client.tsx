@@ -127,7 +127,7 @@ const ops: OpConfig[] = [
   { id: "jsonChunks", label: "chunks", aLabel: "values (JSON array)", needsB: false, hasSource: true },
   { id: "transform", label: "transform", needsB: false, hasSource: true },
   { id: "mapper", label: "map", aLabel: "value (JSON)", needsB: false, hasSource: true },
-  { id: "model", label: "model", needsB: false, hasSource: false },
+  { id: "compile", label: "compile", needsB: false, hasSource: false },
   { id: "dto", label: "dto", aLabel: "entity or entities (JSON)", needsB: false, hasSource: false },
   {
     id: "indexes",
@@ -424,8 +424,8 @@ const mapper = JIT.map(schema, PublicUser, {
     op: "mapper",
   },
   {
-    id: "model",
-    label: "Explicit model operations",
+    id: "compile",
+    label: "Explicit artifact group",
     code: `import { JIT } from "@jit-compiler/jit/runtime";
 
 const schema = JIT.object({
@@ -435,15 +435,14 @@ const schema = JIT.object({
 });
 
 // Only these methods exist, compile, and enter the runtime bundle.
-const model = {
-  ops: ["is", "parse", "clone"],
+const compiled = JIT.compile(schema, {
   is: JIT.is(schema),
   parse: JIT.parse(schema),
   clone: JIT.clone(schema),
-};
+});
 `,
     a: `{ "id": 1, "name": "Ada", "email": "ada@lovelace.dev" }`,
-    op: "model",
+    op: "compile",
   },
   {
     id: "dto",

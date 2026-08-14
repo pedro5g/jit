@@ -277,17 +277,16 @@ describe("generated source snapshots", () => {
       name: JIT.string(),
       profile: JIT.object({ age: JIT.number(), city: JIT.string() }),
     });
-    const toDTO = JIT.mapper(Entity, DTO, { name: { from: "fullName" } }).get("map", "many");
-
-    expect(sourceOf(toDTO)).toMatchSnapshot();
+    expect(Compiler.emitMapperSource(Entity.schema, DTO.schema, { name: { from: "fullName" } })).toMatchSnapshot();
   });
 
   it("mapper: explicit map and many selections", () => {
     const Source = JIT.object({ id: JIT.number(), label: JIT.string() });
     const Target = JIT.object({ id: JIT.number(), label: JIT.string() });
-    const facade = JIT.mapper(Source, Target);
-
-    expect({ map: sourceOf(facade.get("map")), many: sourceOf(facade.get("many")) }).toMatchSnapshot();
+    expect({
+      map: Compiler.emitMapperSource(Source.schema, Target.schema, {}, ["map"]),
+      many: Compiler.emitMapperSource(Source.schema, Target.schema, {}, ["many"]),
+    }).toMatchSnapshot();
   });
   it("sanitize: configured HTML allow-list and identifier presets", () => {
     const Form = JIT.object({

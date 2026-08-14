@@ -1,4 +1,5 @@
 import { type AST, Compiler, Errors, JIT } from "../../index.js";
+import { validation } from "./validation-helper.js";
 
 describe("JIT compiler validator", () => {
   const User = JIT.object({
@@ -18,7 +19,7 @@ describe("JIT compiler validator", () => {
   };
 
   it("should compile is() as a pure inline type guard", () => {
-    const Users = JIT.validator(User);
+    const Users = validation(User);
     const source = Compiler.emitValidatorSource(User.schema);
 
     expect(Users.is(ada)).toBe(true);
@@ -49,7 +50,7 @@ describe("JIT compiler validator", () => {
   });
 
   it("should collect every issue with static paths in safeParse", () => {
-    const Users = JIT.validator(User);
+    const Users = validation(User);
     const result = Users.safeParse({
       id: -3,
       name: "A",
@@ -73,7 +74,7 @@ describe("JIT compiler validator", () => {
 
   it("should report dynamic paths inside arrays", () => {
     const Items = JIT.array(JIT.object({ sku: JIT.string(), qty: JIT.number().int() }));
-    const validate = JIT.validator(Items);
+    const validate = validation(Items);
     const result = validate.safeParse([
       { sku: "a", qty: 1 },
       { sku: 7, qty: 1.5 },
@@ -88,7 +89,7 @@ describe("JIT compiler validator", () => {
   });
 
   it("should return the input reference when nothing transforms", () => {
-    const Users = JIT.validator(User);
+    const Users = validation(User);
     const result = Users.safeParse(ada);
 
     expect(result.success).toBe(true);
@@ -98,7 +99,7 @@ describe("JIT compiler validator", () => {
   it("should freeze successful parse output only for readonly schemas", () => {
     const MutableUser = JIT.object({ id: JIT.number() });
     const ReadonlyUser = MutableUser.readonly();
-    const validate = JIT.validator(ReadonlyUser);
+    const validate = validation(ReadonlyUser);
     const parsed = validate.parse({ id: 1 });
     const safe = validate.safeParse({ id: 2 });
     const failedInput = { id: "nope" };
@@ -124,7 +125,7 @@ describe("JIT compiler validator", () => {
       plan: JIT.string().default("free"),
       code: JIT.string().pipe((value) => value.toUpperCase()),
     });
-    const validate = JIT.validator(Signup);
+    const validate = validation(Signup);
     const result = validate.safeParse({
       email: "  Ada@Math.org ",
       plan: undefined,
@@ -145,7 +146,7 @@ describe("JIT compiler validator", () => {
     const Even = JIT.number()
       .int()
       .refine((value) => value % 2 === 0);
-    const validate = JIT.validator(Even);
+    const validate = validation(Even);
 
     expect(validate.is(4)).toBe(true);
     expect(validate.is(3)).toBe(false);
@@ -155,6 +156,26 @@ describe("JIT compiler validator", () => {
 
     expect(failed.success).toBe(false);
     if (!failed.success) expect(failed.issues[0].code).toBe("custom");
+  });
+
+  it("should keep observable parse checks single-pass", () => {
+    let calls = 0;
+    const Positive = JIT.number().refine((value) => {
+      calls++;
+      return value > 0;
+    });
+    const parse = JIT.parse(Positive);
+
+    expect(() => parse(-1)).toThrow(Errors.JITValidationError);
+    expect(calls).toBe(1);
+    expect(Compiler.emitValidatorSource(Positive.schema, { ops: ["parse"] })).not.toContain("function is(value)");
+  });
+
+  it("should keep stateful regular expressions single-pass", () => {
+    const Token = JIT.string().regex(/^tok_[a-z]+$/g);
+    const source = Compiler.emitValidatorSource(Token.schema, { ops: ["parse"] });
+
+    expect(source).not.toContain("function is(value)");
   });
 
   it("should run conditional refinements with custom issue paths", () => {
@@ -169,7 +190,7 @@ describe("JIT compiler validator", () => {
         return BaseSignup.pick("password", "confirmPassword").safeParse(payload.value).success;
       },
     });
-    const validate = JIT.validator(Signup);
+    const validate = validation(Signup);
     const mismatch = validate.safeParse({
       password: "supersecret",
       confirmPassword: "otherpass",
@@ -207,7 +228,7 @@ describe("JIT compiler validator", () => {
         otherwise: (schema) => schema.optional(),
       }),
     });
-    const validate = JIT.validator(Checkout);
+    const validate = validation(Checkout);
 
     expect(validate.is({ temDesconto: false })).toBe(true);
     expect(validate.is({ temDesconto: true, cupom: "SAVE10", code: "VIP" })).toBe(true);
@@ -246,7 +267,7 @@ describe("JIT compiler validator", () => {
       nonnegative: JIT.number().nonnegative(),
       nonpositive: JIT.number().nonpositive(),
     });
-    const validate = JIT.validator(Metric);
+    const validate = validation(Metric);
 
     expect(
       validate.is({
@@ -301,32 +322,32 @@ describe("JIT compiler validator", () => {
     const secondTime = JIT.string().time({ precision: 0 });
     const millisecondTime = JIT.string().time({ precision: 3 });
 
-    expect(JIT.validator(datetime).is("2020-01-01T06:15Z")).toBe(true);
-    expect(JIT.validator(datetime).is("2020-01-01T06:15:00.123456Z")).toBe(true);
-    expect(JIT.validator(datetime).is("2020-01-01T06:15:00+02:00")).toBe(false);
-    expect(JIT.validator(datetime).is("2020-01-01T06:15:00")).toBe(false);
-    expect(JIT.validator(datetimeWithOffset).is("2020-01-01T06:15:00+02:00")).toBe(true);
-    expect(JIT.validator(datetimeWithOffset).is("2020-01-01T06:15:00+0200")).toBe(false);
-    expect(JIT.validator(localDatetime).is("2020-01-01T06:15")).toBe(true);
-    expect(JIT.validator(minuteDatetime).is("2020-01-01T06:15Z")).toBe(true);
-    expect(JIT.validator(minuteDatetime).is("2020-01-01T06:15:00Z")).toBe(false);
-    expect(JIT.validator(secondDatetime).is("2020-01-01T06:15:00Z")).toBe(true);
-    expect(JIT.validator(secondDatetime).is("2020-01-01T06:15Z")).toBe(false);
-    expect(JIT.validator(millisecondDatetime).is("2020-01-01T06:15:00.123Z")).toBe(true);
-    expect(JIT.validator(millisecondDatetime).is("2020-01-01T06:15:00.12Z")).toBe(false);
+    expect(validation(datetime).is("2020-01-01T06:15Z")).toBe(true);
+    expect(validation(datetime).is("2020-01-01T06:15:00.123456Z")).toBe(true);
+    expect(validation(datetime).is("2020-01-01T06:15:00+02:00")).toBe(false);
+    expect(validation(datetime).is("2020-01-01T06:15:00")).toBe(false);
+    expect(validation(datetimeWithOffset).is("2020-01-01T06:15:00+02:00")).toBe(true);
+    expect(validation(datetimeWithOffset).is("2020-01-01T06:15:00+0200")).toBe(false);
+    expect(validation(localDatetime).is("2020-01-01T06:15")).toBe(true);
+    expect(validation(minuteDatetime).is("2020-01-01T06:15Z")).toBe(true);
+    expect(validation(minuteDatetime).is("2020-01-01T06:15:00Z")).toBe(false);
+    expect(validation(secondDatetime).is("2020-01-01T06:15:00Z")).toBe(true);
+    expect(validation(secondDatetime).is("2020-01-01T06:15Z")).toBe(false);
+    expect(validation(millisecondDatetime).is("2020-01-01T06:15:00.123Z")).toBe(true);
+    expect(validation(millisecondDatetime).is("2020-01-01T06:15:00.12Z")).toBe(false);
 
-    expect(JIT.validator(date).is("2020-01-01")).toBe(true);
-    expect(JIT.validator(date).is("2020-1-1")).toBe(false);
-    expect(JIT.validator(date).is("2020-01-32")).toBe(false);
-    expect(JIT.validator(time).is("03:15")).toBe(true);
-    expect(JIT.validator(time).is("03:15:00.9999999")).toBe(true);
-    expect(JIT.validator(time).is("03:15:00Z")).toBe(false);
-    expect(JIT.validator(minuteTime).is("03:15")).toBe(true);
-    expect(JIT.validator(minuteTime).is("03:15:00")).toBe(false);
-    expect(JIT.validator(secondTime).is("03:15:00")).toBe(true);
-    expect(JIT.validator(secondTime).is("03:15")).toBe(false);
-    expect(JIT.validator(millisecondTime).is("03:15:00.999")).toBe(true);
-    expect(JIT.validator(millisecondTime).is("03:15:00.99")).toBe(false);
+    expect(validation(date).is("2020-01-01")).toBe(true);
+    expect(validation(date).is("2020-1-1")).toBe(false);
+    expect(validation(date).is("2020-01-32")).toBe(false);
+    expect(validation(time).is("03:15")).toBe(true);
+    expect(validation(time).is("03:15:00.9999999")).toBe(true);
+    expect(validation(time).is("03:15:00Z")).toBe(false);
+    expect(validation(minuteTime).is("03:15")).toBe(true);
+    expect(validation(minuteTime).is("03:15:00")).toBe(false);
+    expect(validation(secondTime).is("03:15:00")).toBe(true);
+    expect(validation(secondTime).is("03:15")).toBe(false);
+    expect(validation(millisecondTime).is("03:15:00.999")).toBe(true);
+    expect(validation(millisecondTime).is("03:15:00.99")).toBe(false);
   });
 
   it("should treat empty strings as undefined before optional/default guards", () => {
@@ -335,7 +356,7 @@ describe("JIT compiler validator", () => {
       locale: JIT.string().noEmpty().default("pt-BR"),
       required: JIT.string().noEmpty(),
     });
-    const validate = JIT.validator(Search);
+    const validate = validation(Search);
     const parsed = validate.safeParse({
       query: "",
       locale: "",
@@ -366,7 +387,7 @@ describe("JIT compiler validator", () => {
       phone: JIT.string().phoneBR(),
       custom: JIT.string().format("##-##"),
     });
-    const validate = JIT.validator(Contact);
+    const validate = validation(Contact);
     const parsed = validate.safeParse({
       cpf: "12345678901",
       cnpj: "11222333000181",
@@ -399,7 +420,7 @@ describe("JIT compiler validator", () => {
       mode: "strict",
     });
     const TransformDocument = JIT.string().format("###.###.###-##");
-    const strict = JIT.validator(StrictDocument).get("is", "parse");
+    const strict = JIT.compile(StrictDocument, ["is", "parse"] as const);
     const transformIs = JIT.validate.is(TransformDocument);
 
     expect(strict.is("123.456.789-01")).toBe(true);
@@ -438,7 +459,7 @@ describe("JIT compiler validator", () => {
   });
 
   it("should throw JITValidationError with issues on parse", () => {
-    const Users = JIT.validator(User);
+    const Users = validation(User);
 
     expect(Users.parse(ada)).toBe(ada);
 
@@ -472,7 +493,7 @@ describe("JIT compiler validator", () => {
       session: JIT.optional(JIT.string().uuid()),
       meta: JIT.map(JIT.string(), JIT.number()),
     });
-    const validate = JIT.validator(Payload);
+    const validate = validation(Payload);
 
     expect(
       validate.is({
@@ -506,7 +527,7 @@ describe("JIT compiler validator", () => {
         .positive()
         .refine((value) => value % 2 === 0)
     );
-    const validate = JIT.validator(Handle);
+    const validate = validation(Handle);
 
     expect(validate.is("ada")).toBe(true);
     expect(validate.is(4)).toBe(true);
@@ -523,7 +544,7 @@ describe("JIT compiler validator", () => {
 
   it("should deep-validate object options inside unions", () => {
     const Contact = JIT.union(JIT.object({ email: JIT.string().email() }), JIT.object({ phone: JIT.string().min(8) }));
-    const validate = JIT.validator(Contact);
+    const validate = validation(Contact);
 
     expect(validate.is({ email: "ada@math.org" })).toBe(true);
     expect(validate.is({ phone: "11999998888" })).toBe(true);
@@ -544,7 +565,7 @@ describe("JIT compiler validator", () => {
     const Input = JIT.object({
       value: JIT.union(JIT.string().trim().min(1), JIT.number().int()),
     });
-    const validate = JIT.validator(Input);
+    const validate = validation(Input);
     const parsedString = validate.safeParse({ value: "  ada  " });
     const parsedNumber = validate.safeParse({ value: 7 });
 
@@ -563,7 +584,7 @@ describe("JIT compiler validator", () => {
       }),
       JIT.object({ kind: JIT.literal("ping") }),
     ]);
-    const validate = JIT.validator(Event);
+    const validate = validation(Event);
     const result = validate.safeParse({ kind: "msg", text: "  hi  " });
 
     expect(result.success).toBe(true);
@@ -578,22 +599,22 @@ describe("JIT compiler validator", () => {
     const ExclusiveText = JIT.string().xor(JIT.string().min(2));
     const NotBlocked = JIT.literal("blocked").not();
 
-    expect(JIT.validator(TextOrPositive).is("ok")).toBe(true);
-    expect(JIT.validator(TextOrPositive).is(1)).toBe(true);
-    expect(JIT.validator(TextOrPositive).is(-1)).toBe(false);
+    expect(validation(TextOrPositive).is("ok")).toBe(true);
+    expect(validation(TextOrPositive).is(1)).toBe(true);
+    expect(validation(TextOrPositive).is(-1)).toBe(false);
 
-    const parsed = JIT.validator(Full).safeParse({ id: 1, name: "  Ada  " });
+    const parsed = validation(Full).safeParse({ id: 1, name: "  Ada  " });
 
     expect(parsed.success).toBe(true);
     if (parsed.success) expect(parsed.data).toEqual({ id: 1, name: "Ada" });
 
-    expect(JIT.validator(ExclusiveText).is("a")).toBe(true);
-    expect(JIT.validator(ExclusiveText).is("ab")).toBe(false);
-    expect(JIT.validator(ExclusiveText).is(1)).toBe(false);
-    expect(JIT.validator(NotBlocked).is("open")).toBe(true);
-    expect(JIT.validator(NotBlocked).is("blocked")).toBe(false);
+    expect(validation(ExclusiveText).is("a")).toBe(true);
+    expect(validation(ExclusiveText).is("ab")).toBe(false);
+    expect(validation(ExclusiveText).is(1)).toBe(false);
+    expect(validation(NotBlocked).is("open")).toBe(true);
+    expect(validation(NotBlocked).is("blocked")).toBe(false);
 
-    const xorFailure = JIT.validator(ExclusiveText).safeParse("ab");
+    const xorFailure = validation(ExclusiveText).safeParse("ab");
 
     expect(xorFailure.success).toBe(false);
     if (!xorFailure.success) expect(xorFailure.issues[0].code).toBe("invalid_xor");
@@ -609,7 +630,7 @@ describe("JIT compiler validator", () => {
         JIT.number().pipe((value) => value * 2)
       ),
     });
-    const validate = JIT.validator(Payload);
+    const validate = validation(Payload);
     const input = {
       pair: ["  Ada  ", 1] as [string, number],
       tags: new Set(["MATH", "Poetry"]),
@@ -637,7 +658,7 @@ describe("JIT compiler validator", () => {
       meta: JIT.map(JIT.string(), JIT.number()),
       pair: JIT.tuple(JIT.string(), JIT.number()),
     });
-    const validate = JIT.validator(Plain);
+    const validate = validation(Plain);
     const input = {
       tags: new Set(["a"]),
       meta: new Map([["k", 1]]),
@@ -651,7 +672,7 @@ describe("JIT compiler validator", () => {
 
   it("should enforce strict objects and validate int schemas", () => {
     const Strict = JIT.object({ id: JIT.number() }).strict();
-    const validate = JIT.validator(Strict);
+    const validate = validation(Strict);
     const source = Compiler.emitValidatorSource(Strict.schema);
 
     expect(validate.is({ id: 1 })).toBe(true);
@@ -669,7 +690,7 @@ describe("JIT compiler validator", () => {
 
   it("should preserve loose object extras while rebuilding transformed known fields", () => {
     const Loose = JIT.object({ name: JIT.string().trim() }).loose();
-    const validate = JIT.validator(Loose);
+    const validate = validation(Loose);
     const input = { name: "  Ada  ", extra: 1 };
     const result = validate.safeParse(input);
     const source = Compiler.emitValidatorSource(Loose.schema);
@@ -686,7 +707,7 @@ describe("JIT compiler validator", () => {
 
   it("should validate and transform unknown keys through catchall schemas", () => {
     const WithExtras = JIT.object({ id: JIT.number() }).catchall(JIT.string().trim());
-    const validate = JIT.validator(WithExtras);
+    const validate = validation(WithExtras);
     const result = validate.safeParse({ id: 1, tag: "  ok  " });
     const failed = validate.safeParse({ id: 1, tag: 7 });
 
@@ -711,7 +732,7 @@ describe("JIT compiler validator", () => {
       age: JIT.number().int("idade deve ser inteira").positive("idade deve ser positiva"),
       invite: JIT.string().refine((value) => value.startsWith("inv_"), "convite deve começar com inv_"),
     });
-    const validate = JIT.validator(Signup);
+    const validate = validation(Signup);
     const result = validate.safeParse({
       name: "A",
       email: "nope",
@@ -735,7 +756,7 @@ describe("JIT compiler validator", () => {
 
   it("should keep default messages when no custom message is given", () => {
     const Plain = JIT.object({ name: JIT.string().min(2) });
-    const result = JIT.validator(Plain).safeParse({ name: "A" });
+    const result = validation(Plain).safeParse({ name: "A" });
 
     expect(result.success).toBe(false);
     if (!result.success) expect(result.issues[0].message).toBe("expected at least 2 characters");
@@ -743,7 +764,7 @@ describe("JIT compiler validator", () => {
 
   it("should validate promise wrappers as thenables", () => {
     const Job = JIT.object({ result: JIT.string().promise() });
-    const validate = JIT.validator(Job);
+    const validate = validation(Job);
 
     expect(validate.is({ result: Promise.resolve("ok") })).toBe(true);
     expect(validate.is({ result: "not a promise" })).toBe(false);
@@ -756,7 +777,7 @@ describe("JIT compiler validator", () => {
 
   it("should validate JSON-encodable values recursively", () => {
     const Json = JIT.json.value();
-    const validate = JIT.validator(Json);
+    const validate = validation(Json);
 
     expect(validate.is({ user: "Ada", scores: [1, true, null] })).toBe(true);
     expect(validate.is({ nope: undefined })).toBe(false);
@@ -776,11 +797,11 @@ describe("JIT compiler validator", () => {
       "expected decimal-like value"
     );
     const AnythingTyped = JIT.custom<{ id: string }>();
-    const validate = JIT.validator(DecimalLike);
+    const validate = validation(DecimalLike);
 
     expect(validate.is({ toString: () => "1.5" })).toBe(true);
     expect(validate.is("1.5")).toBe(false);
-    expect(JIT.validator(AnythingTyped).parse({ id: 1 })).toEqual({ id: 1 });
+    expect(validation(AnythingTyped).parse({ id: 1 })).toEqual({ id: 1 });
 
     const bad = validate.safeParse("1.5");
 
@@ -792,8 +813,8 @@ describe("JIT compiler validator", () => {
   it("should validate template literal schemas with compiled regex bindings", () => {
     const Greeting = JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const);
     const Status = JIT.templateLiteral(["status:", JIT.enum(["ok", "failed"] as const), ":", JIT.int()] as const);
-    const greeting = JIT.validator(Greeting);
-    const status = JIT.validator(Status);
+    const greeting = validation(Greeting);
+    const status = validation(Status);
     const source = Compiler.emitValidatorSource(Status.schema);
 
     expect(greeting.is("hello, Ada!")).toBe(true);
@@ -820,8 +841,8 @@ describe("JIT compiler validator", () => {
     expect(() => badOutput("ok")).toThrow(Errors.JITValidationError);
     await expect(computeAsync(42 as never)).rejects.toBeInstanceOf(Errors.JITValidationError);
 
-    expect(JIT.validator(MyFunction).is(computeTrimmedLength)).toBe(true);
-    expect(JIT.validator(MyFunction).is(42)).toBe(false);
+    expect(validation(MyFunction).is(computeTrimmedLength)).toBe(true);
+    expect(validation(MyFunction).is(42)).toBe(false);
   });
 
   it("should validate Temporal API values when Temporal is available", () => {
@@ -842,7 +863,7 @@ describe("JIT compiler validator", () => {
 
     for (const [schema, value, expected] of cases) {
       const temporalSchema = schema.schema as AST.AnyTypeSchema;
-      const validate = JIT.validator(temporalSchema);
+      const validate = validation(temporalSchema);
       const source = Compiler.emitValidatorSource(temporalSchema);
 
       expect(validate.is(value)).toBe(true);
@@ -868,9 +889,9 @@ describe("JIT compiler validator", () => {
       .daysOfWeek([1, 2, 3, 4, 5])
       .monthsOfYear([7]);
     const WholeMinute = JIT.temporal.plainTime().min("09:00:00").max("18:00:00").truncateTo("minute");
-    const date = JIT.validator(BusinessDate);
-    const plainDate = JIT.validator(PlainBusinessDate);
-    const wholeMinute = JIT.validator(WholeMinute);
+    const date = validation(BusinessDate);
+    const plainDate = validation(PlainBusinessDate);
+    const wholeMinute = validation(WholeMinute);
 
     expect(date.is(new Date("2026-07-06T12:30:00.000Z"))).toBe(true);
     expect(date.is(new Date("2026-07-04T12:30:00.000Z"))).toBe(false);
@@ -898,7 +919,7 @@ describe("JIT compiler validator", () => {
     });
     const iso = "2020-01-01T00:00:00.000Z";
     const date = new Date(iso);
-    const validate = JIT.validator(StringToDate);
+    const validate = validation(StringToDate);
     const parsed = validate.parse(iso);
     const bad = validate.safeParse("not-a-date");
 
@@ -917,7 +938,7 @@ describe("JIT compiler validator", () => {
     const Person = JIT.object({ name: JIT.string().trim() });
     const Audit = JIT.object({ createdBy: JIT.string().lowercase() });
     const Full = JIT.intersection(Person, Audit);
-    const validate = JIT.validator(Full);
+    const validate = validation(Full);
     const result = validate.safeParse({ name: "  Ada  ", createdBy: "ROOT" });
 
     expect(result.success).toBe(true);
@@ -928,7 +949,7 @@ describe("JIT compiler validator", () => {
     // Reference is preserved when nothing inside the intersection rebuilds.
     const Static = JIT.intersection(JIT.object({ a: JIT.number() }), JIT.object({ b: JIT.number() }));
     const value = { a: 1, b: 2 };
-    const kept = JIT.validator(Static).safeParse(value);
+    const kept = validation(Static).safeParse(value);
 
     expect(kept.success).toBe(true);
     if (kept.success) expect(kept.data).toBe(value);
@@ -941,7 +962,7 @@ describe("JIT compiler validator", () => {
       secret: JIT.string(),
     });
     const Public = Base.omit(["secret"]).merge(JIT.object({ tag: JIT.string() }));
-    const validate = JIT.validator(Public);
+    const validate = validation(Public);
 
     expect(validate.is({ id: 1, name: "Ada", tag: "x" })).toBe(true);
     expect(validate.is({ id: 1, name: "Ada", secret: "s", tag: "x" })).toBe(true);
@@ -953,8 +974,8 @@ describe("JIT compiler validator", () => {
   });
 
   it("should share one cached validator per schema", () => {
-    expect(JIT.validator(User)).toBe(JIT.validator(User));
-    expect(JIT.validator(User, { cache: false })).not.toBe(JIT.validator(User));
+    expect(Compiler.compileValidator(User.schema)).toBe(Compiler.compileValidator(User.schema));
+    expect(Compiler.compileValidator(User.schema, { cache: false })).not.toBe(Compiler.compileValidator(User.schema));
     Compiler.clearCompileCache();
   });
 
@@ -976,20 +997,21 @@ describe("JIT compiler validator", () => {
     const parseOnlySource = Compiler.emitValidatorSource(User.schema, {
       ops: ["parse"],
     });
-    const selected = JIT.validator(User, { is: true, parse: true });
-    const fromGet = JIT.validator(User).get("is", "parse");
+    const selected = Compiler.compileValidatorSelection(User.schema, ["is", "parse"] as const);
+    const grouped = JIT.compile(User, { is: JIT.is(User), parse: JIT.parse(User) });
 
     expect(isOnlySource).toContain("function is(value)");
     expect(isOnlySource).not.toContain("function safeParse(value)");
     expect(parseOnlySource).toContain("function safeParse(value)");
-    expect(parseOnlySource).not.toContain("function is(value)");
+    expect(parseOnlySource).toContain("function is(value)");
 
     expect(selected.is(ada)).toBe(true);
     expect(selected.parse(ada)).toBe(ada);
     expect((selected as unknown as Record<string, unknown>).safeParse).toBeUndefined();
-    expect(fromGet.is(ada)).toBe(true);
-    expect(fromGet.parse(ada)).toBe(ada);
-    expect((fromGet as unknown as Record<string, unknown>).safeParse).toBeUndefined();
-    expectTypeOf<keyof typeof fromGet>().toEqualTypeOf<"is" | "parse">();
+    expect(grouped.is(ada)).toBe(true);
+    expect(grouped.parse(ada)).toBe(ada);
+    expect((grouped as unknown as Record<string, unknown>).safeParse).toBeUndefined();
+    expectTypeOf(selected).toHaveProperty("is");
+    expectTypeOf(selected).toHaveProperty("parse");
   });
 });

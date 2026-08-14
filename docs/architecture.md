@@ -31,7 +31,7 @@ in the compilation path. The emitted function interprets nothing.
 | `transforms`   | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers)                                                                                                    |
 | `compiler`     | one emitter per operation; shared IR (`ir/ir.ts`) + optimizer passes for equal and query; string emitters (validate/serialize/codec/scrub/stream) follow the same codegen rules |
 | `runtime`      | compile cache, keyed-index cache, hash primitives, boundary scanner (stream), artifact registry                                                                                 |
-| `factories`    | the public `JIT.*` namespace: schema factories + every `compile*` entry point + `model`/`compile` aggregations                                                                  |
+| `factories`    | the public `JIT.*` namespace: schema factories, callable capability artifacts, composition chains, and explicit `compile` aggregations                                         |
 | `aot`          | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary                                                                              |
 | `mcp.ts`       | MCP stdio protocol, tools/resources/prompts/completion dispatch; `mcp-project.ts` owns workspace-safe docs and AOT operations                                                   |
 | `shared`       | source-emission helpers (`parse.ts`: escaping, identifiers, key access) and the `regexes` format library                                                                        |
@@ -113,9 +113,14 @@ The public runtime capabilities `JIT.validate.is(schema)`, `JIT.parse(schema)`,
 and `JIT.safeParse(schema)` lower to a shared ExecutionPlan and the same
 validator compiler/cache. A composed source such as
 `JIT.json.parse(schema).validate()` adds stages to that descriptor; it does
-not introduce a second validation implementation. The legacy object facade is
-kept only as a compatibility adapter, while builder `schema["~standard"]`
+not introduce a second validation implementation. Removed selection facades
+are not part of the runtime surface, while builder `schema["~standard"]`
 closes over the compiled `safeParse` function for Standard Schema interop.
+
+For schemas whose parse output is the input value and whose checks have no
+observable callbacks or stateful regular expressions, generated `parse` uses
+the allocation-free `is` program as its success path. Only invalid values run
+the issue collector. Transforming and observable schemas remain single-pass.
 
 ## Composable execution lowering
 
@@ -129,8 +134,8 @@ The current stage surface is deliberately explicit:
 
 | Stage family         | Composition and physical behavior                                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| JSON / binary source | Adjacent JSON decode + parse validation uses the schema-directed token scanner when the complete schema has a lossless lowering; binary uses the emitted codec. |
-| Validation           | Supported JSON schemas validate while tokens are consumed. Other sources and unsupported JSON semantics use the schema-specific emitted `safeParse`.            |
+| JSON / binary source | JSON always uses native `JSON.parse`; runtime compilation performs bounded shape warm-up, then generated validation runs immediately after parsing. Binary uses the emitted codec. |
+| Validation           | Pure schemas use the allocation-free generated `is` path on successful `parse`; issue collection runs only after failure. Transforming or observable schemas use one generated `safeParse` pass. |
 | Query                | Consecutive filter/select descriptors retain the final program and emit one indexed output loop.                                                                |
 | Mapping              | Shape-specific single/batch mapper. A terminal batch map plus JSON sink serializes in the mapper loop and avoids the mapped output array.                       |
 | Transform            | Per-field emitted transform; collection mode emits an indexed loop. The target schema is explicit.                                                              |
@@ -139,7 +144,7 @@ The current stage surface is deliberately explicit:
 | JSON / binary sink   | Specialized serializer or codec creates the final transport representation.                                                                                     |
 
 “One execution function” must not be misread as “no allocations.” The
-schema-directed JSON backend still materializes its result, while codec
+native `JSON.parse` still materializes its result, while codec
 decoding, query output, mapper batches, collection rewrite stages, and sinks
 are materializing boundaries when their semantics require values. In particular,
 `filter(...).map(...)` may need the filtered array before the target-mapping

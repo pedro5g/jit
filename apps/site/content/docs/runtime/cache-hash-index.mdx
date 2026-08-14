@@ -86,9 +86,9 @@ const cloneUser = JIT.clone(User).compile();
 const hashUser = JIT.hash(User).compile();
 ```
 
-Selection and caching solve different problems. `.get("is", "parse")`
-prevents unused validator operations from being compiled; the cache reuses the
-selected functions when the same schema and operation are requested again.
+Selection and caching solve different problems. Independent `JIT.is(User)` and
+`JIT.parse(User)` artifacts compile only their own operation; the cache reuses
+the generated function when the same schema and operation are requested again.
 
 ### Tier B: plans with external bindings
 
@@ -125,11 +125,14 @@ Tests and benchmark harnesses can call `Compiler.clearCompileCache()` before
 creating fresh artifacts. `.compile()` remains an optional per-artifact
 warm-up; normal calls compile lazily.
 
-### Serializer, binary codec and security functions
+### JSON, binary codec and security functions
 
 ```ts
-const serializer = JIT.serializer(User); // cache enabled
-const coldSerializer = JIT.serializer(User, { cache: false });
+const stringify = JIT.json.stringify(User);
+const parseJson = JIT.json.parse(User).validate();
+
+stringify.compile(); // optional warm-up
+parseJson.compile(); // warms native parse shape + generated validation
 
 const codec = JIT.codec(User, { version: 2 });
 const coldCodec = JIT.codec(User, { version: 2, cache: false });
@@ -414,7 +417,7 @@ ordinary input data and is never stored as a query result.
 
 - Declare schemas and compile static plans at module scope.
 - Keep the default compile cache enabled in runtime mode.
-- Select only the functions used by the route with `.get(...)`.
+- Create only the capability artifacts used by the route, or group them explicitly with `JIT.compile`.
 - Reserve `cache: false` and `clearCompileCache()` for tests and benchmarks.
 - Treat hash-cached objects and indexed arrays as immutable.
 - Confirm hash collisions with compiled equality.

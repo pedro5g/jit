@@ -49,9 +49,8 @@ work and for production performance. Each page explains:
 The public website mirrors these guides with smaller task-oriented pages and a
 complete operator reference under `apps/site/content/docs`.
 
-Historical pages may show the retained `validator`, `mapper`, `model`, or
-`serializer` facades while migration coverage exists. Treat those as
-compatibility material; new code should use the composable runtime surface
+The removed `validator`, `mapper`, `model`, and `serializer` selection facades
+are not part of the current surface. Use the composable capability artifacts
 documented above.
 
 ## Recommended Path

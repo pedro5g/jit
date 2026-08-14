@@ -115,9 +115,9 @@ const PublicUsers = JIT.json
 const response = PublicUsers(requestBody);
 ```
 
-Runtime and AOT lower that plan once. Supported JSON-safe schemas use an
-emitted decoder that parses and validates in the same token traversal;
-adjacent query stages share one indexed loop. `.transform(target, fields)`, `.map`,
+Runtime and AOT lower that plan once. JSON uses native `JSON.parse` followed
+immediately by generated validation; adjacent query stages share one indexed
+loop. `.transform(target, fields)`, `.map`,
 `.update`, `.sanitize`, and `.mask` can participate in the same pipeline.
 The [composable execution guide](docs/features/composable-execution.md)
 documents deliberate allocation boundaries and AOT constraints.
@@ -149,7 +149,7 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 - [Feature guides](docs/features/README.md)
 - [Sanitization](https://jit-site.vercel.app/docs/reference/operators/strings#sanitization)
 - [Reactive updates](https://jit-site.vercel.app/docs/runtime/reactive-updates)
-- [DTO aggregates](https://jit-site.vercel.app/docs/runtime/dtos)
+- [DTO schemas](https://jit-site.vercel.app/docs/runtime/dtos)
 - [Entity, keyed, and index guide](https://jit-site.vercel.app/docs/reference/operators/entity-keyed-and-indexes)
 - [Executable runtime and AOT examples](packages/examples/README.md)
 - [Artifact tokens and Rust CLI](apps/site/content/docs/aot/artifact-cli.mdx)

@@ -1,21 +1,20 @@
-import { compileClone } from "../compiler/clone.js";
-import { compileCodec } from "../compiler/codec.js";
-import { compileDiff } from "../compiler/diff.js";
-import { compileEqual } from "../compiler/equal.js";
-import { compileFormat } from "../compiler/format.js";
-import { compileHash } from "../compiler/hash.js";
-import { jsonDecoderSupport, tryCompileJsonDecoder } from "../compiler/json-decode.js";
-import { compileMask } from "../compiler/mask.js";
-import { compileSanitize } from "../compiler/sanitize.js";
-import { compileSerialize } from "../compiler/serialize.js";
-import { compileUpdate } from "../compiler/update.js";
-import { compileValidatorSelection, type ValidatorOp } from "../compiler/validate.js";
+import { type Clone, compileClone } from "../compiler/clone.js";
+import { type CompiledCodec, compileCodec } from "../compiler/codec.js";
+import { compileDiff, type Diff } from "../compiler/diff.js";
+import { compileEqual, type Equal } from "../compiler/equal.js";
+import { compileFormat, type Format } from "../compiler/format.js";
+import { compileHash, type Hash } from "../compiler/hash.js";
+import { compileJsonParse } from "../compiler/json-parse.js";
+import { compileMask, type Mask } from "../compiler/mask.js";
+import { compileSanitize, type Sanitize } from "../compiler/sanitize.js";
+import { compileSerialize, type Serialize } from "../compiler/serialize.js";
+import { compileUpdate, type Update } from "../compiler/update.js";
+import { compileValidatorSelection, type SafeParseResult, type ValidatorOp } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
-import type { CompiledModel } from "./model.js";
 
 /** Operations `JIT.compile` can aggregate. */
 export const COMPILE_OPS = [
@@ -39,6 +38,26 @@ export const COMPILE_OPS = [
 
 export type CompileOp = (typeof COMPILE_OPS)[number];
 
+/** Complete operation vocabulary used only to type explicit `JIT.compile` selections. */
+export interface CompiledOperations<T> {
+  readonly is: (value: unknown) => value is T;
+  readonly parse: (value: unknown) => T;
+  readonly safeParse: (value: unknown) => SafeParseResult<T>;
+  readonly safeParseAsync: (value: unknown) => Promise<SafeParseResult<T>>;
+  readonly parseAsync: (value: unknown) => Promise<T>;
+  readonly equal: Equal<T>;
+  readonly clone: Clone<T>;
+  readonly diff: Diff<T>;
+  readonly hash: Hash<T>;
+  readonly update: Update<T>;
+  readonly stringify: Serialize<T>;
+  readonly fromJSON: (json: string) => T;
+  readonly format: T extends string ? Format : never;
+  readonly mask: Mask<T>;
+  readonly sanitize: Sanitize<T>;
+  readonly codec: CompiledCodec<T>;
+}
+
 /**
  * The explicit aggregation: only the requested operations exist on the
  * object — nothing else is compiled, typed, or shipped.
@@ -51,7 +70,7 @@ export type CompiledSelection<
   readonly schema: TSchema;
   readonly ops: TOps;
   readonly extras: readonly Extract<keyof TExtras, string>[];
-} & Pick<CompiledModel<ATS.TypeofSchema<TSchema>>, TOps[number]> &
+} & Pick<CompiledOperations<ATS.TypeofSchema<TSchema>>, TOps[number]> &
   Readonly<TExtras>;
 
 export type CompiledObjectSelection<
@@ -62,13 +81,12 @@ export type CompiledObjectSelection<
   readonly schema: TSchema;
   readonly ops: readonly TOps[];
   readonly extras: readonly Exclude<Extract<keyof TCompiled, string>, CompileOp>[];
-} & Pick<CompiledModel<ATS.TypeofSchema<TSchema>>, TOps> &
+} & Pick<CompiledOperations<ATS.TypeofSchema<TSchema>>, TOps> &
   Readonly<Omit<TCompiled, CompileOp>>;
 
 /**
  * Explicitly compiles a chosen set of operations for a schema and
- * aggregates them into one hot object — the opt-in counterpart of the lazy
- * `JIT.model`. Nothing outside `ops` is compiled.
+ * aggregates them into one hot object. Nothing outside `ops` is compiled.
  *
  * The same object is the AOT marker: exporting it from a `*.jit.ts` file
  * makes `jit generate` emit exactly these operations for the schema —
@@ -76,21 +94,20 @@ export type CompiledObjectSelection<
  *
  * @example
  * ```ts
- * const selected = JIT.validator(User).get("is");
  * const ops = JIT.compile(User, ["equal", "stringify"]);
  *
  * export const Users = JIT.compile(User, {
- *   is: selected.is,
+ *   is: JIT.is(User),
  *   equal: ops.equal,
  *   stringify: ops.stringify,
  *   findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")).compile(),
- *   toDTO: JIT.mapper(User, UserDTO),
+ *   toDTO: JIT.map.many(User, UserDTO, {}),
  * });
  *
  * Users.is(input);
  * Users.equal(a, b);            // Users.clone does not exist — not compiled
  * Users.findAdmins(list);       // dev-defined extras live on the same object
- * Users.toDTO.many(list);
+ * Users.toDTO(list);
  * ```
  */
 export function compile<
@@ -124,7 +141,7 @@ export function compile<
     schema: unwrapped,
     ops: Object.freeze([...ops]),
   };
-  const validatorOps = collectValidatorOps(ops, jsonDecoderSupport(unwrapped).supported);
+  const validatorOps = collectValidatorOps(ops);
   let validator: ReturnType<typeof compileValidatorSelection<TSchema, readonly ValidatorOp[]>> | undefined;
   const getValidator = () => {
     validator = validator ?? compileValidatorSelection(unwrapped as TSchema, validatorOps);
@@ -149,9 +166,10 @@ export function compile<
         selection.safeParseAsync = getValidator().safeParseAsync;
         break;
       case "fromJSON": {
-        const decoder = tryCompileJsonDecoder<TValue>(unwrapped);
-        const fromJSON =
-          decoder ?? (((json: string) => getValidator().parse(JSON.parse(json)) as TValue) as (json: string) => TValue);
+        const parseJson = compileJsonParse(unwrapped);
+        const fromJSON = ((json: string) => getValidator().parse(parseJson(json)) as TValue) as (
+          json: string
+        ) => TValue;
 
         registerArtifact(fromJSON as object, {
           kind: "operation",
@@ -246,14 +264,14 @@ function isCompileOp(value: string): value is CompileOp {
   return (COMPILE_OPS as readonly string[]).includes(value);
 }
 
-function collectValidatorOps(ops: readonly CompileOp[], hasJsonDecoder: boolean): readonly ValidatorOp[] {
+function collectValidatorOps(ops: readonly CompileOp[]): readonly ValidatorOp[] {
   const validatorOps = new Set<ValidatorOp>();
 
   for (const op of ops) {
     if (op === "is" || op === "parse" || op === "safeParse" || op === "parseAsync" || op === "safeParseAsync") {
       validatorOps.add(op);
     }
-    if (op === "fromJSON" && !hasJsonDecoder) validatorOps.add("parse");
+    if (op === "fromJSON") validatorOps.add("parse");
   }
   return [...validatorOps];
 }

@@ -42,8 +42,10 @@ if (!result.success) {
 
 The compiler orders cheap checks before expensive checks and emits direct
 property access for known object fields. `is` returns early and never allocates
-an issue array. `safeParse` rebuilds output only when defaults, coercions or
-transforms require it.
+an issue array. For pure non-transforming schemas, `parse` reuses that fast
+success path and only builds issues after failure. Observable callbacks,
+stateful regexes and transforming schemas remain single-pass. `safeParse`
+rebuilds output only when defaults, coercions or transforms require it.
 
 ## Root aliases
 

@@ -42,10 +42,9 @@ describe("JIT.compile explicit aggregation", () => {
   });
 
   it("should aggregate explicitly supplied compiled functions", () => {
-    const selected = JIT.validator(User).get("is", "parse");
     const Users = JIT.compile(User, {
-      is: selected.is,
-      parse: selected.parse,
+      is: JIT.is(User),
+      parse: JIT.parse(User),
     });
 
     expect(Users.is(ada)).toBe(true);
@@ -125,10 +124,9 @@ describe("AOT generation from JIT.compile markers", () => {
   it("should export only the grouped object for object-style compile markers", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const ada = { id: 1, name: "Ada" };
-    const selected = JIT.validator(User).get("is", "parse");
     const marked = JIT.compile(User, {
-      is: selected.is,
-      parse: selected.parse,
+      is: JIT.is(User),
+      parse: JIT.parse(User),
       fromJSON: JIT.json.parse(User).validate(),
     });
 
@@ -139,8 +137,7 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(source).toContain("const User_is");
     expect(source).toContain("const User_parse");
     expect(source).toContain("const User_fromJSON");
-    expect(source).toContain("function decode(input)");
-    expect(source).not.toContain("JSON.parse");
+    expect(source).toContain("JSON.parse");
     expect(source).toContain("const User = /*#__PURE__*/ Object.freeze({");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_is/);
@@ -175,9 +172,8 @@ describe("AOT generation from JIT.compile markers", () => {
     const findAdmins = JIT.query(Users)
       .filter((q) => q.eq("role", "admin"))
       .compile();
-    const toDTO = JIT.mapper(User, PublicUser).get("many");
-    const selected = JIT.validator(User).get("is");
-    const marked = JIT.compile(User, { is: selected.is, findAdmins, toDTO });
+    const toDTO = JIT.map.many(User, PublicUser, {});
+    const marked = JIT.compile(User, { is: JIT.is(User), findAdmins, toDTO });
 
     const people = [
       { id: 1, name: "Ada", role: "admin" },
@@ -186,7 +182,7 @@ describe("AOT generation from JIT.compile markers", () => {
 
     // Runtime aggregation: same object, no prefixes, fully typed.
     expect(marked.findAdmins(people)).toEqual([people[0]]);
-    expect(marked.toDTO.many([people[1]])).toEqual([{ id: 2, name: "Grace" }]);
+    expect(marked.toDTO([people[1]])).toEqual([{ id: 2, name: "Grace" }]);
     expect(marked.extras).toEqual(["findAdmins", "toDTO"]);
 
     // AOT: extras are re-emitted from their registered source + bindings.
@@ -201,8 +197,8 @@ describe("AOT generation from JIT.compile markers", () => {
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("const User_findAdmins");
     expect(source).toContain("const User_toDTO");
-    expect(source).toContain("many: function many(list)");
-    expect(source).not.toContain("map: function map(source)");
+    expect(source).toContain("return (input) => {");
+    expect(source).toContain("function many(list)");
     expect(source).toMatch(/export \{ User \};/);
     expect(source).not.toMatch(/export \{[^}]*User_findAdmins/);
     expect(types).not.toContain("export declare const User_findAdmins");
@@ -212,12 +208,12 @@ describe("AOT generation from JIT.compile markers", () => {
       User: {
         is: (value: unknown) => boolean;
         findAdmins: (items: unknown[]) => unknown[];
-        toDTO: { many: (values: unknown[]) => unknown[] };
+        toDTO: (values: unknown[]) => unknown[];
       };
     };
 
     expect(generated.User.findAdmins(people)).toEqual([people[0]]);
-    expect(generated.User.toDTO.many(people)).toEqual([
+    expect(generated.User.toDTO(people)).toEqual([
       { id: 1, name: "Ada" },
       { id: 2, name: "Grace" },
     ]);
@@ -226,26 +222,23 @@ describe("AOT generation from JIT.compile markers", () => {
   it("should serialize callback bindings used by grouped extras", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const PublicUser = JIT.object({ id: JIT.number(), label: JIT.string() });
-    const toLabel = JIT.mapper(User, PublicUser, {
+    const toLabel = JIT.map(User, PublicUser, {
       label: (user) => `${user.name}#${user.id}`,
     });
-    const selected = JIT.validator(User).get("is");
-    const marked = JIT.compile(User, { is: selected.is, toLabel });
+    const marked = JIT.compile(User, { is: JIT.is(User), toLabel });
 
     const result = AOT.generate({ schemas: { User: marked }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       User: {
-        toLabel: {
-          map: (value: { id: number; name: string }) => { id: number; label: string };
-        };
+        toLabel: (value: { id: number; name: string }) => { id: number; label: string };
       };
     };
 
     expect(result.skipped).toEqual([]);
     expect(source).toContain("((user) =>");
     expect(source).toContain("user.name");
-    expect(generated.User.toLabel.map({ id: 7, name: "Ada" })).toEqual({ id: 7, label: "Ada#7" });
+    expect(generated.User.toLabel({ id: 7, name: "Ada" })).toEqual({ id: 7, label: "Ada#7" });
   });
 
   it("should reject extras colliding with compiled ops", () => {

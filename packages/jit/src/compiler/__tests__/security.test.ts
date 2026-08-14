@@ -1,4 +1,5 @@
 import { Compiler, Errors, JIT } from "../../index.js";
+import { validation } from "./validation-helper.js";
 
 describe("JIT compiler security (mask + sanitize)", () => {
   const User = JIT.object({
@@ -165,7 +166,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
     const Post = JIT.object({
       body: JIT.string().sanitize().min(1),
     });
-    const validate = JIT.validator(Post);
+    const validate = validation(Post);
     const result = validate.safeParse({ body: "<img onerror=x src=y>ok" });
 
     expect(result.success).toBe(true);
@@ -182,7 +183,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
       field: JIT.string().sanitize({ preset: "sqlIdentifier", trim: true }).min(1),
     });
 
-    expect(JIT.validator(Params).parse({ field: " users.name; " })).toEqual({ field: "_users_name_" });
+    expect(validation(Params).parse({ field: " users.name; " })).toEqual({ field: "_users_name_" });
   });
 
   it("should cache compiled mask and sanitize per schema", () => {

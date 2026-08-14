@@ -1,10 +1,3 @@
-import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
-import { createMapperFacade, type MapperFacade } from "../compiler/mapper.js";
-import type * as ATS from "../core/ats/index.js";
-import type { SchemaInput } from "../core/builder/index.js";
-import { unwrapSchema } from "../core/builder/index.js";
-import type { CompileCacheOptions } from "../runtime/cache/compile-cache.js";
-
 type RequiredKeys<TValue> = {
   [TKey in keyof TValue]-?: undefined extends TValue[TKey] ? never : TKey;
 }[keyof TValue];
@@ -40,7 +33,7 @@ export type MapperOverride<TSource, TValue> =
   | { readonly default: TValue; readonly from?: never; readonly via?: never };
 
 /**
- * Override map for `mapper()`: target fields with no compatible same-name
+ * Override map for `JIT.map()`: target fields with no compatible same-name
  * source field are required; auto-matched fields may still be overridden.
  */
 export type MapperOverrides<TSource, TTarget> = {
@@ -51,48 +44,3 @@ export type MapperOverrides<TSource, TTarget> = {
     TTarget[TKey]
   >;
 };
-
-export type MapperOverridesArg<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarget>] extends [never]
-  ? [overrides?: MapperOverrides<TSource, TTarget>, options?: CompileCacheOptions]
-  : [overrides: MapperOverrides<TSource, TTarget>, options?: CompileCacheOptions];
-
-export type MapperOverridesOnlyArg<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarget>] extends [never]
-  ? [overrides?: MapperOverrides<TSource, TTarget>]
-  : [overrides: MapperOverrides<TSource, TTarget>];
-
-/**
- * Compiles a declarative source→target shape mapper.
- *
- * Fields sharing name and compatible type are auto-matched (nested objects
- * and arrays of objects recurse); everything else is declared per target
- * field. Unmapped required target fields are a compile-time type error and a
- * runtime `INVALID_MAPPER`. The output is a whitelist: source fields absent
- * from the target schema can never leak through.
- *
- * @example
- * ```ts
- * const toDTO = JIT.mapper(User, UserDTO, {
- *   fullName: (user) => `${user.first} ${user.last}`,
- *   email: { from: "emailAddress" },
- *   createdAt: { from: "created_at", via: (date) => date.toISOString() },
- *   active: { default: true },
- * }).get("map", "many");
- *
- * toDTO.map(user);   // UserDTO
- * toDTO.many(users); // UserDTO[] — one fused loop, no per-item call
- * ```
- */
-export function mapper<TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends ATS.AnyTypeSchema>(
-  source: SchemaInput<TSourceSchema>,
-  target: SchemaInput<TTargetSchema>,
-  ...rest: MapperOverridesArg<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
-): MapperFacade<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>> {
-  const [overrides, options] = rest;
-
-  return createMapperFacade(
-    unwrapSchema(source),
-    unwrapSchema(target),
-    (overrides ?? {}) as MapperOverridesInput,
-    options
-  );
-}

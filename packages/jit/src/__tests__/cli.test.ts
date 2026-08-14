@@ -106,8 +106,7 @@ describe("jit CLI", () => {
         "  id: JIT.number(),",
         "  name: JIT.string(),",
         "});",
-        "const selected = JIT.validator(User).get('is');",
-        "export const User_is = selected.is;",
+        "export const User_is = JIT.is(User);",
         "",
       ].join("\n")
     );

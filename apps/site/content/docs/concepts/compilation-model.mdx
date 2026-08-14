@@ -47,10 +47,10 @@ schema builders and compiler do not ship in the production bundle.
 - binary rowsets replace string discriminators and booleans with integer codes;
 - unused operations are never generated.
 
-Supported adjacent JSON decode + parse validation uses an emitted
-schema-directed scanner, so fields and items are validated while their tokens
-are consumed. Unsupported semantics retain an explicit native parser plus
-compiled-validator fallback. Either backend materializes the decoded value;
+Adjacent JSON decode + parse validation uses native `JSON.parse`, then runs the
+compiled validator immediately in the same execution function. Runtime
+compilation can prewarm a bounded schema-shaped sample; AOT emits no warm-up
+side effect. JSON parsing always materializes the decoded value;
 read the [composable execution guide](/docs/runtime/composable-execution)
 before interpreting “fused” as “zero allocation”.
 

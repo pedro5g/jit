@@ -58,20 +58,11 @@ const PublicUsers = JIT.json
 ```
 
 JSON decoding, schema validation, query, mapping, transform, update, security,
-and sink stages lower into one generated execution closure. For supported
-JSON-safe schemas, adjacent `.parse(...).validate()` stages select an emitted
-schema-directed scanner: it consumes tokens, builds the value, and runs field
-checks in the same traversal without calling `JSON.parse`. Unsupported schema
-semantics use an explicit compatibility fallback until they have an equivalent
-lowering. Read
+and sink stages lower into one generated execution closure. JSON always uses
+native `JSON.parse`; runtime compilation warms a bounded canonical sample for
+the declared shape, then specialized validation runs immediately after parsing. Read
 [Composable execution pipelines](../../docs/features/composable-execution.md)
 for ordering, physical fusion, AOT constraints, and test requirements.
-
-> **Migration note:** the `validator`, `mapper`, `model`, and `serializer`
-> facades described in historical sections below remain exported for source
-> compatibility. New code should start from the aliases/capability namespaces
-> and execution artifacts above; compatibility facades are not the API model
-> used by new features.
 
 ## Why compiled?
 
@@ -84,16 +75,27 @@ length → regex), classic indexed loops, no closures, early returns. Runtime
 values (regexes, refinement callbacks, query arguments) travel as external
 bindings — never interpolated into source.
 
-Measured on this repo's validation benchmark (mitata, Node 22.17.1,
-linux-x64, AMD Ryzen 7 5800H, Zod 4.4.3, captured 2026-07-11 — run
+Measured on this repo's direct generated-code validation benchmark (mitata,
+Node 22.17.1, linux-x64, AMD Ryzen 7 5800H, Typia 12.1.1, captured
+2026-08-13 — run
 `pnpm bench:validate` for your machine):
 
-| Scenario                      | JIT runtime   | JIT AOT      | Zod 4     | AOT heap/op | Zod heap/op | AOT vs Zod  |
-| ----------------------------- | ------------- | ------------ | --------- | ----------- | ----------- | ----------- |
-| `is()` valid object           | 57.56 ns      | **56.99 ns** | 903.69 ns | 0.26 b      | 2.29 kb     | **15.9x**   |
-| `is()` invalid object         | 2.77 ns       | **2.61 ns**  | 29.29 µs  | 0.03 b      | 16.16 kb    | **11,222x** |
-| `safeParse` valid object      | 67.57 ns      | **66.31 ns** | 789.36 ns | 40.23 b     | 1.90 kb     | **11.9x**   |
-| `safeParse` invalid, 7 issues | **118.56 ns** | 120.59 ns    | 24.99 µs  | 624.33 b    | 5.31 kb     | **207.2x**  |
+| Scenario                           | JIT AOT       | Typia generated | Result    |
+| ---------------------------------- | ------------- | --------------- | --------- |
+| simple `is`, valid                 | **0.320 ns**  | 0.370 ns        | **1.16x** |
+| simple `parse`, valid              | **0.473 ns**  | 0.533 ns        | **1.13x** |
+| simple `safeParse`, valid          | **5.64 ns**   | 6.01 ns         | **1.07x** |
+| simple `safeParse`, invalid        | **38.88 ns**  | 352.93 ns       | **9.08x** |
+| nested constrained `is`, valid     | **39.20 ns**  | 47.96 ns        | **1.22x** |
+| nested constrained `parse`, valid  | **38.74 ns**  | 47.86 ns        | **1.24x** |
+| nested `safeParse`, valid          | **43.94 ns**  | 53.78 ns        | **1.22x** |
+| nested `safeParse`, seven failures | **110.66 ns** | 1.33 µs         | **12.0x** |
+
+The separate `pnpm bench:json` suite keeps native syntax parsing and schema
+validation distinct. JIT AOT `JSON.parse + validate` is 237.17 ns versus
+239.75 ns for generated Typia `assertParse` on the simple case, 777.87 ns
+versus 858.17 ns on the nested case, and 7.14 ms versus 7.38 ms for 10k nested
+objects. Parse-only JIT AOT is the direct `JSON.parse` binding.
 
 High-volume flow benchmark (`pnpm bench:flows`) validates 50k unknown
 objects, filters/projects admins, and serializes the final JSON:
@@ -211,26 +213,27 @@ stop();
 state.dispose();
 ```
 
-Models and DTO boundaries now support explicit operation selection. The same
-selection controls grouped AOT generation, so unused functions do not enter
-the emitted module or final bundle:
+Callable artifacts support explicit aggregation. The same object controls
+grouped AOT generation, so unused functions do not enter the emitted module or
+final bundle. DTO remains an ordinary annotated schema:
 
 ```ts
-const ReadUser = JIT.model(User).get("is", "parse", "equal");
+const ReadUser = JIT.compile(User, {
+  is: JIT.is(User),
+  parse: JIT.parse(User),
+  equal: JIT.equal(User),
+});
 
-const CreateUserDTO = JIT.dto(CreateUserSchema).get(
-  "parse",
-  "safeParse",
-  "fromJSON",
-);
-
-const PublicUserDTO = JIT.dto(UserEntity, PublicUserSchema, {
+const CreateUserDTO = JIT.dto(CreateUserSchema);
+const PublicUserDTO = JIT.dto(PublicUserSchema);
+const parseCreateUser = JIT.json.parse(CreateUserDTO).validate();
+const toPublicUsers = JIT.map.many(UserEntity, PublicUserDTO, {
   name: { from: "fullName" },
-}).get("from", "many", "stringify");
+});
 ```
 
 The browser playground includes executable `sanitize`, `reactiveUpdate`,
-`dto`, `model`, and `indexes` scenarios. The last one contrasts `.entity()`,
+`dto`, `compile`, and `indexes` scenarios. The last one contrasts `.entity()`,
 `.indexBy()`, schema `.keyed()`, and query `.keyed()` side by side.
 
 ---
@@ -613,21 +616,19 @@ returns the input **by reference** when nothing changes.
 ## Data operations
 
 ```ts
-const User = JIT.model(schema); // lazy: compiles each op on first access
-
-User.equal(a, b); // schema-aware deep equality with strategies
-User.clone(a); // static-literal deep clone
-User.diff(a, b); // structural diff entries
-User.hash(a); // inline FNV-1a — no JSON.stringify
-User.update(a, { name: "Ada" }); // immutable surgical update (no Proxy)
-User.stringify(a); // compiled JSON — beats native
-User.fromJSON(json); // schema-directed decode + inline validation when supported
-User.mask(a); // PII-safe copy for logs
-User.sanitize(a); // XSS-stripped copy
-User.codec.encode(a); // binary wire format
+const equalUser = JIT.equal(schema);
+const cloneUser = JIT.clone(schema);
+const diffUser = JIT.diff(schema);
+const hashUser = JIT.hash(schema);
+const updateUser = JIT.update(schema);
+const stringifyUser = JIT.json.stringify(schema);
+const parseUserJson = JIT.json.parse(schema).validate();
+const maskUser = JIT.mask(schema);
+const sanitizeUser = JIT.sanitize(schema);
+const userCodec = JIT.codec(schema);
 ```
 
-The lower-level operation facade follows the dual runtime/AOT API shape:
+Each operation artifact follows the same runtime/AOT API shape:
 
 ```ts
 const equalUser = JIT.equal(User).compile();
@@ -819,13 +820,11 @@ through prepared parameters.
 ### JSON
 
 ```ts
-const json = JIT.serializer(User);
-
-json.stringify(user); // static keys baked in; escape fast path
-json.parse(body); // schema-directed decode + inline validation when supported
-
 const stringifyUser = JIT.json.stringify(User);
 const parseUserJson = JIT.json.parse(User).validate();
+
+stringifyUser(user); // static keys baked in; escape fast path
+parseUserJson(body); // native JSON.parse + specialized validation
 
 const stringifyChunks = JIT.json.stringifyChunks(UserList, {
   chunkBytes: 16 * 1024,
@@ -1278,7 +1277,7 @@ come from, and every one of them is locked by golden-source or snapshot tests:
   when nothing rebuilds; `update` copies only the touched path; `mask` and
   `sanitize` rebuild only subtrees containing marked fields.
 - **Loop fusion** — a query pipeline (`filter → select → unique → orderBy`)
-  is one loop with zero intermediate arrays; `mapper.many` fuses mapping
+  is one loop with zero intermediate arrays; `JIT.map.many` fuses mapping
   into a single preallocated pass.
 - **Inline hashing** — FNV-1a with `Math.imul` and bitwise mixing emitted
   directly into the function (no `JSON.stringify`), plus a WeakMap hash
@@ -1339,6 +1338,7 @@ pnpm jit generate    # generate the configured AOT package
 pnpm jit clean       # remove configured generated output
 pnpm test            # vitest + typecheck + golden sources + snapshots
 pnpm bench:validate  # Zod 4 / typia / JIT runtime / JIT AOT validation bench
+pnpm bench:json      # native JSON / typia / Zod parse and parse+validate bench
 pnpm bench:load      # 10k/100k validation load vs TypeBox / typia / Zod
 pnpm bench:flows     # high-volume validate + query + JSON pipeline bench
 pnpm bench:all       # all mitata suites (equal/clone/query/validate/serialize/...)

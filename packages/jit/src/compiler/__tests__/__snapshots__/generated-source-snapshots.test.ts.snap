@@ -1529,7 +1529,7 @@ exports[`generated source snapshots > validator: strict checks, masks, noEmpty, 
   if (v5 >= 130) {
     return false;
   }
-  if (!Number.isInteger(v5) || v5 < -2147483648 || v5 > 2147483647) {
+  if ((v5 | 0) !== v5) {
     return false;
   }
   let v7 = v1.cpf;
@@ -1611,7 +1611,7 @@ function safeParse(value) {
       if (v6 >= 130) {
         issues[issues.length] = { path: "age", code: "too_big", expected: "< 130", message: "expected a number < 130" };
       }
-      if (!Number.isInteger(v6) || v6 < -2147483648 || v6 > 2147483647) {
+      if ((v6 | 0) !== v6) {
         issues[issues.length] = { path: "age", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
       }
     }

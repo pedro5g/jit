@@ -38,9 +38,9 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
       name: JIT.string(),
       email: JIT.string().email(),
     });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
 
-    AOT.generate({ schemas: {}, functions: { User_is: selected.is }, outDir });
+    AOT.generate({ schemas: {}, functions: { User_is: isUser }, outDir });
 
     const bundled = await bundle(
       `import { User_is } from "./index.js";\nconsole.log(User_is({ id: 1, name: "Ada", email: "ada@math.org" }));\n`
@@ -61,14 +61,15 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
       name: JIT.string(),
       email: JIT.string().email(),
     });
-    const selected = JIT.validator(User).get("is", "parse");
+    const isUser = JIT.is(User);
+    const parseUser = JIT.parse(User);
     const stringify = JIT.json.stringify(User);
 
     AOT.generate({
       schemas: {},
       functions: {
-        User_is: selected.is,
-        User_parse: selected.parse,
+        User_is: isUser,
+        User_parse: parseUser,
         User_stringify: stringify,
       },
       outDir,
@@ -135,9 +136,9 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
   it("should keep the namespace aggregation only when it is used", async () => {
     const User = JIT.object({ id: JIT.number() });
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
 
-    AOT.generate({ schemas: { User: JIT.compile(User, { is: selected.is }) }, outDir });
+    AOT.generate({ schemas: { User: JIT.compile(User, { is: isUser }) }, outDir });
 
     const bundled = await bundle(`import { User } from "./index.js";\nconsole.log(User.is({ id: 1 }));\n`);
 

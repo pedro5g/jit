@@ -29,21 +29,14 @@ export interface CompiledMapper<TSource, TTarget> {
   readonly many: (sources: readonly TSource[]) => TTarget[];
 }
 
-export const MAPPER_OPS = ["map", "many"] as const;
+const MAPPER_OPERATIONS = ["map", "many"] as const;
 
-export type MapperOp = (typeof MAPPER_OPS)[number];
+type MapperOp = (typeof MAPPER_OPERATIONS)[number];
 
-export type CompiledMapperSelection<TSource, TTarget, TOps extends readonly MapperOp[]> = Pick<
+type CompiledMapperSelection<TSource, TTarget, TOps extends readonly MapperOp[]> = Pick<
   CompiledMapper<TSource, TTarget>,
   TOps[number]
 >;
-
-export interface MapperGet<TSource, TTarget> {
-  /** Compiles and returns exactly the requested mapper operations. */
-  get<const TOps extends readonly MapperOp[]>(...ops: TOps): CompiledMapperSelection<TSource, TTarget, TOps>;
-}
-
-export type MapperFacade<TSource, TTarget> = CompiledMapper<TSource, TTarget> & MapperGet<TSource, TTarget>;
 
 /**
  * Emits the JavaScript source of a compiled mapper (`{ map, many }`).
@@ -60,7 +53,7 @@ export function emitMapperSource(
   sourceSchema: ATS.AnyTypeSchema,
   targetSchema: ATS.AnyTypeSchema,
   overrides: MapperOverridesInput = {},
-  operations: readonly MapperOp[] = MAPPER_OPS
+  operations: readonly MapperOp[] = MAPPER_OPERATIONS
 ): string {
   return emitMapper(buildMapperPlan(sourceSchema, targetSchema, overrides), normalizeMapperOps(operations));
 }
@@ -73,7 +66,7 @@ export function emitMapperSource(
  * and default values. Override callbacks and default values travel as
  * external bindings — never interpolated into the generated source.
  *
- * Prefer the typed `JIT.mapper(source, target, overrides)` factory; this is
+ * Prefer the typed `JIT.map(source, target, overrides)` capability; this is
  * the low-level entry point it delegates to.
  *
  * @throws JITError with code `INVALID_MAPPER` when a required target field
@@ -85,20 +78,20 @@ export function compileMapper<TSource = unknown, TTarget = unknown>(
   overrides: MapperOverridesInput = {},
   options?: CompileCacheOptions
 ): CompiledMapper<TSource, TTarget> {
-  return compileMapperSelection<TSource, TTarget, typeof MAPPER_OPS>(
+  return compileMapperSelection<TSource, TTarget, typeof MAPPER_OPERATIONS>(
     sourceSchema,
     targetSchema,
     overrides,
-    MAPPER_OPS,
+    MAPPER_OPERATIONS,
     options
   ) as CompiledMapper<TSource, TTarget>;
 }
 
 /** Compiles only the selected mapper functions and omits every other operation. */
-export function compileMapperSelection<
+function compileMapperSelection<
   TSource = unknown,
   TTarget = unknown,
-  const TOps extends readonly MapperOp[] = typeof MAPPER_OPS,
+  const TOps extends readonly MapperOp[] = typeof MAPPER_OPERATIONS,
 >(
   sourceSchema: ATS.AnyTypeSchema,
   targetSchema: ATS.AnyTypeSchema,
@@ -109,60 +102,6 @@ export function compileMapperSelection<
   const plan = buildMapperPlan(sourceSchema, targetSchema, overrides);
 
   return compileMapperPlanSelection<TSource, TTarget, TOps>(sourceSchema, targetSchema, plan, operations, options);
-}
-
-/**
- * Creates a lazy mapper facade. Direct property access compiles one operation;
- * `.get(...)` compiles only the explicit selection in one generated object.
- */
-export function createMapperFacade<TSource = unknown, TTarget = unknown>(
-  sourceSchema: ATS.AnyTypeSchema,
-  targetSchema: ATS.AnyTypeSchema,
-  overrides: MapperOverridesInput = {},
-  options?: CompileCacheOptions
-): MapperFacade<TSource, TTarget> {
-  const plan = buildMapperPlan(sourceSchema, targetSchema, overrides);
-  const selections = new Map<string, object>();
-
-  const select = <const TOps extends readonly MapperOp[]>(
-    operations: TOps
-  ): CompiledMapperSelection<TSource, TTarget, TOps> => {
-    const normalized = normalizeMapperOps(operations);
-    const key = normalized.join(",");
-    const cached = selections.get(key);
-
-    if (cached) return cached as CompiledMapperSelection<TSource, TTarget, TOps>;
-
-    const selection = compileMapperPlanSelection<TSource, TTarget, TOps>(
-      sourceSchema,
-      targetSchema,
-      plan,
-      normalized as unknown as TOps,
-      options
-    );
-    selections.set(key, selection);
-    return selection;
-  };
-  const target = {
-    get<const TOps extends readonly MapperOp[]>(...operations: TOps): CompiledMapperSelection<TSource, TTarget, TOps> {
-      return select(operations);
-    },
-  };
-
-  for (const operation of MAPPER_OPS) {
-    Object.defineProperty(target, operation, {
-      configurable: false,
-      enumerable: true,
-      get() {
-        return select([operation] as const)[operation];
-      },
-    });
-  }
-
-  const facade = Object.freeze(target) as MapperFacade<TSource, TTarget>;
-
-  registerMapperArtifact(facade, plan, MAPPER_OPS);
-  return facade;
 }
 
 function compileMapperPlanSelection<TSource, TTarget, const TOps extends readonly MapperOp[]>(
@@ -269,12 +208,12 @@ function registerMapperArtifact(
 
 function normalizeMapperOps(operations: readonly MapperOp[]): readonly MapperOp[] {
   for (const operation of operations) {
-    if (!(MAPPER_OPS as readonly string[]).includes(operation)) {
+    if (!(MAPPER_OPERATIONS as readonly string[]).includes(operation)) {
       throw new JITError("INVALID_OPERATION", `unknown mapper operation: ${String(operation)}`);
     }
   }
 
-  return MAPPER_OPS.filter((operation) => operations.includes(operation));
+  return MAPPER_OPERATIONS.filter((operation) => operations.includes(operation));
 }
 
 const targetKeys = new WeakMap<object, number>();

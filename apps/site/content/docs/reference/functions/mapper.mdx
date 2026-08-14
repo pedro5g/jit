@@ -55,7 +55,7 @@ closures. Both results are callable artifacts with `.plan` and optional
 
 Mapper structure is cached separately from user callback bindings, preventing a
 callback from one mapper instance from leaking into another. Reuse one mapper
-facade at module scope. Self-contained callback bindings can be serialized into
+artifact at module scope. Self-contained callback bindings can be serialized into
 AOT output.
 
 ## Mapper versus transform versus DTO

@@ -8,6 +8,14 @@ describe("composable capability API", () => {
   });
   const ada = { id: 1, name: "Ada", role: "admin" as const };
 
+  it("does not expose the removed selection facades", () => {
+    expect(JIT).not.toHaveProperty("validator");
+    expect(JIT).not.toHaveProperty("serializer");
+    expect(JIT).not.toHaveProperty("model");
+    expect(JIT).not.toHaveProperty("mapper");
+    expectTypeOf<Extract<"validator" | "serializer" | "model" | "mapper", keyof typeof JIT>>().toEqualTypeOf<never>();
+  });
+
   it("shares validation factories between root aliases and the namespace", () => {
     const isUser = JIT.validate.is(User);
     const parseUser = JIT.parse(User);
@@ -111,7 +119,7 @@ describe("composable capability API", () => {
     ]);
     expect(source).toContain("return function execution(input)");
     expect(source).not.toContain("previous(value)");
-    expect(source).not.toContain("JSON.parse");
+    expect(source).toContain("JSON.parse");
     expect(
       pipeline(JSON.stringify([{ id: 1, role: "admin", name: " Ada ", email: "ada@math.org", note: "<b>ok</b>" }]))
     ).toBe(JSON.stringify([{ id: 1, name: "PUBLIC", email: "***.org", note: "ok" }]));

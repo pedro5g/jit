@@ -209,7 +209,7 @@ describe("jit MCP server", () => {
       expect(inspect.content[0].text).toContain("standalone functions: User_is");
       expect(inspect.structuredContent).toMatchObject({
         configFile: "jit.config.mjs",
-        standalone: [{ name: "User_is", operations: ["is"], source: "src/user.jit.ts" }],
+        standalone: [{ name: "User_is", operations: ["value", "is"], source: "src/user.jit.ts" }],
       });
       expect(doctor.structuredContent).toMatchObject({ ok: true, grouped: 0, standalone: 1 });
     });
@@ -299,8 +299,7 @@ function writeAotFixture(projectDir: string): void {
     [
       `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
       "const User = JIT.object({ id: JIT.number() });",
-      "const selected = JIT.validator(User).get('is');",
-      "export const User_is = selected.is;",
+      "export const User_is = JIT.is(User);",
       "",
     ].join("\n")
   );

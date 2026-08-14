@@ -7,7 +7,6 @@ import { emitEqualSource } from "../compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
-import { tryEmitJsonDecoder } from "../compiler/json-decode.js";
 import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { emitMapperSource } from "../compiler/mapper.js";
 import { emitMaskSource } from "../compiler/mask.js";
@@ -16,7 +15,7 @@ import { emitQuerySource } from "../compiler/query.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitUpdateSource } from "../compiler/update.js";
-import { emitValidator } from "../compiler/validate/emit-validate.js";
+import { canUseFastParse, emitValidator } from "../compiler/validate/emit-validate.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
@@ -200,14 +199,9 @@ export function generate(options: GenerateOptions): GenerateResult {
     }
 
     // is / parse / safeParse
-    const fromJsonDecoder = wants("fromJSON") ? tryEmitJsonDecoder(schema) : undefined;
-    const fromJsonDecoderBindings = fromJsonDecoder
-      ? inlineBindings(fromJsonDecoder.bindingNames, fromJsonDecoder.bindingValues)
-      : undefined;
-    const hasDirectFromJson = fromJsonDecoder !== undefined && fromJsonDecoderBindings !== undefined;
-    const wantsValidator =
-      wants("is") || wants("parse") || wants("safeParse") || (wants("fromJSON") && !hasDirectFromJson);
+    const wantsValidator = wants("is") || wants("parse") || wants("safeParse") || wants("fromJSON");
     const validator = wantsValidator ? tryEmit(name, "validator", skipped, () => emitValidator(schema)) : undefined;
+    const fastParse = canUseFastParse(schema);
 
     if (validator) {
       const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
@@ -246,12 +240,14 @@ export function generate(options: GenerateOptions): GenerateResult {
             binding,
           });
         }
-        if (wants("parse") || (wants("fromJSON") && !hasDirectFromJson)) {
+        if (wants("parse") || wants("fromJSON")) {
           const parseBinding = internalIdentifier(`${name}_parse`);
 
           needsValidationError = true;
           js.push(
-            `const ${parseBinding} = /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+            fastParse
+              ? `const ${parseBinding} = (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+              : `const ${parseBinding} = (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
           );
           if (wants("parse")) {
             operations.push({
@@ -260,7 +256,7 @@ export function generate(options: GenerateOptions): GenerateResult {
               binding: parseBinding,
             });
           }
-          if (wants("fromJSON") && !hasDirectFromJson) {
+          if (wants("fromJSON")) {
             const binding = internalIdentifier(`${name}_fromJSON`);
             js.push(
               `const ${binding} = /*#__PURE__*/ ((parse) => (json) => parse(JSON.parse(json)))(${parseBinding});`
@@ -273,24 +269,6 @@ export function generate(options: GenerateOptions): GenerateResult {
           }
         }
       }
-    }
-
-    if (wants("fromJSON") && fromJsonDecoder && fromJsonDecoderBindings) {
-      const binding = internalIdentifier(`${name}_fromJSON`);
-
-      needsValidationError = true;
-      js.push(`const ${binding} = /*#__PURE__*/ (() => {`);
-      js.push(...fromJsonDecoderBindings.map((line) => `  ${line}`));
-      js.push(...indentBlock(`const decode = (${fromJsonDecoder.source});`));
-      js.push(
-        "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
-      );
-      js.push("})();");
-      operations.push({
-        prop: "fromJSON",
-        type: `(json: string) => ${name}`,
-        binding,
-      });
     }
 
     // equal source first: it decides whether hash helpers are required.
@@ -508,11 +486,24 @@ export function generate(options: GenerateOptions): GenerateResult {
       }
 
       if (artifact.kind === "execution") {
-        skipped.push({
-          schema: name,
-          operation: extraName,
-          reason: "execution artifacts must be exported directly so their complete plan can be lowered",
-        });
+        const binding = internalIdentifier(`${name}_${extraName}`);
+        const before = js.length;
+
+        emitExecutionArtifact(binding, artifact.plan, undefined, false);
+        const declaration = js
+          .slice(before)
+          .some((line) =>
+            layout.format === "typescript"
+              ? line.startsWith(`const ${binding}:`)
+              : line.startsWith(`const ${binding} =`)
+          );
+        if (!declaration) continue;
+
+        const extraType = sourceFile
+          ? `typeof import(${JSON.stringify(typeImportSpecifier(options.outDir, sourceFile))}).${name}[${JSON.stringify(extraName)}]`
+          : executionPlanType(artifact.plan, typeNames.get(artifact.plan.schema));
+
+        operations.push({ prop: extraName, type: extraType, binding });
         continue;
       }
 
@@ -622,9 +613,10 @@ export function generate(options: GenerateOptions): GenerateResult {
         return;
       }
 
+      const fastParse = artifact.op === "parse" && canUseFastParse(artifact.schema);
       const validator = tryEmit(name, artifact.op, skipped, () =>
         emitValidator(artifact.schema, {
-          is: artifact.op === "is",
+          is: artifact.op === "is" || fastParse,
           safeParse: artifact.op === "safeParse" || artifact.op === "parse",
           safeParseAsync: false,
         })
@@ -657,7 +649,9 @@ export function generate(options: GenerateOptions): GenerateResult {
       } else {
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse
+            ? `${declaration} (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+            : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       }
 
@@ -740,23 +734,7 @@ export function generate(options: GenerateOptions): GenerateResult {
         if (!serializeSource) return;
         js.push(`${declaration} (${serializeSource});`);
       } else if (op === "fromJSON") {
-        const decoder = tryEmitJsonDecoder(schema);
-        const decoderBindings = decoder ? inlineBindings(decoder.bindingNames, decoder.bindingValues) : undefined;
-
-        if (decoder && decoderBindings) {
-          needsValidationError = true;
-          js.push(`${declaration} /*#__PURE__*/ (() => {`);
-          js.push(...decoderBindings.map((line) => `  ${line}`));
-          js.push(...indentBlock(`const decode = (${decoder.source});`));
-          js.push(
-            "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
-          );
-          js.push("})();");
-          exportNames.push(name);
-          dts.push(`export declare const ${name}: ${operationType(artifact, typeNames.get(artifact.schema))};`);
-          dts.push("");
-          return;
-        }
+        const fastParse = canUseFastParse(schema);
         const validator = tryEmit(name, "fromJSON", skipped, () => emitValidator(schema));
 
         if (!validator) return;
@@ -780,7 +758,9 @@ export function generate(options: GenerateOptions): GenerateResult {
         js.push(...indentBlock(validator.source));
         js.push("})();");
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse
+            ? `${declaration} (json) => { const value = JSON.parse(json); if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+            : `${declaration} (json) => { const r = ${validatorName}.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       } else if (op === "format") {
         const formatSource = tryEmit(name, "format", skipped, () => emitFormatSource(schema));
@@ -861,7 +841,12 @@ export function generate(options: GenerateOptions): GenerateResult {
     dts.push("");
   }
 
-  function emitExecutionArtifact(name: string, plan: ExecutionPlan, sourceFile: string | undefined): void {
+  function emitExecutionArtifact(
+    name: string,
+    plan: ExecutionPlan,
+    sourceFile: string | undefined,
+    exportArtifact = true
+  ): void {
     void sourceFile;
     const declaredType = executionPlanType(plan, typeNames.get(plan.schema));
     const declaration = `const ${name}${layout.format === "typescript" ? `: ${declaredType}` : ""} =`;
@@ -875,7 +860,7 @@ export function generate(options: GenerateOptions): GenerateResult {
     const mapStage = stages.find((stage) => stage.kind === "map");
 
     if (stages.some((stage) => isComposedExecutionStage(stage))) {
-      emitComposedExecutionArtifact(name, plan, declaredType, declaration);
+      emitComposedExecutionArtifact(name, plan, declaredType, declaration, exportArtifact);
       return;
     }
 
@@ -926,8 +911,10 @@ export function generate(options: GenerateOptions): GenerateResult {
         js.push("})());");
       }
 
-      exportNames.push(name);
-      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      if (exportArtifact) {
+        exportNames.push(name);
+        dts.push(`export declare const ${name}: ${declaredType};`, "");
+      }
       return;
     }
 
@@ -945,28 +932,10 @@ export function generate(options: GenerateOptions): GenerateResult {
         return;
       }
 
-      if (validateStage.operation === "parse" && hasJsonDecode) {
-        const decoder = tryEmitJsonDecoder(validateStage.schema);
-        const decoderBindings = decoder ? inlineBindings(decoder.bindingNames, decoder.bindingValues) : undefined;
-
-        if (decoder && decoderBindings) {
-          needsValidationError = true;
-          js.push(`${declaration} /*#__PURE__*/ (() => {`);
-          js.push(...decoderBindings.map((line) => `  ${line}`));
-          js.push(...indentBlock(`const decode = (${decoder.source});`));
-          js.push(
-            "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
-          );
-          js.push("})();");
-          exportNames.push(name);
-          dts.push(`export declare const ${name}: ${declaredType};`, "");
-          return;
-        }
-      }
-
+      const fastParse = validateStage.operation === "parse" && canUseFastParse(plan.schema);
       const validator = tryEmit(name, validateStage.operation, skipped, () =>
         emitValidator(plan.schema, {
-          is: validateStage.operation === "is",
+          is: validateStage.operation === "is" || fastParse,
           safeParse: validateStage.operation !== "is",
           safeParseAsync: false,
         })
@@ -1012,7 +981,9 @@ export function generate(options: GenerateOptions): GenerateResult {
       } else if (hasJsonDecode) {
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse
+            ? `${declaration} (json) => { const value = JSON.parse(json); if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+            : `${declaration} (json) => { const r = ${validatorName}.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       } else if (hasBinaryDecode) {
         const codec = tryEmit(name, "binary.decode", skipped, () => emitCodec(plan.schema));
@@ -1028,20 +999,28 @@ export function generate(options: GenerateOptions): GenerateResult {
         }
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((codec, v) => (bytes) => { const r = v.safeParse(codec.decode(bytes)); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
+          fastParse
+            ? `${declaration} /*#__PURE__*/ ((codec, is, safeParse) => (bytes) => { const value = codec.decode(bytes); if (is(value)) return value; const r = safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
+            : `${declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes) => { const r = safeParse(codec.decode(bytes)); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
         );
         js.push(...codecBindings.map((line) => `  ${line}`));
         js.push(...indentBlock(codec.source));
-        js.push(`})()), ${validatorName});`);
+        js.push(
+          fastParse ? `})()), ${validatorName}.is, ${validatorName}.safeParse);` : `})()), ${validatorName}.safeParse);`
+        );
       } else {
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse
+            ? `${declaration} (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+            : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       }
 
-      exportNames.push(name);
-      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      if (exportArtifact) {
+        exportNames.push(name);
+        dts.push(`export declare const ${name}: ${declaredType};`, "");
+      }
       return;
     }
 
@@ -1093,8 +1072,10 @@ export function generate(options: GenerateOptions): GenerateResult {
       return;
     }
 
-    exportNames.push(name);
-    dts.push(`export declare const ${name}: ${declaredType};`, "");
+    if (exportArtifact) {
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+    }
   }
 
   /**
@@ -1108,16 +1089,18 @@ export function generate(options: GenerateOptions): GenerateResult {
     name: string,
     plan: ExecutionPlan,
     declaredType: string,
-    declaration: string
+    declaration: string,
+    exportArtifact: boolean
   ): void {
     const setup: string[] = [];
     const body: string[] = ["let value = input;"];
     const stages = plan.stages;
 
     const emitValidatorBinding = (schema: ATS.AnyTypeSchema): string | undefined => {
+      const fastParse = canUseFastParse(schema);
       const validator = tryEmit(name, "validate", skipped, () =>
         emitValidator(schema, {
-          is: false,
+          is: fastParse,
           safeParse: true,
           safeParseAsync: false,
         })
@@ -1137,22 +1120,6 @@ export function generate(options: GenerateOptions): GenerateResult {
       setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
       setup.push(...inlined.map((line) => `  ${line}`));
       setup.push(...indentBlock(validator.source));
-      setup.push("})();");
-      return binding;
-    };
-
-    const emitJsonDecoderBinding = (schema: ATS.AnyTypeSchema): string | undefined => {
-      const decoder = tryEmitJsonDecoder(schema);
-
-      if (!decoder) return undefined;
-      const inlined = inlineBindings(decoder.bindingNames, decoder.bindingValues);
-
-      if (inlined === undefined) return undefined;
-      const binding = internalIdentifier(`${name}_jsonDecoder`);
-
-      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
-      setup.push(...inlined.map((line) => `  ${line}`));
-      setup.push(...indentBlock(`return (${decoder.source});`));
       setup.push("})();");
       return binding;
     };
@@ -1364,31 +1331,9 @@ export function generate(options: GenerateOptions): GenerateResult {
         case "value":
         case "to.array":
           break;
-        case "json.decode": {
-          const validation = stages[index + 1];
-
-          if (
-            validation?.kind === "validate" &&
-            validation.operation === "parse" &&
-            validation.schema === stage.schema
-          ) {
-            const decoder = emitJsonDecoderBinding(stage.schema);
-
-            if (decoder) {
-              needsValidationError = true;
-              body.push("try {");
-              body.push(`  value = ${decoder}(value);`);
-              body.push("} catch (error) {");
-              body.push("  if (Array.isArray(error)) throw new JITValidationError(error);");
-              body.push("  throw error;");
-              body.push("}");
-              index++;
-              break;
-            }
-          }
+        case "json.decode":
           body.push("value = JSON.parse(value);");
           break;
-        }
         case "binary.decode": {
           const codec = emitCodecBinding(stage.schema, "binary.decode");
           if (!codec) return;
@@ -1407,9 +1352,17 @@ export function generate(options: GenerateOptions): GenerateResult {
           const validator = emitValidatorBinding(stage.schema);
           if (!validator) return;
           needsValidationError = true;
-          body.push(`const result = ${validator}.safeParse(value);`);
-          body.push("if (!result.success) throw new JITValidationError(result.issues);");
-          body.push("value = result.data;");
+          if (canUseFastParse(stage.schema)) {
+            body.push(`if (!${validator}.is(value)) {`);
+            body.push(`  const result = ${validator}.safeParse(value);`);
+            body.push("  if (!result.success) throw new JITValidationError(result.issues);");
+            body.push("  value = result.data;");
+            body.push("}");
+          } else {
+            body.push(`const result = ${validator}.safeParse(value);`);
+            body.push("if (!result.success) throw new JITValidationError(result.issues);");
+            body.push("value = result.data;");
+          }
           break;
         }
         case "query": {
@@ -1495,8 +1448,10 @@ export function generate(options: GenerateOptions): GenerateResult {
     js.push(...body.map((line) => `    ${line}`));
     js.push("  };");
     js.push("})();");
-    exportNames.push(name);
-    dts.push(`export declare const ${name}: ${declaredType};`, "");
+    if (exportArtifact) {
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+    }
   }
 
   function emitAotOperationSource(

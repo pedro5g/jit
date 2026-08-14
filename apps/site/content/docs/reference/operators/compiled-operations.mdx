@@ -36,36 +36,26 @@ against expected reuse; a single lookup may be cheaper as a scan. The
 [cache, hash and indexes guide](/docs/runtime/cache-hash-index) documents the
 immutability contract, adaptive threshold and invalidation choices.
 
-## Models
+## Explicit artifact groups
 
-`JIT.model(schema)` is a compatible lazy facade over every operation. Accessing
-one property compiles only that property, and the per-schema cache reuses it.
-For application boundaries, prefer an explicit model so unsupported or unused
-methods do not exist in the value or its TypeScript type.
+Operations are independent callable artifacts. Group only the capabilities a
+module exports; `JIT.compile(schema, { ... })` is also the grouped AOT marker.
 
 ```ts
-const lazy = JIT.model(User);
-const ReadUser = lazy.get("is", "parse");
-
-const UserRuntime = JIT.model(User, {
-  is: true,
-  parse: true,
-  equal: true,
-  codec: false,
+const ReadUser = JIT.compile(User, {
+  is: JIT.is(User),
+  parse: JIT.parse(User),
+  equal: JIT.equal(User),
 });
 
-ReadUser.ops; // ["is", "parse"]
-UserRuntime.equal(left, right);
-// UserRuntime.clone does not exist
+ReadUser.parse(input);
+ReadUser.equal(left, right);
+// ReadUser.clone does not exist
 ```
 
-`.get()` normalizes operation order and caches equal selections. Boolean model
-configuration is convenient for feature flags and shared runtime modules. Both
-forms compile validator methods together when possible, while unrelated
-compilers are never called. Explicit model selections are grouped AOT markers,
-so exporting `UserRuntime` from a configured `*.jit.ts` entry emits the same
-narrow object. `JIT.compile(schema, { ... })` remains the API for mixing model
-operations with custom queries, mappers or other developer-defined functions.
+Composable artifacts such as `JIT.map.many(...)` or a JSON pipeline can be
+grouped alongside validation and query functions. AOT lowers each complete
+ExecutionPlan and emits only the declared properties.
 
 ## Collection changes
 
@@ -120,10 +110,10 @@ one bulk indexed loop while `JIT.map()` omits the array loop entirely.
 `JIT.transform` provides field operations and selection
 over one source schema.
 
-`JIT.dto(Target)` aggregates inbound validation/transport operations.
-`JIT.dto(Source, Target, mapping)` adds whitelist `from` and fused `many`
-projections. See [DTO aggregates](/docs/runtime/dtos) for schema variants,
-security boundaries and AOT behavior.
+`JIT.dto(Target)` annotates an ordinary boundary schema. Apply `JIT.parse`,
+`JIT.json`, or `JIT.binary` directly; use `JIT.map` and `JIT.map.many` for
+whitelist projections from an entity schema. See [DTO schemas](/docs/runtime/dtos)
+for schema variants, security boundaries, and AOT behavior.
 
 ## Security operations
 

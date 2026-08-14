@@ -39,7 +39,7 @@ A terminal `.map(target, overrides).to.json()` maps and serializes each item
 in one output loop, so it does not allocate a mapped collection. Individual
 target objects may still be needed for mapper callbacks or nested values.
 
-There are deliberate materialization boundaries: schema-directed JSON decode,
+There are deliberate materialization boundaries: native JSON decode,
 binary decode, query output, mapper batches, and serializers must produce
 their semantic output. The planner never reorders observable operations just
 to make a plan look fused.
@@ -50,21 +50,17 @@ to make a plan look fused.
 const parseUser = JIT.json.parse(User).validate();
 ```
 
-For supported JSON-safe schemas this is one generated schema-directed scanner.
-It consumes tokens, builds fields/items, and applies validation checks and
-declarative transforms during the same traversal; its hot source contains no
-`JSON.parse`. Runtime JIT and import-free AOT use the same emitter.
+This is one generated execution closure containing native `JSON.parse`
+followed immediately by the specialized validator. Runtime compilation parses
+a bounded schema-shaped sample to prime V8 object-map transitions; AOT stays
+side-effect free. The decoded JavaScript value remains a real materialization
+boundary.
 
-The compiler only selects this path when it can preserve the complete schema
-semantics. Refines, callback pipes/transforms, coercions, unions, and other
-not-yet-lowered nodes retain the explicit native parse + compiled-validator
-compatibility path. `Compiler.jsonDecoderSupport(schema)` reports why. The
-decoded JavaScript value remains a real materialization boundary.
-
-Performance is shape-dependent: the checked-in `pnpm bench:json-decode`
-suite compares small objects and large arrays against `JSON.parse` plus JIT,
-generated Typia, and Zod validation. Parse-only and fail-fast baselines that do
-less work are labeled as non-comparable.
+For a pure non-transforming schema, `parse` uses the allocation-free `is`
+program on success and only emits issue records after a failure. Observable or
+transforming schemas stay single-pass. The checked-in `pnpm bench:json` suite
+measures native parsing and parse-plus-validation independently against
+generated Typia and Zod.
 
 ## Transform and update
 

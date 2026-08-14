@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AOT, Compiler, JIT } from "../../index.js";
+import { validation } from "./validation-helper.js";
 
 describe("JIT.coerce zod-style native coercions", () => {
   it("should coerce query-string style input on parse", () => {
@@ -13,7 +14,7 @@ describe("JIT.coerce zod-style native coercions", () => {
       since: JIT.coerce.date(),
       tag: JIT.coerce.string(),
     });
-    const validate = JIT.validator(Query);
+    const validate = validation(Query);
     const result = validate.safeParse({
       page: "3",
       limit: "50",
@@ -34,21 +35,21 @@ describe("JIT.coerce zod-style native coercions", () => {
 
   it("should fail validation after coercion like zod", () => {
     const Page = JIT.object({ page: JIT.coerce.number().int().positive() });
-    const validate = JIT.validator(Page);
+    const validate = validation(Page);
 
     // "abc" → NaN → integer check fails; no throw.
     const bad = validate.safeParse({ page: "abc" });
 
     expect(bad.success).toBe(false);
 
-    const invalidDate = JIT.validator(JIT.object({ at: JIT.coerce.date() })).safeParse({ at: "not a date" });
+    const invalidDate = validation(JIT.object({ at: JIT.coerce.date() })).safeParse({ at: "not a date" });
 
     expect(invalidDate.success).toBe(false);
   });
 
   it("should keep safeParse total for bigint coercion", () => {
     const Big = JIT.object({ n: JIT.coerce.bigint() });
-    const validate = JIT.validator(Big);
+    const validate = validation(Big);
 
     expect(validate.safeParse({ n: "12" })).toEqual({ success: true, data: { n: 12n } });
     // BigInt("x") throws in zod; here it degrades to a type issue.
@@ -57,7 +58,7 @@ describe("JIT.coerce zod-style native coercions", () => {
 
   it("should keep the custom-callback coerce form working", () => {
     const Upper = JIT.coerce(JIT.string(), (value) => String(value).toUpperCase());
-    const result = JIT.validator(JIT.object({ code: Upper })).safeParse({ code: "abc" });
+    const result = validation(JIT.object({ code: Upper })).safeParse({ code: "abc" });
 
     expect(result).toEqual({ success: true, data: { code: "ABC" } });
   });
@@ -76,14 +77,14 @@ describe("JIT.coerce zod-style native coercions", () => {
     try {
       const Native = JIT.object({ page: JIT.coerce.number().int() });
       const Callback = JIT.object({ page: JIT.coerce(JIT.number(), (value) => Number(value)) });
-      const nativeSelected = JIT.validator(Native).get("safeParse");
-      const callbackSelected = JIT.validator(Callback).get("safeParse");
+      const nativeSafeParse = JIT.safeParse(Native);
+      const callbackSafeParse = JIT.safeParse(Callback);
 
       const result = AOT.generate({
         schemas: {},
         functions: {
-          Native_safeParse: nativeSelected.safeParse,
-          Callback_safeParse: callbackSelected.safeParse,
+          Native_safeParse: nativeSafeParse,
+          Callback_safeParse: callbackSafeParse,
         },
         outDir,
       });

@@ -1,7 +1,7 @@
 import { JITError, JITValidationError } from "../errors/index.js";
 import { emitCodec } from "./codec/emit-codec.js";
 import type { ExecutionPlan } from "./execution-plan.js";
-import { tryEmitJsonDecoder } from "./json-decode.js";
+import { warmJsonParseShape } from "./json-parse.js";
 import { buildMapperPlan, type MapperOverridesInput } from "./mapper/build-mapper-plan.js";
 import { emitMapperSource } from "./mapper.js";
 import { emitMaskSource } from "./mask.js";
@@ -10,7 +10,7 @@ import { emitQuerySource } from "./query.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "./sanitize.js";
 import { emitSerialize } from "./serialize/emit-serialize.js";
 import { emitUpdateSource } from "./update.js";
-import { emitValidator } from "./validate/emit-validate.js";
+import { canUseFastParse, emitValidator } from "./validate/emit-validate.js";
 
 type FunctionLike = (...args: never[]) => unknown;
 
@@ -88,36 +88,9 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
       case "value":
       case "to.array":
         break;
-      case "json.decode": {
-        const validation = stages[index + 1];
-
-        if (validation?.kind === "validate" && validation.operation === "parse" && stage.schema === validation.schema) {
-          const decoder = tryEmitJsonDecoder(stage.schema);
-
-          if (decoder) {
-            const decoderName = emitBoundBlock(
-              "jsonDecoder",
-              decoder.bindingNames,
-              decoder.bindingValues,
-              decoder.source,
-              true
-            );
-            const error = bind(JITValidationError);
-            const caught = `__caught${valueIndex++}`;
-
-            body.push("try {");
-            body.push(`  value = ${decoderName}(value);`);
-            body.push(`} catch (${caught}) {`);
-            body.push(`  if (Array.isArray(${caught})) throw new ${error}(${caught});`);
-            body.push(`  throw ${caught};`);
-            body.push("}");
-            index++;
-            break;
-          }
-        }
+      case "json.decode":
         body.push("value = JSON.parse(value);");
         break;
-      }
       case "binary.decode": {
         const codec = emitCodec(stage.schema);
         const codecName = emitBoundBlock("codec", codec.bindingNames, codec.bindingValues, codec.source);
@@ -126,8 +99,9 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
         break;
       }
       case "validate": {
+        const fastParse = stage.operation === "parse" && canUseFastParse(stage.schema);
         const validator = emitValidator(stage.schema, {
-          is: stage.operation === "is",
+          is: stage.operation === "is" || fastParse,
           safeParse:
             stage.operation === "parse" ||
             stage.operation === "safeParse" ||
@@ -148,12 +122,23 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
             body.push(`value = ${validatorName}.is(value);`);
             break;
           case "parse": {
-            const result = `__result${valueIndex++}`;
             const error = bind(JITValidationError);
 
-            body.push(`const ${result} = ${validatorName}.safeParse(value);`);
-            body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
-            body.push(`value = ${result}.data;`);
+            if (fastParse) {
+              const result = `__result${valueIndex++}`;
+
+              body.push(`if (!${validatorName}.is(value)) {`);
+              body.push(`  const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`  if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`  value = ${result}.data;`);
+              body.push("}");
+            } else {
+              const result = `__result${valueIndex++}`;
+
+              body.push(`const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`value = ${result}.data;`);
+            }
             break;
           }
           case "safeParse":
@@ -304,8 +289,14 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
 /** Lowers the descriptor exactly once, when its final callable is first used. */
 export function lowerExecutionPlan(plan: ExecutionPlan): FunctionLike {
   const emitted = emitExecutionPlan(plan);
+  const compiled = globalThis.Function(
+    ...emitted.bindingNames,
+    emitted.source
+  )(...emitted.bindingValues) as FunctionLike;
+  const json = plan.stages.find((stage) => stage.kind === "json.decode");
 
-  return globalThis.Function(...emitted.bindingNames, emitted.source)(...emitted.bindingValues) as FunctionLike;
+  if (json?.schema) warmJsonParseShape(json.schema);
+  return compiled;
 }
 
 function indent(source: string): string[] {

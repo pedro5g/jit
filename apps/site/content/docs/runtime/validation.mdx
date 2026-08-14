@@ -23,8 +23,8 @@ const issues = JIT.validate.issues(User);
 ```
 
 `JIT.is`, `JIT.parse`, and `JIT.safeParse` are exact aliases for the
-corresponding `JIT.validate.*` factories. The old `JIT.validator(schema)`
-facade remains a compatibility adapter, not the preferred API.
+corresponding `JIT.validate.*` factories. Each returns one callable artifact;
+the removed selection facade is no longer exported.
 
 `is` is fail-fast and allocation-free on the normal path. `safeParse` collects stable
 issues with `path`, `code`, `expected` and `message`. `parse` throws
@@ -38,7 +38,7 @@ second generic validator.
 | Need                           | Compile        | Failure behavior             |  Happy-path allocation |
 | ------------------------------ | -------------- | ---------------------------- | ---------------------: |
 | Boolean gate                   | `is`           | `false` on first mismatch    |                   none |
-| Typed value or exception       | `parse`        | collects issues, then throws |    transform-dependent |
+| Typed value or exception       | `parse`        | throws with issues           |    transform-dependent |
 | Typed result without exception | `safeParse`    | issue vector                 |    transform-dependent |
 | Promise schemas                | async variants | Promise result/error         |        async machinery |
 | Consume issue records          | `issues`       | iterator                     | validator issue vector |
@@ -74,9 +74,9 @@ wrapper:
 const parseUserJson = JIT.json.parse(User).validate();
 ```
 
-This lowers to one generated execution function. Supported schemas use a
-schema-directed scanner that validates as it consumes JSON tokens; unsupported
-semantics retain the compatibility parser + validator backend. See
+This lowers to one generated execution function: native `JSON.parse` followed
+immediately by the specialized validator. Runtime compilation performs a
+bounded best-effort warm-up for the declared object shape. See
 [composable execution](/docs/runtime/composable-execution) for support and
 physical fusion boundaries.
 

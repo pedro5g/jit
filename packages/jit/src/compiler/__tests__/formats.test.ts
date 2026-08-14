@@ -1,7 +1,8 @@
 import { JIT } from "../../index.js";
+import { validation } from "./validation-helper.js";
 
-function accepts(builder: Parameters<typeof JIT.validator>[0], good: readonly string[], bad: readonly string[]): void {
-  const validate = JIT.validator(JIT.object({ value: builder as never }));
+function accepts(builder: Parameters<typeof JIT.is>[0], good: readonly string[], bad: readonly string[]): void {
+  const validate = validation(JIT.object({ value: builder as never }));
 
   for (const sample of good) {
     expect(validate.is({ value: sample }), `should accept ${JSON.stringify(sample)}`).toBe(true);
@@ -33,10 +34,10 @@ describe("JIT string format checks", () => {
   it("should let a custom regex override the default email pattern", () => {
     const unicode = "josé@empresa.com.br";
 
-    accepts(JIT.string().email(), ["ada@math.org"], [unicode, "a..b@x.com"]);
+    accepts(JIT.string().email(), ["ada@math.org", "a'.b@math.org"], [unicode, "a..b@x.com"]);
     accepts(JIT.string().email(JIT.regexes.unicodeEmail), [unicode, "ada@math.org"], ["semarroba"]);
 
-    const custom = JIT.validator(
+    const custom = validation(
       JIT.object({ email: JIT.string().email(JIT.regexes.rfc5322Email, "e-mail fora do RFC") })
     );
     const bad = custom.safeParse({ email: "not an email" });
@@ -74,7 +75,7 @@ describe("JIT string format checks", () => {
     );
     accepts(JIT.string().stringFormat("slug", /^[a-z0-9]+(?:-[a-z0-9]+)*$/), ["hello-world"], ["Hello World"]);
 
-    const normalized = JIT.validator(JIT.string().normalize("NFC").toLowerCase()).parse("A\u0301");
+    const normalized = validation(JIT.string().normalize("NFC").toLowerCase()).parse("A\u0301");
 
     expect(normalized).toBe("á");
   });
@@ -105,7 +106,7 @@ describe("JIT string format checks", () => {
   });
 
   it("should report custom messages and the format kind in issues", () => {
-    const validate = JIT.validator(JIT.object({ id: JIT.string().ulid("id deve ser um ULID") }));
+    const validate = validation(JIT.object({ id: JIT.string().ulid("id deve ser um ULID") }));
     const result = validate.safeParse({ id: "nope" });
 
     expect(result.success).toBe(false);

@@ -30,8 +30,8 @@ establishes. This lets runtime and AOT use the same semantic program.
 
 | Stage                   | Input → output               | Lowering                                                                                                           |
 | ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `json.decode`           | JSON text → value            | Schema-directed scanner for a supported adjacent parse validation; explicit native fallback otherwise.             |
-| `validate`              | value → validated value      | Runs during token consumption in the specialized JSON backend, or through the emitted validator for other sources. |
+| `json.decode`           | JSON text → value            | Native `JSON.parse`; runtime compilation can prewarm a bounded schema-shaped sample.                                |
+| `validate`              | value → validated value      | Schema-specialized validation emitted directly after the current source.                                           |
 | `query`                 | array → array                | Adjacent `filter`/`select` nodes collapse into one indexed query loop.                                             |
 | `map`                   | value or array → target      | Shape-specific mapper; `many` is an indexed loop.                                                                  |
 | `transform`             | value or array → target      | Per-field transform source; collection mode is an indexed loop.                                                    |
@@ -45,29 +45,24 @@ emitted helpers in its lexical scope. It does not invoke a chain of
 
 ## JSON parsing and validation
 
-`JIT.json.parse(schema).validate()` inspects the complete schema before
-lowering. Objects, arrays, tuples, records, JSON primitives, literal/enum
-values, the common nullable/optional/default/readonly wrappers, and their
-supported declarative checks use an emitted scanner. Strings, numbers, fields,
-array items, defaults, and unknown-key policies are checked or applied as the
-corresponding token is consumed. The generated hot source contains no
-`JSON.parse` and throws the same `JITValidationError` shape after collecting
-validation issues.
+`JIT.json.parse(schema).validate()` always delegates syntax decoding and object
+materialization to native `JSON.parse`, then immediately calls the generated
+schema validator in the same execution closure. Malformed input therefore
+keeps the engine's `SyntaxError`; valid JSON outside the schema throws
+`JITValidationError`.
 
-The compiler selects this backend only when it can preserve the full parse
-semantics. Refines, callback transforms/pipes, coercions, unions and other
-not-yet-lowered nodes retain `JSON.parse` plus the generic compiled validator;
-`Compiler.jsonDecoderSupport(schema)` exposes the reason. This is an explicit
-compatibility boundary, not silent partial validation. The resulting value is
-still materialized. Chunked/incremental input remains the job of the streaming
-API.
+At runtime, compilation parses a compact canonical sample twice to prime V8's
+object-map transitions for the declared key order. The warm-up is bounded and
+best-effort. It does not invoke validation callbacks, does not replace the
+native parser, and is omitted from side-effect-free AOT modules. Real traffic
+still determines steady-state optimization.
 
-Performance is shape-dependent. Fixed small objects can beat `JSON.parse` plus
-validation because the second traversal disappears; native parsing can still
-win for large numeric arrays. `pnpm bench:json-decode` records both cases and
-also compares generated Typia validation and Zod, while labeling parse-only
-and fail-fast baselines that do less work. Backend expansion and selection must
-follow those measurements rather than a universal speed claim.
+For non-transforming, repeatable schemas, generated `parse` first runs the
+allocation-free `is` path and only builds issue records after a failure.
+Schemas with defaults, coercions, transforms, refinements, stateful regexes or
+other observable work stay on the single-pass issue path. `pnpm bench:json`
+measures parse-only and parse-plus-validation independently against native
+JSON, generated Typia, and Zod.
 
 ## Ordering and type safety
 
@@ -101,7 +96,7 @@ The current backend guarantees the following:
   JSON-output loop, avoiding the mapped collection allocation;
 - sources, validators, queries, mappers, transforms, updates, security
   rewrites, and sinks live in one generated execution closure;
-- schema-directed JSON decode, binary decode, query materialization, mapper
+- native JSON decode, binary decode, query materialization, mapper
   batches, collection transforms/updates/security rewrites, and serialization
   are allocation boundaries when their semantics require output values.
 

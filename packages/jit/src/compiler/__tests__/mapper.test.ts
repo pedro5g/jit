@@ -27,12 +27,12 @@ describe("JIT compiler mapper", () => {
   };
 
   it("should auto-match by name and apply computed and rename overrides", () => {
-    const toDTO = JIT.mapper(User, UserDTO, {
-      fullName: (user) => `${user.first} ${user.last}`,
+    const toDTO = JIT.map(User, UserDTO, {
+      fullName: (user: JIT.Typeof<typeof User>) => `${user.first} ${user.last}`,
       email: { from: "emailAddress" },
     });
 
-    const dto = toDTO.map(ada);
+    const dto = toDTO(ada);
 
     expect(dto).toEqual({ id: 1, fullName: "Ada Lovelace", email: "ada@math.org" });
     expectTypeOf(dto).toEqualTypeOf<{
@@ -43,19 +43,19 @@ describe("JIT compiler mapper", () => {
   });
 
   it("should never leak source fields absent from the target schema", () => {
-    const toDTO = JIT.mapper(User, UserDTO, {
+    const toDTO = JIT.map(User, UserDTO, {
       fullName: (user) => `${user.first} ${user.last}`,
       email: { from: "emailAddress" },
     });
 
-    const dto = toDTO.map(ada) as Record<string, unknown>;
+    const dto = toDTO(ada) as Record<string, unknown>;
 
     expect(dto.passwordHash).toBeUndefined();
     expect(Object.keys(dto)).toEqual(["id", "fullName", "email"]);
   });
 
   it("should map lists in one fused loop without per-item calls", () => {
-    const toDTO = JIT.mapper(User, UserDTO, {
+    const toDTO = JIT.map.many(User, UserDTO, {
       fullName: (user) => `${user.first} ${user.last}`,
       email: { from: "emailAddress" },
     });
@@ -65,7 +65,7 @@ describe("JIT compiler mapper", () => {
     });
     const grace = { ...ada, id: 2, first: "Grace", last: "Hopper" };
 
-    expect(toDTO.many([ada, grace]).map((dto) => dto.fullName)).toEqual(["Ada Lovelace", "Grace Hopper"]);
+    expect(toDTO([ada, grace]).map((dto) => dto.fullName)).toEqual(["Ada Lovelace", "Grace Hopper"]);
     expect(source).toContain("const len = list.length;");
     expect(source).toContain("const out = new Array(len);");
     expect(source).toContain("for (let i = 0; i < len; i++)");
@@ -74,40 +74,24 @@ describe("JIT compiler mapper", () => {
     expect(source).not.toContain("map(list[i])");
   });
 
-  it("should compile only mapper operations selected with get", () => {
-    const facade = JIT.mapper(User, UserDTO, {
-      fullName: (user) => `${user.first} ${user.last}`,
-      email: { from: "emailAddress" },
-    });
-    const mapOnly = facade.get("map");
-    const manyOnly = facade.get("many");
-    const both = facade.get("map", "many");
-    const mapArtifact = getArtifact(mapOnly);
-    const manyArtifact = getArtifact(manyOnly);
+  it("should expose standalone single and bulk mapping artifacts", () => {
+    const mapping = {
+      fullName: (user: JIT.Typeof<typeof User>) => `${user.first} ${user.last}`,
+      email: { from: "emailAddress" as const },
+    };
+    const mapOne = JIT.map(User, UserDTO, mapping);
+    const mapMany = JIT.map.many(User, UserDTO, mapping);
+    const mapArtifact = getArtifact(mapOne);
+    const manyArtifact = getArtifact(mapMany);
 
-    expect(Object.keys(mapOnly)).toEqual(["map"]);
-    expect(Object.keys(manyOnly)).toEqual(["many"]);
-    expect(Object.keys(both)).toEqual(["map", "many"]);
-    expect(mapOnly.map(ada).fullName).toBe("Ada Lovelace");
-    expect(manyOnly.many([ada])).toEqual([mapOnly.map(ada)]);
-    expect(facade.map).toBe(facade.map);
-    expect(facade.many).toBe(facade.many);
-    expect(mapArtifact?.kind).toBe("mapper");
-    expect(manyArtifact?.kind).toBe("mapper");
-
-    if (!mapArtifact || !("source" in mapArtifact) || !manyArtifact || !("source" in manyArtifact)) {
-      throw new Error("mapper source artifact was not registered");
-    }
-
-    expect(mapArtifact.source).toContain("map: function map(source)");
-    expect(mapArtifact.source).not.toContain("many: function many(list)");
-    expect(manyArtifact.source).toContain("many: function many(list)");
-    expect(manyArtifact.source).not.toContain("map: function map(source)");
-    expectTypeOf<keyof typeof mapOnly>().toEqualTypeOf<"map">();
-    expectTypeOf<keyof typeof manyOnly>().toEqualTypeOf<"many">();
-    expectTypeOf<keyof typeof both>().toEqualTypeOf<"map" | "many">();
-
-    expect(() => facade.get("unknown" as never)).toThrow(/unknown mapper operation/);
+    expect(mapOne(ada).fullName).toBe("Ada Lovelace");
+    expect(mapMany([ada])).toEqual([mapOne(ada)]);
+    expect(mapArtifact?.kind).toBe("execution");
+    expect(manyArtifact?.kind).toBe("execution");
+    expect(mapOne.plan.stages[mapOne.plan.stages.length - 1]).toMatchObject({ kind: "map", many: false });
+    expect(mapMany.plan.stages[mapMany.plan.stages.length - 1]).toMatchObject({ kind: "map", many: true });
+    expectTypeOf(mapOne).toBeCallableWith(ada);
+    expectTypeOf(mapMany).toBeCallableWith([ada]);
   });
 
   it("should convert values with via and fill defaults", () => {
@@ -121,18 +105,18 @@ describe("JIT compiler mapper", () => {
       createdAt: JIT.string(),
       channel: JIT.string(),
     });
-    const toDTO = JIT.mapper(Event, EventDTO, {
-      createdAt: { from: "created_at", via: (date) => date.toISOString() },
+    const toDTO = JIT.map(Event, EventDTO, {
+      createdAt: { from: "created_at", via: (date: Date) => date.toISOString() },
       channel: { default: "web" },
     });
     const timestamp = new Date("2026-07-04T12:00:00.000Z");
 
-    expect(toDTO.map({ id: 1, created_at: timestamp, channel: "mobile" })).toEqual({
+    expect(toDTO({ id: 1, created_at: timestamp, channel: "mobile" })).toEqual({
       id: 1,
       createdAt: "2026-07-04T12:00:00.000Z",
       channel: "mobile",
     });
-    expect(toDTO.map({ id: 2, created_at: timestamp, channel: undefined })).toEqual({
+    expect(toDTO({ id: 2, created_at: timestamp, channel: undefined })).toEqual({
       id: 2,
       createdAt: "2026-07-04T12:00:00.000Z",
       channel: "web",
@@ -152,7 +136,7 @@ describe("JIT compiler mapper", () => {
       items: JIT.array(JIT.object({ sku: JIT.string(), price: JIT.number() })),
       tags: JIT.array(JIT.string()),
     });
-    const toDTO = JIT.mapper(Order, OrderDTO);
+    const toDTO = JIT.map(Order, OrderDTO, {});
     const source = Compiler.emitMapperSource(Order.schema, OrderDTO.schema);
 
     const order = {
@@ -164,7 +148,7 @@ describe("JIT compiler mapper", () => {
       ],
       tags: ["priority"],
     };
-    const dto = toDTO.map(order);
+    const dto = toDTO(order);
 
     expect(dto).toEqual({
       id: 7,
@@ -188,19 +172,19 @@ describe("JIT compiler mapper", () => {
     const WithOptional = JIT.object({ id: JIT.number(), note: JIT.optional(JIT.string()) });
     const WithRequired = JIT.object({ id: JIT.number(), note: JIT.string() });
 
-    const toOptional = JIT.mapper(Source, WithOptional);
+    const toOptional = JIT.map(Source, WithOptional, {});
 
-    expect(toOptional.map({ id: 1 })).toEqual({ id: 1 });
-    expect(Object.keys(toOptional.map({ id: 1 }))).toEqual(["id"]);
+    expect(toOptional({ id: 1 })).toEqual({ id: 1 });
+    expect(Object.keys(toOptional({ id: 1 }))).toEqual(["id"]);
     expect(() => Compiler.compileMapper(Source.schema, WithRequired.schema)).toThrow(Errors.JITError);
     expect(() => Compiler.compileMapper(Source.schema, WithRequired.schema)).toThrow(/no source match and no override/);
 
     const missingOverrides = () => {
       // @ts-expect-error required unmatched target fields demand an overrides argument.
-      return JIT.mapper(Source, WithRequired);
+      return JIT.map(Source, WithRequired, {});
     };
 
-    expect(missingOverrides).toThrow(Errors.JITError);
+    expect(() => missingOverrides().compile()).toThrow(Errors.JITError);
   });
 
   it("should validate override shapes and unknown fields at plan time", () => {
@@ -247,17 +231,17 @@ describe("JIT compiler mapper", () => {
   });
 
   it("should share the compiled template across equivalent mappers but rebind callbacks", () => {
-    const first = JIT.mapper(User, UserDTO, {
+    const first = JIT.map(User, UserDTO, {
       fullName: (user) => `${user.first} ${user.last}`,
       email: { from: "emailAddress" },
     });
-    const second = JIT.mapper(User, UserDTO, {
+    const second = JIT.map(User, UserDTO, {
       fullName: (user) => `${user.last}, ${user.first}`,
       email: { from: "emailAddress" },
     });
 
-    expect(first.map(ada).fullName).toBe("Ada Lovelace");
-    expect(second.map(ada).fullName).toBe("Lovelace, Ada");
-    expect(first.map).not.toBe(second.map);
+    expect(first(ada).fullName).toBe("Ada Lovelace");
+    expect(second(ada).fullName).toBe("Lovelace, Ada");
+    expect(first).not.toBe(second);
   });
 });

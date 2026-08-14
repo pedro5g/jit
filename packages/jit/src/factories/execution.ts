@@ -1,11 +1,12 @@
 import { compileCodec } from "../compiler/codec.js";
 import { lowerExecutionPlan } from "../compiler/execution-lower.js";
 import { type ExecutionPlan, type ExecutionStage, NO_EFFECTS, THROWING_EFFECTS } from "../compiler/execution-plan.js";
+import { compileJsonParse } from "../compiler/json-parse.js";
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { compileSerialize } from "../compiler/serialize.js";
 import type { UpdatePatch } from "../compiler/update.js";
-import { compileValidator } from "../compiler/validate.js";
+import { compileValidatorSelection } from "../compiler/validate.js";
 import type { QueryConditionNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import { createSchema, TypeName } from "../core/ats/index.js";
@@ -116,13 +117,19 @@ function freezePlan(schema: ATS.AnyTypeSchema, stages: readonly ExecutionStage[]
 /** Creates the only runtime object that can execute a plan. Lowering is delayed until use. */
 export function createExecutionArtifact<TFunction extends FunctionLike>(
   plan: ExecutionPlan,
-  lower: () => TFunction
+  lower: () => TFunction,
+  arity: 1 | 2 = 1
 ): CallableArtifact<TFunction> {
   let compiled: TFunction | undefined;
-  const artifact = function executionArtifact(...args: Parameters<TFunction>): ReturnType<TFunction> {
-    compiled ??= lower();
-    return compiled(...args) as ReturnType<TFunction>;
-  } as CallableArtifact<TFunction>;
+  const artifact = (arity === 1
+    ? function executionArtifact(input: unknown): unknown {
+        compiled ??= lower();
+        return (compiled as unknown as (value: unknown) => unknown)(input);
+      }
+    : function executionArtifact(left: unknown, right: unknown): unknown {
+        compiled ??= lower();
+        return (compiled as unknown as (left: unknown, right: unknown) => unknown)(left, right);
+      }) as unknown as CallableArtifact<TFunction>;
 
   Object.defineProperties(artifact, {
     plan: { enumerable: true, value: plan },
@@ -163,7 +170,7 @@ export function from<TSchema extends ATS.AnyTypeSchema>(
   return artifactForSchema(source, unwrapped) as SchemaArtifact<ATS.TypeofSchema<TSchema>, TSchema>;
 }
 
-/** Source stage for schema-directed JSON decoding. Constraints are deliberately not validated here. */
+/** Native JSON source stage. Schema constraints remain an explicit validation stage. */
 export function jsonParse<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): SchemaArtifact<string, TSchema> {
@@ -181,7 +188,7 @@ export function jsonParse<TSchema extends ATS.AnyTypeSchema>(
   ]);
   const source = createExecutionArtifact<(value: string) => ATS.TypeofSchema<TSchema>>(
     plan,
-    () => (value) => JSON.parse(value)
+    () => compileJsonParse(unwrapped) as (value: string) => ATS.TypeofSchema<TSchema>
   );
 
   return artifactForSchema(source, unwrapped) as SchemaArtifact<string, TSchema>;
@@ -241,24 +248,25 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
   ]);
 
   const artifact = createExecutionArtifact(plan, () => {
-    const validator = compileValidator(unwrapped);
-
     switch (operation) {
       case "is":
-        return validator.is as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["is"] as const).is as FunctionLike;
       case "parse":
-        return validator.parse as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["parse"] as const).parse as FunctionLike;
       case "safeParse":
-        return validator.safeParse as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse as FunctionLike;
       case "parseAsync":
-        return validator.parseAsync as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["parseAsync"] as const).parseAsync as FunctionLike;
       case "safeParseAsync":
-        return validator.safeParseAsync as FunctionLike;
-      case "issues":
+        return compileValidatorSelection(unwrapped, ["safeParseAsync"] as const).safeParseAsync as FunctionLike;
+      case "issues": {
+        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse;
+
         return function* issues(value: unknown) {
-          const result = validator.safeParse(value);
+          const result = safeParse(value);
           if (!result.success) yield* result.issues;
         } as FunctionLike;
+      }
     }
   });
 
@@ -387,7 +395,11 @@ export function operationArtifact<TSchema extends ATS.AnyTypeSchema, TFunction e
       effects: THROWING_EFFECTS,
     },
   ]);
-  const artifact = createExecutionArtifact(plan, () => lower(unwrapped));
+  const artifact = createExecutionArtifact(
+    plan,
+    () => lower(unwrapped),
+    operation === "equal" || operation === "diff" ? 2 : 1
+  );
   const operations = OPERATION_ARTIFACTS.get(unwrapped);
 
   if (operations) operations.set(operation, artifact as CallableArtifact<FunctionLike>);

@@ -47,7 +47,7 @@ export const uuid7: RegExp = /*@__PURE__*/ uuid(7);
 
 /** Practical email validation (the default for `.email()`). */
 export const email: RegExp =
-  /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
+  /^(?:[A-Za-z0-9_'+-]+\.)*[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
 
 /** Equivalent to the HTML5 `input[type=email]` validation implemented by browsers. */
 export const html5Email: RegExp =

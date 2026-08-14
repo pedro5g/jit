@@ -188,12 +188,12 @@ describe("JIT binary codec v2", () => {
     });
   });
 
-  it("should expose encode, encodeInto, and decode from JIT.model", () => {
-    const User = JIT.model(JIT.object({ id: JIT.number(), name: JIT.string() }));
+  it("should expose encode, encodeInto, and decode from JIT.codec", () => {
+    const User = JIT.codec(JIT.object({ id: JIT.number(), name: JIT.string() }));
     const scratch = new Uint8Array(128);
     const user = { id: 1, name: "Ada" };
-    const written = User.codec.encodeInto(user, scratch);
+    const written = User.encodeInto(user, scratch);
 
-    expect(User.codec.decode(scratch.subarray(0, written))).toEqual(user);
+    expect(User.decode(scratch.subarray(0, written))).toEqual(user);
   });
 });

@@ -25,7 +25,7 @@ const User_validator = /*#__PURE__*/ (() => {
     if (typeof v3 !== "number") {
       return false;
     }
-    if (!Number.isInteger(v3) || v3 < -2147483648 || v3 > 2147483647) {
+    if ((v3 | 0) !== v3) {
       return false;
     }
     let v5 = v1.name;
@@ -46,7 +46,7 @@ const User_validator = /*#__PURE__*/ (() => {
       if (typeof v3 !== "number") {
         issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v3 };
       } else {
-        if (!Number.isInteger(v3) || v3 < -2147483648 || v3 > 2147483647) {
+        if ((v3 | 0) !== v3) {
           issues[issues.length] = { path: "id", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
         }
       }
@@ -68,7 +68,7 @@ const User_validator = /*#__PURE__*/ (() => {
   return { is: is, safeParse: safeParse };
 })();
 const User_is = /*#__PURE__*/ ((v) => v.is)(User_validator);
-const User_parse = /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(User_validator);
+const User_parse = (value) => { if (User_validator.is(value)) return value; const r = User_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };
 const User: {
   readonly is: (value: unknown) => value is User;
   readonly parse: (value: unknown) => User;

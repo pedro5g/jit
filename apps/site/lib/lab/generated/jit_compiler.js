@@ -307,7 +307,7 @@ var uuid = (version) => {
 var uuid4 = /* @__PURE__ */ uuid(4);
 var uuid6 = /* @__PURE__ */ uuid(6);
 var uuid7 = /* @__PURE__ */ uuid(7);
-var email = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
+var email = /^(?:[A-Za-z0-9_'+-]+\.)*[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
 var html5Email = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 var browserEmail = html5Email;
 var rfc5322Email = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
@@ -1103,11 +1103,11 @@ function emitObjectGuard(schema, value) {
   return checks.length === 0 ? objectCheck : `(${objectCheck} && ${checks.join(" && ")})`;
 }
 function emitLiteralGuard(schema, value) {
-  const literal4 = schema.def.value;
-  if (typeof literal4 === "number") {
-    return `${value} === ${emitLiteral(literal4)} || (${value} !== ${value} && ${emitLiteral(literal4)} !== ${emitLiteral(literal4)})`;
+  const literal3 = schema.def.value;
+  if (typeof literal3 === "number") {
+    return `${value} === ${emitLiteral(literal3)} || (${value} !== ${value} && ${emitLiteral(literal3)} !== ${emitLiteral(literal3)})`;
   }
-  return `${value} === ${emitLiteral(literal4)}`;
+  return `${value} === ${emitLiteral(literal3)}`;
 }
 function emitEnumGuard(schema, value) {
   const values = Object.values(schema.def.values);
@@ -4767,6 +4767,292 @@ function compileFormat(schema, options) {
   );
 }
 
+// ../../packages/jit/src/compiler/mapper/build-mapper-plan.ts
+function buildMapperPlan(sourceSchema, targetSchema, overrides = {}) {
+  const source = expectObjectSchema(sourceSchema, "mapper source");
+  const target = expectObjectSchema(targetSchema, "mapper target");
+  const bindings = [];
+  const bindingNames = [];
+  const bind = (value) => {
+    const name = `__m${bindings.length}`;
+    bindings[bindings.length] = value;
+    bindingNames[bindingNames.length] = name;
+    return name;
+  };
+  for (const key of Object.keys(overrides)) {
+    if (!(key in target.def.props)) {
+      throw new JITError("INVALID_MAPPER", `mapper override references unknown target field ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+  const fields = planObjectFields(source, target, overrides, bind, []);
+  return { fields, bindingNames, bindings };
+}
+function planObjectFields(source, target, overrides, bind, path) {
+  const fields = [];
+  for (const key of Object.keys(target.def.props)) {
+    const targetProp = target.def.props[key];
+    const fieldPath = [...path, key];
+    const override = overrides[key];
+    if (override !== void 0) {
+      fields[fields.length] = { key, source: planOverride(source, key, override, bind, fieldPath) };
+      continue;
+    }
+    const planned = planAutoMatch(source, key, targetProp, bind, fieldPath);
+    if (planned) fields[fields.length] = { key, source: planned };
+  }
+  return fields;
+}
+function planOverride(source, key, override, bind, path) {
+  if (typeof override === "function") {
+    return { kind: "computed", binding: bind(override) };
+  }
+  if (typeof override !== "object" || override === null) {
+    throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must be a function or object`, {
+      path
+    });
+  }
+  if (override.via !== void 0) {
+    if (typeof override.from !== "string") {
+      throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} with via requires from`, {
+        path
+      });
+    }
+    expectSourceField(source, override.from, path);
+    return { kind: "via", from: override.from, binding: bind(override.via) };
+  }
+  if (override.from !== void 0) {
+    expectSourceField(source, override.from, path);
+    const planned = planAutoMatch(source, override.from, void 0, bind, path);
+    if (!planned) {
+      throw new JITError(
+        "INVALID_MAPPER",
+        `mapper cannot copy source field ${JSON.stringify(override.from)}; use via to convert it`,
+        { path }
+      );
+    }
+    return planned;
+  }
+  if ("default" in override) {
+    const from3 = key in source.def.props ? key : void 0;
+    return { kind: "default", from: from3, binding: bind(override.default) };
+  }
+  throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must define from, via, or default`, {
+    path
+  });
+}
+function planAutoMatch(source, from3, targetProp, bind, path) {
+  const sourceProp = source.def.props[from3];
+  if (sourceProp === void 0) {
+    if (targetProp !== void 0 && resolveWrappers(targetProp).optional) return void 0;
+    throw new JITError(
+      "INVALID_MAPPER",
+      `mapper target field ${JSON.stringify(path[path.length - 1])} has no source match and no override`,
+      { path }
+    );
+  }
+  const sourceResolved = resolveWrappers(sourceProp);
+  const targetResolved = targetProp === void 0 ? void 0 : resolveWrappers(targetProp);
+  if (targetResolved && sourceResolved.optional && !targetResolved.optional) {
+    throw new JITError(
+      "INVALID_MAPPER",
+      `mapper source field ${JSON.stringify(from3)} is optional but the target field is required; use default or via`,
+      { path }
+    );
+  }
+  const sourceBase = sourceResolved.base;
+  const targetBase = targetResolved?.base;
+  if (sourceBase.type === TypeName.object && (targetBase === void 0 || targetBase.type === TypeName.object)) {
+    const nestedTarget = targetBase ?? sourceBase;
+    const fields = planObjectFields(sourceBase, nestedTarget, {}, bind, path);
+    return { kind: "copy-object", from: from3, fromOptional: sourceResolved.optional, fields };
+  }
+  if (sourceBase.type === TypeName.array && (targetBase === void 0 || targetBase.type === TypeName.array)) {
+    const sourceElement = resolveWrappers(sourceBase.def.element).base;
+    const targetElement = targetBase === void 0 ? sourceElement : resolveWrappers(targetBase.def.element).base;
+    if (sourceElement.type === TypeName.object && targetElement.type === TypeName.object) {
+      const element = planObjectFields(sourceElement, targetElement, {}, bind, path);
+      return { kind: "copy-array", from: from3, fromOptional: sourceResolved.optional, element };
+    }
+    if (isCompatibleBase(sourceElement.type, targetElement.type)) {
+      return { kind: "copy-array", from: from3, fromOptional: sourceResolved.optional, element: void 0 };
+    }
+    if (targetResolved?.optional) return void 0;
+    throw new JITError("INVALID_MAPPER", `mapper array field ${JSON.stringify(from3)} has incompatible element types`, {
+      path
+    });
+  }
+  if (targetBase === void 0 || isCompatibleBase(sourceBase.type, targetBase.type)) {
+    return { kind: "copy", from: from3, fromOptional: sourceResolved.optional };
+  }
+  if (targetResolved?.optional) return void 0;
+  throw new JITError(
+    "INVALID_MAPPER",
+    `mapper field ${JSON.stringify(from3)} has type ${sourceBase.type} but the target expects ${targetBase.type}`,
+    { path }
+  );
+}
+function isCompatibleBase(source, target) {
+  if (source === target) return true;
+  if (source === TypeName.int && target === TypeName.number) return true;
+  return false;
+}
+function expectSourceField(source, from3, path) {
+  if (!(from3 in source.def.props)) {
+    throw new JITError("INVALID_MAPPER", `mapper override references unknown source field ${JSON.stringify(from3)}`, {
+      path
+    });
+  }
+}
+function expectObjectSchema(schema, label) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.object) {
+    throw new JITError("INVALID_MAPPER", `${label} must be an object schema`);
+  }
+  return resolved;
+}
+
+// ../../packages/jit/src/compiler/mapper/build-mapper-ir.ts
+var SOURCE = irVar("source");
+var LIST = irVar("list");
+var LEN = irVar("len");
+var OUT = irVar("out");
+var INDEX = irVar("i");
+function buildMapperIR(fields) {
+  const prelude = [];
+  const output = objectLiteral(buildEntries(fields, SOURCE, "f", prelude));
+  const map4 = {
+    kind: "program",
+    params: [SOURCE],
+    body: [...prelude, { kind: "return", value: output }]
+  };
+  const many = {
+    kind: "program",
+    params: [LIST],
+    body: [
+      { kind: "assign", target: LEN, expr: loadProp(LIST, "length") },
+      { kind: "assign", target: OUT, expr: construct("Array", [LEN]) },
+      forRange(INDEX, LEN, [
+        { kind: "assign", target: SOURCE, expr: loadIndex(LIST, INDEX) },
+        ...prelude,
+        store(loadIndex(OUT, INDEX), output)
+      ]),
+      { kind: "return", value: OUT }
+    ]
+  };
+  return { map: map4, many };
+}
+function buildEntries(fields, base, prefix, prelude) {
+  return fields.map((field) => ({
+    key: field.key,
+    value: buildFieldValue(field, base, `${prefix}_${identifier(field.key)}`, prelude)
+  }));
+}
+function buildFieldValue(field, base, prefix, prelude) {
+  const source = field.source;
+  switch (source.kind) {
+    case "copy":
+      return loadProp(base, source.from);
+    case "copy-object": {
+      if (!source.fromOptional) {
+        return objectLiteral(buildEntries(source.fields, loadProp(base, source.from), prefix, prelude));
+      }
+      const src = irVar(`${prefix}_src`);
+      const value = irVar(`${prefix}_val`);
+      const inner = [];
+      const nested = objectLiteral(buildEntries(source.fields, src, prefix, inner));
+      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
+        kind: "if",
+        test: notStrictEqual(src, literal(void 0)),
+        then: [...inner, store(value, nested)]
+      });
+      return value;
+    }
+    case "copy-array": {
+      const src = irVar(`${prefix}_src`);
+      const len = irVar(`${prefix}_len`);
+      const out = irVar(`${prefix}_out`);
+      const index = irVar(`${prefix}_i`);
+      const item = irVar(`${prefix}_item`);
+      const inner = [];
+      const element = source.element === void 0 ? item : objectLiteral(buildEntries(source.element, item, prefix, inner));
+      const loop = [
+        { kind: "assign", target: len, expr: loadProp(src, "length") },
+        { kind: "assign", target: out, expr: construct("Array", [len]) },
+        forRange(index, len, [
+          { kind: "assign", target: item, expr: loadIndex(src, index) },
+          ...inner,
+          store(loadIndex(out, index), element)
+        ])
+      ];
+      if (!source.fromOptional) {
+        prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, ...loop);
+        return out;
+      }
+      const value = irVar(`${prefix}_val`);
+      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
+        kind: "if",
+        test: notStrictEqual(src, literal(void 0)),
+        then: [...loop, store(value, out)]
+      });
+      return value;
+    }
+    case "via":
+      return { kind: "call", callee: irVar(source.binding), args: [loadProp(SOURCE, source.from), SOURCE] };
+    case "computed":
+      return { kind: "call", callee: irVar(source.binding), args: [SOURCE] };
+    case "default": {
+      if (source.from === void 0) return irVar(source.binding);
+      const value = irVar(`${prefix}_val`);
+      prelude.push(letDecl(value, loadProp(SOURCE, source.from)), {
+        kind: "if",
+        test: strictEqual(value, literal(void 0)),
+        then: [store(value, irVar(source.binding))]
+      });
+      return value;
+    }
+  }
+}
+function identifier(key) {
+  return key.replace(/[^$_a-zA-Z0-9]/g, "_").replace(/^[^$_a-zA-Z]/, "_");
+}
+
+// ../../packages/jit/src/compiler/mapper.ts
+var MAPPER_OPERATIONS = ["map", "many"];
+function emitMapperSource(sourceSchema, targetSchema, overrides = {}, operations = MAPPER_OPERATIONS) {
+  return emitMapper(buildMapperPlan(sourceSchema, targetSchema, overrides), normalizeMapperOps(operations));
+}
+function emitMapper(plan, operations) {
+  const programs = buildMapperIR(plan.fields);
+  const writer = new CodeWriter();
+  writer.line("{");
+  writer.indent(() => {
+    operations.forEach((operation, index) => {
+      emitMapperFunctionBody(writer, programs, operation, index < operations.length - 1 ? "," : "");
+    });
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitMapperFunctionBody(writer, programs, operation, suffix, property = true) {
+  const parameter = operation === "map" ? "source" : "list";
+  const prefix = property ? `${operation}: ` : "";
+  writer.line(`${prefix}function ${operation}(${parameter}) {`);
+  writer.indent(() => {
+    for (const node of programs[operation].body) emitNode(writer, node);
+  });
+  writer.line(`}${suffix}`);
+}
+function normalizeMapperOps(operations) {
+  for (const operation of operations) {
+    if (!MAPPER_OPERATIONS.includes(operation)) {
+      throw new JITError("INVALID_OPERATION", `unknown mapper operation: ${String(operation)}`);
+    }
+  }
+  return MAPPER_OPERATIONS.filter((operation) => operations.includes(operation));
+}
+
 // ../../packages/jit/src/compiler/security/emit-scrub.ts
 function emitScrub(schema, selector) {
   const writer = new CodeWriter();
@@ -4903,6 +5189,836 @@ function subtreeMatches(schema, selector) {
     default:
       return false;
   }
+}
+
+// ../../packages/jit/src/compiler/mask.ts
+function emitMaskSource(schema) {
+  return emitScrub(schema, selectPii).source;
+}
+function compileMask(schema, options) {
+  return getCompileCached(
+    schema,
+    "mask",
+    () => {
+      const emitted = emitScrub(schema, selectPii);
+      const compiled = globalThis.Function(
+        `return ${emitted.source.replace("function scrub", "function mask")};`
+      )();
+      registerArtifact(compiled, {
+        kind: "operation",
+        schema,
+        op: "mask"
+      });
+      return compiled;
+    },
+    options
+  );
+}
+function selectPii(base) {
+  const strategy = base.def.pii;
+  if (strategy === void 0) return void 0;
+  const isString = base.type === TypeName.string;
+  const isNumber = base.type === TypeName.number || base.type === TypeName.int;
+  if (!isString && !isNumber) {
+    throw new JITError("UNSUPPORTED_SCHEMA", `pii masking supports string and number fields; found ${base.type}`);
+  }
+  switch (strategy) {
+    case "redact":
+      return () => isString ? '"***"' : "0";
+    case "mask":
+      return (value) => isString ? `(${value}.length > 4 ? "***" + ${value}.slice(-4) : "***")` : "0";
+    case "hash":
+      return (value, writer, nextVar4) => {
+        if (!isString) return `(Math.imul(2166136261 ^ ${value}, 16777619) >>> 0)`;
+        const hash4 = nextVar4("h");
+        const index = nextVar4("i");
+        writer.line(`let ${hash4} = 2166136261;`);
+        writer.line(`for (let ${index} = 0; ${index} < ${value}.length; ${index}++) {`);
+        writer.indent(() => {
+          writer.line(`${hash4} = Math.imul(${hash4} ^ ${value}.charCodeAt(${index}), 16777619);`);
+        });
+        writer.line("}");
+        return `(${hash4} >>> 0).toString(16)`;
+      };
+  }
+}
+
+// ../../packages/jit/src/compiler/object-ops.ts
+function emitMergeSource(schema) {
+  const writer = new CodeWriter();
+  const objectSchema = expectObjectSchema2(schema, "compileMerge");
+  writer.line("function merge(left, right) {");
+  writer.indent(() => {
+    emitMergeTo(writer, createEmitState(), objectSchema, "left", "right", "out");
+    writer.line("return out;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function compileMerge(schema) {
+  return globalThis.Function(`return ${emitMergeSource(schema)};`)();
+}
+function emitPickSource(schema, keys) {
+  const objectSchema = expectObjectSchema2(schema, "compilePick");
+  const selectedKeys = validateObjectKeys(objectSchema, keys, "compilePick");
+  return emitProjectSource("pick", selectedKeys);
+}
+function compilePick(schema, keys) {
+  return globalThis.Function(`return ${emitPickSource(schema, keys)};`)();
+}
+function emitOmitSource(schema, keys) {
+  const objectSchema = expectObjectSchema2(schema, "compileOmit");
+  const omitted = new Set(validateObjectKeys(objectSchema, keys, "compileOmit"));
+  const selectedKeys = Object.keys(objectSchema.def.props).filter((key) => !omitted.has(key));
+  return emitProjectSource("omit", selectedKeys);
+}
+function compileOmit(schema, keys) {
+  return globalThis.Function(`return ${emitOmitSource(schema, keys)};`)();
+}
+function emitTransformSource(schema, transforms) {
+  const objectSchema = expectObjectSchema2(schema, "compileTransform");
+  const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
+  const transformNames = new Map(transformKeys.map((key, index) => [key, `__t${index}`]));
+  const entries = Object.keys(objectSchema.def.props).map((key) => {
+    const source = emitPropertyAccess("value", key);
+    const transformName = transformNames.get(key);
+    const value = transformName ? `${transformName}(${source}, value)` : source;
+    return `${emitLiteral(key)}: ${value}`;
+  });
+  const writer = new CodeWriter();
+  writer.line("function transform(value) {");
+  writer.indent(() => writer.line(`return { ${entries.join(", ")} };`));
+  writer.line("}");
+  return writer.toString();
+}
+function compileTransform(schema, transforms) {
+  const objectSchema = expectObjectSchema2(schema, "compileTransform");
+  const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
+  const bindings = transformKeys.map((key) => transforms[key]);
+  return globalThis.Function(
+    ...transformKeys.map((_, index) => `__t${index}`),
+    `return ${emitTransformSource(schema, transforms)};`
+  )(...bindings);
+}
+function emitNormalizeSource(schema, key) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.array) {
+    throw new JITError("INVALID_OPERATION", "compileNormalize expects an array schema");
+  }
+  const element = resolveWrappers(resolved.def.element).base;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "compileNormalize expects an array of object schema");
+  }
+  const objectSchema = element;
+  const normalizeKey2 = key ?? resolveNormalizeKey(schema);
+  if (!normalizeKey2) {
+    throw new JITError("INVALID_OPERATION", "compileNormalize requires a key or a .keyed()/index/entity hint");
+  }
+  validateObjectKeys(objectSchema, [normalizeKey2], "compileNormalize");
+  const idAccess = emitPropertyAccess("item", normalizeKey2);
+  const writer = new CodeWriter();
+  writer.line("function normalize(value) {");
+  writer.indent(() => {
+    writer.line("const len = value.length;");
+    writer.line("const byId = {};");
+    writer.line("const ids = new Array(len);");
+    writer.line("for (let i = 0; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const item = value[i];");
+      writer.line(`const id = ${idAccess};`);
+      writer.line("ids[i] = id;");
+      writer.line("byId[id] = item;");
+    });
+    writer.line("}");
+    writer.line("return { byId, ids };");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function compileNormalize(schema, key) {
+  return globalThis.Function(`return ${emitNormalizeSource(schema, key)};`)();
+}
+function emitGroupBySource(schema, key) {
+  const { objectSchema, key: groupKey } = expectArrayObjectKey(schema, key, "compileGroupBy", resolveGroupByKey);
+  validateObjectKeys(objectSchema, [groupKey], "compileGroupBy");
+  const keyAccess = emitPropertyAccess("item", groupKey);
+  const writer = new CodeWriter();
+  writer.line("function groupBy(value) {");
+  writer.indent(() => {
+    writer.line("const out = {};");
+    writer.line("for (let i = 0, len = value.length; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const item = value[i];");
+      writer.line(`const key = ${keyAccess};`);
+      writer.line("let group = out[key];");
+      writer.line("if (group === undefined) {");
+      writer.indent(() => {
+        writer.line("group = [];");
+        writer.line("out[key] = group;");
+      });
+      writer.line("}");
+      writer.line("group[group.length] = item;");
+    });
+    writer.line("}");
+    writer.line("return out;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function compileGroupBy(schema, key) {
+  return globalThis.Function(`return ${emitGroupBySource(schema, key)};`)();
+}
+function emitSortBySource(schema, key, direction) {
+  const hints = resolveHints(schema);
+  const hintKey = typeof hints.order?.key === "string" ? hints.order.key : resolveNormalizeKey(schema);
+  const sortKey = key ?? hintKey;
+  if (!sortKey) {
+    throw new JITError("INVALID_OPERATION", "compileSortBy requires a key or a .ordered()/.keyed()/index/entity hint");
+  }
+  const { objectSchema } = expectArrayObjectKey(schema, sortKey, "compileSortBy", () => sortKey);
+  const sortDirection = direction ?? (typeof hints.order?.direction === "string" ? hints.order.direction : "asc");
+  const leftAccess = emitPropertyAccess("left", sortKey);
+  const rightAccess = emitPropertyAccess("right", sortKey);
+  const writer = new CodeWriter();
+  validateObjectKeys(objectSchema, [sortKey], "compileSortBy");
+  writer.line("function sortBy(value) {");
+  writer.indent(() => {
+    writer.line("const out = value.slice();");
+    writer.line("out.sort((left, right) => {");
+    writer.indent(() => {
+      writer.line(`const leftValue = ${leftAccess};`);
+      writer.line(`const rightValue = ${rightAccess};`);
+      writer.line("if (leftValue === rightValue) return 0;");
+      if (sortDirection === "desc") {
+        writer.line("return leftValue < rightValue ? 1 : -1;");
+      } else {
+        writer.line("return leftValue < rightValue ? -1 : 1;");
+      }
+    });
+    writer.line("});");
+    writer.line("return out;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function compileSortBy(schema, key, direction) {
+  return globalThis.Function(`return ${emitSortBySource(schema, key, direction)};`)();
+}
+function emitUniqueBySource(schema, key) {
+  const { objectSchema, key: uniqueKey } = expectArrayObjectKey(schema, key, "compileUniqueBy", resolveNormalizeKey);
+  validateObjectKeys(objectSchema, [uniqueKey], "compileUniqueBy");
+  const keyAccess = emitPropertyAccess("item", uniqueKey);
+  const writer = new CodeWriter();
+  writer.line("function uniqueBy(value) {");
+  writer.indent(() => {
+    writer.line("const seen = new Set();");
+    writer.line("const out = [];");
+    writer.line("for (let i = 0, len = value.length; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const item = value[i];");
+      writer.line(`const key = ${keyAccess};`);
+      writer.line("if (!seen.has(key)) {");
+      writer.indent(() => {
+        writer.line("seen.add(key);");
+        writer.line("out[out.length] = item;");
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+    writer.line("return out;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function compileUniqueBy(schema, key) {
+  return globalThis.Function(`return ${emitUniqueBySource(schema, key)};`)();
+}
+function emitMergeTo(writer, state, schema, left, right, target) {
+  const entries = [];
+  const changed = [];
+  writer.line(`let ${target} = ${left};`);
+  writer.line(`if (${right} !== undefined && !Object.is(${left}, ${right})) {`);
+  writer.indent(() => {
+    for (const key of Object.keys(schema.def.props)) {
+      const propSchema = schema.def.props[key];
+      const next = state.nextVar(`next_${key}`);
+      emitMergeProp(writer, state, propSchema, emitPropertyAccess(left, key), emitPropertyAccess(right, key), next);
+      entries.push(`${emitLiteral(key)}: ${next}`);
+      changed.push(`!Object.is(${next}, ${emitPropertyAccess(left, key)})`);
+    }
+    writer.line(`if (${changed.join(" || ")}) {`);
+    writer.indent(() => writer.line(`${target} = { ${entries.join(", ")} };`));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitMergeProp(writer, state, schema, left, right, target) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.object) {
+    writer.line(`const ${target} = ${right} !== undefined ? ${right} : ${left};`);
+    return;
+  }
+  writer.line(`let ${target} = ${left};`);
+  writer.line(`if (${right} !== undefined && !Object.is(${left}, ${right})) {`);
+  writer.indent(() => {
+    writer.line(`if (${left} == null || ${right} == null) {`);
+    writer.indent(() => writer.line(`${target} = ${right};`));
+    writer.line("} else {");
+    writer.indent(() => {
+      const merged = state.nextVar(`${target}_merged`);
+      emitMergeTo(writer, state, resolved, left, right, merged);
+      writer.line(`${target} = ${merged};`);
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitProjectSource(name, selectedKeys) {
+  const entries = selectedKeys.map((key) => `${emitLiteral(key)}: ${emitPropertyAccess("value", key)}`);
+  const writer = new CodeWriter();
+  writer.line(`function ${name}(value) {`);
+  writer.indent(() => writer.line(`return { ${entries.join(", ")} };`));
+  writer.line("}");
+  return writer.toString();
+}
+function expectObjectSchema2(schema, compilerName) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an object schema`);
+  }
+  return resolved;
+}
+function validateObjectKeys(schema, keys, compilerName) {
+  const props = schema.def.props;
+  for (const key of keys) {
+    if (!(key in props)) {
+      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+  return [...keys];
+}
+function resolveNormalizeKey(schema) {
+  const hints = resolveHints(schema);
+  const key = hints.collection?.uniqueBy ?? hints.index?.key ?? hints.collection?.identify ?? hints.entity?.key;
+  return typeof key === "string" ? key : void 0;
+}
+function resolveGroupByKey(schema) {
+  const hints = resolveHints(schema);
+  const key = hints.collection?.groupBy ?? hints.index?.key ?? hints.collection?.identify ?? hints.entity?.key;
+  return typeof key === "string" ? key : void 0;
+}
+function expectArrayObjectKey(schema, key, compilerName, resolveKey) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.array) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array schema`);
+  }
+  const element = resolveWrappers(resolved.def.element).base;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array of object schema`);
+  }
+  const resolvedKey = key ?? resolveKey(schema);
+  if (!resolvedKey) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} requires a key or a compatible array hint`);
+  }
+  return { objectSchema: element, key: resolvedKey };
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-query.ts
+function emitQuery(program) {
+  const writer = new CodeWriter();
+  const params = program.params.map((param2) => param2.name).join(", ");
+  writer.line(`function query(${params}) {`);
+  writer.indent(() => {
+    for (const node of program.body) emitNode(writer, node);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+
+// ../../packages/jit/src/compiler/ir/builders/build-query-ir.ts
+var VALUE = irVar("value");
+var PARAMS = irVar("params");
+var LEN2 = irVar("len");
+var OUT2 = irVar("out");
+var CURSOR = irVar("j");
+var INDEX2 = irVar("i");
+var ITEM = irVar("item");
+var ENTRY = irVar("entry");
+var SEEN = irVar("seen");
+var UNIQUE_KEY = irVar("uniqueKey");
+var COLLECT_KEY = irVar("collectKey");
+var GROUP = irVar("group");
+var PROJECTED = irVar("projected");
+var COMPARE_OPERATORS = {
+  eq: "strictEqual",
+  neq: "notStrictEqual",
+  gt: "greaterThan",
+  gte: "greaterThanOrEqual",
+  lt: "lessThan",
+  lte: "lessThanOrEqual"
+};
+function buildQueryIR(target, plan, options = {}) {
+  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
+  return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
+}
+function buildArrayQuery(target, plan) {
+  if (shouldProjectAfterOrder(plan)) return buildArrayQueryWithPostOrderProjection(target, plan);
+  const selected = buildProjection(plan.select);
+  const body = [
+    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
+    letDecl(CURSOR, literal(0)),
+    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, selected)])),
+    store(loadProp(OUT2, "length"), CURSOR)
+  ];
+  if (plan.orderBy) body.push(sortByKey(OUT2, plan.orderBy.key, plan.orderBy.direction));
+  body.push({ kind: "return", value: OUT2 });
+  return body;
+}
+function buildArrayQueryWithPostOrderProjection(target, plan) {
+  const orderBy = plan.orderBy;
+  const body = [
+    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
+    letDecl(CURSOR, literal(0)),
+    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, ITEM)])),
+    store(loadProp(OUT2, "length"), CURSOR)
+  ];
+  if (orderBy) body.push(sortByKey(OUT2, orderBy.key, orderBy.direction));
+  body.push(
+    { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },
+    forRange(INDEX2, CURSOR, [
+      { kind: "assign", target: ITEM, expr: loadIndex(OUT2, INDEX2) },
+      store(loadIndex(PROJECTED, INDEX2), buildProjection(plan.select))
+    ]),
+    { kind: "return", value: PROJECTED }
+  );
+  return body;
+}
+function buildCollectedQuery(target, plan) {
+  const collector = plan.collector;
+  if (!collector) return [];
+  const selected = buildProjection(plan.select);
+  const collect = [{ kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, collector.key) }];
+  if (collector.kind === "keyed") {
+    collect.push(exprStmt(call(loadProp(OUT2, "set"), [COLLECT_KEY, selected])));
+  } else {
+    collect.push(
+      letDecl(GROUP, loadIndex(OUT2, COLLECT_KEY)),
+      {
+        kind: "if",
+        test: strictEqual(GROUP, literal(void 0)),
+        then: [store(GROUP, arrayLiteral()), store(loadIndex(OUT2, COLLECT_KEY), GROUP)]
+      },
+      store(loadIndex(GROUP, loadProp(GROUP, "length")), selected)
+    );
+  }
+  const outInitializer = collector.kind === "keyed" ? construct("Map") : call(loadProp(irVar("Object"), "create"), [literal(null)]);
+  return [
+    ...buildLoopHeader(target, plan, outInitializer),
+    buildInputLoop(target, buildGuardedBody(plan, collect)),
+    { kind: "return", value: OUT2 }
+  ];
+}
+var ACC = irVar("acc");
+var ACC_COUNT = irVar("n");
+function buildAggregateQuery(target, plan, aggregate) {
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  const field = aggregate.key === void 0 ? ITEM : loadProp(ITEM, aggregate.key);
+  switch (aggregate.op) {
+    case "sum":
+    case "count": {
+      const increment = aggregate.op === "count" ? literal(1) : field;
+      body.push(
+        letDecl(ACC, literal(0)),
+        buildInputLoop(target, buildGuardedBody(plan, [store(ACC, binary("add", ACC, increment))])),
+        { kind: "return", value: ACC }
+      );
+      return body;
+    }
+    case "avg":
+      body.push(
+        letDecl(ACC, literal(0)),
+        letDecl(ACC_COUNT, literal(0)),
+        buildInputLoop(
+          target,
+          buildGuardedBody(plan, [
+            store(ACC, binary("add", ACC, field)),
+            store(ACC_COUNT, binary("add", ACC_COUNT, literal(1)))
+          ])
+        ),
+        {
+          kind: "if",
+          test: strictEqual(ACC_COUNT, literal(0)),
+          then: [{ kind: "return", value: literal(void 0) }]
+        },
+        { kind: "return", value: binary("divide", ACC, ACC_COUNT) }
+      );
+      return body;
+    case "min":
+    case "max": {
+      const wins = binary(aggregate.op === "min" ? "lessThan" : "greaterThan", field, ACC);
+      body.push(
+        letDecl(ACC),
+        buildInputLoop(
+          target,
+          buildGuardedBody(plan, [
+            {
+              kind: "if",
+              test: { kind: "nary", op: "or", operands: [strictEqual(ACC, literal(void 0)), wins] },
+              then: [store(ACC, field)]
+            }
+          ])
+        ),
+        { kind: "return", value: ACC }
+      );
+      return body;
+    }
+  }
+}
+function buildMutationQuery(target, plan) {
+  const mutation = plan.mutation;
+  if (!mutation) return [];
+  const condition = buildFilterTest(plan);
+  const test = condition ?? literal(false);
+  const loopBody = mutation.kind === "delete" ? [{ kind: "if", test: not(test), then: buildMutationKeep(target, ITEM) }] : [
+    {
+      kind: "if",
+      test,
+      then: buildMutationKeep(target, buildPatchObject(target.objectSchema, mutation)),
+      otherwise: buildMutationKeep(target, ITEM)
+    }
+  ];
+  const outInitializer = target.kind === "array" ? construct("Array", [LEN2]) : target.kind === "set" ? construct("Set") : construct("Map");
+  const body = [...buildLoopHeader(target, plan, outInitializer)];
+  if (target.kind === "array") body.push(letDecl(CURSOR, literal(0)));
+  body.push(buildInputLoop(target, loopBody));
+  if (target.kind === "array") body.push(store(loadProp(OUT2, "length"), CURSOR));
+  body.push({ kind: "return", value: OUT2 });
+  return body;
+}
+function buildMutationKeep(target, value) {
+  switch (target.kind) {
+    case "array":
+      return [append(OUT2, CURSOR, value)];
+    case "set":
+      return [exprStmt(call(loadProp(OUT2, "add"), [value]))];
+    case "map":
+      return [exprStmt(call(loadProp(OUT2, "set"), [loadIndex(ENTRY, literal(0)), value]))];
+  }
+}
+function buildPatchObject(schema, mutation) {
+  if (mutation.kind !== "update") return ITEM;
+  const entries = Object.keys(schema.def.props).map((key) => {
+    const binding = mutation.patch[key];
+    return { key, value: binding ? irVar(binding.name) : loadProp(ITEM, key) };
+  });
+  return objectLiteral(entries);
+}
+function buildLoopHeader(target, plan, outInitializer) {
+  const header = [
+    { kind: "assign", target: LEN2, expr: loadProp(VALUE, target.kind === "array" ? "length" : "size") }
+  ];
+  if (plan.unique) header.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  header.push({ kind: "assign", target: OUT2, expr: outInitializer });
+  return header;
+}
+function buildInputLoop(target, body) {
+  switch (target.kind) {
+    case "array":
+      return forRange(INDEX2, LEN2, [{ kind: "assign", target: ITEM, expr: loadIndex(VALUE, INDEX2) }, ...body]);
+    case "set":
+      return forOf(ITEM, VALUE, body);
+    case "map":
+      return forOf(ENTRY, VALUE, [{ kind: "assign", target: ITEM, expr: loadIndex(ENTRY, literal(1)) }, ...body]);
+  }
+}
+function buildGuardedBody(plan, accepted) {
+  const unique = plan.unique;
+  const inner = unique ? [
+    { kind: "assign", target: UNIQUE_KEY, expr: loadProp(ITEM, unique.key) },
+    {
+      kind: "if",
+      test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
+      then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted]
+    }
+  ] : accepted;
+  const condition = buildFilterTest(plan);
+  return condition ? [{ kind: "if", test: condition, then: inner }] : inner;
+}
+function buildFilterTest(plan) {
+  if (plan.filters.length === 0) return void 0;
+  return allOf(plan.filters.map((filter) => buildCondition(filter.condition)));
+}
+function buildCondition(condition) {
+  switch (condition.kind) {
+    case "compare":
+      return binary(COMPARE_OPERATORS[condition.op], buildValue(condition.left), buildValue(condition.right));
+    case "logical":
+      return {
+        kind: "nary",
+        op: condition.op,
+        operands: [buildCondition(condition.left), buildCondition(condition.right)]
+      };
+    case "not":
+      return not(buildCondition(condition.inner));
+  }
+}
+function buildValue(value) {
+  switch (value.kind) {
+    case "field":
+      return loadProp(ITEM, value.key);
+    case "binding":
+      return irVar(value.name);
+    case "param":
+      return loadProp(PARAMS, value.name);
+    case "literal":
+      return literal(expectSafeLiteral(value.value));
+  }
+}
+function expectSafeLiteral(value) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean" || value === null || value === void 0) {
+    return value;
+  }
+  throw new JITError("INVALID_QUERY", "query literal values must be primitive compiler literals");
+}
+function buildProjection(select) {
+  if (!select) return ITEM;
+  return objectLiteral(select.fields.map((field) => ({ key: field, value: loadProp(ITEM, field) })));
+}
+function shouldProjectAfterOrder(plan) {
+  return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
+}
+
+// ../../packages/jit/src/compiler/query.ts
+function emitQuerySource(schema, program) {
+  const target = expectCollectionObjectSchema(schema, "emitQuerySource");
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+  validateQueryPlan(target.objectSchema, plan);
+  return emitQuery(
+    optimizeQueryIR(
+      buildQueryIR(target, plan, {
+        hasParams: Boolean(program.params?.length)
+      })
+    )
+  );
+}
+function compileQuery(schema, program, options) {
+  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const template = getCompileCached(
+    schema,
+    `query:${serializeQueryNodes(program.nodes)}`,
+    () => {
+      const source = emitQuerySource(schema, program);
+      return {
+        source,
+        create: globalThis.Function(...bindingNames, `return ${source};`)
+      };
+    },
+    options
+  );
+  const compiled = template.create(...program.bindings);
+  registerArtifact(compiled, {
+    kind: "query",
+    source: template.source,
+    bindingNames,
+    bindingValues: program.bindings
+  });
+  return compiled;
+}
+function serializeQueryNodes(nodes) {
+  return nodes.map(serializeQueryNode).join(";");
+}
+function serializeQueryNode(node) {
+  switch (node.kind) {
+    case "filter":
+      return `f(${serializeCondition(node.condition)})`;
+    case "select:fields":
+      return `s(${node.fields.join(",")})`;
+    case "unique":
+      return `u(${node.key})`;
+    case "keyed":
+      return `k(${node.key})`;
+    case "groupBy":
+      return `g(${node.key})`;
+    case "orderBy":
+      return `o(${node.key},${node.direction})`;
+    case "aggregate":
+      return `a(${node.op},${node.key ?? ""})`;
+    case "delete":
+      return "d()";
+    case "update":
+      return `m(${Object.keys(node.patch).map((key) => `${key}=${node.patch[key]?.name}`).join(",")})`;
+  }
+}
+function serializeCondition(condition) {
+  switch (condition.kind) {
+    case "compare":
+      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
+    case "logical":
+      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
+    case "not":
+      return `not(${serializeCondition(condition.inner)})`;
+  }
+}
+function serializeValue(value) {
+  switch (value.kind) {
+    case "field":
+      return `.${value.key}`;
+    case "binding":
+      return `$${value.name}`;
+    case "param":
+      return `p:${value.name}`;
+    case "literal":
+      return `#${typeof value.value}:${String(value.value)}`;
+  }
+}
+function createQueryPlan(nodes) {
+  const filters = [];
+  const selects = [];
+  const uniques = [];
+  const collectors = [];
+  const orderBys = [];
+  const aggregates = [];
+  const mutations = [];
+  for (const node of nodes) {
+    switch (node.kind) {
+      case "filter":
+        filters[filters.length] = node;
+        break;
+      case "select:fields":
+        selects[selects.length] = node;
+        break;
+      case "unique":
+        uniques[uniques.length] = node;
+        break;
+      case "keyed":
+      case "groupBy":
+        collectors[collectors.length] = node;
+        break;
+      case "orderBy":
+        orderBys[orderBys.length] = node;
+        break;
+      case "aggregate":
+        aggregates[aggregates.length] = node;
+        break;
+      case "delete":
+      case "update":
+        mutations[mutations.length] = node;
+        break;
+    }
+  }
+  return {
+    filters,
+    selects,
+    uniques,
+    collectors,
+    orderBys,
+    aggregates,
+    mutations
+  };
+}
+function optimizeQueryPlan(plan) {
+  return {
+    filters: plan.filters,
+    select: last(plan.selects),
+    unique: last(plan.uniques),
+    collector: last(plan.collectors),
+    orderBy: last(plan.orderBys),
+    aggregate: last(plan.aggregates),
+    mutation: last(plan.mutations)
+  };
+}
+function validateQueryPlan(schema, plan) {
+  for (const filter of plan.filters) {
+    validateCondition(schema, filter.condition);
+  }
+  if (plan.select) validateObjectKeys2(schema, plan.select.fields, "query select");
+  if (plan.unique) validateObjectKeys2(schema, [plan.unique.key], "query unique");
+  if (plan.collector) validateObjectKeys2(schema, [plan.collector.key], `query ${plan.collector.kind}`);
+  if (plan.orderBy) validateObjectKeys2(schema, [plan.orderBy.key], "query orderBy");
+  if (plan.collector && plan.orderBy) {
+    throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
+  }
+  if (plan.aggregate) {
+    if (plan.select || plan.collector || plan.orderBy || plan.mutation) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query aggregate cannot be combined with select/keyed/groupBy/orderBy/delete/update in v1"
+      );
+    }
+    if (plan.aggregate.op !== "count") {
+      if (plan.aggregate.key === void 0) {
+        throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
+      }
+      validateObjectKeys2(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
+  }
+  if (plan.mutation) {
+    if (plan.filters.length === 0) {
+      throw new JITError("INVALID_QUERY", "query delete/update requires at least one filter in v1");
+    }
+    if (plan.select || plan.collector || plan.orderBy) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query delete/update cannot be combined with select/keyed/groupBy/orderBy in v1"
+      );
+    }
+    if (plan.mutation.kind === "update") {
+      validateObjectKeys2(schema, Object.keys(plan.mutation.patch), "query update");
+    }
+  }
+}
+function expectCollectionObjectSchema(schema, compilerName) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
+    throw new JITError("INVALID_QUERY", `${compilerName} expects an array, set, or map schema`);
+  }
+  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
+  }
+  return {
+    kind: resolved.type,
+    objectSchema: element
+  };
+}
+function validateObjectKeys2(schema, keys, compilerName) {
+  const props = schema.def.props;
+  for (const key of keys) {
+    if (!(key in props)) {
+      throw new JITError("INVALID_QUERY", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+}
+function validateCondition(schema, condition) {
+  switch (condition.kind) {
+    case "compare":
+      validateValue(schema, condition.left);
+      validateValue(schema, condition.right);
+      return;
+    case "logical":
+      validateCondition(schema, condition.left);
+      validateCondition(schema, condition.right);
+      return;
+    case "not":
+      validateCondition(schema, condition.inner);
+      return;
+  }
+}
+function validateValue(schema, value) {
+  if (value.kind === "field") {
+    validateObjectKeys2(schema, [value.key], "query");
+  }
+}
+function last(values) {
+  return values[values.length - 1];
 }
 
 // ../../packages/jit/src/compiler/sanitize.ts
@@ -5047,6 +6163,728 @@ function resolveSanitizeSpec(spec) {
 function staticRegexReference(pattern) {
   const index = SANITIZE_VALUES.indexOf(pattern);
   return index === -1 ? String(pattern) : SANITIZE_BINDINGS[index];
+}
+
+// ../../packages/jit/src/compiler/serialize/emit-serialize.ts
+function emitSerialize(schema) {
+  const writer = new CodeWriter();
+  const context = { writer, varCounter: 0 };
+  const needsStringHelper = hasStringLeaf2(schema, /* @__PURE__ */ new Set());
+  writer.line("(function () {");
+  writer.indent(() => {
+    if (needsStringHelper) emitStringHelper(writer);
+    writer.line("function stringify(value) {");
+    writer.indent(() => {
+      writer.line('let s = "";');
+      emitAppend(context, schema, "value");
+      writer.line("return s;");
+    });
+    writer.line("}");
+    writer.line("return stringify;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitStringHelper(writer) {
+  writer.line("const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;");
+  writer.line("function str(value) {");
+  writer.indent(() => {
+    writer.line("const len = value.length;");
+    writer.line("if (len < 42) {");
+    writer.indent(() => {
+      writer.line("for (let i = 0; i < len; i++) {");
+      writer.indent(() => {
+        writer.line("const code = value.charCodeAt(i);");
+        writer.line("if (code < 32 || code === 34 || code === 92 || (code > 55295 && code < 57344)) {");
+        writer.indent(() => {
+          writer.line("return JSON.stringify(value);");
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+      writer.line(`return '"' + value + '"';`);
+    });
+    writer.line("}");
+    writer.line("if (__se.test(value)) return JSON.stringify(value);");
+    writer.line(`return '"' + value + '"';`);
+  });
+  writer.line("}");
+}
+function hasStringLeaf2(schema, seen) {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  const current = schema;
+  switch (current.type) {
+    case TypeName.string:
+      return true;
+    case TypeName.enum:
+      return Object.values(current.def.values).some(
+        (value) => typeof value === "string"
+      );
+    case TypeName.record:
+      return true;
+    case TypeName.object: {
+      const props = current.def.props;
+      return Object.keys(props).some((key) => hasStringLeaf2(props[key], seen));
+    }
+    case TypeName.array:
+      return hasStringLeaf2(current.def.element, seen);
+    case TypeName.tuple: {
+      const items = current.def.items ?? [];
+      return items.some((item) => hasStringLeaf2(item, seen));
+    }
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+      return hasStringLeaf2(current.def.innerType, seen);
+    case TypeName.lazy:
+      return hasStringLeaf2(current.def.getter(), seen);
+    default:
+      return false;
+  }
+}
+function nextVar3(context, prefix) {
+  return `${prefix}${++context.varCounter}`;
+}
+function emitAppend(context, schema, valueExpr) {
+  const resolved = resolveSerializeWrappers(schema);
+  const writer = context.writer;
+  if (resolved.nullable || resolved.optional) {
+    writer.line(`if (${valueExpr} == null) {`);
+    writer.indent(() => {
+      writer.line('s += "null";');
+    });
+    writer.line("} else {");
+    writer.indent(() => {
+      emitBaseAppend(context, resolved.base, valueExpr);
+    });
+    writer.line("}");
+    return;
+  }
+  emitBaseAppend(context, resolved.base, valueExpr);
+}
+function emitBaseAppend(context, schema, valueExpr) {
+  const writer = context.writer;
+  switch (schema.type) {
+    case TypeName.string:
+      writer.line(`s += str(${valueExpr});`);
+      return;
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.nan:
+      writer.line(`s += Number.isFinite(${valueExpr}) ? "" + ${valueExpr} : "null";`);
+      return;
+    case TypeName.boolean:
+      writer.line(`s += ${valueExpr} ? "true" : "false";`);
+      return;
+    case TypeName.null:
+      writer.line('s += "null";');
+      return;
+    case TypeName.date:
+      writer.line(`s += '"' + ${valueExpr}.toISOString() + '"';`);
+      return;
+    case TypeName.literal: {
+      const literalValue = schema.def.value;
+      writer.line(`s += ${JSON.stringify(JSON.stringify(literalValue) ?? "null")};`);
+      return;
+    }
+    case TypeName.enum: {
+      const values = Object.values(schema.def.values);
+      if (values.every((entry) => typeof entry === "string")) {
+        writer.line(`s += str(${valueExpr});`);
+      } else {
+        writer.line(`s += JSON.stringify(${valueExpr});`);
+      }
+      return;
+    }
+    case TypeName.object:
+      emitObjectAppend(context, schema, valueExpr);
+      return;
+    case TypeName.array: {
+      const element = schema.def.element;
+      const holder = hoist3(context, valueExpr);
+      const index = nextVar3(context, "i");
+      const item = nextVar3(context, "e");
+      writer.line(`s += "[";`);
+      writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
+      writer.indent(() => {
+        writer.line(`if (${index} !== 0) s += ",";`);
+        writer.line(`const ${item} = ${holder}[${index}];`);
+        emitAppend(context, element, item);
+      });
+      writer.line("}");
+      writer.line(`s += "]";`);
+      return;
+    }
+    case TypeName.tuple: {
+      const items = schema.def.items ?? [];
+      const holder = hoist3(context, valueExpr);
+      writer.line(`s += "[";`);
+      items.forEach((item, position) => {
+        if (position > 0) writer.line(`s += ",";`);
+        emitAppend(context, item, `${holder}[${position}]`);
+      });
+      writer.line(`s += "]";`);
+      return;
+    }
+    case TypeName.record: {
+      const valueSchema = schema.def.value;
+      const holder = hoist3(context, valueExpr);
+      const keys = nextVar3(context, "k");
+      const index = nextVar3(context, "i");
+      const item = nextVar3(context, "e");
+      writer.line(`s += "{";`);
+      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
+      writer.indent(() => {
+        writer.line(`if (${index} !== 0) s += ",";`);
+        writer.line(`s += str(${keys}[${index}]) + ":";`);
+        writer.line(`const ${item} = ${holder}[${keys}[${index}]];`);
+        emitAppend(context, valueSchema, item);
+      });
+      writer.line("}");
+      writer.line(`s += "}";`);
+      return;
+    }
+    case TypeName.union:
+    case TypeName.discriminatedUnion:
+    case TypeName.any:
+    case TypeName.unknown:
+      writer.line(`s += JSON.stringify(${valueExpr}) ?? "null";`);
+      return;
+    default:
+      throw new JITError(
+        "UNSUPPORTED_SCHEMA",
+        `serialize does not support ${schema.type} schemas (not representable in JSON)`
+      );
+  }
+}
+function emitObjectAppend(context, schema, valueExpr) {
+  const writer = context.writer;
+  const props = schema.def.props;
+  const keys = Object.keys(props);
+  const holder = hoist3(context, valueExpr);
+  const optionality = keys.map(
+    (key) => resolveSerializeWrappers(props[key]).optional && emitStaticDefaultSource(props[key]) === void 0
+  );
+  const firstRequired = optionality.indexOf(false);
+  const needsRuntimeComma = optionality.some((optional3, position) => optional3 && position < firstRequired) || firstRequired === -1;
+  writer.line(`s += "{";`);
+  if (keys.length === 0) {
+    writer.line(`s += "}";`);
+    return;
+  }
+  if (needsRuntimeComma) {
+    const flag = nextVar3(context, "f");
+    writer.line(`let ${flag} = false;`);
+    keys.forEach((key, position) => {
+      const rawPropExpr = emitPropertyAccess(holder, key);
+      const propExpr = emitDefaultedValue(props[key], rawPropExpr);
+      const keyPrefix = JSON.stringify(`${JSON.stringify(key)}:`);
+      const emitProp = () => {
+        writer.line(`if (${flag}) s += ",";`);
+        writer.line(`${flag} = true;`);
+        writer.line(`s += ${keyPrefix};`);
+        emitAppend(context, props[key], propExpr);
+      };
+      if (optionality[position]) {
+        writer.line(`if (${rawPropExpr} !== undefined) {`);
+        writer.indent(emitProp);
+        writer.line("}");
+      } else {
+        emitProp();
+      }
+    });
+    writer.line(`s += "}";`);
+    return;
+  }
+  let hasPrevious = false;
+  keys.forEach((key, position) => {
+    const rawPropExpr = emitPropertyAccess(holder, key);
+    const propExpr = emitDefaultedValue(props[key], rawPropExpr);
+    const keyToken = `${JSON.stringify(key)}:`;
+    const prefix = hasPrevious ? `,${keyToken}` : keyToken;
+    if (optionality[position]) {
+      writer.line(`if (${rawPropExpr} !== undefined) {`);
+      writer.indent(() => {
+        writer.line(`s += ${JSON.stringify(`,${keyToken}`)};`);
+        emitAppend(context, props[key], propExpr);
+      });
+      writer.line("}");
+      return;
+    }
+    writer.line(`s += ${JSON.stringify(prefix)};`);
+    emitAppend(context, props[key], propExpr);
+    hasPrevious = true;
+  });
+  writer.line(`s += "}";`);
+}
+function hoist3(context, expr) {
+  if (parse_exports.isValidIdentifier(expr)) return expr;
+  const holder = nextVar3(context, "v");
+  context.writer.line(`const ${holder} = ${expr};`);
+  return holder;
+}
+function resolveSerializeWrappers(schema) {
+  let current = schema;
+  let optional3 = false;
+  let nullable3 = false;
+  while (true) {
+    switch (current.type) {
+      case TypeName.optional:
+        optional3 = true;
+        current = current.def.innerType;
+        continue;
+      case TypeName.nullable:
+        nullable3 = true;
+        current = current.def.innerType;
+        continue;
+      case TypeName.nullish:
+        optional3 = true;
+        nullable3 = true;
+        current = current.def.innerType;
+        continue;
+      case TypeName.default:
+      case TypeName.brand:
+      case TypeName.readonly:
+      case TypeName.refine:
+      case TypeName.coerce:
+      case TypeName.pipe:
+      case TypeName.transform:
+        current = current.def.innerType;
+        continue;
+      case TypeName.lazy:
+        current = current.def.getter();
+        continue;
+      default:
+        return { base: current, optional: optional3, nullable: nullable3 };
+    }
+  }
+}
+
+// ../../packages/jit/src/compiler/update/build-update-ir.ts
+function buildUpdateIR(schema) {
+  return {
+    kind: "program",
+    valueParam: "value",
+    patchParam: "patch",
+    body: buildUpdateNode(schema)
+  };
+}
+function buildUpdateNode(schema) {
+  if (schema.type === TypeName.date) return { kind: "date" };
+  if (schema.type === TypeName.union) return buildUnionNode3(schema);
+  if (schema.type === TypeName.discriminatedUnion)
+    return buildDiscriminatedUnionNode3(schema);
+  const node = buildSchemaNode(schema, buildUpdateNode);
+  if (node) return node;
+  if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
+  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler update IR for type: ${schema.type}`);
+}
+function buildUnionNode3(schema) {
+  if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
+    return { kind: "reuse" };
+  }
+  return {
+    kind: "union",
+    options: schema.def.options.map((option) => ({
+      schema: option,
+      node: buildUpdateNode(option)
+    }))
+  };
+}
+function buildDiscriminatedUnionNode3(schema) {
+  return {
+    kind: "discriminatedUnion",
+    discriminator: schema.def.discriminator,
+    options: schema.def.options.map((option) => ({
+      schema: option,
+      node: buildUpdateNode(option)
+    }))
+  };
+}
+
+// ../../packages/jit/src/compiler/update/emit-update.ts
+function emitUpdate(program) {
+  const writer = new CodeWriter();
+  writer.line(`function update(${program.valueParam}, ${program.patchParam}) {`);
+  writer.indent(() => {
+    emitUpdateBodyLines(writer, createEmitState(), program.body, program.valueParam, program.patchParam);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitUpdateBody(program) {
+  const writer = new CodeWriter();
+  emitUpdateBodyLines(writer, createEmitState(), program.body, program.valueParam, program.patchParam);
+  return writer.toString();
+}
+function emitUpdateBodyLines(writer, state, node, value, patch) {
+  emitUpdateTo(writer, state, node, value, patch, "out");
+  writer.line("return out;");
+}
+function emitUpdateTo(writer, state, node, value, patch, target) {
+  switch (node.kind) {
+    case "reuse":
+      writer.line(`let ${target} = ${value};`);
+      writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+      writer.indent(() => writer.line(`${target} = ${patch};`));
+      writer.line("}");
+      return;
+    case "date":
+      writer.line(`let ${target} = ${value};`);
+      writer.line(
+        `if (${patch} !== undefined && !Object.is(${value}, ${patch}) && ${value}.getTime() !== ${patch}.getTime()) {`
+      );
+      writer.indent(() => writer.line(`${target} = new Date(${patch}.getTime());`));
+      writer.line("}");
+      return;
+    case "union":
+      emitUnionUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "discriminatedUnion":
+      emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "guard":
+      emitGuardUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "object":
+      emitObjectUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "array":
+      emitArrayUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "tuple":
+      emitTupleUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "record":
+      emitRecordUpdateTo(writer, state, node, value, patch, target);
+      return;
+    case "set":
+      emitSetUpdateTo(writer, value, patch, target);
+      return;
+    case "map":
+      emitMapUpdateTo(writer, value, patch, target);
+      return;
+  }
+}
+function emitGuardUpdateTo(writer, state, node, value, patch, target) {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    writer.line(`if (!(${emitGuardTest(node.optional, node.nullable, patch)})) {`);
+    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line(`} else if (!(${emitGuardTest(node.optional, node.nullable, value)})) {`);
+    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line("} else {");
+    writer.indent(() => {
+      const inner = state.nextVar(`${target}_inner`);
+      emitUpdateTo(writer, state, node.inner, value, patch, inner);
+      writer.line(`${target} = ${inner};`);
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitObjectUpdateTo(writer, state, node, value, patch, target) {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined) {`);
+  writer.indent(() => {
+    const entries = [];
+    const changedVars = [];
+    for (const prop of node.props) {
+      const rawPropValue = emitPropertyAccess(value, prop.key);
+      const defaultedPropValue = emitDefaultedValue(prop.schema, rawPropValue);
+      const propValue = defaultedPropValue === rawPropValue ? rawPropValue : state.nextVar(`value_${prop.key}`);
+      const propPatch = emitPropertyAccess(patch, prop.key);
+      const propNext = state.nextVar(`next_${prop.key}`);
+      if (propValue !== rawPropValue) {
+        writer.line(`const ${propValue} = ${defaultedPropValue};`);
+      }
+      emitUpdateTo(writer, state, prop.value, propValue, propPatch, propNext);
+      changedVars.push(`${propNext} !== ${propValue}`);
+      entries.push(`${emitLiteral(prop.key)}: ${propNext}`);
+    }
+    writer.line(`if (${changedVars.join(" || ")}) {`);
+    writer.indent(() => writer.line(`${target} = { ${entries.join(", ")} };`));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitUnionUpdateTo(writer, state, node, value, patch, target) {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    if (node.options.length === 0) {
+      writer.line(`${target} = ${patch};`);
+      return;
+    }
+    let prefix = "if";
+    for (const option of node.options) {
+      writer.line(`${prefix} (${emitSchemaGuard(option.schema, value)}) {`);
+      writer.indent(() => {
+        const next = state.nextVar(`${target}_branch`);
+        emitUpdateTo(writer, state, option.node, value, patch, next);
+        writer.line(`${target} = ${next};`);
+      });
+      prefix = "} else if";
+    }
+    writer.line("} else {");
+    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, target) {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    if (node.options.length === 0) {
+      writer.line(`${target} = ${patch};`);
+      return;
+    }
+    let prefix = "if";
+    for (const option of node.options) {
+      writer.line(`${prefix} (${emitSchemaGuard(option.schema, value)}) {`);
+      writer.indent(() => {
+        const tag = literalDiscriminatorValue(option.schema, node.discriminator);
+        const next = state.nextVar(`${target}_branch`);
+        if (tag !== void 0) {
+          const patchTag = emitPropertyAccess(patch, node.discriminator);
+          writer.line(`if (${patchTag} !== undefined && ${patchTag} !== ${emitLiteral(tag)}) {`);
+          writer.indent(() => writer.line(`${target} = ${patch};`));
+          writer.line("} else {");
+          writer.indent(() => {
+            emitUpdateTo(writer, state, option.node, value, patch, next);
+            writer.line(`${target} = ${next};`);
+          });
+          writer.line("}");
+          return;
+        }
+        emitUpdateTo(writer, state, option.node, value, patch, next);
+        writer.line(`${target} = ${next};`);
+      });
+      prefix = "} else if";
+    }
+    writer.line("} else {");
+    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitTupleUpdateTo(writer, state, node, value, patch, target) {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined) {`);
+  writer.indent(() => {
+    const entries = [];
+    const changedVars = [];
+    for (let index = 0; index < node.items.length; index++) {
+      const itemNext = state.nextVar(`next_${index}`);
+      emitUpdateTo(writer, state, node.items[index], `${value}[${index}]`, `${patch}[${index}]`, itemNext);
+      changedVars.push(`${itemNext} !== ${value}[${index}]`);
+      entries.push(itemNext);
+    }
+    writer.line(`if (${changedVars.join(" || ")}) {`);
+    writer.indent(() => writer.line(`${target} = [${entries.join(", ")}];`));
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitArrayUpdateTo(writer, state, node, value, patch, target) {
+  const len = state.nextVar("len");
+  const patchLen = state.nextVar("patchLen");
+  const index = state.nextVar("i");
+  const item = state.nextVar("item");
+  const patchItem = state.nextVar("patchItem");
+  const next = state.nextVar("next");
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined) {`);
+  writer.indent(() => {
+    writer.line(`const ${len} = ${value}.length;`);
+    writer.line(`const ${patchLen} = ${patch}.length;`);
+    writer.line(`for (let ${index} = 0; ${index} < ${patchLen}; ${index}++) {`);
+    writer.indent(() => {
+      writer.line(`const ${patchItem} = ${patch}[${index}];`);
+      writer.line(`if (${patchItem} !== undefined) {`);
+      writer.indent(() => {
+        writer.line(`if (${index} >= ${len}) {`);
+        writer.indent(() => {
+          writer.line(`if (${target} === ${value}) {`);
+          writer.indent(() => writer.line(`${target} = ${value}.slice();`));
+          writer.line("}");
+          writer.line(`${target}[${index}] = ${patchItem};`);
+        });
+        writer.line("} else {");
+        writer.indent(() => {
+          writer.line(`const ${item} = ${value}[${index}];`);
+          emitUpdateTo(writer, state, node.element, item, patchItem, next);
+          writer.line(`if (${next} !== ${item}) {`);
+          writer.indent(() => {
+            writer.line(`if (${target} === ${value}) {`);
+            writer.indent(() => writer.line(`${target} = ${value}.slice();`));
+            writer.line("}");
+            writer.line(`${target}[${index}] = ${next};`);
+          });
+          writer.line("}");
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitRecordUpdateTo(writer, state, node, value, patch, target) {
+  const keys = state.nextVar("keys");
+  const patchKeys = state.nextVar("patchKeys");
+  const len = state.nextVar("len");
+  const index = state.nextVar("i");
+  const key = state.nextVar("key");
+  const next = state.nextVar("next");
+  const recordOut = state.nextVar("recordOut");
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    writer.line(`let changed = false;`);
+    writer.line(`const ${keys} = Object.keys(${value});`);
+    writer.line(`const ${patchKeys} = Object.keys(${patch});`);
+    writer.line(`if (${keys}.length !== ${patchKeys}.length) {`);
+    writer.indent(() => writer.line("changed = true;"));
+    writer.line("}");
+    writer.line(`for (let ${index} = 0, ${len} = ${patchKeys}.length; ${index} < ${len}; ${index}++) {`);
+    writer.indent(() => {
+      writer.line(`const ${key} = ${patchKeys}[${index}];`);
+      emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
+      writer.line(`if (${next} !== ${value}[${key}]) {`);
+      writer.indent(() => {
+        writer.line("changed = true;");
+        writer.line("break;");
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+    writer.line("if (changed) {");
+    writer.indent(() => {
+      writer.line(`const ${recordOut} = {};`);
+      writer.line(`for (let ${index} = 0, ${len} = ${patchKeys}.length; ${index} < ${len}; ${index}++) {`);
+      writer.indent(() => {
+        writer.line(`const ${key} = ${patchKeys}[${index}];`);
+        emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
+        writer.line(`${recordOut}[${key}] = ${next};`);
+      });
+      writer.line("}");
+      writer.line(`${target} = ${recordOut};`);
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitSetUpdateTo(writer, value, patch, target) {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    writer.line(`if (${value}.size !== ${patch}.size) {`);
+    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line("} else {");
+    writer.indent(() => {
+      writer.line(`const iter = ${patch}.values();`);
+      writer.line("let step = iter.next();");
+      writer.line("while (!step.done) {");
+      writer.indent(() => {
+        writer.line("const item = step.value;");
+        writer.line(`if (!${value}.has(item)) {`);
+        writer.indent(() => {
+          writer.line(`${target} = ${patch};`);
+          writer.line("break;");
+        });
+        writer.line("}");
+        writer.line("step = iter.next();");
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitMapUpdateTo(writer, value, patch, target) {
+  writer.line(`let ${target} = ${value};`);
+  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.indent(() => {
+    writer.line(`if (${value}.size !== ${patch}.size) {`);
+    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line("} else {");
+    writer.indent(() => {
+      writer.line(`const iter = ${patch}.entries();`);
+      writer.line("let step = iter.next();");
+      writer.line("while (!step.done) {");
+      writer.indent(() => {
+        writer.line("const entry = step.value;");
+        writer.line("const key = entry[0];");
+        writer.line("const nextValue = entry[1];");
+        writer.line(`if (!${value}.has(key) || !Object.is(${value}.get(key), nextValue)) {`);
+        writer.indent(() => {
+          writer.line(`${target} = ${patch};`);
+          writer.line("break;");
+        });
+        writer.line("}");
+        writer.line("step = iter.next();");
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+
+// ../../packages/jit/src/compiler/update.ts
+function emitUpdateSource(schema) {
+  assertUpdateable(schema);
+  return emitUpdate(buildUpdateIR(schema));
+}
+function compileUpdate(schema, options) {
+  assertUpdateable(schema);
+  return getCompileCached(
+    schema,
+    "update",
+    () => {
+      const program = buildUpdateIR(schema);
+      const body = emitUpdateBody(program);
+      return globalThis.Function(`return function update(value, patch) {
+${body}
+};`)();
+    },
+    options
+  );
+}
+function assertUpdateable(schema) {
+  if (schema.type === TypeName.readonly) {
+    throw new JITError("READONLY_FIELD", "Cannot compile updates for readonly schemas");
+  }
+  if (schema.type === TypeName.lazy) {
+    assertUpdateable(schema.def.getter());
+    return;
+  }
+  if (hasInnerType(schema)) {
+    assertUpdateable(schema.def.innerType);
+    return;
+  }
+  if (schema.type === TypeName.object) {
+    const objectSchema = schema;
+    for (const child of Object.values(objectSchema.def.props)) {
+      assertUpdateable(child);
+    }
+  }
+}
+function hasInnerType(schema) {
+  return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
 }
 
 // ../../packages/jit/src/compiler/validate/emit-validate.ts
@@ -5980,7 +7818,7 @@ var ValidatorEmitter = class {
               break;
             case "int32":
               this.failIf(
-                `!Number.isInteger(${value}) || ${value} < -2147483648 || ${value} > 2147483647`,
+                `(${value} | 0) !== ${value}`,
                 path,
                 "not_int32",
                 "int32",
@@ -6757,6 +8595,61 @@ function needsBuild(schema) {
       return false;
   }
 }
+function canUseFastParse(schema, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(schema)) return true;
+  if (needsBuild(schema) || rootHasReadonly(schema)) return false;
+  seen.add(schema);
+  const current = schema;
+  switch (current.type) {
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.custom:
+    case TypeName.codec:
+    case TypeName.instanceof:
+      return false;
+    case TypeName.lazy:
+      return canUseFastParse(current.def.getter(), seen);
+    case TypeName.when:
+      return typeof current.def.is !== "function" && canUseFastParse(current.def.thenType, seen) && canUseFastParse(current.def.otherwiseType, seen);
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.not:
+      return canUseFastParse(current.def.innerType, seen);
+    case TypeName.string: {
+      const checks = current.def.checks ?? [];
+      return !checks.some((check) => check.value instanceof RegExp && (check.value.global || check.value.sticky));
+    }
+    case TypeName.array:
+    case TypeName.set:
+      return canUseFastParse(current.def.element, seen);
+    case TypeName.map:
+      return canUseFastParse(current.def.key, seen) && canUseFastParse(current.def.value, seen);
+    case TypeName.record:
+      return canUseFastParse(current.def.value, seen);
+    case TypeName.tuple: {
+      const items = current.def.items ?? [];
+      const rest = current.def.rest;
+      return items.every((item) => canUseFastParse(item, seen)) && (rest === void 0 || canUseFastParse(rest, seen));
+    }
+    case TypeName.union:
+    case TypeName.xor:
+    case TypeName.discriminatedUnion:
+    case TypeName.intersection:
+      return current.def.options.every((option) => canUseFastParse(option, seen));
+    case TypeName.object: {
+      const props = current.def.props;
+      const catchall2 = current.def.catchall;
+      return Object.keys(props).every((key) => canUseFastParse(props[key], seen)) && (catchall2 === void 0 || canUseFastParse(catchall2, seen));
+    }
+    default:
+      return true;
+  }
+}
 function containsPromise(schema, seen = /* @__PURE__ */ new Set()) {
   if (seen.has(schema)) return false;
   seen.add(schema);
@@ -6883,3179 +8776,6 @@ function emitValidator(schema, options = {}) {
   const returned = `return { ${returnedEntries.join(", ")} };`;
   const source = `${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`;
   return { source, bindings };
-}
-
-// ../../packages/jit/src/compiler/json-decode.ts
-function jsonDecoderSupport(schema) {
-  const reason = unsupportedReason(schema, /* @__PURE__ */ new Set());
-  return reason === void 0 ? { supported: true } : { supported: false, reason };
-}
-function tryEmitJsonDecoder(schema) {
-  if (!jsonDecoderSupport(schema).supported) return void 0;
-  return new JsonDecoderEmitter(schema).emit();
-}
-function tryCompileJsonDecoder(schema) {
-  const emitted = tryEmitJsonDecoder(schema);
-  if (!emitted) return void 0;
-  const decode = globalThis.Function(
-    ...emitted.bindingNames,
-    `return (${emitted.source});`
-  )(...emitted.bindingValues);
-  return (json3) => {
-    try {
-      return decode(json3);
-    } catch (error) {
-      if (Array.isArray(error)) throw new JITValidationError(error);
-      throw error;
-    }
-  };
-}
-var JsonDecoderEmitter = class {
-  constructor(schema) {
-    this.schema = schema;
-    this.bindingNames = [];
-    this.bindingValues = [];
-    this.bindingIds = /* @__PURE__ */ new Map();
-    this.parserNames = /* @__PURE__ */ new Map();
-    this.parserSources = [];
-  }
-  emit() {
-    const root = this.parser(this.schema);
-    const freeze = rootHasReadonly2(this.schema) ? 'if (value !== null && (typeof value === "object" || typeof value === "function")) value = Object.freeze(value);' : "";
-    const source = `(() => {
-${JSON_RUNTIME_SOURCE}
-${this.parserSources.join("\n")}
-return function decode(input) {
-  input = String(input);
-  const state = { i: 0 };
-  const issues = [];
-  let value = ${root}(input, state, "", issues);
-  ws(input, state);
-  if (state.i !== input.length) syntax(state, "unexpected trailing token");
-  if (issues.length !== 0) throw issues;
-  ${freeze}
-  return value;
-};
-})()`;
-    return {
-      source,
-      bindingNames: this.bindingNames,
-      bindingValues: this.bindingValues,
-      backend: "schema-directed"
-    };
-  }
-  bind(value) {
-    const existing = this.bindingIds.get(value);
-    if (existing) return existing;
-    const name = `__j${this.bindingNames.length}`;
-    this.bindingNames.push(name);
-    this.bindingValues.push(value);
-    this.bindingIds.set(value, name);
-    return name;
-  }
-  parser(schema) {
-    const existing = this.parserNames.get(schema);
-    if (existing) return existing;
-    const name = `jp${this.parserNames.size}`;
-    const writer = new CodeWriter();
-    const current = schema;
-    this.parserNames.set(schema, name);
-    writer.line(`function ${name}(input, state, path, issues) {`);
-    writer.indent(() => {
-      switch (current.type) {
-        case TypeName.optional:
-        case TypeName.default:
-        case TypeName.brand:
-        case TypeName.readonly:
-          writer.line(`return ${this.parser(current.def.innerType)}(input, state, path, issues);`);
-          break;
-        case TypeName.lazy:
-          writer.line(
-            `return ${this.parser(current.def.getter())}(input, state, path, issues);`
-          );
-          break;
-        case TypeName.nullable:
-        case TypeName.nullish:
-          this.emitNullable(writer, current);
-          break;
-        case TypeName.string:
-          this.emitString(writer, current);
-          break;
-        case TypeName.number:
-        case TypeName.int:
-          this.emitNumber(writer, current, current.type === TypeName.int);
-          break;
-        case TypeName.boolean:
-          this.emitBoolean(writer);
-          break;
-        case TypeName.null:
-          this.emitNull(writer);
-          break;
-        case TypeName.literal:
-          this.emitLiteral(writer, current);
-          break;
-        case TypeName.enum:
-          this.emitEnum(writer, current);
-          break;
-        case TypeName.array:
-          this.emitArray(writer, current);
-          break;
-        case TypeName.tuple:
-          this.emitTuple(writer, current);
-          break;
-        case TypeName.object:
-          this.emitObject(writer, current);
-          break;
-        case TypeName.record:
-          this.emitRecord(writer, current);
-          break;
-        case TypeName.json:
-          writer.line("return any(input, state, issues, path);");
-          break;
-        case TypeName.any:
-        case TypeName.unknown:
-          writer.line("return any(input, state);");
-          break;
-        default:
-          throw new Error(`unsupported JSON decoder schema ${current.type}`);
-      }
-    });
-    writer.line("}");
-    this.parserSources.push(writer.toString());
-    return name;
-  }
-  emitNullable(writer, schema) {
-    const inner = this.parser(schema.def.innerType);
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) === 110) { readNull(input, state); return null; }");
-    writer.line(`return ${inner}(input, state, path, issues);`);
-  }
-  emitString(writer, schema) {
-    const checks = schema.def.checks ?? [];
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 34) {");
-    writer.indent(() => {
-      writer.line('mismatch(input, state, issues, path, "expected_string", "string", ');
-      writer.line(`  ${literal2(requiredMessage(schema, "expected string"))});`);
-      writer.line("return undefined;");
-    });
-    writer.line("}");
-    writer.line("let value = string(input, state);");
-    for (const check of checks) {
-      if (check.kind === "trim") writer.line("value = value.trim();");
-      if (check.kind === "normalize") {
-        writer.line(
-          typeof check.value === "string" ? `value = value.normalize(${literal2(check.value)});` : "value = value.normalize();"
-        );
-      }
-      if (check.kind === "lowercase") writer.line("value = value.toLowerCase();");
-      if (check.kind === "uppercase") writer.line("value = value.toUpperCase();");
-      if (check.kind === "sanitize") {
-        writer.line(
-          `value = ${emitSanitizeChain("value", check.value, (pattern) => this.bind(pattern))};`
-        );
-      }
-      if (check.kind === "format") {
-        const spec = check.value;
-        const length = countFormatPlaceholders(spec.pattern);
-        if (spec.mode === "strict") {
-          this.issueIf(
-            writer,
-            emitStrictFormatCondition("value", spec.pattern),
-            "invalid_format",
-            spec.pattern,
-            check.message ?? `expected the ${spec.pattern} format`
-          );
-        } else {
-          if (spec.stripNonDigits) writer.line('value = value.replace(/\\D+/g, "");');
-          this.issueIf(
-            writer,
-            `value.length !== ${length}`,
-            "invalid_format",
-            `length === ${length}`,
-            check.message ?? `expected ${length} characters before formatting`
-          );
-        }
-      }
-      if (check.kind === "phoneBR") {
-        writer.line('value = value.replace(/\\D+/g, "");');
-        this.issueIf(
-          writer,
-          "value.length !== 10 && value.length !== 11",
-          "invalid_format",
-          "Brazilian phone with 10 or 11 digits",
-          check.message ?? "expected a Brazilian phone number"
-        );
-      }
-    }
-    for (const check of checks) this.emitStringCheck(writer, check);
-    for (const check of checks) {
-      if (check.kind === "format") {
-        const spec = check.value;
-        if (spec.mode === "transform") {
-          const length = countFormatPlaceholders(spec.pattern);
-          writer.line(`if (value.length === ${length}) {`);
-          writer.indent(() => {
-            writer.line(`value = ${emitFormatMaskExpression("value", spec.pattern)};`);
-          });
-          writer.line("}");
-        }
-      }
-      if (check.kind === "phoneBR") {
-        writer.line("if (value.length === 10) {");
-        writer.indent(() => {
-          writer.line(`value = ${emitFormatMaskExpression("value", "(##) ####-####")};`);
-        });
-        writer.line("} else if (value.length === 11) {");
-        writer.indent(() => {
-          writer.line(`value = ${emitFormatMaskExpression("value", "(##) #####-####")};`);
-        });
-        writer.line("}");
-      }
-    }
-    writer.line("return value;");
-  }
-  emitStringCheck(writer, check) {
-    switch (check.kind) {
-      case "trim":
-      case "normalize":
-      case "lowercase":
-      case "uppercase":
-      case "sanitize":
-      case "format":
-      case "phoneBR":
-        return;
-      case "min":
-        this.issueIf(
-          writer,
-          `value.length < ${literal2(check.value)}`,
-          "too_small",
-          `length >= ${String(check.value)}`,
-          check.message ?? `expected at least ${String(check.value)} characters`
-        );
-        return;
-      case "max":
-        this.issueIf(
-          writer,
-          `value.length > ${literal2(check.value)}`,
-          "too_big",
-          `length <= ${String(check.value)}`,
-          check.message ?? `expected at most ${String(check.value)} characters`
-        );
-        return;
-      case "length":
-        this.issueIf(
-          writer,
-          `value.length !== ${literal2(check.value)}`,
-          "invalid_length",
-          `length === ${String(check.value)}`,
-          check.message ?? `expected exactly ${String(check.value)} characters`
-        );
-        return;
-      case "oneOf": {
-        const values = check.value ?? [];
-        const condition = values.length === 0 ? "true" : values.map((value) => `value !== ${literal2(value)}`).join(" && ");
-        this.issueIf(
-          writer,
-          condition,
-          "invalid_enum",
-          values.join(" | "),
-          check.message ?? "expected one of the allowed values"
-        );
-        return;
-      }
-      case "startsWith":
-        this.issueIf(
-          writer,
-          `!value.startsWith(${literal2(check.value)})`,
-          "invalid_string",
-          `startsWith ${String(check.value)}`,
-          check.message ?? `expected string to start with ${String(check.value)}`
-        );
-        return;
-      case "endsWith":
-        this.issueIf(
-          writer,
-          `!value.endsWith(${literal2(check.value)})`,
-          "invalid_string",
-          `endsWith ${String(check.value)}`,
-          check.message ?? `expected string to end with ${String(check.value)}`
-        );
-        return;
-      case "includes":
-        this.issueIf(
-          writer,
-          `!value.includes(${literal2(check.value)})`,
-          "invalid_string",
-          `includes ${String(check.value)}`,
-          check.message ?? `expected string to include ${String(check.value)}`
-        );
-        return;
-      case "digitsLength": {
-        const values = Array.isArray(check.value) ? check.value : [check.value];
-        const condition = values.length === 0 ? "true" : values.map((value) => `value.length !== ${value}`).join(" && ");
-        this.issueIf(
-          writer,
-          condition,
-          "invalid_length",
-          values.map((value) => `length === ${value}`).join(" | "),
-          check.message ?? `expected ${values.join(" or ")} digits`
-        );
-        return;
-      }
-      case "url":
-        writer.line("let validUrl = true;");
-        writer.line("try { new URL(value); } catch { validUrl = false; }");
-        this.issueIf(writer, "!validUrl", "invalid_format", "url", check.message ?? "expected a valid URL");
-        return;
-      case "httpUrl":
-        writer.line("let validHttpUrl = true;");
-        writer.line(
-          'try { const parsedUrl = new URL(value); validHttpUrl = parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"; } catch { validHttpUrl = false; }'
-        );
-        this.issueIf(
-          writer,
-          "!validHttpUrl",
-          "invalid_format",
-          "httpUrl",
-          check.message ?? "expected a valid HTTP(S) URL"
-        );
-        return;
-      case "regex":
-        this.regexIssue(writer, check.value, "regex", check.message ?? "expected the value to match the pattern");
-        return;
-      case "email":
-        this.regexIssue(
-          writer,
-          check.value instanceof RegExp ? check.value : regexes_exports.email,
-          "email",
-          check.message ?? "expected a valid email"
-        );
-        return;
-      case "uuid":
-        this.regexIssue(
-          writer,
-          check.value instanceof RegExp ? check.value : regexes_exports.uuid(),
-          "uuid",
-          check.message ?? "expected a valid uuid"
-        );
-        return;
-      case "stringFormat": {
-        const spec = check.value;
-        this.regexIssue(writer, spec.pattern, spec.name, check.message ?? `expected a valid ${spec.name}`);
-        return;
-      }
-      default:
-        if (check.value instanceof RegExp) {
-          this.regexIssue(writer, check.value, check.kind, check.message ?? `expected a valid ${check.kind}`);
-        }
-    }
-  }
-  regexIssue(writer, regex2, expected, message) {
-    const binding = this.bind(regex2);
-    this.issueIf(writer, `!${binding}.test(value)`, "invalid_format", expected, message);
-  }
-  emitNumber(writer, schema, forceInteger) {
-    const checks = schema.def.checks ?? [];
-    writer.line("ws(input, state);");
-    writer.line("const code = input.charCodeAt(state.i);");
-    writer.line("if (code !== 45 && (code < 48 || code > 57)) {");
-    writer.indent(() => {
-      writer.line(
-        `mismatch(input, state, issues, path, "expected_number", "number", ${literal2(requiredMessage(schema, "expected number"))});`
-      );
-      writer.line("return undefined;");
-    });
-    writer.line("}");
-    writer.line("const value = number(input, state);");
-    const integerCheck = checks.find((check) => check.kind === "integer");
-    if (forceInteger || integerCheck) {
-      this.issueIf(
-        writer,
-        "!Number.isInteger(value)",
-        "not_integer",
-        "integer",
-        integerCheck?.message ?? "expected an integer"
-      );
-    }
-    for (const check of checks) this.emitNumberCheck(writer, check);
-    writer.line("return value;");
-  }
-  emitNumberCheck(writer, check) {
-    switch (check.kind) {
-      case "integer":
-        return;
-      case "min":
-        this.issueIf(
-          writer,
-          `value < ${literal2(check.value)}`,
-          "too_small",
-          `>= ${String(check.value)}`,
-          check.message ?? `expected a number >= ${String(check.value)}`
-        );
-        return;
-      case "max":
-        this.issueIf(
-          writer,
-          `value > ${literal2(check.value)}`,
-          "too_big",
-          `<= ${String(check.value)}`,
-          check.message ?? `expected a number <= ${String(check.value)}`
-        );
-        return;
-      case "moreThan":
-        this.issueIf(
-          writer,
-          `value <= ${literal2(check.value)}`,
-          "too_small",
-          `> ${String(check.value)}`,
-          check.message ?? `expected a number > ${String(check.value)}`
-        );
-        return;
-      case "lessThan":
-        this.issueIf(
-          writer,
-          `value >= ${literal2(check.value)}`,
-          "too_big",
-          `< ${String(check.value)}`,
-          check.message ?? `expected a number < ${String(check.value)}`
-        );
-        return;
-      case "oneOf": {
-        const values = check.value ?? [];
-        const condition = values.length === 0 ? "true" : values.map((value) => `value !== ${literal2(value)}`).join(" && ");
-        this.issueIf(
-          writer,
-          condition,
-          "invalid_enum",
-          values.join(" | "),
-          check.message ?? "expected one of the allowed values"
-        );
-        return;
-      }
-      case "positive":
-        this.issueIf(writer, "value <= 0", "not_positive", "> 0", check.message ?? "expected a positive number");
-        return;
-      case "negative":
-        this.issueIf(writer, "value >= 0", "not_negative", "< 0", check.message ?? "expected a negative number");
-        return;
-      case "finite":
-        this.issueIf(
-          writer,
-          "!Number.isFinite(value)",
-          "not_finite",
-          "finite",
-          check.message ?? "expected a finite number"
-        );
-        return;
-      case "safe":
-        this.issueIf(
-          writer,
-          "!Number.isSafeInteger(value)",
-          "not_safe",
-          "safe integer",
-          check.message ?? "expected a safe integer"
-        );
-        return;
-      case "int32":
-        this.issueIf(
-          writer,
-          "!Number.isInteger(value) || value < -2147483648 || value > 2147483647",
-          "not_int32",
-          "int32",
-          check.message ?? "expected a 32-bit signed integer"
-        );
-        return;
-      case "float32":
-        this.issueIf(
-          writer,
-          "!Number.isFinite(value) || Math.fround(value) !== value",
-          "not_float32",
-          "float32",
-          check.message ?? "expected a float32-representable number"
-        );
-        return;
-      case "float64":
-        this.issueIf(
-          writer,
-          "!Number.isFinite(value)",
-          "not_float64",
-          "float64",
-          check.message ?? "expected a finite float64 number"
-        );
-        return;
-      case "multipleOf":
-        this.issueIf(
-          writer,
-          `value % ${literal2(check.value)} !== 0`,
-          "not_multiple_of",
-          `multiple of ${String(check.value)}`,
-          check.message ?? `expected a multiple of ${String(check.value)}`
-        );
-    }
-  }
-  emitBoolean(writer) {
-    writer.line("ws(input, state);");
-    writer.line('if (input.startsWith("true", state.i)) { state.i += 4; return true; }');
-    writer.line('if (input.startsWith("false", state.i)) { state.i += 5; return false; }');
-    writer.line("any(input, state);");
-    writer.line('issue(issues, path, "expected_boolean", "boolean", "expected boolean");');
-    writer.line("return undefined;");
-  }
-  emitNull(writer) {
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) === 110) { readNull(input, state); return null; }");
-    writer.line("any(input, state);");
-    writer.line('issue(issues, path, "invalid_type", "null", "expected null");');
-    writer.line("return undefined;");
-  }
-  emitLiteral(writer, schema) {
-    const expected = schema.def.value;
-    writer.line("const value = any(input, state);");
-    this.issueIf(
-      writer,
-      `value !== ${literal2(expected)}`,
-      "invalid_literal",
-      String(expected),
-      `expected literal ${String(expected)}`
-    );
-    writer.line("return value;");
-  }
-  emitEnum(writer, schema) {
-    const values = Object.values(schema.def.values);
-    const condition = values.length === 0 ? "true" : values.map((value) => `value !== ${literal2(value)}`).join(" && ");
-    writer.line("const value = any(input, state);");
-    this.issueIf(writer, condition, "invalid_enum", values.join(" | "), "expected one of the enum values");
-    writer.line("return value;");
-  }
-  emitArray(writer, schema) {
-    const element = this.parser(schema.def.element);
-    const checks = schema.def.checks ?? [];
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 91) {");
-    writer.indent(() => {
-      writer.line('mismatch(input, state, issues, path, "expected_array", "array", "expected array");');
-      writer.line("return undefined;");
-    });
-    writer.line("}");
-    writer.line("state.i++;");
-    writer.line("const value = [];");
-    writer.line("let index = 0;");
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 93) {");
-    writer.indent(() => {
-      writer.line("for (;;) {");
-      writer.indent(() => {
-        writer.line(`value[index] = ${element}(input, state, path + "[" + index + "]", issues);`);
-        writer.line("index++;");
-        writer.line("ws(input, state);");
-        writer.line("const separator = input.charCodeAt(state.i++);");
-        writer.line("if (separator === 93) break;");
-        writer.line('if (separator !== 44) syntax(state, "expected comma or closing bracket");');
-      });
-      writer.line("}");
-    });
-    writer.line("} else state.i++;");
-    for (const check of checks) this.emitArrayCheck(writer, check);
-    writer.line("return value;");
-  }
-  emitArrayCheck(writer, check) {
-    switch (check.kind) {
-      case "min":
-        this.issueIf(
-          writer,
-          `value.length < ${literal2(check.value)}`,
-          "too_small",
-          `length >= ${String(check.value)}`,
-          check.message ?? `expected at least ${String(check.value)} items`
-        );
-        break;
-      case "max":
-        this.issueIf(
-          writer,
-          `value.length > ${literal2(check.value)}`,
-          "too_big",
-          `length <= ${String(check.value)}`,
-          check.message ?? `expected at most ${String(check.value)} items`
-        );
-        break;
-      case "length":
-        this.issueIf(
-          writer,
-          `value.length !== ${literal2(check.value)}`,
-          "invalid_length",
-          `length === ${String(check.value)}`,
-          check.message ?? `expected exactly ${String(check.value)} items`
-        );
-        break;
-      case "nonEmpty":
-        this.issueIf(
-          writer,
-          "value.length === 0",
-          "too_small",
-          "length >= 1",
-          check.message ?? "expected a non-empty array"
-        );
-        break;
-    }
-  }
-  emitTuple(writer, schema) {
-    const items = schema.def.items ?? [];
-    const parsers = items.map((item) => this.parser(item));
-    const restSchema = schema.def.rest;
-    const rest = restSchema ? this.parser(restSchema) : void 0;
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 91) {");
-    writer.indent(() => {
-      writer.line('mismatch(input, state, issues, path, "expected_array", "tuple", "expected tuple");');
-      writer.line("return undefined;");
-    });
-    writer.line("}");
-    writer.line("state.i++;");
-    writer.line("const value = [];");
-    writer.line("let index = 0;");
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 93) {");
-    writer.indent(() => {
-      writer.line("for (;;) {");
-      writer.indent(() => {
-        if (parsers.length > 0) {
-          writer.line("switch (index) {");
-          writer.indent(() => {
-            parsers.forEach((parser, index) => {
-              writer.line(`case ${index}: value[index] = ${parser}(input, state, path + "[${index}]", issues); break;`);
-            });
-            writer.line(
-              `default: value[index] = ${rest ? `${rest}(input, state, path + "[" + index + "]", issues)` : "any(input, state)"};`
-            );
-          });
-          writer.line("}");
-        } else {
-          writer.line(
-            `value[index] = ${rest ? `${rest}(input, state, path + "[" + index + "]", issues)` : "any(input, state)"};`
-          );
-        }
-        writer.line("index++;");
-        writer.line("ws(input, state);");
-        writer.line("const separator = input.charCodeAt(state.i++);");
-        writer.line("if (separator === 93) break;");
-        writer.line('if (separator !== 44) syntax(state, "expected comma or closing bracket");');
-      });
-      writer.line("}");
-    });
-    writer.line("} else state.i++;");
-    const lengthCondition = rest ? `value.length < ${items.length}` : `value.length !== ${items.length}`;
-    const expected = rest ? `length >= ${items.length}` : `length === ${items.length}`;
-    const message = rest ? `expected at least ${items.length} items` : `expected exactly ${items.length} items`;
-    this.issueIf(writer, lengthCondition, "invalid_length", expected, message);
-    parsers.forEach((_, index) => {
-      const missing = missingValue(items[index], this.bind.bind(this));
-      if (missing.kind === "default") {
-        writer.line(`if (value.length <= ${index}) value[${index}] = ${missing.expression};`);
-      } else if (missing.kind === "required") {
-        writer.line(`if (value.length <= ${index}) ${this.missingIssue(items[index], `path + "[${index}]"`)};`);
-      }
-    });
-    writer.line("return value;");
-  }
-  emitObject(writer, schema) {
-    const props = schema.def.props;
-    const keys = Object.keys(props);
-    const parsers = keys.map((key) => this.parser(props[key]));
-    const unknownKeys = schema.def.unknownKeys;
-    const catchallSchema = schema.def.catchall;
-    const catchall2 = catchallSchema ? this.parser(catchallSchema) : void 0;
-    const rebuildKnown = needsBuild(schema) && unknownKeys !== "passthrough" && catchall2 === void 0;
-    const preserveUnknown = unknownKeys === "passthrough" || catchall2 !== void 0 || !needsBuild(schema) && unknownKeys !== "strip";
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 123) {");
-    writer.indent(() => {
-      writer.line('mismatch(input, state, issues, path, "expected_object", "object", "expected object");');
-      writer.line("return undefined;");
-    });
-    writer.line("}");
-    writer.line("state.i++;");
-    writer.line("const value = {};");
-    writer.line("let expectedKey = 0;");
-    keys.forEach((_, index) => {
-      writer.line(`let seen${index} = false, field${index};`);
-    });
-    if (unknownKeys === "strict") writer.line("const seenUnknown = {};");
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 125) {");
-    writer.indent(() => {
-      writer.line("for (;;) {");
-      writer.indent(() => {
-        writer.line("ws(input, state);");
-        writer.line("let handled = false;");
-        if (keys.length > 0) {
-          keys.forEach((key, index) => {
-            const token = `${JSON.stringify(key)}:`;
-            const childPath = `path + (path ? "." : "") + ${literal2(key)}`;
-            writer.line(
-              `${index === 0 ? "if" : "else if"} (expectedKey === ${index} && input.startsWith(${literal2(token)}, state.i)) {`
-            );
-            writer.indent(() => {
-              writer.line(`state.i += ${token.length};`);
-              writer.line(`expectedKey = ${index + 1};`);
-              writer.line(`if (seen${index}) drop(issues, ${childPath});`);
-              writer.line(`seen${index} = true;`);
-              writer.line(`field${index} = ${parsers[index]}(input, state, ${childPath}, issues);`);
-              if (!rebuildKnown) {
-                writer.line(`set(value, ${literal2(key)}, field${index});`);
-              }
-              writer.line("handled = true;");
-            });
-            writer.line("}");
-          });
-        }
-        writer.line("if (!handled) {");
-        writer.indent(() => {
-          writer.line("let key;");
-          writer.line('if (input.charCodeAt(state.i) !== 34) syntax(state, "expected object key");');
-          writer.line("key = string(input, state);");
-          writer.line("ws(input, state);");
-          writer.line('if (input.charCodeAt(state.i++) !== 58) syntax(state, "expected colon");');
-          writer.line("switch (key) {");
-          writer.indent(() => {
-            keys.forEach((key, index) => {
-              const childPath = `path + (path ? "." : "") + ${literal2(key)}`;
-              writer.line(`case ${literal2(key)}:`);
-              writer.indent(() => {
-                writer.line(`expectedKey = ${index + 1};`);
-                writer.line(`if (seen${index}) drop(issues, ${childPath});`);
-                writer.line(`seen${index} = true;`);
-                writer.line(`field${index} = ${parsers[index]}(input, state, ${childPath}, issues);`);
-                if (!rebuildKnown) {
-                  writer.line(`set(value, ${literal2(key)}, field${index});`);
-                }
-                writer.line("break;");
-              });
-            });
-            writer.line("default:");
-            writer.indent(() => {
-              if (unknownKeys === "strict") {
-                writer.line('const unknownPath = path + (path ? "." : "") + key;');
-                writer.line("if (Object.prototype.hasOwnProperty.call(seenUnknown, key)) drop(issues, unknownPath);");
-                writer.line("set(seenUnknown, key, true);");
-                writer.line("const unknown = any(input, state);");
-                writer.line(
-                  'issue(issues, unknownPath, "unknown_key", "known keys only", "object contains unknown keys");'
-                );
-                if (preserveUnknown) writer.line("set(value, key, unknown);");
-              } else if (catchall2) {
-                writer.line(
-                  'const unknownPath = path + (path ? "." : "") + key; if (Object.prototype.hasOwnProperty.call(value, key)) drop(issues, unknownPath);'
-                );
-                writer.line(`set(value, key, ${catchall2}(input, state, unknownPath, issues));`);
-              } else if (preserveUnknown) {
-                writer.line("set(value, key, any(input, state));");
-              } else {
-                writer.line("any(input, state);");
-              }
-              writer.line("break;");
-            });
-          });
-          writer.line("}");
-        });
-        writer.line("}");
-        writer.line("ws(input, state);");
-        writer.line("const separator = input.charCodeAt(state.i++);");
-        writer.line("if (separator === 125) break;");
-        writer.line('if (separator !== 44) syntax(state, "expected comma or closing brace");');
-      });
-      writer.line("}");
-    });
-    writer.line("} else state.i++;");
-    keys.forEach((key, index) => {
-      const childPath = `path + (path ? "." : "") + ${literal2(key)}`;
-      const missing = missingValue(props[key], this.bind.bind(this));
-      writer.line(`if (!seen${index}) {`);
-      writer.indent(() => {
-        if (missing.kind === "default") {
-          writer.line(`field${index} = ${missing.expression};`);
-          writer.line(`seen${index} = true;`);
-          if (!rebuildKnown) writer.line(`set(value, ${literal2(key)}, field${index});`);
-        } else if (missing.kind === "required") {
-          writer.line(this.missingIssue(props[key], childPath));
-        }
-      });
-      writer.line("}");
-    });
-    if (rebuildKnown) {
-      keys.forEach((key, index) => {
-        writer.line(`if (seen${index}) set(value, ${literal2(key)}, field${index});`);
-      });
-    }
-    writer.line("return value;");
-  }
-  emitRecord(writer, schema) {
-    const valueParser = this.parser(schema.def.value);
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 123) {");
-    writer.indent(() => {
-      writer.line('mismatch(input, state, issues, path, "expected_object", "record", "expected a plain object");');
-      writer.line("return undefined;");
-    });
-    writer.line("}");
-    writer.line("state.i++;");
-    writer.line("const value = {};");
-    writer.line("ws(input, state);");
-    writer.line("if (input.charCodeAt(state.i) !== 125) {");
-    writer.indent(() => {
-      writer.line("for (;;) {");
-      writer.indent(() => {
-        writer.line("ws(input, state);");
-        writer.line('if (input.charCodeAt(state.i) !== 34) syntax(state, "expected object key");');
-        writer.line("const key = string(input, state);");
-        writer.line("ws(input, state);");
-        writer.line('if (input.charCodeAt(state.i++) !== 58) syntax(state, "expected colon");');
-        writer.line('const childPath = path + (path ? "." : "") + key;');
-        writer.line("if (Object.prototype.hasOwnProperty.call(value, key)) drop(issues, childPath);");
-        writer.line(`set(value, key, ${valueParser}(input, state, childPath, issues));`);
-        writer.line("ws(input, state);");
-        writer.line("const separator = input.charCodeAt(state.i++);");
-        writer.line("if (separator === 125) break;");
-        writer.line('if (separator !== 44) syntax(state, "expected comma or closing brace");');
-      });
-      writer.line("}");
-    });
-    writer.line("} else state.i++;");
-    writer.line("return value;");
-  }
-  issueIf(writer, condition, code, expected, message) {
-    writer.line(`if (${condition}) issue(issues, path, ${literal2(code)}, ${literal2(expected)}, ${literal2(message)});`);
-  }
-  missingIssue(schema, path) {
-    const failure = missingFailure(schema);
-    return `issue(issues, ${path}, ${literal2(failure.code)}, ${literal2(failure.expected)}, ${literal2(failure.message)}, ${failure.received ? literal2(failure.received) : "undefined"})`;
-  }
-};
-function unsupportedReason(schema, seen) {
-  if (seen.has(schema)) return void 0;
-  seen.add(schema);
-  const current = schema;
-  switch (current.type) {
-    case TypeName.string: {
-      if (current.def.coerce === true) return "coercive string schemas require the generic validator";
-      const checks = current.def.checks ?? [];
-      const unsupported2 = checks.find((check) => ["noEmpty", "normalize"].includes(check.kind));
-      return unsupported2 ? `string check ${unsupported2.kind} has no schema-directed JSON lowering yet` : void 0;
-    }
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.boolean:
-      return current.def.coerce === true ? `coercive ${current.type} schemas require the generic validator` : void 0;
-    case TypeName.null:
-    case TypeName.json:
-    case TypeName.any:
-    case TypeName.unknown:
-      return void 0;
-    case TypeName.literal: {
-      const value = current.def.value;
-      return isJsonPrimitive(value) ? void 0 : "only JSON primitive literals can be decoded directly";
-    }
-    case TypeName.enum:
-      return Object.values(current.def.values).every(isJsonPrimitive) ? void 0 : "only JSON primitive enum values can be decoded directly";
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.readonly:
-      return unsupportedReason(current.def.innerType, seen);
-    case TypeName.lazy:
-      return unsupportedReason(current.def.getter(), seen);
-    case TypeName.array:
-      return unsupportedReason(current.def.element, seen);
-    case TypeName.tuple: {
-      const items = current.def.items ?? [];
-      for (const item of items) {
-        const reason = unsupportedReason(item, seen);
-        if (reason) return reason;
-      }
-      return current.def.rest ? unsupportedReason(current.def.rest, seen) : void 0;
-    }
-    case TypeName.record:
-      return unsupportedReason(current.def.value, seen);
-    case TypeName.object: {
-      const checks = current.def.checks ?? [];
-      if (checks.length !== 0) return "object checks have no schema-directed JSON lowering yet";
-      const props = current.def.props;
-      for (const key of Object.keys(props)) {
-        const reason = unsupportedReason(props[key], seen);
-        if (reason) return `${key}: ${reason}`;
-      }
-      return current.def.catchall ? unsupportedReason(current.def.catchall, seen) : void 0;
-    }
-    default:
-      return `${current.type} schemas require the generic JSON.parse + validator fallback`;
-  }
-}
-function isJsonPrimitive(value) {
-  return value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value);
-}
-function missingValue(schema, bind, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(schema)) return { kind: "required" };
-  seen.add(schema);
-  const current = schema;
-  switch (current.type) {
-    case TypeName.optional:
-    case TypeName.nullish:
-      return { kind: "optional" };
-    case TypeName.default: {
-      const value = current.def.defaultValue;
-      const binding = bind(value);
-      return {
-        kind: "default",
-        expression: typeof value === "function" ? `${binding}()` : binding
-      };
-    }
-    case TypeName.nullable:
-    case TypeName.brand:
-    case TypeName.readonly:
-      return missingValue(current.def.innerType, bind, seen);
-    case TypeName.lazy:
-      return missingValue(current.def.getter(), bind, seen);
-    default:
-      return { kind: "required" };
-  }
-}
-function missingFailure(schema, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(schema))
-    return {
-      code: "invalid_type",
-      expected: "value",
-      message: "expected value"
-    };
-  seen.add(schema);
-  const current = schema;
-  switch (current.type) {
-    case TypeName.optional:
-    case TypeName.nullish:
-      return {
-        code: "invalid_type",
-        expected: "value",
-        message: "expected value"
-      };
-    case TypeName.default:
-    case TypeName.nullable:
-    case TypeName.brand:
-    case TypeName.readonly:
-      return missingFailure(current.def.innerType, seen);
-    case TypeName.lazy:
-      return missingFailure(current.def.getter(), seen);
-    case TypeName.string:
-      return {
-        code: "expected_string",
-        expected: "string",
-        message: requiredMessage(current, "expected string"),
-        received: "undefined"
-      };
-    case TypeName.number:
-    case TypeName.int:
-      return {
-        code: "expected_number",
-        expected: "number",
-        message: requiredMessage(current, "expected number"),
-        received: "undefined"
-      };
-    case TypeName.boolean:
-      return {
-        code: "expected_boolean",
-        expected: "boolean",
-        message: "expected boolean"
-      };
-    case TypeName.null:
-      return {
-        code: "invalid_type",
-        expected: "null",
-        message: "expected null"
-      };
-    case TypeName.literal: {
-      const value = current.def.value;
-      return {
-        code: "invalid_literal",
-        expected: String(value),
-        message: `expected literal ${String(value)}`
-      };
-    }
-    case TypeName.enum: {
-      const values = Object.values(current.def.values);
-      return {
-        code: "invalid_enum",
-        expected: values.join(" | "),
-        message: "expected one of the enum values"
-      };
-    }
-    case TypeName.array:
-      return {
-        code: "expected_array",
-        expected: "array",
-        message: "expected array",
-        received: "undefined"
-      };
-    case TypeName.tuple:
-      return {
-        code: "expected_array",
-        expected: "tuple",
-        message: "expected tuple",
-        received: "undefined"
-      };
-    case TypeName.object:
-      return {
-        code: "expected_object",
-        expected: "object",
-        message: "expected object",
-        received: "undefined"
-      };
-    case TypeName.record:
-      return {
-        code: "expected_object",
-        expected: "record",
-        message: "expected a plain object",
-        received: "undefined"
-      };
-    default:
-      return {
-        code: "invalid_type",
-        expected: current.type,
-        message: `expected ${current.type}`
-      };
-  }
-}
-function requiredMessage(schema, fallback) {
-  return typeof schema.def.requiredMessage === "string" ? schema.def.requiredMessage : fallback;
-}
-function rootHasReadonly2(schema, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(schema)) return false;
-  seen.add(schema);
-  const current = schema;
-  if (current.type === TypeName.readonly) return true;
-  if (current.type === TypeName.lazy) return rootHasReadonly2(current.def.getter(), seen);
-  if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.default || current.type === TypeName.brand) {
-    return rootHasReadonly2(current.def.innerType, seen);
-  }
-  return false;
-}
-function literal2(value) {
-  if (value === void 0) return "undefined";
-  if (typeof value === "number") return String(value);
-  if (value === null || typeof value === "boolean") return String(value);
-  return JSON.stringify(String(value));
-}
-var JSON_RUNTIME_SOURCE = String.raw`function ws(input, state) {
-  let code;
-  while ((code = input.charCodeAt(state.i)) === 32 || code === 10 || code === 13 || code === 9) state.i++;
-}
-function syntax(state, message) {
-  throw new SyntaxError(message + " at position " + state.i);
-}
-function issue(issues, path, code, expected, message, received) {
-  const value = { path, code, expected, message };
-  if (received !== undefined) value.received = received;
-  issues[issues.length] = value;
-}
-function invalidJson(issues, path) {
-  for (let index = issues.length - 1; index >= 0; index--) {
-    const current = issues[index];
-    if (current.path === path && current.code === "invalid_json") return;
-  }
-  issue(issues, path, "invalid_json", "JSON value", "expected a JSON-encodable value");
-}
-function drop(issues, path) {
-  const dot = path + ".";
-  const bracket = path + "[";
-  for (let index = issues.length - 1; index >= 0; index--) {
-    const current = issues[index].path;
-    if (current === path || current.startsWith(dot) || current.startsWith(bracket)) issues.splice(index, 1);
-  }
-}
-function kind(input, state) {
-  ws(input, state);
-  const code = input.charCodeAt(state.i);
-  if (code === 34) return "string";
-  if (code === 123 || code === 91) return "object";
-  if (code === 116 || code === 102) return "boolean";
-  if (code === 110) return "object";
-  if (code === 45 || (code >= 48 && code <= 57)) return "number";
-  return "undefined";
-}
-function mismatch(input, state, issues, path, code, expected, message) {
-  const received = kind(input, state);
-  any(input, state);
-  issue(issues, path, code, expected, message, received);
-}
-function string(input, state) {
-  let index = state.i + 1;
-  let start = index;
-  let output = "";
-  for (;;) {
-    const code = input.charCodeAt(index);
-    if (code === 34) {
-      output += input.slice(start, index);
-      state.i = index + 1;
-      return output;
-    }
-    if (code === 92) {
-      output += input.slice(start, index);
-      const escape = input.charCodeAt(++index);
-      if (escape === 34 || escape === 92 || escape === 47) output += String.fromCharCode(escape);
-      else if (escape === 98) output += "\b";
-      else if (escape === 102) output += "\f";
-      else if (escape === 110) output += "\n";
-      else if (escape === 114) output += "\r";
-      else if (escape === 116) output += "\t";
-      else if (escape === 117) {
-        const hex = input.slice(index + 1, index + 5);
-        if (!/^[0-9a-fA-F]{4}$/.test(hex)) { state.i = index; syntax(state, "invalid unicode escape"); }
-        output += String.fromCharCode(Number.parseInt(hex, 16));
-        index += 4;
-      } else { state.i = index; syntax(state, "invalid escape"); }
-      index++;
-      start = index;
-      continue;
-    }
-    if (code < 32 || Number.isNaN(code)) { state.i = index; syntax(state, "unterminated string"); }
-    index++;
-  }
-}
-function number(input, state) {
-  const start = state.i;
-  let index = start;
-  if (input.charCodeAt(index) === 45) index++;
-  let code = input.charCodeAt(index);
-  if (code === 48) {
-    index++;
-    code = input.charCodeAt(index);
-    if (code >= 48 && code <= 57) { state.i = index; syntax(state, "invalid number"); }
-  } else {
-    if (code < 49 || code > 57) { state.i = index; syntax(state, "invalid number"); }
-    do { code = input.charCodeAt(++index); } while (code >= 48 && code <= 57);
-  }
-  if (code === 46) {
-    code = input.charCodeAt(++index);
-    if (code < 48 || code > 57) { state.i = index; syntax(state, "invalid number"); }
-    do { code = input.charCodeAt(++index); } while (code >= 48 && code <= 57);
-  }
-  if (code === 101 || code === 69) {
-    code = input.charCodeAt(++index);
-    if (code === 43 || code === 45) code = input.charCodeAt(++index);
-    if (code < 48 || code > 57) { state.i = index; syntax(state, "invalid number"); }
-    do { code = input.charCodeAt(++index); } while (code >= 48 && code <= 57);
-  }
-  state.i = index;
-  return Number(input.slice(start, index));
-}
-function readNull(input, state) {
-  if (!input.startsWith("null", state.i)) syntax(state, "invalid null");
-  state.i += 4;
-}
-function set(target, key, value) {
-  if (key === "__proto__") Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true });
-  else target[key] = value;
-}
-function any(input, state, jsonIssues, jsonPath) {
-  ws(input, state);
-  const code = input.charCodeAt(state.i);
-  if (code === 34) return string(input, state);
-  if (code === 45 || (code >= 48 && code <= 57)) {
-    const value = number(input, state);
-    if (jsonIssues !== undefined && !Number.isFinite(value)) invalidJson(jsonIssues, jsonPath);
-    return value;
-  }
-  if (code === 116) {
-    if (!input.startsWith("true", state.i)) syntax(state, "invalid token");
-    state.i += 4; return true;
-  }
-  if (code === 102) {
-    if (!input.startsWith("false", state.i)) syntax(state, "invalid token");
-    state.i += 5; return false;
-  }
-  if (code === 110) { readNull(input, state); return null; }
-  if (code === 91) {
-    state.i++;
-    const value = [];
-    ws(input, state);
-    if (input.charCodeAt(state.i) === 93) { state.i++; return value; }
-    for (;;) {
-      value[value.length] = any(input, state, jsonIssues, jsonPath);
-      ws(input, state);
-      const separator = input.charCodeAt(state.i++);
-      if (separator === 93) return value;
-      if (separator !== 44) syntax(state, "expected comma or closing bracket");
-    }
-  }
-  if (code === 123) {
-    state.i++;
-    const value = {};
-    ws(input, state);
-    if (input.charCodeAt(state.i) === 125) { state.i++; return value; }
-    for (;;) {
-      ws(input, state);
-      if (input.charCodeAt(state.i) !== 34) syntax(state, "expected object key");
-      const key = string(input, state);
-      ws(input, state);
-      if (input.charCodeAt(state.i++) !== 58) syntax(state, "expected colon");
-      set(value, key, any(input, state, jsonIssues, jsonPath));
-      ws(input, state);
-      const separator = input.charCodeAt(state.i++);
-      if (separator === 125) return value;
-      if (separator !== 44) syntax(state, "expected comma or closing brace");
-    }
-  }
-  syntax(state, "unexpected token");
-}`;
-
-// ../../packages/jit/src/compiler/mapper/build-mapper-plan.ts
-function buildMapperPlan(sourceSchema, targetSchema, overrides = {}) {
-  const source = expectObjectSchema(sourceSchema, "mapper source");
-  const target = expectObjectSchema(targetSchema, "mapper target");
-  const bindings = [];
-  const bindingNames = [];
-  const bind = (value) => {
-    const name = `__m${bindings.length}`;
-    bindings[bindings.length] = value;
-    bindingNames[bindingNames.length] = name;
-    return name;
-  };
-  for (const key of Object.keys(overrides)) {
-    if (!(key in target.def.props)) {
-      throw new JITError("INVALID_MAPPER", `mapper override references unknown target field ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
-  const fields = planObjectFields(source, target, overrides, bind, []);
-  return { fields, bindingNames, bindings };
-}
-function planObjectFields(source, target, overrides, bind, path) {
-  const fields = [];
-  for (const key of Object.keys(target.def.props)) {
-    const targetProp = target.def.props[key];
-    const fieldPath = [...path, key];
-    const override = overrides[key];
-    if (override !== void 0) {
-      fields[fields.length] = { key, source: planOverride(source, key, override, bind, fieldPath) };
-      continue;
-    }
-    const planned = planAutoMatch(source, key, targetProp, bind, fieldPath);
-    if (planned) fields[fields.length] = { key, source: planned };
-  }
-  return fields;
-}
-function planOverride(source, key, override, bind, path) {
-  if (typeof override === "function") {
-    return { kind: "computed", binding: bind(override) };
-  }
-  if (typeof override !== "object" || override === null) {
-    throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must be a function or object`, {
-      path
-    });
-  }
-  if (override.via !== void 0) {
-    if (typeof override.from !== "string") {
-      throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} with via requires from`, {
-        path
-      });
-    }
-    expectSourceField(source, override.from, path);
-    return { kind: "via", from: override.from, binding: bind(override.via) };
-  }
-  if (override.from !== void 0) {
-    expectSourceField(source, override.from, path);
-    const planned = planAutoMatch(source, override.from, void 0, bind, path);
-    if (!planned) {
-      throw new JITError(
-        "INVALID_MAPPER",
-        `mapper cannot copy source field ${JSON.stringify(override.from)}; use via to convert it`,
-        { path }
-      );
-    }
-    return planned;
-  }
-  if ("default" in override) {
-    const from3 = key in source.def.props ? key : void 0;
-    return { kind: "default", from: from3, binding: bind(override.default) };
-  }
-  throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must define from, via, or default`, {
-    path
-  });
-}
-function planAutoMatch(source, from3, targetProp, bind, path) {
-  const sourceProp = source.def.props[from3];
-  if (sourceProp === void 0) {
-    if (targetProp !== void 0 && resolveWrappers(targetProp).optional) return void 0;
-    throw new JITError(
-      "INVALID_MAPPER",
-      `mapper target field ${JSON.stringify(path[path.length - 1])} has no source match and no override`,
-      { path }
-    );
-  }
-  const sourceResolved = resolveWrappers(sourceProp);
-  const targetResolved = targetProp === void 0 ? void 0 : resolveWrappers(targetProp);
-  if (targetResolved && sourceResolved.optional && !targetResolved.optional) {
-    throw new JITError(
-      "INVALID_MAPPER",
-      `mapper source field ${JSON.stringify(from3)} is optional but the target field is required; use default or via`,
-      { path }
-    );
-  }
-  const sourceBase = sourceResolved.base;
-  const targetBase = targetResolved?.base;
-  if (sourceBase.type === TypeName.object && (targetBase === void 0 || targetBase.type === TypeName.object)) {
-    const nestedTarget = targetBase ?? sourceBase;
-    const fields = planObjectFields(sourceBase, nestedTarget, {}, bind, path);
-    return { kind: "copy-object", from: from3, fromOptional: sourceResolved.optional, fields };
-  }
-  if (sourceBase.type === TypeName.array && (targetBase === void 0 || targetBase.type === TypeName.array)) {
-    const sourceElement = resolveWrappers(sourceBase.def.element).base;
-    const targetElement = targetBase === void 0 ? sourceElement : resolveWrappers(targetBase.def.element).base;
-    if (sourceElement.type === TypeName.object && targetElement.type === TypeName.object) {
-      const element = planObjectFields(sourceElement, targetElement, {}, bind, path);
-      return { kind: "copy-array", from: from3, fromOptional: sourceResolved.optional, element };
-    }
-    if (isCompatibleBase(sourceElement.type, targetElement.type)) {
-      return { kind: "copy-array", from: from3, fromOptional: sourceResolved.optional, element: void 0 };
-    }
-    if (targetResolved?.optional) return void 0;
-    throw new JITError("INVALID_MAPPER", `mapper array field ${JSON.stringify(from3)} has incompatible element types`, {
-      path
-    });
-  }
-  if (targetBase === void 0 || isCompatibleBase(sourceBase.type, targetBase.type)) {
-    return { kind: "copy", from: from3, fromOptional: sourceResolved.optional };
-  }
-  if (targetResolved?.optional) return void 0;
-  throw new JITError(
-    "INVALID_MAPPER",
-    `mapper field ${JSON.stringify(from3)} has type ${sourceBase.type} but the target expects ${targetBase.type}`,
-    { path }
-  );
-}
-function isCompatibleBase(source, target) {
-  if (source === target) return true;
-  if (source === TypeName.int && target === TypeName.number) return true;
-  return false;
-}
-function expectSourceField(source, from3, path) {
-  if (!(from3 in source.def.props)) {
-    throw new JITError("INVALID_MAPPER", `mapper override references unknown source field ${JSON.stringify(from3)}`, {
-      path
-    });
-  }
-}
-function expectObjectSchema(schema, label) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.object) {
-    throw new JITError("INVALID_MAPPER", `${label} must be an object schema`);
-  }
-  return resolved;
-}
-
-// ../../packages/jit/src/compiler/mapper/build-mapper-ir.ts
-var SOURCE = irVar("source");
-var LIST = irVar("list");
-var LEN = irVar("len");
-var OUT = irVar("out");
-var INDEX = irVar("i");
-function buildMapperIR(fields) {
-  const prelude = [];
-  const output = objectLiteral(buildEntries(fields, SOURCE, "f", prelude));
-  const map4 = {
-    kind: "program",
-    params: [SOURCE],
-    body: [...prelude, { kind: "return", value: output }]
-  };
-  const many = {
-    kind: "program",
-    params: [LIST],
-    body: [
-      { kind: "assign", target: LEN, expr: loadProp(LIST, "length") },
-      { kind: "assign", target: OUT, expr: construct("Array", [LEN]) },
-      forRange(INDEX, LEN, [
-        { kind: "assign", target: SOURCE, expr: loadIndex(LIST, INDEX) },
-        ...prelude,
-        store(loadIndex(OUT, INDEX), output)
-      ]),
-      { kind: "return", value: OUT }
-    ]
-  };
-  return { map: map4, many };
-}
-function buildEntries(fields, base, prefix, prelude) {
-  return fields.map((field) => ({
-    key: field.key,
-    value: buildFieldValue(field, base, `${prefix}_${identifier(field.key)}`, prelude)
-  }));
-}
-function buildFieldValue(field, base, prefix, prelude) {
-  const source = field.source;
-  switch (source.kind) {
-    case "copy":
-      return loadProp(base, source.from);
-    case "copy-object": {
-      if (!source.fromOptional) {
-        return objectLiteral(buildEntries(source.fields, loadProp(base, source.from), prefix, prelude));
-      }
-      const src = irVar(`${prefix}_src`);
-      const value = irVar(`${prefix}_val`);
-      const inner = [];
-      const nested = objectLiteral(buildEntries(source.fields, src, prefix, inner));
-      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
-        kind: "if",
-        test: notStrictEqual(src, literal(void 0)),
-        then: [...inner, store(value, nested)]
-      });
-      return value;
-    }
-    case "copy-array": {
-      const src = irVar(`${prefix}_src`);
-      const len = irVar(`${prefix}_len`);
-      const out = irVar(`${prefix}_out`);
-      const index = irVar(`${prefix}_i`);
-      const item = irVar(`${prefix}_item`);
-      const inner = [];
-      const element = source.element === void 0 ? item : objectLiteral(buildEntries(source.element, item, prefix, inner));
-      const loop = [
-        { kind: "assign", target: len, expr: loadProp(src, "length") },
-        { kind: "assign", target: out, expr: construct("Array", [len]) },
-        forRange(index, len, [
-          { kind: "assign", target: item, expr: loadIndex(src, index) },
-          ...inner,
-          store(loadIndex(out, index), element)
-        ])
-      ];
-      if (!source.fromOptional) {
-        prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, ...loop);
-        return out;
-      }
-      const value = irVar(`${prefix}_val`);
-      prelude.push({ kind: "assign", target: src, expr: loadProp(base, source.from) }, letDecl(value), {
-        kind: "if",
-        test: notStrictEqual(src, literal(void 0)),
-        then: [...loop, store(value, out)]
-      });
-      return value;
-    }
-    case "via":
-      return { kind: "call", callee: irVar(source.binding), args: [loadProp(SOURCE, source.from), SOURCE] };
-    case "computed":
-      return { kind: "call", callee: irVar(source.binding), args: [SOURCE] };
-    case "default": {
-      if (source.from === void 0) return irVar(source.binding);
-      const value = irVar(`${prefix}_val`);
-      prelude.push(letDecl(value, loadProp(SOURCE, source.from)), {
-        kind: "if",
-        test: strictEqual(value, literal(void 0)),
-        then: [store(value, irVar(source.binding))]
-      });
-      return value;
-    }
-  }
-}
-function identifier(key) {
-  return key.replace(/[^$_a-zA-Z0-9]/g, "_").replace(/^[^$_a-zA-Z]/, "_");
-}
-
-// ../../packages/jit/src/compiler/mapper.ts
-var MAPPER_OPS = ["map", "many"];
-function emitMapperSource(sourceSchema, targetSchema, overrides = {}, operations = MAPPER_OPS) {
-  return emitMapper(buildMapperPlan(sourceSchema, targetSchema, overrides), normalizeMapperOps(operations));
-}
-function createMapperFacade(sourceSchema, targetSchema, overrides = {}, options) {
-  const plan = buildMapperPlan(sourceSchema, targetSchema, overrides);
-  const selections = /* @__PURE__ */ new Map();
-  const select = (operations) => {
-    const normalized = normalizeMapperOps(operations);
-    const key = normalized.join(",");
-    const cached = selections.get(key);
-    if (cached) return cached;
-    const selection = compileMapperPlanSelection(
-      sourceSchema,
-      targetSchema,
-      plan,
-      normalized,
-      options
-    );
-    selections.set(key, selection);
-    return selection;
-  };
-  const target = {
-    get(...operations) {
-      return select(operations);
-    }
-  };
-  for (const operation of MAPPER_OPS) {
-    Object.defineProperty(target, operation, {
-      configurable: false,
-      enumerable: true,
-      get() {
-        return select([operation])[operation];
-      }
-    });
-  }
-  const facade = Object.freeze(target);
-  registerMapperArtifact(facade, plan, MAPPER_OPS);
-  return facade;
-}
-function compileMapperPlanSelection(sourceSchema, targetSchema, plan, operations, options) {
-  const normalized = normalizeMapperOps(operations);
-  const operationKey = normalized.join(",");
-  if (normalized.length === 0) {
-    const empty = Object.freeze({});
-    registerMapperArtifact(empty, plan, normalized, "{}");
-    return empty;
-  }
-  const template = getCompileCached(
-    sourceSchema,
-    `mapper:${targetKey(targetSchema)}:${operationKey}:${serializeFields(plan.fields)}`,
-    () => {
-      const source = emitMapper(plan, normalized);
-      return {
-        source,
-        create: globalThis.Function(...plan.bindingNames, `return ${source};`)
-      };
-    },
-    options
-  );
-  const compiled = Object.freeze(template.create(...plan.bindings));
-  registerMapperArtifact(compiled, plan, normalized, template.source);
-  const compiledOperations = compiled;
-  for (const operation of normalized) {
-    const compiledOperation = compiledOperations[operation];
-    if (compiledOperation) {
-      registerMapperArtifact(compiledOperation, plan, [operation], emitMapperFunction(plan, operation));
-    }
-  }
-  return compiled;
-}
-function emitMapper(plan, operations) {
-  const programs = buildMapperIR(plan.fields);
-  const writer = new CodeWriter();
-  writer.line("{");
-  writer.indent(() => {
-    operations.forEach((operation, index) => {
-      emitMapperFunctionBody(writer, programs, operation, index < operations.length - 1 ? "," : "");
-    });
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function emitMapperFunction(plan, operation) {
-  const programs = buildMapperIR(plan.fields);
-  const writer = new CodeWriter();
-  emitMapperFunctionBody(writer, programs, operation, "", false);
-  return writer.toString();
-}
-function emitMapperFunctionBody(writer, programs, operation, suffix, property = true) {
-  const parameter = operation === "map" ? "source" : "list";
-  const prefix = property ? `${operation}: ` : "";
-  writer.line(`${prefix}function ${operation}(${parameter}) {`);
-  writer.indent(() => {
-    for (const node of programs[operation].body) emitNode(writer, node);
-  });
-  writer.line(`}${suffix}`);
-}
-function registerMapperArtifact(value, plan, operations, source) {
-  registerArtifact(value, {
-    kind: "mapper",
-    get source() {
-      return source ?? emitMapper(plan, operations);
-    },
-    bindingNames: plan.bindingNames,
-    bindingValues: plan.bindings
-  });
-}
-function normalizeMapperOps(operations) {
-  for (const operation of operations) {
-    if (!MAPPER_OPS.includes(operation)) {
-      throw new JITError("INVALID_OPERATION", `unknown mapper operation: ${String(operation)}`);
-    }
-  }
-  return MAPPER_OPS.filter((operation) => operations.includes(operation));
-}
-var targetKeys = /* @__PURE__ */ new WeakMap();
-var targetKeyCounter = 0;
-function targetKey(schema) {
-  let key = targetKeys.get(schema);
-  if (key === void 0) {
-    key = ++targetKeyCounter;
-    targetKeys.set(schema, key);
-  }
-  return key;
-}
-function serializeFields(fields) {
-  return fields.map(serializeField).join(";");
-}
-function serializeField(field) {
-  const source = field.source;
-  switch (source.kind) {
-    case "copy":
-      return `${field.key}<c:${source.from}:${source.fromOptional ? "?" : ""}>`;
-    case "copy-object":
-      return `${field.key}<o:${source.from}:${source.fromOptional ? "?" : ""}[${serializeFields(source.fields)}]>`;
-    case "copy-array":
-      return `${field.key}<a:${source.from}:${source.fromOptional ? "?" : ""}[${source.element ? serializeFields(source.element) : "*"}]>`;
-    case "via":
-      return `${field.key}<v:${source.from}:${source.binding}>`;
-    case "computed":
-      return `${field.key}<x:${source.binding}>`;
-    case "default":
-      return `${field.key}<d:${source.from ?? ""}:${source.binding}>`;
-  }
-}
-
-// ../../packages/jit/src/compiler/mask.ts
-function emitMaskSource(schema) {
-  return emitScrub(schema, selectPii).source;
-}
-function compileMask(schema, options) {
-  return getCompileCached(
-    schema,
-    "mask",
-    () => {
-      const emitted = emitScrub(schema, selectPii);
-      const compiled = globalThis.Function(
-        `return ${emitted.source.replace("function scrub", "function mask")};`
-      )();
-      registerArtifact(compiled, {
-        kind: "operation",
-        schema,
-        op: "mask"
-      });
-      return compiled;
-    },
-    options
-  );
-}
-function selectPii(base) {
-  const strategy = base.def.pii;
-  if (strategy === void 0) return void 0;
-  const isString = base.type === TypeName.string;
-  const isNumber = base.type === TypeName.number || base.type === TypeName.int;
-  if (!isString && !isNumber) {
-    throw new JITError("UNSUPPORTED_SCHEMA", `pii masking supports string and number fields; found ${base.type}`);
-  }
-  switch (strategy) {
-    case "redact":
-      return () => isString ? '"***"' : "0";
-    case "mask":
-      return (value) => isString ? `(${value}.length > 4 ? "***" + ${value}.slice(-4) : "***")` : "0";
-    case "hash":
-      return (value, writer, nextVar4) => {
-        if (!isString) return `(Math.imul(2166136261 ^ ${value}, 16777619) >>> 0)`;
-        const hash4 = nextVar4("h");
-        const index = nextVar4("i");
-        writer.line(`let ${hash4} = 2166136261;`);
-        writer.line(`for (let ${index} = 0; ${index} < ${value}.length; ${index}++) {`);
-        writer.indent(() => {
-          writer.line(`${hash4} = Math.imul(${hash4} ^ ${value}.charCodeAt(${index}), 16777619);`);
-        });
-        writer.line("}");
-        return `(${hash4} >>> 0).toString(16)`;
-      };
-  }
-}
-
-// ../../packages/jit/src/compiler/object-ops.ts
-function emitMergeSource(schema) {
-  const writer = new CodeWriter();
-  const objectSchema = expectObjectSchema2(schema, "compileMerge");
-  writer.line("function merge(left, right) {");
-  writer.indent(() => {
-    emitMergeTo(writer, createEmitState(), objectSchema, "left", "right", "out");
-    writer.line("return out;");
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function compileMerge(schema) {
-  return globalThis.Function(`return ${emitMergeSource(schema)};`)();
-}
-function emitPickSource(schema, keys) {
-  const objectSchema = expectObjectSchema2(schema, "compilePick");
-  const selectedKeys = validateObjectKeys(objectSchema, keys, "compilePick");
-  return emitProjectSource("pick", selectedKeys);
-}
-function compilePick(schema, keys) {
-  return globalThis.Function(`return ${emitPickSource(schema, keys)};`)();
-}
-function emitOmitSource(schema, keys) {
-  const objectSchema = expectObjectSchema2(schema, "compileOmit");
-  const omitted = new Set(validateObjectKeys(objectSchema, keys, "compileOmit"));
-  const selectedKeys = Object.keys(objectSchema.def.props).filter((key) => !omitted.has(key));
-  return emitProjectSource("omit", selectedKeys);
-}
-function compileOmit(schema, keys) {
-  return globalThis.Function(`return ${emitOmitSource(schema, keys)};`)();
-}
-function emitTransformSource(schema, transforms) {
-  const objectSchema = expectObjectSchema2(schema, "compileTransform");
-  const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
-  const transformNames = new Map(transformKeys.map((key, index) => [key, `__t${index}`]));
-  const entries = Object.keys(objectSchema.def.props).map((key) => {
-    const source = emitPropertyAccess("value", key);
-    const transformName = transformNames.get(key);
-    const value = transformName ? `${transformName}(${source}, value)` : source;
-    return `${emitLiteral(key)}: ${value}`;
-  });
-  const writer = new CodeWriter();
-  writer.line("function transform(value) {");
-  writer.indent(() => writer.line(`return { ${entries.join(", ")} };`));
-  writer.line("}");
-  return writer.toString();
-}
-function compileTransform(schema, transforms) {
-  const objectSchema = expectObjectSchema2(schema, "compileTransform");
-  const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
-  const bindings = transformKeys.map((key) => transforms[key]);
-  return globalThis.Function(
-    ...transformKeys.map((_, index) => `__t${index}`),
-    `return ${emitTransformSource(schema, transforms)};`
-  )(...bindings);
-}
-function emitNormalizeSource(schema, key) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.array) {
-    throw new JITError("INVALID_OPERATION", "compileNormalize expects an array schema");
-  }
-  const element = resolveWrappers(resolved.def.element).base;
-  if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "compileNormalize expects an array of object schema");
-  }
-  const objectSchema = element;
-  const normalizeKey2 = key ?? resolveNormalizeKey(schema);
-  if (!normalizeKey2) {
-    throw new JITError("INVALID_OPERATION", "compileNormalize requires a key or a .keyed()/index/entity hint");
-  }
-  validateObjectKeys(objectSchema, [normalizeKey2], "compileNormalize");
-  const idAccess = emitPropertyAccess("item", normalizeKey2);
-  const writer = new CodeWriter();
-  writer.line("function normalize(value) {");
-  writer.indent(() => {
-    writer.line("const len = value.length;");
-    writer.line("const byId = {};");
-    writer.line("const ids = new Array(len);");
-    writer.line("for (let i = 0; i < len; i++) {");
-    writer.indent(() => {
-      writer.line("const item = value[i];");
-      writer.line(`const id = ${idAccess};`);
-      writer.line("ids[i] = id;");
-      writer.line("byId[id] = item;");
-    });
-    writer.line("}");
-    writer.line("return { byId, ids };");
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function compileNormalize(schema, key) {
-  return globalThis.Function(`return ${emitNormalizeSource(schema, key)};`)();
-}
-function emitGroupBySource(schema, key) {
-  const { objectSchema, key: groupKey } = expectArrayObjectKey(schema, key, "compileGroupBy", resolveGroupByKey);
-  validateObjectKeys(objectSchema, [groupKey], "compileGroupBy");
-  const keyAccess = emitPropertyAccess("item", groupKey);
-  const writer = new CodeWriter();
-  writer.line("function groupBy(value) {");
-  writer.indent(() => {
-    writer.line("const out = {};");
-    writer.line("for (let i = 0, len = value.length; i < len; i++) {");
-    writer.indent(() => {
-      writer.line("const item = value[i];");
-      writer.line(`const key = ${keyAccess};`);
-      writer.line("let group = out[key];");
-      writer.line("if (group === undefined) {");
-      writer.indent(() => {
-        writer.line("group = [];");
-        writer.line("out[key] = group;");
-      });
-      writer.line("}");
-      writer.line("group[group.length] = item;");
-    });
-    writer.line("}");
-    writer.line("return out;");
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function compileGroupBy(schema, key) {
-  return globalThis.Function(`return ${emitGroupBySource(schema, key)};`)();
-}
-function emitSortBySource(schema, key, direction) {
-  const hints = resolveHints(schema);
-  const hintKey = typeof hints.order?.key === "string" ? hints.order.key : resolveNormalizeKey(schema);
-  const sortKey = key ?? hintKey;
-  if (!sortKey) {
-    throw new JITError("INVALID_OPERATION", "compileSortBy requires a key or a .ordered()/.keyed()/index/entity hint");
-  }
-  const { objectSchema } = expectArrayObjectKey(schema, sortKey, "compileSortBy", () => sortKey);
-  const sortDirection = direction ?? (typeof hints.order?.direction === "string" ? hints.order.direction : "asc");
-  const leftAccess = emitPropertyAccess("left", sortKey);
-  const rightAccess = emitPropertyAccess("right", sortKey);
-  const writer = new CodeWriter();
-  validateObjectKeys(objectSchema, [sortKey], "compileSortBy");
-  writer.line("function sortBy(value) {");
-  writer.indent(() => {
-    writer.line("const out = value.slice();");
-    writer.line("out.sort((left, right) => {");
-    writer.indent(() => {
-      writer.line(`const leftValue = ${leftAccess};`);
-      writer.line(`const rightValue = ${rightAccess};`);
-      writer.line("if (leftValue === rightValue) return 0;");
-      if (sortDirection === "desc") {
-        writer.line("return leftValue < rightValue ? 1 : -1;");
-      } else {
-        writer.line("return leftValue < rightValue ? -1 : 1;");
-      }
-    });
-    writer.line("});");
-    writer.line("return out;");
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function compileSortBy(schema, key, direction) {
-  return globalThis.Function(`return ${emitSortBySource(schema, key, direction)};`)();
-}
-function emitUniqueBySource(schema, key) {
-  const { objectSchema, key: uniqueKey } = expectArrayObjectKey(schema, key, "compileUniqueBy", resolveNormalizeKey);
-  validateObjectKeys(objectSchema, [uniqueKey], "compileUniqueBy");
-  const keyAccess = emitPropertyAccess("item", uniqueKey);
-  const writer = new CodeWriter();
-  writer.line("function uniqueBy(value) {");
-  writer.indent(() => {
-    writer.line("const seen = new Set();");
-    writer.line("const out = [];");
-    writer.line("for (let i = 0, len = value.length; i < len; i++) {");
-    writer.indent(() => {
-      writer.line("const item = value[i];");
-      writer.line(`const key = ${keyAccess};`);
-      writer.line("if (!seen.has(key)) {");
-      writer.indent(() => {
-        writer.line("seen.add(key);");
-        writer.line("out[out.length] = item;");
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-    writer.line("return out;");
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function compileUniqueBy(schema, key) {
-  return globalThis.Function(`return ${emitUniqueBySource(schema, key)};`)();
-}
-function emitMergeTo(writer, state, schema, left, right, target) {
-  const entries = [];
-  const changed = [];
-  writer.line(`let ${target} = ${left};`);
-  writer.line(`if (${right} !== undefined && !Object.is(${left}, ${right})) {`);
-  writer.indent(() => {
-    for (const key of Object.keys(schema.def.props)) {
-      const propSchema = schema.def.props[key];
-      const next = state.nextVar(`next_${key}`);
-      emitMergeProp(writer, state, propSchema, emitPropertyAccess(left, key), emitPropertyAccess(right, key), next);
-      entries.push(`${emitLiteral(key)}: ${next}`);
-      changed.push(`!Object.is(${next}, ${emitPropertyAccess(left, key)})`);
-    }
-    writer.line(`if (${changed.join(" || ")}) {`);
-    writer.indent(() => writer.line(`${target} = { ${entries.join(", ")} };`));
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitMergeProp(writer, state, schema, left, right, target) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.object) {
-    writer.line(`const ${target} = ${right} !== undefined ? ${right} : ${left};`);
-    return;
-  }
-  writer.line(`let ${target} = ${left};`);
-  writer.line(`if (${right} !== undefined && !Object.is(${left}, ${right})) {`);
-  writer.indent(() => {
-    writer.line(`if (${left} == null || ${right} == null) {`);
-    writer.indent(() => writer.line(`${target} = ${right};`));
-    writer.line("} else {");
-    writer.indent(() => {
-      const merged = state.nextVar(`${target}_merged`);
-      emitMergeTo(writer, state, resolved, left, right, merged);
-      writer.line(`${target} = ${merged};`);
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitProjectSource(name, selectedKeys) {
-  const entries = selectedKeys.map((key) => `${emitLiteral(key)}: ${emitPropertyAccess("value", key)}`);
-  const writer = new CodeWriter();
-  writer.line(`function ${name}(value) {`);
-  writer.indent(() => writer.line(`return { ${entries.join(", ")} };`));
-  writer.line("}");
-  return writer.toString();
-}
-function expectObjectSchema2(schema, compilerName) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} expects an object schema`);
-  }
-  return resolved;
-}
-function validateObjectKeys(schema, keys, compilerName) {
-  const props = schema.def.props;
-  for (const key of keys) {
-    if (!(key in props)) {
-      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
-  return [...keys];
-}
-function resolveNormalizeKey(schema) {
-  const hints = resolveHints(schema);
-  const key = hints.collection?.uniqueBy ?? hints.index?.key ?? hints.collection?.identify ?? hints.entity?.key;
-  return typeof key === "string" ? key : void 0;
-}
-function resolveGroupByKey(schema) {
-  const hints = resolveHints(schema);
-  const key = hints.collection?.groupBy ?? hints.index?.key ?? hints.collection?.identify ?? hints.entity?.key;
-  return typeof key === "string" ? key : void 0;
-}
-function expectArrayObjectKey(schema, key, compilerName, resolveKey) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.array) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array schema`);
-  }
-  const element = resolveWrappers(resolved.def.element).base;
-  if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array of object schema`);
-  }
-  const resolvedKey = key ?? resolveKey(schema);
-  if (!resolvedKey) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} requires a key or a compatible array hint`);
-  }
-  return { objectSchema: element, key: resolvedKey };
-}
-
-// ../../packages/jit/src/compiler/emitter/emit-query.ts
-function emitQuery(program) {
-  const writer = new CodeWriter();
-  const params = program.params.map((param2) => param2.name).join(", ");
-  writer.line(`function query(${params}) {`);
-  writer.indent(() => {
-    for (const node of program.body) emitNode(writer, node);
-  });
-  writer.line("}");
-  return writer.toString();
-}
-
-// ../../packages/jit/src/compiler/ir/builders/build-query-ir.ts
-var VALUE = irVar("value");
-var PARAMS = irVar("params");
-var LEN2 = irVar("len");
-var OUT2 = irVar("out");
-var CURSOR = irVar("j");
-var INDEX2 = irVar("i");
-var ITEM = irVar("item");
-var ENTRY = irVar("entry");
-var SEEN = irVar("seen");
-var UNIQUE_KEY = irVar("uniqueKey");
-var COLLECT_KEY = irVar("collectKey");
-var GROUP = irVar("group");
-var PROJECTED = irVar("projected");
-var COMPARE_OPERATORS = {
-  eq: "strictEqual",
-  neq: "notStrictEqual",
-  gt: "greaterThan",
-  gte: "greaterThanOrEqual",
-  lt: "lessThan",
-  lte: "lessThanOrEqual"
-};
-function buildQueryIR(target, plan, options = {}) {
-  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
-  return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
-}
-function buildArrayQuery(target, plan) {
-  if (shouldProjectAfterOrder(plan)) return buildArrayQueryWithPostOrderProjection(target, plan);
-  const selected = buildProjection(plan.select);
-  const body = [
-    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
-    letDecl(CURSOR, literal(0)),
-    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, selected)])),
-    store(loadProp(OUT2, "length"), CURSOR)
-  ];
-  if (plan.orderBy) body.push(sortByKey(OUT2, plan.orderBy.key, plan.orderBy.direction));
-  body.push({ kind: "return", value: OUT2 });
-  return body;
-}
-function buildArrayQueryWithPostOrderProjection(target, plan) {
-  const orderBy = plan.orderBy;
-  const body = [
-    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
-    letDecl(CURSOR, literal(0)),
-    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, ITEM)])),
-    store(loadProp(OUT2, "length"), CURSOR)
-  ];
-  if (orderBy) body.push(sortByKey(OUT2, orderBy.key, orderBy.direction));
-  body.push(
-    { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },
-    forRange(INDEX2, CURSOR, [
-      { kind: "assign", target: ITEM, expr: loadIndex(OUT2, INDEX2) },
-      store(loadIndex(PROJECTED, INDEX2), buildProjection(plan.select))
-    ]),
-    { kind: "return", value: PROJECTED }
-  );
-  return body;
-}
-function buildCollectedQuery(target, plan) {
-  const collector = plan.collector;
-  if (!collector) return [];
-  const selected = buildProjection(plan.select);
-  const collect = [{ kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, collector.key) }];
-  if (collector.kind === "keyed") {
-    collect.push(exprStmt(call(loadProp(OUT2, "set"), [COLLECT_KEY, selected])));
-  } else {
-    collect.push(
-      letDecl(GROUP, loadIndex(OUT2, COLLECT_KEY)),
-      {
-        kind: "if",
-        test: strictEqual(GROUP, literal(void 0)),
-        then: [store(GROUP, arrayLiteral()), store(loadIndex(OUT2, COLLECT_KEY), GROUP)]
-      },
-      store(loadIndex(GROUP, loadProp(GROUP, "length")), selected)
-    );
-  }
-  const outInitializer = collector.kind === "keyed" ? construct("Map") : call(loadProp(irVar("Object"), "create"), [literal(null)]);
-  return [
-    ...buildLoopHeader(target, plan, outInitializer),
-    buildInputLoop(target, buildGuardedBody(plan, collect)),
-    { kind: "return", value: OUT2 }
-  ];
-}
-var ACC = irVar("acc");
-var ACC_COUNT = irVar("n");
-function buildAggregateQuery(target, plan, aggregate) {
-  const body = [];
-  if (target.kind === "array") {
-    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
-  }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  const field = aggregate.key === void 0 ? ITEM : loadProp(ITEM, aggregate.key);
-  switch (aggregate.op) {
-    case "sum":
-    case "count": {
-      const increment = aggregate.op === "count" ? literal(1) : field;
-      body.push(
-        letDecl(ACC, literal(0)),
-        buildInputLoop(target, buildGuardedBody(plan, [store(ACC, binary("add", ACC, increment))])),
-        { kind: "return", value: ACC }
-      );
-      return body;
-    }
-    case "avg":
-      body.push(
-        letDecl(ACC, literal(0)),
-        letDecl(ACC_COUNT, literal(0)),
-        buildInputLoop(
-          target,
-          buildGuardedBody(plan, [
-            store(ACC, binary("add", ACC, field)),
-            store(ACC_COUNT, binary("add", ACC_COUNT, literal(1)))
-          ])
-        ),
-        {
-          kind: "if",
-          test: strictEqual(ACC_COUNT, literal(0)),
-          then: [{ kind: "return", value: literal(void 0) }]
-        },
-        { kind: "return", value: binary("divide", ACC, ACC_COUNT) }
-      );
-      return body;
-    case "min":
-    case "max": {
-      const wins = binary(aggregate.op === "min" ? "lessThan" : "greaterThan", field, ACC);
-      body.push(
-        letDecl(ACC),
-        buildInputLoop(
-          target,
-          buildGuardedBody(plan, [
-            {
-              kind: "if",
-              test: { kind: "nary", op: "or", operands: [strictEqual(ACC, literal(void 0)), wins] },
-              then: [store(ACC, field)]
-            }
-          ])
-        ),
-        { kind: "return", value: ACC }
-      );
-      return body;
-    }
-  }
-}
-function buildMutationQuery(target, plan) {
-  const mutation = plan.mutation;
-  if (!mutation) return [];
-  const condition = buildFilterTest(plan);
-  const test = condition ?? literal(false);
-  const loopBody = mutation.kind === "delete" ? [{ kind: "if", test: not(test), then: buildMutationKeep(target, ITEM) }] : [
-    {
-      kind: "if",
-      test,
-      then: buildMutationKeep(target, buildPatchObject(target.objectSchema, mutation)),
-      otherwise: buildMutationKeep(target, ITEM)
-    }
-  ];
-  const outInitializer = target.kind === "array" ? construct("Array", [LEN2]) : target.kind === "set" ? construct("Set") : construct("Map");
-  const body = [...buildLoopHeader(target, plan, outInitializer)];
-  if (target.kind === "array") body.push(letDecl(CURSOR, literal(0)));
-  body.push(buildInputLoop(target, loopBody));
-  if (target.kind === "array") body.push(store(loadProp(OUT2, "length"), CURSOR));
-  body.push({ kind: "return", value: OUT2 });
-  return body;
-}
-function buildMutationKeep(target, value) {
-  switch (target.kind) {
-    case "array":
-      return [append(OUT2, CURSOR, value)];
-    case "set":
-      return [exprStmt(call(loadProp(OUT2, "add"), [value]))];
-    case "map":
-      return [exprStmt(call(loadProp(OUT2, "set"), [loadIndex(ENTRY, literal(0)), value]))];
-  }
-}
-function buildPatchObject(schema, mutation) {
-  if (mutation.kind !== "update") return ITEM;
-  const entries = Object.keys(schema.def.props).map((key) => {
-    const binding = mutation.patch[key];
-    return { key, value: binding ? irVar(binding.name) : loadProp(ITEM, key) };
-  });
-  return objectLiteral(entries);
-}
-function buildLoopHeader(target, plan, outInitializer) {
-  const header = [
-    { kind: "assign", target: LEN2, expr: loadProp(VALUE, target.kind === "array" ? "length" : "size") }
-  ];
-  if (plan.unique) header.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  header.push({ kind: "assign", target: OUT2, expr: outInitializer });
-  return header;
-}
-function buildInputLoop(target, body) {
-  switch (target.kind) {
-    case "array":
-      return forRange(INDEX2, LEN2, [{ kind: "assign", target: ITEM, expr: loadIndex(VALUE, INDEX2) }, ...body]);
-    case "set":
-      return forOf(ITEM, VALUE, body);
-    case "map":
-      return forOf(ENTRY, VALUE, [{ kind: "assign", target: ITEM, expr: loadIndex(ENTRY, literal(1)) }, ...body]);
-  }
-}
-function buildGuardedBody(plan, accepted) {
-  const unique = plan.unique;
-  const inner = unique ? [
-    { kind: "assign", target: UNIQUE_KEY, expr: loadProp(ITEM, unique.key) },
-    {
-      kind: "if",
-      test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
-      then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted]
-    }
-  ] : accepted;
-  const condition = buildFilterTest(plan);
-  return condition ? [{ kind: "if", test: condition, then: inner }] : inner;
-}
-function buildFilterTest(plan) {
-  if (plan.filters.length === 0) return void 0;
-  return allOf(plan.filters.map((filter) => buildCondition(filter.condition)));
-}
-function buildCondition(condition) {
-  switch (condition.kind) {
-    case "compare":
-      return binary(COMPARE_OPERATORS[condition.op], buildValue(condition.left), buildValue(condition.right));
-    case "logical":
-      return {
-        kind: "nary",
-        op: condition.op,
-        operands: [buildCondition(condition.left), buildCondition(condition.right)]
-      };
-    case "not":
-      return not(buildCondition(condition.inner));
-  }
-}
-function buildValue(value) {
-  switch (value.kind) {
-    case "field":
-      return loadProp(ITEM, value.key);
-    case "binding":
-      return irVar(value.name);
-    case "param":
-      return loadProp(PARAMS, value.name);
-    case "literal":
-      return literal(expectSafeLiteral(value.value));
-  }
-}
-function expectSafeLiteral(value) {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean" || value === null || value === void 0) {
-    return value;
-  }
-  throw new JITError("INVALID_QUERY", "query literal values must be primitive compiler literals");
-}
-function buildProjection(select) {
-  if (!select) return ITEM;
-  return objectLiteral(select.fields.map((field) => ({ key: field, value: loadProp(ITEM, field) })));
-}
-function shouldProjectAfterOrder(plan) {
-  return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
-}
-
-// ../../packages/jit/src/compiler/query.ts
-function emitQuerySource(schema, program) {
-  const target = expectCollectionObjectSchema(schema, "emitQuerySource");
-  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
-  validateQueryPlan(target.objectSchema, plan);
-  return emitQuery(
-    optimizeQueryIR(
-      buildQueryIR(target, plan, {
-        hasParams: Boolean(program.params?.length)
-      })
-    )
-  );
-}
-function compileQuery(schema, program, options) {
-  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
-  const template = getCompileCached(
-    schema,
-    `query:${serializeQueryNodes(program.nodes)}`,
-    () => {
-      const source = emitQuerySource(schema, program);
-      return {
-        source,
-        create: globalThis.Function(...bindingNames, `return ${source};`)
-      };
-    },
-    options
-  );
-  const compiled = template.create(...program.bindings);
-  registerArtifact(compiled, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings
-  });
-  return compiled;
-}
-function serializeQueryNodes(nodes) {
-  return nodes.map(serializeQueryNode).join(";");
-}
-function serializeQueryNode(node) {
-  switch (node.kind) {
-    case "filter":
-      return `f(${serializeCondition(node.condition)})`;
-    case "select:fields":
-      return `s(${node.fields.join(",")})`;
-    case "unique":
-      return `u(${node.key})`;
-    case "keyed":
-      return `k(${node.key})`;
-    case "groupBy":
-      return `g(${node.key})`;
-    case "orderBy":
-      return `o(${node.key},${node.direction})`;
-    case "aggregate":
-      return `a(${node.op},${node.key ?? ""})`;
-    case "delete":
-      return "d()";
-    case "update":
-      return `m(${Object.keys(node.patch).map((key) => `${key}=${node.patch[key]?.name}`).join(",")})`;
-  }
-}
-function serializeCondition(condition) {
-  switch (condition.kind) {
-    case "compare":
-      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
-    case "logical":
-      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
-    case "not":
-      return `not(${serializeCondition(condition.inner)})`;
-  }
-}
-function serializeValue(value) {
-  switch (value.kind) {
-    case "field":
-      return `.${value.key}`;
-    case "binding":
-      return `$${value.name}`;
-    case "param":
-      return `p:${value.name}`;
-    case "literal":
-      return `#${typeof value.value}:${String(value.value)}`;
-  }
-}
-function createQueryPlan(nodes) {
-  const filters = [];
-  const selects = [];
-  const uniques = [];
-  const collectors = [];
-  const orderBys = [];
-  const aggregates = [];
-  const mutations = [];
-  for (const node of nodes) {
-    switch (node.kind) {
-      case "filter":
-        filters[filters.length] = node;
-        break;
-      case "select:fields":
-        selects[selects.length] = node;
-        break;
-      case "unique":
-        uniques[uniques.length] = node;
-        break;
-      case "keyed":
-      case "groupBy":
-        collectors[collectors.length] = node;
-        break;
-      case "orderBy":
-        orderBys[orderBys.length] = node;
-        break;
-      case "aggregate":
-        aggregates[aggregates.length] = node;
-        break;
-      case "delete":
-      case "update":
-        mutations[mutations.length] = node;
-        break;
-    }
-  }
-  return {
-    filters,
-    selects,
-    uniques,
-    collectors,
-    orderBys,
-    aggregates,
-    mutations
-  };
-}
-function optimizeQueryPlan(plan) {
-  return {
-    filters: plan.filters,
-    select: last(plan.selects),
-    unique: last(plan.uniques),
-    collector: last(plan.collectors),
-    orderBy: last(plan.orderBys),
-    aggregate: last(plan.aggregates),
-    mutation: last(plan.mutations)
-  };
-}
-function validateQueryPlan(schema, plan) {
-  for (const filter of plan.filters) {
-    validateCondition(schema, filter.condition);
-  }
-  if (plan.select) validateObjectKeys2(schema, plan.select.fields, "query select");
-  if (plan.unique) validateObjectKeys2(schema, [plan.unique.key], "query unique");
-  if (plan.collector) validateObjectKeys2(schema, [plan.collector.key], `query ${plan.collector.kind}`);
-  if (plan.orderBy) validateObjectKeys2(schema, [plan.orderBy.key], "query orderBy");
-  if (plan.collector && plan.orderBy) {
-    throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
-  }
-  if (plan.aggregate) {
-    if (plan.select || plan.collector || plan.orderBy || plan.mutation) {
-      throw new JITError(
-        "INVALID_QUERY",
-        "query aggregate cannot be combined with select/keyed/groupBy/orderBy/delete/update in v1"
-      );
-    }
-    if (plan.aggregate.op !== "count") {
-      if (plan.aggregate.key === void 0) {
-        throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
-      }
-      validateObjectKeys2(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
-    }
-  }
-  if (plan.mutation) {
-    if (plan.filters.length === 0) {
-      throw new JITError("INVALID_QUERY", "query delete/update requires at least one filter in v1");
-    }
-    if (plan.select || plan.collector || plan.orderBy) {
-      throw new JITError(
-        "INVALID_QUERY",
-        "query delete/update cannot be combined with select/keyed/groupBy/orderBy in v1"
-      );
-    }
-    if (plan.mutation.kind === "update") {
-      validateObjectKeys2(schema, Object.keys(plan.mutation.patch), "query update");
-    }
-  }
-}
-function expectCollectionObjectSchema(schema, compilerName) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects an array, set, or map schema`);
-  }
-  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
-  if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
-  }
-  return {
-    kind: resolved.type,
-    objectSchema: element
-  };
-}
-function validateObjectKeys2(schema, keys, compilerName) {
-  const props = schema.def.props;
-  for (const key of keys) {
-    if (!(key in props)) {
-      throw new JITError("INVALID_QUERY", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
-}
-function validateCondition(schema, condition) {
-  switch (condition.kind) {
-    case "compare":
-      validateValue(schema, condition.left);
-      validateValue(schema, condition.right);
-      return;
-    case "logical":
-      validateCondition(schema, condition.left);
-      validateCondition(schema, condition.right);
-      return;
-    case "not":
-      validateCondition(schema, condition.inner);
-      return;
-  }
-}
-function validateValue(schema, value) {
-  if (value.kind === "field") {
-    validateObjectKeys2(schema, [value.key], "query");
-  }
-}
-function last(values) {
-  return values[values.length - 1];
-}
-
-// ../../packages/jit/src/compiler/serialize/emit-serialize.ts
-function emitSerialize(schema) {
-  const writer = new CodeWriter();
-  const context = { writer, varCounter: 0 };
-  const needsStringHelper = hasStringLeaf2(schema, /* @__PURE__ */ new Set());
-  writer.line("(function () {");
-  writer.indent(() => {
-    if (needsStringHelper) emitStringHelper(writer);
-    writer.line("function stringify(value) {");
-    writer.indent(() => {
-      writer.line('let s = "";');
-      emitAppend(context, schema, "value");
-      writer.line("return s;");
-    });
-    writer.line("}");
-    writer.line("return stringify;");
-  });
-  writer.line("})()");
-  return writer.toString();
-}
-function emitStringHelper(writer) {
-  writer.line("const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;");
-  writer.line("function str(value) {");
-  writer.indent(() => {
-    writer.line("const len = value.length;");
-    writer.line("if (len < 42) {");
-    writer.indent(() => {
-      writer.line("for (let i = 0; i < len; i++) {");
-      writer.indent(() => {
-        writer.line("const code = value.charCodeAt(i);");
-        writer.line("if (code < 32 || code === 34 || code === 92 || (code > 55295 && code < 57344)) {");
-        writer.indent(() => {
-          writer.line("return JSON.stringify(value);");
-        });
-        writer.line("}");
-      });
-      writer.line("}");
-      writer.line(`return '"' + value + '"';`);
-    });
-    writer.line("}");
-    writer.line("if (__se.test(value)) return JSON.stringify(value);");
-    writer.line(`return '"' + value + '"';`);
-  });
-  writer.line("}");
-}
-function hasStringLeaf2(schema, seen) {
-  if (seen.has(schema)) return false;
-  seen.add(schema);
-  const current = schema;
-  switch (current.type) {
-    case TypeName.string:
-      return true;
-    case TypeName.enum:
-      return Object.values(current.def.values).some(
-        (value) => typeof value === "string"
-      );
-    case TypeName.record:
-      return true;
-    case TypeName.object: {
-      const props = current.def.props;
-      return Object.keys(props).some((key) => hasStringLeaf2(props[key], seen));
-    }
-    case TypeName.array:
-      return hasStringLeaf2(current.def.element, seen);
-    case TypeName.tuple: {
-      const items = current.def.items ?? [];
-      return items.some((item) => hasStringLeaf2(item, seen));
-    }
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.readonly:
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-      return hasStringLeaf2(current.def.innerType, seen);
-    case TypeName.lazy:
-      return hasStringLeaf2(current.def.getter(), seen);
-    default:
-      return false;
-  }
-}
-function nextVar3(context, prefix) {
-  return `${prefix}${++context.varCounter}`;
-}
-function emitAppend(context, schema, valueExpr) {
-  const resolved = resolveSerializeWrappers(schema);
-  const writer = context.writer;
-  if (resolved.nullable || resolved.optional) {
-    writer.line(`if (${valueExpr} == null) {`);
-    writer.indent(() => {
-      writer.line('s += "null";');
-    });
-    writer.line("} else {");
-    writer.indent(() => {
-      emitBaseAppend(context, resolved.base, valueExpr);
-    });
-    writer.line("}");
-    return;
-  }
-  emitBaseAppend(context, resolved.base, valueExpr);
-}
-function emitBaseAppend(context, schema, valueExpr) {
-  const writer = context.writer;
-  switch (schema.type) {
-    case TypeName.string:
-      writer.line(`s += str(${valueExpr});`);
-      return;
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.nan:
-      writer.line(`s += Number.isFinite(${valueExpr}) ? "" + ${valueExpr} : "null";`);
-      return;
-    case TypeName.boolean:
-      writer.line(`s += ${valueExpr} ? "true" : "false";`);
-      return;
-    case TypeName.null:
-      writer.line('s += "null";');
-      return;
-    case TypeName.date:
-      writer.line(`s += '"' + ${valueExpr}.toISOString() + '"';`);
-      return;
-    case TypeName.literal: {
-      const literalValue = schema.def.value;
-      writer.line(`s += ${JSON.stringify(JSON.stringify(literalValue) ?? "null")};`);
-      return;
-    }
-    case TypeName.enum: {
-      const values = Object.values(schema.def.values);
-      if (values.every((entry) => typeof entry === "string")) {
-        writer.line(`s += str(${valueExpr});`);
-      } else {
-        writer.line(`s += JSON.stringify(${valueExpr});`);
-      }
-      return;
-    }
-    case TypeName.object:
-      emitObjectAppend(context, schema, valueExpr);
-      return;
-    case TypeName.array: {
-      const element = schema.def.element;
-      const holder = hoist3(context, valueExpr);
-      const index = nextVar3(context, "i");
-      const item = nextVar3(context, "e");
-      writer.line(`s += "[";`);
-      writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
-      writer.indent(() => {
-        writer.line(`if (${index} !== 0) s += ",";`);
-        writer.line(`const ${item} = ${holder}[${index}];`);
-        emitAppend(context, element, item);
-      });
-      writer.line("}");
-      writer.line(`s += "]";`);
-      return;
-    }
-    case TypeName.tuple: {
-      const items = schema.def.items ?? [];
-      const holder = hoist3(context, valueExpr);
-      writer.line(`s += "[";`);
-      items.forEach((item, position) => {
-        if (position > 0) writer.line(`s += ",";`);
-        emitAppend(context, item, `${holder}[${position}]`);
-      });
-      writer.line(`s += "]";`);
-      return;
-    }
-    case TypeName.record: {
-      const valueSchema = schema.def.value;
-      const holder = hoist3(context, valueExpr);
-      const keys = nextVar3(context, "k");
-      const index = nextVar3(context, "i");
-      const item = nextVar3(context, "e");
-      writer.line(`s += "{";`);
-      writer.line(`const ${keys} = Object.keys(${holder});`);
-      writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
-      writer.indent(() => {
-        writer.line(`if (${index} !== 0) s += ",";`);
-        writer.line(`s += str(${keys}[${index}]) + ":";`);
-        writer.line(`const ${item} = ${holder}[${keys}[${index}]];`);
-        emitAppend(context, valueSchema, item);
-      });
-      writer.line("}");
-      writer.line(`s += "}";`);
-      return;
-    }
-    case TypeName.union:
-    case TypeName.discriminatedUnion:
-    case TypeName.any:
-    case TypeName.unknown:
-      writer.line(`s += JSON.stringify(${valueExpr}) ?? "null";`);
-      return;
-    default:
-      throw new JITError(
-        "UNSUPPORTED_SCHEMA",
-        `serialize does not support ${schema.type} schemas (not representable in JSON)`
-      );
-  }
-}
-function emitObjectAppend(context, schema, valueExpr) {
-  const writer = context.writer;
-  const props = schema.def.props;
-  const keys = Object.keys(props);
-  const holder = hoist3(context, valueExpr);
-  const optionality = keys.map(
-    (key) => resolveSerializeWrappers(props[key]).optional && emitStaticDefaultSource(props[key]) === void 0
-  );
-  const firstRequired = optionality.indexOf(false);
-  const needsRuntimeComma = optionality.some((optional3, position) => optional3 && position < firstRequired) || firstRequired === -1;
-  writer.line(`s += "{";`);
-  if (keys.length === 0) {
-    writer.line(`s += "}";`);
-    return;
-  }
-  if (needsRuntimeComma) {
-    const flag = nextVar3(context, "f");
-    writer.line(`let ${flag} = false;`);
-    keys.forEach((key, position) => {
-      const rawPropExpr = emitPropertyAccess(holder, key);
-      const propExpr = emitDefaultedValue(props[key], rawPropExpr);
-      const keyPrefix = JSON.stringify(`${JSON.stringify(key)}:`);
-      const emitProp = () => {
-        writer.line(`if (${flag}) s += ",";`);
-        writer.line(`${flag} = true;`);
-        writer.line(`s += ${keyPrefix};`);
-        emitAppend(context, props[key], propExpr);
-      };
-      if (optionality[position]) {
-        writer.line(`if (${rawPropExpr} !== undefined) {`);
-        writer.indent(emitProp);
-        writer.line("}");
-      } else {
-        emitProp();
-      }
-    });
-    writer.line(`s += "}";`);
-    return;
-  }
-  let hasPrevious = false;
-  keys.forEach((key, position) => {
-    const rawPropExpr = emitPropertyAccess(holder, key);
-    const propExpr = emitDefaultedValue(props[key], rawPropExpr);
-    const keyToken = `${JSON.stringify(key)}:`;
-    const prefix = hasPrevious ? `,${keyToken}` : keyToken;
-    if (optionality[position]) {
-      writer.line(`if (${rawPropExpr} !== undefined) {`);
-      writer.indent(() => {
-        writer.line(`s += ${JSON.stringify(`,${keyToken}`)};`);
-        emitAppend(context, props[key], propExpr);
-      });
-      writer.line("}");
-      return;
-    }
-    writer.line(`s += ${JSON.stringify(prefix)};`);
-    emitAppend(context, props[key], propExpr);
-    hasPrevious = true;
-  });
-  writer.line(`s += "}";`);
-}
-function hoist3(context, expr) {
-  if (parse_exports.isValidIdentifier(expr)) return expr;
-  const holder = nextVar3(context, "v");
-  context.writer.line(`const ${holder} = ${expr};`);
-  return holder;
-}
-function resolveSerializeWrappers(schema) {
-  let current = schema;
-  let optional3 = false;
-  let nullable3 = false;
-  while (true) {
-    switch (current.type) {
-      case TypeName.optional:
-        optional3 = true;
-        current = current.def.innerType;
-        continue;
-      case TypeName.nullable:
-        nullable3 = true;
-        current = current.def.innerType;
-        continue;
-      case TypeName.nullish:
-        optional3 = true;
-        nullable3 = true;
-        current = current.def.innerType;
-        continue;
-      case TypeName.default:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType;
-        continue;
-      case TypeName.lazy:
-        current = current.def.getter();
-        continue;
-      default:
-        return { base: current, optional: optional3, nullable: nullable3 };
-    }
-  }
-}
-
-// ../../packages/jit/src/compiler/update/build-update-ir.ts
-function buildUpdateIR(schema) {
-  return {
-    kind: "program",
-    valueParam: "value",
-    patchParam: "patch",
-    body: buildUpdateNode(schema)
-  };
-}
-function buildUpdateNode(schema) {
-  if (schema.type === TypeName.date) return { kind: "date" };
-  if (schema.type === TypeName.union) return buildUnionNode3(schema);
-  if (schema.type === TypeName.discriminatedUnion)
-    return buildDiscriminatedUnionNode3(schema);
-  const node = buildSchemaNode(schema, buildUpdateNode);
-  if (node) return node;
-  if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
-  throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler update IR for type: ${schema.type}`);
-}
-function buildUnionNode3(schema) {
-  if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
-    return { kind: "reuse" };
-  }
-  return {
-    kind: "union",
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: buildUpdateNode(option)
-    }))
-  };
-}
-function buildDiscriminatedUnionNode3(schema) {
-  return {
-    kind: "discriminatedUnion",
-    discriminator: schema.def.discriminator,
-    options: schema.def.options.map((option) => ({
-      schema: option,
-      node: buildUpdateNode(option)
-    }))
-  };
-}
-
-// ../../packages/jit/src/compiler/update/emit-update.ts
-function emitUpdate(program) {
-  const writer = new CodeWriter();
-  writer.line(`function update(${program.valueParam}, ${program.patchParam}) {`);
-  writer.indent(() => {
-    emitUpdateBodyLines(writer, createEmitState(), program.body, program.valueParam, program.patchParam);
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function emitUpdateBody(program) {
-  const writer = new CodeWriter();
-  emitUpdateBodyLines(writer, createEmitState(), program.body, program.valueParam, program.patchParam);
-  return writer.toString();
-}
-function emitUpdateBodyLines(writer, state, node, value, patch) {
-  emitUpdateTo(writer, state, node, value, patch, "out");
-  writer.line("return out;");
-}
-function emitUpdateTo(writer, state, node, value, patch, target) {
-  switch (node.kind) {
-    case "reuse":
-      writer.line(`let ${target} = ${value};`);
-      writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-      writer.indent(() => writer.line(`${target} = ${patch};`));
-      writer.line("}");
-      return;
-    case "date":
-      writer.line(`let ${target} = ${value};`);
-      writer.line(
-        `if (${patch} !== undefined && !Object.is(${value}, ${patch}) && ${value}.getTime() !== ${patch}.getTime()) {`
-      );
-      writer.indent(() => writer.line(`${target} = new Date(${patch}.getTime());`));
-      writer.line("}");
-      return;
-    case "union":
-      emitUnionUpdateTo(writer, state, node, value, patch, target);
-      return;
-    case "discriminatedUnion":
-      emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, target);
-      return;
-    case "guard":
-      emitGuardUpdateTo(writer, state, node, value, patch, target);
-      return;
-    case "object":
-      emitObjectUpdateTo(writer, state, node, value, patch, target);
-      return;
-    case "array":
-      emitArrayUpdateTo(writer, state, node, value, patch, target);
-      return;
-    case "tuple":
-      emitTupleUpdateTo(writer, state, node, value, patch, target);
-      return;
-    case "record":
-      emitRecordUpdateTo(writer, state, node, value, patch, target);
-      return;
-    case "set":
-      emitSetUpdateTo(writer, value, patch, target);
-      return;
-    case "map":
-      emitMapUpdateTo(writer, value, patch, target);
-      return;
-  }
-}
-function emitGuardUpdateTo(writer, state, node, value, patch, target) {
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-  writer.indent(() => {
-    writer.line(`if (!(${emitGuardTest(node.optional, node.nullable, patch)})) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
-    writer.line(`} else if (!(${emitGuardTest(node.optional, node.nullable, value)})) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
-    writer.line("} else {");
-    writer.indent(() => {
-      const inner = state.nextVar(`${target}_inner`);
-      emitUpdateTo(writer, state, node.inner, value, patch, inner);
-      writer.line(`${target} = ${inner};`);
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitObjectUpdateTo(writer, state, node, value, patch, target) {
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined) {`);
-  writer.indent(() => {
-    const entries = [];
-    const changedVars = [];
-    for (const prop of node.props) {
-      const rawPropValue = emitPropertyAccess(value, prop.key);
-      const defaultedPropValue = emitDefaultedValue(prop.schema, rawPropValue);
-      const propValue = defaultedPropValue === rawPropValue ? rawPropValue : state.nextVar(`value_${prop.key}`);
-      const propPatch = emitPropertyAccess(patch, prop.key);
-      const propNext = state.nextVar(`next_${prop.key}`);
-      if (propValue !== rawPropValue) {
-        writer.line(`const ${propValue} = ${defaultedPropValue};`);
-      }
-      emitUpdateTo(writer, state, prop.value, propValue, propPatch, propNext);
-      changedVars.push(`${propNext} !== ${propValue}`);
-      entries.push(`${emitLiteral(prop.key)}: ${propNext}`);
-    }
-    writer.line(`if (${changedVars.join(" || ")}) {`);
-    writer.indent(() => writer.line(`${target} = { ${entries.join(", ")} };`));
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitUnionUpdateTo(writer, state, node, value, patch, target) {
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-  writer.indent(() => {
-    if (node.options.length === 0) {
-      writer.line(`${target} = ${patch};`);
-      return;
-    }
-    let prefix = "if";
-    for (const option of node.options) {
-      writer.line(`${prefix} (${emitSchemaGuard(option.schema, value)}) {`);
-      writer.indent(() => {
-        const next = state.nextVar(`${target}_branch`);
-        emitUpdateTo(writer, state, option.node, value, patch, next);
-        writer.line(`${target} = ${next};`);
-      });
-      prefix = "} else if";
-    }
-    writer.line("} else {");
-    writer.indent(() => writer.line(`${target} = ${patch};`));
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, target) {
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-  writer.indent(() => {
-    if (node.options.length === 0) {
-      writer.line(`${target} = ${patch};`);
-      return;
-    }
-    let prefix = "if";
-    for (const option of node.options) {
-      writer.line(`${prefix} (${emitSchemaGuard(option.schema, value)}) {`);
-      writer.indent(() => {
-        const tag = literalDiscriminatorValue(option.schema, node.discriminator);
-        const next = state.nextVar(`${target}_branch`);
-        if (tag !== void 0) {
-          const patchTag = emitPropertyAccess(patch, node.discriminator);
-          writer.line(`if (${patchTag} !== undefined && ${patchTag} !== ${emitLiteral(tag)}) {`);
-          writer.indent(() => writer.line(`${target} = ${patch};`));
-          writer.line("} else {");
-          writer.indent(() => {
-            emitUpdateTo(writer, state, option.node, value, patch, next);
-            writer.line(`${target} = ${next};`);
-          });
-          writer.line("}");
-          return;
-        }
-        emitUpdateTo(writer, state, option.node, value, patch, next);
-        writer.line(`${target} = ${next};`);
-      });
-      prefix = "} else if";
-    }
-    writer.line("} else {");
-    writer.indent(() => writer.line(`${target} = ${patch};`));
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitTupleUpdateTo(writer, state, node, value, patch, target) {
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined) {`);
-  writer.indent(() => {
-    const entries = [];
-    const changedVars = [];
-    for (let index = 0; index < node.items.length; index++) {
-      const itemNext = state.nextVar(`next_${index}`);
-      emitUpdateTo(writer, state, node.items[index], `${value}[${index}]`, `${patch}[${index}]`, itemNext);
-      changedVars.push(`${itemNext} !== ${value}[${index}]`);
-      entries.push(itemNext);
-    }
-    writer.line(`if (${changedVars.join(" || ")}) {`);
-    writer.indent(() => writer.line(`${target} = [${entries.join(", ")}];`));
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitArrayUpdateTo(writer, state, node, value, patch, target) {
-  const len = state.nextVar("len");
-  const patchLen = state.nextVar("patchLen");
-  const index = state.nextVar("i");
-  const item = state.nextVar("item");
-  const patchItem = state.nextVar("patchItem");
-  const next = state.nextVar("next");
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined) {`);
-  writer.indent(() => {
-    writer.line(`const ${len} = ${value}.length;`);
-    writer.line(`const ${patchLen} = ${patch}.length;`);
-    writer.line(`for (let ${index} = 0; ${index} < ${patchLen}; ${index}++) {`);
-    writer.indent(() => {
-      writer.line(`const ${patchItem} = ${patch}[${index}];`);
-      writer.line(`if (${patchItem} !== undefined) {`);
-      writer.indent(() => {
-        writer.line(`if (${index} >= ${len}) {`);
-        writer.indent(() => {
-          writer.line(`if (${target} === ${value}) {`);
-          writer.indent(() => writer.line(`${target} = ${value}.slice();`));
-          writer.line("}");
-          writer.line(`${target}[${index}] = ${patchItem};`);
-        });
-        writer.line("} else {");
-        writer.indent(() => {
-          writer.line(`const ${item} = ${value}[${index}];`);
-          emitUpdateTo(writer, state, node.element, item, patchItem, next);
-          writer.line(`if (${next} !== ${item}) {`);
-          writer.indent(() => {
-            writer.line(`if (${target} === ${value}) {`);
-            writer.indent(() => writer.line(`${target} = ${value}.slice();`));
-            writer.line("}");
-            writer.line(`${target}[${index}] = ${next};`);
-          });
-          writer.line("}");
-        });
-        writer.line("}");
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitRecordUpdateTo(writer, state, node, value, patch, target) {
-  const keys = state.nextVar("keys");
-  const patchKeys = state.nextVar("patchKeys");
-  const len = state.nextVar("len");
-  const index = state.nextVar("i");
-  const key = state.nextVar("key");
-  const next = state.nextVar("next");
-  const recordOut = state.nextVar("recordOut");
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-  writer.indent(() => {
-    writer.line(`let changed = false;`);
-    writer.line(`const ${keys} = Object.keys(${value});`);
-    writer.line(`const ${patchKeys} = Object.keys(${patch});`);
-    writer.line(`if (${keys}.length !== ${patchKeys}.length) {`);
-    writer.indent(() => writer.line("changed = true;"));
-    writer.line("}");
-    writer.line(`for (let ${index} = 0, ${len} = ${patchKeys}.length; ${index} < ${len}; ${index}++) {`);
-    writer.indent(() => {
-      writer.line(`const ${key} = ${patchKeys}[${index}];`);
-      emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
-      writer.line(`if (${next} !== ${value}[${key}]) {`);
-      writer.indent(() => {
-        writer.line("changed = true;");
-        writer.line("break;");
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-    writer.line("if (changed) {");
-    writer.indent(() => {
-      writer.line(`const ${recordOut} = {};`);
-      writer.line(`for (let ${index} = 0, ${len} = ${patchKeys}.length; ${index} < ${len}; ${index}++) {`);
-      writer.indent(() => {
-        writer.line(`const ${key} = ${patchKeys}[${index}];`);
-        emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
-        writer.line(`${recordOut}[${key}] = ${next};`);
-      });
-      writer.line("}");
-      writer.line(`${target} = ${recordOut};`);
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitSetUpdateTo(writer, value, patch, target) {
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-  writer.indent(() => {
-    writer.line(`if (${value}.size !== ${patch}.size) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
-    writer.line("} else {");
-    writer.indent(() => {
-      writer.line(`const iter = ${patch}.values();`);
-      writer.line("let step = iter.next();");
-      writer.line("while (!step.done) {");
-      writer.indent(() => {
-        writer.line("const item = step.value;");
-        writer.line(`if (!${value}.has(item)) {`);
-        writer.indent(() => {
-          writer.line(`${target} = ${patch};`);
-          writer.line("break;");
-        });
-        writer.line("}");
-        writer.line("step = iter.next();");
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitMapUpdateTo(writer, value, patch, target) {
-  writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-  writer.indent(() => {
-    writer.line(`if (${value}.size !== ${patch}.size) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
-    writer.line("} else {");
-    writer.indent(() => {
-      writer.line(`const iter = ${patch}.entries();`);
-      writer.line("let step = iter.next();");
-      writer.line("while (!step.done) {");
-      writer.indent(() => {
-        writer.line("const entry = step.value;");
-        writer.line("const key = entry[0];");
-        writer.line("const nextValue = entry[1];");
-        writer.line(`if (!${value}.has(key) || !Object.is(${value}.get(key), nextValue)) {`);
-        writer.indent(() => {
-          writer.line(`${target} = ${patch};`);
-          writer.line("break;");
-        });
-        writer.line("}");
-        writer.line("step = iter.next();");
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-
-// ../../packages/jit/src/compiler/update.ts
-function emitUpdateSource(schema) {
-  assertUpdateable(schema);
-  return emitUpdate(buildUpdateIR(schema));
-}
-function compileUpdate(schema, options) {
-  assertUpdateable(schema);
-  return getCompileCached(
-    schema,
-    "update",
-    () => {
-      const program = buildUpdateIR(schema);
-      const body = emitUpdateBody(program);
-      return globalThis.Function(`return function update(value, patch) {
-${body}
-};`)();
-    },
-    options
-  );
-}
-function assertUpdateable(schema) {
-  if (schema.type === TypeName.readonly) {
-    throw new JITError("READONLY_FIELD", "Cannot compile updates for readonly schemas");
-  }
-  if (schema.type === TypeName.lazy) {
-    assertUpdateable(schema.def.getter());
-    return;
-  }
-  if (hasInnerType(schema)) {
-    assertUpdateable(schema.def.innerType);
-    return;
-  }
-  if (schema.type === TypeName.object) {
-    const objectSchema = schema;
-    for (const child of Object.values(objectSchema.def.props)) {
-      assertUpdateable(child);
-    }
-  }
-}
-function hasInnerType(schema) {
-  return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
 }
 
 // ../../packages/jit/src/compiler/binary-rowset.ts
@@ -11492,16 +10212,19 @@ function compileValidator(schema, options) {
 }
 function compileValidatorSelection(schema, ops, options) {
   const normalizedOps = normalizeValidatorOps(ops);
+  const fastParse = normalizedOps.includes("parse") && canUseFastParse(schema);
   const cacheKey = `validator:${normalizedOps.join(",")}`;
   return getCompileCached(
     schema,
     cacheKey,
     () => {
-      const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps));
+      const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps, fastParse));
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values);
       const selection = {};
+      const is2 = compiled.is;
       const safeParse2 = compiled.safeParse;
       const parse2 = (value) => {
+        if (fastParse && is2?.(value)) return value;
         if (!safeParse2) throw new Error("parse requires safeParse generation");
         const result = safeParse2(value);
         if (result.success) return result.data;
@@ -11549,9 +10272,9 @@ function normalizeValidatorOps(ops) {
   }
   return normalized;
 }
-function emitOptionsForValidatorOps(ops) {
+function emitOptionsForValidatorOps(ops, fastParse = false) {
   return {
-    is: ops.includes("is"),
+    is: ops.includes("is") || fastParse,
     safeParse: ops.includes("safeParse") || ops.includes("parse") || ops.includes("safeParseAsync") || ops.includes("parseAsync"),
     safeParseAsync: ops.includes("safeParseAsync") || ops.includes("parseAsync")
   };
@@ -12724,13 +11447,11 @@ function generate(options) {
       dts.push(valueType, strictType);
       tsTypes.push(valueType, strictType);
     }
-    const fromJsonDecoder = wants("fromJSON") ? tryEmitJsonDecoder(schema) : void 0;
-    const fromJsonDecoderBindings = fromJsonDecoder ? inlineBindings(fromJsonDecoder.bindingNames, fromJsonDecoder.bindingValues) : void 0;
-    const hasDirectFromJson = fromJsonDecoder !== void 0 && fromJsonDecoderBindings !== void 0;
-    const wantsValidator = wants("is") || wants("parse") || wants("safeParse") || wants("fromJSON") && !hasDirectFromJson;
-    const validator2 = wantsValidator ? tryEmit(name, "validator", skipped, () => emitValidator(schema)) : void 0;
-    if (validator2) {
-      const inlined = inlineBindings(validator2.bindings.names, validator2.bindings.values);
+    const wantsValidator = wants("is") || wants("parse") || wants("safeParse") || wants("fromJSON");
+    const validator = wantsValidator ? tryEmit(name, "validator", skipped, () => emitValidator(schema)) : void 0;
+    const fastParse = canUseFastParse(schema);
+    if (validator) {
+      const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
       if (inlined === void 0) {
         skipped.push({
           schema: name,
@@ -12741,7 +11462,7 @@ function generate(options) {
         const validatorName = internalIdentifier(`${name}_validator`);
         js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
         js.push(...inlined.map((line) => `  ${line}`));
-        js.push(...indentBlock(validator2.source));
+        js.push(...indentBlock(validator.source));
         js.push("})();");
         if (wants("is")) {
           const binding = internalIdentifier(`${name}_is`);
@@ -12761,11 +11482,11 @@ function generate(options) {
             binding
           });
         }
-        if (wants("parse") || wants("fromJSON") && !hasDirectFromJson) {
+        if (wants("parse") || wants("fromJSON")) {
           const parseBinding = internalIdentifier(`${name}_parse`);
           needsValidationError = true;
           js.push(
-            `const ${parseBinding} = /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+            fastParse ? `const ${parseBinding} = (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `const ${parseBinding} = (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
           );
           if (wants("parse")) {
             operations.push({
@@ -12774,7 +11495,7 @@ function generate(options) {
               binding: parseBinding
             });
           }
-          if (wants("fromJSON") && !hasDirectFromJson) {
+          if (wants("fromJSON")) {
             const binding = internalIdentifier(`${name}_fromJSON`);
             js.push(
               `const ${binding} = /*#__PURE__*/ ((parse) => (json) => parse(JSON.parse(json)))(${parseBinding});`
@@ -12787,22 +11508,6 @@ function generate(options) {
           }
         }
       }
-    }
-    if (wants("fromJSON") && fromJsonDecoder && fromJsonDecoderBindings) {
-      const binding = internalIdentifier(`${name}_fromJSON`);
-      needsValidationError = true;
-      js.push(`const ${binding} = /*#__PURE__*/ (() => {`);
-      js.push(...fromJsonDecoderBindings.map((line) => `  ${line}`));
-      js.push(...indentBlock(`const decode = (${fromJsonDecoder.source});`));
-      js.push(
-        "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
-      );
-      js.push("})();");
-      operations.push({
-        prop: "fromJSON",
-        type: `(json: string) => ${name}`,
-        binding
-      });
     }
     const equalSource = wants("equal") ? tryEmit(name, "equal", skipped, () => emitEqualSource(schema)) : void 0;
     const equalNeedsHash = equalSource?.includes("__hash");
@@ -12970,11 +11675,15 @@ function generate(options) {
         continue;
       }
       if (artifact.kind === "execution") {
-        skipped.push({
-          schema: name,
-          operation: extraName,
-          reason: "execution artifacts must be exported directly so their complete plan can be lowered"
-        });
+        const binding2 = internalIdentifier(`${name}_${extraName}`);
+        const before = js.length;
+        emitExecutionArtifact(binding2, artifact.plan, void 0, false);
+        const declaration = js.slice(before).some(
+          (line) => layout.format === "typescript" ? line.startsWith(`const ${binding2}:`) : line.startsWith(`const ${binding2} =`)
+        );
+        if (!declaration) continue;
+        const extraType2 = sourceFile ? `typeof import(${JSON.stringify(typeImportSpecifier(options.outDir, sourceFile))}).${name}[${JSON.stringify(extraName)}]` : executionPlanType(artifact.plan, typeNames.get(artifact.plan.schema));
+        operations.push({ prop: extraName, type: extraType2, binding: binding2 });
         continue;
       }
       const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
@@ -13058,18 +11767,19 @@ function generate(options) {
         });
         return;
       }
-      const validator2 = tryEmit(
+      const fastParse = artifact.op === "parse" && canUseFastParse(artifact.schema);
+      const validator = tryEmit(
         name,
         artifact.op,
         skipped,
         () => emitValidator(artifact.schema, {
-          is: artifact.op === "is",
+          is: artifact.op === "is" || fastParse,
           safeParse: artifact.op === "safeParse" || artifact.op === "parse",
           safeParseAsync: false
         })
       );
-      if (!validator2) return;
-      const inlined2 = inlineBindings(validator2.bindings.names, validator2.bindings.values);
+      if (!validator) return;
+      const inlined2 = inlineBindings(validator.bindings.names, validator.bindings.values);
       if (inlined2 === void 0) {
         skipped.push({
           schema: name,
@@ -13081,7 +11791,7 @@ function generate(options) {
       const validatorName = internalIdentifier(`${name}_validator`);
       js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
       js.push(...inlined2.map((line) => `  ${line}`));
-      js.push(...indentBlock(validator2.source));
+      js.push(...indentBlock(validator.source));
       js.push("})();");
       if (artifact.op === "is") {
         js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
@@ -13090,7 +11800,7 @@ function generate(options) {
       } else {
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse ? `${declaration} (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       }
       exportNames.push(name);
@@ -13159,25 +11869,10 @@ function generate(options) {
         if (!serializeSource) return;
         js.push(`${declaration} (${serializeSource});`);
       } else if (op === "fromJSON") {
-        const decoder = tryEmitJsonDecoder(schema);
-        const decoderBindings = decoder ? inlineBindings(decoder.bindingNames, decoder.bindingValues) : void 0;
-        if (decoder && decoderBindings) {
-          needsValidationError = true;
-          js.push(`${declaration} /*#__PURE__*/ (() => {`);
-          js.push(...decoderBindings.map((line) => `  ${line}`));
-          js.push(...indentBlock(`const decode = (${decoder.source});`));
-          js.push(
-            "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
-          );
-          js.push("})();");
-          exportNames.push(name);
-          dts.push(`export declare const ${name}: ${operationType(artifact, typeNames.get(artifact.schema))};`);
-          dts.push("");
-          return;
-        }
-        const validator2 = tryEmit(name, "fromJSON", skipped, () => emitValidator(schema));
-        if (!validator2) return;
-        const inlined2 = inlineBindings(validator2.bindings.names, validator2.bindings.values);
+        const fastParse = canUseFastParse(schema);
+        const validator = tryEmit(name, "fromJSON", skipped, () => emitValidator(schema));
+        if (!validator) return;
+        const inlined2 = inlineBindings(validator.bindings.names, validator.bindings.values);
         if (inlined2 === void 0) {
           skipped.push({
             schema: name,
@@ -13190,10 +11885,10 @@ function generate(options) {
         const validatorName = internalIdentifier(`${name}_validator`);
         js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
         js.push(...inlined2.map((line) => `  ${line}`));
-        js.push(...indentBlock(validator2.source));
+        js.push(...indentBlock(validator.source));
         js.push("})();");
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse ? `${declaration} (json) => { const value = JSON.parse(json); if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${declaration} (json) => { const r = ${validatorName}.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       } else if (op === "format") {
         const formatSource = tryEmit(name, "format", skipped, () => emitFormatSource(schema));
@@ -13258,7 +11953,7 @@ function generate(options) {
     );
     dts.push("");
   }
-  function emitExecutionArtifact(name, plan, sourceFile) {
+  function emitExecutionArtifact(name, plan, sourceFile, exportArtifact = true) {
     void sourceFile;
     const declaredType = executionPlanType(plan, typeNames.get(plan.schema));
     const declaration = `const ${name}${layout.format === "typescript" ? `: ${declaredType}` : ""} =`;
@@ -13271,7 +11966,7 @@ function generate(options) {
     const operationStage = stages.find((stage2) => stage2.kind === "operation");
     const mapStage3 = stages.find((stage2) => stage2.kind === "map");
     if (stages.some((stage2) => isComposedExecutionStage(stage2))) {
-      emitComposedExecutionArtifact(name, plan, declaredType, declaration);
+      emitComposedExecutionArtifact(name, plan, declaredType, declaration, exportArtifact);
       return;
     }
     if (mapStage3?.kind === "map") {
@@ -13325,8 +12020,10 @@ function generate(options) {
         js.push(...indentBlock(`return (${mapperSource});`));
         js.push("})());");
       }
-      exportNames.push(name);
-      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      if (exportArtifact) {
+        exportNames.push(name);
+        dts.push(`export declare const ${name}: ${declaredType};`, "");
+      }
       return;
     }
     if (validateStage?.kind === "validate") {
@@ -13338,35 +12035,19 @@ function generate(options) {
         });
         return;
       }
-      if (validateStage.operation === "parse" && hasJsonDecode) {
-        const decoder = tryEmitJsonDecoder(validateStage.schema);
-        const decoderBindings = decoder ? inlineBindings(decoder.bindingNames, decoder.bindingValues) : void 0;
-        if (decoder && decoderBindings) {
-          needsValidationError = true;
-          js.push(`${declaration} /*#__PURE__*/ (() => {`);
-          js.push(...decoderBindings.map((line) => `  ${line}`));
-          js.push(...indentBlock(`const decode = (${decoder.source});`));
-          js.push(
-            "  return (json) => { try { return decode(json); } catch (error) { if (Array.isArray(error)) throw new JITValidationError(error); throw error; } };"
-          );
-          js.push("})();");
-          exportNames.push(name);
-          dts.push(`export declare const ${name}: ${declaredType};`, "");
-          return;
-        }
-      }
-      const validator2 = tryEmit(
+      const fastParse = validateStage.operation === "parse" && canUseFastParse(plan.schema);
+      const validator = tryEmit(
         name,
         validateStage.operation,
         skipped,
         () => emitValidator(plan.schema, {
-          is: validateStage.operation === "is",
+          is: validateStage.operation === "is" || fastParse,
           safeParse: validateStage.operation !== "is",
           safeParseAsync: false
         })
       );
-      if (!validator2) return;
-      const inlined = inlineBindings(validator2.bindings.names, validator2.bindings.values);
+      if (!validator) return;
+      const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
       if (inlined === void 0) {
         skipped.push({
           schema: name,
@@ -13378,7 +12059,7 @@ function generate(options) {
       const validatorName = internalIdentifier(`${name}_validator`);
       js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
       js.push(...inlined.map((line) => `  ${line}`));
-      js.push(...indentBlock(validator2.source));
+      js.push(...indentBlock(validator.source));
       js.push("})();");
       if (validateStage.operation === "is") {
         if (hasJsonDecode || hasBinaryDecode) {
@@ -13403,7 +12084,7 @@ function generate(options) {
       } else if (hasJsonDecode) {
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (json) => { const r = v.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse ? `${declaration} (json) => { const value = JSON.parse(json); if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${declaration} (json) => { const r = ${validatorName}.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       } else if (hasBinaryDecode) {
         const codec2 = tryEmit(name, "binary.decode", skipped, () => emitCodec(plan.schema));
@@ -13419,19 +12100,23 @@ function generate(options) {
         }
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((codec, v) => (bytes) => { const r = v.safeParse(codec.decode(bytes)); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
+          fastParse ? `${declaration} /*#__PURE__*/ ((codec, is, safeParse) => (bytes) => { const value = codec.decode(bytes); if (is(value)) return value; const r = safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {` : `${declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes) => { const r = safeParse(codec.decode(bytes)); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
         );
         js.push(...codecBindings.map((line) => `  ${line}`));
         js.push(...indentBlock(codec2.source));
-        js.push(`})()), ${validatorName});`);
+        js.push(
+          fastParse ? `})()), ${validatorName}.is, ${validatorName}.safeParse);` : `})()), ${validatorName}.safeParse);`
+        );
       } else {
         needsValidationError = true;
         js.push(
-          `${declaration} /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(${validatorName});`
+          fastParse ? `${declaration} (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };` : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
         );
       }
-      exportNames.push(name);
-      dts.push(`export declare const ${name}: ${declaredType};`, "");
+      if (exportArtifact) {
+        exportNames.push(name);
+        dts.push(`export declare const ${name}: ${declaredType};`, "");
+      }
       return;
     }
     if (hasJsonDecode) {
@@ -13484,26 +12169,29 @@ function generate(options) {
       });
       return;
     }
-    exportNames.push(name);
-    dts.push(`export declare const ${name}: ${declaredType};`, "");
+    if (exportArtifact) {
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+    }
   }
-  function emitComposedExecutionArtifact(name, plan, declaredType, declaration) {
+  function emitComposedExecutionArtifact(name, plan, declaredType, declaration, exportArtifact) {
     const setup = [];
     const body2 = ["let value = input;"];
     const stages = plan.stages;
     const emitValidatorBinding = (schema) => {
-      const validator2 = tryEmit(
+      const fastParse = canUseFastParse(schema);
+      const validator = tryEmit(
         name,
         "validate",
         skipped,
         () => emitValidator(schema, {
-          is: false,
+          is: fastParse,
           safeParse: true,
           safeParseAsync: false
         })
       );
-      if (!validator2) return void 0;
-      const inlined = inlineBindings(validator2.bindings.names, validator2.bindings.values);
+      if (!validator) return void 0;
+      const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
       if (inlined === void 0) {
         skipped.push({
           schema: name,
@@ -13515,19 +12203,7 @@ function generate(options) {
       const binding = internalIdentifier(`${name}_validator`);
       setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
       setup.push(...inlined.map((line) => `  ${line}`));
-      setup.push(...indentBlock(validator2.source));
-      setup.push("})();");
-      return binding;
-    };
-    const emitJsonDecoderBinding = (schema) => {
-      const decoder = tryEmitJsonDecoder(schema);
-      if (!decoder) return void 0;
-      const inlined = inlineBindings(decoder.bindingNames, decoder.bindingValues);
-      if (inlined === void 0) return void 0;
-      const binding = internalIdentifier(`${name}_jsonDecoder`);
-      setup.push(`const ${binding} = /*#__PURE__*/ (() => {`);
-      setup.push(...inlined.map((line) => `  ${line}`));
-      setup.push(...indentBlock(`return (${decoder.source});`));
+      setup.push(...indentBlock(validator.source));
       setup.push("})();");
       return binding;
     };
@@ -13696,7 +12372,7 @@ function generate(options) {
       body2.push("}");
       body2.push(`value = ${out};`);
     };
-    const emitMappedJsonArray2 = (mapper2, stringify) => {
+    const emitMappedJsonArray2 = (mapper, stringify) => {
       const list = `mappedList${manyIndex}`;
       const length = `mappedLen${manyIndex}`;
       const item = `mappedItem${manyIndex}`;
@@ -13707,7 +12383,7 @@ function generate(options) {
       body2.push(`let ${json3} = "[";`);
       body2.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
       body2.push(`  if (${index} !== 0) ${json3} += ",";`);
-      body2.push(`  const ${item} = ${mapper2}.map(${list}[${index}]);`);
+      body2.push(`  const ${item} = ${mapper}.map(${list}[${index}]);`);
       body2.push(`  ${json3} += ${stringify}(${item});`);
       body2.push("}");
       body2.push(`${json3} += "]";`);
@@ -13719,25 +12395,9 @@ function generate(options) {
         case "value":
         case "to.array":
           break;
-        case "json.decode": {
-          const validation = stages[index + 1];
-          if (validation?.kind === "validate" && validation.operation === "parse" && validation.schema === stage2.schema) {
-            const decoder = emitJsonDecoderBinding(stage2.schema);
-            if (decoder) {
-              needsValidationError = true;
-              body2.push("try {");
-              body2.push(`  value = ${decoder}(value);`);
-              body2.push("} catch (error) {");
-              body2.push("  if (Array.isArray(error)) throw new JITValidationError(error);");
-              body2.push("  throw error;");
-              body2.push("}");
-              index++;
-              break;
-            }
-          }
+        case "json.decode":
           body2.push("value = JSON.parse(value);");
           break;
-        }
         case "binary.decode": {
           const codec2 = emitCodecBinding(stage2.schema, "binary.decode");
           if (!codec2) return;
@@ -13753,12 +12413,20 @@ function generate(options) {
             });
             return;
           }
-          const validator2 = emitValidatorBinding(stage2.schema);
-          if (!validator2) return;
+          const validator = emitValidatorBinding(stage2.schema);
+          if (!validator) return;
           needsValidationError = true;
-          body2.push(`const result = ${validator2}.safeParse(value);`);
-          body2.push("if (!result.success) throw new JITValidationError(result.issues);");
-          body2.push("value = result.data;");
+          if (canUseFastParse(stage2.schema)) {
+            body2.push(`if (!${validator}.is(value)) {`);
+            body2.push(`  const result = ${validator}.safeParse(value);`);
+            body2.push("  if (!result.success) throw new JITValidationError(result.issues);");
+            body2.push("  value = result.data;");
+            body2.push("}");
+          } else {
+            body2.push(`const result = ${validator}.safeParse(value);`);
+            body2.push("if (!result.success) throw new JITValidationError(result.issues);");
+            body2.push("value = result.data;");
+          }
           break;
         }
         case "query": {
@@ -13775,18 +12443,18 @@ function generate(options) {
         case "map": {
           const nextStage = stages[index + 1];
           const fuseJsonEncode = nextStage?.kind === "json.encode";
-          const mapper2 = emitMapperBinding(stage2, fuseJsonEncode || !stage2.many ? "map" : "many");
-          if (!mapper2) return;
+          const mapper = emitMapperBinding(stage2, fuseJsonEncode || !stage2.many ? "map" : "many");
+          if (!mapper) return;
           if (fuseJsonEncode) {
             const stringify = tryEmit(name, "json.encode", skipped, () => emitSerialize(stage2.target));
             if (!stringify) return;
             const binding = internalIdentifier(`${name}_stringify`);
             setup.push(`const ${binding} = (${stringify});`);
-            if (stage2.many) emitMappedJsonArray2(mapper2, binding);
-            else body2.push(`value = ${binding}(${mapper2}.map(value));`);
+            if (stage2.many) emitMappedJsonArray2(mapper, binding);
+            else body2.push(`value = ${binding}(${mapper}.map(value));`);
             index++;
           } else {
-            body2.push(`value = ${mapper2}.${stage2.many ? "many" : "map"}(value);`);
+            body2.push(`value = ${mapper}.${stage2.many ? "many" : "map"}(value);`);
           }
           break;
         }
@@ -13841,8 +12509,10 @@ function generate(options) {
     js.push(...body2.map((line) => `    ${line}`));
     js.push("  };");
     js.push("})();");
-    exportNames.push(name);
-    dts.push(`export declare const ${name}: ${declaredType};`, "");
+    if (exportArtifact) {
+      exportNames.push(name);
+      dts.push(`export declare const ${name}: ${declaredType};`, "");
+    }
   }
   function emitAotOperationSource(operation, schema, operationSkipped, name) {
     if (operation === "clone") return tryEmit(name, operation, operationSkipped, () => emitCloneSource(schema));
@@ -14289,9 +12959,9 @@ function inlineBindings(names, values) {
   const lines = [];
   for (let index = 0; index < names.length; index++) {
     const value = values[index];
-    const literal4 = serializeBindingValue(value);
-    if (literal4 === void 0) return void 0;
-    lines.push(`const ${names[index]} = ${literal4};`);
+    const literal3 = serializeBindingValue(value);
+    if (literal3 === void 0) return void 0;
+    lines.push(`const ${names[index]} = ${literal3};`);
   }
   return lines;
 }
@@ -14308,9 +12978,9 @@ function inlineCodecBindings(names, values) {
       lines.push("const __dec = new TextDecoder();");
       continue;
     }
-    const literal4 = serializeBindingValue(value);
-    if (literal4 === void 0) return void 0;
-    lines.push(`const ${name} = ${literal4};`);
+    const literal3 = serializeBindingValue(value);
+    if (literal3 === void 0) return void 0;
+    lines.push(`const ${name} = ${literal3};`);
   }
   return lines;
 }
@@ -14585,8 +13255,6 @@ var factories_exports = {};
 __export(factories_exports, {
   COMPILE_OPS: () => COMPILE_OPS,
   KeyedWatchedList: () => KeyedWatchedList,
-  MAPPER_OPS: () => MAPPER_OPS,
-  MODEL_OPS: () => MODEL_OPS,
   WatchedList: () => WatchedList,
   any: () => any,
   array: () => array,
@@ -14635,12 +13303,10 @@ __export(factories_exports, {
   json: () => json,
   jsonValue: () => jsonValue,
   lazy: () => lazy,
-  literal: () => literal3,
+  literal: () => literal2,
   map: () => map2,
   mapSchema: () => map,
-  mapper: () => mapper,
   mask: () => mask,
-  model: () => model,
   nan: () => nan,
   never: () => never,
   not: () => not2,
@@ -14664,7 +13330,6 @@ __export(factories_exports, {
   safeParse: () => safeParse,
   sanitize: () => sanitize,
   security: () => security,
-  serializer: () => serializer,
   set: () => set,
   stream: () => stream,
   string: () => string,
@@ -14679,7 +13344,6 @@ __export(factories_exports, {
   unknown: () => unknown,
   update: () => update,
   validate: () => validate,
-  validator: () => validator,
   void: () => voidType,
   watch: () => watch,
   watchedList: () => watchedList,
@@ -14828,6 +13492,167 @@ function compileCodec(schema, options) {
   );
 }
 
+// ../../packages/jit/src/compiler/json-parse.ts
+function compileJsonParse(schema) {
+  warmJsonParseShape(schema);
+  return JSON.parse;
+}
+function warmJsonParseShape(schema) {
+  const sample = jsonWarmupSample(schema);
+  if (sample === void 0) return false;
+  JSON.parse(sample);
+  JSON.parse(sample);
+  return true;
+}
+function jsonWarmupSample(schema) {
+  const value = emitWarmupValue(schema, /* @__PURE__ */ new Set(), 0);
+  if (value === void 0) return void 0;
+  if (rootIsArray(schema)) {
+    const element = rootArrayElement(schema);
+    const item = element ? emitWarmupValue(element, /* @__PURE__ */ new Set(), 1) : void 0;
+    if (item !== void 0) return `[${item},${item}]`;
+  }
+  return value;
+}
+function emitWarmupValue(schema, seen, depth) {
+  if (depth > 12 || seen.has(schema)) return "null";
+  seen.add(schema);
+  const current = schema;
+  let output;
+  switch (current.type) {
+    case TypeName.string:
+      output = '""';
+      break;
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.bigint:
+    case TypeName.nan:
+      output = "0";
+      break;
+    case TypeName.boolean:
+      output = "false";
+      break;
+    case TypeName.null:
+    case TypeName.undefined:
+    case TypeName.void:
+    case TypeName.never:
+    case TypeName.unknown:
+    case TypeName.any:
+    case TypeName.json:
+      output = "null";
+      break;
+    case TypeName.literal:
+      output = jsonPrimitive(current.def.value);
+      break;
+    case TypeName.enum: {
+      const values = Object.values(current.def.values);
+      output = values.map(jsonPrimitive).find((value) => value !== void 0) ?? "null";
+      break;
+    }
+    case TypeName.array: {
+      const item = emitWarmupValue(current.def.element, seen, depth + 1);
+      output = item === void 0 ? "[]" : `[${item},${item}]`;
+      break;
+    }
+    case TypeName.tuple: {
+      const items = current.def.items ?? [];
+      output = `[${items.map((item) => emitWarmupValue(item, seen, depth + 1) ?? "null").join(",")}]`;
+      break;
+    }
+    case TypeName.object: {
+      const props = current.def.props;
+      const entries = Object.keys(props).map((key) => {
+        const value = emitWarmupValue(props[key], seen, depth + 1) ?? "null";
+        return `${JSON.stringify(key)}:${value}`;
+      });
+      output = `{${entries.join(",")}}`;
+      break;
+    }
+    case TypeName.record:
+    case TypeName.map:
+      output = "{}";
+      break;
+    case TypeName.set:
+      output = "[]";
+      break;
+    case TypeName.union:
+    case TypeName.xor:
+    case TypeName.discriminatedUnion:
+    case TypeName.intersection: {
+      const options = current.def.options ?? [];
+      output = options.length === 0 ? "null" : emitWarmupValue(options[0], seen, depth + 1);
+      break;
+    }
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.not:
+      output = emitWarmupValue(current.def.innerType, seen, depth + 1);
+      break;
+    case TypeName.lazy:
+      output = emitWarmupValue(current.def.getter(), seen, depth + 1);
+      break;
+    case TypeName.when:
+      output = emitWarmupValue(current.def.thenType, seen, depth + 1);
+      break;
+    case TypeName.codec:
+      output = emitWarmupValue(current.def.input, seen, depth + 1);
+      break;
+    default:
+      output = "null";
+  }
+  seen.delete(schema);
+  return output;
+}
+function jsonPrimitive(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return void 0;
+}
+function rootIsArray(schema, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  const current = schema;
+  if (current.type === TypeName.array) return true;
+  const inner = wrapperInner(current);
+  return inner === void 0 ? false : rootIsArray(inner, seen);
+}
+function rootArrayElement(schema, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(schema)) return void 0;
+  seen.add(schema);
+  const current = schema;
+  if (current.type === TypeName.array) return current.def.element;
+  const inner = wrapperInner(current);
+  return inner === void 0 ? void 0 : rootArrayElement(inner, seen);
+}
+function wrapperInner(schema) {
+  switch (schema.type) {
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.not:
+      return schema.def.innerType;
+    case TypeName.lazy:
+      return schema.def.getter();
+    default:
+      return void 0;
+  }
+}
+
 // ../../packages/jit/src/compiler/serialize.ts
 function emitSerializeSource(schema) {
   return emitSerialize(schema);
@@ -14878,11 +13703,11 @@ function compile(schema, opsOrCompiled, extras) {
     schema: unwrapped,
     ops: Object.freeze([...ops])
   };
-  const validatorOps = collectValidatorOps(ops, jsonDecoderSupport(unwrapped).supported);
-  let validator2;
+  const validatorOps = collectValidatorOps(ops);
+  let validator;
   const getValidator = () => {
-    validator2 = validator2 ?? compileValidatorSelection(unwrapped, validatorOps);
-    return validator2;
+    validator = validator ?? compileValidatorSelection(unwrapped, validatorOps);
+    return validator;
   };
   for (const op of ops) {
     switch (op) {
@@ -14902,8 +13727,8 @@ function compile(schema, opsOrCompiled, extras) {
         selection.safeParseAsync = getValidator().safeParseAsync;
         break;
       case "fromJSON": {
-        const decoder = tryCompileJsonDecoder(unwrapped);
-        const fromJSON = decoder ?? ((json3) => getValidator().parse(JSON.parse(json3)));
+        const parseJson = compileJsonParse(unwrapped);
+        const fromJSON = ((json3) => getValidator().parse(parseJson(json3)));
         registerArtifact(fromJSON, {
           kind: "operation",
           schema: unwrapped,
@@ -14986,13 +13811,13 @@ function compileObjectSelection(schema, compiled) {
 function isCompileOp(value) {
   return COMPILE_OPS.includes(value);
 }
-function collectValidatorOps(ops, hasJsonDecoder) {
+function collectValidatorOps(ops) {
   const validatorOps = /* @__PURE__ */ new Set();
   for (const op of ops) {
     if (op === "is" || op === "parse" || op === "safeParse" || op === "parseAsync" || op === "safeParseAsync") {
       validatorOps.add(op);
     }
-    if (op === "fromJSON" && !hasJsonDecoder) validatorOps.add("parse");
+    if (op === "fromJSON") validatorOps.add("parse");
   }
   return [...validatorOps];
 }
@@ -15067,153 +13892,6 @@ var iso = {
   datetime: (options, message) => string().datetime(options, message),
   duration: (message) => string().duration(message)
 };
-
-// ../../packages/jit/src/factories/mapper.ts
-function mapper(source, target, ...rest) {
-  const [overrides, options] = rest;
-  return createMapperFacade(
-    unwrapSchema(source),
-    unwrapSchema(target),
-    overrides ?? {},
-    options
-  );
-}
-
-// ../../packages/jit/src/factories/model.ts
-var MODEL_OPS = [
-  "is",
-  "parse",
-  "safeParse",
-  "safeParseAsync",
-  "parseAsync",
-  "equal",
-  "clone",
-  "diff",
-  "hash",
-  "update",
-  "stringify",
-  "fromJSON",
-  "format",
-  "mask",
-  "sanitize",
-  "codec"
-];
-function model(schema, options) {
-  const unwrapped = unwrapSchema(schema);
-  const selections = /* @__PURE__ */ new Map();
-  const select = (ops) => {
-    const normalized = normalizeModelOps(ops);
-    const key = normalized.join(",");
-    const cached = selections.get(key);
-    if (cached) return cached;
-    const selection = {
-      schema: unwrapped,
-      ops: Object.freeze([...normalized])
-    };
-    const validatorOps = collectValidatorOps2(normalized, jsonDecoderSupport(unwrapped).supported);
-    const validator2 = validatorOps.length > 0 ? compileValidatorSelection(unwrapped, validatorOps) : void 0;
-    for (const op of normalized) {
-      selection[op] = compileModelOperation(op, unwrapped, validator2);
-    }
-    Object.defineProperty(selection, "__jitAot", {
-      enumerable: false,
-      value: "grouped"
-    });
-    const compiled = Object.freeze(selection);
-    selections.set(key, compiled);
-    return compiled;
-  };
-  if (options) {
-    const selected = [];
-    for (const key of Object.keys(options)) {
-      if (!isModelOp(key)) throw new JITError("INVALID_OPERATION", `unknown model operation ${JSON.stringify(key)}`);
-      if (options[key]) selected.push(key);
-    }
-    return select(selected);
-  }
-  const target = {
-    schema: unwrapped,
-    ops: MODEL_OPS,
-    get(...ops) {
-      return select(ops);
-    }
-  };
-  for (const op of MODEL_OPS) {
-    Object.defineProperty(target, op, {
-      configurable: false,
-      enumerable: true,
-      get() {
-        return select([op])[op];
-      }
-    });
-  }
-  Object.defineProperty(target, "__jitAot", {
-    enumerable: false,
-    value: "grouped"
-  });
-  return Object.freeze(target);
-}
-function compileModelOperation(op, schema, validator2) {
-  switch (op) {
-    case "is":
-    case "parse":
-    case "safeParse":
-    case "parseAsync":
-    case "safeParseAsync":
-      return validator2?.[op];
-    case "equal":
-      return compileEqual(schema);
-    case "clone":
-      return compileClone(schema);
-    case "diff":
-      return compileDiff(schema);
-    case "hash":
-      return compileHash(schema);
-    case "update":
-      return compileUpdate(schema);
-    case "stringify":
-      return compileSerialize(schema);
-    case "fromJSON": {
-      const decoder = tryCompileJsonDecoder(schema);
-      if (decoder) return decoder;
-      const parse2 = validator2?.parse;
-      if (!parse2) throw new JITError("INVALID_OPERATION", "fromJSON requires the parse compiler");
-      return (json3) => parse2(JSON.parse(json3));
-    }
-    case "format":
-      return compileFormat(schema);
-    case "mask":
-      return compileMask(schema);
-    case "sanitize":
-      return compileSanitize(schema);
-    case "codec":
-      return compileCodec(schema);
-  }
-}
-function normalizeModelOps(ops) {
-  const normalized = [];
-  for (const op of ops) {
-    if (!isModelOp(op)) throw new JITError("INVALID_OPERATION", `unknown model operation ${JSON.stringify(op)}`);
-  }
-  for (const op of MODEL_OPS) {
-    if (ops.includes(op)) normalized.push(op);
-  }
-  return normalized;
-}
-function isModelOp(value) {
-  return MODEL_OPS.includes(value);
-}
-function isValidatorOp(value) {
-  return value === "is" || value === "parse" || value === "safeParse" || value === "parseAsync" || value === "safeParseAsync";
-}
-function collectValidatorOps2(ops, hasJsonDecoder) {
-  const selected = /* @__PURE__ */ new Set();
-  for (const op of ops) {
-    if (isValidatorOp(op)) selected.add(op);
-    else if (op === "fromJSON" && !hasJsonDecoder) selected.add("parse");
-  }
-  return [...selected];
-}
 
 // ../../packages/jit/src/factories/object/object.ts
 function object(shape) {
@@ -16384,33 +15062,9 @@ function emitExecutionPlan(plan) {
       case "value":
       case "to.array":
         break;
-      case "json.decode": {
-        const validation = stages[index + 1];
-        if (validation?.kind === "validate" && validation.operation === "parse" && stage2.schema === validation.schema) {
-          const decoder = tryEmitJsonDecoder(stage2.schema);
-          if (decoder) {
-            const decoderName = emitBoundBlock(
-              "jsonDecoder",
-              decoder.bindingNames,
-              decoder.bindingValues,
-              decoder.source,
-              true
-            );
-            const error = bind(JITValidationError);
-            const caught = `__caught${valueIndex++}`;
-            body.push("try {");
-            body.push(`  value = ${decoderName}(value);`);
-            body.push(`} catch (${caught}) {`);
-            body.push(`  if (Array.isArray(${caught})) throw new ${error}(${caught});`);
-            body.push(`  throw ${caught};`);
-            body.push("}");
-            index++;
-            break;
-          }
-        }
+      case "json.decode":
         body.push("value = JSON.parse(value);");
         break;
-      }
       case "binary.decode": {
         const codec2 = emitCodec(stage2.schema);
         const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
@@ -16418,27 +15072,37 @@ function emitExecutionPlan(plan) {
         break;
       }
       case "validate": {
-        const validator2 = emitValidator(stage2.schema, {
-          is: stage2.operation === "is",
+        const fastParse = stage2.operation === "parse" && canUseFastParse(stage2.schema);
+        const validator = emitValidator(stage2.schema, {
+          is: stage2.operation === "is" || fastParse,
           safeParse: stage2.operation === "parse" || stage2.operation === "safeParse" || stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync" || stage2.operation === "issues",
           safeParseAsync: stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync"
         });
         const validatorName = emitBoundBlock(
           "validator",
-          validator2.bindings.names,
-          validator2.bindings.values,
-          validator2.source
+          validator.bindings.names,
+          validator.bindings.values,
+          validator.source
         );
         switch (stage2.operation) {
           case "is":
             body.push(`value = ${validatorName}.is(value);`);
             break;
           case "parse": {
-            const result = `__result${valueIndex++}`;
             const error = bind(JITValidationError);
-            body.push(`const ${result} = ${validatorName}.safeParse(value);`);
-            body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
-            body.push(`value = ${result}.data;`);
+            if (fastParse) {
+              const result = `__result${valueIndex++}`;
+              body.push(`if (!${validatorName}.is(value)) {`);
+              body.push(`  const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`  if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`  value = ${result}.data;`);
+              body.push("}");
+            } else {
+              const result = `__result${valueIndex++}`;
+              body.push(`const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`value = ${result}.data;`);
+            }
             break;
           }
           case "safeParse":
@@ -16567,12 +15231,18 @@ function emitExecutionPlan(plan) {
 }
 function lowerExecutionPlan(plan) {
   const emitted = emitExecutionPlan(plan);
-  return globalThis.Function(...emitted.bindingNames, emitted.source)(...emitted.bindingValues);
+  const compiled = globalThis.Function(
+    ...emitted.bindingNames,
+    emitted.source
+  )(...emitted.bindingValues);
+  const json3 = plan.stages.find((stage2) => stage2.kind === "json.decode");
+  if (json3?.schema) warmJsonParseShape(json3.schema);
+  return compiled;
 }
 function indent(source) {
   return source.split("\n").map((line) => `  ${line}`);
 }
-function emitMappedJsonArray(mapper2, stringify, body, index) {
+function emitMappedJsonArray(mapper, stringify, body, index) {
   const list = `__list${index}`;
   const length = `__len${index}`;
   const item = `__item${index}`;
@@ -16583,7 +15253,7 @@ function emitMappedJsonArray(mapper2, stringify, body, index) {
   body.push(`let ${json3} = "[";`);
   body.push(`for (let ${cursor} = 0; ${cursor} < ${length}; ${cursor}++) {`);
   body.push(`  if (${cursor} !== 0) ${json3} += ",";`);
-  body.push(`  const ${item} = ${mapper2}.map(${list}[${cursor}]);`);
+  body.push(`  const ${item} = ${mapper}.map(${list}[${cursor}]);`);
   body.push(`  ${json3} += ${stringify}(${item});`);
   body.push("}");
   body.push(`${json3} += "]";`);
@@ -16611,11 +15281,14 @@ function freezePlan(schema, stages) {
     stages: Object.freeze(stages.map((stage2) => Object.freeze(stage2)))
   });
 }
-function createExecutionArtifact(plan, lower) {
+function createExecutionArtifact(plan, lower, arity = 1) {
   let compiled;
-  const artifact = function executionArtifact(...args) {
+  const artifact = arity === 1 ? function executionArtifact(input) {
     compiled ??= lower();
-    return compiled(...args);
+    return compiled(input);
+  } : function executionArtifact(left, right) {
+    compiled ??= lower();
+    return compiled(left, right);
   };
   Object.defineProperties(artifact, {
     plan: { enumerable: true, value: plan },
@@ -16665,7 +15338,7 @@ function jsonParse(schema) {
   ]);
   const source = createExecutionArtifact(
     plan,
-    () => (value) => JSON.parse(value)
+    () => compileJsonParse(unwrapped)
   );
   return artifactForSchema(source, unwrapped);
 }
@@ -16713,23 +15386,24 @@ function validationArtifact(schema, operation) {
     }
   ]);
   const artifact = createExecutionArtifact(plan, () => {
-    const validator2 = compileValidator(unwrapped);
     switch (operation) {
       case "is":
-        return validator2.is;
+        return compileValidatorSelection(unwrapped, ["is"]).is;
       case "parse":
-        return validator2.parse;
+        return compileValidatorSelection(unwrapped, ["parse"]).parse;
       case "safeParse":
-        return validator2.safeParse;
+        return compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
       case "parseAsync":
-        return validator2.parseAsync;
+        return compileValidatorSelection(unwrapped, ["parseAsync"]).parseAsync;
       case "safeParseAsync":
-        return validator2.safeParseAsync;
-      case "issues":
+        return compileValidatorSelection(unwrapped, ["safeParseAsync"]).safeParseAsync;
+      case "issues": {
+        const safeParse2 = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
         return function* issues(value) {
-          const result = validator2.safeParse(value);
+          const result = safeParse2(value);
           if (!result.success) yield* result.issues;
         };
+      }
     }
   });
   if (operation === "parse") {
@@ -16833,7 +15507,11 @@ function operationArtifact(schema, operation, input, output, lower) {
       effects: THROWING_EFFECTS
     }
   ]);
-  const artifact = createExecutionArtifact(plan, () => lower(unwrapped));
+  const artifact = createExecutionArtifact(
+    plan,
+    () => lower(unwrapped),
+    operation === "equal" || operation === "diff" ? 2 : 1
+  );
   const operations = OPERATION_ARTIFACTS.get(unwrapped);
   if (operations) operations.set(operation, artifact);
   else OPERATION_ARTIFACTS.set(unwrapped, /* @__PURE__ */ new Map([[operation, artifact]]));
@@ -17174,8 +15852,8 @@ function assertTransformTarget(source, target, transforms) {
     throw new JITError("INVALID_OPERATION", "execution transforms require object source and target schemas");
   }
   const sourceKeys = Object.keys(sourceObject.def.props);
-  const targetKeys2 = Object.keys(targetObject.def.props);
-  if (sourceKeys.length !== targetKeys2.length || sourceKeys.some((key) => !targetKeys2.includes(key))) {
+  const targetKeys = Object.keys(targetObject.def.props);
+  if (sourceKeys.length !== targetKeys.length || sourceKeys.some((key) => !targetKeys.includes(key))) {
     throw new JITError(
       "INVALID_OPERATION",
       "execution transform targets must preserve the source object's field set; use .map() for projections or renames"
@@ -17242,7 +15920,7 @@ function selectArraySchema(schema, fields) {
 }
 
 // ../../packages/jit/src/factories/special/special.ts
-function literal3(value) {
+function literal2(value) {
   return /* @__PURE__ */ createBuilder(
     createSchema(TypeName.literal, {
       value
@@ -17407,19 +16085,6 @@ function arrayOf(schema) {
 var map2 = Object.assign(mapCapability, { many: mapMany });
 
 // ../../packages/jit/src/factories/serialize.ts
-function serializer(schema, options) {
-  const unwrapped = unwrapSchema(schema);
-  const stringify = compileSerialize(unwrapped, options);
-  const decoder = tryCompileJsonDecoder(unwrapped);
-  let validate3;
-  return {
-    stringify,
-    parse: decoder ?? ((json3) => {
-      validate3 = validate3 ?? compileValidator(unwrapped, options);
-      return validate3.parse(JSON.parse(json3));
-    })
-  };
-}
 function codec(schema, outputOrOptions, valueCodecOptions) {
   if (valueCodecOptions !== void 0 && outputOrOptions !== void 0 && isSchemaInput(outputOrOptions)) {
     const input = unwrapSchema(schema);
@@ -17669,7 +16334,7 @@ function createArrayStream(root, options) {
   const checks = (root.def.checks ?? []).filter(
     (check) => check.kind === "min" || check.kind === "max" || check.kind === "length" || check.kind === "nonEmpty"
   );
-  const validator2 = compileValidator(element);
+  const validator = compileValidator(element);
   const decode = createDecoder();
   const items = [];
   const gateRef = { pending: rootGate(root) };
@@ -17683,7 +16348,7 @@ function createArrayStream(root, options) {
       } catch {
         throwStructural(`malformed JSON element at index ${items.length}`, `[${items.length}]`);
       }
-      const result = validator2.safeParse(parsed);
+      const result = validator.safeParse(parsed);
       if (!result.success) {
         throw new JITValidationError(prefixIssues(result.issues, `[${items.length}]`));
       }
@@ -17743,7 +16408,7 @@ function createArrayStream(root, options) {
   };
 }
 function createValueStream(schema, root, options) {
-  const validator2 = compileValidator(schema, options);
+  const validator = compileValidator(schema, options);
   const decode = createDecoder();
   const gateRef = { pending: rootGate(root) };
   const scanner = new ValueBoundaryScanner({
@@ -17782,12 +16447,12 @@ function createValueStream(schema, root, options) {
         failed = true;
         throwStructural("unexpected end of stream: incomplete JSON document");
       }
-      return validator2.parse(parsed);
+      return validator.parse(parsed);
     }
   };
 }
 function createNdjsonStream(schema, options) {
-  const validator2 = compileValidator(schema, options);
+  const validator = compileValidator(schema, options);
   const decode = createDecoder();
   const items = [];
   let buffer = "";
@@ -17805,7 +16470,7 @@ function createNdjsonStream(schema, options) {
     } catch {
       throwStructural(`malformed JSON on line ${line}`, `line ${line}`);
     }
-    const result = validator2.safeParse(parsed);
+    const result = validator.safeParse(parsed);
     if (!result.success) {
       throw new JITValidationError(prefixIssues(result.issues, `line ${line}`));
     }
@@ -17867,8 +16532,8 @@ function createTransformBuilder(schema, state) {
     select(...keys) {
       return createTransformBuilder(schema, { ...state, selected: keys });
     },
-    map(key, mapper2) {
-      const result = mapper2(createFieldOps());
+    map(key, mapper) {
+      const result = mapper(createFieldOps());
       const step = isTransformExpression(result) ? { kind: "inline", emit: result.emit } : {
         kind: "binding",
         fn: result
@@ -18328,58 +16993,6 @@ function assertUpdateable2(schema) {
 }
 function hasInnerType3(schema) {
   return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
-}
-
-// ../../packages/jit/src/factories/validate.ts
-var facadeCache = /* @__PURE__ */ new WeakMap();
-function validator(schema, options) {
-  const unwrapped = unwrapSchema(schema);
-  const ops = selectedOpsFromOptions(options);
-  if (ops.length > 0) {
-    return attachGet(unwrapped, compileValidatorSelection(unwrapped, ops, options), options);
-  }
-  if (options?.cache === false)
-    return createValidatorFacade(unwrapped, options);
-  const cached = facadeCache.get(unwrapped);
-  if (cached) return cached;
-  const facade = createValidatorFacade(unwrapped, options);
-  facadeCache.set(unwrapped, facade);
-  return facade;
-}
-function createValidatorFacade(schema, options) {
-  const target = {
-    get(...ops) {
-      return compileValidatorSelection(schema, ops, options);
-    }
-  };
-  for (const op of VALIDATOR_OPS) {
-    Object.defineProperty(target, op, {
-      configurable: false,
-      enumerable: true,
-      get() {
-        return compileValidatorSelection(schema, [op], options)[op];
-      }
-    });
-  }
-  return Object.freeze(target);
-}
-function attachGet(schema, selection, options) {
-  return Object.freeze({
-    ...selection,
-    get(...ops) {
-      return compileValidatorSelection(schema, ops, options);
-    }
-  });
-}
-function selectedOpsFromOptions(options) {
-  if (!options) return [];
-  const ops = [];
-  if (options.is) ops.push("is");
-  if (options.parse) ops.push("parse");
-  if (options.safeParse) ops.push("safeParse");
-  if (options.parseAsync || options.asyncParse) ops.push("parseAsync");
-  if (options.safeParseAsync || options.asyncSafeParse) ops.push("safeParseAsync");
-  return ops;
 }
 
 // ../../packages/jit/src/compiler/watch.ts
@@ -19072,8 +17685,8 @@ function assertTransformTarget2(source, target, transforms) {
     throw new JITError("INVALID_OPERATION", "execution transforms require object source and target schemas");
   }
   const sourceKeys = Object.keys(sourceObject.def.props);
-  const targetKeys2 = Object.keys(targetObject.def.props);
-  if (sourceKeys.length !== targetKeys2.length || sourceKeys.some((key) => !targetKeys2.includes(key))) {
+  const targetKeys = Object.keys(targetObject.def.props);
+  if (sourceKeys.length !== targetKeys.length || sourceKeys.some((key) => !targetKeys.includes(key))) {
     throw new JITError(
       "INVALID_OPERATION",
       "execution transform targets must preserve the source object's field set; use .map() for projections or renames"

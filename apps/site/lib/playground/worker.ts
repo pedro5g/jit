@@ -22,7 +22,7 @@ export type PlaygroundOp =
   | "jsonChunks"
   | "transform"
   | "mapper"
-  | "model"
+  | "compile"
   | "dto"
   | "indexes";
 
@@ -108,7 +108,7 @@ interface UserBindings {
   stringifyChunks?: unknown;
   transform?: unknown;
   mapper?: unknown;
-  model?: unknown;
+  compiled?: unknown;
   dto?: unknown;
   indexes?: unknown;
   reactiveUpdate?: unknown;
@@ -158,7 +158,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         stringifyChunks: typeof stringifyChunks === "undefined" ? undefined : stringifyChunks,
         transform: typeof transform === "undefined" ? undefined : transform,
         mapper: typeof mapper === "undefined" ? undefined : mapper,
-        model: typeof model === "undefined" ? undefined : model,
+        compiled: typeof compiled === "undefined" ? undefined : compiled,
         dto: typeof dto === "undefined" ? undefined : dto,
         indexes: typeof indexes === "undefined" ? undefined : indexes,
         reactiveUpdate: typeof reactiveUpdate === "undefined" ? undefined : reactiveUpdate,
@@ -433,8 +433,8 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         run = () => mapper(requireA());
         break;
       }
-      case "model": {
-        const model = bindings.model as
+      case "compile": {
+        const compiled = bindings.compiled as
           | {
               readonly ops?: readonly string[];
               readonly is?: (value: unknown) => boolean;
@@ -442,16 +442,14 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
               readonly clone?: (value: unknown) => unknown;
             }
           | undefined;
-        if (!model || !Array.isArray(model.ops)) {
-          throw new Error(
-            'define a `model` object with explicit artifacts, e.g. `{ ops: ["is"], is: JIT.is(schema) }`'
-          );
+        if (!compiled || !Array.isArray(compiled.ops)) {
+          throw new Error("define a `compiled` artifact group, e.g. `JIT.compile(schema, { is: JIT.is(schema) })`");
         }
         run = () => ({
-          operations: model.ops,
-          is: model.is?.(requireA()),
-          parsed: model.parse?.(requireA()),
-          cloned: model.clone?.(requireA()),
+          operations: compiled.ops,
+          is: compiled.is?.(requireA()),
+          parsed: compiled.parse?.(requireA()),
+          cloned: compiled.clone?.(requireA()),
         });
         break;
       }

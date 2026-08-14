@@ -125,16 +125,17 @@ describe("JIT compiler serialize + codec", () => {
       );
     });
 
-    it("should expose stringify and validated parse through JIT.serializer", () => {
+    it("should compose specialized stringify with native parsing and validation", () => {
       const Simple = JIT.object({
         id: JIT.number(),
         email: JIT.string().email(),
       });
-      const json = JIT.serializer(Simple);
+      const stringify = JIT.json.stringify(Simple);
+      const parse = JIT.json.parse(Simple).validate();
       const value = { id: 1, email: "ada@math.org" };
 
-      expect(json.parse(json.stringify(value))).toEqual(value);
-      expect(() => json.parse('{"id":1,"email":"nope"}')).toThrow(Errors.JITValidationError);
+      expect(parse(stringify(value))).toEqual(value);
+      expect(() => parse('{"id":1,"email":"nope"}')).toThrow(Errors.JITValidationError);
     });
   });
 

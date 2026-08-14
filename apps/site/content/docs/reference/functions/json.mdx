@@ -34,11 +34,11 @@ const decoded = parseUserJson(text);
 ```
 
 `stringify` bakes known object keys and punctuation into generated source.
-It avoids runtime reflection and generic replacer callbacks. Adjacent
-`parse(...).validate()` emits a schema-directed token scanner for supported
-schemas, including defaults, string transforms, constraints, and object key
-policies in the same traversal. Unsupported semantics use the explicit native
-parse + compiled-validator compatibility path.
+It avoids runtime reflection and generic replacer callbacks. `parse` is a
+direct native `JSON.parse` binding. Adjacent `parse(...).validate()` emits
+native parsing followed immediately by the schema-specialized validator.
+Runtime compilation prewarms a bounded canonical value for the declared key
+order; AOT output remains side-effect free.
 
 ## Chunked arrays
 

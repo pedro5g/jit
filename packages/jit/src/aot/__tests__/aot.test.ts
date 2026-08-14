@@ -5,78 +5,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AOT, JIT } from "../../index.js";
 
-describe("JIT model namespace", () => {
-  const User = JIT.model(
-    JIT.object({
-      id: JIT.number().int().positive(),
-      name: JIT.string().min(2),
-      email: JIT.string().pii("mask"),
-      tags: JIT.array(JIT.string()),
-    })
-  );
-
-  const ada = { id: 1, name: "Ada", email: "ada@math.org", tags: ["math"] };
-
-  it("should expose every compiled operation lazily from one namespace", () => {
-    expect(User.is(ada)).toBe(true);
-    expect(User.is({ ...ada, id: 0 })).toBe(false);
-    expect(User.parse(ada)).toBe(ada);
-    expect(User.safeParse({ ...ada, name: "A" }).success).toBe(false);
-    expect(User.equal(ada, { ...ada })).toBe(true);
-    expect(User.clone(ada)).toEqual(ada);
-    expect(User.clone(ada)).not.toBe(ada);
-    expect(User.diff(ada, { ...ada, name: "Grace" })).toHaveLength(1);
-    expect(User.hash(ada)).toBe(User.hash({ ...ada }));
-    expect(User.update(ada, { name: "Ada L." }).name).toBe("Ada L.");
-    expect(User.stringify(ada)).toBe(JSON.stringify(ada));
-    expect(User.fromJSON(JSON.stringify(ada))).toEqual(ada);
-    expect(User.mask(ada).email).toBe("***.org");
-    expect(User.codec.decode(User.codec.encode(ada))).toEqual(ada);
-    expect(User.schema.type).toBe("object");
-  });
-
-  it("should only throw for unsupported operations when accessed", () => {
-    const WithMap = JIT.model(JIT.object({ meta: JIT.map(JIT.string(), JIT.number()) }));
-
-    expect(WithMap.mask).toBeTypeOf("function");
-    expect(WithMap.codec.decode(WithMap.codec.encode({ meta: new Map([["a", 1]]) }))).toEqual({
-      meta: new Map([["a", 1]]),
-    });
-    expect(() => WithMap.stringify).toThrow(/serialize/);
-  });
-
-  it("should expose explicit get selections without compiling unused model operations", () => {
-    const selected = User.get("is", "parse");
-    const sameSelection = User.get("parse", "is");
-
-    expect(selected).toBe(sameSelection);
-    expect(Object.keys(selected)).toEqual(["schema", "ops", "is", "parse"]);
-    expect(selected.ops).toEqual(["is", "parse"]);
-    expect(selected.is(ada)).toBe(true);
-    expect(selected.parse(ada)).toBe(ada);
-    expectTypeOf(selected).toHaveProperty("is");
-    expectTypeOf(selected).toHaveProperty("parse");
-    // @ts-expect-error clone was not selected
-    selected.clone;
-    expect(() => User.get("unknown" as never)).toThrow(/unknown model operation/);
-  });
-
-  it("should create narrow models from boolean operation options", () => {
-    const UserSchema = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const Compact = JIT.model(UserSchema, { is: true, equal: true, clone: false });
-    const Json = JIT.model(UserSchema, { fromJSON: true });
-
-    expect(Object.keys(Compact)).toEqual(["schema", "ops", "is", "equal"]);
-    expect(Compact.ops).toEqual(["is", "equal"]);
-    expect(Compact.is({ id: 1, name: "Ada" })).toBe(true);
-    expect(Compact.equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
-    expect(Json.fromJSON('{"id":1,"name":"Ada"}')).toEqual({ id: 1, name: "Ada" });
-    // @ts-expect-error parse was not configured
-    Compact.parse;
-    expect(() => JIT.model(UserSchema, { unknown: true } as never)).toThrow(/unknown model operation/);
-  });
-});
-
 describe("JIT AOT generate", () => {
   let outDir: string;
 
@@ -88,9 +16,9 @@ describe("JIT AOT generate", () => {
     rmSync(outDir, { recursive: true, force: true });
   });
 
-  it("should emit only explicitly configured model operations", async () => {
+  it("should emit only explicitly grouped operations", async () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
-    const UserRuntime = JIT.model(User, { is: true, clone: true });
+    const UserRuntime = JIT.compile(User, { is: JIT.is(User), clone: JIT.clone(User) });
     const result = AOT.generate({ schemas: { User: UserRuntime }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const declarations = readFileSync(join(outDir, "index.d.ts"), "utf8");
@@ -113,16 +41,15 @@ describe("JIT AOT generate", () => {
     expect(declarations).not.toContain("readonly parse:");
   });
 
-  it("emits fromJSON as only the schema-directed decoder when selected alone", async () => {
+  it("emits fromJSON as native parsing followed by specialized validation", async () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
-    const Json = JIT.model(User, { fromJSON: true });
+    const Json = JIT.compile(User, { fromJSON: JIT.json.parse(User).validate() });
 
     AOT.generate({ schemas: { Json }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
 
-    expect(source).toContain("function decode(input)");
-    expect(source).not.toContain("JSON.parse");
-    expect(source).not.toContain("safeParse");
+    expect(source).toContain("JSON.parse");
+    expect(source).toContain("safeParse");
 
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       Json: { fromJSON: (json: string) => { id: number; name: string } };
@@ -136,7 +63,7 @@ describe("JIT AOT generate", () => {
       id: JIT.number().int32(),
       name: JIT.string(),
     });
-    const User = JIT.model(UserSchema, { is: true, parse: true });
+    const User = JIT.compile(UserSchema, { is: JIT.is(UserSchema), parse: JIT.parse(UserSchema) });
     const result = AOT.generate({
       schemas: { User },
       outDir,
@@ -394,7 +321,7 @@ describe("JIT AOT generate", () => {
     const source = readFileSync(join(outDir, "index.js"), "utf8");
 
     expect(source).not.toContain('from "@jit-compiler/jit"');
-    expect(source).toContain("function decode(input)");
+    expect(source).toContain("JSON.parse");
     expect(result.skipped).toHaveLength(0);
 
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
@@ -575,13 +502,12 @@ describe("JIT AOT generate", () => {
         name: (value) => String(value).trim(),
       })
       .refine((value) => value.name !== "blocked");
-    const selected = JIT.validator(User).get("is", "parse", "safeParse");
     const result = AOT.generate({
       schemas: {},
       functions: {
-        isUser: selected.is,
-        parseUser: selected.parse,
-        safeParseUser: selected.safeParse,
+        isUser: JIT.is(User),
+        parseUser: JIT.parse(User),
+        safeParseUser: JIT.safeParse(User),
       },
       outDir,
     });
@@ -609,13 +535,12 @@ describe("JIT AOT generate", () => {
       plan: JIT.string().default("free"),
     });
 
-    const selected = JIT.validator(User).get("is", "parse", "safeParse");
     const result = AOT.generate({
       schemas: {},
       functions: {
-        User_is: selected.is,
-        User_parse: selected.parse,
-        User_safeParse: selected.safeParse,
+        User_is: JIT.is(User),
+        User_parse: JIT.parse(User),
+        User_safeParse: JIT.safeParse(User),
       },
       outDir,
       packageName: "@acme/models",
@@ -647,11 +572,11 @@ describe("JIT AOT generate", () => {
 
   it("should preserve standalone export names when grouped internals would collide", async () => {
     const UserSchema = JIT.object({ id: JIT.number() });
-    const selected = JIT.validator(UserSchema).get("is");
+    const isUser = JIT.is(UserSchema);
 
     AOT.generate({
-      schemas: { User: JIT.compile(UserSchema, { is: selected.is }) },
-      functions: { User_is: selected.is },
+      schemas: { User: JIT.compile(UserSchema, { is: isUser }) },
+      functions: { User_is: isUser },
       outDir,
     });
 
@@ -712,11 +637,11 @@ describe("JIT AOT generate", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
 
     writeFileSync(join(outDir, "package.json"), '{"stale":true}\n');
-    const selected = JIT.validator(User).get("is");
+    const isUser = JIT.is(User);
 
     const result = AOT.generate({
       schemas: {},
-      functions: { User_is: selected.is },
+      functions: { User_is: isUser },
       outDir,
     });
     const source = readFileSync(join(outDir, "index.js"), "utf8");

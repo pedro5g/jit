@@ -33,7 +33,7 @@ function __hashUnknown(value) {
 }
 function __combineHash(left, right) { return ((left << 5) - left + right) | 0; }
 const User_validator = /*#__PURE__*/ (() => {
-  const __v0 = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
+  const __v0 = /^(?:[A-Za-z0-9_'+-]+\.)*[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
   const __v1 = /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$/;
   const __v2 = /<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1\s*>/gi;
   const __v3 = /<[^>]*>/g;
@@ -48,7 +48,7 @@ const User_validator = /*#__PURE__*/ (() => {
     if (typeof v3 !== "number") {
       return false;
     }
-    if (!Number.isInteger(v3) || v3 < -2147483648 || v3 > 2147483647) {
+    if ((v3 | 0) !== v3) {
       return false;
     }
     if (v3 <= 0) {
@@ -147,7 +147,7 @@ const User_validator = /*#__PURE__*/ (() => {
       if (typeof v4 !== "number") {
         issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v4 };
       } else {
-        if (!Number.isInteger(v4) || v4 < -2147483648 || v4 > 2147483647) {
+        if ((v4 | 0) !== v4) {
           issues[issues.length] = { path: "id", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
         }
         if (v4 <= 0) {
@@ -277,7 +277,7 @@ const User_validator = /*#__PURE__*/ (() => {
 })();
 const User_is = /*#__PURE__*/ ((v) => v.is)(User_validator);
 const User_safeParse = /*#__PURE__*/ ((v) => v.safeParse)(User_validator);
-const User_parse = /*#__PURE__*/ ((v) => (value) => { const r = v.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })(User_validator);
+const User_parse = (value) => { const r = User_validator.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };
 const User_fromJSON = /*#__PURE__*/ ((parse) => (json) => parse(JSON.parse(json)))(User_parse);
 const User_hash = /*#__PURE__*/ (() => {
   const compute = (function hash(value) {

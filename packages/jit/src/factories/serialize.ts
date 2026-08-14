@@ -1,54 +1,8 @@
 import { type CodecCompileOptions, type CompiledCodec, compileCodec } from "../compiler/codec.js";
-import { tryCompileJsonDecoder } from "../compiler/json-decode.js";
-import { compileSerialize, type Serialize } from "../compiler/serialize.js";
-import { compileValidator } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
 import { createSchema, TypeName } from "../core/ats/index.js";
 import type { Builder, SchemaInput } from "../core/builder/index.js";
 import { createBuilder, unwrapSchema } from "../core/builder/index.js";
-import type { CompileCacheOptions } from "../runtime/cache/compile-cache.js";
-
-/**
- * A compiled JSON boundary for one schema: shape-specialized `stringify`
- * plus a schema-directed `parse` that validates while consuming JSON tokens
- * when the schema has a lossless lowering.
- */
-export interface CompiledSerializer<T> {
-  readonly stringify: (value: T) => string;
-  readonly parse: (json: string) => T;
-}
-
-/**
- * Compiles the JSON boundary for a schema.
- *
- * @example
- * ```ts
- * const Users = JIT.serializer(User);
- *
- * res.end(Users.stringify(user));      // static keys, no reflection
- * const user = Users.parse(rawBody);   // schema-directed decode + validation
- * ```
- */
-export function serializer<TSchema extends ATS.AnyTypeSchema>(
-  schema: SchemaInput<TSchema>,
-  options?: CompileCacheOptions
-): CompiledSerializer<ATS.TypeofSchema<TSchema>> {
-  const unwrapped = unwrapSchema(schema);
-  const stringify: Serialize<ATS.TypeofSchema<TSchema>> = compileSerialize(unwrapped, options);
-  const decoder = tryCompileJsonDecoder<ATS.TypeofSchema<TSchema>>(unwrapped);
-  let validate: ReturnType<typeof compileValidator> | undefined;
-
-  return {
-    stringify,
-    parse:
-      decoder ??
-      ((json) => {
-        validate = validate ?? compileValidator(unwrapped, options);
-
-        return validate.parse(JSON.parse(json));
-      }),
-  };
-}
 
 /**
  * Compiles a schema-driven binary codec (`encode` / `encodeInto` / `decode`).
