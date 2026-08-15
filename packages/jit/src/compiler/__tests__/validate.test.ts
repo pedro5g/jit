@@ -173,7 +173,9 @@ describe("JIT compiler validator", () => {
 
   it("should keep stateful regular expressions single-pass", () => {
     const Token = JIT.string().regex(/^tok_[a-z]+$/g);
-    const source = Compiler.emitValidatorSource(Token.schema, { ops: ["parse"] });
+    const source = Compiler.emitValidatorSource(Token.schema, {
+      ops: ["parse"],
+    });
 
     expect(source).not.toContain("function is(value)");
   });
@@ -420,7 +422,10 @@ describe("JIT compiler validator", () => {
       mode: "strict",
     });
     const TransformDocument = JIT.string().format("###.###.###-##");
-    const strict = { is: JIT.validate.is(StrictDocument), parse: JIT.validate.parse(StrictDocument) };
+    const strict = {
+      is: JIT.validate.is(StrictDocument),
+      parse: JIT.validate.parse(StrictDocument),
+    };
     const transformIs = JIT.validate.is(TransformDocument);
 
     expect(strict.is("123.456.789-01")).toBe(true);
@@ -998,7 +1003,10 @@ describe("JIT compiler validator", () => {
       ops: ["parse"],
     });
     const selected = Compiler.compileValidatorSelection(User.schema, ["is", "parse"] as const);
-    const grouped = { is: JIT.validate.is(User), parse: JIT.validate.parse(User) };
+    const grouped = {
+      is: JIT.validate.is(User),
+      parse: JIT.validate.parse(User),
+    };
 
     expect(isOnlySource).toContain("function is(value)");
     expect(isOnlySource).not.toContain("function safeParse(value)");

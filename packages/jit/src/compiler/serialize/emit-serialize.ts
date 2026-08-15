@@ -4,6 +4,7 @@ import { JITError } from "../../errors/index.js";
 import { Parse } from "../../shared/index.js";
 import { emitDefaultedValue, emitStaticDefaultSource } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { assertNoRecursion } from "../schema-recursion.js";
 import { emitPropertyAccess } from "../source/access.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
@@ -22,6 +23,8 @@ interface SerializeContext {
  * Classic indexed loops, no `Object.keys` on known shapes, no closures.
  */
 export function emitSerialize(schema: ATS.AnyTypeSchema): string {
+  assertNoRecursion(schema, "json.stringify");
+
   const writer = new CodeWriter();
   const context: SerializeContext = { writer, varCounter: 0 };
   const needsStringHelper = hasStringLeaf(schema, new Set());

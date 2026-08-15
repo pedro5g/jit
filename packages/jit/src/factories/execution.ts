@@ -282,7 +282,7 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
 
   // Every validation artifact is a Standard Schema, so it can be handed
   // straight to any consumer in the ecosystem without a wrapper.
-  attachStandardSchema(artifact, unwrapped);
+  attachStandardSchema(artifact, unwrapped, plan);
 
   if (operation === "parse") {
     return artifactForSchema(
@@ -294,13 +294,62 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
   return artifact;
 }
 
-/** Shares the schema's cached adapter; validation stays the compiled one. */
-export function attachStandardSchema(target: object, schema: ATS.AnyTypeSchema): void {
+/**
+ * Any artifact whose plan ends in validation is a Standard Schema.
+ *
+ * A plain `validate.*` artifact shares the schema's own cached adapter, so a
+ * builder and the artifacts built from it are identical by reference and a
+ * consumer may cache on that. A composed pipeline (`json.parse(X).validate()`)
+ * validates a different input than the schema does, so it gets an adapter
+ * that runs the pipeline itself and reports its issues.
+ */
+export function attachStandardSchema(target: object, schema: ATS.AnyTypeSchema, plan?: ExecutionPlan): void {
+  const composed = plan !== undefined && !isPlainValidation(plan);
+
   Object.defineProperty(target, "~standard", {
     enumerable: false,
     configurable: false,
-    get: () => getStandardSchema(schema),
+    get: () => (composed ? pipelineStandardSchema(target as FunctionLike) : getStandardSchema(schema)),
   });
+}
+
+/** True for the `[value, validate]` plan every `validate.*` factory produces. */
+function isPlainValidation(plan: ExecutionPlan): boolean {
+  return plan.stages.length === 2 && plan.stages[0]?.kind === "value" && plan.stages[1]?.kind === "validate";
+}
+
+const PIPELINE_ADAPTERS = new WeakMap<object, StandardSchemaProps<unknown>>();
+
+function pipelineStandardSchema(artifact: FunctionLike): StandardSchemaProps<unknown> {
+  const cached = PIPELINE_ADAPTERS.get(artifact);
+
+  if (cached) return cached;
+
+  const adapter: StandardSchemaProps<unknown> = {
+    version: 1,
+    vendor: "jit",
+    validate(value: unknown) {
+      try {
+        return { value: (artifact as (input: unknown) => unknown)(value) };
+      } catch (error) {
+        const issues = (error as { readonly issues?: readonly { readonly message: string; readonly path?: string }[] })
+          .issues;
+
+        // Only a validation failure is a Standard Schema result; anything
+        // else (malformed JSON, a decoder error) is a real exception.
+        if (!issues) throw error;
+        return {
+          issues: issues.map((issue) => ({
+            message: issue.message,
+            ...(issue.path ? { path: issue.path.split(".").filter(Boolean) } : {}),
+          })),
+        };
+      }
+    },
+  };
+
+  PIPELINE_ADAPTERS.set(artifact, adapter);
+  return adapter;
 }
 
 /** Appends validation as a plan stage; construction never executes the preceding artifact. */
@@ -326,6 +375,9 @@ export function appendValidation<TInput, TOutput, TSchema extends ATS.AnyTypeSch
     () => lowerExecutionPlan(plan) as (value: TInput) => ATS.TypeofSchema<TSchema>
   );
 
+  // A pipeline that ends in validation is a Standard Schema too, over the
+  // input the pipeline accepts rather than over the schema's own value.
+  attachStandardSchema(next, schema, plan);
   return artifactForSchema(next, schema) as SchemaArtifact<TInput, TSchema>;
 }
 

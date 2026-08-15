@@ -192,11 +192,39 @@ function emitValue(schema: ATS.AnyTypeSchema, depth: number): string {
   }
 }
 
-/** Smallest legal value for a schema, used to terminate deep recursion. */
-function emitTerminal(schema: ATS.AnyTypeSchema): string {
-  const current = schema as AnySchema;
+/**
+ * Smallest legal value for a schema, used to terminate deep recursion. It
+ * still has to satisfy the schema — a cut-off value that fails validation
+ * would defeat the point of the generator.
+ */
+function emitTerminal(schema: ATS.AnyTypeSchema, depth = 0): string {
+  const current = resolveLazy(schema) as AnySchema;
+
+  if (depth > 3) return "null";
 
   switch (current.type) {
+    case TypeName.object: {
+      const props = (current.def.props as Record<string, ATS.AnyTypeSchema>) ?? {};
+      const required = Object.keys(props).filter((key) => !isOmittable(props[key]));
+
+      return required.length === 0
+        ? "{}"
+        : `{ ${required.map((key) => `${propertyKey(key)}: ${emitTerminal(props[key], depth + 1)}`).join(", ")} }`;
+    }
+    case TypeName.union:
+    case TypeName.xor:
+    case TypeName.discriminatedUnion: {
+      const options = (current.def.options as readonly ATS.AnyTypeSchema[]) ?? [];
+
+      return options.length > 0 ? emitTerminal(options[0], depth + 1) : "null";
+    }
+    case TypeName.literal:
+      return literal(current.def.value);
+    case TypeName.enum: {
+      const values = Object.values(current.def.values as Record<string, unknown>);
+
+      return values.length > 0 ? literal(values[0]) : "null";
+    }
     case TypeName.optional:
     case TypeName.nullish:
     case TypeName.undefined:
@@ -208,19 +236,39 @@ function emitTerminal(schema: ATS.AnyTypeSchema): string {
     case TypeName.set:
     case TypeName.tuple:
       return "[]";
-    case TypeName.object:
     case TypeName.record:
       return "{}";
     case TypeName.string:
-      return '""';
+      return emitString((current.def.checks as readonly SchemaCheck[] | undefined) ?? []);
     case TypeName.number:
-    case TypeName.int:
-      return "0";
+    case TypeName.int: {
+      const checks = (current.def.checks as readonly SchemaCheck[] | undefined) ?? [];
+
+      return emitNumber(checks, current.type === TypeName.int || hasCheck(checks, "int32", "integer", "safe"));
+    }
     case TypeName.boolean:
       return "false";
+    case TypeName.date:
+      return `new Date(${MOCK_EPOCH_MIN})`;
     default:
       return "null";
   }
+}
+
+/** A field the terminal value may leave out entirely. */
+function isOmittable(schema: ATS.AnyTypeSchema): boolean {
+  return schema.type === TypeName.optional || schema.type === TypeName.nullish || schema.type === TypeName.default;
+}
+
+function resolveLazy(schema: ATS.AnyTypeSchema): ATS.AnyTypeSchema {
+  let current = schema as AnySchema;
+  let guard = 0;
+
+  while (current.type === TypeName.lazy && guard++ < 100) {
+    current = (current.def.getter as () => AnySchema)() as AnySchema;
+  }
+
+  return current;
 }
 
 const STRING_GENERATORS: Readonly<Record<string, string>> = {
@@ -289,7 +337,9 @@ function emitNumber(checks: readonly SchemaCheck[], integer: boolean): string {
 function emitArray(element: ATS.AnyTypeSchema, checks: readonly SchemaCheck[], depth: number): string {
   const length = numeric(checks, "length");
   const min = length ?? numeric(checks, "min") ?? (hasCheck(checks, "nonEmpty") ? 1 : 1);
-  const max = length ?? numeric(checks, "max") ?? Math.max(min, 3);
+  // Near the depth limit the list shrinks to its smallest legal size, so a
+  // recursive shape stops widening instead of producing cut-off elements.
+  const max = depth >= 5 ? min : (length ?? numeric(checks, "max") ?? Math.max(min, 3));
   const item = emitValue(element, depth + 1);
 
   // Parenthesized: an arrow returning an object literal must not read as a block.

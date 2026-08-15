@@ -3,6 +3,7 @@ import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
+import { assertNoRecursion } from "./schema-recursion.js";
 import { emitScrub, type ScrubAction } from "./security/emit-scrub.js";
 
 /**
@@ -22,6 +23,8 @@ type PiiStrategy = "redact" | "mask" | "hash";
  * @returns The generated masking source.
  */
 export function emitMaskSource(schema: ATS.AnyTypeSchema): string {
+  assertNoRecursion(schema, "mask");
+
   return emitScrub(schema, selectPii).source;
 }
 
@@ -48,6 +51,7 @@ export function compileMask<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "mask",
     () => {
+      assertNoRecursion(schema, "mask");
       const emitted = emitScrub(schema, selectPii);
 
       const compiled = globalThis.Function(

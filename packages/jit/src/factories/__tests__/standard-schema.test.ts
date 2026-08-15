@@ -49,6 +49,23 @@ describe("Standard Schema interop", () => {
     expect(result).not.toBeInstanceOf(Promise);
   });
 
+  it("should carry the contract on a pipeline that ends in validation", () => {
+    const fromJson = JIT.json.parse(User).validate();
+    const validate = validateWith(fromJson);
+
+    expect(fromJson["~standard"].vendor).toBe("jit");
+    expect(validate('{"id":1,"name":"Ada"}')).toEqual({ value: { id: 1, name: "Ada" } });
+
+    const rejected = validate('{"id":-1,"name":"A"}');
+
+    expect("issues" in rejected && rejected.issues.length).toBeGreaterThan(0);
+  });
+
+  it("should let a real error through instead of reporting it as an issue", () => {
+    // Malformed JSON is not a validation failure; it must stay an exception.
+    expect(() => validateWith(JIT.json.parse(User).validate())("{oops")).toThrow(SyntaxError);
+  });
+
   it("should keep the artifact callable while carrying the contract", () => {
     const isUser = JIT.validate.is(User);
 

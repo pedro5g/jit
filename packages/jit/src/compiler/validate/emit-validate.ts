@@ -3,6 +3,7 @@ import { TypeName } from "../../core/ats/index.js";
 import { Regexes } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { emitSanitizeChain } from "../sanitize.js";
+import { findRecursiveSchemas, resolveLazySchema } from "../schema-recursion.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { countFormatPlaceholders, emitFormatMaskExpression, emitStrictFormatCondition } from "../source/format-mask.js";
 import { emitSchemaGuard } from "../source/guard.js";
@@ -58,6 +59,9 @@ class ValidatorEmitter {
   private readonly bindingIds = new Map<unknown, string>();
   private readonly helperSources: string[] = [];
   private readonly predicateNames = new Map<ATS.AnyTypeSchema, string>();
+  /** Schemas that close a cycle; each becomes one named recursive helper. */
+  private recursive: ReadonlySet<ATS.AnyTypeSchema> = new Set();
+  private readonly recursiveNames = new Map<ATS.AnyTypeSchema, string>();
   private helperCounter = 0;
   private varCounter = 0;
 
@@ -74,6 +78,14 @@ class ValidatorEmitter {
 
   helpers(): readonly string[] {
     return this.helperSources;
+  }
+
+  /**
+   * Declares which schemas take part in a cycle. Those are expanded once into
+   * a named function that calls itself, instead of being inlined forever.
+   */
+  markRecursive(schemas: ReadonlySet<ATS.AnyTypeSchema>): void {
+    this.recursive = schemas;
   }
 
   bind(value: unknown): string {
@@ -99,6 +111,19 @@ class ValidatorEmitter {
    * value); is-mode returns the holder variable.
    */
   emitNode(schema: ATS.AnyTypeSchema, valueExpr: string, path: PathRef, contextExpr?: string): string {
+    if (this.recursive.size > 0) {
+      const target = resolveLazySchema(schema);
+
+      // A cycle participant is reached through its own function, so the
+      // generated source stays finite and the call is a real recursive call.
+      if (this.recursive.has(target)) return this.emitRecursiveCall(target, valueExpr, path);
+    }
+
+    return this.emitInline(schema, valueExpr, path, contextExpr);
+  }
+
+  /** Expands a schema in place, bypassing the recursion guard for this node. */
+  private emitInline(schema: ATS.AnyTypeSchema, valueExpr: string, path: PathRef, contextExpr?: string): string {
     const current = schema as AnySchema;
 
     if (current.type === TypeName.when) {
@@ -198,6 +223,66 @@ class ValidatorEmitter {
 
     emitValidated();
     return finish();
+  }
+
+  /**
+   * Calls the named function for a recursive schema. In `is` mode the helper
+   * answers a boolean; in parse mode it takes the issue list and the current
+   * path so failures keep reporting the position in the real value.
+   */
+  private emitRecursiveCall(schema: ATS.AnyTypeSchema, valueExpr: string, path: PathRef): string {
+    const name = this.recursiveHelper(schema);
+    const writer = this.writer;
+
+    if (this.mode === "is") {
+      const holder = this.nextVar("v");
+
+      writer.line(`const ${holder} = ${valueExpr};`);
+      writer.line(`if (!${name}(${holder})) return false;`);
+      return holder;
+    }
+
+    const output = this.nextVar("o");
+    const pathSource = path.kind === "static" ? emitLiteral(path.source) : path.source;
+
+    writer.line(`const ${output} = ${this.awaited ? "await " : ""}${name}(${valueExpr}, issues, ${pathSource});`);
+    return output;
+  }
+
+  private recursiveHelper(schema: ATS.AnyTypeSchema): string {
+    const existing = this.recursiveNames.get(schema);
+
+    if (existing) return existing;
+
+    const name = `${this.rootMode === "is" ? "ir" : "pr"}${++this.helperCounter}`;
+
+    // Registered before the body is emitted, so the back-edge inside it
+    // resolves to this same name instead of recursing at emit time.
+    this.recursiveNames.set(schema, name);
+
+    const savedWriter = this.writer;
+
+    this.writer = new CodeWriter();
+    if (this.mode === "is") {
+      this.writer.line(`function ${name}(value) {`);
+      this.writer.indent(() => {
+        this.emitInline(schema, "value", { kind: "static", source: "" });
+        this.writer.line("return true;");
+      });
+      this.writer.line("}");
+    } else {
+      this.writer.line(`${this.awaited ? "async " : ""}function ${name}(value, issues, path) {`);
+      this.writer.indent(() => {
+        const output = this.emitInline(schema, "value", { kind: "dynamic", source: "path" });
+
+        this.writer.line(`return ${output};`);
+      });
+      this.writer.line("}");
+    }
+    this.helperSources.push(this.writer.toString());
+    this.writer = savedWriter;
+
+    return name;
   }
 
   /** Emits `if (<failCondition>) { fail }` — early return or issue push. */
@@ -1789,7 +1874,18 @@ function staticChild(path: PathRef, segment: string): PathRef {
     return { kind: "static", source: `${path.source}${joiner}${segment}` };
   }
 
-  return { kind: "dynamic", source: `${path.source} + ${emitLiteral(`${joiner}${segment}`)}` };
+  // A dynamic prefix is only known at run time — inside a recursive helper it
+  // is "" at the root and a real path deeper down — so the separator is
+  // decided there too. The expression is only evaluated when reporting an
+  // issue, so this costs nothing on the accepting path.
+  if (segment.startsWith("[")) {
+    return { kind: "dynamic", source: `${path.source} + ${emitLiteral(segment)}` };
+  }
+
+  return {
+    kind: "dynamic",
+    source: `(${path.source} ? ${path.source} + ${emitLiteral(`.${segment}`)} : ${emitLiteral(segment)})`,
+  };
 }
 
 function dynamicChild(path: PathRef, indexVar: string): PathRef {
@@ -2254,10 +2350,13 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const emitSafeParse = options.safeParse ?? true;
   const emitSafeParseAsync = options.safeParseAsync ?? true;
   const freezesOutput = rootHasReadonly(schema);
+  const recursive = findRecursiveSchemas(schema);
   let parseEmitter: ValidatorEmitter | undefined;
 
   if (emitSafeParse) {
     const emitter = new ValidatorEmitter("parse");
+
+    emitter.markRecursive(recursive);
 
     parseEmitter = emitter;
     emitter.writer.line("function safeParse(value) {");
@@ -2282,6 +2381,8 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
 
   if (emitSafeParseAsync && containsPromise(schema)) {
     const emitter = new ValidatorEmitter("parse", true);
+
+    emitter.markRecursive(recursive);
 
     asyncEmitter = emitter;
     for (const value of parseEmitter?.bindings().values ?? []) emitter.bind(value);
@@ -2308,6 +2409,8 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   // Function parameter list; extras from either emitter are appended after.
   if (emitIs) {
     const emitter = new ValidatorEmitter("is");
+
+    emitter.markRecursive(recursive);
 
     isEmitter = emitter;
     for (const value of (asyncEmitter ?? parseEmitter)?.bindings().values ?? []) emitter.bind(value);
