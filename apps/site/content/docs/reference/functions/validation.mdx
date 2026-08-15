@@ -20,8 +20,8 @@ same descriptor consumed by AOT.
 | `is(schema)`             | type predicate        | `false`, first failure        | checks current input   |
 | `parse(schema)`          | inferred output       | throws `JITValidationError`   | yes                    |
 | `safeParse(schema)`      | success union         | returns issue vector          | yes                    |
-| `parseAsync(schema)`     | output promise        | rejects with validation error | yes                    |
-| `safeParseAsync(schema)` | success-union promise | resolves with issues          | yes                    |
+| `async.parse(schema)`     | output promise        | rejects with validation error | yes                   |
+| `async.safeParse(schema)` | success-union promise | resolves with issues          | yes                   |
 | `issues(schema)`         | iterator              | yields only issues            | no extra public vector |
 
 Use `is` in hot filtering and guards. Use `safeParse` at user-controlled

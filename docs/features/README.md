@@ -41,7 +41,7 @@ work and for production performance. Each page explains:
 | Publish or consume a contract     | JSON Schema bridge      | `to` a document vs `from` a document        |
 | Reuse expensive lookups           | Cache/hash/index        | build cost vs reuse count                   |
 | Model entity collections          | Cache/hash/index        | identity vs index vs keyed output           |
-| Ship strict-CSP/browser code      | AOT/tree sharing        | grouped object vs standalone export         |
+| Ship strict-CSP/browser code      | AOT/tree sharing        | artifact object vs standalone artifact      |
 | Configure generation/CI           | CLI and config          | discovery, output package and diagnostics   |
 | Reproduce performance claims      | Benchmarks/load         | matching fixture, heap and GC               |
 | Compare JIT and generated code    | Executable examples     | runtime lifecycle vs import-free AOT        |
@@ -66,7 +66,7 @@ For application code, prefer this order:
 3. For runtime-only apps, import from `@jit-compiler/jit/runtime`.
 4. For generated production bundles, export compiled artifacts from
    `*.jit.ts` files and run `jit generate`.
-5. In front-end code, import only the generated function or grouped object you
+5. In front-end code, import only the generated function or artifact object you
    actually call. That is what lets the bundler keep the final bundle tiny.
 
 ## Performance Model

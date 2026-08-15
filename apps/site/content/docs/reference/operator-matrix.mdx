@@ -9,9 +9,9 @@ description: Choose the correct eager, lazy, binary or streaming execution path.
 | Query an in-memory array         | `JIT.query(List)`                  | yes                    |
 | Diff keyed collection snapshots | `JIT.watch(List, { key })`                   | change arrays          |
 | Track aggregate child mutations | `JIT.watchedList(List, items, { key })`      | retained state         |
-| Stop consumption early           | `compileIterator()`                          | no                     |
+| Stop consumption early           | `.to.iterator()`                             | no                     |
 | Consume async cursor             | `compileAsyncIterator()`                     | no                     |
-| Highest-throughput callback sink | `compileVisitor()`                           | no                     |
+| Highest-throughput callback sink | `.to.visitor()`                              | no                     |
 | Repeated million-row scans       | `array.binary({ memoryLayout: "columnar" })` | compact rowset         |
 | Serialize one value              | `JIT.json.stringify(S)`                      | final string           |
 | Write a huge JSON array          | `stringifyChunks()`                          | bounded chunks         |

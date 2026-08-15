@@ -25,12 +25,12 @@ import { User } from "./generated/index.js";
 
 1. Export only operations used by the application.
 2. Prefer standalone exports for route-level granularity.
-3. Keep generated package `sideEffects: false`.
+3. Import only the artifacts a route actually uses.
 4. Import from generated modules, not `@jit-compiler/jit/runtime`, in production UI code.
 5. Inspect the bundler output, not just source package size.
 6. Run `jit inspect <export> --stage source` when a helper is unexpectedly retained.
 
-A grouped object is convenient but importing one property retains the object and
+An artifact object is convenient but importing one property retains the object and
 its declared siblings. Standalone functions provide the narrowest bundler unit.
 
 ## Callbacks and bindings

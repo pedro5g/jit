@@ -103,7 +103,7 @@ serialize in the same output loop without allocating the mapped collection.
 | binary transport              | `JIT.codec(Dto)` or `JIT.binary.*(Dto)`       |
 | one entity to DTO             | `JIT.map(Entity, Dto, mapping)`               |
 | entity collection to DTO list | `JIT.map.many(Entity, Dto, mapping)`          |
-| explicit grouped export       | `{ parse: JIT.validate.parse(Dto) }` |
+| explicit artifact object      | `{ parse: JIT.validate.parse(Dto) }` |
 
 There is no DTO-specific operation list. Independent artifacts make unused
 capabilities absent from both the value and its TypeScript type.

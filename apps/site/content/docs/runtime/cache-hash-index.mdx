@@ -415,7 +415,7 @@ ordinary input data and is never stored as a query result.
 
 - Declare schemas and compile static plans at module scope.
 - Keep the default compile cache enabled in runtime mode.
-- Create only the capability artifacts used by the route, or group them explicitly with `JIT.compile`.
+- Create only the capability artifacts used by the route, or gather them in one artifact object.
 - Reserve `cache: false` and `clearCompileCache()` for tests and benchmarks.
 - Treat hash-cached objects and indexed arrays as immutable.
 - Confirm hash collisions with compiled equality.

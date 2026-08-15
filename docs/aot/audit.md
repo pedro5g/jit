@@ -16,7 +16,7 @@ map to the planned split:
 Implemented and covered by tests:
 
 - `JIT.Typeof<typeof Schema>` is the single public helper for resolving a schema output type.
-- `JIT.validate.is/parse/safeParse/parseAsync/safeParseAsync(schema)`.
+- `JIT.validate.is/parse/safeParse(schema)` and `JIT.validate.async.parse/safeParse(schema)`.
 - `JIT.compare.equal/diff/hash(schema)` and `JIT.clone(schema)`.
 - `JIT.json.stringify(schema)`.
 - `JIT.json.parse(schema).validate()` as AOT `fromJSON`.

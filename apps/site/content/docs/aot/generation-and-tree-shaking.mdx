@@ -1,43 +1,45 @@
 ---
 title: Generation and tree shaking
-description: Export grouped objects or standalone functions without shipping the compiler.
+description: Declare artifact objects or standalone artifacts without shipping the compiler.
 ---
 
 ```ts
-export const User = {
-  is: JIT.validate.is(UserSchema),
-  parse: JIT.validate.parse(UserSchema),
+const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
+
+export const UserOps = {
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
 };
 
-export const User_is = JIT.validate.is(UserSchema);
+export const isUser = JIT.validate.is(User);
 ```
 
-Grouped declarations generate one object import:
+An artifact object generates one object import:
 
 ```ts
-import { User } from "./generated/index.js";
-User.is(input);
+import { UserOps } from "./generated/index.js";
+UserOps.is(input);
 ```
 
-Standalone declarations keep their exact exported name:
+A standalone artifact keeps its exact declared name:
 
 ```ts
-import { User_is } from "./generated/index.js";
+import { isUser } from "./generated/index.js";
 ```
 
-Generated modules contain no import from `jit` and declare `sideEffects: false`. Only
-selected operations and their required low-level helpers are emitted. This matters most
-in browser bundles: importing one validator cannot retain schema builders, codecs,
-queries or the runtime compiler.
+Generated modules contain no import from `jit`. Only the declared operations and the
+low-level helpers they need are emitted. This matters most in browser bundles:
+importing one validator cannot retain schema builders, codecs, queries or the runtime
+compiler.
 
-Manifest and plan files make the retained surface reviewable. Bindings that cannot be
-serialized, such as arbitrary callbacks, are skipped with a reason instead of being
-miscompiled.
+Bindings that cannot be serialized, such as a callback that closes over its scope, are
+skipped with a reason instead of being miscompiled — declaring the transformation with
+[`JIT.ops`](/docs/reference/functions/ops) avoids that entirely.
 
-## Grouped versus standalone
+## Object versus standalone
 
-Grouped objects are ergonomic domain modules. Standalone exports are finer
-tree-shaking units. If one route needs only `is`, importing a grouped object
+An artifact object is an ergonomic domain module. Standalone artifacts are finer
+tree-shaking units. If one route needs only `is`, importing an artifact object
 that also declares parse/stringify can retain those siblings depending on how
 the object is consumed.
 

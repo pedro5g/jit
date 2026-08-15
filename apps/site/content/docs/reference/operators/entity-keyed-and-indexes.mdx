@@ -245,9 +245,9 @@ compile cache.
 | Operation                          |        `entity` |               `indexBy` |          schema `keyed` |
 | ---------------------------------- | --------------: | ----------------------: | ----------------------: |
 | Compiled array equality            | positional loop | adaptive keyed strategy | adaptive keyed strategy |
-| `JIT.compileNormalize` default key |             yes |                     yes |                     yes |
-| `JIT.compileUniqueBy` default key  |             yes |                     yes |                     yes |
-| `JIT.compileSortBy` fallback key   |             yes |                     yes |                     yes |
+| `Compiler.compileNormalize` default key |             yes |                     yes |                     yes |
+| `Compiler.compileUniqueBy` default key  |             yes |                     yes |                     yes |
+| `Compiler.compileSortBy` fallback key   |             yes |                     yes |                     yes |
 | Validator duplicate-key check      |              no |                      no |                      no |
 | Query result memoization           |              no |                      no |                      no |
 

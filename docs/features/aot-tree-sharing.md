@@ -68,7 +68,7 @@ emits:
 export { isUser };
 ```
 
-Grouped exports emit only the grouped object:
+An artifact object emits only that object:
 
 ```ts
 export const User = {
@@ -83,9 +83,9 @@ emits:
 export { User };
 ```
 
-It does not also emit `User_is` or `User_parse` as public exports. Internal
+It does not also emit `isUser` or `parseUser` as public exports. Internal
 bindings may exist inside the generated file, but bundlers can drop them when
-the grouped object itself is not imported.
+the object itself is not imported.
 
 ## Why Tree Sharing Matters
 
@@ -99,7 +99,7 @@ shipping a generic schema library means paying for:
 - query and mapper utilities;
 - all transitive dependencies.
 
-AOT avoids that. The generated module is plain JS, has `sideEffects: false`,
+AOT avoids that. The generated module is plain JS with no imports,
 and has zero imports from `jit`. When the app imports only `isUser`, a bundler
 can keep only that validator. Tests prove that unused `parse`, `stringify`,
 codec, namespace objects, and the validation error class are removed from the
@@ -145,7 +145,7 @@ Cache helpers are also conditional:
 ## Best Practices
 
 - Export flat functions when the app imports operations independently.
-- Use grouped objects when the code naturally calls `User.is`, `User.parse`,
+- Use an artifact object when the code naturally calls `User.is`, `User.parse`,
   or `User.stringify` together.
 - A schema on its own declares a type, not a runtime function. Declare the
   artifacts you want, either standalone or on an artifact object.

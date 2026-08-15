@@ -72,21 +72,21 @@ client can distinguish read-only calls from writes.
 | Tool                  | Mutates files | Purpose                                                       |
 | --------------------- | ------------- | ------------------------------------------------------------- |
 | `jit_project_context` | No            | Package, Git, pnpm commands, architecture/status excerpts     |
-| `jit_project_doctor`  | No            | Node, config, declarations, explicit exports, output settings |
+| `jit_project_doctor`  | No            | Node, config, declarations, artifacts, output settings        |
 | `jit_docs_search`     | No            | Markdown search with file and line results                    |
-| `jit_aot_inspect`     | No            | Grouped/standalone exports, operations, source files, output  |
-| `jit_aot_preview`     | No            | Temporary build of source, types, manifest, or operation plan |
+| `jit_aot_inspect`     | No            | Declared types, artifact objects, artifacts, sources, output  |
+| `jit_aot_preview`     | No            | Temporary build; returns the generated source                 |
 | `jit_aot_generate`    | Yes           | Writes the configured import-free generated package           |
 
 ### Recommended AOT Sequence
 
 1. Call `jit_project_doctor` to catch missing config, declarations, or exports.
 2. Call `jit_aot_inspect` to verify that every output is explicitly selected.
-3. Call `jit_aot_preview` with `stage: "source"` and, for TypeScript output,
-   `stage: "types"` to review runtime code and embedded types.
-4. Preview `manifest` or a named `plan` when those artifacts are enabled.
-5. Call `jit_aot_generate` only after review, with `{ "write": true }`.
-6. Run the project's tests and bundle/tree-shaking checks.
+3. Call `jit_aot_preview` with `stage: "source"` to review the generated code.
+   TypeScript output carries its public types in that same source, so there is
+   no separate types artifact to inspect.
+4. Call `jit_aot_generate` only after review, with `{ "write": true }`.
+5. Run the project's tests and bundle/tree-shaking checks.
 
 `jit_aot_preview` uses a temporary directory and removes it after the result is
 captured. It can honor output options without touching the configured output.
@@ -97,12 +97,14 @@ cannot turn an inspection request into a write by omitting a default.
 {
   "name": "jit_aot_preview",
   "arguments": {
-    "stage": "plan",
-    "target": "User_is",
-    "emit": { "plans": true }
+    "stage": "source",
+    "target": "user"
   }
 }
 ```
+
+`stage` is `summary` or `source`; `target` selects one generated module when
+output is split per declaration file.
 
 ```json
 {
@@ -133,8 +135,8 @@ Fixed resources are listed only when their backing file exists:
 Two templates provide targeted reads:
 
 - `jit://docs/{path}` reads Markdown below `docs/`;
-- `jit://generated/{path}` reads generated source, manifests, and plans
-  below the resolved AOT output directory.
+- `jit://generated/{path}` reads generated source below the resolved AOT
+  output directory.
 
 Resources are capped at 512 KiB per read. This keeps accidental generated
 megafiles from consuming an agent's full context window; use AOT inspection or

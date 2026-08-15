@@ -3,7 +3,7 @@
 JIT keeps eager arrays as the default and exposes lazy execution through
 explicit terminal operations. A generator is useful when the consumer also
 wants incremental consumption; it is not a universal replacement for the
-specialized array loop emitted by `.compile()`.
+specialized array loop the builder itself runs.
 
 ## Output Contracts
 
@@ -13,7 +13,8 @@ const query = JIT.query(Users)
   .select("id", "name")
   .take(10);
 
-const eager = query.compile();
+const eager = query; // the builder is the query
+
 const iterate = query.to.iterator();
 const iterateAsync = query.to.asyncIterator();
 const visit = query.to.visitor();
@@ -62,7 +63,7 @@ Consecutive `filter`, `select`, `take`, `drop`, `takeWhile`, `dropWhile`, and
 `unique` nodes are emitted as one physical stage. Array input uses a classic
 indexed loop. There is no generator boundary between each logical operator.
 
-`compileVisitor()` has a direct backend for the same fused operator set:
+`.to.visitor()` has a direct backend for the same fused operator set:
 
 ```js
 function visit(input, consume) {

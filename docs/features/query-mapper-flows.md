@@ -83,7 +83,7 @@ const normalizeUser = JIT.transform(UserEntity)
 
 ## Aggregating With AOT
 
-Queries and mappers can be attached as extras to a grouped object:
+Queries and mappers can be members of an artifact object:
 
 ```ts
 export const User = {

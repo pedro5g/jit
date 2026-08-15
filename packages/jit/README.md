@@ -687,7 +687,7 @@ members.snapshot();
 
 Schemas provide types here; they do not validate inserted values. Validate
 untrusted input first. Callback-free `JIT.watch` functions can be exported
-standalone from `*.jit.ts` or grouped with `JIT.compile`; the AOT result has no
+standalone from `*.jit.ts` or gathered in an artifact object; the AOT result has no
 runtime compiler import. Stateful watched-list instances remain runtime-owned.
 
 ## Query DSL
@@ -1117,31 +1117,30 @@ export type User = {
   name: string;
   role: "admin" | "member";
 };
-export type UserStrict<TValue> = TValue;
-export const User: {
+const UserOps: {
   readonly is: (value: unknown) => value is User;
   readonly parse: (value: unknown) => User;
 };
 ```
 
 Use `output.format: "js"` for one ready-to-run ESM `.js` file without
-declaration overhead. Use `"typescript"` for the same specialized functions
-with public types embedded in the executable `.ts` source.
+declaration overhead. Use `"ts"` for the same specialized functions with
+public types embedded in the executable `.ts` source.
 
-`User` remains the normal runtime output type. `UserStrict<T>` is for literal
+`Strict<typeof User, TValue>` is a source-side helper for literal
 fixtures/configs where TypeScript can evaluate checks such as string
 `min/max`, string/number `oneOf`, basic email shape, numeric bounds, and
 nested object defaults:
 
 ```ts
-type ValidFixture = UserStrict<{ name: "Pedro"; role: "admin" }>;
-type InvalidFixture = UserStrict<{ name: "Ana"; role: "root" }>; // never
+type ValidFixture = JIT.Strict<typeof User, { name: "Pedro"; role: "admin" }>;
+type InvalidFixture = JIT.Strict<typeof User, { name: "Ana"; role: "root" }>; // never
 ```
 
 Tree-shaking is proven by a real bundler in the test suite: importing only
-`User_is` produces a bundle with **no serializer, no codec, no error class,
-no namespace object**. Object-style markers export only the object;
-standalone explicit functions export only those functions. Operations whose
+`isUser` produces a bundle with **no serializer, no codec, no error class,
+no namespace object**. An artifact object exports only that object;
+standalone artifacts export only those functions. Operations whose
 bindings hold user callbacks (`refine`, computed mapper fields) are skipped
 with a reported reason instead of silently miscompiling.
 
@@ -1308,7 +1307,7 @@ come from, and every one of them is locked by golden-source or snapshot tests:
 - **AOT ahead of everything** — generation moves compilation to build time:
   self-contained zero-import modules, exact-name standalone exports for
   explicit compiled functions, and grouped objects only for object-style
-  `JIT.compile` markers (proven with esbuild in the test suite).
+  artifact objects (proven with esbuild in the test suite).
 
 **Allocate only when the data changes**
 

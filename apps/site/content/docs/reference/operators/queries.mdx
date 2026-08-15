@@ -70,7 +70,7 @@ const plan = JIT.query(Users)
   .select("id", "name")
   .take(10);
 
-plan.compile(); // eager result array
+plan(users); // eager result array — the builder is the query
 plan.to.iterator(); // synchronous iterator
 plan.to.asyncIterator(); // async source/backpressure
 plan.to.visitor(); // callback sink, returns emitted count
