@@ -50,11 +50,22 @@ export function schemaChildren(schema: ATS.AnyTypeSchema): readonly ATS.AnyTypeS
 }
 
 /**
+ * One cycle set per schema. Every emitter asks the same question about the
+ * same immutable graph, so the walk runs once and the answer is shared —
+ * compiling ten operations for a schema costs one traversal, not ten.
+ */
+const RECURSIVE_CACHE = new WeakMap<ATS.AnyTypeSchema, ReadonlySet<ATS.AnyTypeSchema>>();
+
+/**
  * Finds the schemas that close a cycle — the ones an emitter must reach
  * through a named function instead of inlining. Only those need special
  * treatment, so a non-recursive schema keeps generating identical source.
  */
 export function findRecursiveSchemas(schema: ATS.AnyTypeSchema): ReadonlySet<ATS.AnyTypeSchema> {
+  const cached = RECURSIVE_CACHE.get(schema);
+
+  if (cached !== undefined) return cached;
+
   const recursive = new Set<ATS.AnyTypeSchema>();
   const stack = new Set<ATS.AnyTypeSchema>();
   const seen = new Set<ATS.AnyTypeSchema>();
@@ -75,5 +86,6 @@ export function findRecursiveSchemas(schema: ATS.AnyTypeSchema): ReadonlySet<ATS
   };
 
   walk(schema);
+  RECURSIVE_CACHE.set(schema, recursive);
   return recursive;
 }
