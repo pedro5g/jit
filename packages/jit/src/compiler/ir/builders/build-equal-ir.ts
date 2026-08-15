@@ -162,8 +162,20 @@ function appendSchemaCompare(
     case ATS.TypeName.array:
       appendArrayCompare(body, base, left, right, scope, strategy, recursion);
       return;
+    case ATS.TypeName.tuple:
+      appendTupleCompare(body, base, left, right, scope, strategy, recursion);
+      return;
     case ATS.TypeName.object:
       appendObjectCompare(body, base, left, right, scope, recursion);
+      return;
+    case ATS.TypeName.record:
+      appendRecordCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    case ATS.TypeName.set:
+      appendSetCompare(body, left, right, scope);
+      return;
+    case ATS.TypeName.map:
+      appendMapCompare(body, base, left, right, scope, strategy, recursion);
       return;
     case ATS.TypeName.union:
       appendUnionCompare(body, base, left, right, scope, strategy, recursion);
@@ -279,6 +291,156 @@ function appendArrayCompare(
     },
     { kind: "for", index: ix, from: len, body: loopBody }
   );
+}
+
+/**
+ * A tuple has a known arity, so every slot is compared by static index — no
+ * loop, no length read, the same shape an object's known keys produce.
+ */
+function appendTupleCompare(
+  body: IRNode[],
+  schema: EqualSchema,
+  left: IRExpr,
+  right: IRExpr,
+  scope: Scope,
+  strategy: EqualStrategy,
+  recursion: RecursionState
+): void {
+  const items = schema.def.items as readonly EqualSchema[];
+
+  for (let index = 0; index < items.length; index++) {
+    appendSchemaCompare(
+      body,
+      items[index],
+      loadIndex(left, literal(index)),
+      loadIndex(right, literal(index)),
+      scope,
+      strategy,
+      recursion
+    );
+  }
+}
+
+/**
+ * A record's keys are not known at compile time, so this is the one place the
+ * comparison reads them at run time. Counting keys first rejects most unequal
+ * pairs before a single value is compared; presence is then checked per key,
+ * because equal counts alone would call `{ a: undefined }` and
+ * `{ b: undefined }` the same value.
+ */
+function appendRecordCompare(
+  body: IRNode[],
+  schema: EqualSchema,
+  left: IRExpr,
+  right: IRExpr,
+  scope: Scope,
+  strategy: EqualStrategy,
+  recursion: RecursionState
+): void {
+  const leftKeys = scope.createVar("lk");
+  const rightKeys = scope.createVar("rk");
+  const len = scope.createVar("len");
+  const ix = scope.createVar("i");
+  const key = scope.createVar("k");
+  const leftValue = scope.createVar("lv");
+  const rightValue = scope.createVar("rv");
+  const loopBody: IRNode[] = [
+    { kind: "assign", target: key, expr: loadIndex(leftKeys, ix) },
+    { kind: "if", test: not(ownsKey(right, key)), then: [{ kind: "return", value: literal(false) }] },
+    { kind: "assign", target: leftValue, expr: loadIndex(left, key) },
+    { kind: "assign", target: rightValue, expr: loadIndex(right, key) },
+  ];
+
+  appendSchemaCompare(loopBody, schema.def.value as EqualSchema, leftValue, rightValue, scope, strategy, recursion);
+
+  body.push(
+    { kind: "assign", target: leftKeys, expr: objectKeys(left) },
+    { kind: "assign", target: rightKeys, expr: objectKeys(right) },
+    { kind: "assign", target: len, expr: loadProp(leftKeys, "length") },
+    {
+      kind: "if",
+      test: notStrictEqual(len, loadProp(rightKeys, "length")),
+      then: [{ kind: "return", value: literal(false) }],
+    },
+    { kind: "for", index: ix, from: len, body: loopBody }
+  );
+}
+
+/**
+ * Set membership is identity-based in JavaScript, so `has` is the comparison —
+ * the same rule `update` and `diff` already apply to a set.
+ */
+function appendSetCompare(body: IRNode[], left: IRExpr, right: IRExpr, scope: Scope): void {
+  const item = scope.createVar("item");
+
+  body.push(
+    {
+      kind: "if",
+      test: notStrictEqual(loadProp(left, "size"), loadProp(right, "size")),
+      then: [{ kind: "return", value: literal(false) }],
+    },
+    {
+      kind: "for_of",
+      item,
+      iterable: left,
+      body: [
+        {
+          kind: "if",
+          test: not(call(loadProp(right, "has"), [item])),
+          then: [{ kind: "return", value: literal(false) }],
+        },
+      ],
+    }
+  );
+}
+
+/**
+ * Keys are matched by identity like a set, but values are compared through the
+ * value schema, so a map of objects compares structurally rather than by
+ * reference.
+ */
+function appendMapCompare(
+  body: IRNode[],
+  schema: EqualSchema,
+  left: IRExpr,
+  right: IRExpr,
+  scope: Scope,
+  strategy: EqualStrategy,
+  recursion: RecursionState
+): void {
+  const entry = scope.createVar("entry");
+  const key = scope.createVar("mk");
+  const leftValue = scope.createVar("mlv");
+  const rightValue = scope.createVar("mrv");
+  const loopBody: IRNode[] = [
+    { kind: "assign", target: key, expr: loadIndex(entry, literal(0)) },
+    {
+      kind: "if",
+      test: not(call(loadProp(right, "has"), [key])),
+      then: [{ kind: "return", value: literal(false) }],
+    },
+    { kind: "assign", target: leftValue, expr: loadIndex(entry, literal(1)) },
+    { kind: "assign", target: rightValue, expr: call(loadProp(right, "get"), [key]) },
+  ];
+
+  appendSchemaCompare(loopBody, schema.def.value as EqualSchema, leftValue, rightValue, scope, strategy, recursion);
+
+  body.push(
+    {
+      kind: "if",
+      test: notStrictEqual(loadProp(left, "size"), loadProp(right, "size")),
+      then: [{ kind: "return", value: literal(false) }],
+    },
+    { kind: "for_of", item: entry, iterable: left, body: loopBody }
+  );
+}
+
+function objectKeys(value: IRExpr): IRExpr {
+  return call(loadProp(irVar("Object"), "keys"), [value]);
+}
+
+function ownsKey(target: IRExpr, key: IRExpr): IRExpr {
+  return call(loadProp(loadProp(loadProp(irVar("Object"), "prototype"), "hasOwnProperty"), "call"), [target, key]);
 }
 
 function appendObjectCompare(

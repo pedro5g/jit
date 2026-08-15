@@ -25,8 +25,14 @@ equalUser(
 
 - primitives follow their schema domain;
 - `Date` compares timestamps;
-- arrays and tuples are ordered;
-- `Set` and `Map` follow their compiled collection strategy;
+- arrays and tuples are ordered; a tuple's known arity unrolls to static
+  indices, so it costs no loop;
+- a `record` compares key sets before values, so two records with the same
+  values under different keys are not equal;
+- a `Set` compares size then membership, which is identity-based, exactly as
+  JavaScript defines set membership;
+- a `Map` compares size and key identity, but its values go through the value
+  schema, so a map of objects compares structurally;
 - optional, nullable and default states remain distinct where the schema says
   they are distinct;
 - entity/key hints can enable keyed comparison for collections;
