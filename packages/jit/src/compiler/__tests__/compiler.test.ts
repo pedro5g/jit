@@ -207,14 +207,14 @@ describe("JIT compiler", () => {
     });
 
     it("should expose JIT.compileEqual as a public convenience API", () => {
-      const equal = JIT.compileEqual(JIT.object({ id: JIT.number() }).schema);
+      const equal = Compiler.compileEqual(JIT.object({ id: JIT.number() }).schema);
 
       expect(equal({ id: 1 }, { id: 1 })).toBe(true);
       expect(equal({ id: 1 }, { id: 2 })).toBe(false);
     });
 
     it("should expose JIT.equal as the ergonomic schema-aware equality API", () => {
-      const equal = JIT.equal(JIT.object({ id: JIT.number() }).schema);
+      const equal = JIT.compare.equal(JIT.object({ id: JIT.number() }).schema);
 
       expect(equal({ id: 1 }, { id: 1 })).toBe(true);
       expect(equal({ id: 1 }, { id: 2 })).toBe(false);

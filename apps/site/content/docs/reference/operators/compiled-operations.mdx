@@ -24,11 +24,11 @@ offers iterable consumption over the same compiled issue vector.
 
 | API             | Result                  | Allocation strategy            |
 | --------------- | ----------------------- | ------------------------------ |
-| `JIT.equal(S)`  | boolean                 | early return, no result object |
+| `JIT.compare.equal(S)`  | boolean                 | early return, no result object |
 | `JIT.clone(S)`  | deep shape clone        | allocates required output only |
-| `JIT.diff(S)`   | change entries          | allocates only differences     |
+| `JIT.compare.diff(S)`   | change entries          | allocates only differences     |
 | `JIT.update(S)` | immutable updated value | shares untouched branches      |
-| `JIT.hash(S)`   | numeric structural hash | scalar accumulator             |
+| `JIT.compare.hash(S)`   | numeric structural hash | scalar accumulator             |
 
 Hints such as `entity`, `keyed`, `ordered`, `indexBy` and `hash` influence
 strategies for repeated collection operations. Benchmark index construction
@@ -39,14 +39,14 @@ immutability contract, adaptive threshold and invalidation choices.
 ## Explicit artifact groups
 
 Operations are independent callable artifacts. Group only the capabilities a
-module exports; `JIT.compile(schema, { ... })` is also the grouped AOT marker.
+module exports; `{ ... }` is also the grouped AOT marker.
 
 ```ts
-const ReadUser = JIT.compile(User, {
-  is: JIT.is(User),
-  parse: JIT.parse(User),
-  equal: JIT.equal(User),
-});
+const ReadUser = {
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
+  equal: JIT.compare.equal(User),
+};
 
 ReadUser.parse(input);
 ReadUser.equal(left, right);
@@ -110,7 +110,7 @@ one bulk indexed loop while `JIT.map()` omits the array loop entirely.
 `JIT.transform` provides field operations and selection
 over one source schema.
 
-`JIT.dto(Target)` annotates an ordinary boundary schema. Apply `JIT.parse`,
+`JIT.dto(Target)` annotates an ordinary boundary schema. Apply `JIT.validate.parse`,
 `JIT.json`, or `JIT.binary` directly; use `JIT.map` and `JIT.map.many` for
 whitelist projections from an entity schema. See [DTO schemas](/docs/runtime/dtos)
 for schema variants, security boundaries, and AOT behavior.
@@ -118,8 +118,8 @@ for schema variants, security boundaries, and AOT behavior.
 ## Security operations
 
 ```ts
-const SafeLog = JIT.mask(User);
-const CleanForm = JIT.sanitize(Form);
+const SafeLog = JIT.security.mask(User);
+const CleanForm = JIT.security.sanitize(Form);
 ```
 
 `.pii("redact" | "mask" | "hash")` controls field masking. Sanitization
@@ -130,11 +130,11 @@ responsibilities.
 ## Aggregated exports
 
 ```ts
-export const User = JIT.compile(UserSchema, {
+export const User = {
   is: JIT.validate.is(UserSchema),
   parse: JIT.validate.parse(UserSchema),
-  equal: JIT.equal(UserSchema),
-});
+  equal: JIT.compare.equal(UserSchema),
+};
 ```
 
 The object exposes only declared operations. AOT emits only those properties

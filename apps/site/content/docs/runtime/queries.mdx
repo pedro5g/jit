@@ -9,8 +9,7 @@ const findAdmins = JIT.query(Users)
   .filter((q, params) =>
     q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)),
   )
-  .select("id", "name")
-  .compile();
+  .select("id", "name");
 ```
 
 The generated query does not allocate a filter result before mapping. It preallocates
@@ -26,8 +25,7 @@ cannot be emitted safely by AOT.
 ```ts
 const revenue = JIT.query(Orders)
   .filter((q) => q.eq("status", "paid"))
-  .sum("total")
-  .compile();
+  .sum("total");
 ```
 
 `count` and `sum` return zero for empty input. `avg`, `min` and `max` return

@@ -326,7 +326,7 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
   }
 }
 
-function expectCollectionObjectSchema(schema: ATS.AnyTypeSchema, compilerName: string): QueryTarget {
+export function expectCollectionObjectSchema(schema: ATS.AnyTypeSchema, compilerName: string): QueryTarget {
   const resolved = resolveWrappers(schema).base;
 
   if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {

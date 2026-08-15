@@ -8,7 +8,7 @@ methods. `JIT.dto(schema)` adds boundary metadata to an ordinary schema; it
 does not create another compiler or operation facade. Compose that schema with
 the same capabilities used everywhere else:
 
-- `JIT.parse` or `JIT.safeParse` for already-decoded input;
+- `JIT.validate.parse` or `JIT.validate.safeParse` for already-decoded input;
 - `JIT.json.parse(dto).validate()` for JSON text;
 - `JIT.map` or `JIT.map.many` for outbound whitelisting;
 - `JIT.json`, `JIT.binary`, masking, and hashing when the boundary needs them.
@@ -33,8 +33,8 @@ const CreateUserDTO = JIT.dto(
   }).strict(),
 );
 
-export const parseCreateUser = JIT.parse(CreateUserDTO);
-export const safeParseCreateUser = JIT.safeParse(CreateUserDTO);
+export const parseCreateUser = JIT.validate.parse(CreateUserDTO);
+export const safeParseCreateUser = JIT.validate.safeParse(CreateUserDTO);
 export const parseCreateUserJson = JIT.json.parse(CreateUserDTO).validate();
 
 const command = parseCreateUser(request.body);
@@ -95,15 +95,15 @@ serialize in the same output loop without allocating the mapped collection.
 
 | Need                          | Artifact                                      |
 | ----------------------------- | --------------------------------------------- |
-| boolean gate                  | `JIT.is(Dto)`                                 |
-| throwing validation           | `JIT.parse(Dto)`                              |
-| issue result                  | `JIT.safeParse(Dto)`                          |
+| boolean gate                  | `JIT.validate.is(Dto)`                                 |
+| throwing validation           | `JIT.validate.parse(Dto)`                              |
+| issue result                  | `JIT.validate.safeParse(Dto)`                          |
 | validated JSON input          | `JIT.json.parse(Dto).validate()`              |
 | specialized JSON output       | `JIT.json.stringify(Dto)`                     |
 | binary transport              | `JIT.codec(Dto)` or `JIT.binary.*(Dto)`       |
 | one entity to DTO             | `JIT.map(Entity, Dto, mapping)`               |
 | entity collection to DTO list | `JIT.map.many(Entity, Dto, mapping)`          |
-| explicit grouped export       | `JIT.compile(Dto, { parse: JIT.parse(Dto) })` |
+| explicit grouped export       | `{ parse: JIT.validate.parse(Dto) }` |
 
 There is no DTO-specific operation list. Independent artifacts make unused
 capabilities absent from both the value and its TypeScript type.
@@ -125,8 +125,8 @@ const CreateUserDTO = JIT.dto(UserFields.omit("id", "role"));
 const PatchUserDTO = JIT.dto(UserFields.pick("name", "email").partial());
 const UserViewDTO = JIT.dto(UserFields.omit("role"));
 
-const parseCreate = JIT.parse(CreateUserDTO);
-const parsePatch = JIT.parse(PatchUserDTO);
+const parseCreate = JIT.validate.parse(CreateUserDTO);
+const parsePatch = JIT.validate.parse(PatchUserDTO);
 const toView = JIT.map(UserFields, UserViewDTO, {});
 ```
 
@@ -139,16 +139,16 @@ transforms produce schema AST directly and therefore feed every compiler.
 Export the exact callable artifacts from a configured `*.jit.ts` entry:
 
 ```ts
-export const parseCreate = JIT.parse(CreateUserDTO);
+export const parseCreate = JIT.validate.parse(CreateUserDTO);
 export const publicUsersJson = JIT.map
   .many(UserEntity, PublicUserDTO, mapping)
   .to.json();
 
-export const CreateBoundary = JIT.compile(CreateUserDTO, {
-  is: JIT.is(CreateUserDTO),
+export const CreateBoundary = {
+  is: JIT.validate.is(CreateUserDTO),
   parse: parseCreate,
   fromJSON: JIT.json.parse(CreateUserDTO).validate(),
-});
+};
 ```
 
 AOT lowers direct artifacts and complete grouped ExecutionPlans, emitting only
@@ -163,7 +163,7 @@ uses the target schema as its output whitelist. If a callback crosses an
 `unknown` or external-library boundary, validate the mapped result explicitly:
 
 ```ts
-const publicUser = JIT.parse(PublicUserDTO)(toPublicUser(entity));
+const publicUser = JIT.validate.parse(PublicUserDTO)(toPublicUser(entity));
 ```
 
 A DTO prevents accidental field exposure and mass assignment, but it does not

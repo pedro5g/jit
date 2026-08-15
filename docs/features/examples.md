@@ -44,15 +44,12 @@ boundary. The example keeps those concerns explicit.
 
 ## Generated Files
 
-`compiled/catalog.jit.ts` exports only selected operations. Running
+`compiled/catalog.jit.ts` declares the schemas and artifacts. Running
 `jit generate` creates and commits:
 
 ```text
 compiled/generated/
-├── index.ts
-├── catalog.ts
-├── manifest.json
-└── plans/catalog.json
+└── index.ts
 ```
 
 The TypeScript has zero runtime imports from `@jit-compiler/jit`. The compiled

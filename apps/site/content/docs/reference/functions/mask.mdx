@@ -13,7 +13,7 @@ const User = JIT.object({
   document: JIT.string().pii("hash"),
 });
 
-const maskUser = JIT.mask(User);
+const maskUser = JIT.security.mask(User);
 logger.info(maskUser(user));
 ```
 
@@ -45,7 +45,7 @@ const toPublic = JIT.map(User, PublicUser, {});
 
 ## Cache and mutation
 
-`JIT.mask` uses the schema identity cache. Compile once. It does not mutate the
+`JIT.security.mask` uses the schema identity cache. Compile once. It does not mutate the
 input, making it safe to pass the original value to authorized internal code.
 
 ## AOT

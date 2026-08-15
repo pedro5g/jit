@@ -22,8 +22,7 @@ describe("JIT compiler query aggregates", () => {
   it("should compile sum with inline accumulation and no allocations", () => {
     const paidTotal = JIT.query(Orders)
       .filter((q) => q.eq("status", "paid"))
-      .sum("total")
-      .compile();
+      .sum("total");
     const source = Compiler.emitQuerySource(Orders.schema, {
       nodes: [
         {
@@ -62,20 +61,16 @@ describe("JIT compiler query aggregates", () => {
     void paid;
     const countPaid = JIT.query(Orders)
       .filter((q) => q.eq("status", "paid"))
-      .count()
-      .compile();
+      .count();
     const avgPaid = JIT.query(Orders)
       .filter((q) => q.eq("status", "paid"))
-      .avg("total")
-      .compile();
+      .avg("total");
     const minPaid = JIT.query(Orders)
       .filter((q) => q.eq("status", "paid"))
-      .min("total")
-      .compile();
+      .min("total");
     const maxPaid = JIT.query(Orders)
       .filter((q) => q.eq("status", "paid"))
-      .max("total")
-      .compile();
+      .max("total");
 
     expect(countPaid(orders)).toBe(3);
     expect(avgPaid(orders)).toBeCloseTo(325 / 3);
@@ -88,11 +83,11 @@ describe("JIT compiler query aggregates", () => {
   });
 
   it("should return empty-collection fallbacks", () => {
-    const sum = JIT.query(Orders).sum("total").compile();
-    const count = JIT.query(Orders).count().compile();
-    const avg = JIT.query(Orders).avg("total").compile();
-    const min = JIT.query(Orders).min("total").compile();
-    const max = JIT.query(Orders).max("total").compile();
+    const sum = JIT.query(Orders).sum("total");
+    const count = JIT.query(Orders).count();
+    const avg = JIT.query(Orders).avg("total");
+    const min = JIT.query(Orders).min("total");
+    const max = JIT.query(Orders).max("total");
 
     expect(sum([])).toBe(0);
     expect(count([])).toBe(0);
@@ -103,11 +98,10 @@ describe("JIT compiler query aggregates", () => {
 
   it("should aggregate over Set and Map collections without conversion", () => {
     const User = Orders.schema.def.element;
-    const sumSet = JIT.query(JIT.set(User)).sum("total").compile();
-    const countMap = JIT.query(JIT.map(JIT.number(), User))
+    const sumSet = JIT.query(JIT.set(User)).sum("total");
+    const countMap = JIT.query(JIT.mapSchema(JIT.number(), User))
       .filter((q) => q.eq("status", "paid"))
-      .count()
-      .compile();
+      .count();
     const setSource = Compiler.emitQuerySource(JIT.set(User).schema, {
       nodes: [{ kind: "aggregate", op: "sum", key: "total" }],
       bindings: [],
@@ -121,20 +115,16 @@ describe("JIT compiler query aggregates", () => {
   });
 
   it("should respect unique before aggregating", () => {
-    const uniqueCustomerCount = JIT.query(Orders).unique("customer").count().compile();
+    const uniqueCustomerCount = JIT.query(Orders).unique("customer").count();
 
     expect(uniqueCustomerCount(orders)).toBe(2);
   });
 
   it("should reject aggregate combinations and unknown keys", () => {
-    expect(() => JIT.query(Orders).select("total").sum("total").compile()).toThrow(Errors.JITError);
-    expect(() => JIT.query(Orders).keyed("id").sum("total").compile()).toThrow(Errors.JITError);
-    expect(() => JIT.query(Orders).orderBy("total").sum("total").compile()).toThrow(Errors.JITError);
-    expect(() =>
-      JIT.query(Orders)
-        .sum("missing" as "total")
-        .compile()
-    ).toThrow(Errors.JITError);
+    expect(() => JIT.query(Orders).select("total").sum("total")([])).toThrow(Errors.JITError);
+    expect(() => JIT.query(Orders).keyed("id").sum("total")([])).toThrow(Errors.JITError);
+    expect(() => JIT.query(Orders).orderBy("total").sum("total")([])).toThrow(Errors.JITError);
+    expect(() => JIT.query(Orders).sum("missing" as "total")([])).toThrow(Errors.JITError);
 
     // @ts-expect-error non-numeric fields cannot be summed.
     JIT.query(Orders).sum("customer");

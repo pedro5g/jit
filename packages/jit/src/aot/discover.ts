@@ -1,12 +1,14 @@
-import { readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SchemaInput } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
-import { getArtifact } from "../runtime/artifact-registry.js";
+import { classifyDeclaration, readArtifactGroup } from "./classify.js";
 import type { AotOutputFormat } from "./generate.js";
 
-/** `jit.config.*` shape — declaration discovery plus generation targets. */
+export { classifyDeclarations, isSchemaInput } from "./classify.js";
+
+/** `jit.config.*` shape — declaration discovery plus one generation target. */
 export interface JitConfig {
   /**
    * Declaration files, directories, or glob patterns loaded by the AOT build.
@@ -21,30 +23,24 @@ export interface JitConfig {
   /** Generated executable source. */
   readonly output?: {
     /**
-     * Generated directory relative to the config file. TypeScript emits one
-     * typed `index.ts`; JavaScript emits one ready-to-run ESM `index.js`.
-     * A directory below `node_modules` also receives a package manifest.
-     * @default "generated/jit"
+     * Generated directory, relative to this config file. Previous JIT output
+     * there is always replaced.
+     * @default "generated"
      */
     readonly directory?: string;
     /**
-     * Emit one self-contained TypeScript or JavaScript module.
-     * @default "typescript"
+     * `"ts"` emits typed source the application's own build resolves;
+     * `"js"` emits ready-to-run ESM.
+     * @default "ts"
      */
     readonly format?: AotOutputFormat;
-    /** Package namespace for output below `node_modules`; otherwise inferred from the path. */
-    readonly packageName?: string;
-    /** Remove files from the previous JIT generation before writing. @default true */
-    readonly clean?: boolean;
-  };
-  /** Optional metadata and per-declaration entry points. */
-  readonly emit?: {
-    /** Emit one importable module per declaration file. @default false */
-    readonly subpathModules?: boolean;
-    /** Emit `manifest.json` with imports and selected operations. @default false */
-    readonly manifest?: boolean;
-    /** Emit deterministic compiler plans under `plans/`. @default false */
-    readonly plans?: boolean;
+    /**
+     * Emit one module per declaration file, named after it
+     * (`user.jit.ts` -> `user.ts`), plus an `index` re-exporting all of them.
+     * By default everything lands in a single `index`.
+     * @default false
+     */
+    readonly perFile?: boolean;
   };
 }
 
@@ -53,10 +49,12 @@ export function defineConfig<const TConfig extends JitConfig>(config: TConfig): 
   return config;
 }
 
-export const DEFAULT_SCHEMA_PATTERNS = ["**/*.jit.ts"] as const;
+export const DEFAULT_SCHEMA_PATTERNS = ["**/*.jit.ts", "**/*.jit.js"] as const;
 
-const CONFIG_BASENAMES = ["jit.config.ts", "jit.config.mts", "jit.config.js", "jit.config.mjs", "jit.config.cjs"];
+const CONFIG_BASENAMES = ["jit.config.ts", "jit.config.js", "jit.config.mjs"];
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "coverage", ".next", "out"]);
+
+let moduleGeneration = 0;
 
 /** Recursively finds AOT declaration files under a directory using glob patterns. */
 export function discoverSchemaFiles(root: string, patterns: readonly string[] = DEFAULT_SCHEMA_PATTERNS): string[] {
@@ -142,9 +140,12 @@ export function findConfigFile(cwd: string): string | undefined {
 export async function loadModule(file: string): Promise<Record<string, unknown>> {
   const absolute = resolve(file);
   const url = pathToFileURL(absolute).href;
+  // The ESM cache is keyed by URL, so `--watch` and repeated generations
+  // would keep reading the first version of a file the developer edited.
+  const fresh = `${url}?jit=${++moduleGeneration}`;
 
   try {
-    return (await import(url)) as Record<string, unknown>;
+    return (await import(fresh)) as Record<string, unknown>;
   } catch (error) {
     if (!/\.(ts|mts|cts)$/.test(absolute)) throw error;
 
@@ -169,69 +170,162 @@ export async function loadModule(file: string): Promise<Record<string, unknown>>
   }
 }
 
-/** True for values that are schemas/builders/compile marker objects. */
-export function isSchemaInput(candidate: unknown): candidate is SchemaInput {
-  if (candidate === null || typeof candidate !== "object") return false;
-
-  const value = candidate as { schema?: { type?: unknown }; type?: unknown; def?: unknown };
-
-  if (value.schema && typeof value.schema === "object" && typeof value.schema.type === "string") return true;
-  return typeof value.type === "string" && value.def !== undefined;
-}
-
-export interface CollectedSchemas {
-  /** Export name -> object-style `JIT.compile(schema, { ... })` marker. */
+export interface CollectedDeclarations {
+  /** Binding name -> registered compiled artifact. */
+  readonly artifacts: Record<string, unknown>;
+  /** Binding name -> object literal whose members are compiled artifacts. */
+  readonly groups: Record<string, Record<string, unknown>>;
+  /** Binding name -> schema, used to name generated types after the declaration. */
   readonly schemas: Record<string, SchemaInput>;
-  /** Export name -> raw schema used to emit a structural type alias. */
-  readonly typeSchemas: Record<string, SchemaInput>;
-  /** Export name -> standalone compiled function/object registered by JIT. */
-  readonly functions: Record<string, unknown>;
-  /** Export name -> file it came from (collision reporting and subpath grouping). */
+  /** Binding name -> file it was declared in. */
   readonly sources: ReadonlyMap<string, string>;
+  /** Bindings the declaration file exports itself. */
+  readonly exported: ReadonlySet<string>;
 }
 
-/** Loads every file and collects AOT-buildable exports; name collisions throw. */
-export async function collectSchemas(files: readonly string[]): Promise<CollectedSchemas> {
+/**
+ * Reads every declaration file and classifies its top-level bindings. A
+ * schema, an artifact and an object of artifacts are all valid declarations;
+ * `export` is not required, because the file itself is the manifest.
+ * Name collisions across files throw — generated exports share one module.
+ */
+export async function collectDeclarations(files: readonly string[]): Promise<CollectedDeclarations> {
+  const artifacts: Record<string, unknown> = {};
+  const groups: Record<string, Record<string, unknown>> = {};
   const schemas: Record<string, SchemaInput> = {};
-  const typeSchemas: Record<string, SchemaInput> = {};
-  const functions: Record<string, unknown> = {};
   const sources = new Map<string, string>();
+  const exported = new Set<string>();
+  const consumed = new Set<unknown>();
 
   for (const file of files) {
-    const loaded = await loadModule(file);
+    const declaration = await loadDeclarationFile(file);
 
-    for (const name of Object.keys(loaded)) {
-      const value = loaded[name];
-      const buildableSchema = isAotObjectInput(value);
-      const buildableFunction = getArtifact(value) !== undefined;
-      const typeSchema = isSchemaInput(value) && !buildableSchema;
+    for (const name of Object.keys(declaration.module)) {
+      const value = declaration.module[name];
+      const kind = classifyDeclaration(value);
 
-      if (!buildableSchema && !buildableFunction && !typeSchema) continue;
+      if (kind === undefined) continue;
 
       const previous = sources.get(name);
 
       if (previous !== undefined) {
         throw new JITError(
           "INVALID_OPERATION",
-          `AOT export "${name}" is defined in both ${previous} and ${file} — export names must be unique across declaration files`
+          `AOT declaration "${name}" is defined in both ${previous} and ${file} — declaration names must be unique across files`
         );
       }
 
-      if (buildableSchema) schemas[name] = value;
-      else functions[name] = value;
-      if (typeSchema) {
-        delete functions[name];
-        typeSchemas[name] = value;
+      if (kind === "group") {
+        const group = readArtifactGroup(value) as Record<string, unknown>;
+
+        groups[name] = group;
+        for (const member of Object.values(group)) consumed.add(member);
+      } else if (kind === "artifact") {
+        artifacts[name] = value;
+      } else {
+        schemas[name] = value as SchemaInput;
       }
+
       sources.set(name, file);
+      if (declaration.exported.has(name)) exported.add(name);
     }
   }
 
-  return { schemas, typeSchemas, functions, sources };
+  // An artifact that only exists to be placed on a group is an implementation
+  // detail of that group unless the file also exports it on its own.
+  for (const name of Object.keys(artifacts)) {
+    if (consumed.has(artifacts[name]) && !exported.has(name)) delete artifacts[name];
+  }
+
+  // The same artifact bound to several names must not be generated twice; the
+  // exported name is the one the application imports.
+  const byValue = new Map<unknown, string>();
+
+  for (const name of Object.keys(artifacts)) {
+    const previous = byValue.get(artifacts[name]);
+
+    if (previous === undefined) {
+      byValue.set(artifacts[name], name);
+      continue;
+    }
+    if (exported.has(name) && !exported.has(previous)) {
+      delete artifacts[previous];
+      byValue.set(artifacts[name], name);
+    } else {
+      delete artifacts[name];
+    }
+  }
+
+  return { artifacts, groups, schemas, sources, exported };
 }
 
-function isAotObjectInput(candidate: unknown): candidate is SchemaInput {
-  return isSchemaInput(candidate) && (candidate as { readonly __jitAot?: unknown }).__jitAot === "grouped";
+interface LoadedDeclaration {
+  readonly module: Record<string, unknown>;
+  readonly exported: ReadonlySet<string>;
+}
+
+/**
+ * Loads a declaration file with its private top-level bindings made visible.
+ * A schema kept local (`const User = JIT.object(...)`) still has to name the
+ * generated type, so the file is loaded through a temporary sibling module
+ * that re-exports those bindings. The sibling is always removed again, and
+ * any failure falls back to a plain import.
+ */
+async function loadDeclarationFile(file: string): Promise<LoadedDeclaration> {
+  const source = readFileSync(file, "utf8");
+  const bindings = readTopLevelBindings(source);
+  const exported = new Set(bindings.filter((binding) => binding.exported).map((binding) => binding.name));
+  const hidden = bindings.filter((binding) => !binding.exported).map((binding) => binding.name);
+
+  if (hidden.length === 0) return { module: await loadModule(file), exported };
+
+  const extension = extname(file);
+  const sibling = join(
+    dirname(file),
+    `${basename(file, extension)}.${process.pid.toString(36)}${Date.now().toString(36)}.jit-scan${extension}`
+  );
+
+  try {
+    writeFileSync(sibling, `${source}\nexport { ${hidden.join(", ")} };\n`);
+    return { module: await loadModule(sibling), exported };
+  } catch {
+    return { module: await loadModule(file), exported };
+  } finally {
+    rmSync(sibling, { force: true });
+  }
+}
+
+interface TopLevelBinding {
+  readonly name: string;
+  readonly exported: boolean;
+}
+
+/** Top-level `const`/`let`/`var` bindings, plus names in `export { ... }`. */
+function readTopLevelBindings(source: string): readonly TopLevelBinding[] {
+  const bindings: TopLevelBinding[] = [];
+  const seen = new Set<string>();
+  const reexported = new Set<string>();
+
+  for (const match of source.matchAll(/^export\s*\{([^}]*)\}\s*;?\s*$/gm)) {
+    for (const entry of match[1].split(",")) {
+      const name = entry
+        .trim()
+        .split(/\s+as\s+/)[0]
+        ?.trim();
+
+      if (name) reexported.add(name);
+    }
+  }
+
+  for (const match of source.matchAll(/^(export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm)) {
+    const name = match[2];
+
+    if (seen.has(name)) continue;
+    seen.add(name);
+    bindings.push({ name, exported: match[1] !== undefined || reexported.has(name) });
+  }
+
+  return bindings;
 }
 
 function isGlobPattern(value: string): boolean {

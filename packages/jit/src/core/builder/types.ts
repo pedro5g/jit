@@ -54,7 +54,7 @@ import type {
   WhenSchema,
   XorSchema,
 } from "../ats/index.js";
-import type { EntityHint, HashStrategy, OrderDirection, PropertySelector } from "../hints/index.js";
+import type { EntityHint, HashStrategy, Metadata, OrderDirection, PropertySelector } from "../hints/index.js";
 import type { SchemaInput } from "./unwrap-schema.js";
 
 export interface StandardSchemaIssue {
@@ -422,6 +422,12 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   ): Builder<RefineSchema<TSchema>>;
   coerce(coercer: (value: unknown) => TypeofSchema<TSchema>): Builder<CoerceSchema<TSchema>>;
   apply<TNext>(fn: (builder: Builder<TSchema>) => TNext): TNext;
+  /**
+   * Attaches documentation metadata (title, description, examples). It never
+   * changes validation; it surfaces in `JIT.jsonSchema` and other descriptive
+   * outputs.
+   */
+  meta(metadata: Metadata): Builder<TSchema>;
   entity(options: EntityHint<HintTarget<TypeofSchema<TSchema>>>): Builder<TSchema>;
   keyed(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;
   groupBy(key: Extract<PropertySelector<HintTarget<TypeofSchema<TSchema>>>, string>): Builder<TSchema>;

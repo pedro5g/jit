@@ -206,7 +206,7 @@ describe("jit MCP server", () => {
       const inspect = asTool(await callTool({ name: "jit_aot_inspect", arguments: {} }, projectDir));
       const doctor = asTool(await callTool({ name: "jit_project_doctor", arguments: {} }, projectDir));
 
-      expect(inspect.content[0].text).toContain("standalone functions: User_is");
+      expect(inspect.content[0].text).toContain("standalone artifacts: User_is");
       expect(inspect.structuredContent).toMatchObject({
         configFile: "jit.config.mjs",
         standalone: [{ name: "User_is", operations: ["value", "is"], source: "src/user.jit.ts" }],
@@ -216,31 +216,22 @@ describe("jit MCP server", () => {
 
     it("previews generated source without writing to the configured output", async () => {
       const preview = asTool(await callTool({ name: "jit_aot_preview", arguments: { stage: "source" } }, projectDir));
-      const types = asTool(await callTool({ name: "jit_aot_preview", arguments: { stage: "types" } }, projectDir));
-      const plan = asTool(
-        await callTool({ name: "jit_aot_preview", arguments: { stage: "plan", target: "User_is" } }, projectDir)
-      );
+      const summary = asTool(await callTool({ name: "jit_aot_preview", arguments: {} }, projectDir));
 
       expect(preview.isError).toBeUndefined();
       expect(preview.content[0].text).toContain("const User_is");
-      expect(types.isError).toBeUndefined();
-      expect(types.content[0].text).toContain("value is");
-      expect(plan.isError).toBeUndefined();
-      expect(plan.structuredContent).toMatchObject({ selectedFile: "plans/index.json" });
-      expect(plan.content[0].text).toContain('"name": "User_is"');
+      // TypeScript output carries its own types; there is no separate artifact.
+      expect(preview.content[0].text).toContain("value is");
+      expect(summary.isError).toBeUndefined();
+      expect(summary.content[0].text).toContain("AOT preview");
       expect(() => readFileSync(join(projectDir, "generated", "index.ts"), "utf8")).toThrow();
     });
 
-    it("rejects a separate types preview for JavaScript output", async () => {
-      const preview = asTool(
-        await callTool(
-          { name: "jit_aot_preview", arguments: { stage: "types", outputFormat: "javascript" } },
-          projectDir
-        )
-      );
+    it("rejects preview stages that no longer exist", async () => {
+      const preview = asTool(await callTool({ name: "jit_aot_preview", arguments: { stage: "manifest" } }, projectDir));
 
       expect(preview.isError).toBe(true);
-      expect(preview.content[0].text).toContain("has no separate type artifact");
+      expect(preview.content[0].text).toContain("stage must be one of: summary, source");
     });
 
     it("requires explicit write confirmation and then generates typed package artifacts", async () => {
@@ -252,7 +243,7 @@ describe("jit MCP server", () => {
       expect(generated.isError).toBeUndefined();
       expect(generated.structuredContent).toMatchObject({
         outDir: "generated",
-        files: expect.arrayContaining(["generated/index.ts", "generated/manifest.json", "generated/plans/index.json"]),
+        files: ["generated/index.ts"],
       });
       const source = readFileSync(join(projectDir, "generated", "index.ts"), "utf8");
       expect(source).toContain("const User_is");
@@ -313,7 +304,7 @@ function writeAotFixture(projectDir: string): void {
     [
       `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
       "const User = JIT.object({ id: JIT.number() });",
-      "export const User_is = JIT.is(User);",
+      "export const User_is = JIT.validate.is(User);",
       "",
     ].join("\n")
   );

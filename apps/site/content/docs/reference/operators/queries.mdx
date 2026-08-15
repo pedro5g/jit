@@ -71,9 +71,9 @@ const plan = JIT.query(Users)
   .take(10);
 
 plan.compile(); // eager result array
-plan.compileIterator(); // synchronous iterator
-plan.compileAsyncIterator(); // async source/backpressure
-plan.compileVisitor(); // callback sink, returns emitted count
+plan.to.iterator(); // synchronous iterator
+plan.to.asyncIterator(); // async source/backpressure
+plan.to.visitor(); // callback sink, returns emitted count
 ```
 
 Use eager arrays when most/all results are consumed and callers need random

@@ -38,9 +38,7 @@ export function registerQueryScenarios(): void {
   const users = createQueryUsers(10_000);
   const smallUsers = createQueryUsers(100);
 
-  const filterAdults = JIT.query(QueryUsersSchema)
-    .filter((q) => q.gt("age", 18))
-    .compile();
+  const filterAdults = JIT.query(QueryUsersSchema).filter((q) => q.gt("age", 18));
 
   registerScenario({
     op: "query filter",
@@ -71,8 +69,7 @@ export function registerQueryScenarios(): void {
 
   const filterSelect = JIT.query(QueryUsersSchema)
     .filter((q) => q.and(q.gt("age", 18), q.neq("role", "viewer")))
-    .select("id", "name")
-    .compile();
+    .select("id", "name");
 
   registerScenario({
     op: "query filter+select",
@@ -96,8 +93,7 @@ export function registerQueryScenarios(): void {
   const uniqueRoles = JIT.query(QueryUsersSchema)
     .filter((q) => q.gt("age", 18))
     .unique("role")
-    .select("role")
-    .compile();
+    .select("role");
 
   registerScenario({
     op: "query filter+unique",
@@ -126,8 +122,7 @@ export function registerQueryScenarios(): void {
   const groupByRole = JIT.query(QueryUsersSchema)
     .filter((q) => q.gt("age", 18))
     .groupBy("role")
-    .select("id", "name")
-    .compile();
+    .select("id", "name");
 
   registerScenario({
     op: "query filter+groupBy",
@@ -150,8 +145,7 @@ export function registerQueryScenarios(): void {
 
   const promote = JIT.query(QueryUsersSchema)
     .filter((q) => q.gt("age", 40))
-    .update({ role: "senior" })
-    .compile();
+    .update({ role: "senior" });
 
   registerScenario({
     op: "query update",
@@ -168,8 +162,7 @@ export function registerQueryScenarios(): void {
 
   const sumAdultAges = JIT.query(QueryUsersSchema)
     .filter((q) => q.gt("age", 18))
-    .sum("age")
-    .compile();
+    .sum("age");
 
   registerScenario({
     op: "query filter+sum",
@@ -196,9 +189,7 @@ export function registerQueryScenarios(): void {
     ],
   });
 
-  const filterSmall = JIT.query(QueryUsersSchema)
-    .filter((q) => q.and(q.gt("age", 18), q.eq("role", "admin")))
-    .compile();
+  const filterSmall = JIT.query(QueryUsersSchema).filter((q) => q.and(q.gt("age", 18), q.eq("role", "admin")));
 
   registerScenario({
     op: "query filter",

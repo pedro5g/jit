@@ -44,3 +44,14 @@ export type MapperOverrides<TSource, TTarget> = {
     TTarget[TKey]
   >;
 };
+
+/**
+ * Trailing argument list for the mapper factories. When every required target
+ * field is auto-matched by name and type, the overrides argument disappears
+ * from the signature entirely — `JIT.map(User, PublicUser)` is complete. It
+ * becomes required again as soon as one target field cannot be inferred, and
+ * the error then points at exactly the fields that need a rule.
+ */
+export type MapperArgs<TSource, TTarget> = [RequiredOverrideKeys<TSource, TTarget>] extends [never]
+  ? [overrides?: MapperOverrides<TSource, TTarget>]
+  : [overrides: MapperOverrides<TSource, TTarget>];

@@ -4,8 +4,8 @@ describe("JIT binary codec v2", () => {
   describe("schema versioning", () => {
     it("should stamp the version as byte 0 and reject mismatches on decode", () => {
       const Point = JIT.object({ x: JIT.number() });
-      const v1 = JIT.codec(Point);
-      const v7 = JIT.codec(Point, { version: 7 });
+      const v1 = JIT.binary.codec(Point);
+      const v7 = JIT.binary.codec(Point, { version: 7 });
 
       expect(v1.encode({ x: 1 })[0]).toBe(1);
       expect(v7.encode({ x: 1 })[0]).toBe(7);
@@ -17,22 +17,22 @@ describe("JIT binary codec v2", () => {
     it("should cache codecs per version", () => {
       const Point = JIT.object({ x: JIT.number() });
 
-      expect(JIT.codec(Point)).toBe(JIT.codec(Point, { version: 1 }));
-      expect(JIT.codec(Point)).not.toBe(JIT.codec(Point, { version: 2 }));
+      expect(JIT.binary.codec(Point)).toBe(JIT.binary.codec(Point, { version: 1 }));
+      expect(JIT.binary.codec(Point)).not.toBe(JIT.binary.codec(Point, { version: 2 }));
       Compiler.clearCompileCache();
     });
 
     it("should reject versions outside one byte", () => {
       const Point = JIT.object({ x: JIT.number() });
 
-      expect(() => JIT.codec(Point, { version: 256 })).toThrow(/\[0, 255\]/);
-      expect(() => JIT.codec(Point, { version: -1 })).toThrow(/\[0, 255\]/);
+      expect(() => JIT.binary.codec(Point, { version: 256 })).toThrow(/\[0, 255\]/);
+      expect(() => JIT.binary.codec(Point, { version: -1 })).toThrow(/\[0, 255\]/);
     });
   });
 
   describe("encodeInto", () => {
     const Message = JIT.object({ id: JIT.number().int(), body: JIT.string() });
-    const codec = JIT.codec(Message);
+    const codec = JIT.binary.codec(Message);
     const message = { id: 42, body: "olá, binário" };
 
     it("should write into a caller buffer and report bytes written", () => {
@@ -52,7 +52,7 @@ describe("JIT binary codec v2", () => {
   describe("typed numeric writes", () => {
     it("should encode explicit int schemas as 4-byte int32", () => {
       const Ids = JIT.object({ a: JIT.int(), b: JIT.int() });
-      const codec = JIT.codec(Ids);
+      const codec = JIT.binary.codec(Ids);
       const bytes = codec.encode({ a: -7, b: 2147483647 });
 
       expect(bytes.byteLength).toBe(1 + 4 + 4);
@@ -61,7 +61,7 @@ describe("JIT binary codec v2", () => {
 
     it("should throw on int32 overflow instead of corrupting", () => {
       const Ids = JIT.object({ a: JIT.int() });
-      const codec = JIT.codec(Ids);
+      const codec = JIT.binary.codec(Ids);
 
       expect(() => codec.encode({ a: 2147483648 })).toThrow(/int32 overflow/);
       expect(() => codec.encode({ a: 1.5 })).toThrow(/int32 overflow/);
@@ -69,7 +69,7 @@ describe("JIT binary codec v2", () => {
 
     it("should keep number().int() checks on the float64 wire (2^53 range)", () => {
       const Wide = JIT.object({ ts: JIT.number().int() });
-      const codec = JIT.codec(Wide);
+      const codec = JIT.binary.codec(Wide);
       const now = 1783641600000; // epoch millis exceed int32 on purpose
 
       expect(codec.decode(codec.encode({ ts: now }))).toEqual({ ts: now });
@@ -78,7 +78,7 @@ describe("JIT binary codec v2", () => {
 
     it("should round-trip bigints as int64", () => {
       const Big = JIT.object({ n: JIT.bigint() });
-      const codec = JIT.codec(Big);
+      const codec = JIT.binary.codec(Big);
 
       expect(codec.decode(codec.encode({ n: -(2n ** 62n) }))).toEqual({ n: -(2n ** 62n) });
       expect(codec.encode({ n: 5n }).byteLength).toBe(9);
@@ -93,7 +93,7 @@ describe("JIT binary codec v2", () => {
         c: JIT.optional(JIT.number()),
         d: JIT.optional(JIT.number()),
       });
-      const codec = JIT.codec(Sparse);
+      const codec = JIT.binary.codec(Sparse);
       const allAbsent = codec.encode({ a: undefined, b: null, c: undefined, d: undefined });
 
       // 1 version byte + 1 mask byte covering all four fields, no payloads.
@@ -110,7 +110,7 @@ describe("JIT binary codec v2", () => {
         head: JIT.optional(JIT.string()),
         tail: JIT.number(),
       });
-      const codec = JIT.codec(Layout);
+      const codec = JIT.binary.codec(Layout);
 
       expect(codec.decode(codec.encode({ head: undefined, tail: 9.25 }))).toEqual({ head: undefined, tail: 9.25 });
       expect(codec.decode(codec.encode({ head: "x", tail: 9.25 }))).toEqual({ head: "x", tail: 9.25 });
@@ -120,7 +120,7 @@ describe("JIT binary codec v2", () => {
   describe("unions and intersections", () => {
     it("should encode plain unions with one tag byte", () => {
       const Value = JIT.object({ v: JIT.union(JIT.string(), JIT.number(), JIT.boolean()) });
-      const codec = JIT.codec(Value);
+      const codec = JIT.binary.codec(Value);
 
       expect(codec.decode(codec.encode({ v: "text" }))).toEqual({ v: "text" });
       expect(codec.decode(codec.encode({ v: 3.5 }))).toEqual({ v: 3.5 });
@@ -134,7 +134,7 @@ describe("JIT binary codec v2", () => {
         JIT.object({ kind: JIT.literal("click"), x: JIT.number(), y: JIT.number() }),
         JIT.object({ kind: JIT.literal("key"), code: JIT.string() }),
       ]);
-      const codec = JIT.codec(Event);
+      const codec = JIT.binary.codec(Event);
       const click = { kind: "click" as const, x: 1.5, y: 2.5 };
       const key = { kind: "key" as const, code: "Enter" };
 
@@ -150,7 +150,7 @@ describe("JIT binary codec v2", () => {
         JIT.object({ id: JIT.number() }),
         JIT.object({ name: JIT.string(), active: JIT.boolean() })
       );
-      const codec = JIT.codec(Full);
+      const codec = JIT.binary.codec(Full);
       const value = { id: 7, name: "Ada", active: true };
 
       expect(codec.decode(codec.encode(value))).toEqual(value);
@@ -161,11 +161,11 @@ describe("JIT binary codec v2", () => {
     it("should round-trip records, maps, sets, and tuples with rest", () => {
       const Payload = JIT.object({
         counts: JIT.record(JIT.string(), JIT.number()),
-        meta: JIT.map(JIT.string(), JIT.number()),
+        meta: JIT.mapSchema(JIT.string(), JIT.number()),
         tags: JIT.set(JIT.string()),
         pair: JIT.tuple(JIT.string(), JIT.number()),
       });
-      const codec = JIT.codec(Payload);
+      const codec = JIT.binary.codec(Payload);
       const value = {
         counts: { "não-ascii": 1.5, plain: 2 },
         meta: new Map([
@@ -181,7 +181,7 @@ describe("JIT binary codec v2", () => {
 
     it("should reject truncated buffers instead of decoding garbage", () => {
       const Text = JIT.object({ body: JIT.string() });
-      const codec = JIT.codec(Text);
+      const codec = JIT.binary.codec(Text);
       const bytes = codec.encode({ body: "hello world" });
 
       expect(() => codec.decode(bytes.subarray(0, 8))).toThrow(/truncated/);
@@ -189,7 +189,7 @@ describe("JIT binary codec v2", () => {
   });
 
   it("should expose encode, encodeInto, and decode from JIT.codec", () => {
-    const User = JIT.codec(JIT.object({ id: JIT.number(), name: JIT.string() }));
+    const User = JIT.binary.codec(JIT.object({ id: JIT.number(), name: JIT.string() }));
     const scratch = new Uint8Array(128);
     const user = { id: 1, name: "Ada" };
     const written = User.encodeInto(user, scratch);

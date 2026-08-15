@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  collectSchemas,
+  collectDeclarations,
   DEFAULT_SCHEMA_PATTERNS,
   discoverSchemaFiles,
   expandSchemaEntries,
@@ -11,7 +11,7 @@ import {
   type JitConfig,
   loadModule,
 } from "./aot/discover.js";
-import { type AotOutputFormat, type GenerateEmitOptions, generate } from "./aot/generate.js";
+import { type AotOutputFormat, generate } from "./aot/generate.js";
 import { getArtifact } from "./runtime/artifact-registry.js";
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -28,22 +28,12 @@ interface ResolvedAotProject {
   readonly config: JitConfig;
   readonly files: readonly string[];
   readonly outDir: string;
-  readonly packageName: string;
   readonly patterns: readonly string[];
-  readonly clean: boolean;
-  readonly outputFormat: AotOutputFormat;
-  readonly emit?: GenerateEmitOptions;
+  readonly format: AotOutputFormat;
+  readonly perFile: boolean;
 }
 
-interface LegacyJitConfig {
-  readonly schemas?: readonly string[];
-  readonly outDir?: string;
-  readonly packageName?: string;
-  readonly clean?: boolean;
-}
-
-const DEFAULT_PACKAGE_NAME = "@jit/generated";
-const DEFAULT_OUT_DIR = "generated/jit";
+const DEFAULT_OUT_DIR = "generated";
 const MAX_RESOURCE_BYTES = 512 * 1024;
 const DOC_FILES = ["README.md", "packages/jit/README.md"] as const;
 const GENERATED_EXTENSIONS = new Set([".js", ".ts", ".json"]);
@@ -83,37 +73,28 @@ export function projectContext(args: Readonly<Record<string, unknown>>, workspac
 
 export async function inspectAot(args: Readonly<Record<string, unknown>>, workspace: string): Promise<McpPayload> {
   const resolved = await resolveAotProject(args, workspace);
-  const collected = await collectSchemas(resolved.files);
-  const grouped = Object.keys(collected.schemas).map((name) => ({
+  const collected = await collectDeclarations(resolved.files);
+  const grouped = Object.keys(collected.groups).map((name) => ({
     name,
-    operations: readOps(collected.schemas[name]),
+    operations: Object.keys(collected.groups[name]).map(
+      (prop) => `${prop}: ${artifactOperations(collected.groups[name][prop]).join(">") || "unknown"}`
+    ),
     source: relativePath(resolved.root, collected.sources.get(name)),
   }));
-  const standalone = Object.keys(collected.functions).map((name) => {
-    const artifact = getArtifact(collected.functions[name]);
-
-    return {
-      name,
-      kind: artifact?.kind ?? "unknown",
-      operations:
-        artifact && "op" in artifact
-          ? [artifact.op]
-          : artifact?.kind === "execution"
-            ? artifact.plan.stages.map((stage) =>
-                stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
-              )
-            : artifact
-              ? [artifact.kind]
-              : [],
-      source: relativePath(resolved.root, collected.sources.get(name)),
-    };
-  });
+  const standalone = Object.keys(collected.artifacts).map((name) => ({
+    name,
+    kind: getArtifact(collected.artifacts[name])?.kind ?? "unknown",
+    operations: artifactOperations(collected.artifacts[name]),
+    source: relativePath(resolved.root, collected.sources.get(name)),
+  }));
+  const types = Object.keys(collected.schemas);
   const files = resolved.files.map((file) => relativePath(resolved.root, file));
   const data = {
     root: resolved.root,
     configFile: relativePath(resolved.root, resolved.configFile),
     files,
     output: outputDescriptor(resolved),
+    types,
     grouped,
     standalone,
   } as JsonValue;
@@ -122,8 +103,9 @@ export async function inspectAot(args: Readonly<Record<string, unknown>>, worksp
     `config: ${relativePath(resolved.root, resolved.configFile) ?? "none"}`,
     `declaration files: ${files.length}`,
     ...files.map((file) => `- ${file}`),
-    `grouped exports: ${grouped.map(({ name }) => name).join(", ") || "none"}`,
-    `standalone functions: ${standalone.map(({ name }) => name).join(", ") || "none"}`,
+    `types: ${types.join(", ") || "none"}`,
+    `artifact objects: ${grouped.map(({ name }) => name).join(", ") || "none"}`,
+    `standalone artifacts: ${standalone.map(({ name }) => name).join(", ") || "none"}`,
   ].join("\n");
 
   return { text, data };
@@ -131,29 +113,20 @@ export async function inspectAot(args: Readonly<Record<string, unknown>>, worksp
 
 export async function previewAot(args: Readonly<Record<string, unknown>>, workspace: string): Promise<McpPayload> {
   const resolved = await resolveAotProject(args, workspace);
-  const collected = await collectSchemas(resolved.files);
-  assertBuildable(collected.schemas, collected.functions, resolved.files);
-  const stage = readEnum(args, "stage", ["summary", "source", "types", "manifest", "plan"] as const) ?? "summary";
+  const collected = await collectDeclarations(resolved.files);
+  assertBuildable(collected.artifacts, collected.groups, resolved.files);
+  const stage = readEnum(args, "stage", ["summary", "source"] as const) ?? "summary";
   const target = readOptionalString(args, "target");
   const tempDir = mkdtempSync(join(tmpdir(), "jit-mcp-preview-"));
 
   try {
     const result = generate({
-      schemas: collected.schemas,
-      typeSchemas: collected.typeSchemas,
-      functions: collected.functions,
-      sources: collected.sources,
+      ...collected,
       outDir: tempDir,
-      packageName: resolved.packageName,
-      clean: true,
-      format: resolved.outputFormat,
-      emit: {
-        ...resolved.emit,
-        ...(stage === "manifest" ? { manifest: true } : {}),
-        ...(stage === "plan" ? { plans: true } : {}),
-      },
+      format: resolved.format,
+      perFile: resolved.perFile,
     });
-    const selected = selectPreviewFile(tempDir, stage, target, resolved.outputFormat);
+    const selected = selectPreviewFile(result.files, stage, target);
     const content = selected ? readLimitedFile(selected) : undefined;
     const files = result.files.map((file) => relativePath(tempDir, file));
     const data = {
@@ -181,24 +154,19 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
   }
 
   const resolved = await resolveAotProject(args, workspace);
-  const collected = await collectSchemas(resolved.files);
-  assertBuildable(collected.schemas, collected.functions, resolved.files);
+  const collected = await collectDeclarations(resolved.files);
+  assertBuildable(collected.artifacts, collected.groups, resolved.files);
   const result = generate({
-    schemas: collected.schemas,
-    typeSchemas: collected.typeSchemas,
-    functions: collected.functions,
-    sources: collected.sources,
+    ...collected,
     outDir: resolved.outDir,
-    packageName: resolved.packageName,
-    clean: resolved.clean,
-    format: resolved.outputFormat,
-    ...(resolved.emit ? { emit: resolved.emit } : {}),
+    format: resolved.format,
+    perFile: resolved.perFile,
   });
   const files = result.files.map((file) => relativePath(resolved.root, file));
   const data = {
     outDir: relativePath(resolved.root, resolved.outDir),
-    packageName: resolved.packageName,
-    outputFormat: resolved.outputFormat,
+    format: resolved.format,
+    perFile: resolved.perFile,
     files,
     skipped: jsonSkipped(result.skipped),
   } as JsonValue;
@@ -224,11 +192,11 @@ export async function doctorProject(args: Readonly<Record<string, unknown>>, wor
 
   if (resolved.files.length > 0) {
     try {
-      const collected = await collectSchemas(resolved.files);
-      grouped = Object.keys(collected.schemas).length;
-      standalone = Object.keys(collected.functions).length;
+      const collected = await collectDeclarations(resolved.files);
+      grouped = Object.keys(collected.groups).length;
+      standalone = Object.keys(collected.artifacts).length;
       if (grouped + standalone === 0) {
-        errors.push("Declaration files export no compiled functions or grouped JIT.compile objects.");
+        errors.push("Declaration files declare no compiled JIT functions or artifact objects.");
       }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
@@ -255,7 +223,7 @@ export async function doctorProject(args: Readonly<Record<string, unknown>>, wor
     `node: ${process.versions.node}`,
     `config: ${relativePath(resolved.root, resolved.configFile) ?? "not found"}`,
     `declaration files: ${resolved.files.length}`,
-    `AOT exports: ${grouped} grouped, ${standalone} standalone`,
+    `AOT declarations: ${grouped} object(s), ${standalone} standalone`,
     `output: ${relativePath(resolved.root, resolved.outDir)}`,
     ...errors.map((message) => `error: ${message}`),
     ...warnings.map((message) => `warning: ${message}`),
@@ -410,11 +378,8 @@ export function completeValue(name: string, value: string, workspace: string): r
 function outputDescriptor(resolved: ResolvedAotProject): JsonValue {
   return {
     directory: relativePath(resolved.root, resolved.outDir) ?? resolved.outDir,
-    packageName: resolved.packageName,
-    format: resolved.outputFormat,
-    layout: resolved.outDir.split(sep).includes("node_modules") ? "package" : "local",
-    clean: resolved.clean,
-    emit: (resolved.emit ?? {}) as JsonValue,
+    format: resolved.format,
+    perFile: resolved.perFile,
   };
 }
 
@@ -431,8 +396,7 @@ async function resolveAotProject(
   const root = resolveProjectRoot(args, workspace);
   const explicitFiles = readOptionalStringArray(args, "files");
   const explicitPatterns = readOptionalStringArray(args, "patterns");
-  const emitOverride = readEmit(args.emit);
-  let config: JitConfig & LegacyJitConfig = {};
+  let config: JitConfig = {};
   let configFile: string | undefined;
   let files = explicitFiles?.map((file) => resolveInside(root, file, "declaration file")) ?? [];
   let patterns = explicitPatterns;
@@ -443,10 +407,10 @@ async function resolveAotProject(
     configFile = discoveredConfig ? resolveInside(root, discoveredConfig, "JIT config", root, true) : undefined;
     if (configFile) {
       const loaded = await loadModule(configFile);
-      config = (loaded.default ?? loaded) as JitConfig & LegacyJitConfig;
+      config = (loaded.default ?? loaded) as JitConfig;
       configDir = dirname(configFile);
       patterns = patterns ?? config.patterns;
-      files = expandSchemaEntries(config.entries ?? config.schemas, configDir, patterns);
+      files = expandSchemaEntries(config.entries, configDir, patterns);
     }
     if (files.length === 0) files = discoverSchemaFiles(root, patterns);
   }
@@ -454,17 +418,12 @@ async function resolveAotProject(
   files = files.map((file) => resolveInside(root, file, "declaration file", root, true));
   const output = config.output;
   const outArg = readOptionalString(args, "outDir");
-  const configuredOut = output?.directory ?? config.outDir ?? DEFAULT_OUT_DIR;
+  const configuredOut = output?.directory ?? DEFAULT_OUT_DIR;
   const outDir = outArg
     ? resolveInside(root, outArg, "AOT output directory")
     : resolveInside(configDir, configuredOut, "AOT output directory", root);
-  const packageName =
-    readOptionalString(args, "packageName") ?? output?.packageName ?? config.packageName ?? DEFAULT_PACKAGE_NAME;
-  const clean = readOptionalBoolean(args, "clean") ?? output?.clean ?? config.clean ?? true;
-  const outputFormat =
-    readEnum(args, "outputFormat", ["typescript", "javascript"] as const) ??
-    validateOutputFormat(output?.format ?? "typescript");
-  const emit = config.emit || emitOverride ? { ...config.emit, ...emitOverride } : undefined;
+  const format = readEnum(args, "format", ["ts", "js"] as const) ?? validateOutputFormat(output?.format ?? "ts");
+  const perFile = readOptionalBoolean(args, "perFile") ?? output?.perFile ?? false;
 
   return {
     root,
@@ -472,17 +431,15 @@ async function resolveAotProject(
     config,
     files,
     outDir,
-    packageName,
-    outputFormat,
+    format,
+    perFile,
     patterns: patterns ?? DEFAULT_SCHEMA_PATTERNS,
-    clean,
-    ...(emit ? { emit } : {}),
   };
 }
 
 function validateOutputFormat(value: unknown): AotOutputFormat {
-  if (value === "typescript" || value === "javascript") return value;
-  throw new Error(`unknown output format ${JSON.stringify(value)}; expected "typescript" or "javascript"`);
+  if (value === "ts" || value === "js") return value;
+  throw new Error(`unknown output format ${JSON.stringify(value)}; expected "ts" or "js"`);
 }
 
 function resolveProjectRoot(args: Readonly<Record<string, unknown>>, workspace: string): string {
@@ -525,55 +482,39 @@ function assertInside(boundary: string, target: string, label: string): void {
   }
 }
 
+function artifactOperations(value: unknown): readonly string[] {
+  const artifact = getArtifact(value);
+
+  if (!artifact) return [];
+  if ("op" in artifact) return [artifact.op];
+  if (artifact.kind === "execution") {
+    return artifact.plan.stages.map((stage) =>
+      stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
+    );
+  }
+  return [artifact.kind];
+}
+
 function assertBuildable(
-  schemas: Readonly<Record<string, unknown>>,
-  functions: Readonly<Record<string, unknown>>,
+  artifacts: Readonly<Record<string, unknown>>,
+  groups: Readonly<Record<string, unknown>>,
   files: readonly string[]
 ): void {
-  if (Object.keys(schemas).length + Object.keys(functions).length === 0) {
+  if (Object.keys(artifacts).length + Object.keys(groups).length === 0) {
     throw new Error(
-      `No AOT functions found in ${files.join(", ") || "the selected files"}. Export standalone compiled functions or JIT.compile(schema, { ... }) objects.`
+      `No AOT artifacts found in ${files.join(", ") || "the selected files"}. Declare compiled JIT functions or artifact objects.`
     );
   }
 }
 
-function selectPreviewFile(
-  tempDir: string,
-  stage: string,
-  target: string | undefined,
-  format: AotOutputFormat
-): string | undefined {
-  if (stage === "summary") return undefined;
-  if (stage === "source") return resolve(tempDir, format === "typescript" ? "index.ts" : "index.js");
-  if (stage === "types") {
-    if (format !== "typescript") throw new Error('output format "javascript" has no separate type artifact');
-    return resolve(tempDir, "index.ts");
-  }
-  if (stage === "manifest") return resolve(tempDir, "manifest.json");
-  if (stage === "plan") {
-    const plansDir = resolve(tempDir, "plans");
-    const plans = existsSync(plansDir)
-      ? readdirSync(plansDir)
-          .filter((file) => file.endsWith(".json"))
-          .sort()
-      : [];
-    const selected = target ? plans.find((file) => planContainsExport(resolve(plansDir, file), target)) : plans[0];
-    if (!selected)
-      throw new Error(target ? `No generated plan found for "${target}".` : "No generated AOT plans found.");
-    return resolve(plansDir, selected);
-  }
-  return undefined;
-}
+function selectPreviewFile(files: readonly string[], stage: string, target: string | undefined): string | undefined {
+  if (stage !== "source") return undefined;
+  if (!target) return files.find((file) => /index\.[jt]s$/.test(file)) ?? files[0];
 
-function planContainsExport(path: string, target: string): boolean {
-  try {
-    const plan = JSON.parse(readFileSync(path, "utf8")) as {
-      readonly artifacts?: readonly { readonly name?: unknown }[];
-    };
-    return plan.artifacts?.some((artifact) => artifact.name === target) === true;
-  } catch {
-    return false;
-  }
+  const match = files.find((file) => basename(file).replace(/\.[jt]s$/, "") === target);
+
+  if (!match) throw new Error(`No generated module named "${target}".`);
+  return match;
 }
 
 function readLimitedFile(path: string): string {
@@ -630,25 +571,6 @@ function parseJitUri(uri: string): { readonly host: string; readonly path: strin
   }
   if (parsed.protocol !== "jit:") throw new Error(`Unsupported resource protocol "${parsed.protocol}".`);
   return { host: parsed.hostname, path: decodeURIComponent(parsed.pathname.replace(/^\//, "")) };
-}
-
-function readOps(value: unknown): readonly string[] {
-  if (value === null || typeof value !== "object") return [];
-  const ops = (value as { readonly ops?: unknown }).ops;
-  return Array.isArray(ops) ? ops.filter((op): op is string => typeof op === "string") : [];
-}
-
-function readEmit(value: unknown): GenerateEmitOptions | undefined {
-  const record = readRecord(value);
-  if (!record) return undefined;
-  const keys = ["subpathModules", "manifest", "plans"] as const;
-  const emit: Record<string, boolean> = {};
-  for (const key of keys) {
-    const item = record[key];
-    if (item !== undefined && typeof item !== "boolean") throw new Error(`emit.${key} must be a boolean`);
-    if (typeof item === "boolean") emit[key] = item;
-  }
-  return emit;
 }
 
 function readRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {

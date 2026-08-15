@@ -71,7 +71,7 @@ describe("JIT compiler hash", () => {
   });
 
   it("should expose JIT.compileHash as a public convenience API", () => {
-    const hash = JIT.compileHash(JIT.object({ id: JIT.number() }).schema);
+    const hash = Compiler.compileHash(JIT.object({ id: JIT.number() }).schema);
 
     expect(hash({ id: 1 })).toBe(hash({ id: 1 }));
     expect(hash({ id: 1 })).not.toBe(hash({ id: 2 }));

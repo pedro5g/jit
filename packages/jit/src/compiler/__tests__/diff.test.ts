@@ -146,7 +146,7 @@ describe("JIT compiler diff", () => {
     expect(setDiff(new Set([1, 2]), new Set([1, 2]))).toEqual([]);
     expect(setDiff(new Set([1, 2]), nextSet)).toEqual([{ type: "update", path: [], value: nextSet }]);
 
-    const mapDiff = Compiler.compileDiff(JIT.map(JIT.string(), JIT.number()).schema);
+    const mapDiff = Compiler.compileDiff(JIT.mapSchema(JIT.string(), JIT.number()).schema);
     const nextMap = new Map([["a", 2]]);
 
     expect(mapDiff(new Map([["a", 1]]), nextMap)).toEqual([{ type: "update", path: [], value: nextMap }]);
@@ -178,7 +178,7 @@ describe("JIT compiler diff", () => {
   });
 
   it("should expose JIT.compileDiff as a public convenience API", () => {
-    const diff = JIT.compileDiff(JIT.object({ id: JIT.number() }).schema);
+    const diff = Compiler.compileDiff(JIT.object({ id: JIT.number() }).schema);
 
     expect(diff({ id: 1 }, { id: 2 })).toEqual([{ type: "update", path: ["id"], value: 2 }]);
   });
@@ -194,7 +194,7 @@ describe("JIT compiler diff", () => {
 
   it("should keep generated map and set diff source free from array conversions", () => {
     const setSource = Compiler.emitDiffSource(JIT.set(JIT.number()).schema);
-    const mapSource = Compiler.emitDiffSource(JIT.map(JIT.string(), JIT.number()).schema);
+    const mapSource = Compiler.emitDiffSource(JIT.mapSchema(JIT.string(), JIT.number()).schema);
 
     for (const source of [setSource, mapSource]) {
       expect(source).not.toContain("Array.from");

@@ -1,7 +1,11 @@
 import { JIT } from "../../index.js";
 import { validation } from "./validation-helper.js";
 
-function accepts(builder: Parameters<typeof JIT.is>[0], good: readonly string[], bad: readonly string[]): void {
+function accepts(
+  builder: Parameters<typeof JIT.validate.is>[0],
+  good: readonly string[],
+  bad: readonly string[]
+): void {
   const validate = validation(JIT.object({ value: builder as never }));
 
   for (const sample of good) {

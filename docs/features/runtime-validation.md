@@ -19,33 +19,33 @@ const User = JIT.object({
 });
 
 const isUser = JIT.validate.is(User);
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 ```
 
-Use `JIT.compile(schema, { ... })` when several operations should ship as one
+Use `{ ... }` when several operations should ship as one
 object:
 
 ```ts
-const UserValidator = JIT.compile(User, {
+const UserValidator = {
   is: JIT.validate.is(User),
   parse: JIT.validate.parse(User),
   safeParse: JIT.validate.safeParse(User),
-});
+};
 
 UserValidator.is(input);
 UserValidator.parse(input);
 UserValidator.safeParse(input);
 ```
 
-Use `JIT.compile(schema, { ... })` when you want an object-shaped runtime and
+Use `{ ... }` when you want an object-shaped runtime and
 AOT marker:
 
 ```ts
-export const UserModel = JIT.compile(User, {
+export const UserModel = {
   is: JIT.validate.is(User),
   parse: JIT.validate.parse(User),
-});
+};
 ```
 
 ## Function Behavior

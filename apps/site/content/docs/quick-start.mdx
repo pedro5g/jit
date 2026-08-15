@@ -31,9 +31,9 @@ type User = JIT.Typeof<typeof User>;
 ## Validate
 
 ```ts
-const isUser = JIT.is(User);
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 
 isUser(input); // pure boolean guard — compiled specialized code
 parseUser(input); // throws JITValidationError with every issue
@@ -43,9 +43,9 @@ safeParseUser(input); // { success, data | issues } — no exceptions
 ## Use the other compiled operations
 
 ```ts
-const equalUser = JIT.equal(User);
+const equalUser = JIT.compare.equal(User);
 const cloneUser = JIT.clone(User);
-const diffUser = JIT.diff(User);
+const diffUser = JIT.compare.diff(User);
 const stringifyUser = JIT.json.stringify(User);
 
 equalUser(a, b); // schema-aware deep equality
@@ -53,7 +53,7 @@ cloneUser(a); // static-literal deep clone
 diffUser(a, b); // structural diff entries
 JIT.update(User).patch({ name: "Ada" }).compile()(a, { name: "Ada" });
 stringifyUser(a); // compiled JSON — static keys baked in
-JIT.mask(User)(a); // PII-safe copy for logs
+JIT.security.mask(User)(a); // PII-safe copy for logs
 ```
 
 ## Inspect what was generated

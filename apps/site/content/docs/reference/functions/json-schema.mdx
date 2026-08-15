@@ -1,0 +1,81 @@
+---
+title: JSON Schema
+description: Describe a JIT schema as a JSON Schema document for OpenAPI, forms and structured outputs.
+---
+
+`JIT.jsonSchema(schema)` returns a JSON Schema (draft 2020-12) document derived
+from the same schema the validator compiles. It removes the usual second source
+of truth: no hand-written OpenAPI component, no `*-to-json-schema` converter
+that drifts from the runtime checks.
+
+```ts
+const User = JIT.object({
+  id: JIT.number().int32().positive(),
+  email: JIT.string().email(),
+  name: JIT.string().min(2).max(80),
+  role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
+});
+
+JIT.jsonSchema(User);
+```
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": { "type": "integer", "format": "int32", "exclusiveMinimum": 0 },
+    "email": { "type": "string", "format": "email" },
+    "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+    "role": { "anyOf": [{ "const": "admin" }, { "const": "member" }] }
+  },
+  "required": ["id", "email", "name", "role"],
+  "additionalProperties": false
+}
+```
+
+## Faithful by construction
+
+The document reports what the validator actually enforces. `additionalProperties`
+is `false` because object schemas reject unknown keys; a field is in `required`
+only when it is not optional, nullish or defaulted.
+
+Constraints JSON Schema cannot express — custom `refine` predicates, transforms,
+branded identity — are **dropped rather than approximated**, so a document never
+promises a guarantee the validator does not make.
+
+## Options
+
+```ts
+JIT.jsonSchema(User, { dialect: false, additionalProperties: true });
+```
+
+| Option                 | Default        | Purpose                                                       |
+| ---------------------- | -------------- | ------------------------------------------------------------- |
+| `dialect`              | draft 2020-12  | `$schema` value; `false` omits it, which OpenAPI 3.1 expects   |
+| `additionalProperties` | `false`        | `true` describes a forward-compatible payload                  |
+
+## Metadata
+
+`.meta()` attaches documentation that never affects validation and flows
+straight into the document:
+
+```ts
+const Port = JIT.number().min(1).max(65535).meta({
+  title: "Port",
+  description: "TCP port",
+  examples: [80, 443],
+});
+```
+
+## Recursive schemas
+
+A schema that references itself through `JIT.lazy` becomes a `$defs` entry with
+`$ref` back-edges, so the document stays finite and valid.
+
+## Cost
+
+The result is static data derived only from the schema, so it is computed once
+per schema identity and returned frozen on later calls. In AOT it is inlined as
+a frozen object literal — the generated module ships the document, never the
+translator.

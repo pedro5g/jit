@@ -2,7 +2,7 @@
 
 AOT turns compiled JIT artifacts into standalone JavaScript files. The final
 generated package contains only the functions the developer explicitly exports
-or groups with `JIT.compile(schema, { ... })`.
+or groups with `{ ... }`.
 
 This is the main front-end story: the application bundle should not include the
 schema DSL, compiler, emitters, query builders, or runtime engine. It should
@@ -29,7 +29,7 @@ export const stringifyUser = JIT.json.stringify(UserSchema);
 After `jit generate`, standalone exports stay flat:
 
 ```ts
-import { isUser } from "@jit/generated";
+import { isUser } from "./generated/index.js";
 
 isUser(input);
 ```
@@ -42,13 +42,13 @@ const selected = {
   parse: JIT.validate.parse(UserSchema),
 };
 
-export const User = JIT.compile(UserSchema, selected);
+export const User = selected;
 ```
 
 The generated import is then:
 
 ```ts
-import { User } from "@jit/generated";
+import { User } from "./generated/index.js";
 
 User.is(input);
 User.parse(input);
@@ -71,10 +71,10 @@ export { isUser };
 Grouped exports emit only the grouped object:
 
 ```ts
-export const User = JIT.compile(UserSchema, {
+export const User = {
   is,
   parse,
-});
+};
 ```
 
 emits:
@@ -147,10 +147,9 @@ Cache helpers are also conditional:
 - Export flat functions when the app imports operations independently.
 - Use grouped objects when the code naturally calls `User.is`, `User.parse`,
   or `User.stringify` together.
-- Do not export raw schemas expecting AOT to infer everything. Raw schemas are
-  intentionally skipped; export compiled functions or a grouped object.
-- Keep generated output in `node_modules/@jit/generated` when you want package
-  imports. For project-local output, import `./generated/index.js`; the CLI
-  automatically avoids a nested package manifest and no `#` alias is needed.
+- A schema on its own declares a type, not a runtime function. Declare the
+  artifacts you want, either standalone or on an artifact object.
+- Turn on `output.perFile` when different routes import unrelated schemas: each
+  declaration file becomes its own module plus an `index` barrel.
 - Run `pnpm clean:artifacts` after local builds if zshy leaves ignored build
   output beside source files.

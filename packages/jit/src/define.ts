@@ -4,12 +4,17 @@
  * execute before `jit generate` has lowered them.
  */
 import type { Clone } from "./compiler/clone.js";
+import type { CompiledCodec } from "./compiler/codec.js";
 import type { Diff } from "./compiler/diff.js";
 import type { Equal } from "./compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
 import type { Format } from "./compiler/format.js";
 import type { Hash } from "./compiler/hash.js";
+import type { JsonSchemaDocument } from "./compiler/json-schema.js";
+import type { Mask } from "./compiler/mask.js";
+import type { Mock } from "./compiler/mock.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
+import type { Sanitize } from "./compiler/sanitize.js";
 import type { Serialize } from "./compiler/serialize.js";
 import type { UpdatePatch } from "./compiler/update.js";
 import type { SafeParseResult } from "./compiler/validate.js";
@@ -94,6 +99,13 @@ const binary = Object.freeze({
       stage("binary.encode", "value", "binary"),
     ]);
   },
+  codec<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+    return operationStub<TSchema, (value: ATS.TypeofSchema<TSchema>) => Uint8Array>(
+      schema,
+      "codec",
+      "value"
+    ) as unknown as CompiledCodec<ATS.TypeofSchema<TSchema>>;
+  },
   decode<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return executionStub<TSchema, (bytes: Uint8Array | ArrayBuffer) => ATS.TypeofSchema<TSchema>>(schema, [
       {
@@ -116,7 +128,7 @@ function from<TSchema extends ATS.AnyTypeSchema>(
 function map<TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchema>(
   source: SchemaInput<TSource>,
   target: SchemaInput<TTarget>,
-  mapping: Readonly<Record<string, unknown>>
+  mapping: Readonly<Record<string, unknown>> = {}
 ): SchemaArtifact<ATS.TypeofSchema<TSource>, TTarget> {
   const sourceSchema = unwrapSchema(source);
   const targetSchema = unwrapSchema(target);
@@ -130,7 +142,7 @@ function map<TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchem
 function mapMany<TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchema>(
   source: SchemaInput<TSource>,
   target: SchemaInput<TTarget>,
-  mapping: Readonly<Record<string, unknown>>
+  mapping: Readonly<Record<string, unknown>> = {}
 ): SchemaArtifact<ATS.TypeofSchema<TSource>[], ATS.ArraySchema<TTarget>> {
   const sourceSchema = unwrapSchema(source);
   const targetSchema = unwrapSchema(target);
@@ -188,9 +200,35 @@ function validationStub<TSchema extends ATS.AnyTypeSchema>(
   ]);
 }
 
+function jsonSchema<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): JsonSchemaDocument {
+  return operationStub<TSchema, (value: never) => unknown>(
+    schema,
+    "jsonSchema",
+    "value"
+  ) as unknown as JsonSchemaDocument;
+}
+
+function mock<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): DefineFunction<Mock<ATS.TypeofSchema<TSchema>>> {
+  return operationStub<TSchema, Mock<ATS.TypeofSchema<TSchema>>>(schema, "mock", "value");
+}
+
+function mask<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): DefineFunction<Mask<ATS.TypeofSchema<TSchema>>> {
+  return operationStub<TSchema, Mask<ATS.TypeofSchema<TSchema>>>(schema, "mask", "value");
+}
+
+function sanitize<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): DefineFunction<Sanitize<ATS.TypeofSchema<TSchema>>> {
+  return operationStub<TSchema, Sanitize<ATS.TypeofSchema<TSchema>>>(schema, "sanitize", "value");
+}
+
 function operationStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...args: never[]) => unknown>(
   schema: SchemaInput<TSchema>,
-  operation: "equal" | "clone" | "diff" | "hash" | "format" | "mask" | "sanitize",
+  operation: "equal" | "clone" | "diff" | "hash" | "format" | "mask" | "sanitize" | "codec" | "jsonSchema" | "mock",
   output: "value" | "boolean"
 ): DefineFunction<TFunction> {
   return executionStub<TSchema, TFunction>(schema, [
@@ -446,9 +484,6 @@ function stage(kind: string, input: ExecutionStage["input"], output: ExecutionSt
 export const JIT = {
   ...RuntimeJIT,
   validate,
-  is: validate.is,
-  parse: validate.parse,
-  safeParse: validate.safeParse,
   json,
   binary,
   from,
@@ -457,47 +492,30 @@ export const JIT = {
       source: SchemaInput<ATS.AnyTypeSchema>,
       target: SchemaInput<ATS.AnyTypeSchema>,
       mapping?: Readonly<Record<string, unknown>>
-    ) =>
-      mapping === undefined ? RuntimeJIT.map(source, target) : map(source, target, mapping)) as typeof RuntimeJIT.map,
+    ) => map(source, target, mapping ?? {})) as typeof RuntimeJIT.map,
     { many: mapMany }
   ),
-  equal,
   clone,
-  diff,
-  hash,
   format,
+  jsonSchema,
+  mock,
   compare: Object.freeze({ equal, diff, hash }),
+  security: Object.freeze({ mask, sanitize }),
 } as Omit<
   typeof RuntimeJIT,
-  | "validate"
-  | "is"
-  | "parse"
-  | "safeParse"
-  | "json"
-  | "binary"
-  | "from"
-  | "map"
-  | "equal"
-  | "clone"
-  | "diff"
-  | "hash"
-  | "format"
-  | "compare"
+  "validate" | "json" | "binary" | "from" | "map" | "clone" | "format" | "jsonSchema" | "mock" | "compare" | "security"
 > & {
   readonly validate: typeof validate;
-  readonly is: typeof validate.is;
-  readonly parse: typeof validate.parse;
-  readonly safeParse: typeof validate.safeParse;
   readonly json: typeof json;
   readonly binary: typeof binary;
   readonly from: typeof from;
   readonly map: typeof map;
-  readonly equal: typeof equal;
   readonly clone: typeof clone;
-  readonly diff: typeof diff;
-  readonly hash: typeof hash;
   readonly format: typeof format;
+  readonly jsonSchema: typeof jsonSchema;
+  readonly mock: typeof mock;
   readonly compare: { readonly equal: typeof equal; readonly diff: typeof diff; readonly hash: typeof hash };
+  readonly security: { readonly mask: typeof mask; readonly sanitize: typeof sanitize };
 };
 
 export namespace JIT {

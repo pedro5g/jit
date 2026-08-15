@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { zx } from "@traversable/zod";
 import { z } from "zod";
 import { lodashCloneDeep, rfdcClone } from "../shared/competitors.js";
@@ -23,7 +23,7 @@ export function registerArrayClones(): void {
     op: "clone",
     name: "large array 10000",
     args: [createUsers(10_000)],
-    jit: JIT.compileClone(UsersSchema.schema),
+    jit: Compiler.compileClone(UsersSchema.schema),
     competitors: [
       { name: "traversable/zod deepClone", fn: zx.deepClone(TraversableUsers) },
       { name: "rfdc", fn: rfdcClone },
@@ -36,7 +36,7 @@ export function registerArrayClones(): void {
     op: "clone",
     name: "nested arrays",
     args: [createNestedUsers(500, 20)],
-    jit: JIT.compileClone(NestedArraysSchema.schema),
+    jit: Compiler.compileClone(NestedArraysSchema.schema),
     competitors: [
       { name: "traversable/zod deepClone", fn: zx.deepClone(TraversableNestedUsers) },
       { name: "rfdc", fn: rfdcClone },

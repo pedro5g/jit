@@ -16,7 +16,14 @@ import {
   type StringSanitizeSpec,
   TypeName,
 } from "../ats/index.js";
-import { attachHint, type EntityHint, type HashStrategy, type OrderDirection } from "../hints/index.js";
+import {
+  attachHint,
+  attachMetadata,
+  type EntityHint,
+  type HashStrategy,
+  type Metadata,
+  type OrderDirection,
+} from "../hints/index.js";
 import type { AnyBuilder, Builder, ObjectBuilder, StandardSchemaIssue, StandardSchemaProps } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
 
@@ -159,6 +166,10 @@ const baseBuilderPrototype = {
 
   apply(this: RuntimeBuilder, fn: (builder: AnyBuilder) => unknown): unknown {
     return fn(this as unknown as AnyBuilder);
+  },
+
+  meta(this: RuntimeBuilder, metadata: Metadata): AnyBuilder {
+    return createBuilder(attachMetadata(this.schema, metadata));
   },
 
   entity(this: RuntimeBuilder, options: EntityHint<unknown>): AnyBuilder {

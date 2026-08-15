@@ -17,91 +17,65 @@ const User = JIT.object({
   role: JIT.oneOf("admin", "user"),
 });
 
-const validateUser = JIT.safeParse(User);
-const result = validateUser(input);
+const parseUser = JIT.validate.safeParse(User);
+const result = parseUser(input);
 
 type User = JIT.Typeof<typeof User>;
 ```
 
-Runtime JIT compiles and caches an operation on first use. AOT discovers only
-the operations explicitly selected by the application and emits standalone,
-typed, import-free functions so the compiler does not ship in the production
-bundle.
+Runtime JIT compiles and caches an operation on first use. AOT reads your
+declaration files and emits standalone, typed, import-free functions, so the
+compiler never ships in the production bundle.
 
-## Portable AOT Artifacts
+## The API
 
-Direct TypeScript is the default AOT output. It keeps generated code inside the
-application's normal type-check and bundling pipeline:
+Every capability is reached through exactly one namespace. There are no root
+aliases and no `.compile()` step — a compiled artifact *is* the function.
 
-```sh
-pnpm jit generate
-```
-
-```ts
-// input: src/aot/user.jit.ts
-import { JIT } from "@jit-compiler/jit/define";
-
-const User = JIT.object({
-  id: JIT.number().int32(),
-  name: JIT.string().min(2),
-});
-
-export const isUser = JIT.is(User);
-```
+| Namespace      | Members                                                              |
+| -------------- | -------------------------------------------------------------------- |
+| `JIT.validate` | `is`, `parse`, `safeParse`, `parseAsync`, `safeParseAsync`, `issues`  |
+| `JIT.compare`  | `equal`, `diff`, `hash`                                              |
+| `JIT.security` | `mask`, `sanitize`                                                   |
+| `JIT.json`     | `parse`, `stringify`, `stringifyChunks`, `value`                     |
+| `JIT.binary`   | `encode`, `decode`, `codec`                                          |
+| root           | `clone`, `format`, `jsonSchema`, `mock`, `from`, `map`, `query`, `transform`, `update`, `watch`, `stream`, `process`, `dto`, plus every schema factory |
 
 ```ts
-// output: src/generated/jit/index.ts
-export type User = { id: number; name: string };
-export const isUser: (value: unknown) => value is User = function is(value) {
-  // specialized checks only
-};
+const isUser = JIT.validate.is(User);
+const equalUser = JIT.compare.equal(User);
+const maskUser = JIT.security.mask(User);
+const toJson = JIT.json.stringify(User);
+
+isUser(input);
+equalUser(a, b);
 ```
 
-The [Artifact Lab](https://jit-site.vercel.app/lab) is a free-form TypeScript
-editor with the complete JIT type surface. It runs the real AOT compiler in a
-terminable browser worker, previews the exact generated files and creates a
-compact signed reference. Reconstruct those files without installing JIT in
-the target project:
-
-```sh
-pnpm dlx @jit-compiler/cli add jlr1_<signed-reference>
-```
-
-The native Rust CLI trusts the official registry, verifies its Ed25519
-signature, checks the SHA-256 content address, confines paths to the project
-root and writes the complete tree transactionally. It installs no dependencies
-and executes no artifact-provided commands.
-
-## New In 1.0.4
-
-The `1.0.4` release adds configurable source-compiled sanitization, reactive
-immutable update stores, composable execution artifacts, and DTO boundary
-annotations:
+The same schema also describes and populates itself, so neither an OpenAPI
+component nor a test fixture becomes a second source of truth:
 
 ```ts
-const Comment = JIT.object({
-  title: JIT.string().sanitize("text"),
-  body: JIT.string().sanitize({
-    preset: "none",
-    html: { mode: "allow", tags: ["p", "strong", "code"] },
-    normalize: "NFC",
-    maxLength: 4_000,
-  }),
-});
+const userDocument = JIT.jsonSchema(User); // JSON Schema 2020-12, static data
+const mockUser = JIT.mock(User); // values that pass JIT.validate.is(User)
 
-const isUser = JIT.is(User);
-const parseUser = JIT.parse(User);
-const equalUser = JIT.equal(User);
-const CreateUserDTO = JIT.dto(CreateUserSchema);
-const parseCreateUser = JIT.json.parse(CreateUserDTO).validate();
-const userState = JIT.update(User).reactive(initialUser);
-
-userState.watch(["profile", "name"], ({ value }) => renderName(value));
-userState.update({ profile: { name: "Ada" } });
+mockUser({ seed: 7 }); // reproducible fixture
 ```
 
-Boundary work uses one typed execution artifact instead of manually wiring
-individual compilers:
+Queries are builders that *are* the query, with alternative result shapes
+behind `.to`:
+
+```ts
+const activeAdmins = JIT.query(JIT.array(User))
+  .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
+  .select("id", "email");
+
+activeAdmins(users); // eager array
+activeAdmins.to.iterator(); // pull-based generator
+activeAdmins.to.visitor(); // push-based sink, no result array
+```
+
+Boundary work composes into one typed execution artifact instead of manually
+wiring individual compilers:
 
 ```ts
 const PublicUsers = JIT.json
@@ -117,14 +91,76 @@ const response = PublicUsers(requestBody);
 
 Runtime and AOT lower that plan once. JSON uses native `JSON.parse` followed
 immediately by generated validation; adjacent query stages share one indexed
-loop. `.transform(target, fields)`, `.map`,
-`.update`, `.sanitize`, and `.mask` can participate in the same pipeline.
-The [composable execution guide](docs/features/composable-execution.md)
-documents deliberate allocation boundaries and AOT constraints.
+loop. `.transform(target, fields)`, `.map`, `.update`, `.sanitize`, and
+`.mask` can participate in the same pipeline. The
+[composable execution guide](docs/features/composable-execution.md) documents
+deliberate allocation boundaries and AOT constraints.
 
-The browser playground now includes executable `sanitize`, `reactiveUpdate`,
-`dto`, explicit artifact groups, and `indexes` scenarios. The indexes scenario contrasts
-`.entity()`, `.indexBy()`, schema `.keyed()`, and query `.keyed()` directly.
+## AOT: the declaration file is the manifest
+
+`jit generate` reads a `*.jit.ts` file literally. A schema names a generated
+type, an artifact becomes a generated function, and an object of artifacts
+becomes one frozen object — `export` is optional.
+
+```sh
+pnpm jit init
+pnpm jit generate
+```
+
+```ts
+// input: jit/user.jit.ts
+import { JIT } from "@jit-compiler/jit/define";
+
+const User = JIT.object({
+  id: JIT.number().int32(),
+  name: JIT.string().min(2),
+});
+
+export const isUser = JIT.validate.is(User);
+
+export const UserMethods = {
+  is: JIT.validate.is(User),
+  toJson: JIT.json.stringify(User),
+  toObject: JIT.json.parse(User),
+};
+```
+
+```ts
+// output: generated/index.ts
+export type User = { id: number; name: string };
+
+const isUser: (value: unknown) => value is User = function is(value) {
+  // specialized checks only
+};
+
+const UserMethods: {
+  readonly is: (value: unknown) => value is User;
+  readonly toJson: (value: User) => string;
+  readonly toObject: (json: string) => User;
+} = /*#__PURE__*/ Object.freeze({ /* … */ });
+
+export { UserMethods, isUser };
+```
+
+Only two artifact shapes are emitted: `.ts` for typed projects and `.js` for
+vanilla ones. Generated TypeScript carries its public signatures in the
+executable source, so type resolution belongs to the application's own build —
+JIT writes no declaration files and the generated module has zero imports.
+
+The [Artifact Lab](https://jit-site.vercel.app/lab) is a free-form TypeScript
+editor with the complete JIT type surface. It runs the real AOT compiler in a
+terminable browser worker, previews the exact generated files and creates a
+compact signed reference. Reconstruct those files without installing JIT in
+the target project:
+
+```sh
+pnpm dlx @jit-compiler/cli add jlr1_<signed-reference>
+```
+
+The native Rust CLI trusts the official registry, verifies its Ed25519
+signature, checks the SHA-256 content address, confines paths to the project
+root and writes the complete tree transactionally. It installs no dependencies
+and executes no artifact-provided commands.
 
 ## Install
 
@@ -147,10 +183,8 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 - [Package guide](packages/jit/README.md)
 - [Architecture](docs/architecture.md)
 - [Feature guides](docs/features/README.md)
-- [Sanitization](https://jit-site.vercel.app/docs/reference/operators/strings#sanitization)
-- [Reactive updates](https://jit-site.vercel.app/docs/runtime/reactive-updates)
-- [DTO schemas](https://jit-site.vercel.app/docs/runtime/dtos)
-- [Entity, keyed, and index guide](https://jit-site.vercel.app/docs/reference/operators/entity-keyed-and-indexes)
+- [CLI and config](docs/features/cli-and-config.md)
+- [Composable execution](docs/features/composable-execution.md)
 - [Executable runtime and AOT examples](packages/examples/README.md)
 - [Artifact tokens and Rust CLI](apps/site/content/docs/aot/artifact-cli.mdx)
 - [MCP server](docs/features/mcp-server.md)

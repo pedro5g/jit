@@ -6,7 +6,7 @@ description: Choose the correct eager, lazy, binary or streaming execution path.
 | Need                             | Recommended API                              | Materializes output?   |
 | -------------------------------- | -------------------------------------------- | ---------------------- |
 | Validate one value               | `JIT.validate.is/parse/safeParse(S)`         | only issues/transforms |
-| Query an in-memory array         | `JIT.query(List).compile()`                  | yes                    |
+| Query an in-memory array         | `JIT.query(List)`                  | yes                    |
 | Diff keyed collection snapshots | `JIT.watch(List, { key })`                   | change arrays          |
 | Track aggregate child mutations | `JIT.watchedList(List, items, { key })`      | retained state         |
 | Stop consumption early           | `compileIterator()`                          | no                     |

@@ -14,9 +14,9 @@ const query = JIT.query(Users)
   .take(10);
 
 const eager = query.compile();
-const iterate = query.compileIterator();
-const iterateAsync = query.compileAsyncIterator();
-const visit = query.compileVisitor();
+const iterate = query.to.iterator();
+const iterateAsync = query.to.asyncIterator();
+const visit = query.to.visitor();
 
 eager(users); // { id, name }[]
 for (const user of iterate(users)) consume(user);
@@ -24,7 +24,7 @@ for await (const user of iterateAsync(cursor)) consume(user);
 visit(users, consume); // number of consumed values
 ```
 
-`.lazy().compile()` is an ergonomic alias for `.compileIterator()`. Prefer the
+`.lazy()` is an ergonomic alias for `.to.iterator()`. Prefer the
 explicit terminal name in shared APIs because it makes the return contract
 obvious at the call site.
 
@@ -43,11 +43,11 @@ The lazy planner supports:
 - `orderBy()`, with an explicit materialization barrier.
 
 ```ts
-const tags = JIT.query(Posts).flatMap("tags").compileIterator();
-const batches = JIT.query(Events).chunk(1_024).compileIterator();
+const tags = JIT.query(Posts).flatMap("tags").to.iterator();
+const batches = JIT.query(Events).chunk(1_024).to.iterator();
 const balances = JIT.query(Transactions)
   .scan({ initial: 0, update: (total, item) => total + item.amount })
-  .compileIterator();
+  .to.iterator();
 ```
 
 `window()` emits independent arrays. It does not expose a mutable ephemeral

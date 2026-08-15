@@ -33,7 +33,7 @@ export const stringifyUser = JIT.json.stringify(User);
 Generated output imports as:
 
 ```ts
-import { stringifyUser } from "@jit/generated";
+import { stringifyUser } from "./generated/index.js";
 ```
 
 ## JSON Parse With Validation
@@ -114,10 +114,10 @@ Grouped objects should be used only when those operations naturally ship
 together:
 
 ```ts
-export const User = JIT.compile(UserSchema, {
+export const User = {
   is: JIT.validate.is(UserSchema),
   stringify: JIT.json.stringify(UserSchema),
-});
+};
 ```
 
 ## Best Practices

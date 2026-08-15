@@ -59,7 +59,7 @@ export const DeepUserSchema = JIT.object({
 export const UsersSchema = JIT.array(MediumUserSchema);
 export const NestedArraysSchema = JIT.array(JIT.array(MediumUserSchema));
 export const NumberSetSchema = JIT.set(JIT.number());
-export const NumberMapSchema = JIT.map(JIT.string(), JIT.number());
+export const NumberMapSchema = JIT.mapSchema(JIT.string(), JIT.number());
 
 export function range(length: number): number[] {
   const out = new Array<number>(length);

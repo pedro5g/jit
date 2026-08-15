@@ -98,14 +98,16 @@ describe("JIT compile cache", () => {
     emitSpy.mockRestore();
   });
 
-  it("should hit the cache through the query builder for repeated compiles", () => {
+  it("should lower a query builder once and reuse it across calls", () => {
     const emitSpy = vi.spyOn(globalThis, "Function");
-    const builder = JIT.query(Users).filter((q) => q.eq("name", "Ada"));
+    const findAda = JIT.query(Users).filter((q) => q.eq("name", "Ada"));
+    const people = [{ id: 1, name: "Ada", tags: [] }];
 
-    builder.compile();
+    findAda(people);
     const parsesAfterFirst = emitSpy.mock.calls.length;
 
-    builder.compile();
+    findAda(people);
+    findAda(people);
     expect(emitSpy.mock.calls.length).toBe(parsesAfterFirst);
 
     emitSpy.mockRestore();

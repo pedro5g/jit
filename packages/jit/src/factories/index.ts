@@ -1,27 +1,11 @@
-export { compileClone } from "../compiler/clone.js";
-export { compileDiff } from "../compiler/diff.js";
-export { compileEqual } from "../compiler/equal.js";
-export { compileHash } from "../compiler/hash.js";
-export {
-  compileGroupBy,
-  compileMerge,
-  compileNormalize,
-  compileOmit,
-  compilePick,
-  compileSortBy,
-  compileTransform,
-  compileUniqueBy,
-} from "../compiler/object-ops.js";
-export { compilePipeline } from "../compiler/pipeline.js";
+export type { JsonSchemaDocument, JsonSchemaOptions } from "../compiler/json-schema.js";
+export type { Mock, MockOptions } from "../compiler/mock.js";
 export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
-export { compileUpdate } from "../compiler/update.js";
 /** Resolves the output type of a schema or builder as `JIT.Typeof<typeof User>`. */
 export type Typeof<TSchemaLike> = import("../core/ats/typeof.js").Typeof<TSchemaLike>;
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export * from "./collection/index.js";
-export type { CompiledSelection, CompileOp } from "./compile.js";
-export { COMPILE_OPS, compile } from "./compile.js";
 export * from "./composition/index.js";
 export { dto } from "./dto.js";
 export { type IsoFactories, iso } from "./iso.js";
@@ -46,18 +30,12 @@ export {
   binary,
   clone,
   compare,
-  diff,
-  equal,
   format,
   from,
-  hash,
-  is,
   json,
+  jsonSchema,
   map,
-  mask,
-  parse,
-  safeParse,
-  sanitize,
+  mock,
   security,
   validate,
 } from "./runtime-ops.js";

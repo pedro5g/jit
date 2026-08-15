@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler, JIT } from "@jit-compiler/jit";
 import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
 import { range } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
@@ -8,7 +8,7 @@ const User = JIT.object({
   name: JIT.string(),
 });
 const Users = JIT.array(User);
-const equal = JIT.compileEqual(Users.schema);
+const equal = Compiler.compileEqual(Users.schema);
 
 function createUsers(length: number): { readonly id: number; readonly name: string }[] {
   return range(length).map((id) => ({ id, name: `user-${id}` }));

@@ -84,7 +84,7 @@ describe("native JSON parse execution", () => {
       profile: JIT.object({ active: JIT.boolean(), note: JIT.string().optional() }),
     });
     const direct = JIT.json.parse(Payload).validate();
-    const validate = JIT.parse(Payload);
+    const validate = JIT.validate.parse(Payload);
     const values = fc.record({
       id: fc.integer({ min: 1, max: 1_000_000 }),
       name: fc.string({ minLength: 2, maxLength: 40 }),
@@ -113,7 +113,7 @@ describe("native JSON parse execution", () => {
       flags: JIT.array(JIT.boolean()).max(5),
     });
     const direct = JIT.json.parse(Payload).validate();
-    const validate = JIT.parse(Payload);
+    const validate = JIT.validate.parse(Payload);
 
     fc.assert(
       fc.property(fc.jsonValue(), (value) => {

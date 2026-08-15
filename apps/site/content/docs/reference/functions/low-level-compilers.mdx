@@ -3,14 +3,24 @@ title: Low-level compilers
 description: Direct compiler exports and operation lists for advanced integrations.
 ---
 
-These functions operate close to schema AST/compiler internals. High-level
-`JIT.equal`, `JIT.clone`, `JIT.query`, `JIT.transform` and `JIT.update`
-provide metadata, builder ergonomics and the clearest AOT registration.
+These functions operate close to schema AST/compiler internals and are
+exported through the `Compiler` namespace of the package root, not through
+`JIT`:
+
+```ts
+import { Compiler } from "@jit-compiler/jit";
+
+Compiler.compileEqual(User.schema);
+```
+
+The capability namespaces — `JIT.compare`, `JIT.clone`, `JIT.query`,
+`JIT.transform`, `JIT.update` — provide metadata, builder ergonomics and the
+clearest AOT registration, and are what application code should use.
 
 ## compileEqual
 
-Compiles equality directly from an unwrapped schema AST. Prefer `JIT.equal`
-for application exports.
+Compiles equality directly from an unwrapped schema AST. Prefer
+`JIT.compare.equal` for application exports.
 
 ## compileClone
 
@@ -18,11 +28,11 @@ Compiles direct schema-shaped cloning. Prefer `JIT.clone`.
 
 ## compileDiff
 
-Compiles direct structural diff. Prefer `JIT.diff`.
+Compiles direct structural diff. Prefer `JIT.compare.diff`.
 
 ## compileHash
 
-Compiles direct structural hashing. Prefer `JIT.hash`.
+Compiles direct structural hashing. Prefer `JIT.compare.hash`.
 
 ## compileUpdate
 
@@ -71,15 +81,6 @@ is a lazy-query barrier.
 
 Compiles key-based uniqueness. The operation retains a Set/Map proportional to
 observed identities.
-
-## Operation lists
-
-The readonly arrays are useful for tooling, config validation and generated
-UI. Do not mutate them.
-
-### COMPILE_OPS
-
-`JIT.COMPILE_OPS` lists keys supported by `JIT.compile(schema, ops)`.
 
 ## When direct compilers are appropriate
 

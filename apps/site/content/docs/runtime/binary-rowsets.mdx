@@ -12,8 +12,7 @@ const rowset = binary.load(users);
 
 const count = JIT.query(rowset)
   .filter((q) => q.eq("role", "admin"))
-  .count()
-  .compile();
+  .count();
 ```
 
 `packed` minimizes bytes, `aligned` enables typed views and `columnar` stores each field

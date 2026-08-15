@@ -28,10 +28,11 @@ pnpm --filter @jit/examples run generate
 pnpm --filter @jit/examples run compiled
 ```
 
-[`compiled/catalog.jit.ts`](compiled/catalog.jit.ts) is the declaration file.
-The CLI discovers only its explicit exports and writes
-[`compiled/generated/index.ts`](compiled/generated/index.ts), a manifest,
-subpath module, and operation plan.
+[`compiled/catalog.jit.ts`](compiled/catalog.jit.ts) is the declaration file:
+its private schemas name the generated types, `Users` is an object of
+artifacts, and the queries are standalone artifacts. The CLI reads it and
+writes one self-contained
+[`compiled/generated/index.ts`](compiled/generated/index.ts).
 
 The generated application imports validation, equal, clone, diff, hash,
 masking, sanitization, JSON, binary codec, eager query, lazy iterator, visitor,

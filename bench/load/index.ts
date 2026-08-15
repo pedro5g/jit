@@ -109,9 +109,9 @@ interface AotUsersModule {
 
 async function loadAotUsers(): Promise<AotUsersModule> {
   const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
-  const selected = { is: JIT.is(UsersSchema), safeParse: JIT.safeParse(UsersSchema) };
+  const selected = { is: JIT.validate.is(UsersSchema), safeParse: JIT.validate.safeParse(UsersSchema) };
 
-  AOT.generate({ schemas: {}, functions: { Users_is: selected.is, Users_safeParse: selected.safeParse }, outDir });
+  AOT.generate({ artifacts: { Users_is: selected.is, Users_safeParse: selected.safeParse }, outDir });
   return (await import(pathToFileURL(join(outDir, "index.js")).href)) as AotUsersModule;
 }
 
@@ -125,7 +125,7 @@ const typeboxCompiledErrors = (value: unknown): unknown => {
 };
 
 export async function registerLoadScenarios(): Promise<void> {
-  const validate = { is: JIT.is(UsersSchema), safeParse: JIT.safeParse(UsersSchema) };
+  const validate = { is: JIT.validate.is(UsersSchema), safeParse: JIT.validate.safeParse(UsersSchema) };
   const aot = await loadAotUsers();
 
   registerScenario({

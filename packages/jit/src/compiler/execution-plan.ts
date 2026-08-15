@@ -146,7 +146,7 @@ export interface ArraySinkStage extends StageDescriptor {
 /** A leaf capability which still shares the same descriptor container. */
 export interface OperationStage extends StageDescriptor {
   readonly kind: "operation";
-  readonly operation: "equal" | "clone" | "diff" | "hash" | "format" | "mask" | "sanitize";
+  readonly operation: "equal" | "clone" | "diff" | "hash" | "format" | "mask" | "sanitize" | "codec";
   readonly schema: ATS.AnyTypeSchema;
 }
 

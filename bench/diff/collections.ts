@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { microdiff } from "../shared/competitors.js";
 import { createNumberMap, createNumberSet, NumberMapSchema, NumberSetSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
@@ -18,7 +18,7 @@ export function registerCollectionDiffs(): void {
       op: "diff",
       name: "set 10000",
       args: [left, right],
-      jit: JIT.compileDiff(NumberSetSchema.schema),
+      jit: Compiler.compileDiff(NumberSetSchema.schema),
       competitors: [{ name: "microdiff semantic", fn: () => microdiff(leftArray, rightArray), biased: SEMANTIC_BIAS }],
     });
   }
@@ -33,7 +33,7 @@ export function registerCollectionDiffs(): void {
       op: "diff",
       name: "map 10000",
       args: [left, right],
-      jit: JIT.compileDiff(NumberMapSchema.schema),
+      jit: Compiler.compileDiff(NumberMapSchema.schema),
       competitors: [
         { name: "microdiff semantic", fn: () => microdiff(leftRecord, rightRecord), biased: SEMANTIC_BIAS },
       ],

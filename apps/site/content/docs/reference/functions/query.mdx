@@ -10,8 +10,7 @@ const Users = JIT.array(User);
 
 const findAdmins = JIT.query(Users)
   .filter((q) => q.eq("role", "admin"))
-  .select("id", "name")
-  .compile();
+  .select("id", "name");
 
 findAdmins(users);
 ```
@@ -25,8 +24,7 @@ loops.
 ```ts
 const byRole = JIT.query(Users)
   .params({ role: JIT.string() })
-  .filter((q, params) => q.eq("role", params.role))
-  .compile();
+  .filter((q, params) => q.eq("role", params.role));
 
 byRole(users, { role: "member" });
 ```
@@ -57,26 +55,25 @@ Mutation outputs are explicit:
 ```ts
 const deactivateAdmins = JIT.query(Users)
   .filter((q) => q.eq("role", "admin"))
-  .update({ active: false })
-  .compile();
+  .update({ active: false });
 ```
 
 Aggregates include `count`, `sum`, `avg`, `min` and `max`.
 
 ## Output backends
 
-| Compiler                  | Result               | Best use                                    |
-| ------------------------- | -------------------- | ------------------------------------------- |
-| `.compile()`              | eager result         | normal arrays and aggregates                |
-| `.compileIterator()`      | generator            | early stop and pull consumption             |
-| `.compileAsyncIterator()` | async generator      | async pipelines                             |
-| `.compileVisitor()`       | direct callback sink | highest throughput without iterator objects |
-| `.lazy().compile()`       | iterator             | explicit lazy API                           |
+| Backend                | Result               | Best use                                    |
+| ---------------------- | -------------------- | ------------------------------------------- |
+| the builder itself     | eager result         | normal arrays and aggregates                |
+| `.to.iterator()`       | generator            | early stop and pull consumption             |
+| `.to.asyncIterator()`  | async generator      | async pipelines                             |
+| `.to.visitor()`        | direct callback sink | highest throughput without iterator objects |
+| `.lazy()`              | generator            | generator-first chain                       |
 
 ```ts
 const visit = JIT.query(Users)
   .filter((q) => q.eq("active", true))
-  .compileVisitor();
+  .to.visitor();
 
 visit(users, (user) => consume(user));
 ```

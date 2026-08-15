@@ -191,7 +191,7 @@ objects, or compiler import. AOT can export it flat or aggregate it:
 
 ```ts
 export const formatCPF = JIT.format(CPF).compile();
-export const CPFText = JIT.compile(CPF, { format: formatCPF });
+export const CPFText = { format: formatCPF };
 ```
 
 Use transform mode at input/display boundaries and strict mode when a wire or

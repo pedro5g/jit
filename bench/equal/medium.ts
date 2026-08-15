@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler, JIT } from "@jit-compiler/jit";
 import { zx } from "@traversable/zod";
 import { z } from "zod";
 import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
@@ -13,7 +13,7 @@ const User = JIT.object({
   }),
 });
 
-const equal = JIT.compileEqual(User.schema);
+const equal = Compiler.compileEqual(User.schema);
 const TraversableUser = z.object({
   id: z.number(),
   name: z.string(),

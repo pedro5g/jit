@@ -10,7 +10,10 @@ import { getArtifact } from "../../runtime/artifact-registry.js";
 function sourceOf(compiled: object): string {
   const artifact = getArtifact(compiled);
 
-  if (!artifact || !("source" in artifact)) throw new Error("compiled source artifact not registered");
+  if (!artifact) throw new Error("compiled source artifact not registered");
+  // A query builder carries its program; everything else carries its source.
+  if (artifact.kind === "query-plan") return Compiler.emitQuerySource(artifact.schema, artifact.program as never);
+  if (!("source" in artifact)) throw new Error("compiled source artifact not registered");
   return artifact.source;
 }
 
@@ -30,8 +33,7 @@ describe("generated source snapshots", () => {
       .filter((q) => q.and(q.not(q.eq("role", "blocked")), q.or(q.gt("id", 100), q.eq("role", "admin"))))
       .select("id", "name", "role")
       .unique("id")
-      .orderBy("name", "asc")
-      .compile();
+      .orderBy("name", "asc");
 
     expect(sourceOf(compiled)).toMatchSnapshot();
   });
@@ -39,8 +41,7 @@ describe("generated source snapshots", () => {
   it("query: groupBy after filter", () => {
     const compiled = JIT.query(Users)
       .filter((q) => q.gte("id", 10))
-      .groupBy("role")
-      .compile();
+      .groupBy("role");
 
     expect(sourceOf(compiled)).toMatchSnapshot();
   });
@@ -48,8 +49,7 @@ describe("generated source snapshots", () => {
   it("query: filtered aggregation", () => {
     const compiled = JIT.query(Users)
       .filter((q) => q.eq("role", "user"))
-      .avg("id")
-      .compile();
+      .avg("id");
 
     expect(sourceOf(compiled)).toMatchSnapshot();
   });
@@ -199,16 +199,13 @@ describe("generated source snapshots", () => {
     const ColumnarUsers = JIT.array(User).binary({ strategy: "exact", memoryLayout: "columnar" });
     const query = JIT.query(Users)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
-      .select("id", "score")
-      .compile();
+      .select("id", "score");
     const sum = JIT.query(Users)
       .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
-      .sum("score")
-      .compile();
+      .sum("score");
     const columnarQuery = JIT.query(ColumnarUsers)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
-      .select("id", "score")
-      .compile();
+      .select("id", "score");
     const adaptiveProcess = JIT.process(User)
       .binary({ strategy: "exact", memoryLayout: "columnar" })
       .filter((q) => q.eq("role", "admin"))
@@ -239,9 +236,7 @@ describe("generated source snapshots", () => {
       }),
     ]);
     const Shapes = JIT.array(Shape).binary({ strategy: "exact", memoryLayout: "columnar" });
-    const circles = JIT.query(Shapes)
-      .filter((q) => q.eq("kind", "circle"))
-      .compile();
+    const circles = JIT.query(Shapes).filter((q) => q.eq("kind", "circle"));
 
     expect({
       writer: Compiler.emitBinaryRowSetWriterSource(Shapes.layout),
@@ -255,7 +250,7 @@ describe("generated source snapshots", () => {
       .filter((q) => q.eq("role", "admin"))
       .select("id", "name")
       .take(10)
-      .compileIterator();
+      .to.iterator();
     const stringifyChunks = JIT.json.stringifyChunks(Users, { chunkBytes: 1024 });
 
     expect(stringifyChunks.plan.stages.map((stage) => stage.kind)).toEqual(["value", "json.encode"]);

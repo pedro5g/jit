@@ -82,7 +82,7 @@ describe("JIT AST builders", () => {
       expect(set_schema.def.element.type).toBe(AST.TypeName.string);
       expectTypeOf(set_schema._type).toEqualTypeOf<Set<string>>();
 
-      const map_schema = JIT.map(JIT.string(), JIT.number()).schema;
+      const map_schema = JIT.mapSchema(JIT.string(), JIT.number()).schema;
       expect(map_schema.type).toBe(AST.TypeName.map);
       expect(map_schema.def.key.type).toBe(AST.TypeName.string);
       expect(map_schema.def.value.type).toBe(AST.TypeName.number);
@@ -254,7 +254,7 @@ describe("JIT AST builders", () => {
         readonly [string, number]
       >();
       expectTypeOf(JIT.set(JIT.string()).readonly().schema._type).toEqualTypeOf<ReadonlySet<string>>();
-      expectTypeOf(JIT.map(JIT.string(), JIT.number()).readonly().schema._type).toEqualTypeOf<
+      expectTypeOf(JIT.mapSchema(JIT.string(), JIT.number()).readonly().schema._type).toEqualTypeOf<
         ReadonlyMap<string, number>
       >();
 

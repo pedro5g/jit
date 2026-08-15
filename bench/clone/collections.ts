@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { lodashCloneDeep, rfdcClone } from "../shared/competitors.js";
 import { createNumberMap, createNumberSet, NumberMapSchema, NumberSetSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
@@ -12,7 +12,7 @@ export function registerCollectionClones(): void {
     op: "clone",
     name: "set 10000",
     args: [createNumberSet(10_000)],
-    jit: JIT.compileClone(NumberSetSchema.schema),
+    jit: Compiler.compileClone(NumberSetSchema.schema),
     competitors: [
       { name: "rfdc", fn: rfdcClone, biased: RFDC_SET_MAP_BIAS },
       { name: "lodash.cloneDeep", fn: lodashCloneDeep },
@@ -24,7 +24,7 @@ export function registerCollectionClones(): void {
     op: "clone",
     name: "map 10000",
     args: [createNumberMap(10_000)],
-    jit: JIT.compileClone(NumberMapSchema.schema),
+    jit: Compiler.compileClone(NumberMapSchema.schema),
     competitors: [
       { name: "rfdc", fn: rfdcClone, biased: RFDC_SET_MAP_BIAS },
       { name: "lodash.cloneDeep", fn: lodashCloneDeep },

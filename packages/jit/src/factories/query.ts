@@ -2,6 +2,7 @@ import {
   type BinaryArray,
   type BinaryRowSet,
   compileBinaryQuery,
+  emitBinaryQuerySource,
   isBinaryArray,
   isBinaryRowSet,
 } from "../compiler/binary-rowset.js";
@@ -15,7 +16,7 @@ import {
   type QueryIteratorCompiled,
   type QueryVisitorCompiled,
 } from "../compiler/lazy-query.js";
-import { compileQuery, type QueryProgram } from "../compiler/query.js";
+import { compileQuery, expectCollectionObjectSchema, type QueryProgram } from "../compiler/query.js";
 import type {
   QueryCompareNode,
   QueryCompareOperator,
@@ -28,6 +29,7 @@ import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 
 const QUERY_PROGRAMS = new WeakMap<object, QueryProgram>();
 
@@ -59,20 +61,20 @@ type QueryComparable<TValue> = TValue | QueryConstRef<TValue> | QueryParamRef;
 export type QueryRuntimeParams<TParams extends Readonly<Record<string, unknown>>> = {
   readonly [TKey in keyof TParams]: QueryParamRef<TParams[TKey]>;
 };
+/**
+ * Running a query is a plain call. `params` stays optional in the signature
+ * because the builder is generic over its own parameter shape while it is
+ * still being assembled; a declared shape is still checked structurally.
+ */
 type QueryCompiledFunction<
   TSchema extends ATS.AnyTypeSchema,
   TResult,
   TParams extends Readonly<Record<string, unknown>>,
-> = keyof TParams extends never
-  ? (value: ATS.TypeofSchema<TSchema>) => TResult
-  : (value: ATS.TypeofSchema<TSchema>, params: TParams) => TResult;
-type BinaryQueryCompiledFunction<
-  TElement,
-  TResult,
-  TParams extends Readonly<Record<string, unknown>>,
-> = keyof TParams extends never
-  ? (value: BinaryRowSet<TElement>) => TResult
-  : (value: BinaryRowSet<TElement>, params: TParams) => TResult;
+> = (value: ATS.TypeofSchema<TSchema>, params?: TParams) => TResult;
+type BinaryQueryCompiledFunction<TElement, TResult, TParams extends Readonly<Record<string, unknown>>> = (
+  value: BinaryRowSet<TElement>,
+  params?: TParams
+) => TResult;
 type QuerySelectResult<TResult, TSelected> =
   TResult extends Map<infer TKey, unknown>
     ? Map<TKey, TSelected>
@@ -105,8 +107,10 @@ export interface QueryConditionBuilder<TElement> {
   constant<const TValue extends string | number | bigint | boolean | null | undefined>(
     value: TValue
   ): QueryConstRef<TValue>;
-  and(left: QueryConditionNode, right: QueryConditionNode): QueryConditionNode;
-  or(left: QueryConditionNode, right: QueryConditionNode): QueryConditionNode;
+  /** Folds two or more conditions into one nested `and` chain. */
+  and(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
+  /** Folds two or more conditions into one nested `or` chain. */
+  or(left: QueryConditionNode, right: QueryConditionNode, ...rest: readonly QueryConditionNode[]): QueryConditionNode;
   not(inner: QueryConditionNode): QueryConditionNode;
 }
 
@@ -117,7 +121,15 @@ export interface QueryConditionBuilder<TElement> {
  * @template TOutput - The current element/result item type.
  * @template TResult - The final query result type.
  */
-export interface QueryBuilder<
+export type QueryBuilder<
+  TSchema extends ATS.AnyTypeSchema,
+  TOutput,
+  TResult = TOutput[],
+  TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+> = QueryCompiledFunction<TSchema, TResult, TParams> & QueryBuilderOps<TSchema, TOutput, TResult, TParams>;
+
+/** Chain operators carried by every query builder; the builder itself runs the query. */
+export interface QueryBuilderOps<
   TSchema extends ATS.AnyTypeSchema,
   TOutput,
   TResult = TOutput[],
@@ -202,32 +214,48 @@ export interface QueryBuilder<
   max<TKey extends NumericQueryKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number | undefined, TParams>;
-  compile(): QueryCompiledFunction<TSchema, TResult, TParams>;
-  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
-  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
-  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  /** Alternative result shapes for the same query program. */
+  readonly to: QuerySinks<TSchema, TOutput, TParams>;
   lazy(): LazyQueryBuilder<TSchema, TOutput, TParams>;
   explain(outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
 }
 
-export interface LazyQueryBuilder<
+export interface QuerySinks<
+  TSchema extends ATS.AnyTypeSchema,
+  TOutput,
+  TParams extends Readonly<Record<string, unknown>>,
+> {
+  /** Streams results, materializing nothing. */
+  iterator(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  asyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+  /** Pushes each result into a callback; no array and no generator frames. */
+  visitor(): QueryVisitorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+}
+
+/** A lazy query is the generator itself; sinks reshape the same program. */
+export type LazyQueryBuilder<
   TSchema extends ATS.AnyTypeSchema,
   TOutput,
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
-> {
-  compile(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
-  compileIterator(): QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
-  compileAsyncIterator(): QueryAsyncIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
-  compileVisitor(): QueryVisitorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams>;
+> = QueryIteratorCompiled<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TOutput, TParams> & {
+  readonly to: Omit<QuerySinks<TSchema, TOutput, TParams>, "iterator">;
   explain(outputMode?: "generator" | "async-generator" | "visitor"): QueryExecutionPlan;
-}
+};
 
 /**
  * Query builder backed by a binary rowset layout. It accepts the same filter
  * AST as regular `JIT.query`, but compiles supported filters/projections into
  * byte-offset scans over `ArrayBuffer` rows.
  */
-export interface BinaryQueryBuilder<
+export type BinaryQueryBuilder<
+  TElement,
+  TOutput,
+  TResult = TOutput[],
+  TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+> = BinaryQueryCompiledFunction<TElement, TResult, TParams> &
+  BinaryQueryBuilderOps<TElement, TOutput, TResult, TParams>;
+
+export interface BinaryQueryBuilderOps<
   TElement,
   TOutput,
   TResult = TOutput[],
@@ -258,7 +286,6 @@ export interface BinaryQueryBuilder<
   max<TKey extends Extract<keyof TElement, string>>(
     key: TKey
   ): BinaryQueryBuilder<TElement, TOutput, number | undefined, TParams>;
-  compile(): BinaryQueryCompiledFunction<TElement, TResult, TParams>;
 }
 
 export interface QueryParamRef<TValue = unknown> {
@@ -306,7 +333,12 @@ export function query(schema: unknown): unknown {
     return createBinaryQueryBuilder(schema, [], [], []);
   }
 
-  return createQueryBuilder(unwrapSchema(schema as SchemaInput<ATS.AnyTypeSchema>), [], [], []);
+  const unwrapped = unwrapSchema(schema as SchemaInput<ATS.AnyTypeSchema>);
+
+  // Querying something that is not a collection of objects is a declaration
+  // mistake, not a runtime one: reject it before any operator is chained.
+  expectCollectionObjectSchema(unwrapped, "query");
+  return createQueryBuilder(unwrapped, [], [], []);
 }
 
 /** Internal bridge used by composable execution artifacts to retain query IR. */
@@ -325,7 +357,17 @@ function createBinaryQueryBuilder<
   bindings: readonly unknown[],
   paramNames: readonly string[]
 ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams> {
-  return {
+  let compiled: BinaryQueryCompiledFunction<TElement, TResult, TParams> | undefined;
+  const callable = function binaryQuery(value: BinaryRowSet<TElement>, params?: TParams): TResult {
+    compiled ??= compileBinaryQuery<TElement, TResult, TParams>(target, {
+      nodes,
+      bindings,
+      params: paramNames,
+    }) as BinaryQueryCompiledFunction<TElement, TResult, TParams>;
+    return (compiled as (value: BinaryRowSet<TElement>, params?: TParams) => TResult)(value, params);
+  } as BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
+
+  const builder: BinaryQueryBuilder<TElement, TOutput, TResult, TParams> = Object.assign(callable, {
     params(shape) {
       return createBinaryQueryBuilder<TElement, TOutput, TResult, TypeofParamShape<typeof shape>>(
         target,
@@ -370,15 +412,21 @@ function createBinaryQueryBuilder<
     max(key) {
       return createBinaryQueryBuilder(target, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
     },
+  } satisfies BinaryQueryBuilderOps<TElement, TOutput, TResult, TParams>);
 
-    compile() {
-      return compileBinaryQuery<TElement, TResult, TParams>(target, {
-        nodes,
-        bindings,
-        params: paramNames,
-      });
+  // Source is emitted only if AOT (or a golden test) asks for it; running the
+  // query goes through the cached compile above instead.
+  registerArtifact(builder, {
+    kind: "query",
+    get source(): string {
+      return emitBinaryQuerySource(target.layout, { nodes, bindings, params: paramNames });
     },
-  };
+    get bindingNames(): readonly string[] {
+      return bindings.map((_, index) => `__q${index}`);
+    },
+    bindingValues: bindings,
+  });
+  return builder;
 }
 
 function createQueryBuilder<
@@ -392,7 +440,38 @@ function createQueryBuilder<
   bindings: readonly unknown[],
   paramNames: readonly string[]
 ): QueryBuilder<TSchema, TOutput, TResult, TParams> {
-  const builder: QueryBuilder<TSchema, TOutput, TResult, TParams> = {
+  type QueryElement = CollectionElementOf<ATS.TypeofSchema<TSchema>>;
+  let compiled: ((value: ATS.TypeofSchema<TSchema>, params?: TParams) => TResult) | undefined;
+  // Incremental operators (take/chunk/scan/...) only have a streaming lowering,
+  // so an eager call drains that generator once instead of compiling twice.
+  const lowerEager = (): ((value: ATS.TypeofSchema<TSchema>, params?: TParams) => TResult) => {
+    if (!hasIncrementalNodes(nodes)) {
+      return compileQuery(schema, {
+        nodes: nodes as readonly QueryNode[],
+        bindings,
+        params: paramNames,
+      }) as (value: ATS.TypeofSchema<TSchema>, params?: TParams) => TResult;
+    }
+
+    const iterator = compileQueryIterator(schema, { nodes, bindings, params: paramNames });
+
+    return (value, params) =>
+      Array.from(
+        paramNames.length > 0
+          ? (iterator as (input: Iterable<unknown>, params: TParams) => Iterable<unknown>)(
+              value as Iterable<unknown>,
+              params as TParams
+            )
+          : (iterator as (input: Iterable<unknown>) => Iterable<unknown>)(value as Iterable<unknown>)
+      ) as TResult;
+  };
+
+  const callable = function query(value: ATS.TypeofSchema<TSchema>, params?: TParams): TResult {
+    compiled ??= lowerEager();
+    return compiled(value, params);
+  } as QueryBuilder<TSchema, TOutput, TResult, TParams>;
+
+  const builder: QueryBuilder<TSchema, TOutput, TResult, TParams> = Object.assign(callable, {
     params(shape) {
       return createQueryBuilder<TSchema, TOutput, TResult, TypeofParamShape<typeof shape>>(
         schema,
@@ -496,12 +575,14 @@ function createQueryBuilder<
     scan(options) {
       const initialBinding = `__q${bindings.length}`;
       const updateBinding = `__q${bindings.length + 1}`;
+      // The accumulator type is introduced by this method, so the builder it
+      // produces cannot be related to the enclosing one structurally.
       return createQueryBuilder(
         schema,
         [...nodes, { kind: "scan", initialBinding, updateBinding }],
         [...bindings, options.initial, options.update],
         paramNames
-      );
+      ) as never;
     },
 
     groupAdjacentBy(key) {
@@ -543,53 +624,14 @@ function createQueryBuilder<
       return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
     },
 
-    compile() {
-      if (!hasIncrementalNodes(nodes)) {
-        return compileQuery(schema, {
-          nodes: nodes as readonly QueryNode[],
-          bindings,
-          params: paramNames,
-        }) as QueryCompiledFunction<TSchema, TResult, TParams>;
-      }
-      const iterator = compileQueryIterator(schema, {
-        nodes,
-        bindings,
-        params: paramNames,
-      });
-      return ((value: ATS.TypeofSchema<TSchema>, params?: TParams) =>
-        Array.from(
-          paramNames.length > 0
-            ? (iterator as (input: Iterable<unknown>, params: TParams) => Iterable<unknown>)(
-                value as Iterable<unknown>,
-                params as TParams
-              )
-            : (iterator as (input: Iterable<unknown>) => Iterable<unknown>)(value as Iterable<unknown>)
-        )) as QueryCompiledFunction<TSchema, TResult, TParams>;
-    },
-
-    compileIterator() {
-      return compileQueryIterator(schema, {
-        nodes,
-        bindings,
-        params: paramNames,
-      });
-    },
-
-    compileAsyncIterator() {
-      return compileQueryAsyncIterator(schema, {
-        nodes,
-        bindings,
-        params: paramNames,
-      });
-    },
-
-    compileVisitor() {
-      return compileQueryVisitor(schema, {
-        nodes,
-        bindings,
-        params: paramNames,
-      });
-    },
+    to: Object.freeze({
+      iterator: () =>
+        compileQueryIterator<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }),
+      asyncIterator: () =>
+        compileQueryAsyncIterator<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }),
+      visitor: () =>
+        compileQueryVisitor<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }),
+    }),
 
     lazy() {
       return createLazyQueryBuilder(schema, nodes, bindings, paramNames);
@@ -598,13 +640,14 @@ function createQueryBuilder<
     explain(outputMode = "eager-array") {
       return explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
     },
-  };
+  } satisfies QueryBuilderOps<TSchema, TOutput, TResult, TParams>);
 
-  QUERY_PROGRAMS.set(builder, {
-    nodes: nodes as readonly QueryNode[],
-    bindings,
-    params: paramNames,
-  });
+  const program = { nodes: nodes as readonly QueryNode[], bindings, params: paramNames };
+
+  QUERY_PROGRAMS.set(builder, program);
+  // The builder is what a declaration file exports, so it carries the plan
+  // AOT needs; nothing is compiled unless the query is actually called.
+  registerArtifact(builder, { kind: "query-plan", schema, program, mode: "array" });
   return builder;
 }
 
@@ -618,14 +661,25 @@ function createLazyQueryBuilder<
   bindings: readonly unknown[],
   paramNames: readonly string[]
 ): LazyQueryBuilder<TSchema, TOutput, TParams> {
+  type QueryElement = CollectionElementOf<ATS.TypeofSchema<TSchema>>;
   const program = { nodes, bindings, params: paramNames };
-  return {
-    compile: () => compileQueryIterator(schema, program),
-    compileIterator: () => compileQueryIterator(schema, program),
-    compileAsyncIterator: () => compileQueryAsyncIterator(schema, program),
-    compileVisitor: () => compileQueryVisitor(schema, program),
-    explain: (outputMode = "generator") => explainQueryExecution(program, outputMode),
-  };
+  let compiled: QueryIteratorCompiled<QueryElement, TOutput, TParams> | undefined;
+  const callable = function lazyQuery(input: never, params?: never) {
+    compiled ??= compileQueryIterator<QueryElement, TOutput, TParams>(schema, program);
+    return (compiled as (input: never, params?: never) => unknown)(input, params);
+  } as LazyQueryBuilder<TSchema, TOutput, TParams>;
+
+  const builder = Object.assign(callable, {
+    to: Object.freeze({
+      asyncIterator: () => compileQueryAsyncIterator<QueryElement, TOutput, TParams>(schema, program),
+      visitor: () => compileQueryVisitor<QueryElement, TOutput, TParams>(schema, program),
+    }),
+    explain: (outputMode: "generator" | "async-generator" | "visitor" = "generator") =>
+      explainQueryExecution(program, outputMode),
+  });
+
+  registerArtifact(builder, { kind: "query-plan", schema, program, mode: "iterator" });
+  return builder;
 }
 
 function hasIncrementalNodes(nodes: readonly QueryPipelineNode[]): boolean {
@@ -706,11 +760,27 @@ function createConditionBuilder(startIndex: number): {
       gte: (key, value) => compare("gte", key, value),
       lt: (key, value) => compare("lt", key, value),
       lte: (key, value) => compare("lte", key, value),
-      and: (left, right) => ({ kind: "logical", op: "and", left, right }),
-      or: (left, right) => ({ kind: "logical", op: "or", left, right }),
+      and: (left, right, ...rest) => fold("and", left, right, rest),
+      or: (left, right, ...rest) => fold("or", left, right, rest),
       not: (inner) => ({ kind: "not", inner }),
     },
   };
+}
+
+/**
+ * Right-associative fold so `q.and(a, b, c)` is exactly `q.and(a, q.and(b, c))`.
+ * The IR stays binary, which keeps the optimizer's cost model and the
+ * byte-exact goldens unchanged for the two-argument case.
+ */
+function fold(
+  op: "and" | "or",
+  left: QueryConditionNode,
+  right: QueryConditionNode,
+  rest: readonly QueryConditionNode[]
+): QueryConditionNode {
+  const tail = rest.length === 0 ? right : fold(op, right, rest[0], rest.slice(1));
+
+  return { kind: "logical", op, left, right: tail };
 }
 
 function createParamRefs<TParams extends Readonly<Record<string, unknown>>>(

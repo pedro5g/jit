@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createConfigSource, main } from "../cli.js";
+
+const DEFINE_IMPORT = JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href);
 
 describe("jit CLI", () => {
   let projectDir: string;
@@ -30,113 +32,78 @@ describe("jit CLI", () => {
     };
   }
 
+  function writeDeclaration(file: string, body: readonly string[]): void {
+    mkdirSync(join(projectDir, "src"), { recursive: true });
+    writeFileSync(join(projectDir, "src", file), [`import { JIT } from ${DEFINE_IMPORT};`, "", ...body, ""].join("\n"));
+  }
+
+  function writeConfig(options: { readonly perFile?: boolean } = {}): void {
+    writeFileSync(
+      join(projectDir, "jit.config.mjs"),
+      `export default ${JSON.stringify(
+        { entries: ["src"], output: { directory: "generated", format: "ts", perFile: options.perFile === true } },
+        null,
+        2
+      )};\n`
+    );
+  }
+
   it("should initialize a typed AOT config in the project root", async () => {
     const { runtime, stdout, stderr } = createRuntime();
+
+    writeFileSync(join(projectDir, "tsconfig.json"), "{}\n");
+
     const code = await main(["init"], runtime);
-    const configPath = join(projectDir, "jit.config.ts");
-    const source = readFileSync(configPath, "utf8");
+    const source = readFileSync(join(projectDir, "jit.config.ts"), "utf8");
 
     expect(code).toBe(0);
     expect(stdout.join("")).toContain("created");
     expect(stderr.join("")).toBe("");
     expect(source).toContain('import { AOT } from "@jit-compiler/jit";');
     expect(source).toContain('entries: ["./jit/**/*.jit.ts"]');
-    expect(source).toContain('directory: "generated/jit"');
-    expect(source).not.toContain("importSpecifier");
-    expect(source).toContain('patterns: ["**/*.jit.ts"]');
-    expect(source).not.toContain("types:");
-    expect(source).toContain("subpathModules: true");
-    expect(source).toContain("manifest: true");
-    expect(source).toContain("plans: true");
+    expect(source).toContain('directory: "generated"');
+    expect(source).toContain('format: "ts"');
     expect(existsSync(join(projectDir, "jit", "user.jit.ts"))).toBe(true);
-    expect(source).not.toContain("operations:");
-    expect(source).not.toContain("exportMode:");
-    expect(source).toContain('format: "typescript"');
-    expect(source).not.toContain("emitPackageJson");
-    expect(source).not.toContain("performance:");
-    expect(source).not.toContain("diagnostics:");
   });
 
-  it("should configure ready-to-run JavaScript output", () => {
+  it("should initialize plain JavaScript output when the project has no tsconfig", async () => {
+    const { runtime } = createRuntime();
+    const code = await main(["init"], runtime);
+    const source = readFileSync(join(projectDir, "jit.config.js"), "utf8");
+
+    expect(code).toBe(0);
+    expect(source).toContain('format: "js"');
+    expect(source).toContain('entries: ["./jit/**/*.jit.js"]');
+    expect(source).not.toContain("import { AOT }");
+    expect(existsSync(join(projectDir, "jit", "user.jit.js"))).toBe(true);
+  });
+
+  it("should keep the config to declaration entries and one output target", () => {
     const source = createConfigSource({
       format: "ts",
       force: true,
-      entries: ["jit"],
+      entries: ["src"],
       outDir: "generated",
-      packageName: undefined,
-      patterns: ["**/*.jit.ts"],
-      outputFormat: "javascript",
+      perFile: false,
     });
 
-    expect(source).toContain('format: "javascript"');
-    expect(source).not.toContain(".d.ts");
+    for (const removed of ["packageName", "clean", "subpathModules", "manifest", "plans", "patterns"]) {
+      expect(source, `config must not carry ${removed}`).not.toContain(removed);
+    }
   });
 
-  it("should reject removed multi-artifact output formats", async () => {
-    const { runtime, stderr } = createRuntime();
-
-    expect(await main(["init", "--output-format", "javascript-only"], runtime)).toBe(1);
-    expect(stderr.join("")).toContain('expected "typescript" or "javascript"');
-  });
-
-  it("should reject the removed declaration inspection stage", async () => {
-    const { runtime, stderr } = createRuntime();
-
-    expect(await main(["inspect", "User", "--stage", "declaration"], runtime)).toBe(1);
-    expect(stderr.join("")).toContain('expected "plan" or "source"');
-  });
-
-  it("should refuse to overwrite an existing config unless forced", async () => {
-    const { runtime, stderr } = createRuntime();
-
-    writeFileSync(join(projectDir, "jit.config.ts"), "export default {};\n");
-
-    expect(await main(["init"], runtime)).toBe(1);
-    expect(stderr.join("")).toContain("--force");
-
-    expect(
-      await main(["init", "--force", "--format", "mjs", "--schemas", "models/**/*.ts", "--pattern", "**/*.ts"], runtime)
-    ).toBe(0);
-    expect(existsSync(join(projectDir, "jit.config.mjs"))).toBe(true);
-    expect(readFileSync(join(projectDir, "jit.config.mjs"), "utf8")).toContain('entries: ["models/**/*.ts"]');
-    expect(readFileSync(join(projectDir, "jit.config.mjs"), "utf8")).toContain('patterns: ["**/*.ts"]');
-  });
-
-  it("should generate standalone AOT functions from explicit exports", async () => {
+  it("should generate one index module from declared artifacts", async () => {
     const { runtime, stdout, stderr } = createRuntime();
 
-    mkdirSync(join(projectDir, "src"), { recursive: true });
-    mkdirSync(join(projectDir, "node_modules", "@jit-compiler"), { recursive: true });
-    symlinkSync(
-      join(process.cwd(), "packages", "jit"),
-      join(projectDir, "node_modules", "@jit-compiler", "jit"),
-      "dir"
-    );
-    writeFileSync(
-      join(projectDir, "src", "user.jit.ts"),
-      [
-        `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
-        "",
-        "export const User = JIT.object({",
-        "  id: JIT.number(),",
-        "  name: JIT.string(),",
-        "});",
-        "export const User_is = JIT.is(User);",
-        "",
-      ].join("\n")
-    );
-    writeFileSync(
-      join(projectDir, "jit.config.mjs"),
-      createConfigSource({
-        format: "mjs",
-        force: true,
-        entries: ["src"],
-        outDir: "generated",
-        packageName: "@acme/generated",
-        patterns: ["**/*.jit.ts"],
-        outputFormat: "typescript",
-      })
-    );
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({",
+      "  id: JIT.number(),",
+      "  name: JIT.string(),",
+      "});",
+      "",
+      "export const isUser = JIT.validate.is(User);",
+    ]);
+    writeConfig();
 
     const code = await main(["generate"], runtime);
     const source = readFileSync(join(projectDir, "generated", "index.ts"), "utf8");
@@ -144,110 +111,172 @@ describe("jit CLI", () => {
     expect(code).toBe(0);
     expect(stderr.join("")).toBe("");
     expect(stdout.join("")).toContain("using");
-    expect(source).toContain("const User_is");
-    expect(source).not.toContain("const User_parse");
-    expect(source).not.toContain("const User = /*#__PURE__*/ Object.freeze({");
+    // The schema is private in the declaration, but it still names the type.
     expect(source).toContain("export type User = { id: number; name: string };");
-    expect(source).toContain("const User_is: (value: unknown) => value is User =");
-    expect(source).not.toContain('import("@jit-compiler/jit")');
+    expect(source).toContain("const isUser: (value: unknown) => value is User =");
+    expect(source).toContain("export { isUser };");
+    expect(source).not.toContain("import");
     expect(existsSync(join(projectDir, "generated", "index.d.ts"))).toBe(false);
-    expect(existsSync(join(projectDir, "generated", "user.ts"))).toBe(true);
-    const subpath = readFileSync(join(projectDir, "generated", "user.ts"), "utf8");
-    expect(subpath).toContain("const User_is:");
-    expect(subpath).toContain("export { User_is };");
-    expect(subpath).not.toContain('from "./index.js"');
-    expect(existsSync(join(projectDir, "generated", "manifest.json"))).toBe(true);
-    expect(existsSync(join(projectDir, "generated", "plans", "user.json"))).toBe(true);
+    expect(existsSync(join(projectDir, "generated", "manifest.json"))).toBe(false);
+    expect(existsSync(join(projectDir, "generated", "plans"))).toBe(false);
   });
 
-  it("should diagnose and explain AOT declaration discovery", async () => {
-    const { runtime, stdout, stderr } = createRuntime();
+  it("should generate an object of artifacts as one frozen object", async () => {
+    const { runtime } = createRuntime();
 
-    mkdirSync(join(projectDir, "src"), { recursive: true });
-    mkdirSync(join(projectDir, "node_modules", "@jit-compiler"), { recursive: true });
-    symlinkSync(
-      join(process.cwd(), "packages", "jit"),
-      join(projectDir, "node_modules", "@jit-compiler", "jit"),
-      "dir"
-    );
-    writeFileSync(
-      join(projectDir, "src", "user.jit.ts"),
-      [
-        `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
-        "",
-        "export const User = JIT.object({",
-        "  id: JIT.number(),",
-        "  name: JIT.string(),",
-        "});",
-        "export const User_is = JIT.validate.is(User);",
-        "export const UserModel = JIT.compile(User, {",
-        "  is: User_is,",
-        "  diff: JIT.diff(User).compile(),",
-        "});",
-        "",
-      ].join("\n")
-    );
-    writeFileSync(
-      join(projectDir, "jit.config.mjs"),
-      createConfigSource({
-        format: "mjs",
-        force: true,
-        entries: ["src"],
-        outDir: "generated",
-        packageName: "@acme/generated",
-        patterns: ["**/*.jit.ts"],
-      })
-    );
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({ id: JIT.number(), name: JIT.string() });",
+      "",
+      "export const UserMethods = {",
+      "  is: JIT.validate.is(User),",
+      "  toJson: JIT.json.stringify(User),",
+      "  equal: JIT.compare.equal(User),",
+      "};",
+    ]);
+    writeConfig();
+
+    const code = await main(["generate"], runtime);
+    const source = readFileSync(join(projectDir, "generated", "index.ts"), "utf8");
+
+    expect(code).toBe(0);
+    expect(source).toContain("readonly is: (value: unknown) => value is User;");
+    expect(source).toContain("readonly toJson: (value: User) => string;");
+    expect(source).toContain("readonly equal: (left: User, right: User) => boolean;");
+    expect(source).toContain("Object.freeze({");
+    expect(source).toContain("export { UserMethods };");
+  });
+
+  it("should emit one module per declaration file plus a barrel when asked", async () => {
+    const { runtime } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(User);",
+    ]);
+    writeDeclaration("post.jit.ts", [
+      "const Post = JIT.object({ slug: JIT.string() });",
+      "export const isPost = JIT.validate.is(Post);",
+    ]);
+    writeConfig({ perFile: true });
+
+    const code = await main(["generate"], runtime);
+    const barrel = readFileSync(join(projectDir, "generated", "index.ts"), "utf8");
+
+    expect(code).toBe(0);
+    expect(existsSync(join(projectDir, "generated", "user.ts"))).toBe(true);
+    expect(existsSync(join(projectDir, "generated", "post.ts"))).toBe(true);
+    expect(barrel).toContain('export { isUser } from "./user.js";');
+    expect(barrel).toContain('export type { User } from "./user.js";');
+    expect(barrel).toContain('export { isPost } from "./post.js";');
+  });
+
+  it("should remove output left by a previous generation", async () => {
+    const { runtime } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(User);",
+    ]);
+    writeConfig({ perFile: true });
+    await main(["generate"], runtime);
+
+    writeConfig({ perFile: false });
+    const code = await main(["generate"], runtime);
+
+    expect(code).toBe(0);
+    expect(existsSync(join(projectDir, "generated", "index.ts"))).toBe(true);
+    expect(existsSync(join(projectDir, "generated", "user.ts"))).toBe(false);
+  });
+
+  it("should never delete files it did not generate", async () => {
+    const { runtime } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(User);",
+    ]);
+    writeConfig();
+    mkdirSync(join(projectDir, "generated"), { recursive: true });
+    writeFileSync(join(projectDir, "generated", "handwritten.ts"), "export const keep = 1;\n");
+
+    await main(["generate"], runtime);
+
+    expect(existsSync(join(projectDir, "generated", "handwritten.ts"))).toBe(true);
+  });
+
+  it("should report discovery and declarations without generating", async () => {
+    const { runtime, stdout } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(User);",
+      "export const UserMethods = { toJson: JIT.json.stringify(User) };",
+    ]);
+    writeConfig();
 
     expect(await main(["doctor"], runtime)).toBe(0);
-    expect(stdout.join("")).toContain("jit doctor");
-    expect(stdout.join("")).toContain("files: 1");
-
-    stdout.length = 0;
-    stderr.length = 0;
-
-    expect(await main(["explain"], runtime)).toBe(0);
-    expect(stderr.join("")).toBe("");
-    expect(stdout.join("")).toContain("jit explain");
-    expect(stdout.join("")).toContain("grouped objects: 1");
-    expect(stdout.join("")).toContain("UserModel: is, diff");
-    expect(stdout.join("")).toContain("standalone functions: 1");
-    expect(stdout.join("")).toContain("User_is: execution");
-
-    stdout.length = 0;
-    stderr.length = 0;
-
     expect(await main(["list"], runtime)).toBe(0);
-    expect(stderr.join("")).toBe("");
-    expect(stdout.join("")).toContain("jit list");
-    expect(stdout.join("")).toContain("UserModel: is, diff");
 
-    stdout.length = 0;
-    stderr.length = 0;
+    const output = stdout.join("");
 
-    expect(await main(["inspect", "User_is", "--stage", "plan"], runtime)).toBe(0);
-    expect(stderr.join("")).toBe("");
-    expect(stdout.join("")).toContain("jit inspect User_is");
-    expect(stdout.join("")).toContain('"operations": [');
-    expect(stdout.join("")).toContain('"is"');
-
-    stdout.length = 0;
-    stderr.length = 0;
-
-    expect(await main(["generate"], runtime)).toBe(0);
-    expect(existsSync(join(projectDir, "generated", "index.ts"))).toBe(true);
-    expect(await main(["clean"], runtime)).toBe(0);
-    expect(stdout.join("")).toContain("removed");
+    expect(output).toContain("format: ts");
+    expect(output).toContain("layout: single index module");
+    expect(output).toContain("type User");
+    expect(output).toContain("isUser:");
+    expect(output).toContain("UserMethods:");
     expect(existsSync(join(projectDir, "generated"))).toBe(false);
   });
 
-  it("should warn when declaration files contain no buildable exports", async () => {
+  it("should print the generated source for one declaration", async () => {
+    const { runtime, stdout } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(User);",
+    ]);
+    writeConfig();
+
+    const code = await main(["inspect", "isUser", "--stage", "source"], runtime);
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("const isUser:");
+  });
+
+  it("should fail when a declaration file holds no artifacts", async () => {
     const { runtime, stderr } = createRuntime();
 
-    mkdirSync(join(projectDir, "src"), { recursive: true });
-    writeFileSync(join(projectDir, "src", "user.jit.ts"), "export const User = { type: 'object', def: {} };\n");
+    writeDeclaration("user.jit.ts", ["export const User = JIT.object({ id: JIT.number() });"]);
+    writeConfig();
 
-    expect(await main(["generate", "src/user.jit.ts"], runtime)).toBe(1);
-    expect(stderr.join("")).toContain("No AOT functions found");
+    const code = await main(["generate"], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("")).toContain("No AOT artifacts found");
+  });
+
+  it("should reject unknown output formats", async () => {
+    const { runtime, stderr } = createRuntime();
+
+    writeDeclaration("user.jit.ts", ["export const isUser = JIT.validate.is(JIT.object({ id: JIT.number() }));"]);
+    writeConfig();
+
+    const code = await main(["generate", "--format", "mjs"], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("")).toContain('expected "ts" or "js"');
+  });
+
+  it("should remove the generated directory on clean", async () => {
+    const { runtime } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const User = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(User);",
+    ]);
+    writeConfig();
+    await main(["generate"], runtime);
+
+    expect(await main(["clean"], runtime)).toBe(0);
+    expect(existsSync(join(projectDir, "generated"))).toBe(false);
   });
 });

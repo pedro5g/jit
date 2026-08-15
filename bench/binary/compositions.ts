@@ -16,12 +16,10 @@ const binary = Shapes.binary({ strategy: "exact", memoryLayout: "columnar" });
 const rowset = binary.load(values);
 const countCircles = JIT.query(rowset)
   .filter((q) => q.eq("kind", "circle"))
-  .count()
-  .compile();
+  .count();
 const sumCircles = JIT.query(rowset)
   .filter((q) => q.eq("kind", "circle"))
-  .sum("area")
-  .compile();
+  .sum("area");
 
 registerScenario({
   op: "binary tagged union count",

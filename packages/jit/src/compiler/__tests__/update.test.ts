@@ -231,7 +231,7 @@ describe("JIT compiler update", () => {
     expect(setUpdate(setInput, new Set([1, 2]))).toBe(setInput);
     expect(setUpdate(setInput, setPatch)).toBe(setPatch);
 
-    const mapUpdate = Compiler.compileUpdate(JIT.map(JIT.string(), JIT.number()).schema);
+    const mapUpdate = Compiler.compileUpdate(JIT.mapSchema(JIT.string(), JIT.number()).schema);
     const mapInput = new Map([["a", 1]]);
     const mapPatch = new Map([["a", 2]]);
 
@@ -268,7 +268,7 @@ describe("JIT compiler update", () => {
   });
 
   it("should expose JIT.compileUpdate as a public convenience API", () => {
-    const update = JIT.compileUpdate(JIT.object({ id: JIT.number() }).schema);
+    const update = Compiler.compileUpdate(JIT.object({ id: JIT.number() }).schema);
     const input = { id: 1 };
 
     expect(update(input, {})).toBe(input);
@@ -440,7 +440,7 @@ describe("JIT compiler update", () => {
 
   it("should keep generated map and set update source free from array conversions", () => {
     const setSource = Compiler.emitUpdateSource(JIT.set(JIT.number()).schema);
-    const mapSource = Compiler.emitUpdateSource(JIT.map(JIT.string(), JIT.number()).schema);
+    const mapSource = Compiler.emitUpdateSource(JIT.mapSchema(JIT.string(), JIT.number()).schema);
 
     for (const source of [setSource, mapSource]) {
       expect(source).not.toContain("Array.from");

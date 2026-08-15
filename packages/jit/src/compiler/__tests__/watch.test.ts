@@ -106,7 +106,7 @@ describe("JIT compiler watch", () => {
   });
 
   it("should support Map watched lists over values", () => {
-    const UserMap = JIT.map(JIT.number(), User);
+    const UserMap = JIT.mapSchema(JIT.number(), User);
     const watch = JIT.watch(UserMap, { key: "id" });
     const result = watch(
       new Map([

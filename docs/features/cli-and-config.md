@@ -2,16 +2,15 @@
 
 The CLI is the bridge between declaration files and generated AOT output. It is
 designed for a Prisma-like workflow: initialize config, inspect what will be
-built, generate the package, then import from the generated module.
+built, generate the module, then import it.
 
 ## Commands
 
 ```sh
 pnpm jit init
 pnpm jit doctor
-pnpm jit explain
 pnpm jit list
-pnpm jit inspect User --stage plan
+pnpm jit inspect isUser --stage source
 pnpm jit generate
 pnpm jit clean
 ```
@@ -30,92 +29,80 @@ build output that zshy writes beside package source files.
 
 ## Config Shape
 
-Prefer the plan-shaped config:
+`jit init` detects the project: a `tsconfig.json` gets `jit.config.ts` with
+TypeScript output, anything else gets `jit.config.js` with ready-to-run ESM.
 
 ```ts
 import { AOT } from "@jit-compiler/jit";
 
 export default AOT.defineConfig({
-  entries: ["src/schemas/**/*.jit.ts"],
-  patterns: ["**/*.jit.ts"],
+  entries: ["./jit/**/*.jit.ts"],
   output: {
-    directory: "src/generated/jit",
-    format: "typescript",
-    clean: true,
-  },
-  emit: {
-    subpathModules: true,
-    manifest: true,
-    plans: true,
+    directory: "generated",
+    format: "ts",
   },
 });
 ```
+
+That is the whole surface:
+
+| Setting            | Purpose                                                | Default                      |
+| ------------------ | ------------------------------------------------------ | ---------------------------- |
+| `entries`          | declaration files, directories, or globs               | root discovery               |
+| `patterns`         | patterns used for directory/root discovery             | `**/*.jit.ts`, `**/*.jit.js` |
+| `output.directory` | destination relative to the config file                | `generated`                  |
+| `output.format`    | `ts` (typed source) or `js` (ready-to-run ESM)         | `ts`                         |
+| `output.perFile`   | one module per declaration file plus an `index` barrel | `false`                      |
 
 If `entries` is omitted, discovery scans from the project root using
-`patterns`. The default pattern is `**/*.jit.ts`.
+`patterns`. Generated output is always replaced: JIT deletes the files it owns
+— identified by the generated banner, never by name — and leaves everything
+else in the directory untouched.
 
-## Output Directory Choices
+## Output Layout
 
-Use `node_modules/@jit/generated` when you want package-style imports:
+By default everything lands in one self-contained module:
 
-```ts
-import { User } from "@jit/generated";
+```
+generated/
+  index.ts
 ```
 
-The generator recognizes `node_modules` in the output path, infers the package
-namespace, keeps the selected `index.ts` or `index.js`, and adds `package.json`
-with an exports map. `output.packageName` is only needed to override the
-inferred namespace. The path never silently creates CJS, `.mjs`, or declaration
-variants.
+`output.perFile` names each module after the declaration file it came from and
+adds a barrel, keeping unrelated schemas in separate modules for bundlers that
+split by import:
 
-Use a project-local directory when you want checked-in generated source or
-normal relative imports:
-
-```ts
-export default AOT.defineConfig({
-  entries: ["src/**/*.jit.ts"],
-  output: {
-    directory: "src/generated/jit",
-  },
-});
+```
+generated/
+  index.ts     // re-exports both
+  user.ts      // from jit/user.jit.ts
+  order.ts     // from jit/order.jit.ts
 ```
 
+Both layouts import the same way:
+
 ```ts
-import { User } from "./generated/jit/index.js";
+import { isUser } from "./generated/index.js";
 ```
 
-Local output emits a typed, self-contained `index.ts` by default without a
-nested `package.json`. No package `imports` map and no `#jit` alias are
-required. Choose `javascript` when the consumer needs ready-to-run ESM and
-does not need generated TypeScript types.
-
-## Config Reference
-
-| Setting                  | Purpose                                                        | Default            |
-| ------------------------ | -------------------------------------------------------------- | ------------------ |
-| `entries`                | declaration files, directories, or globs                       | root discovery     |
-| `patterns`               | patterns used for directory/root discovery                     | all `.jit.ts` files |
-| `output.directory`       | local directory or package path below `node_modules`            | `generated/jit`    |
-| `output.format`          | exactly `typescript` (`.ts`) or `javascript` (`.js`)             | `typescript`       |
-| `output.packageName`     | namespace override for a generated `node_modules` package       | inferred from path |
-| `output.clean`           | remove JIT-owned files from the previous generation             | `true`             |
-| `emit.subpathModules`    | add one entrypoint per declaration source                       | `false`            |
-| `emit.manifest`          | write imports, layout, exports, and selected operations         | `false`            |
-| `emit.plans`             | write deterministic operation plans for inspection/tooling      | `false`            |
+Generated TypeScript carries its public signatures in the executable file
+itself, so the application's own build resolves the types — JIT emits no
+`.d.ts` and installs nothing at runtime. Choose `js` when the consumer needs
+ready-to-run ESM and does not need generated TypeScript types.
 
 ## Inspection Flow
 
 Before generating, use:
 
 ```sh
-pnpm jit doctor
-pnpm jit explain
-pnpm jit inspect User --stage source
+pnpm jit doctor            # config discovery, output target, declaration files
+pnpm jit list              # every declared type, artifact object and artifact
+pnpm jit inspect isUser --stage source
 ```
 
-This matters because AOT is explicit. Raw schemas do not generate output by
-themselves. If no buildable functions or grouped objects are found, the CLI
-warns and writes nothing.
+This matters because AOT is explicit. A schema on its own declares a type, not
+a runtime function. If no artifacts are found, the CLI warns and writes
+nothing.
 
 ## Why This Improves Performance
 
@@ -134,12 +121,12 @@ only the generated functions used by the route.
 ## Best Practices
 
 - Keep declaration files small and explicit.
-- Export compiled functions, not raw schemas, for AOT output.
+- Let the declaration file be the manifest: a schema names its generated type,
+  an artifact becomes a generated function, an object of artifacts becomes one
+  frozen object.
 - Keep the default TypeScript output for application source; it carries
   structural types and public signatures in the executable file itself.
-- Turn on `manifest` and `plans` when reviewing generated artifacts in CI.
-- Use subpath modules for `@jit/generated/user` package imports or
-  `./generated/user.js` local imports.
-- Run `jit explain` after adding new declaration files to verify discovery.
+- Turn on `output.perFile` when different routes import unrelated schemas.
+- Run `jit doctor` after adding new declaration files to verify discovery.
 - Run `jit clean` or `pnpm clean:artifacts` when local generated output is
   polluting the workspace.

@@ -1,7 +1,6 @@
+import { classifyDeclarations } from "../../../../../packages/jit/src/aot/classify.js";
 import { type AotOutputFormat, generate } from "../../../../../packages/jit/src/aot/generate.js";
-import type { SchemaInput } from "../../../../../packages/jit/src/core/builder/index.js";
 import { JIT } from "../../../../../packages/jit/src/define.js";
-import { getArtifact } from "../../../../../packages/jit/src/runtime/artifact-registry.js";
 import { readVirtualFile, resetVirtualFiles } from "./virtual-fs.js";
 import { basename } from "./virtual-path.js";
 
@@ -27,25 +26,12 @@ export function compileBindings(
   options: BrowserCompileOptions
 ): BrowserCompileResult {
   resetVirtualFiles();
-  const schemas: Record<string, SchemaInput> = {};
-  const typeSchemas: Record<string, SchemaInput> = {};
-  const functions: Record<string, unknown> = {};
 
-  for (const [name, value] of Object.entries(bindings)) {
-    if (isSchema(value)) {
-      if ((value as { readonly __jitAot?: unknown }).__jitAot === "grouped") schemas[name] = value;
-      else typeSchemas[name] = value;
-    } else if (getArtifact(value) !== undefined) {
-      functions[name] = value;
-    }
-  }
-
+  // The editor buffer is a declaration file: the same classifier the CLI
+  // uses decides what each top-level binding generates.
   const result = generate({
-    schemas,
-    typeSchemas,
-    functions,
+    ...classifyDeclarations(bindings),
     outDir: "/jit-lab",
-    clean: true,
     format: options.format,
   });
 
@@ -56,12 +42,6 @@ export function compileBindings(
     })),
     skipped: result.skipped,
   };
-}
-
-function isSchema(value: unknown): value is SchemaInput {
-  if (value === null || typeof value !== "object") return false;
-  const candidate = value as { readonly schema?: { readonly type?: unknown }; readonly type?: unknown };
-  return typeof candidate.schema?.type === "string" || typeof candidate.type === "string";
 }
 
 function outputName(generated: string, requested: string): string {

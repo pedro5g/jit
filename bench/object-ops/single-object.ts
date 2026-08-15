@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { createMediumUser, type MediumUser, MediumUserSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
 import { genericMerge, genericOmit, genericPick, genericTransform } from "./generic.js";
@@ -13,7 +13,7 @@ export function registerSingleObjectOps(): void {
     op: "merge",
     name: "medium nested",
     args: [createMediumUser(), { profile: { score: 999 } }],
-    jit: JIT.compileMerge(MediumUserSchema.schema),
+    jit: Compiler.compileMerge(MediumUserSchema.schema),
     competitors: [{ name: "generic merge", fn: genericMerge, biased: GENERIC_BIAS }],
   });
 
@@ -21,7 +21,7 @@ export function registerSingleObjectOps(): void {
     op: "pick",
     name: "medium object",
     args: [createMediumUser()],
-    jit: JIT.compilePick(MediumUserSchema.schema, ["id", "name"]),
+    jit: Compiler.compilePick(MediumUserSchema.schema, ["id", "name"]),
     competitors: [
       { name: "generic pick", fn: (value: MediumUser) => genericPick(value, PICK_KEYS), biased: GENERIC_BIAS },
     ],
@@ -31,7 +31,7 @@ export function registerSingleObjectOps(): void {
     op: "omit",
     name: "medium object",
     args: [createMediumUser()],
-    jit: JIT.compileOmit(MediumUserSchema.schema, ["profile"]),
+    jit: Compiler.compileOmit(MediumUserSchema.schema, ["profile"]),
     competitors: [
       { name: "generic omit", fn: (value: MediumUser) => genericOmit(value, OMIT_KEYS), biased: GENERIC_BIAS },
     ],
@@ -46,7 +46,7 @@ export function registerSingleObjectOps(): void {
     op: "transform",
     name: "medium object",
     args: [createMediumUser()],
-    jit: JIT.compileTransform(MediumUserSchema.schema, {
+    jit: Compiler.compileTransform(MediumUserSchema.schema, {
       name: (value) => value.toUpperCase(),
       active: (value) => !value,
     }),

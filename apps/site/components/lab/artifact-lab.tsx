@@ -38,7 +38,7 @@ const STARTER_SOURCE = `const User = JIT.object({
   ),
 });
 
-const isUser = JIT.is(User);`;
+const isUser = JIT.validate.is(User);`;
 const COMPILER_TIMEOUT_MS = 5_000;
 
 type PackageManager = "pnpm" | "npm" | "yarn" | "bun";
@@ -64,12 +64,12 @@ const editorOptions = {
 
 const formatOptions: readonly SelectOption[] = [
   {
-    value: "typescript",
+    value: "ts",
     label: "TypeScript",
     description: "Pure .ts with types in the generated source",
   },
   {
-    value: "javascript",
+    value: "js",
     label: "JavaScript",
     description: "Ready-to-run ESM .js without declaration overhead",
   },
@@ -86,7 +86,7 @@ export function ArtifactLab() {
   const [body, setBody] = useState(STARTER_SOURCE);
   const [fileName, setFileName] = useState("schemas.generated");
   const [outputRoot, setOutputRoot] = useState("src/generated/jit");
-  const [format, setFormat] = useState<AotOutputFormat>("typescript");
+  const [format, setFormat] = useState<AotOutputFormat>("ts");
   const [packageManager, setPackageManager] = useState<PackageManager>("pnpm");
   const [dts, setDts] = useState<Record<string, string> | null>(null);
   const [compiled, setCompiled] = useState<LabCompilerResult>();
@@ -484,7 +484,7 @@ function ConfigPanel({
           <dl className="space-y-2 text-xs">
             <div className="flex justify-between gap-3">
               <dt className="text-fg-subtle">Module</dt>
-              <dd className="font-mono text-ghost-200">{format === "typescript" ? ".ts" : ".js"}</dd>
+              <dd className="font-mono text-ghost-200">{format === "ts" ? ".ts" : ".js"}</dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-fg-subtle">Runtime imports</dt>

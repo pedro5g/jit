@@ -82,27 +82,17 @@ const RESULT_SCHEMA: JsonValue = {
 const AOT_PROPERTIES = {
   root: optionalString("Project root below the MCP workspace. Defaults to the workspace root."),
   files: optionalStringArray("Explicit declaration files relative to the project root."),
-  patterns: optionalStringArray("Discovery globs. Defaults to config or **/*.jit.ts."),
+  patterns: optionalStringArray("Discovery globs. Defaults to config or **/*.jit.{ts,js}."),
 } as const;
 
 const OUTPUT_PROPERTIES = {
   outDir: optionalString("Output directory relative to the project root."),
-  packageName: optionalString("Package namespace used when output is below node_modules."),
-  outputFormat: {
+  format: {
     type: "string",
-    enum: ["typescript", "javascript"],
-    description: "Generated source format. Defaults to config or typescript.",
+    enum: ["ts", "js"],
+    description: "Generated source format. Defaults to config or ts.",
   },
-  clean: optionalBoolean("Remove known generated files before generation."),
-  emit: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      subpathModules: { type: "boolean" },
-      manifest: { type: "boolean" },
-      plans: { type: "boolean" },
-    },
-  },
+  perFile: optionalBoolean("Emit one module per declaration file instead of a single index."),
 } as const;
 
 const TOOLS: readonly ToolDefinition[] = [
@@ -147,16 +137,16 @@ const TOOLS: readonly ToolDefinition[] = [
   tool(
     "jit_aot_preview",
     "Preview AOT output",
-    "Compile into a temporary directory and inspect source, embedded TypeScript types, manifest, or plans without changing the project.",
+    "Compile into a temporary directory and inspect the generated source without changing the project.",
     objectSchema({
       ...AOT_PROPERTIES,
       ...OUTPUT_PROPERTIES,
       stage: {
         type: "string",
-        enum: ["summary", "source", "types", "manifest", "plan"],
+        enum: ["summary", "source"],
         description: "Artifact to return. Defaults to summary.",
       },
-      target: optionalString("Export name used to select a plan when stage is plan."),
+      target: optionalString("Generated module name to return when stage is source."),
     }),
     readOnlyAnnotations()
   ),

@@ -59,7 +59,7 @@ For application code, prefer this order:
 
 1. Define schemas with `JIT.object`, `JIT.string`, `JIT.number`, and the
    typed operator chain.
-2. Use direct artifacts such as `JIT.is(schema)`, `JIT.parse(schema)`, and
+2. Use direct artifacts such as `JIT.validate.is(schema)`, `JIT.validate.parse(schema)`, and
    `JIT.json.stringify(schema)`. Compose boundary work with
    `JIT.json.parse(schema).validate().filter(...).to.json()`.
 3. For runtime-only apps, import from `@jit-compiler/jit/runtime`.

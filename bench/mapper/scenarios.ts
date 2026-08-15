@@ -46,7 +46,7 @@ function createSourceUsers(length: number): SourceUser[] {
 }
 
 /** Reflective field-config mapper in the style of class-transformer/AutoMapper. */
-function createReflectiveMapper<TSource extends Record<string, unknown>>(config: {
+function createReflectiveMapper<TSource extends object>(config: {
   readonly fields: Readonly<Record<string, string | ((source: TSource) => unknown)>>;
 }) {
   return (source: TSource): Record<string, unknown> => {

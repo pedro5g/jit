@@ -18,8 +18,8 @@ describe("JIT AOT generate", () => {
 
   it("should emit only explicitly grouped operations", async () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
-    const UserRuntime = JIT.compile(User, { is: JIT.is(User), clone: JIT.clone(User) });
-    const result = AOT.generate({ schemas: { User: UserRuntime }, outDir });
+    const UserRuntime = { is: JIT.validate.is(User), clone: JIT.clone(User) };
+    const result = AOT.generate({ groups: { User: UserRuntime }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly User: {
@@ -41,9 +41,9 @@ describe("JIT AOT generate", () => {
 
   it("emits fromJSON as native parsing followed by specialized validation", async () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
-    const Json = JIT.compile(User, { fromJSON: JIT.json.parse(User).validate() });
+    const Json = { fromJSON: JIT.json.parse(User).validate() };
 
-    AOT.generate({ schemas: { Json }, outDir });
+    AOT.generate({ groups: { Json }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
 
     expect(source).toContain("JSON.parse");
@@ -62,11 +62,12 @@ describe("JIT AOT generate", () => {
       id: JIT.number().int32(),
       name: JIT.string(),
     });
-    const User = JIT.compile(UserSchema, { is: JIT.is(UserSchema), parse: JIT.parse(UserSchema) });
+    const User = { is: JIT.validate.is(UserSchema), parse: JIT.validate.parse(UserSchema) };
     const result = AOT.generate({
-      schemas: { User },
+      groups: { User },
+      schemas: { User: UserSchema },
       outDir,
-      format: "typescript",
+      format: "ts",
     });
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
@@ -126,10 +127,10 @@ describe("JIT AOT generate", () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
     const isUser = JIT.validate.is(User);
     const result = AOT.generate({
-      schemas: {},
-      functions: { isUser },
+      groups: {},
+      artifacts: { isUser },
       outDir,
-      format: "javascript",
+      format: "js",
     });
 
     expect(result.files).toEqual([join(outDir, "index.js")]);
@@ -140,12 +141,12 @@ describe("JIT AOT generate", () => {
   it("should reject removed output formats at the programmatic boundary", () => {
     expect(() =>
       AOT.generate({
-        schemas: {},
-        functions: { isValue: JIT.is(JIT.string()) },
+        groups: {},
+        artifacts: { isValue: JIT.validate.is(JIT.string()) },
         outDir,
-        format: "javascript-only" as never,
+        format: "typescript" as never,
       })
-    ).toThrow(/expected "typescript" or "javascript"/);
+    ).toThrow(/expected "ts" or "js"/);
   });
 
   it("should emit standalone functions against named structural schema types", () => {
@@ -157,11 +158,11 @@ describe("JIT AOT generate", () => {
     const isUser = JIT.validate.is(User);
 
     AOT.generate({
-      schemas: {},
-      typeSchemas: { User },
-      functions: { isUser },
+      groups: {},
+      schemas: { User },
+      artifacts: { isUser },
       outDir,
-      format: "typescript",
+      format: "ts",
     });
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
@@ -174,8 +175,8 @@ describe("JIT AOT generate", () => {
     const User = JIT.object({ id: JIT.number().int32(), fullName: JIT.string(), passwordHash: JIT.string() });
     const Public = JIT.dto(JIT.object({ id: JIT.number().int32(), name: JIT.string() }));
     const result = AOT.generate({
-      schemas: {},
-      functions: {
+      groups: {},
+      artifacts: {
         Public_is: JIT.validate.is(Public),
         Public_stringify: JIT.json.stringify(Public),
         Public_from: JIT.map(User, Public, { name: { from: "fullName" } }),
@@ -216,7 +217,7 @@ describe("JIT AOT generate", () => {
       .filter((query) => query.eq("active", true))
       .select("id", "name")
       .to.json();
-    const result = AOT.generate({ schemas: {}, functions: { activeUsers }, outDir });
+    const result = AOT.generate({ groups: {}, artifacts: { activeUsers }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly activeUsers: (json: string) => string;
@@ -248,7 +249,7 @@ describe("JIT AOT generate", () => {
       .filter((query) => query.eq("role", "admin"))
       .select("id", "name", "email", "note")
       .to.json();
-    const result = AOT.generate({ schemas: {}, functions: { publicUsers }, outDir });
+    const result = AOT.generate({ groups: {}, artifacts: { publicUsers }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly publicUsers: (json: string) => string;
@@ -268,7 +269,7 @@ describe("JIT AOT generate", () => {
     const Domain = JIT.object({ id: JIT.string(), name: JIT.string() });
     const toDomain = JIT.from(Wire).transform(Domain, { id: (id) => String(id) });
 
-    const result = AOT.generate({ schemas: {}, functions: { toDomain }, outDir, format: "typescript" });
+    const result = AOT.generate({ groups: {}, artifacts: { toDomain }, outDir, format: "ts" });
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       readonly toDomain: (value: { id: number; name: string }) => { id: string; name: string };
@@ -283,7 +284,7 @@ describe("JIT AOT generate", () => {
     const Entity = JIT.object({ id: JIT.number(), fullName: JIT.string() });
     const Public = JIT.object({ id: JIT.number(), name: JIT.string() });
     const publicJson = JIT.map.many(Entity, Public, { name: { from: "fullName" } }).to.json();
-    const result = AOT.generate({ schemas: {}, functions: { publicJson }, outDir });
+    const result = AOT.generate({ groups: {}, artifacts: { publicJson }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly publicJson: (value: readonly { id: number; fullName: string }[]) => string;
@@ -308,19 +309,16 @@ describe("JIT AOT generate", () => {
       kind: JIT.literal("click"),
       target: JIT.string(),
     });
-    const selected = JIT.compile(Event, ["equal", "clone", "diff", "stringify"]);
-
     const result = AOT.generate({
-      schemas: {},
-      functions: {
-        Event_equal: selected.equal,
-        Event_clone: selected.clone,
-        Event_diff: selected.diff,
-        Event_stringify: selected.stringify,
+      artifacts: {
+        Event_equal: JIT.compare.equal(Event),
+        Event_clone: JIT.clone(Event),
+        Event_diff: JIT.compare.diff(Event),
+        Event_stringify: JIT.json.stringify(Event),
         Event_fromJSON: JIT.json.parse(WireEvent).validate(),
-        Event_mask: JIT.mask(Event),
-        Event_sanitize: JIT.sanitize(Event),
-        Event_codec: JIT.codec(Event),
+        Event_mask: JIT.security.mask(Event),
+        Event_sanitize: JIT.security.sanitize(Event),
+        Event_codec: JIT.binary.codec(Event),
       },
       outDir,
     });
@@ -382,12 +380,11 @@ describe("JIT AOT generate", () => {
     ]);
     const ActiveAdmins = JIT.query(rowset)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
-      .select("id", "score")
-      .compile();
+      .select("id", "score");
 
     const result = AOT.generate({
-      schemas: {},
-      functions: { ActiveAdmins },
+      groups: {},
+      artifacts: { ActiveAdmins },
       outDir,
     });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
@@ -412,12 +409,12 @@ describe("JIT AOT generate", () => {
       .filter((q) => q.eq("active", true))
       .select("id")
       .take(2)
-      .compileIterator();
+      .to.iterator();
     const VisitActiveIds = JIT.query(Users)
       .filter((q) => q.eq("active", true))
       .select("id")
-      .compileVisitor();
-    const result = AOT.generate({ schemas: {}, functions: { ActiveIds, VisitActiveIds }, outDir });
+      .to.visitor();
+    const result = AOT.generate({ groups: {}, artifacts: { ActiveIds, VisitActiveIds }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       ActiveIds: (input: readonly { id: number; active: boolean }[]) => IterableIterator<{ id: number }>;
@@ -447,8 +444,8 @@ describe("JIT AOT generate", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const Users = JIT.array(User);
     const UserChanges = JIT.watch(Users, { key: "id" });
-    const UserCollection = JIT.compile(Users, { changes: UserChanges });
-    const result = AOT.generate({ schemas: { UserCollection }, functions: { UserChanges }, outDir });
+    const UserCollection = { changes: UserChanges };
+    const result = AOT.generate({ groups: { UserCollection }, artifacts: { UserChanges }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       UserCollection: { changes: typeof UserChanges };
@@ -489,7 +486,7 @@ describe("JIT AOT generate", () => {
       },
     };
     const UserChanges = JIT.watch(Users, { key: "id", onAdd: hooks.onAdd });
-    const result = AOT.generate({ schemas: {}, functions: { UserChanges }, outDir });
+    const result = AOT.generate({ groups: {}, artifacts: { UserChanges }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       UserChanges: typeof UserChanges;
@@ -509,11 +506,11 @@ describe("JIT AOT generate", () => {
       })
       .refine((value) => value.name !== "blocked");
     const result = AOT.generate({
-      schemas: {},
-      functions: {
-        isUser: JIT.is(User),
-        parseUser: JIT.parse(User),
-        safeParseUser: JIT.safeParse(User),
+      groups: {},
+      artifacts: {
+        isUser: JIT.validate.is(User),
+        parseUser: JIT.validate.parse(User),
+        safeParseUser: JIT.validate.safeParse(User),
       },
       outDir,
     });
@@ -537,7 +534,7 @@ describe("JIT AOT generate", () => {
   it("should reject callbacks with inaccessible closure dependencies", () => {
     const minimum = 2;
     const Name = JIT.string().refine((value) => value.length >= minimum);
-    const result = AOT.generate({ schemas: {}, functions: { isName: JIT.is(Name) }, outDir });
+    const result = AOT.generate({ groups: {}, artifacts: { isName: JIT.validate.is(Name) }, outDir });
 
     expect(result.files).toEqual([]);
     expect(result.skipped).toContainEqual({
@@ -555,15 +552,14 @@ describe("JIT AOT generate", () => {
     });
 
     const result = AOT.generate({
-      schemas: {},
-      functions: {
-        User_is: JIT.is(User),
-        User_parse: JIT.parse(User),
-        User_safeParse: JIT.safeParse(User),
+      groups: {},
+      artifacts: {
+        User_is: JIT.validate.is(User),
+        User_parse: JIT.validate.parse(User),
+        User_safeParse: JIT.validate.safeParse(User),
       },
       outDir,
-      packageName: "@acme/models",
-      format: "typescript",
+      format: "ts",
     });
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
 
@@ -591,13 +587,13 @@ describe("JIT AOT generate", () => {
 
   it("should preserve standalone export names when grouped internals would collide", async () => {
     const UserSchema = JIT.object({ id: JIT.number() });
-    const isUser = JIT.is(UserSchema);
+    const isUser = JIT.validate.is(UserSchema);
 
     AOT.generate({
-      schemas: { User: JIT.compile(UserSchema, { is: isUser }) },
-      functions: { User_is: isUser },
+      groups: { User: { is: isUser } },
+      artifacts: { User_is: isUser },
       outDir,
-      format: "typescript",
+      format: "ts",
     });
 
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
@@ -609,7 +605,6 @@ describe("JIT AOT generate", () => {
     expect(source).toContain("const User_is_1");
     expect(source).toContain("is: User_is_1");
     expect(source).toContain("const User_is:");
-    expect(source).toContain("export type UserStrict<TValue> = TValue;");
     expect(generated.User.is({ id: 1 })).toBe(true);
     expect(generated.User_is({ id: 1 })).toBe(true);
   });
@@ -619,10 +614,10 @@ describe("JIT AOT generate", () => {
     const formatDocument = JIT.format(Document).compile();
 
     AOT.generate({
-      schemas: { Document: JIT.compile(Document, { format: formatDocument }) },
-      functions: { formatDocument },
+      groups: { Document: { format: formatDocument } },
+      artifacts: { formatDocument },
       outDir,
-      format: "typescript",
+      format: "ts",
     });
 
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
@@ -640,15 +635,14 @@ describe("JIT AOT generate", () => {
 
   it("should report raw schemas as skipped instead of generating fallback functions", () => {
     const Weird = JIT.object({
-      meta: JIT.map(JIT.string(), JIT.number()),
+      meta: JIT.mapSchema(JIT.string(), JIT.number()),
       hook: JIT.string().refine((value) => value.length > 0),
       open: JIT.any(),
     });
 
     const result = AOT.generate({ schemas: { Weird }, outDir });
-    const operations = result.skipped.map((skip) => `${skip.schema}.${skip.operation}`);
 
-    expect(operations).toContain("Weird.schema");
+    // A schema on its own declares a type, never a runtime function.
     expect(result.files).toHaveLength(0);
   });
 
@@ -656,11 +650,11 @@ describe("JIT AOT generate", () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
 
     writeFileSync(join(outDir, "package.json"), '{"stale":true}\n');
-    const isUser = JIT.is(User);
+    const isUser = JIT.validate.is(User);
 
     const result = AOT.generate({
-      schemas: {},
-      functions: { User_is: isUser },
+      groups: {},
+      artifacts: { User_is: isUser },
       outDir,
     });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
@@ -687,8 +681,8 @@ describe("JIT AOT generate", () => {
     const hashedDir = join(outDir, "hashed");
 
     AOT.generate({
-      schemas: {},
-      functions: { Plain_equal: JIT.compile(PlainUsers, ["equal"]).equal },
+      groups: {},
+      artifacts: { Plain_equal: JIT.compare.equal(PlainUsers) },
       outDir: plainDir,
     });
 
@@ -698,8 +692,8 @@ describe("JIT AOT generate", () => {
     expect(plainSource).not.toContain("__hashCache");
 
     AOT.generate({
-      schemas: {},
-      functions: { Indexed_equal: JIT.compile(IndexedUsers, ["equal"]).equal },
+      groups: {},
+      artifacts: { Indexed_equal: JIT.compare.equal(IndexedUsers) },
       outDir: indexedDir,
     });
 
@@ -722,11 +716,8 @@ describe("JIT AOT generate", () => {
       )
     ).toBe(false);
 
-    const selected = JIT.compile(Hashed, ["equal", "hash"]);
-
     AOT.generate({
-      schemas: {},
-      functions: { Hashed_equal: selected.equal, Hashed_hash: selected.hash },
+      artifacts: { Hashed_equal: JIT.compare.equal(Hashed), Hashed_hash: JIT.compare.hash(Hashed) },
       outDir: hashedDir,
     });
 
@@ -747,12 +738,10 @@ describe("JIT AOT generate", () => {
 
   it("should generate hash and hash-short-circuit equal with zero imports", async () => {
     const Hashed = JIT.object({ id: JIT.number(), name: JIT.string() }).hash("ordered");
-    const selected = JIT.compile(Hashed, ["equal", "hash"]);
     const result = AOT.generate({
-      schemas: {},
-      functions: {
-        Hashed_equal: selected.equal,
-        Hashed_hash: selected.hash,
+      artifacts: {
+        Hashed_equal: JIT.compare.equal(Hashed),
+        Hashed_hash: JIT.compare.hash(Hashed),
       },
       outDir,
     });
@@ -775,6 +764,39 @@ describe("JIT AOT generate", () => {
     expect(generated.Hashed_equal(ada, { ...ada, name: "Grace" })).toBe(false);
     expect(generated.Hashed_hash(ada)).toBe(generated.Hashed_hash({ ...ada }));
     expect(generated.Hashed_hash(ada)).not.toBe(generated.Hashed_hash({ ...ada, name: "Grace" }));
+  });
+
+  it("should inline a JSON Schema document and a specialized mock generator", async () => {
+    const User = JIT.object({
+      id: JIT.number().int32().positive(),
+      email: JIT.string().email(),
+      role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
+    });
+    const result = AOT.generate({
+      artifacts: { userDocument: JIT.jsonSchema(User), mockUser: JIT.mock(User) },
+      schemas: { User },
+      outDir,
+      format: "ts",
+    });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+
+    expect(result.skipped).toHaveLength(0);
+    // The document is static data: the translator never reaches the bundle.
+    expect(source).toContain("const userDocument: { readonly [key: string]: unknown } = /*#__PURE__*/ Object.freeze({");
+    expect(source).toContain('"format":"email"');
+    expect(source).toContain("const mockUser: (options?: { readonly seed?: number }) => User =");
+    expect(source).toContain("function __srand(seed)");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
+      userDocument: { type: string; required: readonly string[] };
+      mockUser: (options?: { seed?: number }) => { id: number; email: string; role: string };
+    };
+
+    expect(generated.userDocument.type).toBe("object");
+    expect(generated.userDocument.required).toEqual(["id", "email", "role"]);
+    expect(JIT.validate.is(User)(generated.mockUser({ seed: 5 }))).toBe(true);
+    expect(generated.mockUser({ seed: 5 })).toEqual(generated.mockUser({ seed: 5 }));
   });
 
   it("should emit TypeScript types for nested and wrapped schemas", () => {

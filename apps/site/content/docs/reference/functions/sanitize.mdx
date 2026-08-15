@@ -14,7 +14,7 @@ const Comment = JIT.object({
   }),
 });
 
-const sanitizeComment = JIT.sanitize(Comment);
+const sanitizeComment = JIT.security.sanitize(Comment);
 const clean = sanitizeComment(input);
 ```
 

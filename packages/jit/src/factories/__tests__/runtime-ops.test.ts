@@ -13,16 +13,26 @@ describe("composable capability API", () => {
     expect(JIT).not.toHaveProperty("serializer");
     expect(JIT).not.toHaveProperty("model");
     expect(JIT).not.toHaveProperty("mapper");
-    expectTypeOf<Extract<"validator" | "serializer" | "model" | "mapper", keyof typeof JIT>>().toEqualTypeOf<never>();
+    expect(JIT).not.toHaveProperty("compile");
+    expectTypeOf<
+      Extract<"validator" | "serializer" | "model" | "mapper" | "compile", keyof typeof JIT>
+    >().toEqualTypeOf<never>();
   });
 
-  it("shares validation factories between root aliases and the namespace", () => {
-    const isUser = JIT.validate.is(User);
-    const parseUser = JIT.parse(User);
-    const safeParseUser = JIT.safeParse(User);
+  it("reaches every capability through exactly one namespace", () => {
+    for (const alias of ["is", "parse", "safeParse", "equal", "diff", "hash", "mask", "sanitize"] as const) {
+      expect(JIT, `JIT.${alias} must only exist on its capability namespace`).not.toHaveProperty(alias);
+    }
+    expectTypeOf<
+      Extract<"is" | "parse" | "safeParse" | "equal" | "diff" | "hash" | "mask" | "sanitize", keyof typeof JIT>
+    >().toEqualTypeOf<never>();
+  });
 
-    expect(JIT.is).toBe(JIT.validate.is);
-    expect(JIT.parse).toBe(JIT.validate.parse);
+  it("compiles validation through the validate namespace", () => {
+    const isUser = JIT.validate.is(User);
+    const parseUser = JIT.validate.parse(User);
+    const safeParseUser = JIT.validate.safeParse(User);
+
     expect(isUser(ada)).toBe(true);
     expect(parseUser({ ...ada, name: "  Ada  " })).toEqual(ada);
     expect(safeParseUser({ ...ada, name: "A" }).success).toBe(false);
@@ -33,10 +43,9 @@ describe("composable capability API", () => {
     expectTypeOf(parseUser).toMatchTypeOf<(value: unknown) => AST.Typeof<typeof User>>();
   });
 
-  it("keeps comparison aliases on the same descriptor factory", () => {
-    const equalUser = JIT.equal(User);
+  it("compiles comparison through the compare namespace", () => {
+    const equalUser = JIT.compare.equal(User);
 
-    expect(JIT.equal).toBe(JIT.compare.equal);
     expect(equalUser(ada, { ...ada })).toBe(true);
     expect(equalUser(ada, { ...ada, name: "Grace" })).toBe(false);
     expect(equalUser.plan.stages[equalUser.plan.stages.length - 1]).toMatchObject({
@@ -132,7 +141,7 @@ describe("composable capability API", () => {
     const transformed = JIT.from(Wire).transform(Domain, { id: (id) => String(id) });
 
     expect(transformed({ id: 1, name: "Ada" })).toEqual({ id: "1", name: "Ada" });
-    expect(JIT.parse(Wire).transform(Domain, { id: (id) => String(id) })({ id: 2, name: "Grace" })).toEqual({
+    expect(JIT.validate.parse(Wire).transform(Domain, { id: (id) => String(id) })({ id: 2, name: "Grace" })).toEqual({
       id: "2",
       name: "Grace",
     });

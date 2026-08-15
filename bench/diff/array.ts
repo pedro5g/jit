@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { microdiff } from "../shared/competitors.js";
 import { createNestedUsers, createUsers, NestedArraysSchema, UsersSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
@@ -13,7 +13,7 @@ export function registerArrayDiffs(): void {
       op: "diff",
       name: "large array changed at end",
       args: [left, right],
-      jit: JIT.compileDiff(UsersSchema.schema),
+      jit: Compiler.compileDiff(UsersSchema.schema),
       competitors: [{ name: "microdiff", fn: microdiff }],
     });
   }
@@ -27,7 +27,7 @@ export function registerArrayDiffs(): void {
       op: "diff",
       name: "nested arrays",
       args: [left, right],
-      jit: JIT.compileDiff(NestedArraysSchema.schema),
+      jit: Compiler.compileDiff(NestedArraysSchema.schema),
       competitors: [{ name: "microdiff", fn: microdiff }],
     });
   }

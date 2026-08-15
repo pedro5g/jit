@@ -13,25 +13,18 @@ documentation.
 
 | API               | Reference                            | Purpose                                       |
 | ----------------- | ------------------------------------ | --------------------------------------------- |
-| `JIT.validate`    | [Validation](./validation)           | Validation capability namespace               |
-| `JIT.is`          | [Validation](./validation)           | Root alias for `JIT.validate.is`              |
-| `JIT.parse`       | [Validation](./validation)           | Root alias for `JIT.validate.parse`           |
-| `JIT.safeParse`   | [Validation](./validation)           | Root alias for `JIT.validate.safeParse`       |
-| `JIT.equal`       | [Equal](./equal)                     | Schema-specialized structural equality        |
+| `JIT.validate`    | [Validation](./validation)           | `is`, `parse`, `safeParse`, async, `issues`   |
+| `JIT.compare`     | [Equal](./equal)                     | `equal`, `diff`, `hash`                       |
+| `JIT.security`    | [Mask](./mask)                       | `mask`, `sanitize`                            |
+| `JIT.json`        | [JSON](./json)                       | `parse`, `stringify`, `stringifyChunks`       |
+| `JIT.binary`      | [Codec](./codec)                     | `encode`, `decode`, `codec`                   |
 | `JIT.clone`       | [Clone](./clone)                     | Shape-specialized deep clone                  |
-| `JIT.diff`        | [Diff](./diff)                       | Typed structural change entries               |
 | `JIT.update`      | [Update](./update)                   | Immutable patches, recipes and reactive state |
-| `JIT.hash`        | [Hash](./hash)                       | Structural numeric hash                       |
-| `JIT.json`        | [JSON](./json)                       | JSON capability namespace                     |
 | `JIT.jsonValue`   | [JSON](./json)                       | JSON-value schema factory                     |
-| `JIT.binary`      | [Codec](./codec)                     | Persisted binary capability namespace         |
-| `JIT.compare`     | [Equal](./equal)                     | Equality, diff, and hash capability namespace |
-| `JIT.security`    | [Mask](./mask)                       | Masking and sanitization capability namespace |
-| `JIT.codec`       | [Codec](./codec)                     | Value codec schema or binary wire codec       |
+| `JIT.codec`       | [Codec](./codec)                     | Two-way value conversion inside a schema      |
+| `JIT.jsonSchema`  | [JSON Schema](./json-schema)         | Schema described as a JSON Schema document    |
+| `JIT.mock`        | [Mock](./mock)                       | Deterministic sample generator                |
 | `JIT.format`      | [Format](./format)                   | Standalone string-mask formatter              |
-| `JIT.mask`        | [Mask](./mask)                       | PII-aware output masking                      |
-| `JIT.sanitize`    | [Sanitize](./sanitize)               | Policy-driven hostile string cleanup          |
-| `JIT.compile`     | [Compile](./compile)                 | Explicit grouped operation export             |
 | `JIT.from`        | [Query](./query)                     | Starts a value-source execution pipeline      |
 | `JIT.transform`   | [Transform](./transform)             | Select and transform object fields            |
 | `JIT.query`       | [Query](./query)                     | Eager and lazy compiled collection query      |
@@ -72,30 +65,16 @@ documentation.
 | `JIT.templateLiterals` | [Composition](./composition#templateliterals) | `JIT.union`              | [Composition](./composition#union)              |
 | `JIT.xor`              | [Composition](./composition#xor)              | `JIT.const`              | [Query](./query#const)                          |
 
-## Low-level and introspection exports
+## Class exports
 
-These exports are public for advanced compiler integrations. Application code
-normally uses the higher-level function in the second column.
+| API                    | Reference                                       | Prefer                          |
+| ---------------------- | ----------------------------------------------- | ------------------------------- |
+| `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)      | `JIT.watchedList()`             |
+| `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class) | `JIT.watchedList(..., { key })` |
 
-| API                    | Reference                                                     | Prefer                          |
-| ---------------------- | ------------------------------------------------------------- | ------------------------------- |
-| `JIT.compileClone`     | [Low-level compilers](./low-level-compilers#compileclone)     | `JIT.clone`                     |
-| `JIT.compileDiff`      | [Low-level compilers](./low-level-compilers#compilediff)      | `JIT.diff`                      |
-| `JIT.compileEqual`     | [Low-level compilers](./low-level-compilers#compileequal)     | `JIT.equal`                     |
-| `JIT.compileHash`      | [Low-level compilers](./low-level-compilers#compilehash)      | `JIT.hash`                      |
-| `JIT.compileUpdate`    | [Low-level compilers](./low-level-compilers#compileupdate)    | `JIT.update`                    |
-| `JIT.compilePipeline`  | [Low-level compilers](./low-level-compilers#compilepipeline)  | schema parse transforms         |
-| `JIT.compileGroupBy`   | [Low-level compilers](./low-level-compilers#compilegroupby)   | `JIT.query`                     |
-| `JIT.compileMerge`     | [Low-level compilers](./low-level-compilers#compilemerge)     | object schema merge             |
-| `JIT.compileNormalize` | [Low-level compilers](./low-level-compilers#compilenormalize) | `JIT.transform`                 |
-| `JIT.compileOmit`      | [Low-level compilers](./low-level-compilers#compileomit)      | `JIT.transform().select()`      |
-| `JIT.compilePick`      | [Low-level compilers](./low-level-compilers#compilepick)      | `JIT.transform().select()`      |
-| `JIT.compileSortBy`    | [Low-level compilers](./low-level-compilers#compilesortby)    | `JIT.query().orderBy()`         |
-| `JIT.compileTransform` | [Low-level compilers](./low-level-compilers#compiletransform) | `JIT.transform`                 |
-| `JIT.compileUniqueBy`  | [Low-level compilers](./low-level-compilers#compileuniqueby)  | `JIT.query().unique()`          |
-| `JIT.COMPILE_OPS`      | [Operation lists](./low-level-compilers#compile_ops)          | supported `compile()` keys      |
-| `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)                    | `JIT.watchedList()`             |
-| `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class)               | `JIT.watchedList(..., { key })` |
+Low-level compilers (`compileEqual`, `compileNormalize`, emitters, IR passes)
+are not part of the `JIT` namespace. They live in the `Compiler` namespace of
+the package root — see [Low-level compilers](./low-level-compilers).
 
 ## Runtime or AOT?
 

@@ -124,7 +124,7 @@ defeat binary dictionary/index reuse.
 
 `.sanitize()` defaults to the fast `text` preset: executable element blocks
 are removed, remaining tags are stripped and stray angle brackets are escaped.
-The same specialized chain runs inside `parse`, while `JIT.sanitize(schema)`
+The same specialized chain runs inside `parse`, while `JIT.security.sanitize(schema)`
 creates a dedicated immutable sanitizer over only the marked paths.
 
 ```ts

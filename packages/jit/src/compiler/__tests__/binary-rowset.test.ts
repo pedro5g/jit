@@ -130,8 +130,7 @@ describe("binary rowsets", () => {
     const rowset = binary.load(rows);
     const findAdmins = JIT.query(rowset)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
-      .select("id", "name", "score")
-      .compile();
+      .select("id", "name", "score");
 
     expect(binary.layout).toMatchObject({
       rowSize: 19,
@@ -230,8 +229,7 @@ describe("binary rowsets", () => {
     const rowset = binary.load(rows);
     const findAdmins = JIT.query(rowset)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
-      .select("id", "name", "score")
-      .compile();
+      .select("id", "name", "score");
 
     expect(findAdmins(rowset)).toEqual([
       { id: 1, name: "Ada", score: 9.5 },
@@ -245,12 +243,10 @@ describe("binary rowsets", () => {
     const total = JIT.query(rowset)
       .params({ active: JIT.boolean() })
       .filter((q, params) => q.eq("active", params.active))
-      .sum("score")
-      .compile();
+      .sum("score");
     const countAdmins = JIT.query(rowset)
       .filter((q) => q.eq("role", q.constant("admin")))
-      .count()
-      .compile();
+      .count();
 
     expect(total(rowset, { active: true })).toBe(25.5);
     expect(countAdmins(rowset)).toBe(2);
@@ -311,8 +307,7 @@ describe("binary rowsets", () => {
     const rowset = binary.load(rows);
     const query = JIT.query(rowset)
       .filter((q) => q.eq("role", "admin"))
-      .select("id", "name")
-      .compile();
+      .select("id", "name");
     const pipeline = JIT.process(User)
       .binary()
       .filter((q) => q.eq("role", "admin"))
@@ -321,7 +316,7 @@ describe("binary rowsets", () => {
 
     expectTypeOf(binary).toEqualTypeOf<Compiler.BinaryArray<JIT.Typeof<typeof User>>>();
     expectTypeOf(rowset).toEqualTypeOf<Compiler.BinaryRowSet<JIT.Typeof<typeof User>>>();
-    expectTypeOf(query).toEqualTypeOf<
+    expectTypeOf(query).toMatchTypeOf<
       (value: Compiler.BinaryRowSet<JIT.Typeof<typeof User>>) => { readonly id: number; readonly name: string }[]
     >();
     expectTypeOf(pipeline.execute).toEqualTypeOf<
@@ -359,9 +354,7 @@ describe("binary rowsets", () => {
     ];
     const binary = Shapes.binary({ strategy: "exact", memoryLayout: "columnar" });
     const rowset = binary.load(values);
-    const circles = JIT.query(rowset)
-      .filter((q) => q.eq("kind", "circle"))
-      .compile();
+    const circles = JIT.query(rowset).filter((q) => q.eq("kind", "circle"));
     const kind = binary.layout.fields.find((field) => field.key === "kind");
 
     expect(binary.layout.union).toEqual({

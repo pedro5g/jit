@@ -27,12 +27,13 @@ const UserSchema = JIT.object({
 });
 
 AOT.generate({
-  schemas: {
-    User: JIT.compile(UserSchema, {
-      is: JIT.is(UserSchema),
+  groups: {
+    User: {
+      is: JIT.validate.is(UserSchema),
       stringify: JIT.json.stringify(UserSchema),
-    }),
+    },
   },
+  schemas: { UserSchema },
   outDir: join(here, ".generated"),
 });
 

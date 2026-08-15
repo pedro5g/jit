@@ -43,7 +43,7 @@ from this hint alone.
 ```ts
 const Users = JIT.array(User).entity({ key: "id" });
 
-const normalizeUsers = JIT.compileNormalize(Users.schema);
+const normalizeUsers = Compiler.compileNormalize(Users.schema);
 
 normalizeUsers([
   { id: 10, email: "ada@example.com", name: "Ada" },
@@ -104,7 +104,7 @@ declare that duplicates are valid or automatically reject them.
 
 ```ts
 const IndexedUsers = JIT.array(User).indexBy("id");
-const equalUsers = JIT.equal(IndexedUsers).compile();
+const equalUsers = JIT.compare.equal(IndexedUsers).compile();
 
 const left = [
   { id: 1, email: "ada@example.com", name: "Ada" },
@@ -155,7 +155,7 @@ There is no mutation observer or per-array invalidation API:
 
 ```ts
 const IndexedUsers = JIT.array(User).indexBy("id");
-const equalUsers = JIT.equal(IndexedUsers).compile();
+const equalUsers = JIT.compare.equal(IndexedUsers).compile();
 
 equalUsers(previous, users); // `users` may now own a cached index
 
@@ -184,9 +184,9 @@ collections. It records all of the following in one operation:
 ```ts
 const Users = JIT.array(User).keyed("id");
 
-const equalUsers = JIT.equal(Users).compile();
-const normalizeUsers = JIT.compileNormalize(Users.schema);
-const uniqueUsers = JIT.compileUniqueBy(Users.schema);
+const equalUsers = JIT.compare.equal(Users).compile();
+const normalizeUsers = Compiler.compileNormalize(Users.schema);
+const uniqueUsers = Compiler.compileUniqueBy(Users.schema);
 ```
 
 Use `.keyed("id")` when all entity-oriented operations should agree on one
@@ -222,8 +222,7 @@ cache. It fuses `Map` construction into the query loop:
 const adaById = JIT.query(JIT.array(User))
   .filter((q) => q.eq("email", "ada@example.com"))
   .keyed("id")
-  .select("name")
-  .compile();
+  .select("name");
 
 const result = adaById(users);
 // Map<number, { name: string }>

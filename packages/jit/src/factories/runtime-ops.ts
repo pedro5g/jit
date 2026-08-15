@@ -1,18 +1,20 @@
 import { type Clone, compileClone } from "../compiler/clone.js";
+import { type CodecCompileOptions, type CompiledCodec, compileCodec } from "../compiler/codec.js";
 import { compileDiff, type Diff } from "../compiler/diff.js";
 import { compileEqual, type Equal } from "../compiler/equal.js";
 import { compileFormat, type Format } from "../compiler/format.js";
 import { compileHash, type Hash } from "../compiler/hash.js";
 import { compileStringifyChunks, type JsonChunksOptions } from "../compiler/json-chunks.js";
+import { compileJsonSchema, type JsonSchemaDocument, type JsonSchemaOptions } from "../compiler/json-schema.js";
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { compileMask, type Mask } from "../compiler/mask.js";
+import { compileMock, type Mock } from "../compiler/mock.js";
 import { compileSanitize, type Sanitize } from "../compiler/sanitize.js";
 import type { SafeParseResult } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
 import type { Builder, SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import type { ValidationIssue } from "../errors/index.js";
-import { map as mapSchema } from "./collection/collection.js";
 import {
   binaryDecode,
   binaryEncode,
@@ -28,7 +30,7 @@ import {
   type SchemaArtifact,
   validationArtifact,
 } from "./execution.js";
-import type { MapperOverrides } from "./mapper.js";
+import type { MapperArgs } from "./mapper.js";
 import { jsonValue } from "./special/special.js";
 
 export type {
@@ -90,11 +92,6 @@ export const validate: ValidateNamespace = Object.freeze({
   },
 });
 
-/** Root aliases intentionally reference the exact namespace factories. */
-export const is = validate.is;
-export const parse = validate.parse;
-export const safeParse = validate.safeParse;
-
 export interface JsonNamespace {
   value(): Builder<ATS.JsonSchema>;
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<string, TSchema>;
@@ -127,15 +124,23 @@ export interface BinaryNamespace {
   decode<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): SchemaArtifact<Uint8Array | ArrayBuffer, TSchema>;
+  /** Both directions plus `encodeInto`, sharing one wire version. */
+  codec<TSchema extends ATS.AnyTypeSchema>(
+    schema: SchemaInput<TSchema>,
+    options?: CodecCompileOptions
+  ): CompiledCodec<ATS.TypeofSchema<TSchema>>;
 }
 
 /** Persisted binary codec capability. Binary rowsets remain under `process`. */
 export const binary: BinaryNamespace = Object.freeze({
   encode: binaryEncode,
   decode: binaryDecode,
+  codec<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: CodecCompileOptions) {
+    return compileCodec(unwrapSchema(schema), options) as CompiledCodec<ATS.TypeofSchema<TSchema>>;
+  },
 });
 
-export function equal<TSchema extends ATS.AnyTypeSchema>(
+function equal<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Equal<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "equal", "value", "boolean", compileEqual) as RuntimeCompiledFunction<
@@ -151,7 +156,7 @@ export function clone<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-export function diff<TSchema extends ATS.AnyTypeSchema>(
+function diff<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Diff<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "diff", "value", "value", compileDiff) as RuntimeCompiledFunction<
@@ -159,12 +164,31 @@ export function diff<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-export function hash<TSchema extends ATS.AnyTypeSchema>(
+function hash<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Hash<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "hash", "value", "value", compileHash) as RuntimeCompiledFunction<
     Hash<ATS.TypeofSchema<TSchema>>
   >;
+}
+
+/**
+ * Describes the schema as a JSON Schema document — the format OpenAPI, form
+ * builders and structured-output APIs consume. Static data, computed once.
+ */
+export function jsonSchema<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  options?: JsonSchemaOptions
+): JsonSchemaDocument {
+  return compileJsonSchema(unwrapSchema(schema), options);
+}
+
+/**
+ * Compiles a deterministic sample generator. Values satisfy the same checks
+ * the validator enforces, so fixtures cannot drift from the schema.
+ */
+export function mock<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): Mock<ATS.TypeofSchema<TSchema>> {
+  return compileMock<ATS.TypeofSchema<TSchema>>(unwrapSchema(schema));
 }
 
 export function format<TSchema extends ATS.StringSchema>(
@@ -173,36 +197,40 @@ export function format<TSchema extends ATS.StringSchema>(
   return operationArtifact(schema, "format", "value", "value", compileFormat);
 }
 
-export function mask<TSchema extends ATS.AnyTypeSchema>(
+function mask<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Mask<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "mask", "value", "value", compileMask);
 }
 
-export function sanitize<TSchema extends ATS.AnyTypeSchema>(
+function sanitize<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Sanitize<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "sanitize", "value", "value", compileSanitize);
 }
 
-/** Semantic grouping only: these are the same factories as their root aliases. */
+/** Structural comparison capability: one schema in, one compiled function out. */
 export const compare = Object.freeze({ equal, diff, hash });
+/** Boundary hardening capability. `mask` redacts, `sanitize` rewrites. */
 export const security = Object.freeze({ mask, sanitize });
 
+/**
+ * Specialized source-to-target mapping. The overrides argument only appears
+ * when the target has a field that cannot be matched by name and type, so
+ * a straight projection is `JIT.map(User, PublicUser)`. `Map` schemas are a
+ * different thing entirely and live on `JIT.mapSchema(key, value)`.
+ */
 export interface MapNamespace {
-  <TKey extends ATS.AnyTypeSchema, TValue extends ATS.AnyTypeSchema>(
-    key: SchemaInput<TKey>,
-    value: SchemaInput<TValue>
-  ): Builder<ATS.MapSchema<TKey, TValue>>;
   <TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends ATS.AnyTypeSchema>(
     source: SchemaInput<TSourceSchema>,
     target: SchemaInput<TTargetSchema>,
-    mapping: MapperOverrides<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
+    ...overrides: MapperArgs<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
   ): SchemaArtifact<ATS.TypeofSchema<TSourceSchema>, TTargetSchema>;
+  /** The same mapping applied over a collection, in one generated loop. */
   many<TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends ATS.AnyTypeSchema>(
     source: SchemaInput<TSourceSchema>,
     target: SchemaInput<TTargetSchema>,
-    mapping: MapperOverrides<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
+    ...overrides: MapperArgs<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
   ): CollectionArtifact<
     ATS.TypeofSchema<TSourceSchema>[],
     ATS.TypeofSchema<TTargetSchema>,
@@ -213,27 +241,22 @@ export interface MapNamespace {
 function mapCapability<TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends ATS.AnyTypeSchema>(
   source: SchemaInput<TSourceSchema>,
   target: SchemaInput<TTargetSchema>,
-  mapping: MapperOverrides<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
-): SchemaArtifact<ATS.TypeofSchema<TSourceSchema>, TTargetSchema>;
-function mapCapability<TKey extends ATS.AnyTypeSchema, TValue extends ATS.AnyTypeSchema>(
-  key: SchemaInput<TKey>,
-  value: SchemaInput<TValue>
-): Builder<ATS.MapSchema<TKey, TValue>>;
-function mapCapability(
-  source: SchemaInput<ATS.AnyTypeSchema>,
-  target: SchemaInput<ATS.AnyTypeSchema>,
-  ...rest: readonly unknown[]
-): unknown {
-  if (rest.length === 0) return mapSchema(source, target);
-
+  ...overrides: MapperArgs<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
+): SchemaArtifact<ATS.TypeofSchema<TSourceSchema>, TTargetSchema> {
   const sourceSchema = unwrapSchema(source);
-  return mappedValue(from(sourceSchema), sourceSchema, target, (rest[0] ?? {}) as MapperOverridesInput);
+
+  return mappedValue(
+    from(sourceSchema),
+    sourceSchema,
+    target,
+    (overrides[0] ?? {}) as MapperOverridesInput
+  ) as SchemaArtifact<ATS.TypeofSchema<TSourceSchema>, TTargetSchema>;
 }
 
 function mapMany<TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends ATS.AnyTypeSchema>(
   source: SchemaInput<TSourceSchema>,
   target: SchemaInput<TTargetSchema>,
-  mapping: MapperOverrides<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
+  ...overrides: MapperArgs<ATS.TypeofSchema<TSourceSchema>, ATS.TypeofSchema<TTargetSchema>>
 ): CollectionArtifact<
   ATS.TypeofSchema<TSourceSchema>[],
   ATS.TypeofSchema<TTargetSchema>,
@@ -245,7 +268,7 @@ function mapMany<TSourceSchema extends ATS.AnyTypeSchema, TTargetSchema extends 
   if (sourceCollection.schema.type !== "array") {
     throw new Error("unreachable collection schema");
   }
-  return sourceCollection.map(target, mapping);
+  return sourceCollection.map(target, (overrides[0] ?? {}) as MapperOverridesInput);
 }
 
 function arrayOf<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): ATS.ArraySchema<TSchema> {

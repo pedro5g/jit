@@ -19,6 +19,22 @@ export function mkdirSync(_path: string, _options?: { readonly recursive?: boole
   return undefined;
 }
 
+/** Direct children of a virtual directory; the generator uses it to clean. */
+export function readdirSync(path: string): string[] {
+  const prefix = `${normalize(path)}/`;
+  const names = new Set<string>();
+
+  for (const file of files.keys()) {
+    if (!file.startsWith(prefix)) continue;
+    const rest = file.slice(prefix.length);
+    const slash = rest.indexOf("/");
+
+    names.add(slash === -1 ? rest : rest.slice(0, slash));
+  }
+
+  return [...names];
+}
+
 export function readFileSync(path: string, _encoding: string): string {
   return readVirtualFile(path);
 }

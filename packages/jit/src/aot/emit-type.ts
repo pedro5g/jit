@@ -3,12 +3,28 @@ import { TypeName } from "../core/ats/index.js";
 import { Parse } from "../shared/index.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
+type EmitChild = (schema: ATS.AnyTypeSchema) => string;
 
 /**
  * Emits the TypeScript type literal for a schema — powers generated `.ts`
  * files. Unknown or unrepresentable kinds degrade to `unknown`.
+ *
+ * `names` maps schemas that were declared with their own binding to that
+ * name, so a nested schema is emitted as `User` instead of being inlined
+ * structurally a second time. The schema being emitted is always expanded,
+ * which is what makes `export type User = { ... }` possible.
  */
-export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
+export function emitTypeScriptType(schema: ATS.AnyTypeSchema, names?: ReadonlyMap<ATS.AnyTypeSchema, string>): string {
+  const emit: EmitChild = (child) => {
+    const named = names?.get(child);
+
+    return named !== undefined && child !== schema ? named : emitStructural(child, emit);
+  };
+
+  return emitStructural(schema, emit);
+}
+
+function emitStructural(schema: ATS.AnyTypeSchema, emit: EmitChild): string {
   const current = schema as AnySchema;
 
   switch (current.type) {
@@ -53,84 +69,84 @@ export function emitTypeScriptType(schema: ATS.AnyTypeSchema): string {
     case TypeName.object: {
       const props = current.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
       const entries = Object.keys(props).map((key) => {
-        const prop = props[key] as AnySchema;
+        const prop = props[key];
         const safeKey = Parse.isValidIdentifier(key) ? key : JSON.stringify(key);
 
-        return `${safeKey}: ${emitTypeScriptType(prop)}`;
+        return `${safeKey}: ${emit(prop)}`;
       });
 
       return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
     }
     case TypeName.array:
-      return `${wrapForSuffix(emitTypeScriptType(current.def.element as ATS.AnyTypeSchema))}[]`;
+      return `${wrapForSuffix(emit(current.def.element as ATS.AnyTypeSchema))}[]`;
     case TypeName.set:
-      return `Set<${emitTypeScriptType(current.def.element as ATS.AnyTypeSchema)}>`;
+      return `Set<${emit(current.def.element as ATS.AnyTypeSchema)}>`;
     case TypeName.map:
-      return `Map<${emitTypeScriptType(current.def.key as ATS.AnyTypeSchema)}, ${emitTypeScriptType(current.def.value as ATS.AnyTypeSchema)}>`;
+      return `Map<${emit(current.def.key as ATS.AnyTypeSchema)}, ${emit(current.def.value as ATS.AnyTypeSchema)}>`;
     case TypeName.record:
-      return `Record<string, ${emitTypeScriptType(current.def.value as ATS.AnyTypeSchema)}>`;
+      return `Record<string, ${emit(current.def.value as ATS.AnyTypeSchema)}>`;
     case TypeName.tuple: {
       const items = (current.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
 
-      return `[${items.map(emitTypeScriptType).join(", ")}]`;
+      return `[${items.map(emit).join(", ")}]`;
     }
     case TypeName.union:
     case TypeName.xor:
     case TypeName.discriminatedUnion: {
       const options = current.def.options as readonly ATS.AnyTypeSchema[];
 
-      return options.map(emitTypeScriptType).join(" | ");
+      return options.map(emit).join(" | ");
     }
     case TypeName.not:
       return "unknown";
     case TypeName.when:
-      return `${emitTypeScriptType(current.def.thenType as ATS.AnyTypeSchema)} | ${emitTypeScriptType(current.def.otherwiseType as ATS.AnyTypeSchema)}`;
+      return `${emit(current.def.thenType as ATS.AnyTypeSchema)} | ${emit(current.def.otherwiseType as ATS.AnyTypeSchema)}`;
     case TypeName.intersection: {
       const options = current.def.options as readonly ATS.AnyTypeSchema[];
 
-      return options.map(emitTypeScriptType).join(" & ");
+      return options.map(emit).join(" & ");
     }
     case TypeName.optional:
-      return `${emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema)} | undefined`;
+      return `${emit(current.def.innerType as ATS.AnyTypeSchema)} | undefined`;
     case TypeName.nullable:
-      return `${emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema)} | null`;
+      return `${emit(current.def.innerType as ATS.AnyTypeSchema)} | null`;
     case TypeName.nullish:
-      return `${emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema)} | null | undefined`;
+      return `${emit(current.def.innerType as ATS.AnyTypeSchema)} | null | undefined`;
     case TypeName.default:
     case TypeName.brand:
     case TypeName.refine:
     case TypeName.coerce:
     case TypeName.pipe:
     case TypeName.transform:
-      return emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema);
+      return emit(current.def.innerType as ATS.AnyTypeSchema);
     case TypeName.readonly:
-      return emitReadonlyType(current.def.innerType as ATS.AnyTypeSchema);
+      return emitReadonlyType(current.def.innerType as ATS.AnyTypeSchema, emit);
     case TypeName.lazy:
-      return emitTypeScriptType((current.def.getter as () => ATS.AnyTypeSchema)());
+      return emit((current.def.getter as () => ATS.AnyTypeSchema)());
     case TypeName.promise:
-      return `Promise<${emitTypeScriptType(current.def.innerType as ATS.AnyTypeSchema)}>`;
+      return `Promise<${emit(current.def.innerType as ATS.AnyTypeSchema)}>`;
     default:
       return "unknown";
   }
 }
 
-function emitReadonlyType(schema: ATS.AnyTypeSchema): string {
+function emitReadonlyType(schema: ATS.AnyTypeSchema, emit: EmitChild): string {
   const current = schema as AnySchema;
 
   switch (current.type) {
     case TypeName.array:
-      return `readonly ${wrapForSuffix(emitTypeScriptType(current.def.element as ATS.AnyTypeSchema))}[]`;
+      return `readonly ${wrapForSuffix(emit(current.def.element as ATS.AnyTypeSchema))}[]`;
     case TypeName.tuple: {
       const items = (current.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
 
-      return `readonly [${items.map(emitTypeScriptType).join(", ")}]`;
+      return `readonly [${items.map(emit).join(", ")}]`;
     }
     case TypeName.set:
-      return `ReadonlySet<${emitTypeScriptType(current.def.element as ATS.AnyTypeSchema)}>`;
+      return `ReadonlySet<${emit(current.def.element as ATS.AnyTypeSchema)}>`;
     case TypeName.map:
-      return `ReadonlyMap<${emitTypeScriptType(current.def.key as ATS.AnyTypeSchema)}, ${emitTypeScriptType(current.def.value as ATS.AnyTypeSchema)}>`;
+      return `ReadonlyMap<${emit(current.def.key as ATS.AnyTypeSchema)}, ${emit(current.def.value as ATS.AnyTypeSchema)}>`;
     default:
-      return `Readonly<${emitTypeScriptType(schema)}>`;
+      return `Readonly<${emit(schema)}>`;
   }
 }
 

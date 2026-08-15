@@ -111,7 +111,7 @@ strings can use identity codes and skip the large lookup Map.
 const batches = JIT.query(Events)
   .filter((q) => q.eq("valid", true))
   .chunk(1_000)
-  .compileAsyncIterator();
+  .to.asyncIterator();
 
 for await (const batch of batches(cursor)) await database.insert(batch);
 ```
@@ -128,7 +128,7 @@ const User = JIT.object({
   token: JIT.string().pii("redact"),
 });
 
-const safeLog = JIT.mask(User);
+const safeLog = JIT.security.mask(User);
 logger.info(safeLog(user));
 ```
 

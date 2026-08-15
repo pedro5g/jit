@@ -109,19 +109,14 @@ cannot turn an inspection request into a write by omitting a default.
   "name": "jit_aot_generate",
   "arguments": {
     "write": true,
-    "emit": {
-      "subpathModules": true,
-      "manifest": true,
-      "plans": true
-    }
+    "format": "ts",
+    "perFile": true
   }
 }
 ```
 
 Config remains the source of defaults. Tool arguments may override `files`,
-`patterns`, `outDir`, `packageName`, `outputFormat`, `clean`, and individual
-`emit` flags for one call. Runtime layout is inferred from whether `outDir`
-is local or below `node_modules`.
+`patterns`, `outDir`, `format`, and `perFile` for one call.
 
 ## Resources
 

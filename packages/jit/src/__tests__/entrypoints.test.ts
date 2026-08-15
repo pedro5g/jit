@@ -27,8 +27,7 @@ describe("runtime and define entrypoints", () => {
       expect(() => isUser({ id: 1 })).toThrow(/AOT artifacts cannot be executed/);
 
       AOT.generate({
-        schemas: {},
-        functions: { isUser },
+        artifacts: { isUser },
         outDir,
       });
 
@@ -60,7 +59,7 @@ describe("runtime and define entrypoints", () => {
 
       expect(() => activeUsers('[{"id":1,"active":true}]')).toThrow(/AOT artifacts cannot be executed/);
 
-      AOT.generate({ schemas: {}, functions: { activeUsers }, outDir });
+      AOT.generate({ schemas: {}, artifacts: { activeUsers }, outDir });
 
       const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
         activeUsers: (json: string) => string;
@@ -94,7 +93,7 @@ describe("runtime and define entrypoints", () => {
         .select("id", "name", "email", "note")
         .to.json();
 
-      AOT.generate({ schemas: {}, functions: { publicUsers }, outDir });
+      AOT.generate({ schemas: {}, artifacts: { publicUsers }, outDir });
 
       const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
         publicUsers: (json: string) => string;

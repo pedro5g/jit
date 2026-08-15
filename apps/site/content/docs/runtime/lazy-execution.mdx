@@ -12,10 +12,10 @@ const query = JIT.query(Users)
   .take(10);
 
 query.compile();
-query.compileIterator();
-query.compileAsyncIterator();
-query.compileVisitor();
-query.lazy().compile();
+query.to.iterator();
+query.to.asyncIterator();
+query.to.visitor();
+query.lazy();
 ```
 
 Supported incremental operators include `flatMap`, `take/takeWhile`, `drop/dropWhile`,
@@ -29,7 +29,7 @@ iterator object or `{ value, done }` protocol.
 const visit = JIT.query(Users)
   .filter((q) => q.eq("active", true))
   .select("id")
-  .compileVisitor();
+  .to.visitor();
 
 visit(users, sendToQueue);
 ```

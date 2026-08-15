@@ -3,15 +3,14 @@
  * jit CLI — Prisma-style code generation with declaration discovery.
  *
  * Usage:
- *   jit init [--force] [--format ts|mts|mjs|cjs] [--entries <path-or-glob>] [--pattern <glob>]
- *   jit generate [files...] [--out <dir>] [--output-format js|ts] [--watch] [--pattern <glob>]
+ *   jit init [--force] [--out <dir>] [--format ts|js] [--entries <path-or-glob>]
+ *   jit generate [files...] [--out <dir>] [--format ts|js] [--watch] [--pattern <glob>]
  *   jit doctor [files...] [--pattern <glob>]
- *   jit explain [files...] [--pattern <glob>]
  *   jit list [files...] [--pattern <glob>]
  *   jit inspect <export> [files...] [--stage source|plan]
  *   jit clean [--out <dir>]
  *
- * `init` writes a typed `jit.config.*` in the current project root.
+ * `init` writes a `jit.config.*` in the current project root.
  * `generate` resolves config first, then falls back to pattern discovery.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, watch, writeFileSync } from "node:fs";
@@ -19,7 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  collectSchemas,
+  collectDeclarations,
   DEFAULT_SCHEMA_PATTERNS,
   discoverSchemaFiles,
   expandSchemaEntries,
@@ -30,9 +29,8 @@ import {
 import { type AotOutputFormat, generate } from "./aot/generate.js";
 import { getArtifact } from "./runtime/artifact-registry.js";
 
-const DEFAULT_OUT_DIR = "generated/jit";
-const DEFAULT_PACKAGE_NAME = "@jit/generated";
-const CONFIG_FORMATS = ["ts", "mts", "mjs", "cjs"] as const;
+/** Generated output lands beside the config file, so no `src/` tree is assumed. */
+const DEFAULT_OUT_DIR = "generated";
 
 export interface CliRuntime {
   readonly cwd?: string;
@@ -43,49 +41,30 @@ export interface CliRuntime {
 interface GenerateArguments {
   readonly files: readonly string[];
   readonly outDir: string | undefined;
-  readonly packageName: string | undefined;
   readonly watch: boolean;
   readonly patterns: readonly string[] | undefined;
-  readonly clean: boolean | undefined;
-  readonly emit: JitConfig["emit"] | undefined;
-  readonly outputFormat: AotOutputFormat | undefined;
+  readonly format: AotOutputFormat | undefined;
+  readonly perFile: boolean | undefined;
 }
 
-interface ResolvedAotInputs extends Omit<GenerateArguments, "outputFormat"> {
-  readonly outputFormat: AotOutputFormat;
+interface ResolvedAotInputs extends Omit<GenerateArguments, "format"> {
+  readonly format: AotOutputFormat;
   readonly configFile: string | undefined;
   readonly resolvedOut: string;
 }
 
-interface LegacyJitConfig {
-  readonly schemas?: readonly string[];
-  readonly outDir?: string;
-  readonly packageName?: string;
-  readonly clean?: boolean;
-  readonly output?: {
-    readonly directory?: string;
-    readonly packageName?: string;
-    readonly clean?: boolean;
-  };
-}
-
 export interface InitArguments {
-  readonly format: ConfigFormat;
   readonly force: boolean;
   readonly entries: readonly string[] | undefined;
   readonly outDir: string;
-  readonly packageName: string | undefined;
-  readonly patterns: readonly string[];
-  readonly outputFormat?: AotOutputFormat;
+  readonly format: AotOutputFormat | undefined;
+  readonly perFile: boolean;
 }
 
-export type ConfigFormat = (typeof CONFIG_FORMATS)[number];
-
 const USAGE = `Usage:
-  jit init [--force] [--format ts|mts|mjs|cjs] [--output-format ts|js] [--entries <path-or-glob>] [--out <dir>] [--name <package>] [--pattern <glob>]
-  jit generate [files...] [--out <dir>] [--output-format ts|js] [--name <package>] [--watch] [--pattern <glob>] [--no-clean]
+  jit init [--force] [--out <dir>] [--format ts|js] [--entries <path-or-glob>]
+  jit generate [files...] [--out <dir>] [--format ts|js] [--per-file] [--watch] [--pattern <glob>]
   jit doctor [files...] [--pattern <glob>]
-  jit explain [files...] [--pattern <glob>]
   jit list [files...] [--pattern <glob>]
   jit inspect <export> [files...] [--stage source|plan]
   jit clean [--out <dir>]
@@ -101,7 +80,6 @@ export async function main(argv: readonly string[], runtime: CliRuntime = {}): P
     if (command === "init") return runInit(parseInitArguments(rest), cwd, stdout, stderr);
     if (command === "generate") return runGenerate(parseGenerateArguments(rest, cwd), cwd, stdout, stderr);
     if (command === "doctor") return runDoctor(parseGenerateArguments(rest, cwd), cwd, stdout);
-    if (command === "explain") return runExplain(parseGenerateArguments(rest, cwd), cwd, stdout, stderr);
     if (command === "list") return runList(parseGenerateArguments(rest, cwd), cwd, stdout, stderr);
     if (command === "inspect") return runInspect(parseInspectArguments(rest, cwd), cwd, stdout, stderr);
     if (command === "clean") return runClean(parseGenerateArguments(rest, cwd), cwd, stdout);
@@ -124,15 +102,18 @@ function runInit(
   stdout: (text: string) => void,
   stderr: (text: string) => void
 ): number {
-  const configFile = join(cwd, `jit.config.${parsed.format}`);
+  // A TypeScript project gets a typed config and typed output; everything
+  // else gets plain ESM it can run without a build step.
+  const format = parsed.format ?? (existsSync(join(cwd, "tsconfig.json")) ? "ts" : "js");
+  const configFile = join(cwd, `jit.config.${format}`);
 
   if (existsSync(configFile) && !parsed.force) {
     stderr(`jit config already exists at ${configFile}; pass --force to overwrite it\n`);
     return 1;
   }
 
-  writeFileSync(configFile, createConfigSource(parsed));
-  writeExampleDeclaration(cwd);
+  writeFileSync(configFile, createConfigSource({ ...parsed, format }));
+  writeExampleDeclaration(cwd, format);
   stdout(`created ${configFile}\n`);
   return 0;
 }
@@ -144,7 +125,7 @@ async function runGenerate(
   stderr: (text: string) => void
 ): Promise<number> {
   const resolved = await resolveAotInputs(parsed, cwd);
-  const { files, packageName, clean, emit, resolvedOut } = resolved;
+  const { files, resolvedOut } = resolved;
 
   if (resolved.configFile) stdout(`using ${resolved.configFile}\n`);
 
@@ -154,25 +135,18 @@ async function runGenerate(
   }
 
   const runOnce = async (): Promise<number> => {
-    const { schemas, typeSchemas, functions, sources } = await collectSchemas(files);
+    const declarations = await collectDeclarations(files);
 
-    if (Object.keys(schemas).length === 0 && Object.keys(functions).length === 0) {
-      stderr(
-        `No AOT functions found in: ${files.join(", ")}. Export standalone compiled functions or JIT.compile(schema, { ... }) objects.\n`
-      );
+    if (Object.keys(declarations.artifacts).length === 0 && Object.keys(declarations.groups).length === 0) {
+      stderr(`No AOT artifacts found in: ${files.join(", ")}. Declare compiled JIT functions or artifact objects.\n`);
       return 1;
     }
 
     const result = generate({
-      schemas,
-      typeSchemas,
-      functions,
-      sources,
+      ...declarations,
       outDir: resolvedOut,
-      ...(packageName ? { packageName } : {}),
-      ...(clean !== undefined ? { clean } : {}),
-      ...(emit !== undefined ? { emit } : {}),
-      ...(resolved.outputFormat !== undefined ? { format: resolved.outputFormat } : {}),
+      format: resolved.format,
+      perFile: resolved.perFile === true,
     });
 
     for (const skip of result.skipped) {
@@ -223,55 +197,13 @@ async function runDoctor(parsed: GenerateArguments, cwd: string, stdout: (text: 
   stdout(`cwd: ${cwd}\n`);
   stdout(`config: ${resolved.configFile ?? "not found"}\n`);
   stdout(`outDir: ${resolved.resolvedOut}\n`);
-  stdout(`format: ${resolved.outputFormat ?? "typescript"}\n`);
-  const packageLayout = resolved.resolvedOut.split(/[\\/]+/).includes("node_modules");
-
-  stdout(`layout: ${packageLayout ? "package" : "local"}\n`);
-  if (packageLayout) stdout(`packageName: ${resolved.packageName ?? DEFAULT_PACKAGE_NAME}\n`);
+  stdout(`format: ${resolved.format}\n`);
+  stdout(`layout: ${resolved.perFile ? "one module per declaration file" : "single index module"}\n`);
   stdout(`patterns: ${(resolved.patterns ?? DEFAULT_SCHEMA_PATTERNS).join(", ")}\n`);
-  stdout(
-    `emit: subpathModules=${resolved.emit?.subpathModules ?? false}, manifest=${resolved.emit?.manifest ?? false}, plans=${resolved.emit?.plans ?? false}\n`
-  );
   stdout(`files: ${resolved.files.length}\n`);
   for (const file of resolved.files) stdout(`  - ${file}\n`);
 
   return resolved.files.length === 0 ? 1 : 0;
-}
-
-async function runExplain(
-  parsed: GenerateArguments,
-  cwd: string,
-  stdout: (text: string) => void,
-  stderr: (text: string) => void
-): Promise<number> {
-  const resolved = await resolveAotInputs(parsed, cwd);
-
-  if (resolved.files.length === 0) {
-    stderr("No declaration files found: pass files, add jit.config.*, or create *.jit.ts modules\n");
-    return 1;
-  }
-
-  const { schemas, functions } = await collectSchemas(resolved.files);
-
-  stdout("jit explain\n");
-  stdout(`files: ${resolved.files.length}\n`);
-  stdout(`grouped objects: ${Object.keys(schemas).length}\n`);
-  for (const [name, value] of Object.entries(schemas)) {
-    stdout(`  - ${name}: ${readOps(value).join(", ") || "no selected operations"}\n`);
-  }
-  stdout(`standalone functions: ${Object.keys(functions).length}\n`);
-  for (const [name, value] of Object.entries(functions)) {
-    const artifact = getArtifact(value);
-
-    stdout(`  - ${name}: ${artifactLabel(artifact)}\n`);
-  }
-
-  if (Object.keys(schemas).length === 0 && Object.keys(functions).length === 0) {
-    stderr("No AOT functions found in declaration files\n");
-    return 1;
-  }
-
-  return 0;
 }
 
 async function runList(
@@ -287,20 +219,24 @@ async function runList(
     return 1;
   }
 
-  const { schemas, functions } = await collectSchemas(resolved.files);
-  const schemaNames = Object.keys(schemas);
-  const functionNames = Object.keys(functions);
+  const { artifacts, groups, schemas } = await collectDeclarations(resolved.files);
 
   stdout("jit list\n");
-  for (const name of schemaNames) stdout(`${name}: ${readOps(schemas[name]).join(", ") || "no selected operations"}\n`);
-  for (const name of functionNames) {
-    const artifact = getArtifact(functions[name]);
+  stdout(`files: ${resolved.files.length}\n`);
+  for (const name of Object.keys(schemas)) stdout(`  type ${name}\n`);
+  for (const name of Object.keys(groups)) {
+    const members = Object.keys(groups[name]).map(
+      (prop) => `${prop} (${artifactLabel(getArtifact(groups[name][prop]))})`
+    );
 
-    stdout(`${name}: ${artifactLabel(artifact)}\n`);
+    stdout(`  ${name}: ${members.join(", ")}\n`);
+  }
+  for (const name of Object.keys(artifacts)) {
+    stdout(`  ${name}: ${artifactLabel(getArtifact(artifacts[name]))}\n`);
   }
 
-  if (schemaNames.length === 0 && functionNames.length === 0) {
-    stderr("No AOT functions found in declaration files\n");
+  if (Object.keys(artifacts).length === 0 && Object.keys(groups).length === 0) {
+    stderr("No AOT artifacts found in declaration files\n");
     return 1;
   }
 
@@ -326,52 +262,38 @@ async function runInspect(
     return 1;
   }
 
-  const { schemas, typeSchemas, functions, sources } = await collectSchemas(resolved.files);
-  const schema = schemas[parsed.target];
-  const fn = functions[parsed.target];
+  const declarations = await collectDeclarations(resolved.files);
+  const group = declarations.groups[parsed.target];
+  const artifact = declarations.artifacts[parsed.target];
 
-  if (schema === undefined && fn === undefined) {
-    stderr(`AOT export "${parsed.target}" was not found\n`);
+  if (group === undefined && artifact === undefined) {
+    stderr(`AOT declaration "${parsed.target}" was not found\n`);
     return 1;
   }
 
   const descriptor =
-    schema !== undefined
+    group !== undefined
       ? {
           name: parsed.target,
-          kind: "grouped",
-          source: sources.get(parsed.target),
-          operations: readOps(schema),
+          kind: "group",
+          source: declarations.sources.get(parsed.target),
+          operations: Object.keys(group).map((prop) => `${prop}: ${artifactLabel(getArtifact(group[prop]))}`),
         }
       : {
           name: parsed.target,
-          kind: getArtifact(fn)?.kind ?? "unknown",
-          source: sources.get(parsed.target),
-          operations: readFunctionOps(fn),
+          kind: getArtifact(artifact)?.kind ?? "unknown",
+          source: declarations.sources.get(parsed.target),
+          operations: readArtifactOps(artifact),
         };
 
   stdout(`jit inspect ${parsed.target}\n`);
-
-  if (parsed.stage === "plan") {
-    stdout(`${JSON.stringify(descriptor, null, 2)}\n`);
-    return 0;
-  }
 
   if (parsed.stage === "source") {
     const tempDir = mkdtempSync(join(tmpdir(), "jit-inspect-"));
 
     try {
-      generate({
-        schemas,
-        typeSchemas,
-        functions,
-        sources,
-        outDir: tempDir,
-        clean: true,
-        format: resolved.outputFormat,
-      });
-      const file = resolved.outputFormat === "typescript" ? "index.ts" : "index.js";
-      stdout(readFileSync(join(tempDir, file), "utf8"));
+      generate({ ...declarations, outDir: tempDir, format: resolved.format });
+      stdout(readFileSync(join(tempDir, `index.${resolved.format}`), "utf8"));
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
@@ -393,32 +315,25 @@ async function runClean(parsed: GenerateArguments, cwd: string, stdout: (text: s
 async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise<ResolvedAotInputs> {
   let files = [...parsed.files];
   let outDir = parsed.outDir;
-  let packageName = parsed.packageName;
   let patterns = parsed.patterns;
-  let clean = parsed.clean;
-  let emit = parsed.emit;
-  let outputFormat = parsed.outputFormat;
+  let format = parsed.format;
+  let perFile = parsed.perFile;
   let configFile: string | undefined;
+  let configDir = cwd;
 
   if (files.length === 0) {
     configFile = findConfigFile(cwd);
 
     if (configFile) {
       const loaded = await loadModule(configFile);
-      const config = (loaded.default ?? loaded) as JitConfig & LegacyJitConfig;
-      const configDir = dirname(configFile);
+      const config = (loaded.default ?? loaded) as JitConfig;
 
-      const entries = config.entries ?? config.schemas;
-      const output = config.output;
-
+      configDir = dirname(configFile);
       patterns = patterns ?? config.patterns;
-      files = expandSchemaEntries(entries, configDir, patterns);
-      outDir = outDir ?? (output?.directory ? resolve(configDir, output.directory) : undefined);
-      outDir = outDir ?? (config.outDir ? resolve(configDir, config.outDir) : undefined);
-      packageName = packageName ?? output?.packageName ?? config.packageName;
-      clean = clean ?? output?.clean ?? config.clean;
-      outputFormat = outputFormat ?? output?.format;
-      emit = mergeEmit(config.emit, emit);
+      files = expandSchemaEntries(config.entries, configDir, patterns);
+      outDir = outDir ?? (config.output?.directory ? resolve(configDir, config.output.directory) : undefined);
+      format = format ?? config.output?.format;
+      perFile = perFile ?? config.output?.perFile;
     }
 
     if (files.length === 0) files = discoverSchemaFiles(cwd, patterns);
@@ -428,28 +343,22 @@ async function resolveAotInputs(parsed: GenerateArguments, cwd: string): Promise
     ...parsed,
     files,
     outDir,
-    packageName,
     patterns,
-    clean,
-    emit,
-    outputFormat: validateOutputFormat(outputFormat ?? "typescript"),
+    perFile,
+    format: validateOutputFormat(format ?? "ts"),
     configFile,
-    resolvedOut: outDir ?? resolve(cwd, DEFAULT_OUT_DIR),
+    resolvedOut: outDir ?? resolve(configDir, DEFAULT_OUT_DIR),
   };
 }
 
-function readOps(value: unknown): readonly string[] {
-  if (value === null || typeof value !== "object") return [];
-
-  const ops = (value as { readonly ops?: unknown }).ops;
-
-  return Array.isArray(ops) ? ops.filter((op): op is string => typeof op === "string") : [];
-}
-
-function readFunctionOps(value: unknown): readonly string[] {
+function readArtifactOps(value: unknown): readonly string[] {
   const artifact = getArtifact(value);
 
   if (!artifact) return [];
+  return artifactOps(artifact);
+}
+
+function artifactOps(artifact: Exclude<ReturnType<typeof getArtifact>, undefined>): readonly string[] {
   if ("op" in artifact) return [artifact.op];
   if (artifact.kind === "execution") {
     return artifact.plan.stages.map((stage) =>
@@ -462,34 +371,17 @@ function readFunctionOps(value: unknown): readonly string[] {
 function artifactLabel(artifact: ReturnType<typeof getArtifact>): string {
   if (!artifact) return "unknown";
   if ("op" in artifact) return `${artifact.kind}:${artifact.op}`;
-  if (artifact.kind === "execution") return `execution:${readFunctionOpsFromArtifact(artifact).join(">")}`;
+  if (artifact.kind === "execution") return `execution:${artifactOps(artifact).join(">")}`;
   return artifact.kind;
-}
-
-function readFunctionOpsFromArtifact(artifact: Exclude<ReturnType<typeof getArtifact>, undefined>): readonly string[] {
-  if ("op" in artifact) return [artifact.op];
-  if (artifact.kind === "execution") {
-    return artifact.plan.stages.map((stage) =>
-      stage.kind === "validate" || stage.kind === "operation" ? stage.operation : stage.kind
-    );
-  }
-  return [artifact.kind];
-}
-
-function mergeEmit(base: JitConfig["emit"], override: JitConfig["emit"]): JitConfig["emit"] | undefined {
-  if (!base && !override) return undefined;
-  return { ...base, ...override };
 }
 
 function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateArguments {
   const files: string[] = [];
   let outDir: string | undefined;
-  let packageName: string | undefined;
   let watchMode = false;
   let patterns: string[] | undefined;
-  let clean: boolean | undefined;
-  let emit: JitConfig["emit"] | undefined;
-  let outputFormat: AotOutputFormat | undefined;
+  let format: AotOutputFormat | undefined;
+  let perFile: boolean | undefined;
 
   for (let index = 0; index < rest.length; index++) {
     const argument = rest[index];
@@ -499,13 +391,13 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
       continue;
     }
 
-    if (argument === "--name") {
-      packageName = readValue(rest, ++index, "--name");
+    if (argument === "--per-file") {
+      perFile = true;
       continue;
     }
 
-    if (argument === "--output-format") {
-      outputFormat = parseOutputFormat(readValue(rest, ++index, "--output-format"));
+    if (argument === "--format") {
+      format = parseOutputFormat(readValue(rest, ++index, "--format"));
       continue;
     }
 
@@ -519,50 +411,10 @@ function parseGenerateArguments(rest: readonly string[], cwd: string): GenerateA
       continue;
     }
 
-    if (argument === "--clean") {
-      clean = true;
-      continue;
-    }
-
-    if (argument === "--no-clean") {
-      clean = false;
-      continue;
-    }
-
-    if (argument === "--subpath-modules") {
-      emit = { ...emit, subpathModules: true };
-      continue;
-    }
-
-    if (argument === "--no-subpath-modules") {
-      emit = { ...emit, subpathModules: false };
-      continue;
-    }
-
-    if (argument === "--manifest") {
-      emit = { ...emit, manifest: true };
-      continue;
-    }
-
-    if (argument === "--no-manifest") {
-      emit = { ...emit, manifest: false };
-      continue;
-    }
-
-    if (argument === "--plans") {
-      emit = { ...emit, plans: true };
-      continue;
-    }
-
-    if (argument === "--no-plans") {
-      emit = { ...emit, plans: false };
-      continue;
-    }
-
     if (!argument.startsWith("--")) files.push(resolve(cwd, argument));
   }
 
-  return { files, outDir, packageName, watch: watchMode, patterns, clean, emit, outputFormat };
+  return { files, outDir, watch: watchMode, patterns, format, perFile };
 }
 
 function parseInspectArguments(rest: readonly string[], cwd: string): InspectArguments {
@@ -592,33 +444,26 @@ function parseInspectArguments(rest: readonly string[], cwd: string): InspectArg
 }
 
 function parseInitArguments(rest: readonly string[]): InitArguments {
-  let format: ConfigFormat = "ts";
   let force = false;
   let entries: string[] | undefined;
   let outDir = DEFAULT_OUT_DIR;
-  let packageName: string | undefined;
-  let patterns: string[] = [...DEFAULT_SCHEMA_PATTERNS];
-  let outputFormat: AotOutputFormat | undefined;
+  let format: AotOutputFormat | undefined;
+  let perFile = false;
 
   for (let index = 0; index < rest.length; index++) {
     const argument = rest[index];
-
-    if (argument === "--format") {
-      format = parseFormat(readValue(rest, ++index, "--format"));
-      continue;
-    }
 
     if (argument === "--force" || argument === "-f") {
       force = true;
       continue;
     }
 
-    if (argument === "--yes" || argument === "-y") continue;
-
-    if (argument === "--schemas") {
-      entries = [...(entries ?? []), readValue(rest, ++index, "--schemas")];
+    if (argument === "--per-file") {
+      perFile = true;
       continue;
     }
+
+    if (argument === "--yes" || argument === "-y") continue;
 
     if (argument === "--entries") {
       entries = [...(entries ?? []), readValue(rest, ++index, "--entries")];
@@ -630,72 +475,40 @@ function parseInitArguments(rest: readonly string[]): InitArguments {
       continue;
     }
 
-    if (argument === "--name") {
-      packageName = readValue(rest, ++index, "--name");
-      continue;
-    }
-
-    if (argument === "--output-format") {
-      outputFormat = parseOutputFormat(readValue(rest, ++index, "--output-format"));
-      continue;
-    }
-
-    if (argument === "--pattern") {
-      patterns = [readValue(rest, ++index, "--pattern")];
+    if (argument === "--format") {
+      format = parseOutputFormat(readValue(rest, ++index, "--format"));
     }
   }
 
-  return {
-    format,
-    force,
-    entries,
-    outDir,
-    packageName,
-    patterns,
-    ...(outputFormat !== undefined ? { outputFormat } : {}),
-  };
+  return { force, entries, outDir, format, perFile };
 }
 
-export function createConfigSource(options: InitArguments): string {
+export function createConfigSource(options: InitArguments & { readonly format: AotOutputFormat }): string {
+  const extension = options.format === "ts" ? "ts" : "js";
   const lines = [
-    "  /** Files, directories, or globs containing explicit compiled AOT exports. */",
-    `  entries: ${formatStringArray(options.entries ?? ["./jit/**/*.jit.ts"])},`,
-    "  /** Patterns used when an entry is a directory or discovery starts at the project root. */",
-    `  patterns: ${formatStringArray(options.patterns)},`,
+    "  /** Files, directories, or globs holding your JIT declarations. */",
+    `  entries: ${formatStringArray(options.entries ?? [`./jit/**/*.jit.${extension}`])},`,
     "  output: {",
     "    /** Destination relative to this config file. */",
     `    directory: ${JSON.stringify(options.outDir)},`,
-    '    /** "typescript" emits typed source; "javascript" emits ready-to-run ESM. */',
-    `    format: ${JSON.stringify(options.outputFormat ?? "typescript")},`,
-    ...(options.packageName && options.outDir.split(/[\\/]+/).includes("node_modules")
-      ? [
-          "    /** Namespace override for this generated node_modules package. */",
-          `    packageName: ${JSON.stringify(options.packageName)},`,
-        ]
+    '    /** "ts" emits typed source; "js" emits ready-to-run ESM. */',
+    `    format: ${JSON.stringify(options.format)},`,
+    ...(options.perFile
+      ? ["    /** One module per declaration file instead of a single index. */", "    perFile: true,"]
       : []),
-    "    /** Delete only JIT-owned artifacts before each generation. */",
-    "    clean: true,",
-    "  },",
-    "  emit: {",
-    "    /** Add one tree-shakable entry point per declaration file. */",
-    "    subpathModules: true,",
-    "    /** Describe generated imports and selected operations. */",
-    "    manifest: true,",
-    "    /** Persist deterministic operation plans for inspection and tooling. */",
-    "    plans: true,",
     "  },",
   ];
 
-  if (options.format === "cjs") {
-    return `/** @type {import("@jit-compiler/jit").AOT.JitConfig} */\nmodule.exports = {\n${lines.join("\n")}\n};\n`;
+  if (options.format === "js") {
+    return `/** @type {import("@jit-compiler/jit").AOT.JitConfig} */\nexport default {\n${lines.join("\n")}\n};\n`;
   }
 
   return `import { AOT } from "@jit-compiler/jit";\n\nexport default AOT.defineConfig({\n${lines.join("\n")}\n});\n`;
 }
 
-function writeExampleDeclaration(cwd: string): void {
+function writeExampleDeclaration(cwd: string, format: AotOutputFormat): void {
   const dir = join(cwd, "jit");
-  const file = join(dir, "user.jit.ts");
+  const file = join(dir, `user.jit.${format === "ts" ? "ts" : "js"}`);
 
   if (existsSync(file)) return;
 
@@ -705,7 +518,7 @@ function writeExampleDeclaration(cwd: string): void {
     [
       'import { JIT } from "@jit-compiler/jit/define";',
       "",
-      "export const User = JIT.object({",
+      "const User = JIT.object({",
       "  id: JIT.int(),",
       "  name: JIT.string().trim().min(1),",
       "});",
@@ -725,20 +538,15 @@ function readValue(values: readonly string[], index: number, flag: string): stri
   return value;
 }
 
-function parseFormat(value: string): ConfigFormat {
-  if ((CONFIG_FORMATS as readonly string[]).includes(value)) return value as ConfigFormat;
-  throw new Error(`unknown config format "${value}"`);
-}
-
 function parseOutputFormat(value: string): AotOutputFormat {
-  if (value === "js" || value === "javascript") return "javascript";
-  if (value === "ts" || value === "typescript") return "typescript";
-  throw new Error(`unknown output format "${value}"; expected "typescript" or "javascript"`);
+  if (value === "js" || value === "javascript") return "js";
+  if (value === "ts" || value === "typescript") return "ts";
+  throw new Error(`unknown output format "${value}"; expected "ts" or "js"`);
 }
 
 function validateOutputFormat(value: unknown): AotOutputFormat {
-  if (value === "typescript" || value === "javascript") return value;
-  throw new Error(`unknown output format ${JSON.stringify(value)}; expected "typescript" or "javascript"`);
+  if (value === "ts" || value === "js") return value;
+  throw new Error(`unknown output format ${JSON.stringify(value)}; expected "ts" or "js"`);
 }
 
 function formatStringArray(values: readonly string[]): string {

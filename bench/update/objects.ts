@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { produce } from "../shared/competitors.js";
 import {
   createDeepUser,
@@ -18,7 +18,7 @@ export function registerObjectUpdates(): void {
     op: "update",
     name: "small object unchanged",
     args: [createSmallUser(), {}],
-    jit: JIT.compileUpdate(SmallUserSchema.schema),
+    jit: Compiler.compileUpdate(SmallUserSchema.schema),
     competitors: [{ name: "immer", fn: (value: SmallUser) => produce(value, () => {}) }],
   });
 
@@ -26,7 +26,7 @@ export function registerObjectUpdates(): void {
     op: "update",
     name: "small object changed",
     args: [createSmallUser(), { name: "changed" }],
-    jit: JIT.compileUpdate(SmallUserSchema.schema),
+    jit: Compiler.compileUpdate(SmallUserSchema.schema),
     competitors: [
       { name: "immer", fn: (value: SmallUser) => produce(value, (draft) => void (draft.name = "changed")) },
     ],
@@ -36,7 +36,7 @@ export function registerObjectUpdates(): void {
     op: "update",
     name: "medium object nested",
     args: [createMediumUser(), { profile: { score: 999 } }],
-    jit: JIT.compileUpdate(MediumUserSchema.schema),
+    jit: Compiler.compileUpdate(MediumUserSchema.schema),
     competitors: [
       { name: "immer", fn: (value: MediumUser) => produce(value, (draft) => void (draft.profile.score = 999)) },
     ],
@@ -46,7 +46,7 @@ export function registerObjectUpdates(): void {
     op: "update",
     name: "deep object nested",
     args: [createDeepUser(), { profile: { address: { zip: 99999 } } }],
-    jit: JIT.compileUpdate(DeepUserSchema.schema),
+    jit: Compiler.compileUpdate(DeepUserSchema.schema),
     competitors: [
       { name: "immer", fn: (value: DeepUser) => produce(value, (draft) => void (draft.profile.address.zip = 99999)) },
     ],

@@ -15,9 +15,9 @@ const User = JIT.object({
 
 type User = JIT.Typeof<typeof User>;`;
 
-export const heroUsageSource = `const isUser = JIT.is(User);
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+export const heroUsageSource = `const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 
 isUser(input);        // pure boolean guard
 parseUser(input);     // throws with every issue

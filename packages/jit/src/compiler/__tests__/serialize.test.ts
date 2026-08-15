@@ -152,7 +152,7 @@ describe("JIT compiler serialize + codec", () => {
     });
 
     it("should round-trip values exactly", () => {
-      const events = JIT.codec(Event);
+      const events = JIT.binary.codec(Event);
       const event = {
         id: 42,
         kind: "click" as const,
@@ -180,7 +180,7 @@ describe("JIT compiler serialize + codec", () => {
         a: JIT.optional(JIT.number()),
         b: JIT.nullable(JIT.number()),
       });
-      const codec = JIT.codec(Maybe);
+      const codec = JIT.binary.codec(Maybe);
 
       expect(codec.decode(codec.encode({ a: undefined, b: null }))).toEqual({
         a: undefined,
@@ -195,7 +195,7 @@ describe("JIT compiler serialize + codec", () => {
     it("should carry no field names on the wire", () => {
       const Point = JIT.object({ x: JIT.number(), y: JIT.number() });
       const Points = JIT.object({ items: JIT.array(Point) });
-      const codec = JIT.codec(Points);
+      const codec = JIT.binary.codec(Points);
       const value = {
         items: Array.from({ length: 100 }, (_, index) => ({
           x: index + 0.123456789,
@@ -214,7 +214,7 @@ describe("JIT compiler serialize + codec", () => {
 
     it("should decode from ArrayBuffer and Uint8Array views", () => {
       const Simple = JIT.object({ id: JIT.number() });
-      const codec = JIT.codec(Simple);
+      const codec = JIT.binary.codec(Simple);
       const bytes = codec.encode({ id: 5 });
 
       expect(codec.decode(bytes.buffer.slice(0) as ArrayBuffer)).toEqual({
@@ -228,7 +228,7 @@ describe("JIT compiler serialize + codec", () => {
         kind: JIT.literal("ping"),
         seq: JIT.number(),
       });
-      const codec = JIT.codec(Tagged);
+      const codec = JIT.binary.codec(Tagged);
       const bytes = codec.encode({ kind: "ping", seq: 1 });
 
       // 1 version byte + float64; the literal costs nothing.
@@ -237,8 +237,8 @@ describe("JIT compiler serialize + codec", () => {
     });
 
     it("should reject dynamically-typed schemas", () => {
-      expect(() => JIT.codec(JIT.object({ meta: JIT.any() }))).toThrow(Errors.JITError);
-      expect(() => JIT.codec(JIT.object({ meta: JIT.unknown() }))).toThrow(/rigid/);
+      expect(() => JIT.binary.codec(JIT.object({ meta: JIT.any() }))).toThrow(Errors.JITError);
+      expect(() => JIT.binary.codec(JIT.object({ meta: JIT.unknown() }))).toThrow(/rigid/);
     });
   });
 });

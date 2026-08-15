@@ -6,11 +6,11 @@ description: Compile allocation-free structural equality for one schema.
 ## Signature
 
 ```ts
-const equalUser = JIT.equal(User);
+const equalUser = JIT.compare.equal(User);
 // (left: User, right: User) => boolean
 ```
 
-`JIT.equal(schema)` emits equality code from the known shape. Objects use
+`JIT.compare.equal(schema)` emits equality code from the known shape. Objects use
 direct field access, arrays use indexed loops, tuples unroll fixed positions
 and tagged unions dispatch before comparing variant fields.
 
@@ -49,14 +49,14 @@ explain.cache; // "identity"
 equalUser.hash; // deterministic source hash
 ```
 
-Compile once at module scope. Calling `JIT.equal(User)` again with the same
+Compile once at module scope. Calling `JIT.compare.equal(User)` again with the same
 schema identity reuses the compiled cache.
 
 ## Collections and indexes
 
 ```ts
 const Users = JIT.array(User).keyed("id");
-const equalUsers = JIT.equal(Users);
+const equalUsers = JIT.compare.equal(Users);
 ```
 
 `keyed` is useful when order does not express identity and snapshots are
@@ -68,7 +68,7 @@ behind the compiler's back.
 
 ```ts
 // models.jit.ts
-export const equalUser = JIT.equal(User);
+export const equalUser = JIT.compare.equal(User);
 ```
 
 AOT writes the same specialized body as a pure export. No schema object,

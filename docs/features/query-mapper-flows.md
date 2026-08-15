@@ -20,8 +20,7 @@ const Users = JIT.array(User);
 
 const findAdmins = JIT.query(Users)
   .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true), q.gt("score", 500)))
-  .select("id", "name", "score")
-  .compile();
+  .select("id", "name", "score");
 ```
 
 With parameters:
@@ -29,8 +28,7 @@ With parameters:
 ```ts
 const findByRole = JIT.query(Users)
   .params({ role: JIT.string() })
-  .filter((q, params) => q.eq("role", params.role))
-  .compile();
+  .filter((q, params) => q.eq("role", params.role));
 
 findByRole(users, { role: "admin" });
 ```
@@ -39,8 +37,7 @@ Build-time constants can be embedded:
 
 ```ts
 JIT.query(Users)
-  .filter((q) => q.eq("role", JIT.const("admin")))
-  .compile();
+  .filter((q) => q.eq("role", JIT.const("admin")));
 ```
 
 ## Mapper API
@@ -89,19 +86,19 @@ const normalizeUser = JIT.transform(UserEntity)
 Queries and mappers can be attached as extras to a grouped object:
 
 ```ts
-export const User = JIT.compile(UserSchema, {
+export const User = {
   is: JIT.validate.is(UserSchema),
   findAdmins: JIT.query(JIT.array(UserSchema))
     .filter((q) => q.eq("role", "admin"))
-    .compile(),
+    ,
   toPublic: JIT.map.many(UserSchema, PublicUser, {}),
-});
+};
 ```
 
 Generated output exposes:
 
 ```ts
-import { User } from "@jit/generated";
+import { User } from "./generated/index.js";
 
 User.is(input);
 User.findAdmins(users);
@@ -142,8 +139,7 @@ The JIT version compiles each stage and keeps the hot loops direct:
 const isUser = JIT.validate.is(User);
 const selectAdmins = JIT.query(Users)
   .filter((q) => q.eq("role", "admin"))
-  .select("id", "name")
-  .compile();
+  .select("id", "name");
 const stringifyPublicUsers = JIT.json.stringify(PublicUsers);
 ```
 

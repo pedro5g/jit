@@ -11,14 +11,14 @@ AOT performs that work during the build and emits only ordinary JavaScript.
 
 ```ts
 // jit/user.jit.ts
-export const User = JIT.compile(UserSchema, {
+export const User = {
   is: JIT.validate.is(UserSchema),
   safeParse: JIT.validate.safeParse(UserSchema),
-});
+};
 ```
 
 ```ts
-import { User } from "@jit/generated";
+import { User } from "./generated/index.js";
 ```
 
 ## Tree-shaking checklist

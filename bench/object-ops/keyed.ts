@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler, JIT } from "@jit-compiler/jit";
 import { createUsers, type MediumUser, MediumUserSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
 import { genericGroupBy, genericNormalize, genericSortBy, genericUniqueBy } from "./generic.js";
@@ -37,7 +37,7 @@ export function registerKeyedOps(): void {
     op: "normalize",
     name: "users 10000",
     args: [users],
-    jit: JIT.compileNormalize(KeyedUsersSchema.schema),
+    jit: Compiler.compileNormalize(KeyedUsersSchema.schema),
     competitors: [
       {
         name: "generic reduce normalize",
@@ -51,7 +51,7 @@ export function registerKeyedOps(): void {
     op: "groupBy",
     name: "role users 10000",
     args: [roleUsers],
-    jit: JIT.compileGroupBy(RoleUsersSchema.schema),
+    jit: Compiler.compileGroupBy(RoleUsersSchema.schema),
     competitors: [
       {
         name: "generic reduce groupBy",
@@ -65,7 +65,7 @@ export function registerKeyedOps(): void {
     op: "sortBy",
     name: "users 10000",
     args: [users],
-    jit: JIT.compileSortBy(JIT.array(MediumUserSchema).sortBy("id", "desc").schema),
+    jit: Compiler.compileSortBy(JIT.array(MediumUserSchema).sortBy("id", "desc").schema),
     competitors: [
       {
         name: "generic sortBy",
@@ -79,7 +79,7 @@ export function registerKeyedOps(): void {
     op: "uniqueBy",
     name: "users 10000",
     args: [users],
-    jit: JIT.compileUniqueBy(JIT.array(MediumUserSchema).uniqueBy("id").schema),
+    jit: Compiler.compileUniqueBy(JIT.array(MediumUserSchema).uniqueBy("id").schema),
     competitors: [
       {
         name: "generic filter uniqueBy",

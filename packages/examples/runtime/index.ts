@@ -6,22 +6,22 @@ import { EventSchema, PublicUserSchema, UserListSchema, UserSchema } from "./sch
 
 export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   const validator = {
-    is: JIT.is(UserSchema),
-    parse: JIT.parse(UserSchema),
-    safeParse: JIT.safeParse(UserSchema),
+    is: JIT.validate.is(UserSchema),
+    parse: JIT.validate.parse(UserSchema),
+    safeParse: JIT.validate.safeParse(UserSchema),
   };
   const parsedUsers = users.map((user) => validator.parse(user));
   const invalid = validator.safeParse(invalidUser);
-  const equal = JIT.equal(UserSchema).compile();
-  const clone = JIT.clone(UserSchema).compile();
-  const diff = JIT.diff(UserSchema).compile();
-  const hash = JIT.hash(UserSchema).compile();
+  const equal = JIT.compare.equal(UserSchema);
+  const clone = JIT.clone(UserSchema);
+  const diff = JIT.compare.diff(UserSchema);
+  const hash = JIT.compare.hash(UserSchema);
   const update = JIT.update(UserSchema)
     .patch({ name: JIT.param("name") })
     .compile();
-  const mask = JIT.mask(UserSchema);
-  const sanitize = JIT.sanitize(UserSchema);
-  const mapper = JIT.map(UserSchema, PublicUserSchema, {});
+  const mask = JIT.security.mask(UserSchema);
+  const sanitize = JIT.security.sanitize(UserSchema);
+  const mapper = JIT.map(UserSchema, PublicUserSchema);
   const stringify = JIT.json.stringify(UserSchema);
   const fromJSON = JIT.json.parse(UserSchema).validate();
   const stringifyChunks = JIT.json.stringifyChunks(UserListSchema, { chunkBytes: 96 });
@@ -36,17 +36,20 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   const encoded = codec.encode(parsedUsers[0]);
   const admins = JIT.query(UserListSchema)
     .filter((query) => query.and(query.eq("role", "admin"), query.eq("active", true)))
-    .select("id", "name", "score")
-    .compile()(parsedUsers);
+    .select(
+      "id",
+      "name",
+      "score"
+    )(parsedUsers);
   const iterateActive = JIT.query(UserListSchema)
     .filter((query) => query.eq("active", true))
     .select("id", "name")
     .take(10)
-    .compileIterator();
+    .to.iterator();
   const visitActive = JIT.query(UserListSchema)
     .filter((query) => query.eq("active", true))
     .select("id")
-    .compileVisitor();
+    .to.visitor();
   const lazyIds = [...iterateActive(parsedUsers)].map((user) => user.id);
   const visitedIds: number[] = [];
   const streamed = JIT.stream(UserListSchema);
@@ -61,8 +64,11 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   const rowset = binary.load(events);
   const binaryAdmins = JIT.query(rowset)
     .filter((query) => query.and(query.eq("region", "br"), query.eq("active", true)))
-    .select("id", "userId", "score")
-    .compile()(rowset);
+    .select(
+      "id",
+      "userId",
+      "score"
+    )(rowset);
   const binaryScore = JIT.process(EventSchema)
     .binary({ strategy: "exact", memoryLayout: "columnar" })
     .filter((query) => query.eq("active", true))

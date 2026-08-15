@@ -109,7 +109,7 @@ perform effects from the returned change set.
 ```ts
 const watchArray = JIT.watch(JIT.array(User), { key: "id" });
 const watchSet = JIT.watch(JIT.set(User), { key: "id" });
-const watchMap = JIT.watch(JIT.map(JIT.number(), User), { key: "id" });
+const watchMap = JIT.watch(JIT.mapSchema(JIT.number(), User), { key: "id" });
 ```
 
 Array order is preserved in `initialItems` and `currentItems`. Sets use
@@ -240,9 +240,9 @@ domain namespace is more convenient:
 ```ts title="src/watchers/users.jit.ts"
 const changes = JIT.watch(Users, { key: "id" });
 
-export const UserCollection = JIT.compile(Users, {
+export const UserCollection = {
   changes,
-});
+};
 ```
 
 ```ts
@@ -262,7 +262,7 @@ owns its evolving state.
 ## AOT callback boundary
 
 Arbitrary callbacks cannot be serialized safely. A watcher declared with
-`onAdd`, `onRemove` or `onUpdate` is reported by `jit explain` and skipped by
+`onAdd`, `onRemove` or `onUpdate` is reported by `jit list` and skipped by
 generation. Keep the generated watcher pure and execute effects explicitly:
 
 ```ts

@@ -84,7 +84,10 @@ The runtime compile helper can still accept array selections for in-memory
 compatibility:
 
 ```ts
-JIT.compile(User, ["is", "parse"], extras);
+{
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
+};
 ```
 
 For AOT markers, the project uses object aggregation:
@@ -92,14 +95,14 @@ For AOT markers, the project uses object aggregation:
 ```ts
 const validator = JIT.validator(User).get("is", "parse");
 
-export const UserCompiled = JIT.compile(User, {
+export const UserCompiled = {
   ...validator,
   stringify: JIT.serializer(User).stringify,
-  findAdmins: JIT.query(JIT.array(User)).filter((q) => q.eq("role", "admin")).compile(),
-});
+  findAdmins: JIT.query(JIT.array(User)).filter((q) => q.eq("role", "admin")),
+};
 ```
 
-`JIT.compile(schema, compiledObject)` returns a frozen object with:
+`compiledObject` returns a frozen object with:
 
 - `schema`
 - an internal operation-key list for AOT
@@ -110,7 +113,7 @@ Reserved public keys: `schema`, `ops`, `extras`.
 
 ### AOT Export Rules
 
-When a schema is exported as `JIT.compile(schema, compiledObject)`, generated
+When a schema is exported as `compiledObject`, generated
 code exports only the grouped object:
 
 ```ts
@@ -134,7 +137,9 @@ export const User_parse = selected.parse;
 ```
 
 The generated package preserves those export names exactly. Raw schemas and
-array-style `JIT.compile(schema, ["is"])` markers do not generate fallback
+array-style `{
+  is: JIT.validate.is(schema),
+}` markers do not generate fallback
 functions. If discovery finds no buildable exports, the CLI warns and writes
 nothing.
 

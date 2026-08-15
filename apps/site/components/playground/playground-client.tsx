@@ -254,8 +254,7 @@ const query = JIT.query(JIT.array(schema))
   .params({ minimumId: JIT.int() })
   .filter((q, p) => q.and(q.eq("role", "admin"), q.gte("id", p.minimumId)))
   .select("id", "name", "role")
-  .orderBy("name", "asc")
-  .compile();
+  .orderBy("name", "asc");
 `,
     a: usersArrayInput,
     op: "query",
@@ -277,8 +276,7 @@ const lazy = JIT.query(JIT.array(schema))
   .filter((q) => q.eq("active", true))
   .select("id", "score")
   .take(2)
-  .lazy()
-  .compile();
+  .lazy();
 `,
     a: eventRowsInput,
     op: "lazy",
@@ -299,7 +297,7 @@ const schema = JIT.object({
 const visitor = JIT.query(JIT.array(schema))
   .filter((q) => q.and(q.eq("active", true), q.gte("score", 40)))
   .select("id", "score")
-  .compileVisitor();
+  .to.visitor();
 `,
     a: eventRowsInput,
     op: "visitor",
@@ -435,11 +433,11 @@ const schema = JIT.object({
 });
 
 // Only these methods exist, compile, and enter the runtime bundle.
-const compiled = JIT.compile(schema, {
-  is: JIT.is(schema),
-  parse: JIT.parse(schema),
+const compiled = {
+  is: JIT.validate.is(schema),
+  parse: JIT.validate.parse(schema),
   clone: JIT.clone(schema),
-});
+};
 `,
     a: `{ "id": 1, "name": "Ada", "email": "ada@lovelace.dev" }`,
     op: "compile",
@@ -492,14 +490,14 @@ const KeyedUsers = JIT.array(schema).keyed("id");
 
 const indexes = {
   // entity alone keeps positional equality
-  entityEqual: JIT.equal(EntityUsers).compile(),
+  entityEqual: JIT.compare.equal(EntityUsers),
   // indexBy/keyed match reordered entities by id
-  indexedEqual: JIT.equal(IndexedUsers).compile(),
-  keyedEqual: JIT.equal(KeyedUsers).compile(),
+  indexedEqual: JIT.compare.equal(IndexedUsers),
+  keyedEqual: JIT.compare.equal(KeyedUsers),
   // entity metadata supplies the default normalization key
-  normalize: JIT.compileNormalize(EntityUsers.schema),
+  normalize: Compiler.compileNormalize(EntityUsers.schema),
   // query keyed() is a fresh Map collector, not a retained schema index
-  keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name").compile(),
+  keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name"),
 };
 `,
     a: `[

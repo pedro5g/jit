@@ -4,9 +4,9 @@ description: Generate only is, parse, safeParse or asynchronous validation when 
 ---
 
 ```ts
-const isUser = JIT.is(User);
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 
 isUser(input);
 parseUser(input);
@@ -22,9 +22,9 @@ const safeParseUser = JIT.validate.safeParse(User);
 const issues = JIT.validate.issues(User);
 ```
 
-`JIT.is`, `JIT.parse`, and `JIT.safeParse` are exact aliases for the
-corresponding `JIT.validate.*` factories. Each returns one callable artifact;
-the removed selection facade is no longer exported.
+Validation is reached through `JIT.validate` and nowhere else — there are no
+root-level `is`/`parse`/`safeParse` aliases. Each factory returns one callable
+artifact.
 
 `is` is fail-fast and allocation-free on the normal path. `safeParse` collects stable
 issues with `path`, `code`, `expected` and `message`. `parse` throws

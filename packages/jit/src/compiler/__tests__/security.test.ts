@@ -26,7 +26,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
   };
 
   it("should mask pii fields with redact, mask, and hash strategies", () => {
-    const maskUser = JIT.mask(User);
+    const maskUser = JIT.security.mask(User);
     const masked = maskUser(ada);
 
     expect(masked.password).toBe("***");
@@ -48,7 +48,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
       meta: JIT.object({ tag: JIT.string() }),
       secret: JIT.string().pii(),
     });
-    const maskClean = JIT.mask(Clean);
+    const maskClean = JIT.security.mask(Clean);
     const input = { meta: { tag: "x" }, secret: "hide" };
     const masked = maskClean(input);
 
@@ -59,7 +59,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
 
   it("should compile to identity when no field is marked", () => {
     const Plain = JIT.object({ id: JIT.number() });
-    const maskPlain = JIT.mask(Plain);
+    const maskPlain = JIT.security.mask(Plain);
     const value = { id: 1 };
 
     expect(maskPlain(value)).toBe(value);
@@ -78,8 +78,8 @@ describe("JIT compiler security (mask + sanitize)", () => {
   it("should reject pii on unsupported field types", () => {
     const Bad = JIT.object({ flags: JIT.array(JIT.string()).pii() });
 
-    expect(() => JIT.mask(Bad).compile()).toThrow(Errors.JITError);
-    expect(() => JIT.mask(Bad).compile()).toThrow(/string and number/);
+    expect(() => JIT.security.mask(Bad).compile()).toThrow(Errors.JITError);
+    expect(() => JIT.security.mask(Bad).compile()).toThrow(/string and number/);
   });
 
   it("should strip scripts, tags, and stray brackets with sanitize", () => {
@@ -88,7 +88,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
       body: JIT.string().sanitize(),
       title: JIT.string(),
     });
-    const clean = JIT.sanitize(Comment);
+    const clean = JIT.security.sanitize(Comment);
     const dirty = {
       id: 1,
       body: '<script>alert("xss")</script><b>hello</b> 1 < 2 <style>p{}</style>',
@@ -118,7 +118,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
         patterns: [{ pattern: /javascript:/gi, replacement: "blocked:" }],
       }),
     });
-    const result = JIT.sanitize(Input)({
+    const result = JIT.security.sanitize(Input)({
       escaped: '<a href="/">A&B</a>',
       rich: '<B onclick="steal()">Hello</B><img src=x><script>bad()</script><em>x</em>',
       sqlIdentifier: " 9 users; DROP",
@@ -147,7 +147,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
     const Passthrough = JIT.object({ body: JIT.string().sanitize("none") });
     const value = { body: "<b>kept</b>" };
 
-    expect(JIT.sanitize(Passthrough)(value)).toBe(value);
+    expect(JIT.security.sanitize(Passthrough)(value)).toBe(value);
     expect(Compiler.emitSanitizeSource(Passthrough.schema)).toContain("return value;");
   });
 
@@ -156,7 +156,7 @@ describe("JIT compiler security (mask + sanitize)", () => {
       id: JIT.number(),
       recoveryEmail: JIT.optional(JIT.string().pii()),
     });
-    const maskAccount = JIT.mask(Account);
+    const maskAccount = JIT.security.mask(Account);
 
     expect(maskAccount({ id: 1, recoveryEmail: undefined }).recoveryEmail).toBeUndefined();
     expect(maskAccount({ id: 1, recoveryEmail: "a@b.co" }).recoveryEmail).toBe("***");
@@ -187,11 +187,11 @@ describe("JIT compiler security (mask + sanitize)", () => {
   });
 
   it("should cache compiled mask and sanitize per schema", () => {
-    expect(JIT.mask(User)).toBe(JIT.mask(User));
+    expect(JIT.security.mask(User)).toBe(JIT.security.mask(User));
 
     const Comment = JIT.object({ body: JIT.string().sanitize() });
 
-    expect(JIT.sanitize(Comment)).toBe(JIT.sanitize(Comment));
+    expect(JIT.security.sanitize(Comment)).toBe(JIT.security.sanitize(Comment));
     Compiler.clearCompileCache();
   });
 });

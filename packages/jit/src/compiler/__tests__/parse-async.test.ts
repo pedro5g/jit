@@ -56,14 +56,14 @@ describe("JIT async validation (parseAsync / safeParseAsync)", () => {
     expect(validate.is({ result: "not a promise" })).toBe(false);
   });
 
-  it("should expose the async pair on the validation namespace and JIT.compile", async () => {
+  it("should expose the async pair on the validation namespace", async () => {
     const Task = JIT.object({ output: JIT.string().promise() });
     const parseAsync = JIT.validate.parseAsync(Task);
-    const compiled = JIT.compile(Task, ["parseAsync", "safeParseAsync"]);
+    const safeParseAsync = JIT.validate.safeParseAsync(Task);
 
     await expect(parseAsync({ output: Promise.resolve("ok") })).resolves.toEqual({ output: "ok" });
 
-    const result = await compiled.safeParseAsync({ output: Promise.resolve(42) });
+    const result = await safeParseAsync({ output: Promise.resolve(42) });
 
     expect(result.success).toBe(false);
   });

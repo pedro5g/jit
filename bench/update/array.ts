@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { produce } from "../shared/competitors.js";
 import { createNestedUsers, createUsers, type MediumUser, NestedArraysSchema, UsersSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
@@ -8,7 +8,7 @@ export function registerArrayUpdates(): void {
     op: "update",
     name: "large array changed at end",
     args: [createUsers(10_000), new Array(9_999).concat({ profile: { score: 999 } })],
-    jit: JIT.compileUpdate(UsersSchema.schema),
+    jit: Compiler.compileUpdate(UsersSchema.schema),
     competitors: [
       {
         name: "immer",
@@ -21,7 +21,7 @@ export function registerArrayUpdates(): void {
     op: "update",
     name: "nested arrays",
     args: [createNestedUsers(500, 20), [undefined, new Array(499).concat({ profile: { score: 999 } })]],
-    jit: JIT.compileUpdate(NestedArraysSchema.schema),
+    jit: Compiler.compileUpdate(NestedArraysSchema.schema),
     competitors: [
       {
         name: "immer",

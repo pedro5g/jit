@@ -12,20 +12,19 @@ const lazyFirstTen = JIT.query(Events)
   .filter((q) => q.and(q.eq("active", true), q.gt("score", 900)))
   .select("id", "score")
   .take(10)
-  .compileIterator();
+  .to.iterator();
 const eagerFirstTen = JIT.query(Events)
   .filter((q) => q.and(q.eq("active", true), q.gt("score", 900)))
   .select("id", "score")
-  .take(10)
-  .compile();
+  .take(10);
 const visitAll = JIT.query(Events)
   .filter((q) => q.eq("active", true))
   .select("id")
-  .compileVisitor();
+  .to.visitor();
 const lazyAll = JIT.query(Events)
   .filter((q) => q.eq("active", true))
   .select("id")
-  .compileIterator();
+  .to.iterator();
 
 registerScenario({
   op: "lazy early termination",

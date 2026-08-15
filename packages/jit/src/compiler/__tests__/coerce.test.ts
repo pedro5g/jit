@@ -77,12 +77,11 @@ describe("JIT.coerce zod-style native coercions", () => {
     try {
       const Native = JIT.object({ page: JIT.coerce.number().int() });
       const Callback = JIT.object({ page: JIT.coerce(JIT.number(), (value) => Number(value)) });
-      const nativeSafeParse = JIT.safeParse(Native);
-      const callbackSafeParse = JIT.safeParse(Callback);
+      const nativeSafeParse = JIT.validate.safeParse(Native);
+      const callbackSafeParse = JIT.validate.safeParse(Callback);
 
       const result = AOT.generate({
-        schemas: {},
-        functions: {
+        artifacts: {
           Native_safeParse: nativeSafeParse,
           Callback_safeParse: callbackSafeParse,
         },

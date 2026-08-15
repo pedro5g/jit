@@ -1,0 +1,63 @@
+---
+title: Mock
+description: Compile a deterministic sample generator that satisfies the schema's own checks.
+---
+
+`JIT.mock(schema)` compiles a generator of valid sample values. It replaces the
+fixture factory that otherwise gets hand-written next to every test, and the
+faker call that knows nothing about the schema's constraints.
+
+```ts
+const mockUser = JIT.mock(User);
+
+mockUser();            // a different valid user each call
+mockUser({ seed: 7 }); // identical on every run and machine
+```
+
+## Valid by construction
+
+The generator honors the checks the validator enforces, so this holds for any
+schema:
+
+```ts
+JIT.validate.is(User)(JIT.mock(User)()); // true
+```
+
+Concretely it respects string lengths, affixes and formats (`email`, `uuid`,
+`url`, `datetime`, `ulid`, …), numeric bounds, integer-ness and `multipleOf`,
+array lengths, enum and literal members, optional and nullable presence, and
+union branches — a different branch is chosen per call, not per compile.
+
+`refine` predicates and transforms are developer code the generator cannot
+invert; the inner shape is still generated, so add an explicit fixture when a
+custom predicate is essential to the test.
+
+## Determinism
+
+Seeding uses a xorshift32 core, so a seed reproduces a value exactly across
+runs, machines and Node versions — safe for snapshot tests:
+
+```ts
+expect(mockUser({ seed: 42 })).toEqual(mockUser({ seed: 42 }));
+```
+
+Without a seed each call draws fresh values.
+
+## Recursive schemas
+
+Generation stops descending past a small depth: an optional branch collapses to
+`undefined` and a required one to its smallest legal value, so a self-referencing
+schema terminates.
+
+## AOT
+
+`JIT.mock` generates ahead of time like any other operation. The tiny PRNG core
+is inlined into the generated module, which keeps it import-free:
+
+```ts
+// jit/user.jit.ts
+export const mockUser = JIT.mock(User);
+```
+
+Fixtures then load with zero compiler cost, which matters for large test suites
+and for seeded demo data in a browser bundle.

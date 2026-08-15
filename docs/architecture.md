@@ -97,7 +97,7 @@ Tier B templates also feed the **artifact registry**
 their source + bindings, while validator and operation artifacts remember the
 schema/op pair. `jit generate` uses that metadata to re-emit explicitly
 exported standalone functions and dev-defined extras aggregated via
-`JIT.compile(schema, { ... })`.
+`{ ... }`.
 
 ## Validation engine
 
@@ -109,8 +109,8 @@ values). Unions validate deeply through hoisted sync predicates;
 discriminated unions dispatch on the literal tag. Output is returned by
 reference when nothing rebuilds (`needsBuild` gates every allocation).
 
-The public runtime capabilities `JIT.validate.is(schema)`, `JIT.parse(schema)`,
-and `JIT.safeParse(schema)` lower to a shared ExecutionPlan and the same
+The public runtime capabilities `JIT.validate.is(schema)`, `JIT.validate.parse(schema)`,
+and `JIT.validate.safeParse(schema)` lower to a shared ExecutionPlan and the same
 validator compiler/cache. A composed source such as
 `JIT.json.parse(schema).validate()` adds stages to that descriptor; it does
 not introduce a second validation implementation. Removed selection facades
@@ -162,8 +162,8 @@ coverage. See [composable execution pipelines](features/composable-execution.md)
 for the public contract.
 
 Query output is a physical-plan choice. `.compile()` keeps the specialized
-eager-array backend; `.compileIterator()`, `.compileAsyncIterator()`, and
-`.compileVisitor()` select explicit incremental backends. The lazy emitter
+eager-array backend; `.to.iterator()`, `.to.asyncIterator()`, and
+`.to.visitor()` select explicit incremental backends. The lazy emitter
 fuses adjacent filter/select/control nodes, emits direct indexed array loops,
 and records materialization barriers in `explain()`. Direct visitors avoid the
 iterator protocol for fusible pipelines. Cardinality-changing operators use
@@ -210,20 +210,14 @@ format. Output location never changes the code format:
 - CLI/config generation defaults to typed `index.ts` in local directories;
   opt-in JavaScript receives one ready-to-run ESM `index.js` with no parallel
   declaration artifact;
-- output below `node_modules` keeps the chosen `.ts` or `.js` source and adds
-  only `package.json` (exports map, `sideEffects: false`); there is no implicit
-  ESM/CJS/declaration fan-out;
-- optional subpath entrypoints are independently compiled from one declaration
-  source and never import/initialize the root barrel, plus deterministic
-  manifest v2 and `plans/*.json` review files when enabled;
+- `output.perFile` compiles one module per declaration file, each standing
+  alone and never importing the barrel;
 - zero imports — the validation error class and runtime helpers
   (keyed-index cache, hash primitives) are inlined;
-- export shape is explicit and bundle-oriented: standalone compiled functions
-  are emitted with the exact export name the developer declared
-  (`export const User_is = selected.is` -> `User_is`); object-style
-  `JIT.compile(schema, { ... })` markers emit only the grouped object
-  (`User.is`). Raw schemas and array-style compile markers do not emit AOT
-  output;
+- export shape mirrors the declaration file: an artifact keeps the exact
+  binding name (`const isUser = JIT.validate.is(User)` -> `isUser`), an object
+  of artifacts emits one frozen object (`UserOps.is`), and a schema emits a
+  named type (`export type User`) but no runtime function;
 - the generator never emits an operation outside the selected surface: object
   markers use only the keys present in the compiled object; standalone output
   uses only exported registered functions;
@@ -237,17 +231,18 @@ format. Output location never changes the code format:
   `safeParse`, async validation is absent unless it is the selected runtime
   capability, and `fromJSON` lowers native `JSON.parse` plus specialized
   validation directly without an intermediate parse wrapper;
-- `JIT.compile` markers restrict generation to the requested ops and add
-  dev-defined extras from the artifact registry; self-contained callback
-  bindings are emitted into the generated module, while native/bound functions
-  and callbacks with inaccessible closure dependencies are skipped with a
-  reported reason, never miscompiled.
+- discovery loads each declaration file through a temporary sibling module
+  that re-exports its private top-level bindings, so a schema kept local still
+  names its generated type; self-contained callback bindings are emitted into
+  the generated module, while native/bound functions and callbacks with
+  inaccessible closure dependencies are skipped with a reported reason, never
+  miscompiled.
 
 CLI/config: `jit init` writes a typed `jit.config.*` plus a starter
 `jit/user.jit.ts` using `@jit-compiler/jit/define`. `jit doctor` reports resolved
-config/discovery without generating; `jit explain` and `jit list` load
-declaration files and list buildable grouped objects plus standalone
-functions; `jit inspect <export> --stage plan|source` prints the
+config/discovery without generating; `jit list` loads declaration files and
+lists declared types, artifact objects and standalone artifacts;
+`jit inspect <export> --stage plan|source` prints the
 collected descriptor or generated review output; `jit clean` removes the
 configured generated directory. `entries` is optional; when omitted,
 `jit generate` scans from the project root. `entries` accepts files,

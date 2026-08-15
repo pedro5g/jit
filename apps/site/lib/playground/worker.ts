@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit/runtime";
+import { Compiler, JIT, Runtime } from "@jit-compiler/jit";
 
 export type PlaygroundOp =
   | "validate"
@@ -88,6 +88,20 @@ function hex(bytes: Uint8Array, limit = 48): string {
  */
 function sourceOf(fn: unknown): string | null {
   if (typeof fn !== "function") return null;
+
+  // A query builder holds its program, so show the loop it would generate
+  // rather than the builder wrapper itself.
+  const artifact = Runtime.getArtifact(fn);
+
+  if (artifact?.kind === "query-plan") {
+    const program = artifact.program as never;
+
+    if (artifact.mode === "iterator") return Compiler.emitQueryIteratorSource(artifact.schema, program);
+    if (artifact.mode === "visitor") return Compiler.emitQueryVisitorSource(artifact.schema, program);
+    return Compiler.emitQuerySource(artifact.schema, program);
+  }
+  if (artifact && "source" in artifact) return artifact.source;
+
   const withPlan = fn as { plan?: unknown };
   if (withPlan.plan !== undefined) return JSON.stringify(withPlan.plan, null, 2);
   const withSource = fn as { source?: unknown };
@@ -136,7 +150,8 @@ interface PlaygroundBinaryArray {
 /**
  * Executes user schema code with JIT in scope, then compiles and runs the
  * selected operation (guide §16: client-only, terminable worker, never on a
- * server, never logged). Import lines are stripped — JIT is injected. Besides
+ * server, never logged). Import lines are stripped — JIT and the low-level
+ * Compiler namespace are injected. Besides
  * `schema`, the snippet may define operation-specific bindings returned below.
  */
 export function executePlaygroundRequest(request: PlaygroundRequest): PlaygroundResponse {
@@ -146,6 +161,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
     const body = code.replace(/^\s*import[^\n]*$/gm, "");
     const build = new Function(
       "JIT",
+      "Compiler",
       `"use strict";\n${body}\n;return {
         schema: typeof schema === "undefined" ? undefined : schema,
         query: typeof query === "undefined" ? undefined : query,
@@ -166,7 +182,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
     );
 
     const compileStart = performance.now();
-    const bindings = build(JIT) as UserBindings;
+    const bindings = build(JIT, Compiler) as UserBindings;
 
     const requireSchema = () => {
       if (!bindings.schema) throw new Error("define a `schema` binding, e.g. `const schema = JIT.object({ … })`");
@@ -213,13 +229,13 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "equal": {
-        const equal = JIT.equal(requireSchema()).compile();
+        const equal = JIT.compare.equal(requireSchema());
         source = sourceOf(equal);
         run = () => equal(requireA(), requireB("a second value"));
         break;
       }
       case "clone": {
-        const clone = JIT.clone(requireSchema()).compile();
+        const clone = JIT.clone(requireSchema());
         source = sourceOf(clone);
         run = () => {
           const out = clone(requireA());
@@ -228,13 +244,13 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "diff": {
-        const diff = JIT.diff(requireSchema()).compile();
+        const diff = JIT.compare.diff(requireSchema());
         source = sourceOf(diff);
         run = () => diff(requireA(), requireB("a second value"));
         break;
       }
       case "hash": {
-        const hashFn = JIT.hash(requireSchema()).compile();
+        const hashFn = JIT.compare.hash(requireSchema());
         source = sourceOf(hashFn);
         run = () => hashFn(requireA());
         break;
@@ -262,7 +278,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "mask": {
-        const mask = JIT.mask(requireSchema());
+        const mask = JIT.security.mask(requireSchema());
         run = () => mask(requireA() as never);
         // compiles lazily on first call — capture the source after running once
         run();
@@ -270,7 +286,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "sanitize": {
-        const sanitize = JIT.sanitize(requireSchema());
+        const sanitize = JIT.security.sanitize(requireSchema());
         run = () => sanitize(requireA() as never);
         run();
         source = sourceOf(sanitize);
@@ -289,9 +305,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
       case "query": {
         const query = bindings.query as ((rows: unknown, params?: unknown) => unknown) | undefined;
         if (typeof query !== "function") {
-          throw new Error(
-            "define a `query` binding, e.g. `const query = JIT.query(JIT.array(schema)).filter(...).compile()`"
-          );
+          throw new Error("define a `query` binding, e.g. `const query = JIT.query(JIT.array(schema)).filter(...)`");
         }
         source = sourceOf(query);
         run = () =>
@@ -302,7 +316,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         const lazy = bindings.lazy as ((rows: unknown, params?: unknown) => Iterable<unknown>) | undefined;
         if (typeof lazy !== "function") {
           throw new Error(
-            "define a `lazy` binding, e.g. `const lazy = JIT.query(JIT.array(schema)).take(10).compileIterator()`"
+            "define a `lazy` binding, e.g. `const lazy = JIT.query(JIT.array(schema)).take(10).to.iterator()`"
           );
         }
         source = sourceOf(lazy);
@@ -317,7 +331,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
           | undefined;
         if (typeof visitor !== "function") {
           throw new Error(
-            "define a `visitor` binding, e.g. `const visitor = JIT.query(JIT.array(schema)).compileVisitor()`"
+            "define a `visitor` binding, e.g. `const visitor = JIT.query(JIT.array(schema)).to.visitor()`"
           );
         }
         source = sourceOf(visitor);
@@ -436,17 +450,20 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
       case "compile": {
         const compiled = bindings.compiled as
           | {
-              readonly ops?: readonly string[];
               readonly is?: (value: unknown) => boolean;
               readonly parse?: (value: unknown) => unknown;
               readonly clone?: (value: unknown) => unknown;
             }
           | undefined;
-        if (!compiled || !Array.isArray(compiled.ops)) {
-          throw new Error("define a `compiled` artifact group, e.g. `JIT.compile(schema, { is: JIT.is(schema) })`");
+        if (!compiled || typeof compiled !== "object") {
+          throw new Error(
+            "define a `compiled` artifact object, e.g. `const compiled = { is: JIT.validate.is(schema) }`"
+          );
         }
+        const operations = Object.keys(compiled);
+
         run = () => ({
-          operations: compiled.ops,
+          operations,
           is: compiled.is?.(requireA()),
           parsed: compiled.parse?.(requireA()),
           cloned: compiled.clone?.(requireA()),

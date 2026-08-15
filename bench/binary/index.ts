@@ -52,52 +52,40 @@ for (const size of SIZES) {
   const columnarRowset = columnarBinary.load(users);
   const byteQuery = JIT.query(rowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .select("id", "name", "score")
-    .compile();
+    .select("id", "name", "score");
   const regularQuery = JIT.query(Users)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .select("id", "name", "score")
-    .compile();
+    .select("id", "name", "score");
   const alignedByteQuery = JIT.query(alignedRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .select("id", "name", "score")
-    .compile();
+    .select("id", "name", "score");
   const columnarByteQuery = JIT.query(columnarRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .select("id", "name", "score")
-    .compile();
+    .select("id", "name", "score");
   const byteCount = JIT.query(rowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .count()
-    .compile();
+    .count();
   const regularCount = JIT.query(Users)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .count()
-    .compile();
+    .count();
   const alignedByteCount = JIT.query(alignedRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .count()
-    .compile();
+    .count();
   const columnarByteCount = JIT.query(columnarRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
-    .count()
-    .compile();
+    .count();
   const byteSum = JIT.query(rowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
-    .sum("score")
-    .compile();
+    .sum("score");
   const regularSum = JIT.query(Users)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
-    .sum("score")
-    .compile();
+    .sum("score");
   const alignedByteSum = JIT.query(alignedRowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
-    .sum("score")
-    .compile();
+    .sum("score");
   const columnarByteSum = JIT.query(columnarRowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
-    .sum("score")
-    .compile();
+    .sum("score");
   const exactPipeline = JIT.process(User)
     .binary({ strategy: "exact" })
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
@@ -241,7 +229,7 @@ function handwrittenSum(input: readonly User[]): number {
 }
 
 function zodFlow(input: readonly User[]): PublicUser[] {
-  return handwritten(zodUsers.parse(input));
+  return handwritten(zodUsers.parse(input) as User[]);
 }
 
 function typeboxFlow(input: readonly User[]): PublicUser[] {

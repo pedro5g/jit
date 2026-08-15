@@ -10,6 +10,10 @@ export default defineConfig({
         replacement: resolve(__dirname, "packages/jit/src/aot/index.ts"),
       },
       {
+        find: /^@jit-compiler\/jit\/define$/,
+        replacement: resolve(__dirname, "packages/jit/src/define.ts"),
+      },
+      {
         find: /^@jit-compiler\/jit\/runtime$/,
         replacement: resolve(__dirname, "packages/jit/src/runtime.ts"),
       },

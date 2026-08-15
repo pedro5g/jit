@@ -164,7 +164,7 @@ describe("JIT compiler validator", () => {
       calls++;
       return value > 0;
     });
-    const parse = JIT.parse(Positive);
+    const parse = JIT.validate.parse(Positive);
 
     expect(() => parse(-1)).toThrow(Errors.JITValidationError);
     expect(calls).toBe(1);
@@ -420,7 +420,7 @@ describe("JIT compiler validator", () => {
       mode: "strict",
     });
     const TransformDocument = JIT.string().format("###.###.###-##");
-    const strict = JIT.compile(StrictDocument, ["is", "parse"] as const);
+    const strict = { is: JIT.validate.is(StrictDocument), parse: JIT.validate.parse(StrictDocument) };
     const transformIs = JIT.validate.is(TransformDocument);
 
     expect(strict.is("123.456.789-01")).toBe(true);
@@ -491,7 +491,7 @@ describe("JIT compiler validator", () => {
     const Payload = JIT.object({
       events: JIT.array(Event).nonEmpty(),
       session: JIT.optional(JIT.string().uuid()),
-      meta: JIT.map(JIT.string(), JIT.number()),
+      meta: JIT.mapSchema(JIT.string(), JIT.number()),
     });
     const validate = validation(Payload);
 
@@ -624,7 +624,7 @@ describe("JIT compiler validator", () => {
     const Payload = JIT.object({
       pair: JIT.tuple(JIT.string().trim(), JIT.number()),
       tags: JIT.set(JIT.string().lowercase()),
-      meta: JIT.map(JIT.string().trim(), JIT.number()),
+      meta: JIT.mapSchema(JIT.string().trim(), JIT.number()),
       counts: JIT.record(
         JIT.string(),
         JIT.number().pipe((value) => value * 2)
@@ -655,7 +655,7 @@ describe("JIT compiler validator", () => {
   it("should keep untransformed collections by reference", () => {
     const Plain = JIT.object({
       tags: JIT.set(JIT.string()),
-      meta: JIT.map(JIT.string(), JIT.number()),
+      meta: JIT.mapSchema(JIT.string(), JIT.number()),
       pair: JIT.tuple(JIT.string(), JIT.number()),
     });
     const validate = validation(Plain);
@@ -998,7 +998,7 @@ describe("JIT compiler validator", () => {
       ops: ["parse"],
     });
     const selected = Compiler.compileValidatorSelection(User.schema, ["is", "parse"] as const);
-    const grouped = JIT.compile(User, { is: JIT.is(User), parse: JIT.parse(User) });
+    const grouped = { is: JIT.validate.is(User), parse: JIT.validate.parse(User) };
 
     expect(isOnlySource).toContain("function is(value)");
     expect(isOnlySource).not.toContain("function safeParse(value)");

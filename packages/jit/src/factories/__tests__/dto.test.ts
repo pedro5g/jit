@@ -11,7 +11,7 @@ describe("JIT.dto schema annotation", () => {
 
     expect(CreateUser.schema).not.toBe(Input.schema);
     expect(Input.schema.annotations?.metadata?.custom?.dto).toBe(true);
-    expect(JIT.parse(Input)(value)).toBe(value);
+    expect(JIT.validate.parse(Input)(value)).toBe(value);
     expect(JIT.json.parse(Input).validate()(JSON.stringify(value))).toEqual(value);
     expect(JIT.binary.decode(Input)(JIT.binary.encode(Input)(value))).toEqual(value);
   });
@@ -39,7 +39,10 @@ describe("JIT.dto schema annotation", () => {
     const Create = JIT.dto(User.omit("id", "role"));
     const Patch = JIT.dto(Create.partial());
 
-    expect(JIT.parse(Create)({ name: "Ada", email: "ada@math.org" })).toEqual({ name: "Ada", email: "ada@math.org" });
-    expect(JIT.parse(Patch)({ name: "Grace" })).toEqual({ name: "Grace", email: undefined });
+    expect(JIT.validate.parse(Create)({ name: "Ada", email: "ada@math.org" })).toEqual({
+      name: "Ada",
+      email: "ada@math.org",
+    });
+    expect(JIT.validate.parse(Patch)({ name: "Grace" })).toEqual({ name: "Grace", email: undefined });
   });
 });

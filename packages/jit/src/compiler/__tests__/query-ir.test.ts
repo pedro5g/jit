@@ -16,9 +16,7 @@ describe("JIT compiler query IR optimizer", () => {
   const input = [ada, grace, edsger];
 
   it("should flatten nested and chains into the filter conjunction", () => {
-    const query = JIT.query(Users)
-      .filter((q) => q.and(q.gt("age", 18), q.neq("role", "blocked")))
-      .compile();
+    const query = JIT.query(Users).filter((q) => q.and(q.gt("age", 18), q.neq("role", "blocked")));
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         {
@@ -52,9 +50,7 @@ describe("JIT compiler query IR optimizer", () => {
   });
 
   it("should remove double negation and invert equality under not", () => {
-    const notEq = JIT.query(Users)
-      .filter((q) => q.not(q.eq("role", "blocked")))
-      .compile();
+    const notEq = JIT.query(Users).filter((q) => q.not(q.eq("role", "blocked")));
     const notEqSource = Compiler.emitQuerySource(Users.schema, {
       nodes: [{ kind: "filter", condition: { kind: "not", inner: compare("eq", "role", "__q0") } }],
       bindings: ["blocked"],
@@ -93,9 +89,7 @@ describe("JIT compiler query IR optimizer", () => {
       ],
       bindings: ["blocked", 3],
     });
-    const query = JIT.query(Users)
-      .filter((q) => q.not(q.and(q.eq("role", "blocked"), q.eq("id", 3))))
-      .compile();
+    const query = JIT.query(Users).filter((q) => q.not(q.and(q.eq("role", "blocked"), q.eq("id", 3))));
 
     expect(source).toContain("item.role !== __q0 || item.id !== __q1");
     expect(query(input)).toEqual([ada, grace]);
@@ -106,9 +100,7 @@ describe("JIT compiler query IR optimizer", () => {
       nodes: [{ kind: "filter", condition: { kind: "not", inner: compare("gt", "age", "__q0") } }],
       bindings: [18],
     });
-    const minors = JIT.query(Users)
-      .filter((q) => q.not(q.gt("age", 18)))
-      .compile();
+    const minors = JIT.query(Users).filter((q) => q.not(q.gt("age", 18)));
     const withNaN = [...input, { id: 4, name: "NaN", age: Number.NaN, role: "user" }];
 
     expect(source).toContain("!(item.age > __q0)");

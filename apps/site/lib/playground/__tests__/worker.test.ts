@@ -75,11 +75,11 @@ const reactiveUpdate = (initial, patches) => {
     const result = execute(
       "compile",
       `const schema = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
-const compiled = JIT.compile(schema, {
-  is: JIT.is(schema),
-  parse: JIT.parse(schema),
+const compiled = {
+  is: JIT.validate.is(schema),
+  parse: JIT.validate.parse(schema),
   clone: JIT.clone(schema),
-});`,
+};`,
       { id: 1, name: "Ada" }
     );
 
@@ -129,11 +129,11 @@ const EntityUsers = JIT.array(schema).entity({ key: "id" });
 const IndexedUsers = JIT.array(schema).indexBy("id");
 const KeyedUsers = JIT.array(schema).keyed("id");
 const indexes = {
-  entityEqual: JIT.equal(EntityUsers).compile(),
-  indexedEqual: JIT.equal(IndexedUsers).compile(),
-  keyedEqual: JIT.equal(KeyedUsers).compile(),
-  normalize: JIT.compileNormalize(EntityUsers.schema),
-  keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name").compile(),
+  entityEqual: JIT.compare.equal(EntityUsers),
+  indexedEqual: JIT.compare.equal(IndexedUsers),
+  keyedEqual: JIT.compare.equal(KeyedUsers),
+  normalize: Compiler.compileNormalize(EntityUsers.schema),
+  keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name"),
 };`,
       left,
       right
@@ -157,8 +157,7 @@ const lazy = JIT.query(JIT.array(schema))
   .filter((q) => q.eq("active", true))
   .select("id", "score")
   .take(2)
-  .lazy()
-  .compile();`,
+  .lazy();`,
       rows
     );
     const visitor = execute(
@@ -167,7 +166,7 @@ const lazy = JIT.query(JIT.array(schema))
 const visitor = JIT.query(JIT.array(schema))
   .filter((q) => q.and(q.eq("active", true), q.gte("score", 40)))
   .select("id", "score")
-  .compileVisitor();`,
+  .to.visitor();`,
       rows
     );
 
@@ -235,7 +234,7 @@ const binary = JIT.array(schema).binary({ strategy: "exact", memoryLayout: "colu
 const binaryQuery = JIT.query(binary)
   .filter((q) => q.and(q.eq("region", "br"), q.eq("active", true)))
   .select("id", "score")
-  .compile();`,
+`,
       rows
     );
     const chunks = execute(

@@ -67,14 +67,13 @@ async function loadAot(): Promise<AotModule> {
   const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
 
   AOT.generate({
-    schemas: {},
-    functions: {
-      Simple_is: JIT.is(SimpleSchema),
-      Simple_parse: JIT.parse(SimpleSchema),
-      Simple_safeParse: JIT.safeParse(SimpleSchema),
-      User_is: JIT.is(UserSchema),
-      User_parse: JIT.parse(UserSchema),
-      User_safeParse: JIT.safeParse(UserSchema),
+    artifacts: {
+      Simple_is: JIT.validate.is(SimpleSchema),
+      Simple_parse: JIT.validate.parse(SimpleSchema),
+      Simple_safeParse: JIT.validate.safeParse(SimpleSchema),
+      User_is: JIT.validate.is(UserSchema),
+      User_parse: JIT.validate.parse(UserSchema),
+      User_safeParse: JIT.validate.safeParse(UserSchema),
     },
     outDir,
   });

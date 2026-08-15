@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { zx } from "@traversable/zod";
 import { z } from "zod";
 import { lodashCloneDeep, rfdcClone } from "../shared/competitors.js";
@@ -43,7 +43,7 @@ export function registerObjectClones(): void {
     op: "clone",
     name: "small object",
     args: [createSmallUser()],
-    jit: JIT.compileClone(SmallUserSchema.schema),
+    jit: Compiler.compileClone(SmallUserSchema.schema),
     competitors: [
       { name: "traversable/zod deepClone", fn: zx.deepClone(TraversableSmallUser) },
       { name: "rfdc", fn: rfdcClone },
@@ -56,7 +56,7 @@ export function registerObjectClones(): void {
     op: "clone",
     name: "medium object",
     args: [createMediumUser()],
-    jit: JIT.compileClone(MediumUserSchema.schema),
+    jit: Compiler.compileClone(MediumUserSchema.schema),
     competitors: [
       { name: "traversable/zod deepClone", fn: zx.deepClone(TraversableMediumUser) },
       { name: "rfdc", fn: rfdcClone },
@@ -69,7 +69,7 @@ export function registerObjectClones(): void {
     op: "clone",
     name: "deep object",
     args: [createDeepUser()],
-    jit: JIT.compileClone(DeepUserSchema.schema),
+    jit: Compiler.compileClone(DeepUserSchema.schema),
     competitors: [
       { name: "traversable/zod deepClone", fn: zx.deepClone(TraversableDeepUser) },
       { name: "rfdc", fn: rfdcClone },

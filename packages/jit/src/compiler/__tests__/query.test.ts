@@ -19,9 +19,7 @@ describe("JIT compiler query", () => {
   const inputMap = new Map(input.map((item) => [item.id, item]));
 
   it("should compile typed filter queries", () => {
-    const adults = JIT.query(Users)
-      .filter((q) => q.gt("age", 18))
-      .compile();
+    const adults = JIT.query(Users).filter((q) => q.gt("age", 18));
     const result = adults(input);
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
@@ -52,8 +50,7 @@ describe("JIT compiler query", () => {
   it("should compile fused filter/select queries through explicit compile", () => {
     const selectAdults = JIT.query(Users)
       .filter((q) => q.and(q.gt("age", 18), q.neq("role", "blocked")))
-      .select("name")
-      .compile();
+      .select("name");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         {
@@ -92,8 +89,7 @@ describe("JIT compiler query", () => {
     const uniqueAdmins = JIT.query(Users)
       .select("id", "name")
       .filter((q) => q.eq("role", "admin"))
-      .unique("id")
-      .compile();
+      .unique("id");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         { kind: "select:fields", fields: ["id", "name"] },
@@ -140,8 +136,7 @@ describe("JIT compiler query", () => {
     const keyed = JIT.query(Users)
       .filter((q) => q.gt("age", 18))
       .keyed("id")
-      .select("name")
-      .compile();
+      .select("name");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         {
@@ -189,8 +184,7 @@ describe("JIT compiler query", () => {
     const grouped = JIT.query(Users)
       .filter((q) => q.gt("age", 18))
       .groupBy("role")
-      .select("id")
-      .compile();
+      .select("id");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         {
@@ -239,8 +233,7 @@ describe("JIT compiler query", () => {
     const ordered = JIT.query(Users)
       .filter((q) => q.gt("age", 18))
       .select("name", "age")
-      .orderBy("age", "asc")
-      .compile();
+      .orderBy("age", "asc");
     const result = ordered(input);
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
@@ -275,8 +268,7 @@ describe("JIT compiler query", () => {
     const orderedNames = JIT.query(Users)
       .filter((q) => q.gt("age", 18))
       .select("name")
-      .orderBy("age", "desc")
-      .compile();
+      .orderBy("age", "desc");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         {
@@ -328,8 +320,7 @@ describe("JIT compiler query", () => {
     const query = JIT.query(Users)
       .select("id", "role")
       .unique("id")
-      .filter((q) => q.not(q.eq("role", "blocked")))
-      .compile();
+      .filter((q) => q.not(q.eq("role", "blocked")));
     const result = query(input);
 
     expect(result).toEqual([
@@ -353,8 +344,7 @@ describe("JIT compiler query", () => {
       .unique("role")
       .unique("id")
       .orderBy("name", "desc")
-      .orderBy("age", "asc")
-      .compile();
+      .orderBy("age", "asc");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         { kind: "filter", condition: compare("gt", "age", "__q0") },
@@ -385,7 +375,7 @@ describe("JIT compiler query", () => {
   });
 
   it("should let the last collector win", () => {
-    const query = JIT.query(Users).keyed("id").groupBy("role").select("name").compile();
+    const query = JIT.query(Users).keyed("id").groupBy("role").select("name");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         { kind: "keyed", key: "id" },
@@ -414,8 +404,7 @@ describe("JIT compiler query", () => {
     const User = Users.schema.def.element;
     const query = JIT.query(JIT.set(User))
       .filter((q) => q.gt("age", 18))
-      .select("name")
-      .compile();
+      .select("name");
     const source = Compiler.emitQuerySource(JIT.set(User).schema, {
       nodes: [
         { kind: "filter", condition: compare("gt", "age", "__q0") },
@@ -435,13 +424,12 @@ describe("JIT compiler query", () => {
 
   it("should compile Map value queries without entry destructuring or array conversion", () => {
     const User = Users.schema.def.element;
-    const query = JIT.query(JIT.map(JIT.number(), User))
+    const query = JIT.query(JIT.mapSchema(JIT.number(), User))
       .filter((q) => q.gt("age", 18))
       .unique("id")
       .groupBy("role")
-      .select("id")
-      .compile();
-    const source = Compiler.emitQuerySource(JIT.map(JIT.number(), User).schema, {
+      .select("id");
+    const source = Compiler.emitQuerySource(JIT.mapSchema(JIT.number(), User).schema, {
       nodes: [
         { kind: "filter", condition: compare("gt", "age", "__q0") },
         { kind: "unique", key: "id" },
@@ -465,12 +453,10 @@ describe("JIT compiler query", () => {
   it("should compile array delete and shallow update terminals", () => {
     const deleteBlocked = JIT.query(Users)
       .filter((q) => q.eq("role", "blocked"))
-      .delete()
-      .compile();
+      .delete();
     const promoteAdults = JIT.query(Users)
       .filter((q) => q.gt("age", 18))
-      .update({ role: "adult" })
-      .compile();
+      .update({ role: "adult" });
     const deleteSource = Compiler.emitQuerySource(Users.schema, {
       nodes: [{ kind: "filter", condition: compare("eq", "role", "__q0") }, { kind: "delete" }],
       bindings: ["blocked"],
@@ -502,15 +488,13 @@ describe("JIT compiler query", () => {
     const User = Users.schema.def.element;
     const deleteFromSet = JIT.query(JIT.set(User))
       .filter((q) => q.eq("role", "blocked"))
-      .delete()
-      .compile();
-    const updateMap = JIT.query(JIT.map(JIT.number(), User))
+      .delete();
+    const updateMap = JIT.query(JIT.mapSchema(JIT.number(), User))
       .filter((q) => q.eq("role", "admin"))
-      .update({ name: "Admin" })
-      .compile();
+      .update({ name: "Admin" });
     const deletedSet = deleteFromSet(inputSet);
     const updatedMap = updateMap(inputMap);
-    const source = Compiler.emitQuerySource(JIT.map(JIT.number(), User).schema, {
+    const source = Compiler.emitQuerySource(JIT.mapSchema(JIT.number(), User).schema, {
       nodes: [
         { kind: "filter", condition: compare("eq", "role", "__q0") },
         { kind: "update", patch: { name: { kind: "binding", name: "__q1" } } },
@@ -530,9 +514,9 @@ describe("JIT compiler query", () => {
   });
 
   it("should infer select output from rest fields without as const", () => {
-    const oneField = JIT.query(Users).select("name").compile()(input);
-    const twoFields = JIT.query(Users).select("id", "name").compile()(input);
-    const chained = JIT.query(Users).select("id", "name").select("name").compile()(input);
+    const oneField = JIT.query(Users).select("name")(input);
+    const twoFields = JIT.query(Users).select("id", "name")(input);
+    const chained = JIT.query(Users).select("id", "name").select("name")(input);
 
     expectTypeOf(oneField).toEqualTypeOf<{ readonly name: string }[]>();
     expectTypeOf(twoFields).toEqualTypeOf<
@@ -548,8 +532,7 @@ describe("JIT compiler query", () => {
     const adminsAboveAge = JIT.query(Users)
       .params({ minimumAge: JIT.number() })
       .filter((q, params) => q.and(q.gt("age", params.minimumAge), q.eq("role", JIT.const("admin"))))
-      .select("id", "name")
-      .compile();
+      .select("id", "name");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         {
@@ -598,26 +581,21 @@ describe("JIT compiler query", () => {
   });
 
   it("should reject unknown keys and unsupported schemas", () => {
-    expect(() =>
-      JIT.query(Users)
-        .filter((q) => q.gt("missing" as "age", 1))
-        .compile()
-    ).toThrow(Errors.JITError);
-    expect(() => JIT.query(JIT.object({ id: JIT.number() })).compile()).toThrow(Errors.JITError);
-    expect(() => JIT.query(Users).keyed("id").orderBy("age").compile()).toThrow(Errors.JITError);
-    expect(() => JIT.query(Users).delete().compile()).toThrow(Errors.JITError);
+    // A query builder lowers on its first call, so key errors surface there.
+    expect(() => JIT.query(Users).filter((q) => q.gt("missing" as "age", 1))([])).toThrow(Errors.JITError);
+    expect(() => JIT.query(JIT.object({ id: JIT.number() }))).toThrow(Errors.JITError);
+    expect(() => JIT.query(Users).keyed("id").orderBy("age")([])).toThrow(Errors.JITError);
+    expect(() => JIT.query(Users).delete()([])).toThrow(Errors.JITError);
     expect(() =>
       JIT.query(Users)
         .filter((q) => q.eq("role", "admin"))
         .select("name")
-        .delete()
-        .compile()
+        .delete()([])
     ).toThrow(Errors.JITError);
     expect(() =>
       JIT.query(Users)
         .filter((q) => q.eq("role", "admin"))
-        .update({ missing: "nope" } as unknown as { role: string })
-        .compile()
+        .update({ missing: "nope" } as unknown as { role: string })([])
     ).toThrow(Errors.JITError);
 
     // @ts-expect-error invalid query keys are rejected statically.

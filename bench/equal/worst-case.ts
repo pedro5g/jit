@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler, JIT } from "@jit-compiler/jit";
 import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
 import { range } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
@@ -10,7 +10,7 @@ const RecordLike = JIT.object({
   c: JIT.number(),
 });
 const Records = JIT.array(RecordLike);
-const equal = JIT.compileEqual(Records.schema);
+const equal = Compiler.compileEqual(Records.schema);
 
 const left = range(25_000).map((id) => ({
   id,

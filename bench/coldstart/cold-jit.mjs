@@ -16,7 +16,7 @@ const UserSchema = JIT.object({
   }),
 });
 
-const isUser = JIT.is(UserSchema);
+const isUser = JIT.validate.is(UserSchema);
 const stringifyUser = JIT.json.stringify(UserSchema);
 
 const user = {

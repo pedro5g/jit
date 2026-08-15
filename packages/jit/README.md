@@ -32,9 +32,9 @@ const User = JIT.object({
 
 type User = JIT.Typeof<typeof User>;
 
-const isUser = JIT.is(User);
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 
 isUser(input); // pure boolean guard — compiled specialized code
 parseUser(input); // throws JITValidationError with every issue
@@ -218,11 +218,11 @@ grouped AOT generation, so unused functions do not enter the emitted module or
 final bundle. DTO remains an ordinary annotated schema:
 
 ```ts
-const ReadUser = JIT.compile(User, {
-  is: JIT.is(User),
-  parse: JIT.parse(User),
-  equal: JIT.equal(User),
-});
+const ReadUser = {
+  is: JIT.validate.is(User),
+  parse: JIT.validate.parse(User),
+  equal: JIT.compare.equal(User),
+};
 
 const CreateUserDTO = JIT.dto(CreateUserSchema);
 const PublicUserDTO = JIT.dto(PublicUserSchema);
@@ -252,7 +252,7 @@ JIT.enum({ A: "a", B: "b" })  JIT.enum(["admin", "user"] as const)
 JIT.null()    JIT.undefined()  JIT.any()  JIT.unknown()  JIT.never()
 
 // collections
-JIT.array(T)  JIT.set(T)  JIT.map(K, V)  JIT.record(K, V)
+JIT.array(T)  JIT.set(T)  JIT.mapSchema(K, V)  JIT.record(K, V)
 JIT.tuple(A, B)  JIT.object({ ... })
 
 // composition
@@ -469,14 +469,14 @@ const StrictCode = JIT.string().format("##-##", { mode: "strict" });
 StrictCode.is("12-34"); // true: literals and digit positions already match
 StrictCode.is("1234"); // false
 
-const formatCode = JIT.format(JIT.string().format("##-##")).compile();
+const formatCode = JIT.format(JIT.string().format("##-##"));
 formatCode("1234"); // "12-34" without compiling/shipping a validator
 ```
 
 Literal mask patterns are type-checked: they must include at least one `#`
 placeholder and only use supported mask characters. The dedicated formatter
 can also be exported from `*.jit.ts` as a standalone AOT function or grouped
-with `JIT.compile(Code, { format: formatCode })`.
+with `{ format: formatCode }`.
 
 ### Coercion (zod-style)
 
@@ -498,7 +498,7 @@ JIT.coerce(JIT.string(), (v) => String(v).toUpperCase());
 ### Data annotations
 
 ```ts
-JIT.string().pii("mask")       // for JIT.mask: "redact" | "mask" | "hash"
+JIT.string().pii("mask")       // for JIT.security.mask: "redact" | "mask" | "hash"
 JIT.string().sanitize()        // executable HTML removed, fused into parse
 JIT.string().sanitize("htmlEscape")
 JIT.string().sanitize("sqlIdentifier") // identifiers only; bind SQL values
@@ -558,10 +558,10 @@ Validators can be compiled selectively. The compiler emits only the requested
 surface plus the minimum shared internals needed by that surface:
 
 ```ts
-const Selected = JIT.compile(User, {
+const Selected = {
   is: JIT.validate.is(User),
   parse: JIT.validate.parse(User),
-});
+};
 Selected.is(input);
 Selected.parse(input);
 Selected.safeParse; // ✗ not compiled
@@ -616,28 +616,27 @@ returns the input **by reference** when nothing changes.
 ## Data operations
 
 ```ts
-const equalUser = JIT.equal(schema);
+const equalUser = JIT.compare.equal(schema);
 const cloneUser = JIT.clone(schema);
-const diffUser = JIT.diff(schema);
-const hashUser = JIT.hash(schema);
+const diffUser = JIT.compare.diff(schema);
+const hashUser = JIT.compare.hash(schema);
 const updateUser = JIT.update(schema);
 const stringifyUser = JIT.json.stringify(schema);
 const parseUserJson = JIT.json.parse(schema).validate();
-const maskUser = JIT.mask(schema);
-const sanitizeUser = JIT.sanitize(schema);
-const userCodec = JIT.codec(schema);
+const maskUser = JIT.security.mask(schema);
+const sanitizeUser = JIT.security.sanitize(schema);
+const userCodec = JIT.binary.codec(schema);
 ```
 
-Each operation artifact follows the same runtime/AOT API shape:
+Each operation artifact is the compiled function itself — nothing to unwrap:
 
 ```ts
-const equalUser = JIT.equal(User).compile();
-const cloneUser = JIT.clone(User).compile();
-const diffUser = JIT.diff(User).compile();
-const hashUser = JIT.hash(User).compile();
+const equalUser = JIT.compare.equal(User);
+const cloneUser = JIT.clone(User);
+const diffUser = JIT.compare.diff(User);
+const hashUser = JIT.compare.hash(User);
 
-// Backward-compatible: these are callable directly too.
-JIT.equal(User)(a, b);
+equalUser(a, b);
 ```
 
 Structural operations understand the same complex shape semantics as the
@@ -703,33 +702,27 @@ const admins = JIT.query(UserList)
   )
   .select("id", "name", "role")
   .unique("id")
-  .orderBy("name", "asc")
-  .compile();
+  .orderBy("name", "asc");
 
 admins(users, { minimumId: 100 }); // one pass, params read directly
 
 // build-time constants are baked into the query artifact:
-JIT.query(UserList)
-  .filter((q) => q.eq("role", JIT.const("admin")))
-  .compile();
+JIT.query(UserList).filter((q) => q.eq("role", JIT.const("admin")));
 
 // terminals
 JIT.query(UserList)
   .filter((q) => q.eq("role", "user"))
-  .avg("id")
-  .compile();
+  .avg("id");
 // sum / count / avg / min / max — empty: sum/count → 0, others → undefined
 
 // keyed collections, grouping, and mutations
-JIT.query(UserList).groupBy("role").compile();
+JIT.query(UserList).groupBy("role");
 JIT.query(UserList)
   .filter((q) => q.lt("score", 0))
-  .delete()
-  .compile();
+  .delete();
 JIT.query(UserList)
   .filter((q) => q.eq("id", 7))
-  .update({ active: false })
-  .compile();
+  .update({ active: false });
 ```
 
 ### Lazy iterators and visitors
@@ -743,11 +736,11 @@ const activeNames = JIT.query(UserList)
   .select("id", "name")
   .take(10);
 
-activeNames.compile(); // eager array
-activeNames.compileIterator(); // IterableIterator<{ id, name }>
-activeNames.compileAsyncIterator(); // AsyncGenerator, accepts cursors/streams
-activeNames.compileVisitor(); // (input, consume) => emitted count
-activeNames.lazy().compile(); // alias for compileIterator()
+activeNames(users); // eager array — the builder is the query
+activeNames.to.iterator(); // IterableIterator<{ id, name }>
+activeNames.to.asyncIterator(); // AsyncGenerator, accepts cursors/streams
+activeNames.to.visitor(); // (input, consume) => emitted count
+activeNames.lazy(); // generator-first builder
 ```
 
 Incremental operators include `flatMap`, `take`, `takeWhile`, `drop`,
@@ -756,7 +749,7 @@ Incremental operators include `flatMap`, `take`, `takeWhile`, `drop`,
 into one generated stage. `orderBy` is supported but reported as a
 materialization barrier by `.explain("generator")`.
 
-On the one-million-row lazy benchmark, direct `compileVisitor()` consumed
+On the one-million-row lazy benchmark, a direct `.to.visitor()` consumed
 800k projected matches in **3.81 ms / 760 B heap**, versus **15.21 ms / 7.75
 MiB** for a handwritten generator. See
 [`docs/features/lazy-execution.md`](../../docs/features/lazy-execution.md).
@@ -782,6 +775,10 @@ Whitelist by construction — only target-schema fields can exist in the
 output, so accidental `passwordHash` leaks are impossible:
 
 ```ts
+// Every target field matches by name and type: nothing else to say.
+const toPublicUser = JIT.map(User, PublicUser);
+
+// Overrides appear in the signature only when a field cannot be inferred.
 const toDTO = JIT.map(UserEntity, PublicUser, {
   name: { from: "fullName" }, // rename
   label: (user) => `${user.name}#${user.id}`, // computed
@@ -795,18 +792,45 @@ toDTO(entity);
 toManyDTOs(entities); // fused indexed loop over the list
 ```
 
+The third argument is typed against the target: it is required only while a
+required target field has no compatible same-name source field, and the error
+names exactly those fields. `Map` **schemas** are a different thing and live on
+`JIT.mapSchema(key, value)`.
+
 Selection is physical code generation, not an object projection after compile:
 `JIT.map` emits no bulk loop, while `JIT.map.many` emits only the fused indexed
 loop. Artifact creation remains lazy and compiles that
 single operation on first use.
 
+## JSON Schema and fixtures
+
+Two descriptive operations share the same schema, so neither can drift from
+what the validator enforces:
+
+```ts
+// The interchange document OpenAPI, form builders and structured-output
+// APIs consume — static data, inlined as a literal by AOT.
+const userDocument = JIT.jsonSchema(User);
+
+// A generator whose values pass `JIT.validate.is(User)` by construction.
+const mockUser = JIT.mock(User);
+
+mockUser({ seed: 7 }); // reproducible fixture
+```
+
+`jsonSchema` reports only what the validator checks: constraints JSON Schema
+cannot express (custom refinements, transforms, brands) are dropped rather than
+approximated. `mock` honors string lengths/affixes/formats, numeric bounds and
+multiples, array lengths, enum members, optional presence and union branches;
+its PRNG core is inlined so generated modules stay import-free.
+
 ## Security
 
 ```ts
-const mask = JIT.mask(User); // .pii() fields → "***" / last-4 / FNV hash
+const mask = JIT.security.mask(User); // .pii() fields → "***" / last-4 / FNV hash
 logger.info(mask(user)); // LGPD/GDPR-safe structured logs
 
-const clean = JIT.sanitize(Form); // applies each field's compiled policy
+const clean = JIT.security.sanitize(Form); // applies each field's compiled policy
 ```
 
 Both are surgical: only paths containing marked fields are rebuilt, untouched
@@ -881,11 +905,11 @@ JIT.stream(Event, { format: "ndjson", onItem }); // one document per line
 
 ---
 
-## Explicit compilation — `JIT.compile`
+## Artifact objects
 
-The opt-in aggregation: pass already-compiled functions and extras in one
-object. Only those properties exist at runtime, in types, and in AOT output.
-This is the preferred shape when you want `User.is()` style imports.
+An artifact is a plain value, so grouping them is a plain object. Only those
+properties exist at runtime, in types, and in AOT output. This is the shape to
+use when you want `User.is()` style imports.
 
 ```ts
 const UserSchema = JIT.object({
@@ -894,19 +918,17 @@ const UserSchema = JIT.object({
   role: JIT.union(JIT.literal("admin"), JIT.literal("user")),
 });
 
-export const User = JIT.compile(UserSchema, {
+export const User = {
   is: JIT.validate.is(UserSchema),
   parse: JIT.validate.parse(UserSchema),
-  findAdmins: JIT.query(UserList)
-    .filter((q) => q.eq("role", "admin"))
-    .compile(),
+  findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")),
   toDTO: JIT.map.many(UserSchema, PublicUser, {}),
-});
+};
 
 User.is(input);
 User.findAdmins(users); // your query, no prefixes, fully typed
 User.toDTO(users);
-User.clone(x); // ✗ does not exist — not requested, not compiled
+User.clone(x); // ✗ does not exist — never declared, never compiled
 ```
 
 ## AOT — `jit generate`
@@ -916,7 +938,7 @@ Create the config in the project root:
 ```sh
 pnpm jit init
 pnpm jit doctor
-pnpm jit explain
+pnpm jit list
 pnpm jit generate
 ```
 
@@ -926,21 +948,13 @@ Generated `jit.config.ts`:
 import { AOT } from "@jit-compiler/jit";
 
 export default AOT.defineConfig({
-  /** Files, directories, or globs containing explicit compiled AOT exports. */
+  /** Files, directories, or globs holding your JIT declarations. */
   entries: ["./jit/**/*.jit.ts"],
-  /** Patterns used for directory and root discovery. */
-  patterns: ["**/*.jit.ts"],
   output: {
-    /** Emit one directly typed .ts source (use "javascript" for ready ESM). */
-    directory: "generated/jit",
-    format: "typescript",
-    /** Delete only JIT-owned artifacts before writing. */
-    clean: true,
-  },
-  emit: {
-    subpathModules: true,
-    manifest: true,
-    plans: true,
+    /** Destination relative to this config file. */
+    directory: "generated",
+    /** "ts" emits typed source; "js" emits ready-to-run ESM. */
+    format: "ts",
   },
 });
 ```
@@ -949,55 +963,48 @@ Discovery rules are intentionally boring:
 
 - if `entries` is omitted, `jit generate` scans from the project root;
 - `entries` accepts files, directories, and globs like `jit/**/*.jit.ts`;
-- `patterns` controls directory scans; the default is `**/*.jit.ts`;
-- if no buildable functions are exported, the CLI prints a warning and writes
-  nothing.
+- `patterns` controls directory scans; the default matches `**/*.jit.ts` and
+  `**/*.jit.js`;
+- if no artifacts are declared, the CLI prints a warning and writes nothing;
 - `jit doctor` prints resolved config, output directory, patterns, and files;
-- `jit explain` loads declaration files and lists grouped objects plus
-  standalone compiled exports without writing generated files.
-- `jit list` prints buildable exports in a compact format;
+- `jit list` loads declaration files and prints declared types, artifact
+  objects and standalone artifacts without writing anything;
 - `jit inspect <export> --stage plan|source` shows the collected descriptor or
   exact generated source for review;
 - `jit clean` removes the configured generated directory.
 
-There is no raw-schema fallback. AOT builds only what you explicitly export.
+The declaration file is the manifest, read literally: a schema names a
+generated type, an artifact becomes a generated function under its own binding
+name, and an object of artifacts becomes one frozen object. `export` is
+optional; a schema alone never becomes a runtime function.
 
 ```ts
 // jit/user.jit.ts — discovered by convention (**/*.jit.ts)
 import { JIT } from "@jit-compiler/jit/define";
 
-const UserSchema = JIT.object({
+// Private to the file, but it still names the generated `User` type.
+const User = JIT.object({
   id: JIT.number(),
   name: JIT.string(),
   role: JIT.string(),
 });
 
-const isUser = JIT.validate.is(UserSchema);
-const parseUser = JIT.validate.parse(UserSchema);
+// Keeps its binding name exactly.
+export const isUser = JIT.validate.is(User);
 
-// Standalone functions keep their declared export names exactly.
-export const User_is = isUser;
-export const User_parse = parseUser;
-
-// Object-style aggregation exports one object: User.is, User.parse, ...
-export const User = JIT.compile(UserSchema, {
-  is: isUser,
-  parse: parseUser,
-  findAdmins: JIT.query(JIT.array(UserSchema))
-    .filter((q) => q.eq("role", "admin"))
-    .compile(),
-});
+// One frozen object: UserOps.parse, UserOps.findAdmins.
+export const UserOps = {
+  parse: JIT.validate.parse(User),
+  findAdmins: JIT.query(JIT.array(User)).filter((q) => q.eq("role", "admin")),
+};
 ```
 
 ```ts
-import { User, User_is, User_parse } from "./generated/jit/index.js";
-import { User as UserFromSubpath } from "./generated/jit/user.js";
+import { isUser, type User, UserOps } from "./generated/index.js";
 
-User.is(input);
-User.findAdmins(users);
-User_is(input);
-User_parse(input);
-UserFromSubpath.is(input);
+isUser(input);
+const user: User = UserOps.parse(input);
+UserOps.findAdmins(users);
 ```
 
 Run generation:
@@ -1008,32 +1015,22 @@ pnpm jit generate src/user.jit.ts --out generated --name @acme/models
 pnpm jit generate --pattern "src/schemas/**/*.ts"
 pnpm jit generate --watch
 pnpm jit list
-pnpm jit inspect User --stage plan
+pnpm jit inspect isUser --stage source
 pnpm jit clean
 ```
 
-With the default local config, generation writes standard relative ESM plus
-review artifacts:
+Generation writes one self-contained module, or one per declaration file plus
+a barrel when `output.perFile` is on:
 
 ```text
-generated/jit/
-├── index.ts
-├── user.ts
-├── manifest.json
-└── plans/
-    └── user.json
+generated/            generated/          (perFile: true)
+└── index.ts          ├── index.ts
+                      ├── user.ts
+                      └── order.ts
 ```
 
-Each requested subpath is compiled as an independent, self-contained module
-containing only exports from that declaration file. It does not import or
-initialize the generated barrel. No `package.json#imports` entry and no `#`
-alias is needed.
-
-When `output.directory` is below `node_modules`, the generator infers the
-namespace, keeps exactly the selected `.ts` or `.js` source, and adds
-`package.json` (exports map, `sideEffects: false`). Consumers then use
-`import { User } from "@jit/generated"` and optional
-`import { User } from "@jit/generated/user"` subpaths.
+With `output.perFile`, each declaration file is compiled as an independent,
+self-contained module that does not import or initialize the generated barrel.
 
 Every layout is **fully self-contained**:
 compiled functions, tiny error class, hash/index helpers, and codec helpers
@@ -1041,7 +1038,8 @@ are inlined. There is no `import "jit"` in generated runtime code, so the
 final app bundle carries only the low-level specialized functions it imports.
 
 Source-first TypeScript is the CLI/config default. The generator writes one
-executable and typed `index.ts`, plus optional `.ts` subpath modules:
+executable and typed `index.ts`, plus one `.ts` module per declaration file
+when `output.perFile` is on:
 
 ```ts
 import { AOT } from "@jit-compiler/jit";
@@ -1050,16 +1048,15 @@ export default AOT.defineConfig({
   entries: ["jit/**/*.jit.ts"],
   output: {
     directory: "src/generated/jit",
-    format: "typescript",
-    clean: true,
+    format: "ts",
   },
 });
 ```
 
 ```ts
-import { User } from "./generated/jit/index.js";
+import { UserOps } from "./generated/jit/index.js";
 
-User.is(input);
+UserOps.is(input);
 ```
 
 The `.js` import specifier is intentional for ESM and `NodeNext`: TypeScript
@@ -1082,7 +1079,7 @@ export const User: {
 };
 ```
 
-Use `output.format: "javascript"` for one ready-to-run ESM `.js` file without
+Use `output.format: "js"` for one ready-to-run ESM `.js` file without
 declaration overhead. Use `"typescript"` for the same specialized functions
 with public types embedded in the executable `.ts` source.
 
@@ -1213,7 +1210,7 @@ const EntityUsers = JIT.array(User).entity({ key: "id" }); // identity only
 const IndexedUsers = JIT.array(User).indexBy("id"); // indexed equality
 const KeyedUsers = JIT.array(User).keyed("id"); // identity + index + unique contract
 
-const byId = JIT.query(KeyedUsers).keyed("id").compile(); // fresh Map result
+const byId = JIT.query(KeyedUsers).keyed("id"); // fresh Map result
 ```
 
 `entity` gives normalize/unique/sort compilers a default key without changing
@@ -1328,9 +1325,8 @@ Feature-specific guides live in [docs/features](../../docs/features/README.md).
 ```sh
 pnpm jit init        # create jit.config.ts in the current project root
 pnpm jit doctor      # inspect resolved config/discovery
-pnpm jit explain     # list AOT-buildable exports without writing files
-pnpm jit list        # compact list of AOT exports
-pnpm jit inspect User --stage plan
+pnpm jit list        # declared types, artifact objects and artifacts
+pnpm jit inspect isUser --stage source
 pnpm jit generate    # generate the configured AOT package
 pnpm jit clean       # remove configured generated output
 pnpm test            # vitest + typecheck + golden sources + snapshots

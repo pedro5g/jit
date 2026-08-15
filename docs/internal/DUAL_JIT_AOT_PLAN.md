@@ -23,7 +23,7 @@ import { JIT } from "jit/runtime";
 
 const isUser = JIT.validate(User).is().compile();
 const parseUser = JIT.validate(User).parse().compile();
-const equalUser = JIT.equal(User).compile();
+const equalUser = JIT.compare.equal(User).compile();
 const stringifyUser = JIT.json(User).stringify().compile();
 ```
 
@@ -39,24 +39,24 @@ export const stringifyUser = JIT.json(User).stringify().compile();
 Compatibility surfaces remain:
 
 - `JIT.validator(User)` object facade.
-- `JIT.compile(User, { ...compiledFns })` grouped AOT marker.
+- `{ ...compiledFns }` grouped AOT marker.
 - `JIT.model(User)` lazy all-ops namespace.
 - `JIT.compileEqual`, `compileClone`, etc. low-level compiler entry points.
 
-`JIT.equal(User)`, `JIT.clone(User)`, `JIT.diff(User)`, and `JIT.hash(User)`
+`JIT.compare.equal(User)`, `JIT.clone(User)`, `JIT.compare.diff(User)`, and `JIT.compare.hash(User)`
 are callable directly and also expose `.compile()` returning the same cached
 function.
 
 ## Implemented In This Branch
 
 - `JIT.validate(schema).is/parse/safeParse/parseAsync/safeParseAsync().compile()`.
-- `JIT.equal/clone/diff/hash(schema).compile()`.
+- `JIT.compare.equal/diff/hash(schema)` and `JIT.clone(schema)`.
 - `JIT.json()` still creates the JSON-value schema; `JIT.json(schema)` now
   exposes `.stringify().compile()` and `.parse().compile()`.
 - `JIT.Typeof<typeof Schema>` alias.
 - `JIT.update(schema).patch({ field: JIT.param("name") }).compile()`.
 - `JIT.query(schema).params({...})` and `JIT.const(value)` / `q.constant(value)`.
-- `JIT.transform(schema).select(...).map(...).compile()` with inline built-in
+- `JIT.transform(schema).select(...).map(...)` with inline built-in
   field transforms.
 - `jit/runtime` and `jit/define` subpaths.
 - Shared host contracts in `core/host.ts`.

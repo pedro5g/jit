@@ -38,8 +38,7 @@ const users = createUsers(COUNT);
 const isUser = JIT.validate.is(User);
 const selectAdmins = JIT.query(Users)
   .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true), q.gt("score", 500)))
-  .select("id", "name", "score")
-  .compile();
+  .select("id", "name", "score");
 const stringifyPublicUsers = JIT.json.stringify(PublicUsers);
 const composedFlow = JIT.from(Users)
   .validate()

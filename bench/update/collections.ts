@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler } from "@jit-compiler/jit";
 import { produce } from "../shared/competitors.js";
 import { createNumberMap, createNumberSet, NumberMapSchema, NumberSetSchema } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
@@ -8,7 +8,7 @@ export function registerCollectionUpdates(): void {
     op: "update",
     name: "set 10000",
     args: [createNumberSet(10_000), createNumberSet(10_001)],
-    jit: JIT.compileUpdate(NumberSetSchema.schema),
+    jit: Compiler.compileUpdate(NumberSetSchema.schema),
     competitors: [
       {
         name: "immer",
@@ -24,7 +24,7 @@ export function registerCollectionUpdates(): void {
     op: "update",
     name: "map 10000",
     args: [createNumberMap(10_000), new Map([...createNumberMap(10_000), ["key-9999", 42]])],
-    jit: JIT.compileUpdate(NumberMapSchema.schema),
+    jit: Compiler.compileUpdate(NumberMapSchema.schema),
     competitors: [
       {
         name: "immer",

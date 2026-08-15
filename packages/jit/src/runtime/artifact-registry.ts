@@ -15,6 +15,22 @@ interface SourceArtifact {
   readonly bindingValues: readonly unknown[];
 }
 
+/**
+ * A query builder registers its declarative program instead of compiled
+ * source: it is the artifact the developer exports, and AOT re-emits it for
+ * the requested result shape without the builder ever compiling at runtime.
+ */
+interface QueryPlanArtifact {
+  readonly kind: "query-plan";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly program: {
+    readonly nodes: readonly unknown[];
+    readonly bindings: readonly unknown[];
+    readonly params?: readonly string[];
+  };
+  readonly mode: "array" | "iterator" | "async-iterator" | "visitor";
+}
+
 interface ValidatorArtifact {
   readonly kind: "validator";
   readonly schema: ATS.AnyTypeSchema;
@@ -34,7 +50,9 @@ interface OperationArtifact {
     | "format"
     | "mask"
     | "sanitize"
-    | "codec";
+    | "codec"
+    | "jsonSchema"
+    | "mock";
 }
 
 /**
@@ -47,7 +65,12 @@ interface ExecutionArtifact {
   readonly plan: ExecutionPlan;
 }
 
-export type CompiledArtifact = SourceArtifact | ValidatorArtifact | OperationArtifact | ExecutionArtifact;
+export type CompiledArtifact =
+  | SourceArtifact
+  | QueryPlanArtifact
+  | ValidatorArtifact
+  | OperationArtifact
+  | ExecutionArtifact;
 
 const REGISTRY = new WeakMap<object, CompiledArtifact>();
 

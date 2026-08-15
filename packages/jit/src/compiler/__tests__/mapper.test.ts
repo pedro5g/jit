@@ -136,7 +136,7 @@ describe("JIT compiler mapper", () => {
       items: JIT.array(JIT.object({ sku: JIT.string(), price: JIT.number() })),
       tags: JIT.array(JIT.string()),
     });
-    const toDTO = JIT.map(Order, OrderDTO, {});
+    const toDTO = JIT.map(Order, OrderDTO);
     const source = Compiler.emitMapperSource(Order.schema, OrderDTO.schema);
 
     const order = {
@@ -172,7 +172,7 @@ describe("JIT compiler mapper", () => {
     const WithOptional = JIT.object({ id: JIT.number(), note: JIT.optional(JIT.string()) });
     const WithRequired = JIT.object({ id: JIT.number(), note: JIT.string() });
 
-    const toOptional = JIT.map(Source, WithOptional, {});
+    const toOptional = JIT.map(Source, WithOptional);
 
     expect(toOptional({ id: 1 })).toEqual({ id: 1 });
     expect(Object.keys(toOptional({ id: 1 }))).toEqual(["id"]);
@@ -181,7 +181,7 @@ describe("JIT compiler mapper", () => {
 
     const missingOverrides = () => {
       // @ts-expect-error required unmatched target fields demand an overrides argument.
-      return JIT.map(Source, WithRequired, {});
+      return JIT.map(Source, WithRequired);
     };
 
     expect(() => missingOverrides().compile()).toThrow(Errors.JITError);

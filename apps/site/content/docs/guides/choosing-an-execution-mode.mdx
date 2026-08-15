@@ -36,7 +36,7 @@ early; lazy is not required merely to stop a scan.
 
 ## Synchronous iterator
 
-Use `.compileIterator()` when:
+Use `.to.iterator()` when:
 
 - consumers often stop early;
 - output cardinality is unknown (`flatMap`);
@@ -49,7 +49,7 @@ into one stage so it does not suspend once per logical operator.
 
 ## Async iterator
 
-Use `.compileAsyncIterator()` for database cursors, queue consumers, HTTP body
+Use `.to.asyncIterator()` for database cursors, queue consumers, HTTP body
 sources and paginated APIs. Consumer speed naturally controls production:
 
 ```ts
@@ -63,10 +63,10 @@ async generator steps cost more than a synchronous indexed loop.
 
 ## Visitor
 
-Use `.compileVisitor()` for high-throughput sinks:
+Use `.to.visitor()` for high-throughput sinks:
 
 ```ts
-const visit = query.compileVisitor();
+const visit = query.to.visitor();
 visit(users, (user) => encoder.write(user));
 ```
 

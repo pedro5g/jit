@@ -27,8 +27,7 @@ const rowset = Users.load(bigArray);
 
 const findAdmins = JIT.query(rowset)
   .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
-  .select("id", "name", "score")
-  .compile();
+  .select("id", "name", "score");
 
 const admins = findAdmins(rowset);
 ```
@@ -275,8 +274,7 @@ selected fields:
 ```ts
 JIT.query(rowset)
   .filter((q) => q.eq("active", true))
-  .select("id", "score")
-  .compile();
+  .select("id", "score");
 ```
 
 The output contains `{ id, score }` objects only for matching rows. No full
@@ -310,14 +308,13 @@ binary.clear();
 
 Binary queries register source artifacts like normal compiled queries. If a
 dev exports one as a standalone function or puts it inside a grouped
-`JIT.compile(schema, { ... })` object, `jit generate` can re-emit the byte
+`{ ... }` object, `jit generate` can re-emit the byte
 scanner as plain JS.
 
 ```ts
 export const ActiveAdmins = JIT.query(Users.binary().load(seed))
   .filter((q) => q.eq("role", "admin"))
-  .select("id", "score")
-  .compile();
+  .select("id", "score");
 ```
 
 Generated output contains the specialized `function query(rowset)` body and

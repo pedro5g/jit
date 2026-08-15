@@ -122,7 +122,7 @@ describe("JIT compiler clone", () => {
     expect(setOutput).toEqual(new Set([setItem]));
     expect(clonedSetItem).not.toBe(setItem);
 
-    const mapClone = Compiler.compileClone(JIT.map(JIT.string(), JIT.object({ id: JIT.number() })).schema);
+    const mapClone = Compiler.compileClone(JIT.mapSchema(JIT.string(), JIT.object({ id: JIT.number() })).schema);
     const mapValue = { id: 1 };
     const mapOutput = mapClone(new Map([["user", mapValue]]));
 
@@ -145,8 +145,8 @@ describe("JIT compiler clone", () => {
     `);
   });
 
-  it("should expose JIT.compileClone as a public convenience API", () => {
-    const clone = JIT.compileClone(JIT.object({ id: JIT.number() }).schema);
+  it("should expose the clone compiler as a low-level API", () => {
+    const clone = Compiler.compileClone(JIT.object({ id: JIT.number() }).schema);
     const input = { id: 1 };
 
     expect(clone(input)).toEqual(input);

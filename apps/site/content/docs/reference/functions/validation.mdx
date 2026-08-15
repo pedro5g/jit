@@ -54,8 +54,8 @@ implementations:
 
 ```ts
 JIT.is === JIT.validate.is; // the exact same factory
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 ```
 
 ## Async schemas
@@ -84,7 +84,7 @@ local bindings. Generated functions import no JIT runtime.
 // user.jit.ts
 import { JIT } from "@jit-compiler/jit/define";
 
-export const isUser = JIT.is(User);
+export const isUser = JIT.validate.is(User);
 ```
 
 After `jit generate`, import `isUser` from the configured output directory.

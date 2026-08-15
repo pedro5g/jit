@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler, JIT } from "@jit-compiler/jit";
 import { zx } from "@traversable/zod";
 import fc from "fast-check";
 import { z } from "zod";
@@ -16,7 +16,7 @@ const GeneratedUser = JIT.object({
   }),
 });
 const GeneratedUsers = JIT.array(GeneratedUser);
-const equal = JIT.compileEqual(GeneratedUsers.schema);
+const equal = Compiler.compileEqual(GeneratedUsers.schema);
 
 const TraversableUser = z.object({
   id: z.number(),

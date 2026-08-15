@@ -66,8 +66,7 @@ async function loadAot(): Promise<JsonAotModule> {
   const outDir = fileURLToPath(new URL("./.generated/", import.meta.url));
 
   AOT.generate({
-    schemas: {},
-    functions: {
+    artifacts: {
       Simple_json: JIT.json.parse(Simple),
       Simple_parse: JIT.json.parse(Simple).validate(),
       User_json: JIT.json.parse(User),

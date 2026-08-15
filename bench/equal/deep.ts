@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler, JIT } from "@jit-compiler/jit";
 import { fastEqual, lodashIsEqual } from "../shared/competitors.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -33,7 +33,7 @@ const Node10 = JIT.object({
   }),
 });
 
-const equal = JIT.compileEqual(Node10.schema);
+const equal = Compiler.compileEqual(Node10.schema);
 
 interface DeepNode {
   readonly value: number;

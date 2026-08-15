@@ -17,7 +17,7 @@ import type { CompileCacheOptions } from "../runtime/cache/compile-cache.js";
  *   document: JIT.string().pii("hash"),  // FNV-1a hex digest
  * });
  *
- * const maskUser = JIT.mask(User);
+ * const maskUser = JIT.security.mask(User);
  * logger.info(maskUser(user)); // sensitive fields never reach the log
  * ```
  */
@@ -38,7 +38,7 @@ export function mask<TSchema extends ATS.AnyTypeSchema>(
  *   body: JIT.string().sanitize(),
  * });
  *
- * const cleanComment = JIT.sanitize(Comment);
+ * const cleanComment = JIT.security.sanitize(Comment);
  * cleanComment({ id: 1, body: "<script>steal()</script>hi" }).body; // "hi"
  * ```
  */

@@ -1,4 +1,4 @@
-import { JIT } from "@jit-compiler/jit";
+import { Compiler, JIT } from "@jit-compiler/jit";
 import { range } from "../shared/data.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -12,7 +12,7 @@ const User = JIT.object({
   name: JIT.string(),
 });
 const Users = JIT.array(User).entity({ key: "id" }).indexBy("id");
-const indexedEqual = JIT.compileEqual(Users.schema);
+const indexedEqual = Compiler.compileEqual(Users.schema);
 
 const left = range(50_000).map((id) => ({ id, name: `user-${id}` }));
 const right = [...left].reverse();

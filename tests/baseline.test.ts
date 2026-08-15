@@ -13,7 +13,7 @@ describe("public surface smoke test", () => {
       id: jit.JIT.number(),
       name: jit.JIT.string(),
     });
-    const equal = jit.JIT.compileEqual(User.schema);
+    const equal = jit.JIT.compare.equal(User);
 
     expect(equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" })).toBe(true);
     expect(equal({ id: 1, name: "Ada" }, { id: 2, name: "Ada" })).toBe(false);

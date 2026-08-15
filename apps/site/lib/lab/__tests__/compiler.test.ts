@@ -9,7 +9,7 @@ describe("Lab browser AOT compiler", () => {
       role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
     });
     const isUser = JIT.validate.is(User);
-    const result = compileBindings({ User, isUser }, { format: "typescript", fileName: "user.generated" });
+    const result = compileBindings({ User, isUser }, { format: "ts", fileName: "user.generated" });
     const file = result.files[0];
 
     expect(result.skipped).toEqual([]);
@@ -23,7 +23,7 @@ describe("Lab browser AOT compiler", () => {
   it("emits one ready-to-run JavaScript file without declaration files", () => {
     const Flag = JIT.object({ enabled: JIT.boolean() });
     const isFlag = JIT.validate.is(Flag);
-    const result = compileBindings({ Flag, isFlag }, { format: "javascript", fileName: "flag" });
+    const result = compileBindings({ Flag, isFlag }, { format: "js", fileName: "flag" });
 
     expect(result.files.map((file) => file.path)).toEqual(["flag.js"]);
   });
@@ -34,8 +34,8 @@ describe("Lab browser AOT compiler", () => {
     })
       .transform({ name: (value) => String(value).trim() })
       .refine((value) => value.name !== "blocked");
-    const parseProfile = JIT.parse(Profile);
-    const result = compileBindings({ Profile, parseProfile }, { format: "typescript", fileName: "profile" });
+    const parseProfile = JIT.validate.parse(Profile);
+    const result = compileBindings({ Profile, parseProfile }, { format: "ts", fileName: "profile" });
     const source = result.files[0]?.source;
 
     expect(result.skipped).toEqual([]);
