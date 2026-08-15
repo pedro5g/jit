@@ -1,5 +1,6 @@
 import type { BinaryArray, BinaryRowSetOptions } from "../../compiler/binary-rowset.js";
 import type { SafeParseResult } from "../../compiler/validate.js";
+import type { OpChain } from "../../factories/ops.js";
 import type { Regexes } from "../../shared/index.js";
 import type {
   AnyTypeSchema,
@@ -159,18 +160,77 @@ type IsNegativeNumber<TValue extends number> = `${TValue}` extends `-${string}` 
 
 type IsIntegerNumber<TValue extends number> = `${TValue}` extends `${string}.${string}` ? false : true;
 
-type IsTupleComparableNumber<TValue extends number> = number extends TValue
-  ? false
-  : IsNegativeNumber<TValue> extends true
-    ? false
-    : IsIntegerNumber<TValue>;
+/**
+ * Digit-wise numeric comparison.
+ *
+ * Counting a tuple up to the value is exact but costs one instantiation per
+ * unit, so a bound like `.max(65535)` exhausts the compiler before it can
+ * answer. Comparing the decimal strings costs one step per *digit* instead,
+ * which keeps a static default check on any integer bound essentially free.
+ *
+ * Values the comparison cannot decide (a non-literal `number`, a decimal)
+ * resolve to `boolean`, which `IsKnownTrue`/`IsKnownFalse` read as "unknown"
+ * — so an undecidable bound never rejects a valid default.
+ */
+type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+
+type GreaterDigits = {
+  "0": "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+  "1": "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+  "2": "3" | "4" | "5" | "6" | "7" | "8" | "9";
+  "3": "4" | "5" | "6" | "7" | "8" | "9";
+  "4": "5" | "6" | "7" | "8" | "9";
+  "5": "6" | "7" | "8" | "9";
+  "6": "7" | "8" | "9";
+  "7": "8" | "9";
+  "8": "9";
+  "9": never;
+};
+
+type DigitCount<TText extends string, TAcc extends readonly unknown[] = []> = TText extends `${string}${infer TRest}`
+  ? DigitCount<TRest, readonly [...TAcc, unknown]>
+  : TAcc["length"];
+
+type CompareSameLength<
+  TLeft extends string,
+  TRight extends string,
+> = TLeft extends `${infer TLeftHead extends Digit}${infer TLeftRest}`
+  ? TRight extends `${infer TRightHead extends Digit}${infer TRightRest}`
+    ? TLeftHead extends TRightHead
+      ? CompareSameLength<TLeftRest, TRightRest>
+      : TRightHead extends GreaterDigits[TLeftHead]
+        ? "lt"
+        : "gt"
+    : "gt"
+  : "eq";
+
+/** Compares two non-negative integer strings; longer means larger. */
+type CompareDigits<TLeft extends string, TRight extends string> =
+  DigitCount<TLeft> extends DigitCount<TRight>
+    ? CompareSameLength<TLeft, TRight>
+    : LessThan<DigitCount<TLeft>, DigitCount<TRight>> extends true
+      ? "lt"
+      : "gt";
+
+type Magnitude<TValue extends number> = `${TValue}` extends `-${infer TRest}` ? TRest : `${TValue}`;
+
+type NumericCompare<TLeft extends number, TRight extends number> = number extends TLeft | TRight
+  ? "unknown"
+  : IsIntegerNumber<TLeft> extends false
+    ? "unknown"
+    : IsIntegerNumber<TRight> extends false
+      ? "unknown"
+      : IsNegativeNumber<TLeft> extends true
+        ? IsNegativeNumber<TRight> extends true
+          ? // Both negative: the larger magnitude is the smaller number.
+            CompareDigits<Magnitude<TRight>, Magnitude<TLeft>>
+          : "lt"
+        : IsNegativeNumber<TRight> extends true
+          ? "gt"
+          : CompareDigits<Magnitude<TLeft>, Magnitude<TRight>>;
 
 type NumericLessThan<TLeft extends number, TRight extends number> =
-  IsTupleComparableNumber<TLeft> extends true
-    ? IsTupleComparableNumber<TRight> extends true
-      ? LessThan<TLeft, TRight>
-      : boolean
-    : boolean;
+  NumericCompare<TLeft, TRight> extends "unknown" ? boolean : NumericCompare<TLeft, TRight> extends "lt" ? true : false;
 
 type NumericGreaterThan<TLeft extends number, TRight extends number> = NumericLessThan<TRight, TLeft>;
 
@@ -399,7 +459,14 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
     defaultValue: TDefault & ValidDefault<TSchema, TDefault>
   ): Builder<DefaultSchema<TSchema>>;
   brand<const TBrand extends string>(brandName: TBrand): Builder<BrandSchema<TSchema, TBrand>>;
+  /**
+   * Applies a transformation after validation. A `JIT.ops` chain is compiled
+   * into the generated validator as source; a callback is kept as a call.
+   */
   pipe<TOutput>(transform: (value: TypeofSchema<TSchema>) => TOutput): Builder<PipeSchema<TSchema, TOutput>>;
+  pipe<TChain extends OpChain>(
+    transform: TChain
+  ): Builder<PipeSchema<TSchema, TChain extends OpChain<never, infer TOut> ? TOut : unknown>>;
   or<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<UnionSchema<[TSchema, TRight]>>;
   and<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<IntersectionSchema<[TSchema, TRight]>>;
   xor<TRight extends AnyTypeSchema>(right: SchemaInput<TRight>): Builder<XorSchema<[TSchema, TRight]>>;

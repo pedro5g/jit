@@ -22,6 +22,7 @@ export { dto } from "./dto.js";
 export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export * from "./object/index.js";
+export { type AnyOpChain, type DateOps, type NumberOps, type OpChain, ops, type StringOps } from "./ops.js";
 export * from "./primitive/index.js";
 export type {
   BinaryProcessBuilder,

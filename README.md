@@ -39,7 +39,7 @@ aliases and no `.compile()` step — a compiled artifact *is* the function.
 | `JIT.security` | `mask`, `sanitize`                                                   |
 | `JIT.json`     | `parse`, `stringify`, `stringifyChunks`, `value`                     |
 | `JIT.binary`   | `encode`, `decode`, `codec`                                          |
-| root           | `clone`, `format`, `jsonSchema`, `mock`, `from`, `map`, `query`, `transform`, `update`, `watch`, `stream`, `process`, `dto`, plus every schema factory |
+| root           | `clone`, `format`, `jsonSchema`, `mock`, `ops`, `from`, `map`, `query`, `transform`, `update`, `watch`, `stream`, `process`, `dto`, plus every schema factory |
 
 ```ts
 const isUser = JIT.validate.is(User);
@@ -78,6 +78,14 @@ const isOrder = JIT.validate.is(Order);
 Every compiled validation artifact also implements
 [Standard Schema](https://standardschema.dev), so it can be handed straight to
 any consumer in the ecosystem.
+
+A transformation can be declared instead of written as a callback, which lets
+the emitter write it into the generated source — and, more importantly, lets
+AOT generate it at all, since a closure over outer scope cannot be serialized:
+
+```ts
+const Handle = JIT.string().min(3).pipe(JIT.ops.trim().lowercase().slice(0, 20));
+```
 
 Queries are builders that *are* the query, with alternative result shapes
 behind `.to`:

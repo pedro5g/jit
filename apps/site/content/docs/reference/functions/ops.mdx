@@ -1,0 +1,83 @@
+---
+title: Value operations
+description: Declarative transformations the compiler writes into the generated source.
+---
+
+`.pipe()` accepts either a callback or a `JIT.ops` chain. Both run after
+validation, on the validated value.
+
+```ts
+const Handle = JIT.string().min(3).pipe(JIT.ops.trim().lowercase().slice(0, 20));
+const Price = JIT.number().pipe(JIT.ops.clamp(0, 1000).toFixed(2));
+```
+
+A chain is data, so the emitter writes it into the generated function as
+source:
+
+```js
+o2 = o2.trim().toLowerCase().slice(0, 20);   // declarative
+o2 = __v0(o2);                               // callback
+```
+
+## What this is and is not for
+
+It is **not** a runtime speed optimization. A monomorphic callback is inlined
+by the engine, and measured on a 3M-value loop the two forms are within noise
+of each other. Claiming otherwise would be wrong.
+
+What a chain buys is **ahead-of-time coverage**. A callback that closes over
+anything in its scope cannot be serialized into a generated module, so
+`jit generate` skips the whole artifact:
+
+```
+skipped parseUser.parse: refine/transform/default callbacks cannot be
+serialized ahead of time
+```
+
+A chain has no closure, so the same transform always generates. If a schema is
+destined for AOT, declaring the transformation is the difference between
+shipping it and silently losing it.
+
+A whole chain also folds into one expression rather than one call per step,
+and the generated module carries no bound closure for it.
+
+## Vocabulary
+
+### Strings
+
+`trim()` · `lowercase()` · `uppercase()` · `normalize(form?)` ·
+`slice(start, end?)` · `replace(pattern, replacement)` ·
+`padStart(length, pad?)` · `padEnd(length, pad?)` · `collapseWhitespace()` ·
+`toNumber()` · `toDate()`
+
+### Numbers
+
+`round()` · `floor()` · `ceil()` · `abs()` · `clamp(min, max)` ·
+`toFixed(digits)` · `toText()`
+
+### Dates
+
+`startOfDay()` · `toISO()` · `toEpoch()`
+
+## Ordering
+
+The chain runs **after** the schema's checks, on the value they accepted:
+
+```ts
+const Email = JIT.string().email().pipe(JIT.ops.lowercase());
+
+JIT.validate.parse(Email)("NOT-AN-EMAIL"); // throws — the transform cannot rescue it
+JIT.validate.parse(Email)("ADA@example.com"); // "ada@example.com"
+```
+
+To normalize *before* validating, use the checks that already do it —
+`JIT.string().trim().email()`.
+
+## Runtime values
+
+A regex passed to `replace` travels as a binding, never interpolated into the
+source, exactly like every other runtime value the compiler handles:
+
+```js
+o2 = o2.replace(__v0, "#");
+```

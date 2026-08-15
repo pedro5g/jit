@@ -1,5 +1,6 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
+import { emitOpChain, isOpChain, type OpChain } from "../../factories/ops.js";
 import { Regexes } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { emitSanitizeChain } from "../sanitize.js";
@@ -25,6 +26,14 @@ interface RefineRecord {
 }
 
 /** Wrapper pipeline resolved outside-in for one schema node. */
+/**
+ * A transform is either a bound callback (opaque to the emitter) or a
+ * declarative chain the emitter can write out as source.
+ */
+type PipeStep =
+  | { readonly kind: "call"; readonly binding: string }
+  | { readonly kind: "inline"; readonly chain: OpChain };
+
 interface UnwrappedSchema {
   readonly base: AnySchema;
   readonly optional: boolean;
@@ -33,7 +42,7 @@ interface UnwrappedSchema {
   readonly emptyAsUndefined: boolean;
   readonly coerce: string | undefined;
   readonly refines: readonly RefineRecord[];
-  readonly pipes: readonly string[];
+  readonly pipes: readonly PipeStep[];
   readonly fieldTransforms: Readonly<Record<string, string>> | undefined;
 }
 
@@ -184,7 +193,12 @@ class ValidatorEmitter {
         // (trim/case) after the initial `output = holder` capture.
         writer.line(`${output} = ${innerOut};`);
         for (const pipe of unwrapped.pipes) {
-          writer.line(`${output} = ${pipe}(${output});`);
+          // A declarative chain becomes real source; a callback stays a call.
+          writer.line(
+            pipe.kind === "inline"
+              ? `${output} = ${emitOpChain(pipe.chain, output, (value) => this.bind(value))};`
+              : `${output} = ${pipe.binding}(${output});`
+          );
         }
       }
     };
@@ -1981,7 +1995,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
   let defaultValue: UnwrappedSchema["defaultValue"];
   let coerce: string | undefined;
   const refines: RefineRecord[] = [];
-  const pipes: string[] = [];
+  const pipes: PipeStep[] = [];
   let fieldTransforms: Record<string, string> | undefined;
 
   while (true) {
@@ -2033,7 +2047,11 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     }
 
     if (current.type === TypeName.pipe) {
-      pipes.unshift(emitter.bind(current.def.transform));
+      const transform = current.def.transform;
+
+      pipes.unshift(
+        isOpChain(transform) ? { kind: "inline", chain: transform } : { kind: "call", binding: emitter.bind(transform) }
+      );
       current = current.def.innerType as AnySchema;
       continue;
     }

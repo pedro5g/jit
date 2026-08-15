@@ -1,6 +1,7 @@
 import { type BinaryRowSetOptions, compileBinaryArray } from "../../compiler/binary-rowset.js";
 import { compileValidator, compileValidatorSelection } from "../../compiler/validate.js";
 import { JITError } from "../../errors/index.js";
+import type { OpChain } from "../../factories/ops.js";
 import { Regexes } from "../../shared/index.js";
 import * as Transform from "../../transforms/index.js";
 import {
@@ -86,8 +87,8 @@ const baseBuilderPrototype = {
     return createBuilder(Transform.brand(this.schema, brandName));
   },
 
-  pipe(this: RuntimeBuilder, transform: (value: unknown) => unknown): AnyBuilder {
-    return createBuilder(Transform.pipe(this.schema, transform));
+  pipe(this: RuntimeBuilder, transform: ((value: unknown) => unknown) | OpChain): AnyBuilder {
+    return createBuilder(Transform.pipe(this.schema, transform as (value: unknown) => unknown));
   },
 
   or(this: RuntimeBuilder, right: SchemaInput): AnyBuilder {

@@ -849,6 +849,26 @@ form for it: `JIT.date()` is a `date-time` string because that is what
 array lengths, enum members, optional presence and union branches; its PRNG
 core is inlined so generated modules stay import-free.
 
+## Declared transformations
+
+`.pipe()` takes a callback or a `JIT.ops` chain. Both run after validation, on
+the validated value:
+
+```ts
+const Handle = JIT.string()
+  .min(3)
+  .pipe(JIT.ops.trim().lowercase().slice(0, 20));
+const Price = JIT.number().pipe(JIT.ops.clamp(0, 1000).toFixed(2));
+```
+
+A chain is data, so it is written into the generated function as source
+(`o = o.trim().toLowerCase()`) instead of a call to a bound closure.
+
+This is **not** a runtime speed win — a monomorphic callback is inlined by the
+engine, and the two forms measure the same. What it buys is ahead-of-time
+coverage: a callback that closes over its scope cannot be serialized, so
+`jit generate` skips the artifact entirely. A chain always generates.
+
 ## Security
 
 ```ts
