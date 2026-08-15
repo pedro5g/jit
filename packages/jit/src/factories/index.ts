@@ -1,6 +1,17 @@
-export type { JsonSchemaDocument, JsonSchemaOptions } from "../compiler/json-schema.js";
+export type {
+  FromJsonSchemaOptions,
+  InferJsonSchema,
+  JsonSchemaDocument,
+  JsonSchemaNode,
+  JsonSchemaTarget,
+  OverrideContext,
+  RefineContext,
+  ToJsonSchemaOptions,
+  UnsupportedContext,
+} from "../compiler/json-schema/index.js";
 export type { Mock, MockOptions } from "../compiler/mock.js";
 export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
+export { type JsonSchemaBuilder, jsonSchema } from "./json-schema.js";
 /** Resolves the output type of a schema or builder as `JIT.Typeof<typeof User>`. */
 export type Typeof<TSchemaLike> = import("../core/ats/typeof.js").Typeof<TSchemaLike>;
 /** Format regexes behind the string checks — reusable and overridable. */
@@ -33,7 +44,6 @@ export {
   format,
   from,
   json,
-  jsonSchema,
   map,
   mock,
   security,

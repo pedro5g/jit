@@ -887,7 +887,11 @@ function normalizeKeys(first: readonly string[] | string, rest: readonly string[
   return typeof first === "string" ? [first, ...rest] : first;
 }
 
-function getStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknown> {
+/**
+ * The Standard Schema adapter for a schema, cached by identity so a compiled
+ * artifact and its builder hand the ecosystem the very same object.
+ */
+export function getStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknown> {
   const cached = standardSchemaCache.get(schema);
 
   if (cached) return cached;

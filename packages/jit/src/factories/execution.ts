@@ -10,8 +10,8 @@ import { compileValidatorSelection } from "../compiler/validate.js";
 import type { QueryConditionNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import { createSchema, TypeName } from "../core/ats/index.js";
-import type { SchemaInput } from "../core/builder/index.js";
-import { unwrapSchema } from "../core/builder/index.js";
+import type { SchemaInput, StandardSchemaProps } from "../core/builder/index.js";
+import { getStandardSchema, unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { getQueryProgram, type QueryConditionBuilder, query } from "./query.js";
@@ -29,8 +29,18 @@ export type CallableArtifact<TFunction extends FunctionLike> = TFunction & {
 
 export type ExecutionArtifact<TInput, TOutput> = CallableArtifact<(input: TInput) => TOutput>;
 
+/**
+ * A compiled artifact that also satisfies the Standard Schema contract, so
+ * it can be handed to any consumer in the ecosystem with no wrapper.
+ */
+export type StandardArtifact<TFunction extends FunctionLike, TOutput> = CallableArtifact<TFunction> & {
+  readonly "~standard": StandardSchemaProps<unknown, TOutput>;
+};
+
 export type ValueArtifact<TInput, TOutput, TSchema extends ATS.AnyTypeSchema> = ExecutionArtifact<TInput, TOutput> & {
   readonly schema: TSchema;
+  /** Standard Schema interop; `validate` runs the compiled validator. */
+  readonly "~standard": StandardSchemaProps<unknown, ATS.TypeofSchema<TSchema>>;
   validate(): SchemaArtifact<TInput, TSchema>;
   map<TTarget extends ATS.AnyTypeSchema>(
     target: SchemaInput<TTarget>,
@@ -270,6 +280,10 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
     }
   });
 
+  // Every validation artifact is a Standard Schema, so it can be handed
+  // straight to any consumer in the ecosystem without a wrapper.
+  attachStandardSchema(artifact, unwrapped);
+
   if (operation === "parse") {
     return artifactForSchema(
       artifact as unknown as ExecutionArtifact<unknown, ATS.TypeofSchema<TSchema>>,
@@ -278,6 +292,15 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
   }
 
   return artifact;
+}
+
+/** Shares the schema's cached adapter; validation stays the compiled one. */
+export function attachStandardSchema(target: object, schema: ATS.AnyTypeSchema): void {
+  Object.defineProperty(target, "~standard", {
+    enumerable: false,
+    configurable: false,
+    get: () => getStandardSchema(schema),
+  });
 }
 
 /** Appends validation as a plan stage; construction never executes the preceding artifact. */

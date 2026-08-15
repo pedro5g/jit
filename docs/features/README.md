@@ -38,6 +38,7 @@ work and for production performance. Each page explains:
 | Process unbounded/cursor input    | Lazy execution          | sync iterator vs async iterator             |
 | Scan million-row flat batches     | Binary rowsets          | packed/aligned/columnar and memory strategy |
 | Send JSON or binary data          | Serialization and codec | full string, chunks, or versioned bytes     |
+| Publish or consume a contract     | JSON Schema bridge      | `to` a document vs `from` a document        |
 | Reuse expensive lookups           | Cache/hash/index        | build cost vs reuse count                   |
 | Model entity collections          | Cache/hash/index        | identity vs index vs keyed output           |
 | Ship strict-CSP/browser code      | AOT/tree sharing        | grouped object vs standalone export         |

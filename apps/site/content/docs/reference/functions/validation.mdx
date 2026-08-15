@@ -67,7 +67,7 @@ const Job = JIT.object({
   result: JIT.promise(JIT.object({ id: JIT.string() })),
 });
 
-const parseJob = JIT.validate.parseAsync(Job);
+const parseJob = JIT.validate.async.parse(Job);
 const job = await parseJob(input);
 ```
 

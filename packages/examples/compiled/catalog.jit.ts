@@ -44,7 +44,7 @@ export const Users = {
 };
 
 /** The interchange document; static data, inlined by the generator. */
-export const UserJsonSchema = JIT.jsonSchema(User);
+export const UserJsonSchema = JIT.jsonSchema.to(User);
 
 export const toPublicUser = JIT.map(User, PublicUser);
 

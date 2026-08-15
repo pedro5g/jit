@@ -773,7 +773,7 @@ describe("JIT AOT generate", () => {
       role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
     });
     const result = AOT.generate({
-      artifacts: { userDocument: JIT.jsonSchema(User), mockUser: JIT.mock(User) },
+      artifacts: { userDocument: JIT.jsonSchema.to(User), mockUser: JIT.mock(User) },
       schemas: { User },
       outDir,
       format: "ts",
@@ -797,6 +797,37 @@ describe("JIT AOT generate", () => {
     expect(generated.userDocument.required).toEqual(["id", "email", "role"]);
     expect(JIT.validate.is(User)(generated.mockUser({ seed: 5 }))).toBe(true);
     expect(generated.mockUser({ seed: 5 })).toEqual(generated.mockUser({ seed: 5 }));
+  });
+
+  it("should lower a schema built from a JSON Schema document at generation time", async () => {
+    const User = JIT.jsonSchema.from({
+      type: "object",
+      properties: { id: { type: "integer", minimum: 1 }, name: { type: "string", minLength: 2 } },
+      required: ["id", "name"],
+    } as const);
+    const result = AOT.generate({
+      artifacts: { isUser: JIT.validate.is(User), toJson: JIT.json.stringify(User) },
+      schemas: { User },
+      outDir,
+      format: "ts",
+    });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+
+    expect(result.skipped).toHaveLength(0);
+    // The document is build-time input: only specialized functions ship.
+    expect(source).toContain("export type User = { id: number; name: string };");
+    expect(source).not.toContain("properties");
+    expect(source).not.toContain("$schema");
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
+      isUser: (value: unknown) => boolean;
+      toJson: (value: { id: number; name: string }) => string;
+    };
+
+    expect(generated.isUser({ id: 1, name: "Ada" })).toBe(true);
+    expect(generated.isUser({ id: 0, name: "Ada" })).toBe(false);
+    expect(generated.isUser({ id: 1, name: "A" })).toBe(false);
+    expect(generated.toJson({ id: 1, name: "Ada" })).toBe('{"id":1,"name":"Ada"}');
   });
 
   it("should emit TypeScript types for nested and wrapped schemas", () => {

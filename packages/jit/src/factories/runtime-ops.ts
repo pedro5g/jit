@@ -5,7 +5,6 @@ import { compileEqual, type Equal } from "../compiler/equal.js";
 import { compileFormat, type Format } from "../compiler/format.js";
 import { compileHash, type Hash } from "../compiler/hash.js";
 import { compileStringifyChunks, type JsonChunksOptions } from "../compiler/json-chunks.js";
-import { compileJsonSchema, type JsonSchemaDocument, type JsonSchemaOptions } from "../compiler/json-schema.js";
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { compileMask, type Mask } from "../compiler/mask.js";
 import { compileMock, type Mock } from "../compiler/mock.js";
@@ -28,6 +27,7 @@ import {
   mappedValue,
   operationArtifact,
   type SchemaArtifact,
+  type StandardArtifact,
   validationArtifact,
 } from "./execution.js";
 import type { MapperArgs } from "./mapper.js";
@@ -45,51 +45,69 @@ export { from } from "./execution.js";
 /** A direct callable artifact; `.compile()` is only an optional warm-up hook. */
 export type RuntimeCompiledFunction<TFunction extends (...args: never[]) => unknown> = CallableArtifact<TFunction>;
 
+/** Async validation, for schemas that contain promises or async refinements. */
+export interface AsyncValidateNamespace {
+  parse<TSchema extends ATS.AnyTypeSchema>(
+    schema: SchemaInput<TSchema>
+  ): ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
+  safeParse<TSchema extends ATS.AnyTypeSchema>(
+    schema: SchemaInput<TSchema>
+  ): ExecutionArtifact<unknown, Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>>;
+}
+
+/**
+ * Validation capability. The unprefixed members are synchronous — the common
+ * path — and `async` holds the awaited pair, so a call site never has to read
+ * a suffix to know which one it is running.
+ *
+ * Every artifact it returns is a Standard Schema (`~standard`), so it can be
+ * handed directly to any consumer in the ecosystem.
+ */
 export interface ValidateNamespace {
   is<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
-  ): CallableArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>>;
+  ): StandardArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>>;
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<unknown, TSchema>;
   safeParse<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
-  ): ExecutionArtifact<unknown, SafeParseResult<ATS.TypeofSchema<TSchema>>>;
-  parseAsync<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>
-  ): ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
-  safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>
-  ): ExecutionArtifact<unknown, Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>>;
+  ): StandardArtifact<(value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>, ATS.TypeofSchema<TSchema>>;
   issues<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
+  readonly async: AsyncValidateNamespace;
 }
 
 /** Capability namespace for validation. It has no compile-selection chain. */
 export const validate: ValidateNamespace = Object.freeze({
   is<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationArtifact(schema, "is") as CallableArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>>;
+    return validationArtifact(schema, "is") as StandardArtifact<
+      (value: unknown) => value is ATS.TypeofSchema<TSchema>,
+      ATS.TypeofSchema<TSchema>
+    >;
   },
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationArtifact(schema, "parse") as SchemaArtifact<unknown, TSchema>;
   },
   safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationArtifact(schema, "safeParse") as ExecutionArtifact<
-      unknown,
-      SafeParseResult<ATS.TypeofSchema<TSchema>>
-    >;
-  },
-  parseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationArtifact(schema, "parseAsync") as ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
-  },
-  safeParseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationArtifact(schema, "safeParseAsync") as ExecutionArtifact<
-      unknown,
-      Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
+    return validationArtifact(schema, "safeParse") as StandardArtifact<
+      (value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>,
+      ATS.TypeofSchema<TSchema>
     >;
   },
   issues<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationArtifact(schema, "issues") as ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
   },
+  async: Object.freeze({
+    parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+      return validationArtifact(schema, "parseAsync") as ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
+    },
+    safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+      return validationArtifact(schema, "safeParseAsync") as ExecutionArtifact<
+        unknown,
+        Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
+      >;
+    },
+  }),
 });
 
 export interface JsonNamespace {
@@ -170,17 +188,6 @@ function hash<TSchema extends ATS.AnyTypeSchema>(
   return operationArtifact(schema, "hash", "value", "value", compileHash) as RuntimeCompiledFunction<
     Hash<ATS.TypeofSchema<TSchema>>
   >;
-}
-
-/**
- * Describes the schema as a JSON Schema document — the format OpenAPI, form
- * builders and structured-output APIs consume. Static data, computed once.
- */
-export function jsonSchema<TSchema extends ATS.AnyTypeSchema>(
-  schema: SchemaInput<TSchema>,
-  options?: JsonSchemaOptions
-): JsonSchemaDocument {
-  return compileJsonSchema(unwrapSchema(schema), options);
 }
 
 /**

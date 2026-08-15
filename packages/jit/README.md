@@ -551,7 +551,7 @@ parseUser(x); // data or throws JITValidationError
 
 // async: settles promise wrappers, then validates the resolved value
 const Job = JIT.object({ result: JIT.string().min(3).promise() });
-await JIT.validate.parseAsync(Job)({ result: fetchResult() });
+await JIT.validate.async.parse(Job)({ result: fetchResult() });
 ```
 
 Validators can be compiled selectively. The compiler emits only the requested
@@ -810,7 +810,8 @@ what the validator enforces:
 ```ts
 // The interchange document OpenAPI, form builders and structured-output
 // APIs consume — static data, inlined as a literal by AOT.
-const userDocument = JIT.jsonSchema(User);
+const userDocument = JIT.jsonSchema.to(User);
+const openapi = JIT.jsonSchema.to(User, { target: "openapi-3.0", io: "input" });
 
 // A generator whose values pass `JIT.validate.is(User)` by construction.
 const mockUser = JIT.mock(User);
@@ -818,11 +819,35 @@ const mockUser = JIT.mock(User);
 mockUser({ seed: 7 }); // reproducible fixture
 ```
 
-`jsonSchema` reports only what the validator checks: constraints JSON Schema
-cannot express (custom refinements, transforms, brands) are dropped rather than
-approximated. `mock` honors string lengths/affixes/formats, numeric bounds and
-multiples, array lengths, enum members, optional presence and union branches;
-its PRNG core is inlined so generated modules stay import-free.
+The bridge also runs the other way. A document is a contract that already
+states its shape, so the type is read from the literal instead of declared
+twice:
+
+```ts
+const Order = JIT.jsonSchema.from({
+  type: "object",
+  properties: { id: { type: "integer", minimum: 1 }, sku: { type: "string" } },
+  required: ["id", "sku"],
+} as const);
+
+const isOrder = JIT.validate.is(Order);
+// (value: unknown) => value is { id: number; sku: string }
+```
+
+`minimum` and friends become the same specialized checks a hand-written schema
+compiles, and in AOT the whole conversion happens at generation time — the
+generated module carries the functions, never the document.
+
+A type is representable exactly when JIT's own JSON serializer defines a wire
+form for it: `JIT.date()` is a `date-time` string because that is what
+`JIT.json.stringify` writes, while `Map`, `Set` and `bigint` go through the
+`unsupported` policy instead of being approximated. See the
+[JSON Schema bridge guide](../../docs/features/json-schema.md) for targets,
+`refine` and `override`.
+
+`mock` honors string lengths/affixes/formats, numeric bounds and multiples,
+array lengths, enum members, optional presence and union branches; its PRNG
+core is inlined so generated modules stay import-free.
 
 ## Security
 

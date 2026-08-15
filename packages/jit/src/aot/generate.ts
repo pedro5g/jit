@@ -7,7 +7,7 @@ import { emitEqualSource } from "../compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
-import { compileJsonSchema } from "../compiler/json-schema.js";
+import { compileJsonSchema } from "../compiler/json-schema/index.js";
 import {
   emitQueryAsyncIteratorSource,
   emitQueryIteratorSource,

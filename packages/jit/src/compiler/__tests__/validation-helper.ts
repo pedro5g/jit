@@ -8,7 +8,9 @@ export function validation<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInpu
     is: JIT.validate.is(schema),
     parse: JIT.validate.parse(schema),
     safeParse: JIT.validate.safeParse(schema),
-    parseAsync: JIT.validate.parseAsync(schema),
-    safeParseAsync: JIT.validate.safeParseAsync(schema),
+    async: {
+      parse: JIT.validate.async.parse(schema),
+      safeParse: JIT.validate.async.safeParse(schema),
+    },
   } as const;
 }

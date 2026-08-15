@@ -26,6 +26,27 @@ Validation is reached through `JIT.validate` and nowhere else — there are no
 root-level `is`/`parse`/`safeParse` aliases. Each factory returns one callable
 artifact.
 
+The unprefixed members are synchronous, and the awaited pair lives under
+`async`, so a call site never has to read a suffix to know which one it runs:
+
+```ts
+const parseUser = JIT.validate.parse(User);
+const parseUserAsync = JIT.validate.async.parse(User);
+```
+
+Every artifact it returns also implements
+[Standard Schema](https://standardschema.dev) through `~standard`, so it can be
+handed directly to any consumer in the ecosystem:
+
+```ts
+const isUser = JIT.validate.is(User);
+
+isUser["~standard"].validate({ id: 1 }); // { value } | { issues }
+```
+
+The adapter is the schema's own, shared by identity, and it closes over the
+compiled `safeParse` — there is no second, generic validator behind it.
+
 `is` is fail-fast and allocation-free on the normal path. `safeParse` collects stable
 issues with `path`, `code`, `expected` and `message`. `parse` throws
 `JITValidationError`. Promise schemas use the asynchronous variants.

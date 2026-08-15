@@ -22,7 +22,7 @@ export * from "./ir/optimizer/optimize-ir.js";
 export * from "./ir/scope.js";
 export * from "./json-chunks.js";
 export * from "./json-parse.js";
-export * from "./json-schema.js";
+export * from "./json-schema/index.js";
 export * from "./lazy-query.js";
 export * from "./mapper/build-mapper-plan.js";
 export * from "./mapper.js";

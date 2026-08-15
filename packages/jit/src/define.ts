@@ -10,7 +10,7 @@ import type { Equal } from "./compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
 import type { Format } from "./compiler/format.js";
 import type { Hash } from "./compiler/hash.js";
-import type { JsonSchemaDocument } from "./compiler/json-schema.js";
+import type { ToJsonSchemaOptions } from "./compiler/json-schema/index.js";
 import type { Mask } from "./compiler/mask.js";
 import type { Mock } from "./compiler/mock.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
@@ -56,21 +56,23 @@ const validate = Object.freeze({
       SafeParseResult<ATS.TypeofSchema<TSchema>>
     >;
   },
-  parseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationStub(schema, "parseAsync") as unknown as ExecutionArtifact<
-      unknown,
-      Promise<ATS.TypeofSchema<TSchema>>
-    >;
-  },
-  safeParseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationStub(schema, "safeParseAsync") as unknown as ExecutionArtifact<
-      unknown,
-      Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
-    >;
-  },
   issues<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationStub(schema, "issues") as unknown as ExecutionArtifact<unknown, IterableIterator<unknown>>;
   },
+  async: Object.freeze({
+    parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+      return validationStub(schema, "parseAsync") as unknown as ExecutionArtifact<
+        unknown,
+        Promise<ATS.TypeofSchema<TSchema>>
+      >;
+    },
+    safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+      return validationStub(schema, "safeParseAsync") as unknown as ExecutionArtifact<
+        unknown,
+        Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
+      >;
+    },
+  }),
 });
 
 const json = Object.freeze({
@@ -200,13 +202,20 @@ function validationStub<TSchema extends ATS.AnyTypeSchema>(
   ]);
 }
 
-function jsonSchema<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): JsonSchemaDocument {
-  return operationStub<TSchema, (value: never) => unknown>(
-    schema,
-    "jsonSchema",
-    "value"
-  ) as unknown as JsonSchemaDocument;
-}
+/**
+ * AOT mirror of the runtime namespace. `to` still produces the real document
+ * (it is static data the generator inlines), while `from` builds a schema the
+ * generator lowers exactly like a hand-written one.
+ */
+const jsonSchema = Object.freeze({
+  to<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ToJsonSchemaOptions) {
+    const document = RuntimeJIT.jsonSchema.to(schema, options);
+
+    registerArtifact(document, { kind: "operation", schema: unwrapSchema(schema), op: "jsonSchema" });
+    return document;
+  },
+  from: RuntimeJIT.jsonSchema.from,
+});
 
 function mock<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
@@ -492,7 +501,7 @@ export const JIT = {
       source: SchemaInput<ATS.AnyTypeSchema>,
       target: SchemaInput<ATS.AnyTypeSchema>,
       mapping?: Readonly<Record<string, unknown>>
-    ) => map(source, target, mapping ?? {})) as typeof RuntimeJIT.map,
+    ) => map(source, target, mapping ?? {})) as unknown as typeof RuntimeJIT.map,
     { many: mapMany }
   ),
   clone,
@@ -509,7 +518,7 @@ export const JIT = {
   readonly json: typeof json;
   readonly binary: typeof binary;
   readonly from: typeof from;
-  readonly map: typeof map;
+  readonly map: typeof RuntimeJIT.map;
   readonly clone: typeof clone;
   readonly format: typeof format;
   readonly jsonSchema: typeof jsonSchema;

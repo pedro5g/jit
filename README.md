@@ -34,7 +34,7 @@ aliases and no `.compile()` step — a compiled artifact *is* the function.
 
 | Namespace      | Members                                                              |
 | -------------- | -------------------------------------------------------------------- |
-| `JIT.validate` | `is`, `parse`, `safeParse`, `parseAsync`, `safeParseAsync`, `issues`  |
+| `JIT.validate` | `is`, `parse`, `safeParse`, `issues`, `async.parse`, `async.safeParse` |
 | `JIT.compare`  | `equal`, `diff`, `hash`                                              |
 | `JIT.security` | `mask`, `sanitize`                                                   |
 | `JIT.json`     | `parse`, `stringify`, `stringifyChunks`, `value`                     |
@@ -55,11 +55,29 @@ The same schema also describes and populates itself, so neither an OpenAPI
 component nor a test fixture becomes a second source of truth:
 
 ```ts
-const userDocument = JIT.jsonSchema(User); // JSON Schema 2020-12, static data
+const userDocument = JIT.jsonSchema.to(User); // JSON Schema 2020-12, static data
 const mockUser = JIT.mock(User); // values that pass JIT.validate.is(User)
 
 mockUser({ seed: 7 }); // reproducible fixture
 ```
+
+The bridge runs both ways, so a contract that arrives as data becomes a schema
+whose type is read straight from the literal:
+
+```ts
+const Order = JIT.jsonSchema.from({
+  type: "object",
+  properties: { id: { type: "integer" }, sku: { type: "string" } },
+  required: ["id", "sku"],
+} as const);
+
+const isOrder = JIT.validate.is(Order);
+// (value: unknown) => value is { id: number; sku: string }
+```
+
+Every compiled validation artifact also implements
+[Standard Schema](https://standardschema.dev), so it can be handed straight to
+any consumer in the ecosystem.
 
 Queries are builders that *are* the query, with alternative result shapes
 behind `.to`:
@@ -185,6 +203,7 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 - [Feature guides](docs/features/README.md)
 - [CLI and config](docs/features/cli-and-config.md)
 - [Composable execution](docs/features/composable-execution.md)
+- [JSON Schema bridge](docs/features/json-schema.md)
 - [Executable runtime and AOT examples](packages/examples/README.md)
 - [Artifact tokens and Rust CLI](apps/site/content/docs/aot/artifact-cli.mdx)
 - [MCP server](docs/features/mcp-server.md)

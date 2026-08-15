@@ -1,22 +1,21 @@
 ---
 title: JSON Schema
-description: Describe a JIT schema as a JSON Schema document for OpenAPI, forms and structured outputs.
+description: Two-way bridge between a JIT schema and a JSON Schema document.
 ---
 
-`JIT.jsonSchema(schema)` returns a JSON Schema (draft 2020-12) document derived
-from the same schema the validator compiles. It removes the usual second source
-of truth: no hand-written OpenAPI component, no `*-to-json-schema` converter
-that drifts from the runtime checks.
+`JIT.jsonSchema` bridges both directions, so a contract has one source of
+truth whichever side it starts on.
+
+## `to` — schema to document
 
 ```ts
 const User = JIT.object({
   id: JIT.number().int32().positive(),
   email: JIT.string().email(),
-  name: JIT.string().min(2).max(80),
   role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
 });
 
-JIT.jsonSchema(User);
+JIT.jsonSchema.to(User);
 ```
 
 ```json
@@ -26,56 +25,94 @@ JIT.jsonSchema(User);
   "properties": {
     "id": { "type": "integer", "format": "int32", "exclusiveMinimum": 0 },
     "email": { "type": "string", "format": "email" },
-    "name": { "type": "string", "minLength": 2, "maxLength": 80 },
     "role": { "anyOf": [{ "const": "admin" }, { "const": "member" }] }
   },
-  "required": ["id", "email", "name", "role"],
+  "required": ["id", "email", "role"],
   "additionalProperties": false
 }
 ```
 
-## Faithful by construction
+| Option                 | Default           | Purpose                                                       |
+| ---------------------- | ----------------- | ------------------------------------------------------------- |
+| `target`               | `"draft-2020-12"` | also `draft-07`, `draft-04`, `openapi-3.0`                    |
+| `io`                   | `"output"`        | describe the produced value, or the accepted one (`"input"`)  |
+| `unsupported`          | `"throw"`         | `"any"`, or a function returning a node / `"any"` / `"throw"` |
+| `cycles`               | `"ref"`           | `"throw"` to refuse a schema that cannot be inlined           |
+| `reused`               | `"inline"`        | `"ref"` extracts repeated schemas into the defs               |
+| `override`             | —                 | last word over every node                                     |
+| `ref`                  | —                 | turns a schema `id` into an external `$ref` URI               |
+| `dialect`              | auto              | emit the `$schema` keyword                                    |
+| `additionalProperties` | auto              | force the object policy                                       |
 
-The document reports what the validator actually enforces. `additionalProperties`
-is `false` because object schemas reject unknown keys; a field is in `required`
-only when it is not optional, nullish or defaulted.
+### What is representable
 
-Constraints JSON Schema cannot express — custom `refine` predicates, transforms,
-branded identity — are **dropped rather than approximated**, so a document never
-promises a guarantee the validator does not make.
+A type is representable exactly when JIT's own JSON serializer defines a wire
+form for it. `JIT.date()` becomes `{ "type": "string", "format": "date-time" }`
+because that is what `JIT.json.stringify` writes. `bigint`, `symbol`, `Map`,
+`Set`, `File`, `Promise` and friends have no wire form, so they go through the
+`unsupported` policy — which throws by default, with the path in the message.
 
-## Options
+A document that claimed `{}` for a `Set` would tell consumers "anything goes"
+about a field the validator rejects, so silence is not an option.
+
+### Targets
+
+Each protocol version is one capability descriptor; the emitter never branches
+on a version name. Adding a version is adding a descriptor.
+
+| Capability       | 2020-12       | draft-07      | draft-04      | OpenAPI 3.0   |
+| ---------------- | ------------- | ------------- | ------------- | ------------- |
+| definitions      | `$defs`       | `definitions` | `definitions` | `definitions` |
+| `$ref` siblings  | yes           | `allOf` wrap  | `allOf` wrap  | `allOf` wrap  |
+| single value     | `const`       | `const`       | `enum: [v]`   | `enum: [v]`   |
+| tuples           | `prefixItems` | `items: []`   | `items: []`   | `items: []`   |
+| exclusive bounds | number        | number        | boolean       | boolean       |
+| null             | type union    | type union    | type union    | `nullable`    |
+| examples         | `examples`    | `examples`    | `examples`    | `example`     |
+
+## `from` — document to schema
 
 ```ts
-JIT.jsonSchema(User, { dialect: false, additionalProperties: true });
+const User = JIT.jsonSchema.from({
+  type: "object",
+  properties: { name: { type: "string" }, age: { type: "number" } },
+  required: ["name", "age"],
+} as const);
+
+const isUser = JIT.validate.is(User);
+// (value: unknown) => value is { name: string; age: number }
 ```
 
-| Option                 | Default        | Purpose                                                       |
-| ---------------------- | -------------- | ------------------------------------------------------------- |
-| `dialect`              | draft 2020-12  | `$schema` value; `false` omits it, which OpenAPI 3.1 expects   |
-| `additionalProperties` | `false`        | `true` describes a forward-compatible payload                  |
+The document already states the shape, so the type is read from the literal
+rather than declared twice. Pass it `as const` and every compiled operation is
+typed from it.
 
-## Metadata
+Constraints become the same specialized checks a hand-written schema produces:
+`format: "email"` compiles to the email check, not to a runtime interpreter.
 
-`.meta()` attaches documentation that never affects validation and flows
-straight into the document:
+### `refine`
 
 ```ts
-const Port = JIT.number().min(1).max(65535).meta({
-  title: "Port",
-  description: "TCP port",
-  examples: [80, 443],
+JIT.jsonSchema.from(contract, {
+  refine: ({ node, path, schema }) =>
+    node.type === "integer" && path.at(-1) === "amount"
+      ? JIT.custom<number>((value) => (value as number) % 2 === 0, "must be even").schema
+      : schema,
 });
 ```
 
-## Recursive schemas
+`refine` runs for every node after the structural conversion; returning a
+schema replaces the built one. `unknownKeywords: "throw"` refuses a document
+with keywords the converter does not implement.
 
-A schema that references itself through `JIT.lazy` becomes a `$defs` entry with
-`$ref` back-edges, so the document stays finite and valid.
+### AOT
 
-## Cost
+`from` resolves entirely at generation time: the generated module contains the
+specialized functions and no document.
 
-The result is static data derived only from the schema, so it is computed once
-per schema identity and returned frozen on later calls. In AOT it is inlined as
-a frozen object literal — the generated module ships the document, never the
-translator.
+## Known limits
+
+- A recursive document builds a schema with a lazy back-edge, but compiling a
+  validator for a self-referencing schema is still unsupported — a limitation
+  of the validator emitter, not of the bridge.
+- External `$ref` URIs are refused rather than fetched.
