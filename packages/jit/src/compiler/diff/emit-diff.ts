@@ -12,6 +12,7 @@ type PathPart = string | number | { readonly expr: string };
 export function emitDiff(program: DiffIRProgram): string {
   const writer = new CodeWriter();
 
+  emitDiffHelpers(writer, program);
   writer.line(`function diff(${program.leftParam}, ${program.rightParam}) {`);
   writer.indent(() =>
     emitDiffBodyLines(writer, createEmitState(), program.body, program.leftParam, program.rightParam)
@@ -24,9 +25,34 @@ export function emitDiff(program: DiffIRProgram): string {
 export function emitDiffBody(program: DiffIRProgram): string {
   const writer = new CodeWriter();
 
+  emitDiffHelpers(writer, program);
   emitDiffBodyLines(writer, createEmitState(), program.body, program.leftParam, program.rightParam);
 
   return writer.toString();
+}
+
+/**
+ * One function per cycle participant. It receives the change list and the
+ * path prefix, so a change found deep inside a recursive value still reports
+ * its real position instead of restarting at the root.
+ */
+function emitDiffHelpers(writer: CodeWriter, program: DiffIRProgram): void {
+  for (const helper of program.helpers) {
+    writer.line(`function ${helperName(helper.id)}(${program.leftParam}, ${program.rightParam}, changes, path) {`);
+    writer.indent(() => {
+      writer.line(`if (Object.is(${program.leftParam}, ${program.rightParam})) {`);
+      writer.indent(() => writer.line("return;"));
+      writer.line("}");
+      emitDiffNode(writer, createEmitState(), helper.node, program.leftParam, program.rightParam, [
+        { expr: "...path" },
+      ]);
+    });
+    writer.line("}");
+  }
+}
+
+function helperName(id: string): string {
+  return `diff_${id}`;
 }
 
 function emitDiffBodyLines(writer: CodeWriter, state: EmitState, node: DiffIRNode, left: string, right: string): void {
@@ -47,6 +73,9 @@ function emitDiffNode(
   path: readonly PathPart[]
 ): void {
   switch (node.kind) {
+    case "recursive":
+      writer.line(`${helperName(node.id)}(${left}, ${right}, changes, ${emitPath(path)});`);
+      return;
     case "reuse":
       writer.line(`if (!Object.is(${left}, ${right})) {`);
       writer.indent(() => emitChange(writer, "update", path, right));

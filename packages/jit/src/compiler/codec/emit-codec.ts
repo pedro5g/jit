@@ -3,6 +3,7 @@ import { TypeName } from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
 import { Parse } from "../../shared/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { findRecursiveSchemas } from "../schema-recursion.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitSchemaGuard } from "../source/guard.js";
 import { emitLiteral } from "../source/literal.js";
@@ -14,7 +15,63 @@ interface CodecContext {
   readonly bindingNames: string[];
   readonly bindingValues: unknown[];
   readonly enumBindings: Map<AnySchema, string>;
+  readonly recursion: CodecRecursion;
   varCounter: number;
+}
+
+/**
+ * Cycle bookkeeping shared by the three passes.
+ *
+ * A self-referencing schema cannot be expanded inline: each pass reaches it
+ * through a named function instead — `_size_r1`, `_write_r1`, `_read_r1` — so
+ * one cycle costs one function per pass and the ids line up across them. The
+ * set is empty for an acyclic schema, which then emits exactly as before.
+ */
+interface CodecRecursion {
+  readonly recursive: ReadonlySet<ATS.AnyTypeSchema>;
+  readonly ids: Map<ATS.AnyTypeSchema, string>;
+  readonly pendingSize: AnySchema[];
+  readonly pendingWrite: AnySchema[];
+  readonly pendingRead: AnySchema[];
+  readonly queued: Set<string>;
+}
+
+function helperId(context: CodecContext, schema: AnySchema): string | undefined {
+  const recursion = context.recursion;
+
+  if (!recursion.recursive.has(schema)) return undefined;
+
+  const existing = recursion.ids.get(schema);
+
+  if (existing) return existing;
+
+  const id = `r${recursion.ids.size + 1}`;
+
+  recursion.ids.set(schema, id);
+  return id;
+}
+
+/** Registers a cycle participant for helper emission and names its call. */
+function enqueueHelper(context: CodecContext, schema: AnySchema, pass: "size" | "write" | "read"): string | undefined {
+  const id = helperId(context, schema);
+
+  if (id === undefined) return undefined;
+
+  const key = `${pass}:${id}`;
+
+  if (!context.recursion.queued.has(key)) {
+    context.recursion.queued.add(key);
+    const queue =
+      pass === "size"
+        ? context.recursion.pendingSize
+        : pass === "write"
+          ? context.recursion.pendingWrite
+          : context.recursion.pendingRead;
+
+    queue.push(schema);
+  }
+
+  return id;
 }
 
 export interface CodecEmitOptions {
@@ -70,14 +127,28 @@ export function emitCodec(schema: ATS.AnyTypeSchema, options: CodecEmitOptions =
     bindingNames: [],
     bindingValues: [],
     enumBindings: new Map(),
+    recursion: {
+      recursive: findRecursiveSchemas(schema),
+      ids: new Map(),
+      pendingSize: [],
+      pendingWrite: [],
+      pendingRead: [],
+      queued: new Set(),
+    },
     varCounter: 0,
   };
+  const cyclic = context.recursion.recursive.size > 0;
   const usesStrings = hasStringLeaf(schema, new Set());
 
   if (usesStrings) {
     bindValue(context, "__enc", textEncoder);
     bindValue(context, "__dec", textDecoder);
   }
+
+  // Read helpers advance one cursor across call boundaries; decode is
+  // synchronous, so a single shared `o` is enough. Declared only when a cycle
+  // exists, so acyclic output keeps its decode-local `let o`.
+  if (cyclic) writer.line("let o = 0;");
 
   writer.line("function _write(value, u8, dv, o) {");
   writer.indent(() => {
@@ -123,12 +194,13 @@ export function emitCodec(schema: ATS.AnyTypeSchema, options: CodecEmitOptions =
       );
     });
     writer.line("}");
-    writer.line("let o = 1;");
+    writer.line(cyclic ? "o = 1;" : "let o = 1;");
     const result = emitRead(context, schema);
 
     writer.line(`return ${result};`);
   });
   writer.line("}");
+  emitCodecHelpers(context);
   writer.line("return { encode: encode, encodeInto: encodeInto, decode: decode };");
 
   return {
@@ -136,6 +208,55 @@ export function emitCodec(schema: ATS.AnyTypeSchema, options: CodecEmitOptions =
     bindingNames: context.bindingNames,
     bindingValues: context.bindingValues,
   };
+}
+
+/**
+ * Writes one function per cycle participant per pass. Bodies are emitted from
+ * the `*Inner` entry points so the participant expands once inside its own
+ * helper, and every deeper occurrence stays a call. Draining is iterative
+ * because a body can reveal a further cycle; declarations hoist, so appending
+ * them after the entry points is fine.
+ */
+function emitCodecHelpers(context: CodecContext): void {
+  const writer = context.writer;
+  const recursion = context.recursion;
+
+  while (recursion.pendingSize.length > 0 || recursion.pendingWrite.length > 0 || recursion.pendingRead.length > 0) {
+    const sizeSchema = recursion.pendingSize.shift();
+
+    if (sizeSchema) {
+      writer.line(`function _size_${recursion.ids.get(sizeSchema)}(value) {`);
+      writer.indent(() => {
+        writer.line("let size = 0;");
+        emitBaseSizeInner(context, sizeSchema, "value");
+        writer.line("return size;");
+      });
+      writer.line("}");
+      continue;
+    }
+
+    const writeSchema = recursion.pendingWrite.shift();
+
+    if (writeSchema) {
+      writer.line(`function _write_${recursion.ids.get(writeSchema)}(value, u8, dv, o) {`);
+      writer.indent(() => {
+        emitBaseWriteInner(context, writeSchema, "value");
+        writer.line("return o;");
+      });
+      writer.line("}");
+      continue;
+    }
+
+    const readSchema = recursion.pendingRead.shift();
+
+    if (readSchema) {
+      writer.line(`function _read_${recursion.ids.get(readSchema)}(u8, dv) {`);
+      writer.indent(() => {
+        writer.line(`return ${emitBaseReadInner(context, readSchema)};`);
+      });
+      writer.line("}");
+    }
+  }
 }
 
 function nextVar(context: CodecContext, prefix: string): string {
@@ -313,6 +434,17 @@ function emitSize(context: CodecContext, schema: ATS.AnyTypeSchema, valueExpr: s
 }
 
 function emitBaseSize(context: CodecContext, schema: AnySchema, valueExpr: string): void {
+  const id = enqueueHelper(context, schema, "size");
+
+  if (id !== undefined) {
+    context.writer.line(`size += _size_${id}(${valueExpr});`);
+    return;
+  }
+
+  emitBaseSizeInner(context, schema, valueExpr);
+}
+
+function emitBaseSizeInner(context: CodecContext, schema: AnySchema, valueExpr: string): void {
   const writer = context.writer;
 
   switch (schema.type) {
@@ -541,6 +673,17 @@ function emitStringWrite(context: CodecContext, valueExpr: string): void {
 }
 
 function emitBaseWrite(context: CodecContext, schema: AnySchema, valueExpr: string): void {
+  const id = enqueueHelper(context, schema, "write");
+
+  if (id !== undefined) {
+    context.writer.line(`o = _write_${id}(${valueExpr}, u8, dv, o);`);
+    return;
+  }
+
+  emitBaseWriteInner(context, schema, valueExpr);
+}
+
+function emitBaseWriteInner(context: CodecContext, schema: AnySchema, valueExpr: string): void {
   const writer = context.writer;
 
   switch (schema.type) {
@@ -844,6 +987,14 @@ function emitObjectEntries(context: CodecContext, schema: AnySchema): string[] {
 }
 
 function emitBaseRead(context: CodecContext, schema: AnySchema): string {
+  const id = enqueueHelper(context, schema, "read");
+
+  if (id !== undefined) return `_read_${id}(u8, dv)`;
+
+  return emitBaseReadInner(context, schema);
+}
+
+function emitBaseReadInner(context: CodecContext, schema: AnySchema): string {
   const writer = context.writer;
 
   switch (schema.type) {

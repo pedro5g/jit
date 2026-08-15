@@ -15,13 +15,31 @@ type EmitChild = (schema: ATS.AnyTypeSchema) => string;
  * which is what makes `export type User = { ... }` possible.
  */
 export function emitTypeScriptType(schema: ATS.AnyTypeSchema, names?: ReadonlyMap<ATS.AnyTypeSchema, string>): string {
+  // A self-referencing schema would expand forever. The root is expanded
+  // directly below, so any later encounter of a schema still being expanded is
+  // a back-edge: it emits that schema's name, which is what makes
+  // `export type Node = { children: Node[] }` come out valid. Without a name
+  // there is nothing to refer to, so the edge degrades to `unknown`.
+  const expanding = new Set<ATS.AnyTypeSchema>();
+
   const emit: EmitChild = (child) => {
     const named = names?.get(child);
 
-    return named !== undefined && child !== schema ? named : emitStructural(child, emit);
+    if (named !== undefined) return named;
+    if (expanding.has(child)) return "unknown";
+
+    expanding.add(child);
+    const emitted = emitStructural(child, emit);
+
+    expanding.delete(child);
+    return emitted;
   };
 
-  return emitStructural(schema, emit);
+  expanding.add(schema);
+  const emitted = emitStructural(schema, emit);
+
+  expanding.delete(schema);
+  return emitted;
 }
 
 function emitStructural(schema: ATS.AnyTypeSchema, emit: EmitChild): string {

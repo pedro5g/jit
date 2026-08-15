@@ -214,9 +214,5 @@ const isUser: (value: unknown) => value is User = function is(value) { … };
 
 ## Known limits
 
-- A **recursive** document builds a schema with a lazy back-edge, but the
-  validator emitter does not yet support self-referencing schemas; compiling a
-  validator for one overflows. This predates the bridge and applies equally to
-  a hand-written `JIT.lazy` cycle.
 - External `$ref` URIs are refused rather than fetched. Inline the definition,
   or supply it through `refine`.

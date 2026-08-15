@@ -36,7 +36,17 @@ export function optimizeIRWith(program: IRProgram, passes: readonly IRPass[]): I
     next = pass(next);
   }
 
-  return next;
+  // Helpers are ordinary programs, so every pass applies to them too: a
+  // recursive schema gets exactly the same optimization as an inlined one.
+  if (!program.helpers || program.helpers.length === 0) return next;
+
+  return {
+    ...next,
+    helpers: program.helpers.map((helper) => ({
+      name: helper.name,
+      program: optimizeIRWith(helper.program, passes),
+    })),
+  };
 }
 
 export function optimizeIR(program: IRProgram): IRProgram {

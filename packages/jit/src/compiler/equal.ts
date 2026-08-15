@@ -6,7 +6,6 @@ import { emitEqual, emitEqualBody } from "./emitter/emit-equal.js";
 import { compileHash } from "./hash.js";
 import { buildEqualIR } from "./ir/builders/build-equal-ir.js";
 import { optimizeIR } from "./ir/optimizer/optimize-ir.js";
-import { assertNoRecursion } from "./schema-recursion.js";
 import { resolveEqualStrategy } from "./strategy/resolve-strategy.js";
 
 /**
@@ -26,8 +25,6 @@ export type Equal<T = unknown> = (left: T, right: T) => boolean;
  * @returns The complete JavaScript source for the generated equality function.
  */
 export function emitEqualSource(schema: ATS.AnyTypeSchema): string {
-  assertNoRecursion(schema, "equal");
-
   const strategy = resolveEqualStrategy(schema);
   return emitEqual(optimizeIR(buildEqualIR(schema, strategy)));
 }
@@ -50,7 +47,6 @@ export function compileEqual<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "equal",
     () => {
-      assertNoRecursion(schema, "equal");
       const strategy = resolveEqualStrategy(schema);
       const program = optimizeIR(buildEqualIR(schema, strategy));
       const body = emitEqualBody(program);

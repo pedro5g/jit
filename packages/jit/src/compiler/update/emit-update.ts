@@ -10,6 +10,7 @@ import type { UpdateIRNode, UpdateIRProgram } from "./build-update-ir.js";
 export function emitUpdate(program: UpdateIRProgram): string {
   const writer = new CodeWriter();
 
+  emitHelpers(writer, program);
   writer.line(`function update(${program.valueParam}, ${program.patchParam}) {`);
   writer.indent(() => {
     emitUpdateBodyLines(writer, createEmitState(), program.body, program.valueParam, program.patchParam);
@@ -22,9 +23,30 @@ export function emitUpdate(program: UpdateIRProgram): string {
 export function emitUpdateBody(program: UpdateIRProgram): string {
   const writer = new CodeWriter();
 
+  emitHelpers(writer, program);
   emitUpdateBodyLines(writer, createEmitState(), program.body, program.valueParam, program.patchParam);
 
   return writer.toString();
+}
+
+/**
+ * One named function per cycle participant, so a self-referencing schema
+ * produces finite source that recurses at run time instead of at emit time.
+ * The helper keeps the entry signature, and an absent patch still returns the
+ * value untouched, so a call is a drop-in for the expansion it replaces.
+ */
+function emitHelpers(writer: CodeWriter, program: UpdateIRProgram): void {
+  for (const helper of program.helpers) {
+    writer.line(`function ${helperName(helper.id)}(${program.valueParam}, ${program.patchParam}) {`);
+    writer.indent(() => {
+      emitUpdateBodyLines(writer, createEmitState(), helper.node, program.valueParam, program.patchParam);
+    });
+    writer.line("}");
+  }
+}
+
+function helperName(id: string): string {
+  return `update_${id}`;
 }
 
 function emitUpdateBodyLines(
@@ -47,6 +69,9 @@ function emitUpdateTo(
   target: string
 ): void {
   switch (node.kind) {
+    case "recursive":
+      writer.line(`const ${target} = ${helperName(node.id)}(${value}, ${patch});`);
+      return;
     case "reuse":
       writer.line(`let ${target} = ${value};`);
       writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);

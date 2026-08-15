@@ -52,7 +52,8 @@ interface OperationArtifact {
     | "sanitize"
     | "codec"
     | "jsonSchema"
-    | "mock";
+    | "mock"
+    | "update";
 }
 
 /**

@@ -1,6 +1,5 @@
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
-import { JITError } from "../errors/index.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 
@@ -77,18 +76,4 @@ export function findRecursiveSchemas(schema: ATS.AnyTypeSchema): ReadonlySet<ATS
 
   walk(schema);
   return recursive;
-}
-
-/**
- * Guards the emitters that still expand a schema inline. Validation compiles
- * recursion into a named function; the structural operations do not yet, and
- * a clear error beats a stack overflow with no explanation.
- */
-export function assertNoRecursion(schema: ATS.AnyTypeSchema, operation: string): void {
-  if (findRecursiveSchemas(schema).size === 0) return;
-
-  throw new JITError(
-    "UNSUPPORTED_SCHEMA",
-    `${operation} does not support a self-referencing schema yet; validation (is/parse/safeParse), hash, mock and jsonSchema do. Split the recursive part out, or run this operation on a bounded projection of it.`
-  );
 }

@@ -1,4 +1,5 @@
 import * as ATS from "../core/ats/index.js";
+import { resolveLazySchema } from "./schema-recursion.js";
 
 export interface GuardNode<TNode> {
   readonly kind: "guard";
@@ -142,4 +143,72 @@ export function emitGuardTest(optional: boolean, nullable: boolean, source: stri
   if (optional && nullable) return `${source} != null`;
   if (optional) return `${source} !== undefined`;
   return `${source} !== null`;
+}
+
+/** A back-edge into a schema that is being expanded further up the tree. */
+export interface RecursiveNode {
+  readonly kind: "recursive";
+  /** Suffix of the generated helper, unique inside one program. */
+  readonly id: string;
+}
+
+/** One named function a program must emit alongside its body. */
+export interface RecursiveHelper<TNode> {
+  readonly id: string;
+  readonly node: TNode;
+}
+
+export interface RecursiveProgram<TNode> {
+  readonly body: TNode;
+  readonly helpers: readonly RecursiveHelper<TNode>[];
+}
+
+/**
+ * Builds a node tree in which every cycle is broken by a `recursive` node.
+ *
+ * The structural emitters expand a schema inline, which never terminates on a
+ * self-referencing shape. This lifts each cycle participant into its own
+ * helper once and leaves a reference behind, so the emitter writes a named
+ * function that calls itself — the same shape the validator uses.
+ *
+ * A schema with no cycle never reaches `makeRef`, so its node tree, and the
+ * source emitted from it, are byte-identical to before.
+ */
+export function buildRecursiveProgram<TNode>(
+  schema: ATS.AnyTypeSchema,
+  build: (current: ATS.AnyTypeSchema, recurse: (child: ATS.AnyTypeSchema) => TNode) => TNode,
+  makeRef: (id: string) => TNode,
+  recursive: ReadonlySet<ATS.AnyTypeSchema>
+): RecursiveProgram<TNode> {
+  const ids = new Map<ATS.AnyTypeSchema, string>();
+  const helpers: RecursiveHelper<TNode>[] = [];
+  const started = new Set<ATS.AnyTypeSchema>();
+
+  const idFor = (target: ATS.AnyTypeSchema): string => {
+    const existing = ids.get(target);
+
+    if (existing) return existing;
+    const id = `r${ids.size + 1}`;
+
+    ids.set(target, id);
+    return id;
+  };
+
+  const recurse = (child: ATS.AnyTypeSchema): TNode => {
+    const target = resolveLazySchema(child);
+
+    if (!recursive.has(target)) return build(child, recurse);
+
+    const id = idFor(target);
+
+    if (!started.has(target)) {
+      started.add(target);
+      // Reserved before building so the back-edge inside resolves to this id.
+      helpers.push({ id, node: build(target, recurse) });
+    }
+
+    return makeRef(id);
+  };
+
+  return { body: recurse(schema), helpers };
 }

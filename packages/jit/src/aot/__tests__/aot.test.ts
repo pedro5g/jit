@@ -848,4 +848,47 @@ describe("JIT AOT generate", () => {
 
     expect(AOT.emitTypeScriptType(JIT.object({ id: JIT.number() }).readonly().schema)).toBe("Readonly<{ id: number }>");
   });
+
+  it("should generate every structural operation for a self-referencing schema", async () => {
+    const Node: never = JIT.object({
+      value: JIT.number().int32(),
+      label: JIT.string().min(1),
+      children: JIT.array(JIT.lazy((): never => Node)),
+    }) as never;
+    const names = new Map([[(Node as { schema: unknown }).schema, "Node"]] as never);
+
+    // A cycle is only expressible in TypeScript through a name.
+    expect(AOT.emitTypeScriptType((Node as { schema: never }).schema, names as never)).toBe(
+      "{ value: number; label: string; children: Node[] }"
+    );
+
+    AOT.generate({
+      artifacts: {
+        cloneNode: JIT.clone(Node),
+        equalNode: JIT.compare.equal(Node),
+        diffNode: JIT.compare.diff(Node),
+        nodeToJson: JIT.json.stringify(Node),
+        updateNode: JIT.update(Node).compile(),
+        isNode: JIT.validate.is(Node),
+      },
+      outDir,
+      format: "js",
+    });
+
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as Record<string, never>;
+    const value = { value: 1, label: "root", children: [{ value: 2, label: "a", children: [] }] };
+    const clone = (generated.cloneNode as (v: unknown) => typeof value)(value);
+    const changed = { ...value, children: [{ value: 9, label: "a", children: [] }] };
+
+    expect(clone).toEqual(value);
+    expect(clone.children).not.toBe(value.children);
+    expect((generated.equalNode as (a: unknown, b: unknown) => boolean)(clone, value)).toBe(true);
+    expect((generated.equalNode as (a: unknown, b: unknown) => boolean)(changed, value)).toBe(false);
+    expect((generated.diffNode as (a: unknown, b: unknown) => unknown[])(value, changed)).toEqual([
+      { type: "update", path: ["children", 0, "value"], value: 9 },
+    ]);
+    expect((generated.nodeToJson as (v: unknown) => string)(value)).toBe(JSON.stringify(value));
+    expect((generated.updateNode as (v: unknown, p: unknown) => typeof value)(value, { value: 7 }).value).toBe(7);
+    expect((generated.isNode as (v: unknown) => boolean)(value)).toBe(true);
+  });
 });

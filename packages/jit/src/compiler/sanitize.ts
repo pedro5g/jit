@@ -2,7 +2,6 @@ import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
-import { assertNoRecursion } from "./schema-recursion.js";
 import { emitScrub, type ScrubAction } from "./security/emit-scrub.js";
 import { emitLiteral } from "./source/literal.js";
 
@@ -111,8 +110,6 @@ export function emitSanitizeChain(
 }
 
 export function emitSanitizeSource(schema: ATS.AnyTypeSchema): string {
-  assertNoRecursion(schema, "sanitize");
-
   return emitScrub(schema, selectSanitize).source;
 }
 
@@ -124,11 +121,10 @@ export function compileSanitize<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "sanitize",
     () => {
-      assertNoRecursion(schema, "sanitize");
       const emitted = emitScrub(schema, selectSanitize);
       const compiled = globalThis.Function(
         ...SANITIZE_BINDINGS,
-        `return ${emitted.source.replace("function scrub", "function sanitize")};`
+        `return ${emitted.source.replace("function scrub(", "function sanitize(")};`
       )(...SANITIZE_VALUES) as Sanitize<ATS.TypeofSchema<TSchema>>;
 
       registerArtifact(compiled as object, {

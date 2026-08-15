@@ -2,15 +2,19 @@ import * as ATS from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
 import {
   type ArrayNode,
+  buildRecursiveProgram,
   buildSchemaNode,
   type GuardNode,
   isPrimitiveLikeSchema,
   type MapNode,
   type ObjectNode,
   type RecordNode,
+  type RecursiveHelper,
+  type RecursiveNode,
   type SetNode,
   type TupleNode,
 } from "../schema-nodes.js";
+import { findRecursiveSchemas } from "../schema-recursion.js";
 
 export type CloneIRNode =
   | { readonly kind: "reuse" }
@@ -24,7 +28,8 @@ export type CloneIRNode =
   | ArrayNode<CloneIRNode>
   | SetNode<CloneIRNode>
   | MapNode<CloneIRNode>
-  | GuardNode<CloneIRNode>;
+  | GuardNode<CloneIRNode>
+  | RecursiveNode;
 
 export interface CloneIROption {
   readonly schema: ATS.AnyTypeSchema;
@@ -35,31 +40,37 @@ export interface CloneIRProgram {
   readonly kind: "program";
   readonly param: "value";
   readonly body: CloneIRNode;
+  /** Named functions for cycle participants; empty for an acyclic schema. */
+  readonly helpers: readonly RecursiveHelper<CloneIRNode>[];
 }
 
 export function buildCloneIR(schema: ATS.AnyTypeSchema): CloneIRProgram {
-  return {
-    kind: "program",
-    param: "value",
-    body: buildCloneNode(schema),
-  };
+  const { body, helpers } = buildRecursiveProgram<CloneIRNode>(
+    schema,
+    (current, recurse) => buildCloneNode(current, recurse),
+    (id) => ({ kind: "recursive", id }),
+    findRecursiveSchemas(schema)
+  );
+
+  return { kind: "program", param: "value", body, helpers };
 }
 
-function buildCloneNode(schema: ATS.AnyTypeSchema): CloneIRNode {
+function buildCloneNode(schema: ATS.AnyTypeSchema, recurse: (child: ATS.AnyTypeSchema) => CloneIRNode): CloneIRNode {
   if (schema.type === ATS.TypeName.date) return { kind: "date" };
-  if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema);
-  if (schema.type === ATS.TypeName.intersection) return buildIntersectionNode(schema as ATS.IntersectionSchema);
+  if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema, recurse);
+  if (schema.type === ATS.TypeName.intersection)
+    return buildIntersectionNode(schema as ATS.IntersectionSchema, recurse);
   if (schema.type === ATS.TypeName.discriminatedUnion)
-    return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema);
+    return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema, recurse);
 
-  const node = buildSchemaNode(schema, buildCloneNode);
+  const node = buildSchemaNode(schema, recurse);
   if (node) return node;
   if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
 
   throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler clone IR for type: ${schema.type}`);
 }
 
-function buildUnionNode(schema: ATS.UnionSchema): CloneIRNode {
+function buildUnionNode(schema: ATS.UnionSchema, recurse: (child: ATS.AnyTypeSchema) => CloneIRNode): CloneIRNode {
   if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
     return { kind: "reuse" };
   }
@@ -68,25 +79,31 @@ function buildUnionNode(schema: ATS.UnionSchema): CloneIRNode {
     kind: "union",
     options: schema.def.options.map((option) => ({
       schema: option,
-      node: buildCloneNode(option),
+      node: recurse(option),
     })),
   };
 }
 
-function buildIntersectionNode(schema: ATS.IntersectionSchema): CloneIRNode {
+function buildIntersectionNode(
+  schema: ATS.IntersectionSchema,
+  recurse: (child: ATS.AnyTypeSchema) => CloneIRNode
+): CloneIRNode {
   return {
     kind: "intersection",
-    options: schema.def.options.map(buildCloneNode),
+    options: schema.def.options.map(recurse),
   };
 }
 
-function buildDiscriminatedUnionNode(schema: ATS.DiscriminatedUnionSchema): CloneIRNode {
+function buildDiscriminatedUnionNode(
+  schema: ATS.DiscriminatedUnionSchema,
+  recurse: (child: ATS.AnyTypeSchema) => CloneIRNode
+): CloneIRNode {
   return {
     kind: "discriminatedUnion",
     discriminator: schema.def.discriminator,
     options: schema.def.options.map((option) => ({
       schema: option,
-      node: buildCloneNode(option),
+      node: recurse(option),
     })),
   };
 }

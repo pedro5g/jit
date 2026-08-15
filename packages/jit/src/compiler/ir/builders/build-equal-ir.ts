@@ -3,11 +3,13 @@ import { JITError } from "../../../errors/index.js";
 import { staticDefaultIRExpr } from "../../defaults.js";
 import { resolveWrappers } from "../../resolvers/resolve-wrappers.js";
 import { isPrimitiveLikeSchema } from "../../schema-nodes.js";
+import { findRecursiveSchemas } from "../../schema-recursion.js";
 import { literalDiscriminatorValue } from "../../source/guard.js";
 import { type EqualStrategy, resolveEqualStrategy } from "../../strategy/resolve-strategy.js";
 import {
   call,
   type IRExpr,
+  type IRHelper,
   type IRNode,
   type IRProgram,
   irVar,
@@ -31,6 +33,53 @@ export function buildEqualIR(
   schema: ATS.AnyTypeSchema,
   strategy: EqualStrategy = resolveEqualStrategy(schema)
 ): IRProgram {
+  const recursion = createRecursionState(schema);
+  const program = buildEqualProgram(schema, strategy, recursion);
+
+  // Draining the queue may discover further cycles, so it runs to fixpoint.
+  const helpers: IRHelper[] = [];
+
+  while (recursion.pending.length > 0) {
+    const target = recursion.pending.shift() as ATS.AnyTypeSchema;
+
+    helpers.push({
+      name: recursion.names.get(target) as string,
+      program: buildEqualProgram(target, resolveEqualStrategy(target), recursion),
+    });
+  }
+
+  return helpers.length > 0 ? { ...program, helpers } : program;
+}
+
+interface RecursionState {
+  readonly recursive: ReadonlySet<ATS.AnyTypeSchema>;
+  readonly names: Map<ATS.AnyTypeSchema, string>;
+  readonly pending: ATS.AnyTypeSchema[];
+  /** The schema whose helper body is being built, which must expand inline. */
+  entry: ATS.AnyTypeSchema | undefined;
+}
+
+function createRecursionState(schema: ATS.AnyTypeSchema): RecursionState {
+  return { recursive: findRecursiveSchemas(schema), names: new Map(), pending: [], entry: undefined };
+}
+
+function helperFor(recursion: RecursionState, target: ATS.AnyTypeSchema): string {
+  const existing = recursion.names.get(target);
+
+  if (existing) return existing;
+
+  const name = `equal_r${recursion.names.size + 1}`;
+
+  recursion.names.set(target, name);
+  recursion.pending.push(target);
+  return name;
+}
+
+function buildEqualProgram(schema: ATS.AnyTypeSchema, strategy: EqualStrategy, recursion: RecursionState): IRProgram {
+  const previousEntry = recursion.entry;
+
+  recursion.entry = schema;
+
   const scope = new Scope();
   const left = irVar("l");
   const right = irVar("r");
@@ -46,14 +95,11 @@ export function buildEqualIR(
     });
   }
 
-  appendSchemaCompare(body, schema as EqualSchema, left, right, scope, strategy);
+  appendSchemaCompare(body, schema as EqualSchema, left, right, scope, strategy, recursion);
   body.push({ kind: "return", value: literal(true) });
+  recursion.entry = previousEntry;
 
-  return {
-    kind: "program",
-    params: [left, right],
-    body,
-  };
+  return { kind: "program", params: [left, right], body };
 }
 
 function appendSchemaCompare(
@@ -62,16 +108,30 @@ function appendSchemaCompare(
   left: IRExpr,
   right: IRExpr,
   scope: Scope,
-  strategy: EqualStrategy
+  strategy: EqualStrategy,
+  recursion: RecursionState
 ): void {
   const resolved = resolveWrappers(schema);
 
   if (resolved.optional || resolved.nullable) {
-    appendResolvedWrapperCompare(body, resolved, left, right, scope, strategy);
+    appendResolvedWrapperCompare(body, resolved, left, right, scope, strategy, recursion);
     return;
   }
 
   const base = resolved.base as EqualSchema;
+
+  // A cycle participant is compared through its own function. The one
+  // exception is the first node of that function's own body, which has to
+  // expand for the call to have something to call — consumed immediately so
+  // the same schema deeper down still becomes a call.
+  if (recursion.recursive.has(base)) {
+    if (recursion.entry === base) {
+      recursion.entry = undefined;
+    } else {
+      appendCompareOrFail(body, call(irVar(helperFor(recursion, base)), [left, right]));
+      return;
+    }
+  }
 
   switch (base.type) {
     case ATS.TypeName.any:
@@ -100,19 +160,19 @@ function appendSchemaCompare(
       appendCompareOrFail(body, sameValue(call(loadProp(left, "getTime")), call(loadProp(right, "getTime"))));
       return;
     case ATS.TypeName.array:
-      appendArrayCompare(body, base, left, right, scope, strategy);
+      appendArrayCompare(body, base, left, right, scope, strategy, recursion);
       return;
     case ATS.TypeName.object:
-      appendObjectCompare(body, base, left, right, scope);
+      appendObjectCompare(body, base, left, right, scope, recursion);
       return;
     case ATS.TypeName.union:
-      appendUnionCompare(body, base, left, right, scope, strategy);
+      appendUnionCompare(body, base, left, right, scope, strategy, recursion);
       return;
     case ATS.TypeName.intersection:
-      appendIntersectionCompare(body, base, left, right, scope, strategy);
+      appendIntersectionCompare(body, base, left, right, scope, strategy, recursion);
       return;
     case ATS.TypeName.discriminatedUnion:
-      appendDiscriminatedUnionCompare(body, base, left, right, scope, strategy);
+      appendDiscriminatedUnionCompare(body, base, left, right, scope, strategy, recursion);
       return;
     default:
       throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler equal IR for type: ${base.type}`);
@@ -129,7 +189,8 @@ function appendResolvedWrapperCompare(
   left: IRExpr,
   right: IRExpr,
   scope: Scope,
-  strategy: EqualStrategy
+  strategy: EqualStrategy,
+  recursion: RecursionState
 ): void {
   const inner: IRNode[] = [];
 
@@ -149,7 +210,7 @@ function appendResolvedWrapperCompare(
     });
   }
 
-  appendSchemaCompare(inner, resolved.base as EqualSchema, left, right, scope, strategy);
+  appendSchemaCompare(inner, resolved.base as EqualSchema, left, right, scope, strategy, recursion);
   body.push({ kind: "if", test: not(sameValue(left, right)), then: inner });
 }
 
@@ -159,7 +220,8 @@ function appendArrayCompare(
   left: IRExpr,
   right: IRExpr,
   scope: Scope,
-  strategy: EqualStrategy
+  strategy: EqualStrategy,
+  recursion: RecursionState
 ): void {
   const len = scope.createVar("len");
   const ix = scope.createVar("i");
@@ -170,7 +232,7 @@ function appendArrayCompare(
     { kind: "assign", target: rightItem, expr: loadIndex(right, ix) },
   ];
 
-  appendSchemaCompare(loopBody, schema.def.element as EqualSchema, leftItem, rightItem, scope, strategy);
+  appendSchemaCompare(loopBody, schema.def.element as EqualSchema, leftItem, rightItem, scope, strategy, recursion);
 
   if (strategy.array.type === "map") {
     body.push({
@@ -219,7 +281,14 @@ function appendArrayCompare(
   );
 }
 
-function appendObjectCompare(body: IRNode[], schema: EqualSchema, left: IRExpr, right: IRExpr, scope: Scope): void {
+function appendObjectCompare(
+  body: IRNode[],
+  schema: EqualSchema,
+  left: IRExpr,
+  right: IRExpr,
+  scope: Scope,
+  recursion: RecursionState
+): void {
   const props = schema.def.props as Record<string, EqualSchema>;
 
   for (const key of Object.keys(props)) {
@@ -250,11 +319,15 @@ function appendObjectCompare(body: IRNode[], schema: EqualSchema, left: IRExpr, 
       rightValue = rightVar;
     }
 
-    appendSchemaCompare(body, prop, leftValue, rightValue, scope, {
-      type: "equal",
-      array: { type: "loop" },
-      hash: { type: "none" },
-    });
+    appendSchemaCompare(
+      body,
+      prop,
+      leftValue,
+      rightValue,
+      scope,
+      { type: "equal", array: { type: "loop" }, hash: { type: "none" } },
+      recursion
+    );
   }
 }
 
@@ -270,7 +343,8 @@ function appendUnionCompare(
   left: IRExpr,
   right: IRExpr,
   scope: Scope,
-  strategy: EqualStrategy
+  strategy: EqualStrategy,
+  recursion: RecursionState
 ): void {
   const options = schema.def.options as EqualSchema[];
   const branches: IRNode[] = [];
@@ -285,7 +359,7 @@ function appendUnionCompare(
       { kind: "if", test: not(schemaGuard(option, right)), then: [{ kind: "return", value: literal(false) }] },
     ];
 
-    appendSchemaCompare(then, option, left, right, scope, strategy);
+    appendSchemaCompare(then, option, left, right, scope, strategy, recursion);
     then.push({ kind: "return", value: literal(true) });
     branches.push({ kind: "if", test: schemaGuard(option, left), then });
   }
@@ -305,12 +379,13 @@ function appendIntersectionCompare(
   left: IRExpr,
   right: IRExpr,
   scope: Scope,
-  strategy: EqualStrategy
+  strategy: EqualStrategy,
+  recursion: RecursionState
 ): void {
   const options = schema.def.options as EqualSchema[];
 
   for (const option of options) {
-    appendSchemaCompare(body, option, left, right, scope, strategy);
+    appendSchemaCompare(body, option, left, right, scope, strategy, recursion);
   }
 }
 
@@ -320,7 +395,8 @@ function appendDiscriminatedUnionCompare(
   left: IRExpr,
   right: IRExpr,
   scope: Scope,
-  strategy: EqualStrategy
+  strategy: EqualStrategy,
+  recursion: RecursionState
 ): void {
   const discriminator = schema.def.discriminator as string;
   const leftTag = loadProp(left, discriminator);
@@ -336,7 +412,7 @@ function appendDiscriminatedUnionCompare(
       { kind: "if", test: notStrictEqual(rightTag, literal(tag)), then: [{ kind: "return", value: literal(false) }] },
     ];
 
-    appendSchemaCompare(then, option, left, right, scope, strategy);
+    appendSchemaCompare(then, option, left, right, scope, strategy, recursion);
     then.push({ kind: "return", value: literal(true) });
     body.push({ kind: "if", test: strictEqual(leftTag, literal(tag)), then });
   }

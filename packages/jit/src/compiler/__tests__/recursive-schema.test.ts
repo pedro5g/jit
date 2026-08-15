@@ -73,22 +73,99 @@ describe("JIT recursive schemas", () => {
     expect(JIT.jsonSchema.to(Tree)).toHaveProperty("$defs");
   });
 
-  it("should refuse the structural operations that still inline, with a usable message", () => {
-    // A stack overflow explains nothing; this names the operation and the
-    // ones that do work.
-    const value = { value: 1, children: [] } as never;
+  it("should clone a recursive value with every level detached", () => {
+    const value = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [] }] }] } as never;
+    const copy = JIT.clone(Tree)(value) as { children: { children: unknown[] }[] };
+    const original = value as unknown as { children: { children: unknown[] }[] };
 
-    // Artifacts lower on first call, so the guard fires there.
-    for (const compile of [
-      () => JIT.clone(Tree)(value),
-      () => JIT.compare.equal(Tree)(value, value),
-      () => JIT.compare.diff(Tree)(value, value),
-      () => JIT.json.stringify(Tree)(value),
-      () => JIT.security.mask(Tree)(value),
-    ]) {
-      expect(compile).toThrow(Errors.JITError);
-      expect(compile).toThrow(/does not support a self-referencing schema yet/);
-    }
+    expect(copy).toEqual(value);
+    expect(copy.children).not.toBe(original.children);
+    expect(copy.children[0].children).not.toBe(original.children[0].children);
+  });
+
+  it("should compare recursive values structurally", () => {
+    const equal = JIT.compare.equal(Tree);
+    const left = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [] }] }] } as never;
+    const same = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [] }] }] } as never;
+    const deepDiff = { value: 1, children: [{ value: 2, children: [{ value: 4, children: [] }] }] } as never;
+
+    expect(equal(left, same)).toBe(true);
+    expect(equal(left, deepDiff)).toBe(false);
+  });
+
+  it("should diff a recursive value and keep the real path", () => {
+    const left = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [] }] }] } as never;
+    const right = { value: 1, children: [{ value: 2, children: [{ value: 9, children: [] }] }] } as never;
+
+    expect(JIT.compare.diff(Tree)(left, right)).toEqual([
+      { type: "update", path: ["children", 0, "children", 0, "value"], value: 9 },
+    ]);
+  });
+
+  it("should serialize a recursive value exactly like JSON", () => {
+    const value = { value: 1, children: [{ value: 2, children: [] }] } as never;
+
+    expect(JIT.json.stringify(Tree)(value)).toBe(JSON.stringify(value));
+  });
+
+  it("should mask and sanitize at every level of a recursive value", () => {
+    const Node: never = JIT.object({
+      email: JIT.string().email().pii("mask"),
+      bio: JIT.string().sanitize(),
+      children: JIT.array(JIT.lazy((): never => Node)).optional(),
+    }) as never;
+    const value = {
+      email: "ada@example.com",
+      bio: "<b>hi</b>",
+      children: [{ email: "grace@example.com", bio: "<i>x</i>", children: [] }],
+    } as never;
+    const masked = JIT.security.mask(Node)(value) as { email: string; children: { email: string }[] };
+    const cleaned = JIT.security.sanitize(Node)(value) as { bio: string; children: { bio: string }[] };
+
+    expect(masked.email).not.toContain("ada");
+    expect(masked.children[0].email).not.toContain("grace");
+    expect(cleaned.bio).toBe("hi");
+    expect(cleaned.children[0].bio).toBe("x");
+  });
+
+  it("should emit one named function per cycle, not an inlined expansion", () => {
+    expect(Compiler.emitCloneSource(Tree.schema)).toMatch(/function clone_r\d+\(/);
+    expect(Compiler.emitEqualSource(Tree.schema)).toMatch(/function equal_r\d+\(/);
+    expect(Compiler.emitDiffSource(Tree.schema)).toMatch(/function diff_r\d+\(/);
+    expect(Compiler.emitSerializeSource(Tree.schema)).toMatch(/function stringify_r\d+\(/);
+  });
+
+  it("should update a recursive value through a named helper", () => {
+    const update = JIT.update(Tree).compile();
+    const value = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [] }] }] } as never;
+    const next = update(value, { children: [{ children: [{ value: 42 }] }] } as never) as {
+      children: { children: { value: number }[] }[];
+    };
+
+    expect(next.children[0].children[0].value).toBe(42);
+    // An empty patch changes nothing, so the original is handed straight back.
+    expect(update(value, {} as never)).toBe(value);
+    expect(Compiler.emitUpdateSource(Tree.schema)).toMatch(/function update_r\d+\(/);
+  });
+
+  it("should round-trip a recursive value through the binary codec", () => {
+    const Labelled: never = JIT.object({
+      value: JIT.number().int(),
+      label: JIT.string(),
+      children: JIT.array(JIT.lazy((): never => Labelled)),
+    }) as never;
+    const codec = JIT.binary.codec(Labelled);
+    const value = {
+      value: 1,
+      label: "root",
+      children: [{ value: 2, label: "a", children: [{ value: 3, label: "deep", children: [] }] }],
+    } as never;
+
+    expect(codec.decode(codec.encode(value))).toEqual(value);
+
+    const target = new Uint8Array(4096);
+
+    expect(codec.decode(target.subarray(0, codec.encodeInto(value, target)))).toEqual(value);
   });
 
   it("should not change the generated source of a non-recursive schema", () => {

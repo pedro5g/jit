@@ -3,7 +3,6 @@ import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { buildCloneIR } from "./clone/build-clone-ir.js";
 import { emitClone, emitCloneBody } from "./clone/emit-clone.js";
-import { assertNoRecursion } from "./schema-recursion.js";
 
 /**
  * A compiled deep-clone function.
@@ -23,8 +22,6 @@ export type Clone<T = unknown> = (value: T) => T;
  * @returns The complete JavaScript source for the generated clone function.
  */
 export function emitCloneSource(schema: ATS.AnyTypeSchema): string {
-  assertNoRecursion(schema, "clone");
-
   return emitClone(buildCloneIR(schema));
 }
 
@@ -52,7 +49,6 @@ export function compileClone<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "clone",
     () => {
-      assertNoRecursion(schema, "clone");
       const program = buildCloneIR(schema);
       const body = emitCloneBody(program);
 

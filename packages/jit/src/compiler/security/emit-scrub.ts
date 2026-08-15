@@ -2,6 +2,7 @@ import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { findRecursiveSchemas } from "../schema-recursion.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitLiteral } from "../source/literal.js";
 
@@ -27,6 +28,10 @@ interface ScrubContext {
   readonly writer: CodeWriter;
   readonly selector: ScrubSelector;
   varCounter: number;
+  /** Cycle participants, each rewritten once as its own named function. */
+  readonly recursive: ReadonlySet<ATS.AnyTypeSchema>;
+  readonly helperIds: Map<ATS.AnyTypeSchema, string>;
+  readonly pending: ATS.AnyTypeSchema[];
 }
 
 /**
@@ -37,8 +42,15 @@ interface ScrubContext {
  */
 export function emitScrub(schema: ATS.AnyTypeSchema, selector: ScrubSelector): EmittedScrub {
   const writer = new CodeWriter();
-  const context: ScrubContext = { writer, selector, varCounter: 0 };
-  const rewrites = subtreeMatches(schema, selector);
+  const context: ScrubContext = {
+    writer,
+    selector,
+    varCounter: 0,
+    recursive: findRecursiveSchemas(schema),
+    helperIds: new Map(),
+    pending: [],
+  };
+  const rewrites = subtreeMatches(schema, selector, new Set());
 
   writer.line("function scrub(value) {");
   writer.indent(() => {
@@ -53,7 +65,42 @@ export function emitScrub(schema: ATS.AnyTypeSchema, selector: ScrubSelector): E
   });
   writer.line("}");
 
+  emitScrubHelpers(context);
   return { source: writer.toString(), rewrites };
+}
+
+/**
+ * A cycle participant becomes its own function, so a self-referencing shape
+ * rewrites at run time instead of expanding forever at emit time.
+ */
+function emitScrubHelpers(context: ScrubContext): void {
+  while (context.pending.length > 0) {
+    const target = context.pending.shift() as ATS.AnyTypeSchema;
+    const writer = context.writer;
+    const body = new CodeWriter();
+    const nested: ScrubContext = { ...context, writer: body };
+
+    body.line(`function ${context.helperIds.get(target)}(value) {`);
+    body.indent(() => {
+      const output = emitScrubBase(nested, target, "value");
+
+      body.line(`return ${output};`);
+    });
+    body.line("}");
+    writer.line(body.toString().trimEnd());
+  }
+}
+
+function scrubHelper(context: ScrubContext, target: ATS.AnyTypeSchema): string {
+  const existing = context.helperIds.get(target);
+
+  if (existing) return existing;
+
+  const id = `scrub_r${context.helperIds.size + 1}`;
+
+  context.helperIds.set(target, id);
+  context.pending.push(target);
+  return id;
 }
 
 function nextVar(context: ScrubContext, prefix: string): string {
@@ -66,6 +113,24 @@ function nextVar(context: ScrubContext, prefix: string): string {
  * guards so loops and hash preludes never touch missing values.
  */
 function emitScrubExpr(context: ScrubContext, schema: ATS.AnyTypeSchema, valueExpr: string): string {
+  const resolved = resolveScrubWrappers(schema);
+  const base = resolved.base;
+
+  if (context.recursive.has(base)) {
+    const call = `${scrubHelper(context, base)}(${valueExpr})`;
+
+    if (!resolved.optional && !resolved.nullable) return call;
+
+    const holder = hoist(context, valueExpr);
+
+    return `(${holder} == null ? ${holder} : ${scrubHelper(context, base)}(${holder}))`;
+  }
+
+  return emitScrubBase(context, schema, valueExpr);
+}
+
+/** The body of a scrub, with the recursion guard already applied. */
+function emitScrubBase(context: ScrubContext, schema: ATS.AnyTypeSchema, valueExpr: string): string {
   const resolved = resolveScrubWrappers(schema);
   const base = resolved.base;
   const action = context.selector(base);
@@ -200,8 +265,16 @@ function resolveScrubWrappers(schema: ATS.AnyTypeSchema): ResolvedScrubWrappers 
 }
 
 /** True when any leaf in the subtree is selected for rewriting. */
-export function subtreeMatches(schema: ATS.AnyTypeSchema, selector: ScrubSelector): boolean {
+export function subtreeMatches(
+  schema: ATS.AnyTypeSchema,
+  selector: ScrubSelector,
+  seen: Set<ATS.AnyTypeSchema> = new Set()
+): boolean {
   const base = resolveScrubWrappers(schema).base;
+
+  // A cycle is finite for this question: revisiting adds nothing.
+  if (seen.has(base)) return false;
+  seen.add(base);
 
   if (selector(base)) return true;
 
@@ -209,10 +282,10 @@ export function subtreeMatches(schema: ATS.AnyTypeSchema, selector: ScrubSelecto
     case TypeName.object: {
       const props = base.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
 
-      return Object.keys(props).some((key) => subtreeMatches(props[key], selector));
+      return Object.keys(props).some((key) => subtreeMatches(props[key], selector, seen));
     }
     case TypeName.array:
-      return subtreeMatches(base.def.element as ATS.AnyTypeSchema, selector);
+      return subtreeMatches(base.def.element as ATS.AnyTypeSchema, selector, seen);
     default:
       return false;
   }

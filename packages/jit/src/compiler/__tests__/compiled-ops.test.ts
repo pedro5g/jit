@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { AOT, Compiler, JIT } from "../../index.js";
 
 describe("compiled value operations", () => {
@@ -132,6 +133,25 @@ describe("compiled value operations", () => {
 
       expect(declarative.skipped).toHaveLength(0);
       expect(readFileSync(join(outDir, "index.js"), "utf8")).toContain(".trim()");
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("should keep the generated transform runnable, not just present in the source", async () => {
+    const Declarative = JIT.string().pipe(JIT.ops.trim().lowercase().slice(0, 6));
+    const outDir = mkdtempSync(join(tmpdir(), "jit-ops-run-"));
+
+    try {
+      AOT.generate({ artifacts: { parseIt: JIT.validate.parse(Declarative) }, outDir, format: "js" });
+
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+        parseIt: (value: unknown) => string;
+      };
+
+      // The generated module and the runtime compiler agree value for value.
+      expect(generated.parseIt("  Ada Lovelace ")).toBe(JIT.validate.parse(Declarative)("  Ada Lovelace "));
+      expect(generated.parseIt("  Ada Lovelace ")).toBe("ada lo");
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }

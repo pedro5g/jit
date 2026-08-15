@@ -110,6 +110,16 @@ export interface IRProgram {
   readonly kind: "program";
   readonly params: readonly IRVar[];
   readonly body: readonly IRNode[];
+  /**
+   * Named sub-programs a cycle participant compiles to. They use the same
+   * node vocabulary, so every optimizer pass applies to them unchanged.
+   */
+  readonly helpers?: readonly IRHelper[];
+}
+
+export interface IRHelper {
+  readonly name: string;
+  readonly program: IRProgram;
 }
 
 export function irVar(name: string): IRVar {

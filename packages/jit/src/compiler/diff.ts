@@ -3,7 +3,6 @@ import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { buildDiffIR } from "./diff/build-diff-ir.js";
 import { emitDiff, emitDiffBody } from "./diff/emit-diff.js";
-import { assertNoRecursion } from "./schema-recursion.js";
 
 /**
  * A single structural change reported by a compiled diff function.
@@ -40,8 +39,6 @@ export type Diff<T = unknown> = (left: T, right: T) => DiffChange[];
  * @returns The complete JavaScript source for the generated diff function.
  */
 export function emitDiffSource(schema: ATS.AnyTypeSchema): string {
-  assertNoRecursion(schema, "diff");
-
   return emitDiff(buildDiffIR(schema));
 }
 
@@ -69,7 +66,6 @@ export function compileDiff<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "diff",
     () => {
-      assertNoRecursion(schema, "diff");
       const program = buildDiffIR(schema);
       const body = emitDiffBody(program);
 

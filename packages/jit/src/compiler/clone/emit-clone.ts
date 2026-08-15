@@ -9,16 +9,11 @@ import type { CloneIRNode, CloneIRProgram } from "./build-clone-ir.js";
 
 export function emitClone(program: CloneIRProgram): string {
   const writer = new CodeWriter();
-  const inline = emitInlineClone(program.body, program.param);
 
+  emitHelpers(writer, program);
   writer.line(`function clone(${program.param}) {`);
   writer.indent(() => {
-    if (inline) {
-      writer.line(`return ${inline};`);
-    } else {
-      emitCloneTo(writer, createEmitState(), program.body, program.param, "out");
-      writer.line("return out;");
-    }
+    emitCloneReturn(writer, program.body, program.param);
   });
   writer.line("}");
 
@@ -27,16 +22,42 @@ export function emitClone(program: CloneIRProgram): string {
 
 export function emitCloneBody(program: CloneIRProgram): string {
   const writer = new CodeWriter();
-  const inline = emitInlineClone(program.body, program.param);
+
+  emitHelpers(writer, program);
+  emitCloneReturn(writer, program.body, program.param);
+
+  return writer.toString();
+}
+
+/**
+ * One named function per cycle participant. A recursive node then compiles to
+ * a call, so a self-referencing schema produces finite source that recurses at
+ * run time instead of at emit time.
+ */
+function emitHelpers(writer: CodeWriter, program: CloneIRProgram): void {
+  for (const helper of program.helpers) {
+    writer.line(`function ${helperName(helper.id)}(${program.param}) {`);
+    writer.indent(() => {
+      emitCloneReturn(writer, helper.node, program.param);
+    });
+    writer.line("}");
+  }
+}
+
+function emitCloneReturn(writer: CodeWriter, node: CloneIRNode, source: string): void {
+  const inline = emitInlineClone(node, source);
 
   if (inline) {
     writer.line(`return ${inline};`);
-  } else {
-    emitCloneTo(writer, createEmitState(), program.body, program.param, "out");
-    writer.line("return out;");
+    return;
   }
 
-  return writer.toString();
+  emitCloneTo(writer, createEmitState(), node, source, "out");
+  writer.line("return out;");
+}
+
+function helperName(id: string): string {
+  return `clone_${id}`;
 }
 
 function emitCloneTo(writer: CodeWriter, state: EmitState, node: CloneIRNode, source: string, target: string): void {
@@ -80,6 +101,7 @@ function emitCloneTo(writer: CodeWriter, state: EmitState, node: CloneIRNode, so
       return;
     case "date":
     case "reuse":
+    case "recursive":
       return;
   }
 }
@@ -88,6 +110,8 @@ function emitInlineClone(node: CloneIRNode, source: string): string | undefined 
   switch (node.kind) {
     case "reuse":
       return source;
+    case "recursive":
+      return `${helperName(node.id)}(${source})`;
     case "date":
       return `new Date(${source}.getTime())`;
     case "object":

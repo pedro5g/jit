@@ -2,15 +2,19 @@ import * as ATS from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
 import {
   type ArrayNode,
+  buildRecursiveProgram,
   buildSchemaNode,
   type GuardNode,
   isPrimitiveLikeSchema,
   type MapNode,
   type ObjectNode,
   type RecordNode,
+  type RecursiveHelper,
+  type RecursiveNode,
   type SetNode,
   type TupleNode,
 } from "../schema-nodes.js";
+import { findRecursiveSchemas } from "../schema-recursion.js";
 
 export type DiffIRNode =
   | { readonly kind: "reuse" }
@@ -24,7 +28,8 @@ export type DiffIRNode =
   | ArrayNode<DiffIRNode>
   | SetNode<DiffIRNode>
   | MapNode<DiffIRNode>
-  | GuardNode<DiffIRNode>;
+  | GuardNode<DiffIRNode>
+  | RecursiveNode;
 
 export interface DiffIROption {
   readonly schema: ATS.AnyTypeSchema;
@@ -36,32 +41,37 @@ export interface DiffIRProgram {
   readonly leftParam: "left";
   readonly rightParam: "right";
   readonly body: DiffIRNode;
+  /** Named functions for cycle participants; empty for an acyclic schema. */
+  readonly helpers: readonly RecursiveHelper<DiffIRNode>[];
 }
 
 export function buildDiffIR(schema: ATS.AnyTypeSchema): DiffIRProgram {
-  return {
-    kind: "program",
-    leftParam: "left",
-    rightParam: "right",
-    body: buildDiffNode(schema),
-  };
+  const { body, helpers } = buildRecursiveProgram<DiffIRNode>(
+    schema,
+    (current, recurse) => buildDiffNode(current, recurse),
+    (id) => ({ kind: "recursive", id }),
+    findRecursiveSchemas(schema)
+  );
+
+  return { kind: "program", leftParam: "left", rightParam: "right", body, helpers };
 }
 
-function buildDiffNode(schema: ATS.AnyTypeSchema): DiffIRNode {
+function buildDiffNode(schema: ATS.AnyTypeSchema, recurse: (child: ATS.AnyTypeSchema) => DiffIRNode): DiffIRNode {
   if (schema.type === ATS.TypeName.date) return { kind: "date" };
-  if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema);
-  if (schema.type === ATS.TypeName.intersection) return buildIntersectionNode(schema as ATS.IntersectionSchema);
+  if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema, recurse);
+  if (schema.type === ATS.TypeName.intersection)
+    return buildIntersectionNode(schema as ATS.IntersectionSchema, recurse);
   if (schema.type === ATS.TypeName.discriminatedUnion)
-    return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema);
+    return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema, recurse);
 
-  const node = buildSchemaNode(schema, buildDiffNode);
+  const node = buildSchemaNode(schema, recurse);
   if (node) return node;
   if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
 
   throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler diff IR for type: ${schema.type}`);
 }
 
-function buildUnionNode(schema: ATS.UnionSchema): DiffIRNode {
+function buildUnionNode(schema: ATS.UnionSchema, recurse: (child: ATS.AnyTypeSchema) => DiffIRNode): DiffIRNode {
   if (schema.def.options.every((option) => isPrimitiveLikeSchema(option))) {
     return { kind: "reuse" };
   }
@@ -70,25 +80,31 @@ function buildUnionNode(schema: ATS.UnionSchema): DiffIRNode {
     kind: "union",
     options: schema.def.options.map((option) => ({
       schema: option,
-      node: buildDiffNode(option),
+      node: recurse(option),
     })),
   };
 }
 
-function buildIntersectionNode(schema: ATS.IntersectionSchema): DiffIRNode {
+function buildIntersectionNode(
+  schema: ATS.IntersectionSchema,
+  recurse: (child: ATS.AnyTypeSchema) => DiffIRNode
+): DiffIRNode {
   return {
     kind: "intersection",
-    options: schema.def.options.map(buildDiffNode),
+    options: schema.def.options.map(recurse),
   };
 }
 
-function buildDiscriminatedUnionNode(schema: ATS.DiscriminatedUnionSchema): DiffIRNode {
+function buildDiscriminatedUnionNode(
+  schema: ATS.DiscriminatedUnionSchema,
+  recurse: (child: ATS.AnyTypeSchema) => DiffIRNode
+): DiffIRNode {
   return {
     kind: "discriminatedUnion",
     discriminator: schema.def.discriminator,
     options: schema.def.options.map((option) => ({
       schema: option,
-      node: buildDiffNode(option),
+      node: recurse(option),
     })),
   };
 }

@@ -4,7 +4,7 @@ import { JITError } from "../../errors/index.js";
 import { Parse } from "../../shared/index.js";
 import { emitDefaultedValue, emitStaticDefaultSource } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
-import { assertNoRecursion } from "../schema-recursion.js";
+import { findRecursiveSchemas } from "../schema-recursion.js";
 import { emitPropertyAccess } from "../source/access.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
@@ -12,6 +12,12 @@ type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 interface SerializeContext {
   readonly writer: CodeWriter;
   varCounter: number;
+  /** Cycle participants, each written once as its own named function. */
+  readonly recursive: ReadonlySet<ATS.AnyTypeSchema>;
+  readonly helperIds: Map<ATS.AnyTypeSchema, string>;
+  /** Helpers whose body has been emitted or is being emitted. */
+  readonly emitted: Set<ATS.AnyTypeSchema>;
+  readonly pending: ATS.AnyTypeSchema[];
 }
 
 /**
@@ -23,15 +29,21 @@ interface SerializeContext {
  * Classic indexed loops, no `Object.keys` on known shapes, no closures.
  */
 export function emitSerialize(schema: ATS.AnyTypeSchema): string {
-  assertNoRecursion(schema, "json.stringify");
-
   const writer = new CodeWriter();
-  const context: SerializeContext = { writer, varCounter: 0 };
+  const context: SerializeContext = {
+    writer,
+    varCounter: 0,
+    recursive: findRecursiveSchemas(schema),
+    helperIds: new Map(),
+    emitted: new Set(),
+    pending: [],
+  };
   const needsStringHelper = hasStringLeaf(schema, new Set());
 
   writer.line("(function () {");
   writer.indent(() => {
     if (needsStringHelper) emitStringHelper(writer);
+    emitSerializeHelpers(context);
     writer.line("function stringify(value) {");
     writer.indent(() => {
       writer.line('let s = "";');
@@ -44,6 +56,41 @@ export function emitSerialize(schema: ATS.AnyTypeSchema): string {
   writer.line("})()");
 
   return writer.toString();
+}
+
+/**
+ * Writes one function per cycle participant before the entry point. Bodies
+ * are produced breadth-first: emitting one may discover another, so the queue
+ * drains until every reachable cycle has a function.
+ */
+function emitSerializeHelpers(context: SerializeContext): void {
+  for (const target of context.recursive) queueHelper(context, target);
+
+  while (context.pending.length > 0) {
+    const target = context.pending.shift() as ATS.AnyTypeSchema;
+    const writer = context.writer;
+
+    writer.line(`function ${context.helperIds.get(target)}(value) {`);
+    writer.indent(() => {
+      writer.line('let s = "";');
+      emitBaseAppend(context, resolveSerializeWrappers(target).base, "value");
+      writer.line("return s;");
+    });
+    writer.line("}");
+  }
+}
+
+function queueHelper(context: SerializeContext, target: ATS.AnyTypeSchema): string {
+  const existing = context.helperIds.get(target);
+
+  if (existing) return existing;
+
+  const id = `stringify_r${context.helperIds.size + 1}`;
+
+  context.helperIds.set(target, id);
+  context.emitted.add(target);
+  context.pending.push(target);
+  return id;
 }
 
 /**
@@ -134,6 +181,20 @@ function nextVar(context: SerializeContext, prefix: string): string {
 function emitAppend(context: SerializeContext, schema: ATS.AnyTypeSchema, valueExpr: string): void {
   const resolved = resolveSerializeWrappers(schema);
   const writer = context.writer;
+
+  // A cycle participant is reached through its function, never inlined again.
+  // Helper bodies start at `emitBaseAppend`, so a helper never calls itself
+  // here before emitting anything.
+  if (context.recursive.has(resolved.base)) {
+    const call = `${queueHelper(context, resolved.base)}(${valueExpr})`;
+
+    if (resolved.nullable || resolved.optional) {
+      writer.line(`s += ${valueExpr} == null ? "null" : ${call};`);
+    } else {
+      writer.line(`s += ${call};`);
+    }
+    return;
+  }
 
   if (resolved.nullable || resolved.optional) {
     // JSON emits null for both; optional object PROPS are skipped earlier.

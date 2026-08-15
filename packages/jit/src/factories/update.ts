@@ -5,6 +5,7 @@ import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 import {
   createReactiveUpdate,
   type ReactiveUpdateController,
@@ -157,7 +158,12 @@ export function update<TSchema extends AnyTypeSchema>(
     },
   });
 
-  if (args.length === 0) return run;
+  if (args.length === 0) {
+    // Registered so `jit generate` sees a standalone update the same way it
+    // sees one inside an execution plan, instead of dropping it silently.
+    registerArtifact(run as object, { kind: "operation", schema: unwrapped, op: "update" });
+    return run;
+  }
 
   return run(args[0], args[1]);
 }

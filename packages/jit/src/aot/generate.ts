@@ -487,9 +487,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           const hashBinding = internalIdentifier(`${binding}_hash`);
 
           if (!emitHashBinding(hashBinding, schema, reportName)) return undefined;
-          js.push(`${declaration} /*#__PURE__*/ ((__hash) => (${source}))(${hashBinding});`);
+          js.push(`${declaration} /*#__PURE__*/ ((__hash) => ${asExpression(source, "equal")})(${hashBinding});`);
         } else {
-          js.push(`${declaration} (${source});`);
+          js.push(`${declaration} ${asExpression(source, "equal")};`);
         }
         return emitted;
       }
@@ -501,7 +501,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         const source = emitOperationSource(artifact.op, schema, reportName);
 
         if (!source) return undefined;
-        js.push(`${declaration} (${source});`);
+        js.push(`${declaration} ${asExpression(source, OPERATION_ENTRY[artifact.op])};`);
         return emitted;
       }
       case "sanitize": {
@@ -514,7 +514,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
             (name, position) => `  const ${name} = ${String(sanitizeChainBindings.values[position])};`
           )
         );
-        js.push(...indentBlock(`return (${source});`));
+        js.push(...indentBlock(`return ${asExpression(source, "scrub")};`));
         js.push("})();");
         return emitted;
       }
@@ -552,6 +552,13 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         if (!source) return undefined;
         needsMockHelpers = true;
         js.push(`${declaration} (${source});`);
+        return emitted;
+      }
+      case "update": {
+        const source = tryEmit(reportName, "update", skipped, () => emitUpdateSource(schema));
+
+        if (!source) return undefined;
+        js.push(`${declaration} ${asExpression(source, "update")};`);
         return emitted;
       }
     }
@@ -803,7 +810,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const source = tryEmit(reportName, "json.encode", skipped, () => emitSerialize(plan.schema));
 
       if (!source) return undefined;
-      js.push(`${declaration} (${source});`);
+      js.push(`${declaration} ${asExpression(source, "stringify")};`);
       return emitted;
     }
 
@@ -1022,7 +1029,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const update = internalIdentifier(`${binding}_update`);
       const patchName = internalIdentifier(`${binding}_patch`);
 
-      setup.push(`const ${update} = (${source});`);
+      setup.push(`const ${update} = ${asExpression(source, "update")};`);
       setup.push(`const ${patchName} = ${patch};`);
       return { update, patch: patchName };
     };
@@ -1044,10 +1051,10 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
             (bindingName, position) => `  const ${bindingName} = ${String(sanitizeChainBindings.values[position])};`
           )
         );
-        setup.push(...indentBlock(`return (${source.replace("function scrub", "function sanitize")});`));
+        setup.push(...indentBlock(`return ${asExpression(source, "scrub")};`));
         setup.push("})();");
       } else {
-        setup.push(`const ${securityName} = (${source.replace("function scrub", "function mask")});`);
+        setup.push(`const ${securityName} = ${asExpression(source, "scrub")};`);
       }
       return securityName;
     };
@@ -1155,7 +1162,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
             if (!stringify) return undefined;
             const stringifyName = internalIdentifier(`${binding}_stringify`);
 
-            setup.push(`const ${stringifyName} = (${stringify});`);
+            setup.push(`const ${stringifyName} = ${asExpression(stringify, "stringify")};`);
             if (stage.many) emitMappedJsonArray(mapper, stringifyName);
             else body.push(`value = ${stringifyName}(${mapper}.map(value));`);
             index++;
@@ -1194,7 +1201,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           if (!stringify) return undefined;
           const stringifyName = internalIdentifier(`${binding}_stringify`);
 
-          setup.push(`const ${stringifyName} = (${stringify});`);
+          setup.push(`const ${stringifyName} = ${asExpression(stringify, "stringify")};`);
           body.push(`value = ${stringifyName}(value);`);
           break;
         }
@@ -1481,6 +1488,10 @@ function operationSignature(
       return "{ readonly [key: string]: unknown }";
     case "mock":
       return `(options?: { readonly seed?: number }) => ${valueType}`;
+    case "update":
+      // The patch is a deep-partial applied at run time, so it stays loose
+      // here rather than restating the whole shape a second time.
+      return `(value: ${valueType}, patch: unknown) => ${valueType}`;
   }
 }
 
@@ -1659,6 +1670,41 @@ function isComposedExecutionStage(stage: ExecutionStage): boolean {
     stage.kind === "update" ||
     stage.kind === "security"
   );
+}
+
+/** Entry-point function name emitted by each structural operation. */
+const OPERATION_ENTRY: Record<"clone" | "diff" | "stringify" | "format" | "mask", string> = {
+  clone: "clone",
+  diff: "diff",
+  stringify: "stringify",
+  format: "format",
+  // mask and sanitize share one emitter, whose entry point is `scrub`.
+  mask: "scrub",
+};
+
+/**
+ * Wraps an emitted source so it reads as a single expression.
+ *
+ * A schema with a cycle emits one named helper per participant alongside its
+ * entry point, so the source is a sequence of declarations rather than one
+ * function expression. Those are evaluated once and the entry point returned
+ * by name — order-independent, and the same shape the runtime `Function` body
+ * already has. An acyclic source is a lone function expression and is
+ * parenthesized exactly as before.
+ */
+function asExpression(source: string, entry: string): string {
+  const trimmed = source.trimStart();
+
+  // Already a self-contained expression — a serializer wraps its own IIFE.
+  if (!trimmed.startsWith("function ")) return `(${source})`;
+
+  // Bodies are indented, so a top-level match counts declarations. One means
+  // the historical single-function shape, which is parenthesized unchanged.
+  const declarations = trimmed.match(/^function /gm)?.length ?? 0;
+
+  if (declarations <= 1) return `(${source})`;
+
+  return `/*#__PURE__*/ (() => {\n${source}\nreturn ${entry};\n})()`;
 }
 
 function serializeBindingFunction(value: Function): string | undefined {

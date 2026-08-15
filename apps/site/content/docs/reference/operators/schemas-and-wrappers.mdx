@@ -152,6 +152,15 @@ construction-time macro and introduces no runtime node by itself. `lazy`
 breaks recursive declaration cycles; compile once and reuse the resulting
 operation rather than rebuilding recursive schemas per request.
 
+A cycle does not cost you an operation. Every emitter compiles each cycle
+participant into one named function and calls it — `clone_r1`, `equal_r1`,
+`diff_r1`, `stringify_r1`, `update_r1`, `scrub_r1`, and the codec's
+`_size_r1`/`_write_r1`/`_read_r1` — so validation, cloning, comparison, diffing,
+updating, serialization, masking, sanitizing and the binary codec all work on a
+self-referencing schema, ahead of time as well as at run time. The generated
+TypeScript refers to the cycle by name (`{ children: Node[] }`), and a schema
+without a cycle emits exactly the same source it always did.
+
 ## Standard Schema
 
 Every builder exposes `schema["~standard"]` compatibility through the builder
