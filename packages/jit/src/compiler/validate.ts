@@ -101,7 +101,10 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
 ): CompiledValidatorSelection<ATS.TypeofSchema<TSchema>, TOps> {
   type TValue = ATS.TypeofSchema<TSchema>;
   const normalizedOps = normalizeValidatorOps(ops);
-  const fastParse = normalizedOps.includes("parse") && canUseFastParse(schema);
+  // `is` is the allocation-free proof that a value is already valid. When the
+  // schema cannot rebuild, both parse and safeParse can lead with it and skip
+  // the issue-collecting traversal entirely on the common path.
+  const fastParse = canUseFastParse(schema) && (normalizedOps.includes("parse") || normalizedOps.includes("safeParse"));
   const cacheKey = `validator:${normalizedOps.join(",")}`;
 
   return getCompileCached(
@@ -117,6 +120,10 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
       const selection: MutableCompiledValidatorSelection<TValue> = {};
       const is = compiled.is;
       const safeParse = compiled.safeParse;
+      const fastSafeParse =
+        fastParse && is && safeParse
+          ? (value: unknown): SafeParseResult<TValue> => (is(value) ? { success: true, data: value } : safeParse(value))
+          : safeParse;
       const parse = (value: unknown): TValue => {
         if (fastParse && is?.(value)) return value;
         if (!safeParse) throw new Error("parse requires safeParse generation");
@@ -143,9 +150,9 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
         selection.is = compiled.is;
         registerValidatorArtifact(compiled.is, schema, "is");
       }
-      if (normalizedOps.includes("safeParse") && safeParse) {
-        selection.safeParse = safeParse;
-        registerValidatorArtifact(safeParse, schema, "safeParse");
+      if (normalizedOps.includes("safeParse") && fastSafeParse) {
+        selection.safeParse = fastSafeParse;
+        registerValidatorArtifact(fastSafeParse, schema, "safeParse");
       }
       if (normalizedOps.includes("parse")) {
         selection.parse = parse;

@@ -157,3 +157,64 @@ describe("compiled value operations", () => {
     }
   });
 });
+
+describe("validation fast path", () => {
+  it("should return the input untouched when nothing can rebuild it", () => {
+    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(3) });
+    const value = { id: 1, name: "Ada" };
+    const result = JIT.validate.safeParse(User)(value);
+
+    expect(result.success).toBe(true);
+    // Proof the issue-collecting traversal was skipped: no copy was made.
+    expect(result.success && result.data).toBe(value);
+  });
+
+  it("should still collect every issue when the value is invalid", () => {
+    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(3) });
+    const result = JIT.validate.safeParse(User)({ id: 1.5, name: "A" });
+
+    expect(result.success).toBe(false);
+    expect(!result.success && result.issues.map((issue) => issue.code)).toEqual(["not_int32", "too_small"]);
+  });
+
+  it("should keep rebuilding where the schema says the output differs", () => {
+    const Form = JIT.object({ s: JIT.string().trim(), n: JIT.number().default(5) });
+    const value = { s: "  x  " };
+    const result = JIT.validate.safeParse(Form)(value as never);
+
+    expect(result.success && result.data).toEqual({ s: "x", n: 5 });
+    expect(result.success && result.data).not.toBe(value);
+  });
+
+  it("should generate the same fast path ahead of time", async () => {
+    const User = JIT.object({ id: JIT.number().int32() });
+    const Form = JIT.object({ s: JIT.string().trim() });
+    const outDir = mkdtempSync(join(tmpdir(), "jit-fast-"));
+
+    try {
+      AOT.generate({
+        artifacts: { spFast: JIT.validate.safeParse(User), spBuild: JIT.validate.safeParse(Form) },
+        outDir,
+        format: "js",
+      });
+
+      const source = readFileSync(join(outDir, "index.js"), "utf8");
+
+      expect(source).toContain("const spFast = (value) => spFast_validator.is(value)");
+      // A schema that rebuilds cannot take the shortcut.
+      expect(source).not.toContain("const spBuild = (value) => spBuild_validator.is(value)");
+
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+        spFast: (value: unknown) => { success: boolean; data?: unknown };
+        spBuild: (value: unknown) => { success: boolean; data?: unknown };
+      };
+      const value = { id: 7 };
+
+      expect(generated.spFast(value).data).toBe(value);
+      expect(generated.spFast({ id: 1.5 }).success).toBe(false);
+      expect(generated.spBuild({ s: " x " }).data).toEqual({ s: "x" });
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+});

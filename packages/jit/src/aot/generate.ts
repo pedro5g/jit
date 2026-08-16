@@ -379,7 +379,10 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return undefined;
     }
 
-    const fastParse = artifact.op === "parse" && canUseFastParse(artifact.schema);
+    // Leading with `is` skips the issue-collecting traversal for a value that
+    // is already valid, so parse and safeParse share the same fast path the
+    // runtime compiler uses.
+    const fastParse = (artifact.op === "parse" || artifact.op === "safeParse") && canUseFastParse(artifact.schema);
     const validatorName = emitValidatorBinding(binding, artifact.schema, reportName, artifact.op, {
       is: artifact.op === "is" || fastParse,
       safeParse: artifact.op === "safeParse" || artifact.op === "parse",
@@ -390,7 +393,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.op === "is") {
       js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
     } else if (artifact.op === "safeParse") {
-      js.push(`${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`);
+      js.push(
+        fastParse
+          ? `${declaration} (value) => ${validatorName}.is(value) ? { success: true, data: value } : ${validatorName}.safeParse(value);`
+          : `${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`
+      );
     } else {
       needsValidationError = true;
       js.push(
@@ -733,7 +740,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         return undefined;
       }
 
-      const fastParse = validateStage.operation === "parse" && canUseFastParse(plan.schema);
+      const fastParse =
+        (validateStage.operation === "parse" || validateStage.operation === "safeParse") &&
+        canUseFastParse(plan.schema);
       const validatorName = emitValidatorBinding(binding, plan.schema, reportName, validateStage.operation, {
         is: validateStage.operation === "is" || fastParse,
         safeParse: validateStage.operation !== "is",
@@ -756,7 +765,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           });
           return undefined;
         }
-        js.push(`${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`);
+        js.push(
+          fastParse
+            ? `${declaration} (value) => ${validatorName}.is(value) ? { success: true, data: value } : ${validatorName}.safeParse(value);`
+            : `${declaration} /*#__PURE__*/ ((v) => v.safeParse)(${validatorName});`
+        );
       } else if (hasJsonDecode) {
         needsValidationError = true;
         js.push(
