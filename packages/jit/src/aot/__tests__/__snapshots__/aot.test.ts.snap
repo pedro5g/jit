@@ -58,12 +58,10 @@ const User_parse_validator = /*#__PURE__*/ (() => {
   function safeParse(value) {
     const issues = [];
     let v1 = value;
-    let o2 = v1;
     if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
       issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v3 = v1.id;
-      let o4 = v3;
       if (typeof v3 !== "number") {
         issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v3 };
       } else {
@@ -71,20 +69,16 @@ const User_parse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "id", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
         }
       }
-      o4 = v3;
       let v5 = v1.name;
-      let o6 = v5;
       if (typeof v5 !== "string") {
         issues[issues.length] = { path: "name", code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
       } else {
       }
-      o6 = v5;
     }
-    o2 = v1;
     if (issues.length !== 0) {
       return { success: false, issues: issues };
     }
-    return { success: true, data: o2 };
+    return { success: true, data: v1 };
   }
   return { is: is, safeParse: safeParse };
 })();

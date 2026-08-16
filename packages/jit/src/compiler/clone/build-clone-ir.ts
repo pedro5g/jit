@@ -4,6 +4,7 @@ import {
   type ArrayNode,
   buildRecursiveProgram,
   buildSchemaNode,
+  flattenObjectIntersection,
   type GuardNode,
   isPrimitiveLikeSchema,
   type MapNode,
@@ -58,8 +59,14 @@ export function buildCloneIR(schema: ATS.AnyTypeSchema): CloneIRProgram {
 function buildCloneNode(schema: ATS.AnyTypeSchema, recurse: (child: ATS.AnyTypeSchema) => CloneIRNode): CloneIRNode {
   if (schema.type === ATS.TypeName.date) return { kind: "date" };
   if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema, recurse);
-  if (schema.type === ATS.TypeName.intersection)
+  if (schema.type === ATS.TypeName.intersection) {
+    // Merging the options at compile time turns three allocations — one per
+    // option plus the Object.assign result — into a single object literal.
+    const flattened = flattenObjectIntersection(schema);
+
+    if (flattened !== undefined) return buildCloneNode(flattened, recurse);
     return buildIntersectionNode(schema as ATS.IntersectionSchema, recurse);
+  }
   if (schema.type === ATS.TypeName.discriminatedUnion)
     return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema, recurse);
 

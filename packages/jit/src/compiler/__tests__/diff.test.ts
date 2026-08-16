@@ -161,9 +161,6 @@ describe("JIT compiler diff", () => {
     expect(Compiler.emitDiffSource(schema)).toMatchInlineSnapshot(`
       "function diff(left, right) {
         const changes = [];
-        if (Object.is(left, right)) {
-          return changes;
-        }
         if (!Object.is(left, right)) {
           if (!Object.is(left.id, right.id)) {
             changes[changes.length] = { type: "update", path: ["id"], value: right.id };

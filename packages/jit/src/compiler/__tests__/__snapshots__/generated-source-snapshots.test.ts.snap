@@ -885,12 +885,10 @@ exports[`generated source snapshots > validator: ISO namespace schemas 1`] = `
 function safeParse(value) {
   const issues = [];
   let v1 = value;
-  let o2 = v1;
   if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
     issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
   } else {
     let v3 = v1.date;
-    let o4 = v3;
     if (typeof v3 !== "string") {
       issues[issues.length] = { path: "date", code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
     } else {
@@ -898,9 +896,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "date", code: "invalid_format", expected: "date", message: "expected a valid date" };
       }
     }
-    o4 = v3;
     let v5 = v1.time;
-    let o6 = v5;
     if (typeof v5 !== "string") {
       issues[issues.length] = { path: "time", code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
     } else {
@@ -908,9 +904,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "time", code: "invalid_format", expected: "time", message: "expected a valid time" };
       }
     }
-    o6 = v5;
     let v7 = v1.at;
-    let o8 = v7;
     if (typeof v7 !== "string") {
       issues[issues.length] = { path: "at", code: "expected_string", expected: "string", message: "expected string", received: typeof v7 };
     } else {
@@ -918,9 +912,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "at", code: "invalid_format", expected: "datetime", message: "expected a valid datetime" };
       }
     }
-    o8 = v7;
     let v9 = v1.ttl;
-    let o10 = v9;
     if (typeof v9 !== "string") {
       issues[issues.length] = { path: "ttl", code: "expected_string", expected: "string", message: "expected string", received: typeof v9 };
     } else {
@@ -928,13 +920,11 @@ function safeParse(value) {
         issues[issues.length] = { path: "ttl", code: "invalid_format", expected: "duration", message: "expected a valid duration" };
       }
     }
-    o10 = v9;
   }
-  o2 = v1;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }
-  return { success: true, data: o2 };
+  return { success: true, data: v1 };
 }
 return { is: is, safeParse: safeParse };"
 `;
@@ -962,37 +952,29 @@ exports[`generated source snapshots > validator: Temporal API schemas 1`] = `
 function safeParse(value) {
   const issues = [];
   let v1 = value;
-  let o2 = v1;
   if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
     issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
   } else {
     let v3 = v1.at;
-    let o4 = v3;
     if (!(globalThis.Temporal !== undefined && v3 instanceof globalThis.Temporal.Instant)) {
       issues[issues.length] = { path: "at", code: "invalid_temporal", expected: "Temporal.Instant", message: "expected Temporal.Instant" };
     } else {
     }
-    o4 = v3;
     let v5 = v1.date;
-    let o6 = v5;
     if (!(globalThis.Temporal !== undefined && v5 instanceof globalThis.Temporal.PlainDate)) {
       issues[issues.length] = { path: "date", code: "invalid_temporal", expected: "Temporal.PlainDate", message: "expected Temporal.PlainDate" };
     } else {
     }
-    o6 = v5;
     let v7 = v1.duration;
-    let o8 = v7;
     if (!(globalThis.Temporal !== undefined && v7 instanceof globalThis.Temporal.Duration)) {
       issues[issues.length] = { path: "duration", code: "invalid_temporal", expected: "Temporal.Duration", message: "expected Temporal.Duration" };
     } else {
     }
-    o8 = v7;
   }
-  o2 = v1;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }
-  return { success: true, data: o2 };
+  return { success: true, data: v1 };
 }
 return { is: is, safeParse: safeParse };"
 `;
@@ -1014,7 +996,6 @@ function safeParse(value) {
   let v1 = value;
   let o2 = v1;
   let v3 = v1;
-  let o4 = v3;
   if (typeof v3 !== "string") {
     issues[issues.length] = { path: "", code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
   } else {
@@ -1022,21 +1003,18 @@ function safeParse(value) {
       issues[issues.length] = { path: "", code: "invalid_format", expected: "datetime", message: "expected a valid datetime" };
     }
   }
-  o4 = v3;
   let c5;
   try {
-    c5 = __v1(o4);
+    c5 = __v1(v3);
   } catch {
     issues[issues.length] = { path: "", code: "invalid_codec", expected: "codec decode", message: "codec decode failed" };
   }
   let v6 = c5;
-  let o7 = v6;
   if (!(v6 instanceof Date) || v6.getTime() !== v6.getTime()) {
     issues[issues.length] = { path: "", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
   } else {
   }
-  o7 = v6;
-  o2 = o7;
+  o2 = v6;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }
@@ -1152,20 +1130,16 @@ function is(value) {
 function safeParse(value) {
   const issues = [];
   let v1 = value;
-  let o2 = v1;
   if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
     issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
   } else {
     let v3 = v1.temDesconto;
-    let o4 = v3;
     if (typeof v3 !== "boolean") {
       issues[issues.length] = { path: "temDesconto", code: "expected_boolean", expected: "boolean", message: "expected boolean" };
     }
-    o4 = v3;
     let w5;
     if (v1.temDesconto === true) {
       let v6 = v1.cupom;
-      let o7 = v6;
       if (typeof v6 !== "string") {
         issues[issues.length] = { path: "cupom", code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
       } else {
@@ -1173,34 +1147,26 @@ function safeParse(value) {
           issues[issues.length] = { path: "cupom", code: "too_small", expected: "length >= 3", message: "expected at least 3 characters" };
         }
       }
-      o7 = v6;
-      w5 = o7;
+      w5 = v6;
     } else {
       let v8 = v1.cupom;
-      let o9 = v8;
       if (v8 !== undefined) {
         if (typeof v8 !== "string") {
           issues[issues.length] = { path: "cupom", code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
         } else {
         }
-        o9 = v8;
       }
-      w5 = o9;
+      w5 = v8;
     }
     let v10 = v1.ref;
-    let o11 = v10;
     if ((pu1(v10) ? 1 : 0) + (pu2(v10) ? 1 : 0) !== 1) {
       issues[issues.length] = { path: "ref", code: "invalid_xor", expected: "exactly one schema", message: "value must match exactly one schema" };
     }
-    o11 = v10;
     let v16 = v1.status;
-    let o17 = v16;
     if (pu3(v16)) {
       issues[issues.length] = { path: "status", code: "invalid_not", expected: "not", message: "value matched a forbidden schema" };
     }
-    o17 = v16;
     let v20 = v1.at;
-    let o21 = v20;
     if (!(v20 instanceof Date) || v20.getTime() !== v20.getTime()) {
       issues[issues.length] = { path: "at", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
     } else {
@@ -1211,9 +1177,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "at", code: "invalid_precision", expected: "minute", message: "expected value truncated to minute" };
       }
     }
-    o21 = v20;
     let v22 = v1.day;
-    let o23 = v22;
     if (!(globalThis.Temporal !== undefined && v22 instanceof globalThis.Temporal.PlainDate)) {
       issues[issues.length] = { path: "day", code: "invalid_temporal", expected: "Temporal.PlainDate", message: "expected Temporal.PlainDate" };
     } else {
@@ -1224,13 +1188,11 @@ function safeParse(value) {
         issues[issues.length] = { path: "day", code: "invalid_month_of_year", expected: "7", message: "expected an allowed month" };
       }
     }
-    o23 = v22;
   }
-  o2 = v1;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }
-  return { success: true, data: o2 };
+  return { success: true, data: v1 };
 }
 return { is: is, safeParse: safeParse };"
 `;
@@ -1353,7 +1315,6 @@ function safeParse(value) {
     issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
   } else {
     let v4 = v1.id;
-    let o5 = v4;
     if (typeof v4 !== "string") {
       issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
     } else {
@@ -1361,7 +1322,6 @@ function safeParse(value) {
         issues[issues.length] = { path: "id", code: "invalid_format", expected: "ulid", message: "id deve ser ULID" };
       }
     }
-    o5 = v4;
     let v6 = v1.amount;
     let o7 = v6;
     v6 = Number(v6);
@@ -1374,11 +1334,9 @@ function safeParse(value) {
     }
     o7 = v6;
     let v8 = v1.method;
-    let o9 = v8;
     if (!(pu1(v8) || pu2(v8))) {
       issues[issues.length] = { path: "method", code: "invalid_union", expected: "union", message: "value matched no union option" };
     }
-    o9 = v8;
     let v22 = v1.note;
     let o23 = v22;
     if (v22 !== undefined) {
@@ -1392,7 +1350,7 @@ function safeParse(value) {
       }
       o23 = v22;
     }
-    b3 = { "id": o5, "amount": o7, "method": o9, "note": o23 };
+    b3 = { "id": v4, "amount": o7, "method": v8, "note": o23 };
   }
   if (b3 === undefined) { b3 = v1; }
   o2 = b3;
@@ -1470,24 +1428,18 @@ function is(value) {
 function safeParse(value) {
   const issues = [];
   let v1 = value;
-  let o2 = v1;
   if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
     issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
   } else {
     let v3 = v1.data;
-    let o4 = v3;
     if (!pj1(v3)) {
       issues[issues.length] = { path: "data", code: "invalid_json", expected: "JSON value", message: "expected a JSON-encodable value" };
     }
-    o4 = v3;
     let v5 = v1.external;
-    let o6 = v5;
     if (!__v0(v5)) {
       issues[issues.length] = { path: "external", code: "custom", expected: "custom", message: "custom predicate rejected the value" };
     }
-    o6 = v5;
     let v7 = v1.greeting;
-    let o8 = v7;
     if (typeof v7 !== "string") {
       issues[issues.length] = { path: "greeting", code: "expected_string", expected: "string", message: "expected string", received: typeof v7 };
     } else {
@@ -1495,13 +1447,11 @@ function safeParse(value) {
         issues[issues.length] = { path: "greeting", code: "invalid_template_literal", expected: "template literal", message: "expected a matching template literal string" };
       }
     }
-    o8 = v7;
   }
-  o2 = v1;
   if (issues.length !== 0) {
     return { success: false, issues: issues };
   }
-  return { success: true, data: o2 };
+  return { success: true, data: v1 };
 }
 return { is: is, safeParse: safeParse };"
 `;
@@ -1591,7 +1541,6 @@ function safeParse(value) {
     issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
   } else {
     let v4 = v1.kind;
-    let o5 = v4;
     if (typeof v4 !== "string") {
       issues[issues.length] = { path: "kind", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
     } else {
@@ -1599,9 +1548,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "kind", code: "invalid_enum", expected: "admin | user", message: "expected one of the allowed values" };
       }
     }
-    o5 = v4;
     let v6 = v1.age;
-    let o7 = v6;
     if (typeof v6 !== "number") {
       issues[issues.length] = { path: "age", code: "expected_number", expected: "number", message: "expected number", received: typeof v6 };
     } else {
@@ -1615,7 +1562,6 @@ function safeParse(value) {
         issues[issues.length] = { path: "age", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
       }
     }
-    o7 = v6;
     let v8 = v1.cpf;
     let o9 = v8;
     if (typeof v8 !== "string") {
@@ -1660,12 +1606,10 @@ function safeParse(value) {
       o13 = v12;
     }
     let v14 = v1.credentials;
-    let o15 = v14;
     if (v14 === null || typeof v14 !== "object" || Array.isArray(v14)) {
       issues[issues.length] = { path: "credentials", code: "expected_object", expected: "object", message: "expected object", received: typeof v14 };
     } else {
       let v16 = v14.password;
-      let o17 = v16;
       if (typeof v16 !== "string") {
         issues[issues.length] = { path: "credentials.password", code: "expected_string", expected: "string", message: "expected string", received: typeof v16 };
       } else {
@@ -1673,9 +1617,7 @@ function safeParse(value) {
           issues[issues.length] = { path: "credentials.password", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters" };
         }
       }
-      o17 = v16;
       let v18 = v14.confirmPassword;
-      let o19 = v18;
       if (typeof v18 !== "string") {
         issues[issues.length] = { path: "credentials.confirmPassword", code: "expected_string", expected: "string", message: "expected string", received: typeof v18 };
       } else {
@@ -1683,15 +1625,13 @@ function safeParse(value) {
           issues[issues.length] = { path: "credentials.confirmPassword", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters" };
         }
       }
-      o19 = v18;
     }
     if (__v1({ value: v14 })) {
       if (!__v0(v14)) {
         issues[issues.length] = { path: "credentials.confirmPassword", code: "custom", expected: "refinement", message: "passwords must match" };
       }
     }
-    o15 = v14;
-    b3 = { "kind": o5, "age": o7, "cpf": o9, "phone": o11, "invite": o13, "credentials": o15 };
+    b3 = { "kind": v4, "age": v6, "cpf": o9, "phone": o11, "invite": o13, "credentials": v14 };
   }
   if (b3 === undefined) { b3 = v1; }
   o2 = b3;
@@ -1752,7 +1692,6 @@ function safeParse(value) {
     issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
   } else {
     let v4 = v1.id;
-    let o5 = v4;
     if (typeof v4 !== "number") {
       issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v4 };
     } else {
@@ -1760,7 +1699,6 @@ function safeParse(value) {
         issues[issues.length] = { path: "id", code: "not_integer", expected: "integer", message: "expected an integer" };
       }
     }
-    o5 = v4;
     let v6 = v1.meta;
     let o7 = v6;
     let b8;
@@ -1800,7 +1738,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "" + k15[i16], code: "unknown_key", expected: "known keys only", message: "object contains unknown keys" };
       }
     }
-    b3 = { "id": o5, "meta": o7 };
+    b3 = { "id": v4, "meta": o7 };
   }
   if (b3 === undefined) { b3 = v1; }
   o2 = b3;

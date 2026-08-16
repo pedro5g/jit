@@ -2,7 +2,7 @@ import * as ATS from "../../../core/ats/index.js";
 import { JITError } from "../../../errors/index.js";
 import { staticDefaultIRExpr } from "../../defaults.js";
 import { resolveWrappers } from "../../resolvers/resolve-wrappers.js";
-import { isPrimitiveLikeSchema } from "../../schema-nodes.js";
+import { flattenObjectIntersection, isPrimitiveLikeSchema } from "../../schema-nodes.js";
 import { findRecursiveSchemas } from "../../schema-recursion.js";
 import { literalDiscriminatorValue } from "../../source/guard.js";
 import { type EqualStrategy, resolveEqualStrategy } from "../../strategy/resolve-strategy.js";
@@ -180,9 +180,15 @@ function appendSchemaCompare(
     case ATS.TypeName.union:
       appendUnionCompare(body, base, left, right, scope, strategy, recursion);
       return;
-    case ATS.TypeName.intersection:
-      appendIntersectionCompare(body, base, left, right, scope, strategy, recursion);
+    case ATS.TypeName.intersection: {
+      // Merged at compile time so a key shared by two options is compared
+      // once instead of twice.
+      const flattened = flattenObjectIntersection(base);
+
+      if (flattened !== undefined) appendObjectCompare(body, flattened as EqualSchema, left, right, scope, recursion);
+      else appendIntersectionCompare(body, base, left, right, scope, strategy, recursion);
       return;
+    }
     case ATS.TypeName.discriminatedUnion:
       appendDiscriminatedUnionCompare(body, base, left, right, scope, strategy, recursion);
       return;

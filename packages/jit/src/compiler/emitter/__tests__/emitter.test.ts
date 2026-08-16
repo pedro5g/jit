@@ -164,4 +164,53 @@ describe("emitter", () => {
       expect(hash(make(1))).toBe(hash(make(1)));
     });
   });
+
+  describe("intersections of objects", () => {
+    const Both = JIT.intersection(
+      JIT.object({ a: JIT.number(), shared: JIT.string() }),
+      JIT.object({ b: JIT.string(), shared: JIT.string(), nested: JIT.object({ n: JIT.number() }) })
+    );
+    const value = { a: 1, shared: "s", b: "x", nested: { n: 5 } };
+
+    it("should clone through one object literal, not a runtime merge", () => {
+      const source = Compiler.emitCloneSource(Both.schema);
+
+      expect(JIT.clone(Both)(value as never)).toEqual(value);
+      // Merged at compile time: no per-option object and no Object.assign.
+      expect(source).not.toContain("Object.assign");
+      expect(source.match(/\{/g) ?? []).toHaveLength(3);
+    });
+
+    it("should report a shared key once, not once per option", () => {
+      const changed = { ...value, shared: "t" };
+
+      expect(JIT.compare.diff(Both)(value as never, changed as never)).toEqual([
+        { type: "update", path: ["shared"], value: "t" },
+      ]);
+    });
+
+    it("should serialize and update an intersection like the object it is", () => {
+      const update = JIT.update(Both).compile();
+
+      expect(JIT.json.stringify(Both)(value as never)).toBe(JSON.stringify(value));
+      expect(update(value as never, { nested: { n: 9 } } as never)).toEqual({ ...value, nested: { n: 9 } });
+      // Nothing patched means the original reference survives.
+      expect(update(value as never, {} as never)).toBe(value);
+    });
+
+    it("should compare an intersection and agree with diff", () => {
+      const equal = JIT.compare.equal(Both);
+
+      expect(equal(value as never, { ...value } as never)).toBe(true);
+      expect(equal(value as never, { ...value, b: "other" } as never)).toBe(false);
+      expect(equal(value as never, { ...value, nested: { n: 6 } } as never)).toBe(false);
+    });
+
+    it("should still refuse an intersection it cannot represent as one object", () => {
+      const Mixed = JIT.intersection(JIT.object({ a: JIT.number() }), JIT.string() as never);
+
+      // Compilation is deferred to the first call, so that is where it reports.
+      expect(() => JIT.json.stringify(Mixed as never)({ a: 1 } as never)).toThrow(/does not support/);
+    });
+  });
 });

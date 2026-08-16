@@ -212,3 +212,48 @@ export function buildRecursiveProgram<TNode>(
 
   return { body: recurse(schema), helpers };
 }
+
+/**
+ * Flattens an intersection of objects into the single object it describes.
+ *
+ * `A & B` over objects is an object holding both sets of properties, so the
+ * shape is known at compile time and no emitter needs a runtime merge: it sees
+ * one object and emits one pass. A key present in both is emitted once, with
+ * the later option winning — the rule the validator already applies.
+ *
+ * Returns undefined when an option is not an object, leaving the caller to
+ * report the case it genuinely cannot represent.
+ */
+export function flattenObjectIntersection(schema: ATS.AnyTypeSchema): ATS.AnyTypeSchema | undefined {
+  const cached = FLATTENED_INTERSECTIONS.get(schema);
+
+  if (cached !== undefined) return cached.schema;
+
+  const flattened = buildFlattenedIntersection(schema);
+
+  FLATTENED_INTERSECTIONS.set(schema, { schema: flattened });
+  return flattened;
+}
+
+/** Shared across emitters, so the merged shape is built once per schema. */
+const FLATTENED_INTERSECTIONS = new WeakMap<ATS.AnyTypeSchema, { readonly schema: ATS.AnyTypeSchema | undefined }>();
+
+function buildFlattenedIntersection(schema: ATS.AnyTypeSchema): ATS.AnyTypeSchema | undefined {
+  const options = (schema as { readonly def: { readonly options?: readonly ATS.AnyTypeSchema[] } }).def.options;
+
+  if (!options || options.length === 0) return undefined;
+
+  const props: Record<string, ATS.AnyTypeSchema> = {};
+
+  for (const option of options) {
+    const resolved = resolveLazySchema(option) as ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
+
+    if (resolved.type !== ATS.TypeName.object) return undefined;
+
+    const optionProps = resolved.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
+
+    for (const key of Object.keys(optionProps)) props[key] = optionProps[key];
+  }
+
+  return ATS.createSchema(ATS.TypeName.object, { props, unknownKeys: undefined, catchall: undefined, checks: [] });
+}

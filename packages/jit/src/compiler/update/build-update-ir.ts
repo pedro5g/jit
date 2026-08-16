@@ -4,6 +4,7 @@ import {
   type ArrayNode,
   buildRecursiveProgram,
   buildSchemaNode,
+  flattenObjectIntersection,
   type GuardNode,
   isPrimitiveLikeSchema,
   type MapNode,
@@ -60,6 +61,13 @@ function buildUpdateNode(schema: ATS.AnyTypeSchema, recurse: (child: ATS.AnyType
   if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema, recurse);
   if (schema.type === ATS.TypeName.discriminatedUnion)
     return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema, recurse);
+  if (schema.type === ATS.TypeName.intersection) {
+    // An intersection of objects is one object, so patching it is an ordinary
+    // object update over the merged shape — no per-option merge at run time.
+    const flattened = flattenObjectIntersection(schema);
+
+    if (flattened !== undefined) return buildUpdateNode(flattened, recurse);
+  }
 
   const node = buildSchemaNode(schema, recurse);
   if (node) return node;

@@ -4,6 +4,7 @@ import { JITError } from "../../errors/index.js";
 import { Parse } from "../../shared/index.js";
 import { emitDefaultedValue, emitStaticDefaultSource } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
+import { flattenObjectIntersection } from "../schema-nodes.js";
 import { findRecursiveSchemas } from "../schema-recursion.js";
 import { emitPropertyAccess } from "../source/access.js";
 
@@ -150,6 +151,13 @@ function hasStringLeaf(schema: ATS.AnyTypeSchema, seen: Set<ATS.AnyTypeSchema>):
     }
     case TypeName.array:
       return hasStringLeaf(current.def.element as ATS.AnyTypeSchema, seen);
+    case TypeName.intersection: {
+      // Flattened into an object at emit time, so its leaves are serialized
+      // as real properties and may need the string helper.
+      const options = (current.def.options as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
+
+      return options.some((option) => hasStringLeaf(option, seen));
+    }
     case TypeName.tuple: {
       const items = (current.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
 
@@ -253,6 +261,15 @@ function emitBaseAppend(context: SerializeContext, schema: AnySchema, valueExpr:
     case TypeName.object:
       emitObjectAppend(context, schema, valueExpr);
       return;
+    case TypeName.intersection: {
+      // An intersection of objects is one object: flattening it at compile
+      // time means a single serialization pass, with no runtime merge.
+      const flattened = flattenObjectIntersection(schema);
+
+      if (flattened === undefined) break;
+      emitObjectAppend(context, flattened as AnySchema, valueExpr);
+      return;
+    }
     case TypeName.array: {
       const element = schema.def.element as ATS.AnyTypeSchema;
       const holder = hoist(context, valueExpr);
@@ -309,12 +326,12 @@ function emitBaseAppend(context: SerializeContext, schema: AnySchema, valueExpr:
       // Generic fallback: correctness over specialization for open shapes.
       writer.line(`s += JSON.stringify(${valueExpr}) ?? "null";`);
       return;
-    default:
-      throw new JITError(
-        "UNSUPPORTED_SCHEMA",
-        `serialize does not support ${schema.type} schemas (not representable in JSON)`
-      );
   }
+
+  throw new JITError(
+    "UNSUPPORTED_SCHEMA",
+    `serialize does not support ${schema.type} schemas (not representable in JSON)`
+  );
 }
 
 function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExpr: string): void {

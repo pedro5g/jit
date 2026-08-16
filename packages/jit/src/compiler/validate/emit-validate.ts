@@ -143,17 +143,21 @@ class ValidatorEmitter {
     const writer = this.writer;
     const holder = this.nextVar("v");
     const output = this.nextVar("o");
+    // The output variable is only real when parse can produce a value that
+    // differs from the input. Otherwise every write to it is a dead store and
+    // the holder already is the answer, so the subtree emits neither.
+    const builds = this.mode === "parse" && needsBuild(schema);
 
     writer.line(`let ${holder} = ${valueExpr};`);
-    if (this.mode === "parse") writer.line(`let ${output} = ${holder};`);
+    if (builds) writer.line(`let ${output} = ${holder};`);
 
-    const finish = () => (this.mode === "parse" ? output : holder);
+    const finish = () => (builds ? output : holder);
 
     if (unwrapped.emptyAsUndefined) {
       writer.line(`if (${holder} === "") {`);
       writer.indent(() => {
         writer.line(`${holder} = undefined;`);
-        if (this.mode === "parse") writer.line(`${output} = ${holder};`);
+        if (builds) writer.line(`${output} = ${holder};`);
       });
       writer.line("}");
     }
@@ -161,7 +165,7 @@ class ValidatorEmitter {
     const emitValidated = () => {
       if (unwrapped.coerce) {
         writer.line(`${holder} = ${unwrapped.coerce}(${holder});`);
-        if (this.mode === "parse") writer.line(`${output} = ${holder};`);
+        if (builds) writer.line(`${output} = ${holder};`);
       }
 
       const innerOut = this.emitBase(unwrapped, holder, path);
@@ -188,7 +192,7 @@ class ValidatorEmitter {
         }
       }
 
-      if (this.mode === "parse") {
+      if (builds) {
         // Re-sync unconditionally: string checks may have mutated the holder
         // (trim/case) after the initial `output = holder` capture.
         writer.line(`${output} = ${innerOut};`);

@@ -56,10 +56,9 @@ function helperName(id: string): string {
 }
 
 function emitDiffBodyLines(writer: CodeWriter, state: EmitState, node: DiffIRNode, left: string, right: string): void {
+  // Every node opens with its own identity guard, so an early return here
+  // would only repeat the comparison the first node is about to make.
   writer.line("const changes = [];");
-  writer.line(`if (Object.is(${left}, ${right})) {`);
-  writer.indent(() => writer.line("return changes;"));
-  writer.line("}");
   emitDiffNode(writer, state, node, left, right, []);
   writer.line("return changes;");
 }
@@ -144,6 +143,28 @@ function emitGuardDiff(
   writer.line("}");
 }
 
+/** A bare identifier is free to repeat; anything else is a property chain. */
+function isBareName(expr: string): boolean {
+  return /^[A-Za-z_$][\w$]*$/.test(expr);
+}
+
+/**
+ * Binds an operand once when a node is about to read it several times.
+ *
+ * Without this, a nested access re-walks its whole chain on every mention —
+ * `left.friends[i].tags` was read for its length and again for each element.
+ * Reading it once into a local is the same rule the object emitters already
+ * follow for their children.
+ */
+function hoistOperand(writer: CodeWriter, state: EmitState, expr: string, prefix: string): string {
+  if (isBareName(expr)) return expr;
+
+  const name = state.nextVar(prefix);
+
+  writer.line(`const ${name} = ${expr};`);
+  return name;
+}
+
 function emitObjectDiff(
   writer: CodeWriter,
   state: EmitState,
@@ -152,11 +173,14 @@ function emitObjectDiff(
   right: string,
   path: readonly PathPart[]
 ): void {
-  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  const leftBase = node.props.length > 1 ? hoistOperand(writer, state, left, "lo") : left;
+  const rightBase = node.props.length > 1 ? hoistOperand(writer, state, right, "ro") : right;
+
+  writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
   writer.indent(() => {
     for (const prop of node.props) {
-      const leftValue = emitDefaultedValue(prop.schema, emitPropertyAccess(left, prop.key));
-      const rightValue = emitDefaultedValue(prop.schema, emitPropertyAccess(right, prop.key));
+      const leftValue = emitDefaultedValue(prop.schema, emitPropertyAccess(leftBase, prop.key));
+      const rightValue = emitDefaultedValue(prop.schema, emitPropertyAccess(rightBase, prop.key));
 
       emitDiffNode(writer, state, prop.value, leftValue, rightValue, [...path, prop.key]);
     }
@@ -283,18 +307,24 @@ function emitArrayDiff(
   const commonLen = state.nextVar("commonLen");
   const index = state.nextVar("i");
 
-  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  const leftBase = hoistOperand(writer, state, left, "la");
+  const rightBase = hoistOperand(writer, state, right, "ra");
+
+  writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
   writer.indent(() => {
-    writer.line(`const ${leftLen} = ${left}.length;`);
-    writer.line(`const ${rightLen} = ${right}.length;`);
+    writer.line(`const ${leftLen} = ${leftBase}.length;`);
+    writer.line(`const ${rightLen} = ${rightBase}.length;`);
     writer.line(`const ${commonLen} = ${leftLen} < ${rightLen} ? ${leftLen} : ${rightLen};`);
     writer.line(`for (let ${index} = 0; ${index} < ${commonLen}; ${index}++) {`);
     writer.indent(() => {
-      emitDiffNode(writer, state, node.element, `${left}[${index}]`, `${right}[${index}]`, [...path, { expr: index }]);
+      emitDiffNode(writer, state, node.element, `${leftBase}[${index}]`, `${rightBase}[${index}]`, [
+        ...path,
+        { expr: index },
+      ]);
     });
     writer.line("}");
     writer.line(`for (let ${index} = ${commonLen}; ${index} < ${rightLen}; ${index}++) {`);
-    writer.indent(() => emitChange(writer, "add", [...path, { expr: index }], `${right}[${index}]`));
+    writer.indent(() => emitChange(writer, "add", [...path, { expr: index }], `${rightBase}[${index}]`));
     writer.line("}");
     writer.line(`for (let ${index} = ${commonLen}; ${index} < ${leftLen}; ${index}++) {`);
     writer.indent(() => emitChange(writer, "remove", [...path, { expr: index }]));

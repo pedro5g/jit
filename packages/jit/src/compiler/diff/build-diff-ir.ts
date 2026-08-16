@@ -4,6 +4,7 @@ import {
   type ArrayNode,
   buildRecursiveProgram,
   buildSchemaNode,
+  flattenObjectIntersection,
   type GuardNode,
   isPrimitiveLikeSchema,
   type MapNode,
@@ -59,8 +60,14 @@ export function buildDiffIR(schema: ATS.AnyTypeSchema): DiffIRProgram {
 function buildDiffNode(schema: ATS.AnyTypeSchema, recurse: (child: ATS.AnyTypeSchema) => DiffIRNode): DiffIRNode {
   if (schema.type === ATS.TypeName.date) return { kind: "date" };
   if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema, recurse);
-  if (schema.type === ATS.TypeName.intersection)
+  if (schema.type === ATS.TypeName.intersection) {
+    // Options are merged at compile time so a key shared by two of them is
+    // visited once — otherwise the same change is reported twice.
+    const flattened = flattenObjectIntersection(schema);
+
+    if (flattened !== undefined) return buildDiffNode(flattened, recurse);
     return buildIntersectionNode(schema as ATS.IntersectionSchema, recurse);
+  }
   if (schema.type === ATS.TypeName.discriminatedUnion)
     return buildDiscriminatedUnionNode(schema as ATS.DiscriminatedUnionSchema, recurse);
 
