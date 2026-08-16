@@ -7,6 +7,9 @@ export function hoistArrayElements(program: IRProgram): IRProgram {
 function rewriteNodes(nodes: readonly IRNode[]): readonly IRNode[] {
   return nodes.map((node) => {
     if (node.kind === "for") return { ...node, body: dedupeIndexLoads(node.body, new Map()) };
+    // A for-of has no index, so element dedupe does not apply; its body is
+    // still visited so nested indexed loops inside it are optimized.
+    if (node.kind === "for_of") return { ...node, body: rewriteNodes(node.body) };
     if (node.kind === "if") {
       return {
         ...node,

@@ -8,17 +8,16 @@ function hoistLoopInvariants(nodes: readonly IRNode[]): readonly IRNode[] {
   const out: IRNode[] = [];
 
   for (const node of nodes) {
-    if (node.kind === "for") {
+    if (node.kind === "for" || node.kind === "for_of") {
       const before: IRNode[] = [];
       const body: IRNode[] = [];
       const loopLocals = collectAssignedNames(node.body);
+      // Whatever the loop carries per iteration: the index of a counted loop,
+      // the item of a for-of. An assignment free of it is loop-invariant.
+      const carried = node.kind === "for" ? node.index.name : node.item.name;
 
       for (const child of node.body) {
-        if (
-          child.kind === "assign" &&
-          !referencesVar(child.expr, node.index.name) &&
-          !referencesAny(child.expr, loopLocals)
-        ) {
+        if (child.kind === "assign" && !referencesVar(child.expr, carried) && !referencesAny(child.expr, loopLocals)) {
           before.push(child);
           continue;
         }

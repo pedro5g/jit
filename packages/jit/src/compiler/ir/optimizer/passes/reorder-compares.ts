@@ -32,7 +32,7 @@ function reorderNodes(nodes: readonly IRNode[]): readonly IRNode[] {
       continue;
     }
 
-    if (node.kind === "for") {
+    if (node.kind === "for" || node.kind === "for_of") {
       out.push({ ...node, body: reorderNodes(node.body) });
       continue;
     }

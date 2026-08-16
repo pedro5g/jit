@@ -34,7 +34,9 @@ function rewriteChildLoops(node: IRNode): IRNode {
     };
   }
 
-  if (node.kind === "for") return { ...node, body: fuseNodes(node.body) };
+  // Two for-of loops are never fused — they may walk different iterables —
+  // but their bodies are still visited.
+  if (node.kind === "for" || node.kind === "for_of") return { ...node, body: fuseNodes(node.body) };
 
   return node;
 }

@@ -18,9 +18,11 @@ function simplifyNodes(nodes: readonly IRNode[]): readonly IRNode[] {
       continue;
     }
 
-    if (node.kind === "for") {
+    if (node.kind === "for" || node.kind === "for_of") {
       const body = simplifyNodes(node.body);
 
+      // An empty loop body means the loop cannot observe anything: iterating
+      // an array, set or map is side-effect free in generated code.
       if (body.length === 0) continue;
 
       out.push({ ...node, body });

@@ -285,10 +285,16 @@ function emitTupleDiff(
   right: string,
   path: readonly PathPart[]
 ): void {
-  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  const leftBase = node.items.length > 1 ? hoistOperand(writer, state, left, "lt") : left;
+  const rightBase = node.items.length > 1 ? hoistOperand(writer, state, right, "rt") : right;
+
+  writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
   writer.indent(() => {
     for (let index = 0; index < node.items.length; index++) {
-      emitDiffNode(writer, state, node.items[index], `${left}[${index}]`, `${right}[${index}]`, [...path, index]);
+      emitDiffNode(writer, state, node.items[index], `${leftBase}[${index}]`, `${rightBase}[${index}]`, [
+        ...path,
+        index,
+      ]);
     }
   });
   writer.line("}");
@@ -347,18 +353,21 @@ function emitRecordDiff(
   const index = state.nextVar("i");
   const key = state.nextVar("key");
 
-  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  const leftBase = hoistOperand(writer, state, left, "lr");
+  const rightBase = hoistOperand(writer, state, right, "rr");
+
+  writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
   writer.indent(() => {
-    writer.line(`const ${leftKeys} = Object.keys(${left});`);
-    writer.line(`const ${rightKeys} = Object.keys(${right});`);
+    writer.line(`const ${leftKeys} = Object.keys(${leftBase});`);
+    writer.line(`const ${rightKeys} = Object.keys(${rightBase});`);
     writer.line(`for (let ${index} = 0, ${len} = ${rightKeys}.length; ${index} < ${len}; ${index}++) {`);
     writer.indent(() => {
       writer.line(`const ${key} = ${rightKeys}[${index}];`);
-      writer.line(`if (!Object.prototype.hasOwnProperty.call(${left}, ${key})) {`);
-      writer.indent(() => emitChange(writer, "add", [...path, { expr: key }], `${right}[${key}]`));
+      writer.line(`if (!Object.prototype.hasOwnProperty.call(${leftBase}, ${key})) {`);
+      writer.indent(() => emitChange(writer, "add", [...path, { expr: key }], `${rightBase}[${key}]`));
       writer.line("} else {");
       writer.indent(() =>
-        emitDiffNode(writer, state, node.value, `${left}[${key}]`, `${right}[${key}]`, [...path, { expr: key }])
+        emitDiffNode(writer, state, node.value, `${leftBase}[${key}]`, `${rightBase}[${key}]`, [...path, { expr: key }])
       );
       writer.line("}");
     });
@@ -366,7 +375,7 @@ function emitRecordDiff(
     writer.line(`for (let ${index} = 0, ${len} = ${leftKeys}.length; ${index} < ${len}; ${index}++) {`);
     writer.indent(() => {
       writer.line(`const ${key} = ${leftKeys}[${index}];`);
-      writer.line(`if (!Object.prototype.hasOwnProperty.call(${right}, ${key})) {`);
+      writer.line(`if (!Object.prototype.hasOwnProperty.call(${rightBase}, ${key})) {`);
       writer.indent(() => emitChange(writer, "remove", [...path, { expr: key }]));
       writer.line("}");
     });

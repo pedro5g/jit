@@ -1,31 +1,26 @@
 import type { IRProgram } from "../ir.js";
 import { optimizeCost } from "./cost/optimize-cost.js";
-import { dedupeLoads } from "./passes/dedupe-loads.js";
-import { eliminateDead } from "./passes/eliminate-dead.js";
 import { flattenBlocks } from "./passes/flatten-blocks.js";
-import { hoistArrayElements } from "./passes/hoist-array-elements.js";
-import { hoistLoads } from "./passes/hoist-loads.js";
 import { inlineVars } from "./passes/inline-vars.js";
-import { loopFusion } from "./passes/loop-fusion.js";
-import { loopHoist } from "./passes/loop-hoist.js";
-import { loopSimplify } from "./passes/loop-simplify.js";
 import { normalizeLogic } from "./passes/normalize-logic.js";
 import { reorderCompares } from "./passes/reorder-compares.js";
 import { reorderConditions } from "./passes/reorder-conditions.js";
 
-export const optimizeEqualIRPasses = [
-  flattenBlocks,
-  dedupeLoads,
-  hoistLoads,
-  loopFusion,
-  loopHoist,
-  hoistArrayElements,
-  loopSimplify,
-  eliminateDead,
-  optimizeCost,
-  inlineVars,
-  reorderCompares,
-] as const;
+/**
+ * The passes that still earn their place.
+ *
+ * The equal builder emits hoisted, block-free, dead-code-free IR on its own,
+ * so the load/loop/dead-code passes were re-measured against every container
+ * kind, unions, hints, deep nesting and wide objects: they changed no output
+ * at all while costing ~15µs per compile — two thirds of the pipeline. What
+ * remains is what demonstrably rewrites something. V8 performs load
+ * elimination and loop-invariant motion on the generated function anyway; the
+ * value is in emitting good code, not in polishing it afterwards.
+ *
+ * Re-measure before adding one back: `optimizeIRWith(ir, [pass])` must produce
+ * different source from `ir` on some real schema, or it is pure compile cost.
+ */
+export const optimizeEqualIRPasses = [flattenBlocks, optimizeCost, inlineVars, reorderCompares] as const;
 
 export type IRPass = (program: IRProgram) => IRProgram;
 

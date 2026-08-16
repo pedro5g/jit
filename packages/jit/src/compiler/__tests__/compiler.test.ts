@@ -47,17 +47,35 @@ describe("JIT compiler", () => {
     it("should expose the optimizer passes in the mandated order", () => {
       expect(Compiler.optimizeEqualIRPasses.map((pass) => pass.name)).toEqual([
         "flattenBlocks",
-        "dedupeLoads",
-        "hoistLoads",
-        "loopFusion",
-        "loopHoist",
-        "hoistArrayElements",
-        "loopSimplify",
-        "eliminateDead",
         "optimizeCost",
         "inlineVars",
         "reorderCompares",
       ]);
+    });
+
+    it("should keep every pass in the pipeline earning its cost", () => {
+      // A pass that never rewrites anything is pure compile time. Each one
+      // here must change the emitted source for at least one real schema,
+      // otherwise the builder already produces what it would produce.
+      const Item = JIT.object({ id: JIT.number(), name: JIT.string(), score: JIT.number() });
+      const schemas = [
+        JIT.array(JIT.string()),
+        JIT.object({ l1: JIT.object({ l2: JIT.object({ l3: Item }) }) }),
+        JIT.union(Item, JIT.object({ k: JIT.string() })),
+        JIT.tuple(JIT.string(), Item, JIT.number()),
+      ].map((builder) => builder.schema);
+
+      for (const pass of Compiler.optimizeEqualIRPasses) {
+        if (pass.name === "flattenBlocks") continue; // shared normalizer, also used by query
+
+        const rewrites = schemas.some((schema) => {
+          const ir = Compiler.buildEqualIR(schema);
+
+          return Compiler.emitEqual(Compiler.optimizeIRWith(ir, [pass])) !== Compiler.emitEqual(ir);
+        });
+
+        expect(`${pass.name}:${rewrites}`).toBe(`${pass.name}:true`);
+      }
     });
 
     it("should compile primitive and object equality", () => {

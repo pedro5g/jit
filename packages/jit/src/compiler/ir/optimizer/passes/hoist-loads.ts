@@ -28,7 +28,7 @@ function hoistNodes(nodes: readonly IRNode[], usedNames: Set<string>): readonly 
       continue;
     }
 
-    if (node.kind === "for") {
+    if (node.kind === "for" || node.kind === "for_of") {
       out.push({ ...node, body: hoistNodes(node.body, usedNames) });
       continue;
     }

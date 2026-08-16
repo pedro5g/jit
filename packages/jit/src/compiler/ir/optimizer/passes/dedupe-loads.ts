@@ -33,7 +33,7 @@ function dedupeNodes(nodes: readonly IRNode[], loads: Map<string, IRVar>): reado
       continue;
     }
 
-    if (node.kind === "for") {
+    if (node.kind === "for" || node.kind === "for_of") {
       out.push({ ...node, body: dedupeNodes(node.body, new Map()) });
       continue;
     }
