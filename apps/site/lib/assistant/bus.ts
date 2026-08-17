@@ -56,6 +56,38 @@ export function requestHighlight(detail: HighlightDetail) {
   window.dispatchEvent(new CustomEvent(HIGHLIGHT_EVENT, { detail }));
 }
 
+/** Survives the navigation to the page the passage is on. */
+const PENDING_HIGHLIGHT_KEY = "jit.docs.pending-highlight";
+
+/**
+ * Points at something on a page the reader is not on yet.
+ *
+ * Dispatching the event before navigating loses it: the page that would listen
+ * has not mounted. So the request is parked, the route changes, and the guide
+ * picks it up the moment it has an article to look in — which is what turns
+ * "take me there" into being shown the passage rather than dropped at the top
+ * of a page and left to search it.
+ */
+export function requestHighlightAfterNavigation(detail: HighlightDetail) {
+  try {
+    sessionStorage.setItem(PENDING_HIGHLIGHT_KEY, JSON.stringify(detail));
+  } catch {
+    // a blocked store costs the pointer, not the navigation
+  }
+}
+
+export function takePendingHighlight(): HighlightDetail | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_HIGHLIGHT_KEY);
+    if (!raw) return null;
+
+    sessionStorage.removeItem(PENDING_HIGHLIGHT_KEY);
+    return JSON.parse(raw) as HighlightDetail;
+  } catch {
+    return null;
+  }
+}
+
 export interface SnippetDemoDetail {
   /** The variation to show in place of the example on the page. */
   code: string;

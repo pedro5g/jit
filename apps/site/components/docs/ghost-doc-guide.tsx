@@ -5,10 +5,14 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { type GhostState, JitGhost } from "@/components/brand/jit-ghost";
 import { useGhostVisibility } from "@/hooks/use-ghost-visibility";
-import { ASSISTANT_OPEN_EVENT, HIGHLIGHT_EVENT, type HighlightDetail } from "@/lib/assistant/bus";
+import { ASSISTANT_OPEN_EVENT, HIGHLIGHT_EVENT, type HighlightDetail, takePendingHighlight } from "@/lib/assistant/bus";
 
 const GHOST_SIZE = 60;
 const LANE_WIDTH = 88;
+
+/** A page arriving from another route is not in the DOM on the first look. */
+const RETRIES = 12;
+const RETRY_MS = 120;
 
 const tipRules: { pattern: RegExp; tip: string }[] = [
   { pattern: /install/i, tip: "copy it, run it — one dependency" },
@@ -93,14 +97,18 @@ export function GhostDocGuide() {
    * heading into view is enough: the guide already tracks whatever sits at the
    * reading line, so it flies there on the very next frame.
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies(pathname): a highlight parked before a navigation is claimed when the route changes, not when anything in the body does
   useEffect(() => {
-    const onHighlight = (event: Event) => {
-      const { heading } = (event as CustomEvent<HighlightDetail>).detail;
+    const point = (heading: string, attempt = 0) => {
       const wanted = heading.trim().toLowerCase();
       if (!wanted) return;
 
       const article = document.querySelector("article#nd-page") ?? document.querySelector("article");
-      if (!article) return;
+      // arriving from another route, the article renders a frame or two later
+      if (!article) {
+        if (attempt < RETRIES) setTimeout(() => point(heading, attempt + 1), RETRY_MS);
+        return;
+      }
 
       // A heading is the usual target, but the ghost also points at the code
       // block or the sentence that answers the question — so anything the
@@ -113,16 +121,25 @@ export function GhostDocGuide() {
         headings.find((element) => element.textContent?.trim().toLowerCase().startsWith(wanted)) ??
         headings.find((element) => element.textContent?.toLowerCase().includes(wanted)) ??
         passages.find((element) => element.textContent?.toLowerCase().includes(wanted));
-      if (!match) return;
+      if (!match) {
+        if (attempt < RETRIES) setTimeout(() => point(heading, attempt + 1), RETRY_MS);
+        return;
+      }
 
       match.scrollIntoView({ behavior: "smooth", block: "center" });
       match.classList.add("guide-pointed");
       setTimeout(() => match.classList.remove("guide-pointed"), 2200);
     };
 
+    const onHighlight = (event: Event) => point((event as CustomEvent<HighlightDetail>).detail.heading);
+
+    // parked before a navigation, claimed once this page exists
+    const pending = takePendingHighlight();
+    if (pending) point(pending.heading);
+
     window.addEventListener(HIGHLIGHT_EVENT, onHighlight);
     return () => window.removeEventListener(HIGHLIGHT_EVENT, onHighlight);
-  }, []);
+  }, [pathname]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(pathname): targets must be re-collected when the docs route changes
   useEffect(() => {

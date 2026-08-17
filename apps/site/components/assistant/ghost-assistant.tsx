@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  BookOpen,
   Check,
+  Footprints,
   Maximize2,
   Minimize2,
   MousePointerClick,
@@ -36,6 +38,7 @@ import {
   ASSISTANT_OPEN_EVENT,
   readEditorCode,
   requestHighlight,
+  requestHighlightAfterNavigation,
   requestSnippetDemo,
   requestWorkspaceWrite,
 } from "@/lib/assistant/bus";
@@ -195,6 +198,30 @@ export function GhostAssistant() {
     [router]
   );
 
+  /**
+   * Being taken to the passage, rather than to the page it is on.
+   *
+   * "take me there" used to mean a route change and nothing else: the reader
+   * landed at the top of a long page still holding the question. Guiding parks
+   * the passage first, so the page opens already scrolled to it with the guide
+   * pointing — and the panel gets out of the way when they asked to be walked
+   * over, because reading is what they are about to do.
+   */
+  const guide = useCallback(
+    (url: string, heading: string, close: boolean) => {
+      const samePage = url.split("#")[0] === pathname;
+
+      if (samePage) requestHighlight({ heading });
+      else {
+        requestHighlightAfterNavigation({ heading });
+        router.push(url);
+      }
+
+      setShell(close ? "closed" : "dock");
+    },
+    [pathname, router]
+  );
+
   const act = useCallback(
     (action: AssistantAction) => {
       if (action.kind === "workspace") {
@@ -246,7 +273,15 @@ export function GhostAssistant() {
       <header className="flex shrink-0 items-center gap-2 border-b border-line-subtle px-3 py-2">
         <JitGhost size={26} state={assistant.busy ? "compiling" : "observing"} follow="none" />
         <div className="flex min-w-0 flex-col">
-          <span className="font-pixel-badge text-[11px] uppercase tracking-wider text-gold-200">ghost</span>
+          <span className="flex items-center gap-1.5">
+            <span className="font-pixel-badge text-[11px] uppercase tracking-wider text-gold-200">ghost</span>
+            <span
+              title="Written answers come from a model on your machine. Retrieval, the sources and every executed example are not in beta."
+              className="rounded-pill border border-line-subtle px-1.5 font-mono text-[9px] uppercase tracking-wide text-fg-subtle"
+            >
+              beta
+            </span>
+          </span>
           <span className="truncate font-mono text-[10px] text-fg-subtle">
             {assistant.busy ? "thinking…" : (assistant.provider?.label ?? "retrieval only")}
             {assistant.semantic.status === "ready" ? " · semantic" : ""}
@@ -332,6 +367,7 @@ export function GhostAssistant() {
                       onRunCode={openCode}
                       onAct={act}
                       onAsk={submit}
+                      onGuide={guide}
                       onRegenerate={regenerate}
                     />
                   )}
@@ -453,6 +489,7 @@ function Turn({
   onRunCode,
   onAct,
   onAsk,
+  onGuide,
   onRegenerate,
 }: {
   message: AssistantMessage;
@@ -461,6 +498,7 @@ function Turn({
   onRunCode: (code: string, mode: "run" | "generate") => void;
   onAct: (action: AssistantAction) => void;
   onAsk: (question: string) => void;
+  onGuide: (url: string, heading: string, close: boolean) => void;
   onRegenerate: () => void;
 }) {
   const severe = message.findings.filter(isSevere);
@@ -518,6 +556,7 @@ function Turn({
 
             {message.findings.length > 0 && !message.streaming && <Audit findings={message.findings} />}
 
+            {!message.streaming && <Guide sources={message.sources} onGuide={onGuide} />}
             <AssistantSources sources={message.sources} />
             {!message.streaming && <FollowUps questions={message.followUps} onAsk={onAsk} />}
 
@@ -535,6 +574,52 @@ function Turn({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Two ways to be shown where the answer came from.
+ *
+ * The sources under an answer are a list of links, and a list of links is work
+ * the reader has to do: open it, find the passage, decide whether it is the
+ * one. These do that part. "Show me" opens the page already scrolled to the
+ * passage with the guide pointing at it and the panel still there; "guide me"
+ * gets the panel out of the way too, because someone who asked to be walked
+ * over is about to read rather than to ask again.
+ */
+function Guide({
+  sources,
+  onGuide,
+}: {
+  sources: AssistantMessage["sources"];
+  onGuide: (url: string, heading: string, close: boolean) => void;
+}) {
+  const best = sources[0]?.section;
+  if (!best) return null;
+
+  return (
+    <ul className="mt-2 flex flex-wrap gap-1.5">
+      <li>
+        <button
+          type="button"
+          onClick={() => onGuide(best.url, best.heading, false)}
+          className="inline-flex items-center gap-1.5 rounded-control border border-line-subtle px-2 py-1 text-[11px] text-fg-muted transition-colors hover:border-line-gold hover:text-gold-200"
+        >
+          <BookOpen aria-hidden className="size-3" />
+          Show me in the docs
+        </button>
+      </li>
+      <li>
+        <button
+          type="button"
+          onClick={() => onGuide(best.url, best.heading, true)}
+          className="inline-flex items-center gap-1.5 rounded-control border border-line-subtle px-2 py-1 text-[11px] text-fg-muted transition-colors hover:border-line-gold hover:text-gold-200"
+        >
+          <Footprints aria-hidden className="size-3" />
+          Guide me there
+        </button>
+      </li>
+    </ul>
   );
 }
 
@@ -701,8 +786,13 @@ function Welcome({
   return (
     <div className="flex flex-col gap-2">
       <p className="text-xs leading-relaxed text-fg-muted">
-        I read these docs with you. Ask anything about jit — I will take you to the right section, point at it, or write
-        the schema into the workspace. Everything runs on your machine.
+        I read these docs with you. Ask anything about jit and I will find the passage, walk you to it, or write the
+        schema into your workspace. Everything runs on your machine.
+      </p>
+      <p className="rounded-control border border-line-subtle bg-surface-900/40 px-2.5 py-2 text-[11px] leading-relaxed text-fg-subtle">
+        Written answers are beta. A small local model writes them, so they can still be wrong: I run every code example
+        before showing it and check every name against the compiled library, and the sources under each answer are the
+        thing to trust.
       </p>
 
       {needsModel && (

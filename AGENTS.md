@@ -134,6 +134,39 @@ Legacy schemas may still use fields such as `item`, `props`, `schemas`, `literal
 - Centralize source helpers for identifier validation, string escaping, property access, literal emission, and binding allocation.
 - Generated code should be readable, deterministic, and engine-friendly.
 
+## The Site And Its Assistant (apps/site)
+
+The documentation assistant answers from generated context rather than from the source
+tree, so changing the public API, the documentation or the workspace leaves it holding a
+description of a library that no longer exists. **Rebuild that context in the same change**,
+from `apps/site`:
+
+```bash
+pnpm gen:api-surface   # the surface the answer audit is checked against
+pnpm gen:docs-index    # retrieval index; its version key invalidates cached embeddings
+pnpm gen:dts           # Monaco declarations for the workspace
+pnpm gen:lab           # browser AOT bundle used by Generate and by example verification
+pnpm audit:docs        # executes every documentation example against the real library
+pnpm eval:ghost        # retrieval against the golden question set
+```
+
+Context that is written by hand and must be updated by hand: `lib/assistant/graph.ts`
+(concepts, verified facts, one runnable example per concept), `lib/assistant/solutions.ts`
+(symptom to API recipes) and `lib/assistant/prompt.ts` (the always-true block). Their
+examples are executed by the test suite, so a stale one fails the build.
+
+Rules the assistant and workspace are held to:
+
+- No unaudited answer is shown. Every jit code block the assistant writes is transpiled
+  and executed in a disposable worker before the reader sees it; a block that throws,
+  loops or uses an undeclared value is an audit finding.
+- Generative behaviour is beta and says so. The verified floor (retrieval, concept facts,
+  executed examples) is what the product promises; the model is a layer on top.
+- The workspace holds a project. `lib/workspace/project.ts` owns path rules, identical to
+  the artifact protocol's, and `lib/workspace/bundle.ts` links files so each dependency
+  keeps its own scope.
+- The entrypoint import line belongs to the workspace and is restored when edited.
+
 ## Performance Principles
 
 - Avoid work.
