@@ -104,6 +104,12 @@ export function repairTurn(answer: string, findings: AuditFinding[], surface: Ap
     if (finding.kind === "unusable-example") {
       problems.push(`Your code example is wrong: ${finding.reason}`);
     }
+
+    if (finding.kind === "degenerated") {
+      problems.push(
+        `Your previous output was not an answer: ${finding.reason} Reply in plain prose, with at most one short code block, and stop when the question is answered.`
+      );
+    }
   }
 
   // The valid alternatives, but only when a name was the problem: a

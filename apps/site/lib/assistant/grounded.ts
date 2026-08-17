@@ -26,6 +26,7 @@ import type { Understanding } from "./understanding";
 interface Copy {
   lead: (subject: string) => string;
   how: string;
+  example: string;
   source: string;
   more: string;
 }
@@ -34,12 +35,14 @@ const COPY: Record<"pt" | "en", Copy> = {
   pt: {
     lead: (subject) => subject,
     how: "Na prática:",
+    example: "Na prática, em código:",
     source: "Fonte:",
     more: "Posso detalhar qualquer um desses pontos.",
   },
   en: {
     lead: (subject) => subject,
     how: "Concretely:",
+    example: "In code:",
     source: "Source:",
     more: "I can go deeper on any of these.",
   },
@@ -66,8 +69,16 @@ function subjectOf(understanding: Understanding) {
  * to the ordinary failure path rather than getting a confident non-answer.
  */
 export function canAnswerFromGround(understanding: Understanding): boolean {
-  if (understanding.intent !== "concept" && understanding.intent !== "compare") return false;
-  return subjectOf(understanding) !== undefined;
+  const subject = subjectOf(understanding);
+  if (!subject) return false;
+
+  if (understanding.intent === "concept" || understanding.intent === "compare") return true;
+
+  // "pode me mostrar um exemplo de uso?" is a how-to, and a fixed paragraph
+  // cannot answer most of those — but it can answer this one, because every
+  // concept carries a runnable demonstration that the test suite executes.
+  // Without it the reader got a JSON envelope and a hundred lines of push().
+  return (understanding.intent === "howto" || understanding.intent === "api") && Boolean(subject.example);
 }
 
 export function groundedAnswer(understanding: Understanding, sections: RetrievedSection[]): string | null {
@@ -81,7 +92,15 @@ export function groundedAnswer(understanding: Understanding, sections: Retrieved
 
   const parts: string[] = [copy.lead(fact)];
 
-  if (how.length > 0) {
+  // Asked for an example, lead with the example — the mechanisms are the
+  // answer to "why", not to "show me".
+  const wantsCode = understanding.intent === "howto" || understanding.intent === "api";
+
+  if (wantsCode && node.example) {
+    parts.push(`${copy.example}\n\n\`\`\`ts\n${node.example}\n\`\`\``);
+  }
+
+  if (how.length > 0 && !wantsCode) {
     parts.push([copy.how, ...how.map((line) => `- ${line}`)].join("\n"));
   }
 

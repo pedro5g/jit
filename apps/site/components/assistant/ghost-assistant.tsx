@@ -571,6 +571,10 @@ function describe(finding: AuditFinding): string {
     return `The code example does not work: ${finding.reason}`;
   }
 
+  if (finding.kind === "degenerated") {
+    return `The model's output came apart: ${finding.reason}`;
+  }
+
   if (finding.kind === "contradiction") {
     return `This contradicts the documentation: ${finding.claim}`;
   }

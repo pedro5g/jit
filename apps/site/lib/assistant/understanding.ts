@@ -25,6 +25,14 @@ export type Intent =
   | "troubleshoot";
 
 export interface Understanding {
+  /** The question itself, so a follow-up can carry it forward. */
+  question: string;
+  /**
+   * What retrieval should search for. Usually the question; for a follow-up
+   * with no subject of its own, the previous question is prepended so the
+   * search has something to match.
+   */
+  retrievalQuery: string;
   language: "pt" | "en";
   intent: Intent;
   /** Concepts the question is about, strongest first. */
@@ -68,7 +76,11 @@ export interface Understanding {
 
 /** Portuguese function words that never appear in an English question. */
 const PT_MARKERS =
-  /\b(como|porque|por que|pq|qual|quais|quando|onde|quem|preciso|posso|fazer|faço|usar|meu|minha|isso|esse|essa|não|nao|também|tambem|então|entao|para|pra|com|sem|sobre|mais|muito|melhor|ajuda|ajudar|escrever|criar|gerar|rodar|tem|está|esta|ser|seu|sua)\b/i;
+  /\b(como|porque|por que|pq|qual|quais|quando|onde|quem|preciso|posso|pode|podem|poderia|fazer|faço|usar|uso|meu|minha|isso|esse|essa|não|nao|também|tambem|então|entao|para|pra|com|sem|sobre|mais|muito|melhor|ajuda|ajudar|escrever|criar|gerar|rodar|tem|está|esta|ser|seu|sua|mostrar|mostra|exemplo|exemplos|um|uma|dos|das|entre|sobre|serve|funciona)\b/i;
+
+/** Words that settle it the other way, so "um" in an English sentence cannot. */
+const EN_MARKERS =
+  /\b(the|is|are|does|do|how|what|why|when|which|show|me|can|could|should|would|write|make|give|about|between)\b/i;
 
 const HOWTO =
   /\b(how|como|write|escrev|creat|cria|build|constru|generat|ger|make|faz|show|mostr|use|usar|set up|configur)/i;
@@ -99,10 +111,28 @@ const NAVIGATE =
 const ANAPHORA =
   /\b(isso|esse|essa|isto|ele|ela|dele|dela|aquilo|mesmo|it|this|that|these|those|there|instead|also|e se|and if|então|entao)\b/i;
 
+/**
+ * Which language the question is in, or null when nothing in it says.
+ *
+ * Kept separate from `detectLanguage` because a follow-up often carries no
+ * signal at all and the right answer is then "the same as last time" rather
+ * than a guess. "pode me mostrar um exemplo de uso?" has no accent, and an
+ * answer in English to a Portuguese reader is its own kind of wrong.
+ */
+function languageSignal(question: string): "pt" | "en" | null {
+  if (/[ãõçáéíóúâêôàü]/i.test(question)) return "pt";
+
+  const portuguese = PT_MARKERS.test(question);
+  const english = EN_MARKERS.test(question);
+
+  if (portuguese && !english) return "pt";
+  if (english && !portuguese) return "en";
+
+  return null;
+}
+
 export function detectLanguage(question: string): "pt" | "en" {
-  // accents settle it; otherwise the function words do
-  if (/[ãõçáéíóúâêô]/i.test(question)) return "pt";
-  return PT_MARKERS.test(question) ? "pt" : "en";
+  return languageSignal(question) ?? "en";
 }
 
 export function classifyIntent(question: string, apis: string[]): Intent {
@@ -143,6 +173,16 @@ export function mentionedApis(question: string, api: ApiMember[]): string[] {
 export function isContinuation(concepts: ConceptMatch[], previous: Understanding | null, question: string): boolean {
   if (!previous) return false;
   if (ANAPHORA.test(question)) return true;
+
+  // A question with no subject of its own is asking about the last one.
+  //
+  // "pode me mostrar um exemplo de uso?" names nothing: no concept matches, so
+  // retrieval returned literally zero sections and the model was asked to show
+  // an example of nothing at all. It answered with a JSON envelope and a
+  // hundred lines of `array.push(...)`, which is what a small model does when
+  // it is handed a question and no evidence. An example of *what* is in the
+  // exchange immediately before it.
+  if (!concepts.some((match) => match.weight === 1 && match.id !== SELF_NODE)) return true;
 
   // Only concepts the reader named count. An edge neighbour is a weak
   // association — nearly every question inherits `validation` from something —
@@ -209,13 +249,44 @@ export function understand(
   question: string,
   options: { api: ApiMember[]; currentUrl: string; previous: Understanding | null }
 ): Understanding {
-  const concepts = resolveConcepts(question);
+  const own = resolveConcepts(question);
   const apis = mentionedApis(question, options.api);
+
+  /**
+   * A follow-up inherits the subject it is following up on.
+   *
+   * "pode me mostrar um exemplo de uso?" resolves to nothing, so on its own it
+   * retrieves nothing and the model is asked to demonstrate an unnamed
+   * library. Carrying the previous question's concepts forward is what makes
+   * it a question about *that* — and it costs nothing when the reader really
+   * has changed subject, because then they named the new one.
+   */
+  const inherited =
+    !own.some((match) => match.weight === 1 && match.id !== SELF_NODE) && options.previous
+      ? options.previous.concepts
+      : [];
+
+  const concepts = inherited.length > 0 ? inherited : own;
   const suggestedPage = suggestedPageFor(concepts);
   const currentPage = options.currentUrl.split("#")[0];
 
+  /**
+   * What retrieval searches for. A subjectless follow-up carries the previous
+   * question's words too: "exemplo de uso" matches nothing in an English
+   * index, while "pq a jit é rápida exemplo de uso" finds the page the
+   * example should come from.
+   */
+  const retrievalQuery =
+    inherited.length > 0 && options.previous ? `${options.previous.question} ${question}` : question;
+
+  // A reader does not switch language between two messages. When the follow-up
+  // carries no signal of its own, the previous turn decides.
+  const language = languageSignal(question) ?? options.previous?.language ?? "en";
+
   return {
-    language: detectLanguage(question),
+    question,
+    retrievalQuery,
+    language,
     intent: classifyIntent(question, apis),
     concepts,
     apis,
@@ -224,7 +295,7 @@ export function understand(
     // "jit" is what left the identity anchor off most prompts, and a small
     // model with no anchor answers about just-in-time compilation in general.
     aboutTheLibrary: true,
-    continuation: isContinuation(concepts, options.previous, question),
+    continuation: isContinuation(own, options.previous, question),
     wantsHistory: HISTORY.test(question) || concepts.some((match) => match.weight === 1 && match.id === "migration"),
     asksToNavigate: NAVIGATE.test(question),
     solutions: resolveSolutions(question),

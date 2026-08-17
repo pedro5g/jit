@@ -141,6 +141,8 @@ describe("system prompt grounding", () => {
 });
 
 const understanding = (overrides: Partial<Understanding> = {}): Understanding => ({
+  question: "why is jit fast?",
+  retrievalQuery: "why is jit fast?",
   language: "en",
   intent: "concept",
   wantsHistory: false,

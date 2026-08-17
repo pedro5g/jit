@@ -52,6 +52,15 @@ export interface ConceptNode {
   mechanisms?: string[];
   /** The mechanisms in Portuguese, for the same reason as `factPt`. */
   mechanismsPt?: string[];
+  /**
+   * A short, runnable demonstration of this concept.
+   *
+   * Asked "pode me mostrar um exemplo de uso?", a small model with no example
+   * to lean on produced a JSON envelope and a hundred lines of `array.push`.
+   * These are executed against the real library by the test suite, so what the
+   * ghost falls back to is code that actually runs.
+   */
+  example?: string;
   /** The page that explains it, used when deciding where to navigate. */
   page?: string;
   /** Related concepts, and how much of this node's weight they inherit. */
@@ -84,6 +93,8 @@ export const CONCEPTS: ConceptNode[] = [
       "As capacidades são alcançadas por namespaces — JIT.validate.*, JIT.compare.*, JIT.security.*, JIT.json.*, JIT.binary.* — e as fábricas de schema ficam na raiz: JIT.object, JIT.string, JIT.array.",
       "Todo artefato é lazy e chamável: `.compile()` é um aquecimento opcional e `.plan` expõe o descritor que o AOT consome.",
     ],
+    example:
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n  age: JIT.number().int().min(0),\n});\n\n// one declaration, many compiled operations\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.compare.equal(User);\nconst cloneUser = JIT.clone(User);\nconst toJson = JIT.json.stringify(User);",
     page: "/docs",
     edges: { purpose: 0.7, compilation: 0.6, validation: 0.3, aot: 0.3 },
   },
@@ -134,6 +145,8 @@ export const CONCEPTS: ConceptNode[] = [
       "jit's answer to both: describe the shape once, and compile a specialized function for every operation over it. The schema is read at build time and never at call time, and every operation is derived from the same declaration, so they cannot disagree.",
       "AOT generation closes the loop: the engine itself never ships to production, so the only thing in the bundle is the generated code the application actually calls.",
     ],
+    example:
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email().pii(),\n});\n\n// every one of these is derived from the SAME declaration,\n// so they cannot disagree about what a User is\nconst isUser = JIT.validate.is(User);\nconst safeForLogs = JIT.security.mask(User);\nconst sameUser = JIT.compare.equal(User);",
     page: "/docs/concepts/why-jit",
     edges: { compilation: 0.7, performance: 0.5, comparison: 0.4, self: 0.4 },
   },
@@ -159,6 +172,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Runtime values (regexes, refinement callbacks, query arguments) travel into the compiled function as external bindings, never interpolated into its source — so compiling is not string concatenation of user data.",
       "The result is monomorphic: one shape in, one code path, so the JavaScript engine can inline and keep the call site hot.",
     ],
+    example:
+      'const User = JIT.object({ id: JIT.string(), age: JIT.number().int() });\n\n// compiled on first use, then cached by schema identity\nconst isUser = JIT.validate.is(User);\n\nisUser({ id: "a", age: 30 }); // compiles here\nisUser({ id: "b", age: 31 }); // reuses the compiled function',
     page: "/docs/concepts/compilation-model",
     edges: { performance: 0.7, aot: 0.5, runtime: 0.5 },
   },
@@ -184,6 +199,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Structural operations are surgical: only paths containing a changed or marked field are rebuilt, and untouched subtrees are shared by reference rather than copied.",
       "Queries fuse into one loop — filters and projections are lowered into a single pass with no intermediate arrays.",
     ],
+    example:
+      "const User = JIT.object({ id: JIT.string(), age: JIT.number().int().min(0) });\n\n// allocates nothing and returns on the first failing check\nconst isUser = JIT.validate.is(User);\n\n// pays for the issue vector only when it has to report one\nconst parseUser = JIT.validate.safeParse(User);",
     page: "/docs/reference/benchmarks",
     edges: { compilation: 0.8, memory: 0.4 },
   },
@@ -207,6 +224,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Rowsets binários guardam linhas em memória de largura fixa, então um scan lê typed views em vez de alocar um objeto por linha.",
       "`JIT.json.stringifyChunks` emite chunks limitados em vez de montar uma string gigante para um array grande.",
     ],
+    example:
+      "const Row = JIT.object({ id: JIT.string(), amount: JIT.number() });\n\n// a guard that allocates nothing at all\nconst isRow = JIT.validate.is(Row);\n\n// bounded chunks instead of one large string\nconst toChunks = JIT.json.stringifyChunks(JIT.array(Row), { chunkBytes: 16 * 1024 });",
     page: "/docs/runtime/binary-rowsets",
     edges: { binary: 0.7, performance: 0.5 },
   },
@@ -230,6 +249,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`safeParse` returns a success union whose failure carries a structured issue vector — each issue has a path, a code and a message.",
       "Sanitization and coercion run inside the same specialized pass as validation, so a value is not traversed twice.",
     ],
+    example:
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n});\n\nconst isUser = JIT.validate.is(User);          // boolean, allocates nothing\nconst parseUser = JIT.validate.parse(User);    // returns the value or throws\nconst safeUser = JIT.validate.safeParse(User); // returns a success union",
     page: "/docs/runtime/validation",
     edges: { schema: 0.5, errors: 0.5, boundary: 0.4 },
   },
@@ -256,6 +277,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`JIT.Typeof<typeof User>` lê o tipo inferido de volta, então o schema é a única declaração e o tipo TypeScript segue dela.",
       "O próprio objeto de schema é a chave do cache de compilação, então reusar uma declaração reusa toda função compilada a partir dela.",
     ],
+    example:
+      'const User = JIT.object({\n  id: JIT.number().int32().positive(),\n  name: JIT.string().min(3).max(80),\n  email: JIT.string().email(),\n  role: JIT.union(JIT.literal("admin"), JIT.literal("member")),\n});\n\n// the schema carries its own TypeScript type\ntype UserShape = JIT.Typeof<typeof User>;',
     page: "/docs/concepts/schemas-and-types",
     edges: { validation: 0.5, composition: 0.5 },
   },
@@ -298,6 +321,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`JIT.refine` recebe um predicado que entra na função compilada como binding externo — nunca interpolado no fonte dela.",
       "Um callback de refine ou transform que captura o escopo não pode ser serializado em build time, então o `jit generate` pula aquele artefato; uma cadeia declarativa `JIT.ops` não tem closure e sempre gera.",
     ],
+    example:
+      'const Node = JIT.object({\n  name: JIT.string(),\n  // lazy is what lets a schema reference itself\n  children: JIT.array(JIT.lazy(() => Node)),\n});\n\nconst Shape = JIT.discriminatedUnion("kind", [\n  JIT.object({ kind: JIT.literal("circle"), radius: JIT.number() }),\n  JIT.object({ kind: JIT.literal("square"), side: JIT.number() }),\n]);',
     page: "/docs/reference/functions/composition",
     edges: { schema: 0.6 },
   },
@@ -323,6 +348,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Because nothing is compiled at runtime, the output needs no globalThis.Function and runs under a strict Content Security Policy and on edge runtimes.",
       "Only the artifacts a declaration file names are emitted, so an operation the application never asks for is never generated and never bundled.",
     ],
+    example:
+      '// user.jit.ts — read by `jit generate`, imports from /define\nimport { JIT } from "@jit-compiler/jit/define";\n\nexport const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n});\n\nexport const isUser = JIT.validate.is(User);\n\n// then: pnpm jit generate\n// and import from the emitted module, which has zero runtime imports',
     page: "/docs/aot/generation-and-tree-shaking",
     edges: { compilation: 0.6, workspace: 0.4, bundle: 0.5 },
   },
@@ -346,6 +373,8 @@ export const CONCEPTS: ConceptNode[] = [
       "It needs `globalThis.Function`, which a strict Content Security Policy forbids — that restriction is the reason AOT exists, not a flaw in runtime mode.",
       "It is the right mode for a long-lived process and for schemas that are not known until the program runs.",
     ],
+    example:
+      'const User = JIT.object({ id: JIT.string() });\nconst isUser = JIT.validate.is(User);\n\nisUser({ id: "a" });   // compiles through globalThis.Function here\nisUser({ id: "b" });   // cached from now on\n\nisUser.compile();      // optional eager warm-up; same callable',
     page: "/docs/concepts/compilation-model",
     edges: { compilation: 0.6, cache: 0.5, aot: 0.5 },
   },
@@ -367,6 +396,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Só os artefatos que um arquivo de declaração nomeia são emitidos, então uma operação que a aplicação nunca importa nunca é gerada nem empacotada.",
       "Como nada compila em runtime, a saída não precisa de `globalThis.Function` e roda sob CSP estrita e em edge runtimes.",
     ],
+    example:
+      '// declared in a .jit.ts file, generated at build time\nimport { JIT } from "@jit-compiler/jit/define";\n\nexport const User = JIT.object({ email: JIT.string().email() });\nexport const isUser = JIT.validate.is(User);\n\n// the emitted module imports nothing, so it runs under a strict CSP:\n//   import { isUser } from "./generated/index.js";',
     page: "/docs/guides/browser-and-edge",
     edges: { aot: 0.7 },
   },
@@ -392,6 +423,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`unique` mantém as primeiras ocorrências, `keyed` devolve um Map, `groupBy` devolve arrays por chave, e `orderBy` faz uma ordenação global.",
       "Operadores de mutação reconstroem coleções de forma imutável e exigem um filtro, então um update de tabela inteira não acontece por acidente.",
     ],
+    example:
+      'const Users = JIT.array(\n  JIT.object({ id: JIT.string(), role: JIT.string(), score: JIT.number() })\n).indexBy("id");\n\nconst topAdmins = JIT.query(Users)\n  .params({ minimumScore: JIT.number() })\n  .filter((q, params) => q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)))\n  .select("id", "score");',
     page: "/docs/runtime/queries",
     edges: { binary: 0.4, lazy: 0.5 },
   },
@@ -413,6 +446,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Um backend lazy nunca materializa o resultado completo, e é isso que faz `take(10)` sobre uma fonte grande parar cedo em vez de filtrar tudo antes.",
       "`JIT.stream` é o irmão para dados que chegam em chunks: seu boundary scanner guarda só o estado de parser necessário para achar valores completos, então um token cortado na borda de um chunk é retomado, não rejeitado.",
     ],
+    example:
+      'const Users = JIT.array(JIT.object({ id: JIT.string(), active: JIT.boolean() }));\n\nconst query = JIT.query(Users)\n  .filter((q) => q.eq("active", true))\n  .select("id")\n  .take(10);\n\n// the terminal call chooses the backend\nconst rows = query.to.iterator();',
     page: "/docs/runtime/lazy-execution",
     edges: { query: 0.5, json: 0.4 },
   },
@@ -436,6 +471,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Uniões discriminadas de objetos usam tags inteiras densas, então um scan de união é uma comparação de inteiro em vez de comparação de string.",
       "O modo colunar mantém máscaras e lanes tipadas por campo em um único buffer, e os scans gerados usam um índice-base de coluna em cache, sem cursor de linha.",
     ],
+    example:
+      'const Event = JIT.object({\n  id: JIT.string(),\n  kind: JIT.enum(["click", "view", "purchase"]),\n  amount: JIT.number(),\n});\n\n// packed into fixed-width memory and scanned as typed views\nconst Events = JIT.array(Event).binary();\n\nconst revenue = JIT.query(Events).filter((q) => q.eq("kind", "purchase")).sum("amount");',
     page: "/docs/runtime/binary-rowsets",
     edges: { memory: 0.6, query: 0.5 },
   },
@@ -459,6 +496,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`JIT.json.parse(schema).validate()` funde decode e validação em uma função de execução, mas o parse de JSON sempre materializa o valor decodificado — fundido não quer dizer sem alocação.",
       "`stringifyChunks(users, { chunkBytes })` devolve pedaços limitados em vez de montar uma string gigante.",
     ],
+    example:
+      "const User = JIT.object({ id: JIT.string(), email: JIT.string().email() });\n\nconst toJson = JIT.json.stringify(User);\nconst fromJson = JIT.json.parse(User).validate();\n\n// bounded chunks for a large array\nconst toChunks = JIT.json.stringifyChunks(JIT.array(User), { chunkBytes: 16 * 1024 });",
     page: "/docs/runtime/serialization",
     edges: { codec: 0.5, lazy: 0.3 },
   },
@@ -484,6 +523,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`encodeInto(value, target)` reusa memória do chamador, o que importa num laço de socket de alta frequência onde alocar um Uint8Array por mensagem é mensurável.",
       "Rowsets binários não são payloads de codec e não devem ser persistidos como tal — rowsets otimizam memória de query local ao processo e podem mudar de layout de forma independente.",
     ],
+    example:
+      "// a value codec: the input and output TypeScript types differ\nconst IsoDate = JIT.codec(JIT.iso.datetime(), JIT.date(), {\n  decode: (value) => new Date(value),\n  encode: (value) => value.toISOString(),\n});\n\n// a binary transport, which is a different API\nconst Event = JIT.object({ id: JIT.string(), amount: JIT.number() });\nconst EventWire = JIT.binary.codec(Event, { version: 2 });",
     page: "/docs/reference/functions/codec",
     edges: { json: 0.4 },
   },
@@ -507,6 +548,8 @@ export const CONCEPTS: ConceptNode[] = [
       "A sanitização roda dentro da mesma passada especializada da validação, então o valor não é percorrido duas vezes.",
       "O mascaramento é cirúrgico: só caminhos que contêm campo marcado são reconstruídos, e o resto é compartilhado por referência em vez de copiado.",
     ],
+    example:
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email().pii(),\n  name: JIT.string(),\n});\n\n// marked once on the declaration, applied everywhere\nconst safeForLogs = JIT.security.mask(User);",
     page: "/docs/reference/functions/mask",
     edges: { boundary: 0.5, validation: 0.3 },
   },
@@ -532,6 +575,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Saída: `JIT.dto` e `JIT.map` fazem whitelist do formato de destino, então um campo novo no modelo não começa a vazar sozinho na resposta.",
       "Mantenha uma data de calendário como string de calendário ou decodifique para Temporal.PlainDate; inventar um Date à meia-noite UTC é o bug clássico de borda.",
     ],
+    example:
+      "const CreateUser = JIT.object({\n  name: JIT.string().trim().min(2).max(80),\n  email: JIT.string().trim().toLowerCase().email(),\n}).strict();\n\n// decode and validate in one compiled step; strict keys catch drift\nconst parseBody = JIT.json.parse(CreateUser).validate();",
     page: "/docs/guides/boundary-recipes",
     edges: { validation: 0.6, security: 0.4 },
   },
@@ -553,6 +598,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Não há Proxy nem draft para finalizar: o updater é gerado a partir do formato conhecido, então o patch é aplicado por escrita direta de campo.",
       "`JIT.watch` e `JIT.watchedList` cobrem mudanças em coleções com chave — diffs de snapshot sem estado e agregados com estado, respectivamente.",
     ],
+    example:
+      'const User = JIT.object({\n  id: JIT.string(),\n  profile: JIT.object({ name: JIT.string(), city: JIT.string() }),\n});\n\nconst updateUser = JIT.update(User);\n\n// only the branches the patch touches are rebuilt\nconst next = updateUser(current, { profile: { name: "Grace" } });',
     page: "/docs/runtime/reactive-updates",
     edges: { compare: 0.5 },
   },
@@ -578,6 +625,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`hash` é o jeito barato de pular comparações repetidas, e `.keyed(key)` ou `.indexBy(key)` transformam igualdade sobre um array grande com chave em lookup indexado. O cache de hash estrutural fica obsoleto se um valor for mutado no lugar.",
       "`JIT.clone` é a mesma ideia para cópia: um deep clone especializado no formato, em vez de uma varredura genérica.",
     ],
+    example:
+      "const Order = JIT.object({\n  id: JIT.string(),\n  lines: JIT.array(JIT.object({ sku: JIT.string(), quantity: JIT.number() })),\n});\n\nconst same = JIT.compare.equal(Order);\nconst changes = JIT.compare.diff(Order);\nconst fingerprint = JIT.compare.hash(Order);",
     page: "/docs/reference/functions/equal",
     edges: { update: 0.4 },
   },
@@ -601,6 +650,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`is` não reporta nada — retorna na primeira falha sem montar o vetor, e é por isso que é a escolha de caminho quente.",
       "Montar o vetor de issues é o custo que `safeParse` paga a mais que `is`; onde o schema não precisa reconstruir a entrada, o `safeParse` começa pela checagem sem alocação.",
     ],
+    example:
+      'const User = JIT.object({ email: JIT.string().email(), age: JIT.number().int() });\n\nconst result = JIT.validate.safeParse(User)({ email: "nope", age: 1.5 });\n\nif (!result.success) {\n  // each issue carries a path, a code and a message\n  for (const issue of result.issues) console.log(issue.path, issue.code, issue.message);\n}',
     page: "/docs/reference/functions/validation",
     edges: { validation: 0.7 },
   },
@@ -624,6 +675,8 @@ export const CONCEPTS: ConceptNode[] = [
       "O cache de índice de coleção serve para igualdade repetida sobre arrays grandes com chave, e exige que o array e os campos-chave permaneçam imutáveis.",
       "O cache de compilação elimina trabalho de geração de código; hashes e índices eliminam trabalho de travessia repetida. São custos diferentes e são cacheados separadamente.",
     ],
+    example:
+      "// ONE declaration, reused — this is what the compile cache is keyed by\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.compare.equal(User);\n\n// declaring a fresh schema per request reuses nothing and recompiles every time",
     page: "/docs/runtime/cache-hash-index",
     edges: { runtime: 0.5 },
   },
@@ -645,6 +698,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`from` lê um contrato já publicado de volta para um schema, e é isso que o torna utilizável em vez de algo para copiar à mão.",
       "Os checks atravessam: um `.email()` ou um `.int32().positive()` vira a restrição correspondente no documento, em vez de se perder.",
     ],
+    example:
+      "const CreateUser = JIT.object({\n  email: JIT.string().email(),\n  age: JIT.number().int().min(18),\n});\n\n// the same declaration that validates the request describes it\nconst document = JIT.jsonSchema.to(CreateUser);\n\n// and an existing contract can come back the other way\nconst fromContract = JIT.jsonSchema.from(document);",
     page: "/docs/reference/functions/json-schema",
     edges: { schema: 0.5 },
   },
@@ -670,6 +725,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Um agregado agora é escrito como um objeto literal comum de artefatos, não por um construtor de fachada.",
       "Nomes que aparecem só no guia de migração são contraexemplos, não código utilizável.",
     ],
+    example:
+      "// 2.0 — capabilities are reached through namespaces\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User);        // was JIT.validator(User).is\nconst sameUser = JIT.compare.equal(User);    // was JIT.equal(User)\nconst safeUser = JIT.security.mask(User);    // was JIT.mask(User)\n\n// an aggregate is now a plain object literal\nconst artifacts = { isUser, sameUser, safeUser };",
     page: "/docs/guides/migrating-to-2",
     edges: { self: 0.3 },
   },
@@ -689,6 +746,8 @@ export const CONCEPTS: ConceptNode[] = [
       "Run executa o schema no navegador contra os valores do painel de entrada; Generate produz o módulo sem imports. São botões do workspace, não métodos de um schema.",
       "O editor guarda um módulo comum que importa a JIT de `@jit-compiler/jit/runtime`, então o que roda ali é o que rodaria numa aplicação.",
     ],
+    example:
+      "// paste this into the workspace editor and press Run\nconst User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n});\n\nconst isUser = JIT.validate.is(User);",
     page: "/workspace",
     edges: { aot: 0.5 },
   },
@@ -712,6 +771,8 @@ export const CONCEPTS: ConceptNode[] = [
       "O diferencial da jit é abrangência sobre uma declaração: não só validação, mas igualdade, clonagem, diff, queries, mascaramento, serialização e um codec binário a partir do mesmo schema.",
       "Se validação é tudo que você precisa e ela não aparece no seu profile, o motivo para mudar é o argumento da declaração compartilhada, não velocidade.",
     ],
+    example:
+      "// jit's distinguishing move: many operations from ONE declaration\nconst User = JIT.object({ id: JIT.string(), email: JIT.string().email() });\n\nconst isUser = JIT.validate.is(User);      // what a validator library gives you\nconst sameUser = JIT.compare.equal(User);  // and a deep-equal library\nconst cloneUser = JIT.clone(User);         // and a clone library\nconst toJson = JIT.json.stringify(User);   // and a serializer",
     page: "/docs/reference/library-comparison",
     edges: { performance: 0.4 },
   },
@@ -750,6 +811,8 @@ export const CONCEPTS: ConceptNode[] = [
       "`pnpm jit init` escreve a config do AOT e `jit generate` emite o módulo; os subcomandos do CLI são init, generate, watch, check e mcp.",
       "Um arquivo de declaração que o AOT lê importa de `@jit-compiler/jit/define` em vez de `/runtime` — esse import é o que o marca como fonte de geração.",
     ],
+    example:
+      '// pnpm add @jit-compiler/jit\nimport { JIT } from "@jit-compiler/jit/runtime";\n\nconst User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n});\n\nconst isUser = JIT.validate.is(User);',
     page: "/docs/quick-start",
     edges: { self: 0.4, aot: 0.3 },
   },
@@ -771,6 +834,8 @@ export const CONCEPTS: ConceptNode[] = [
       "As ferramentas somente-leitura cobrem contexto de projeto, um doctor de AOT, busca na documentação, inspeção de declarações e preview de geração; jit_api_surface reflete o namespace JIT real para o agente não inventar nome.",
       "Escrever é explícito: jit_aot_generate exige write=true, e o preview é o caminho somente-leitura.",
     ],
+    example:
+      '// .mcp.json — the server uses the same generator as the CLI\n// {\n//   "mcpServers": { "jit": { "command": "pnpm", "args": ["exec", "jit-mcp"] } }\n// }\n\n// the schemas it inspects are ordinary declarations\nconst User = JIT.object({ id: JIT.string().uuid() });\nexport const isUser = JIT.validate.is(User);',
     page: "/docs/guides/mcp-server",
   },
 ];

@@ -155,14 +155,17 @@ export class AssistantEngine {
   /** Ranks sections for a question, using vectors when they are available. */
   async retrieve(question: string, currentUrl: string, understanding?: Understanding): Promise<RetrievedSection[]> {
     const retriever = await this.loadIndex();
+    // a follow-up searches with the subject it inherited, not with its own
+    // subjectless wording
+    const query = understanding?.retrievalQuery || question;
 
     let queryVector: Float32Array | null = null;
     if (this.embeddingsReady) {
-      const embedded = await this.host.embed([question]).catch(() => []);
+      const embedded = await this.host.embed([query]).catch(() => []);
       queryVector = embedded[0] ?? null;
     }
 
-    return retriever.search(question, {
+    return retriever.search(query, {
       limit: 6,
       currentUrl,
       queryVector,

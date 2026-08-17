@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { unusableExample } from "../audit";
+import { degenerated, unusableExample } from "../audit";
 import { DEFAULT_GENERATION_MODEL, GENERATION_MODELS } from "../catalog";
 import { CONCEPTS } from "../graph";
 import { canAnswerFromGround, groundedAnswer } from "../grounded";
@@ -104,13 +104,40 @@ describe("the grounded answer", () => {
   });
 
   /**
-   * The floor must not become the strategy. A how-to needs code shaped to what
-   * the reader is building, which a fixed paragraph cannot do — those questions
-   * stay with the model.
+   * The floor must not become the strategy.
+   *
+   * Troubleshooting needs the reader's own error and their own code; nothing
+   * written in advance can answer it, so those questions stay with the model
+   * and fail visibly rather than getting a confident non-answer.
    */
-  it("declines a question a fixed paragraph cannot answer", () => {
-    expect(canAnswerFromGround(ask("como escrevo um schema de usuário com email?").understanding)).toBe(false);
+  it("declines a question nothing written in advance can answer", () => {
     expect(canAnswerFromGround(ask("why does my parse throw?").understanding)).toBe(false);
+    expect(canAnswerFromGround(ask("meu safeParse está retornando erro errado").understanding)).toBe(false);
+  });
+
+  /**
+   * "pode me mostrar um exemplo de uso?" — the question that produced a JSON
+   * envelope and a hundred lines of `array.push`. It is a how-to, which the
+   * floor used to refuse, and it is answerable because every concept carries a
+   * runnable example.
+   */
+  it("shows real code when the reader asks for an example", () => {
+    const previous = understand("pq a jit é tão rapida ?", { api: index.api, currentUrl: "", previous: null });
+    const understanding = understand("pode me mostrar um exemplo de uso?", {
+      api: index.api,
+      currentUrl: "",
+      previous,
+    });
+    const sections = retriever.search(understanding.retrievalQuery, {
+      limit: 6,
+      conceptTerms: conceptTerms(understanding.concepts),
+      conceptPages: conceptPages(understanding.concepts),
+    });
+    const answer = groundedAnswer(understanding, sections) ?? "";
+
+    expect(canAnswerFromGround(understanding)).toBe(true);
+    expect(answer).toContain("```ts");
+    expect(answer).toContain("JIT.");
   });
 
   it("has something to say for every concept a reader can reach", () => {
@@ -169,6 +196,99 @@ describe("the default model", () => {
 
   it("still offers the smaller one for machines that need it", () => {
     expect(GENERATION_MODELS.map((model) => model.id)).toContain("qwen3.5-0.8b");
+  });
+});
+
+/**
+ * The follow-up that broke everything. "pode me mostrar um exemplo de uso?"
+ * names no concept, so it used to resolve to nothing, retrieve nothing, and
+ * drop the previous exchange — the model was asked to demonstrate an unnamed
+ * library and answered with a JSON envelope.
+ */
+describe("a follow-up with no subject of its own", () => {
+  const first = understand("pq a jit é tão rapida ?", { api: index.api, currentUrl: "", previous: null });
+  const second = understand("pode me mostrar um exemplo de uso ?", {
+    api: index.api,
+    currentUrl: "",
+    previous: first,
+  });
+
+  it("inherits the subject of the question before it", () => {
+    expect(second.concepts.filter((match) => match.weight === 1).map((match) => match.id)).toContain("performance");
+    expect(second.continuation).toBe(true);
+  });
+
+  it("searches with the inherited subject, so retrieval finds something", () => {
+    expect(second.retrievalQuery).toContain("rapida");
+
+    const sections = retriever.search(second.retrievalQuery, {
+      limit: 6,
+      conceptTerms: conceptTerms(second.concepts),
+      conceptPages: conceptPages(second.concepts),
+    });
+
+    expect(sections.length).toBeGreaterThan(0);
+  });
+
+  /** A reader does not switch language between two messages. */
+  it("keeps answering in the language the conversation is in", () => {
+    expect(second.language).toBe("pt");
+  });
+
+  it("opens a new subject when the reader actually names one", () => {
+    const third = understand("como mascarar PII?", { api: index.api, currentUrl: "", previous: first });
+
+    expect(third.concepts.filter((match) => match.weight === 1).map((match) => match.id)).toContain("security");
+    expect(third.continuation).toBe(false);
+  });
+});
+
+/**
+ * Output that came apart rather than an answer that is wrong. Both of these
+ * appeared in one reply, produced when retrieval returned zero sections.
+ */
+describe("degeneration", () => {
+  it("catches a raw JSON envelope", () => {
+    const answer = '{\n  "question": "pode me mostrar um exemplo?",\n  "answer": "Sim",\n  "code": "..."\n}';
+
+    expect(degenerated(answer)).toContain("JSON envelope");
+  });
+
+  it("catches a repetition loop", () => {
+    const answer = ["```ts", "const arraysWithTypes = [];", "const arraysWithTypes = [];", "```"].join("\n");
+
+    expect(degenerated(answer)).toContain("declared more than once");
+  });
+
+  it("catches an answer cut off inside a code block", () => {
+    expect(degenerated("Here:\n\n```ts\nconst User = JIT.object({")).toContain("stops in the middle");
+  });
+
+  it("leaves an ordinary answer alone", () => {
+    const answer = "jit compiles the schema once.\n\n```ts\nconst User = JIT.object({ id: JIT.string() });\n```";
+
+    expect(degenerated(answer)).toBeNull();
+  });
+});
+
+describe("concept examples", () => {
+  it("gives every concept something runnable to show", () => {
+    expect(CONCEPTS.filter((concept) => !concept.example).map((concept) => concept.id)).toEqual([]);
+  });
+
+  it("writes them with the real API", () => {
+    const known = new Set([...index.api.map((member) => member.name), "Typeof", "Strict"]);
+    const offenders: string[] = [];
+
+    for (const concept of CONCEPTS) {
+      // the migration example shows the old names in comments, on purpose
+      if (concept.id === "migration") continue;
+      for (const match of (concept.example ?? "").matchAll(/\bJIT\.([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+        if (!known.has(match[1])) offenders.push(`${concept.id}: JIT.${match[1]}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
   });
 });
 

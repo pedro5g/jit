@@ -26,6 +26,8 @@ export type AuditFinding =
   | { kind: "invented-cli"; names: string[] }
   /** Showed code that does not demonstrate the library, or does not work. */
   | { kind: "unusable-example"; reason: string }
+  /** The generation came apart: a repetition loop, or raw machine output. */
+  | { kind: "degenerated"; reason: string }
   /** Made a technical claim nothing it was given supports. */
   | { kind: "ungrounded-claim"; sentences: string[] }
   /** Quoted a figure that appears in none of the sections it was given. */
@@ -148,6 +150,49 @@ function jitCodeBlocks(answer: string): string[] {
  * code with the jit version is doing something useful, and does it by showing
  * both.
  */
+/**
+ * A generation that came apart rather than an answer that is wrong.
+ *
+ * Handed a question and no evidence, a small model does one of two things: it
+ * emits the shape of a training example — a raw `{"question": ..., "answer":
+ * ..., "code": ...}` envelope — or it falls into a loop, repeating a line with
+ * the noun changed until it runs out of tokens. Both were observed in a single
+ * answer. Neither is a claim to fact-check; the output is simply broken, and
+ * the reader should never see it.
+ */
+export function degenerated(answer: string): string | null {
+  const trimmed = answer.trim();
+
+  if (/^[{[]/.test(trimmed) && /"(?:question|answer|code|response|output)"\s*:/.test(trimmed.slice(0, 400))) {
+    return "it is raw machine output rather than a reply — a JSON envelope instead of an answer.";
+  }
+
+  // A repeated declaration is the clearest signal: real code does not declare
+  // the same const twice, and a loop always does it eventually.
+  const declarations = [...answer.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g)].map((match) => match[1]);
+  const seen = new Set<string>();
+  for (const name of declarations) {
+    if (seen.has(name)) return `it repeats itself — \`${name}\` is declared more than once, so the generation looped.`;
+    seen.add(name);
+  }
+
+  const lines = answer
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 12);
+  const counts = new Map<string, number>();
+  for (const line of lines) counts.set(line, (counts.get(line) ?? 0) + 1);
+  const worst = [...counts.values()].reduce((most, count) => Math.max(most, count), 0);
+
+  if (worst >= 4) return "it repeats the same line over and over, so the generation looped.";
+
+  // an answer cut off mid-token has no closing fence and no final punctuation
+  const fences = (answer.match(/```/g) ?? []).length;
+  if (fences % 2 === 1) return "it stops in the middle of a code block, so the answer is incomplete.";
+
+  return null;
+}
+
 /**
  * Technology the answer drifted into.
  *
@@ -468,7 +513,8 @@ export function isSevere(finding: AuditFinding): boolean {
     finding.kind === "invented-cli" ||
     finding.kind === "contradiction" ||
     // a reader copies an example before they finish reading the prose
-    finding.kind === "unusable-example"
+    finding.kind === "unusable-example" ||
+    finding.kind === "degenerated"
   );
 }
 
@@ -501,6 +547,9 @@ export function audit(
 
   const unusable = unusableExample(answer);
   if (unusable) findings.push({ kind: "unusable-example", reason: unusable });
+
+  const broken = degenerated(answer);
+  if (broken) findings.push({ kind: "degenerated", reason: broken });
 
   for (const claim of contradictions(answer, context.concepts)) {
     findings.push({ kind: "contradiction", claim });
