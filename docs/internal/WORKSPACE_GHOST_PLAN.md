@@ -12,6 +12,17 @@ Nothing reaches a reader unverified. Every example the ghost writes runs before
 it is shown, every generated tree is reconstructed byte-exactly by the CLI, and
 every claim is checked against the compiled library rather than trusted.
 
+## Status
+
+1. Done — `c6d2f35`.
+2. Done — `dd4a5e3`.
+3. Done — `ab3398b`.
+4. Partly done — `36bcb06` carries the guide options, the beta labelling and the
+   bottom-sheet chat. Still open: the ghost typing into the workspace on its own,
+   and the copy pass over the marketing pages (em dashes, assistant mannerisms,
+   alignment).
+5. Done — `36bcb06`.
+
 ## Phases
 
 ### 1 — The ghost stops being wrong in public

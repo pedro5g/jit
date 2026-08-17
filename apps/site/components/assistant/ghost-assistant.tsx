@@ -267,7 +267,9 @@ export function GhostAssistant() {
       className={
         shell === "modal"
           ? "flex h-[min(780px,calc(100dvh-4rem))] w-[min(780px,calc(100vw-2rem))] flex-col overflow-hidden rounded-card border border-line-gold/40 bg-night-950 shadow-(--shadow-card)"
-          : "fixed bottom-4 right-4 z-50 flex max-h-[min(700px,calc(100dvh-2rem))] w-[min(420px,calc(100vw-2rem))] flex-col overflow-hidden rounded-card border border-line-gold/40 bg-night-950/97 shadow-(--shadow-card) backdrop-blur"
+          : // a phone gets a bottom sheet, where a floating card would cover the
+            // page it is talking about and still be too narrow to read
+            "fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-card border-t border-line-gold/40 bg-night-950/97 shadow-(--shadow-card) backdrop-blur sm:inset-x-auto sm:bottom-4 sm:right-4 sm:max-h-[min(700px,calc(100dvh-2rem))] sm:w-[min(420px,calc(100vw-2rem))] sm:rounded-card sm:border"
       }
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-line-subtle px-3 py-2">
