@@ -1,65 +1,69 @@
 "use client";
 
-import { AlertTriangle, Check, Code2, PackageCheck, Play, Undo2, X } from "lucide-react";
+import { AlertTriangle, Check, Code2, FolderTree, PackageCheck, Play, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { JitLogo } from "@/components/brand/jit-logo";
 import { Select } from "@/components/ui/select";
 import { openAssistant, publishEditorCode } from "@/lib/assistant/bus";
 import { EXAMPLES } from "@/lib/workspace/operations";
-import { useWorkspaceCode, type WorkspaceMode, withEntrypoint } from "@/lib/workspace/store";
+import { lockEntrypoint, useWorkspaceProject, type WorkspaceMode } from "@/lib/workspace/store";
+import { FileTree } from "./file-tree";
 import { GeneratePanel } from "./generate-panel";
 import { RunPanel } from "./run-panel";
 import { type EditorHandle, WorkspaceEditor } from "./workspace-editor";
 
 /**
- * One schema, one editor, two things to do with it: run it against values, or
- * generate the module a project would ship. They used to be separate pages
- * with separate editors, which meant declaring the same schema twice to see
- * both halves of what jit does.
+ * A project, an editor, and two things to do with it: run a file against
+ * values, or generate the modules a repository would ship.
  *
- * Below the split point the two panes become one at a time. Half a screen of
- * editor above half a screen of output is worse than either on a phone, so the
- * layout switches rather than shrinks.
+ * The tree on the left is not navigation. It is the declaration the CLI
+ * reconstructs, so a directory made here is a directory that appears in the
+ * reader's repository, and the panel on the right shows exactly what lands.
+ *
+ * Below the split point the panes become one at a time. Three columns on a
+ * phone are three unusable columns, so the layout switches rather than shrinks.
  */
 export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode }) {
-  const workspace = useWorkspaceCode();
+  const workspace = useWorkspaceProject();
   const [editor, setEditor] = useState<EditorHandle | null>(null);
   const [mode, setMode] = useState<WorkspaceMode>(initialMode);
-  const [narrowPane, setNarrowPane] = useState<"editor" | "panel">("editor");
+  const [narrowPane, setNarrowPane] = useState<"files" | "editor" | "panel">("editor");
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [loadedExample, setLoadedExample] = useState("");
 
   // a write from the ghost carries the mode it was meant for
   const activeMode = workspace.ghostEdit ? workspace.mode : mode;
   const onReady = useCallback((handle: EditorHandle) => setEditor(handle), []);
+  const active = workspace.activeFile;
 
-  // the ghost replacing the source means the named example is no longer loaded
+  // the ghost replacing a file means the named example is no longer loaded
   useEffect(() => {
     if (workspace.ghostEdit) setLoadedExample("");
   }, [workspace.ghostEdit]);
 
-  // the ghost answers about the schema on screen, so it has to see it
+  // the ghost answers about the file on screen, so it has to see it
   useEffect(() => {
-    publishEditorCode(workspace.code);
+    publishEditorCode(active?.source ?? null);
     return () => publishEditorCode(null);
-  }, [workspace.code]);
+  }, [active?.source]);
 
   /**
    * Type errors are surfaced continuously rather than only when Generate runs,
    * because the most common one — an import that did not resolve — otherwise
    * looks like the editor silently not working.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies(workspace.code): the edited source is the trigger, not an input — Monaco holds the model
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !active) return;
 
     const timer = setTimeout(() => {
-      void editor.firstDiagnostic().then(setDiagnostic);
+      void editor.firstDiagnostic(active.path).then(setDiagnostic);
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [editor, workspace.code]);
+  }, [editor, active]);
+
+  if (!active) return null;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-night-1000">
@@ -88,14 +92,14 @@ export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode
             ariaLabel="Load an example"
             value={loadedExample}
             options={[
-              { value: "", label: "Examples", description: "Replace the editor with a ready-made schema" },
+              { value: "", label: "Examples", description: "Replace the open file with a ready-made schema" },
               ...EXAMPLES.map((example) => ({ value: example.id, label: example.label })),
             ]}
             onValueChange={(value) => {
               const example = EXAMPLES.find((item) => item.id === value);
               if (!example) return;
               setLoadedExample(example.id);
-              workspace.setCode(withEntrypoint(example.code, activeMode));
+              workspace.setSource(active.path, lockEntrypoint(example.code, activeMode));
             }}
           />
         </div>
@@ -113,9 +117,9 @@ export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode
       </header>
 
       {workspace.ghostEdit && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-line-gold/30 bg-gold-200/5 px-3 py-1.5 sm:px-4">
+        <Banner tone="gold" onDismiss={workspace.dismissGhostEdit}>
           <p className="flex-1 truncate font-mono text-[11px] text-gold-200">
-            The editor was {workspace.ghostEdit.reason}.
+            {workspace.ghostEdit.path} was {workspace.ghostEdit.reason}.
           </p>
           <button
             type="button"
@@ -125,19 +129,23 @@ export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode
             <Undo2 aria-hidden className="size-3" />
             undo
           </button>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={workspace.dismissGhostEdit}
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:text-ghost-100"
-          >
-            <X aria-hidden className="size-3" />
-          </button>
-        </div>
+        </Banner>
       )}
 
-      {/* one pane at a time below lg, where two would each be unusable */}
+      {workspace.problem && (
+        <Banner tone="warning" onDismiss={workspace.dismissProblem}>
+          <p className="flex-1 truncate text-[11px] text-warning">{workspace.problem}</p>
+        </Banner>
+      )}
+
+      {/* one pane at a time below lg, where three would each be unusable */}
       <div className="flex shrink-0 items-center gap-0.5 border-b border-line-subtle bg-night-950 px-3 py-1.5 lg:hidden">
+        <PaneTab
+          active={narrowPane === "files"}
+          onClick={() => setNarrowPane("files")}
+          icon={<FolderTree aria-hidden className="size-3" />}
+          label="Files"
+        />
         <PaneTab
           active={narrowPane === "editor"}
           onClick={() => setNarrowPane("editor")}
@@ -158,12 +166,37 @@ export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode
         />
       </div>
 
-      <main className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+      <main className="grid min-h-0 flex-1 lg:grid-cols-[13rem_minmax(0,1fr)_minmax(0,1fr)]">
+        <section
+          aria-label="Project files"
+          className={`min-h-0 border-line-subtle bg-night-950 lg:block lg:border-r ${
+            narrowPane === "files" ? "block" : "hidden"
+          }`}
+        >
+          <FileTree
+            project={workspace.project}
+            onOpen={(path) => {
+              workspace.setActive(path);
+              setNarrowPane("editor");
+            }}
+            onCreateFile={workspace.addFile}
+            onCreateDirectory={workspace.addDirectory}
+            onRename={workspace.rename}
+            onDelete={workspace.remove}
+          />
+        </section>
+
         <section
           aria-label="Schema editor"
           className={`min-h-0 border-line-subtle lg:block lg:border-r ${narrowPane === "editor" ? "block" : "hidden"}`}
         >
-          <WorkspaceEditor code={workspace.code} onChange={workspace.setCode} onReady={onReady} />
+          <WorkspaceEditor
+            files={workspace.project.files}
+            activePath={active.path}
+            mode={activeMode}
+            onChange={workspace.setSource}
+            onReady={onReady}
+          />
         </section>
 
         <section
@@ -171,12 +204,40 @@ export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode
           className={`min-h-0 bg-night-950 lg:block ${narrowPane === "panel" ? "block" : "hidden"}`}
         >
           {activeMode === "run" ? (
-            <RunPanel code={withEntrypoint(workspace.code, "run")} editor={editor} />
+            <RunPanel project={workspace.project} editor={editor} />
           ) : (
-            <GeneratePanel code={withEntrypoint(workspace.code, "generate")} editor={editor} />
+            <GeneratePanel project={workspace.project} editor={editor} />
           )}
         </section>
       </main>
+    </div>
+  );
+}
+
+function Banner({
+  tone,
+  children,
+  onDismiss,
+}: {
+  tone: "gold" | "warning";
+  children: React.ReactNode;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      className={`flex shrink-0 items-center gap-2 border-b px-3 py-1.5 sm:px-4 ${
+        tone === "gold" ? "border-line-gold/30 bg-gold-200/5" : "border-warning/30 bg-warning/5"
+      }`}
+    >
+      {children}
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={onDismiss}
+        className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:text-ghost-100"
+      >
+        <X aria-hidden className="size-3" />
+      </button>
     </div>
   );
 }
@@ -240,7 +301,7 @@ function DiagnosticPill({ diagnostic, ready }: { diagnostic: string | null; read
   if (!diagnostic) {
     return (
       <span
-        title="The schema type-checks"
+        title="The open file type-checks"
         className="hidden items-center gap-1 rounded-pill border border-success/30 px-2 py-0.5 font-mono text-[10px] text-success sm:inline-flex"
       >
         <Check aria-hidden className="size-2.5" />

@@ -1,18 +1,24 @@
 "use client";
 
 import Editor, { type Monaco } from "@monaco-editor/react";
-import { useCallback, useEffect, useState } from "react";
+import { Lock } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { WorkspaceFile } from "@/lib/workspace/project";
+import { entrypointLine, lockEntrypoint, type WorkspaceMode } from "@/lib/workspace/store";
 
 /**
- * The one editor the workspace has. Both the run panel and the generate panel
- * read from it, so Monaco is configured once — theme, jit type definitions,
- * and the TypeScript worker both panels transpile through.
+ * The one editor the workspace has, holding the whole project.
+ *
+ * Every file gets a Monaco model of its own, whether or not it is on screen,
+ * because that is what makes `import { User } from "./user-schemas"` resolve
+ * instead of showing a missing-module error on a file that is right there in
+ * the tree.
  */
 export interface EditorHandle {
-  /** TypeScript to JavaScript, using Monaco's own worker. */
-  transpile(source: string): Promise<string>;
-  /** The first type error, or null when the source compiles. */
-  firstDiagnostic(): Promise<string | null>;
+  /** TypeScript to JavaScript, for one file of the project. */
+  transpile(path: string, source: string): Promise<string>;
+  /** The first type error in a file, or null when it compiles. */
+  firstDiagnostic(path: string): Promise<string | null>;
 }
 
 const EDITOR_OPTIONS = {
@@ -20,7 +26,7 @@ const EDITOR_OPTIONS = {
   fontSize: 13,
   lineHeight: 21,
   scrollBeyondLastLine: false,
-  padding: { top: 16, bottom: 16 },
+  padding: { top: 12, bottom: 16 },
   tabSize: 2,
   automaticLayout: true,
   wordWrap: "on",
@@ -31,20 +37,30 @@ const EDITOR_OPTIONS = {
   smoothScrolling: true,
 } as const;
 
-const FILE_URI = "file:///workspace/schema.ts";
+const WORKSPACE_ROOT = "file:///workspace";
 const PACKAGE_ROOT = "file:///node_modules/@jit-compiler/jit";
 
+function uriOf(path: string): string {
+  return `${WORKSPACE_ROOT}/${path}`;
+}
+
 export function WorkspaceEditor({
-  code,
+  files,
+  activePath,
+  mode,
   onChange,
   onReady,
 }: {
-  code: string;
-  onChange: (value: string) => void;
+  files: readonly WorkspaceFile[];
+  activePath: string;
+  mode: WorkspaceMode;
+  onChange: (path: string, source: string) => void;
   onReady: (handle: EditorHandle) => void;
 }) {
   const [monaco, setMonaco] = useState<Monaco | null>(null);
   const [dts, setDts] = useState<Record<string, string> | null>(null);
+  const active = files.find((file) => file.path === activePath) ?? files[0];
+  const guarding = useRef(false);
 
   useEffect(() => {
     fetch("/playground/jit-dts.json")
@@ -85,6 +101,31 @@ export function WorkspaceEditor({
     onReady(createHandle(monaco));
   }, [monaco, dts, onReady]);
 
+  /**
+   * One model per file, kept in step with the tree. A file the reader deleted
+   * has to lose its model too, or its declarations keep resolving and the
+   * editor disagrees with the project about what exists.
+   */
+  useEffect(() => {
+    if (!monaco) return;
+
+    const wanted = new Set(files.map((file) => uriOf(file.path)));
+
+    for (const file of files) {
+      const uri = monaco.Uri.parse(uriOf(file.path));
+      const model = monaco.editor.getModel(uri);
+
+      if (!model) monaco.editor.createModel(file.source, "typescript", uri);
+      // the active file's model is driven by the editor's own value prop
+      else if (file.path !== activePath && model.getValue() !== file.source) model.setValue(file.source);
+    }
+
+    for (const model of monaco.editor.getModels()) {
+      const uri = model.uri.toString();
+      if (uri.startsWith(`${WORKSPACE_ROOT}/`) && !wanted.has(uri)) model.dispose();
+    }
+  }, [monaco, files, activePath]);
+
   const beforeMount = useCallback((instance: Monaco) => {
     instance.editor.defineTheme("jit-night", {
       base: "vs-dark",
@@ -124,34 +165,73 @@ export function WorkspaceEditor({
 
   const onMount = useCallback((_editor: unknown, instance: Monaco) => setMonaco(instance), []);
 
+  /**
+   * The entrypoint import is the workspace's line, so an edit that breaks it
+   * is undone rather than reported. Restoring is one model write, and the
+   * guard flag keeps that write from being read as another edit.
+   */
+  const handleChange = useCallback(
+    (value: string | undefined) => {
+      if (guarding.current || !active) return;
+
+      const source = value ?? "";
+      const locked = lockEntrypoint(source, mode);
+
+      if (locked === source) {
+        onChange(active.path, source);
+        return;
+      }
+
+      guarding.current = true;
+      monaco?.editor.getModel(monaco.Uri.parse(uriOf(active.path)))?.setValue(locked);
+      guarding.current = false;
+      onChange(active.path, locked);
+    },
+    [active, mode, monaco, onChange]
+  );
+
+  if (!active) return null;
+
   return (
-    <Editor
-      height="100%"
-      path={FILE_URI}
-      defaultLanguage="typescript"
-      theme="jit-night"
-      value={code}
-      onChange={(value) => onChange(value ?? "")}
-      beforeMount={beforeMount}
-      onMount={onMount}
-      options={EDITOR_OPTIONS}
-      loading={<span className="font-mono text-xs text-fg-subtle">loading the editor…</span>}
-    />
+    <div className="flex h-full min-h-0 flex-col">
+      <p className="flex shrink-0 items-center gap-1.5 border-b border-line-subtle bg-night-1000/60 px-3 py-1">
+        <Lock aria-hidden className="size-2.5 shrink-0 text-fg-subtle" />
+        <code className="truncate font-mono text-[10px] text-fg-subtle">{entrypointLine(mode)}</code>
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-subtle">
+          {mode === "run" ? "compiles in memory" : "read by the generator"}
+        </span>
+      </p>
+
+      <div className="min-h-0 flex-1">
+        <Editor
+          height="100%"
+          path={uriOf(active.path)}
+          defaultLanguage="typescript"
+          theme="jit-night"
+          value={active.source}
+          onChange={handleChange}
+          beforeMount={beforeMount}
+          onMount={onMount}
+          options={EDITOR_OPTIONS}
+          loading={<span className="font-mono text-xs text-fg-subtle">loading the editor…</span>}
+        />
+      </div>
+    </div>
   );
 }
 
 /** Both panels reach the TypeScript worker through this. */
 function createHandle(monaco: Monaco): EditorHandle {
-  const client = async () => {
-    const uri = monaco.Uri.parse(FILE_URI);
+  const client = async (path: string) => {
+    const uri = monaco.Uri.parse(uriOf(path));
     const getWorker = await monaco.languages.typescript.getTypeScriptWorker();
     return { worker: await getWorker(uri), uri };
   };
 
   return {
-    async transpile(source) {
+    async transpile(path, source) {
       try {
-        const { worker, uri } = await client();
+        const { worker, uri } = await client(path);
         const output = await worker.getEmitOutput(uri.toString());
         return output.outputFiles[0]?.text ?? source;
       } catch {
@@ -159,9 +239,9 @@ function createHandle(monaco: Monaco): EditorHandle {
         return source;
       }
     },
-    async firstDiagnostic() {
+    async firstDiagnostic(path) {
       try {
-        const { worker, uri } = await client();
+        const { worker, uri } = await client(path);
         const [syntactic, semantic] = await Promise.all([
           worker.getSyntacticDiagnostics(uri.toString()),
           worker.getSemanticDiagnostics(uri.toString()),

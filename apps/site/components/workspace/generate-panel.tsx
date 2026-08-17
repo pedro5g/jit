@@ -1,11 +1,13 @@
 "use client";
 
-import { Loader2, PackageCheck, ShieldCheck } from "lucide-react";
+import { FileCode2, Loader2, PackageCheck, ShieldCheck } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { CopyButton } from "@/components/code/copy-button";
 import { Select } from "@/components/ui/select";
 import type { LabCompilerRequest, LabCompilerResponse, LabCompilerResult } from "@/lib/lab/compiler/worker-types";
 import { type PublishedArtifact, publishArtifact } from "@/lib/lab/registry/client";
+import { bundleUnits, topLevelNames } from "@/lib/workspace/bundle";
+import { compilationOrder, parentOf, type WorkspaceProject } from "@/lib/workspace/project";
 import { Field, PanelBody, PanelToolbar, Tab } from "./panel-parts";
 import type { EditorHandle } from "./workspace-editor";
 
@@ -13,94 +15,107 @@ const COMPILER_TIMEOUT_MS = 5_000;
 
 type Status = "idle" | "working" | "ready" | "error";
 
+interface GeneratedFile {
+  path: string;
+  source: string;
+  /** The workspace file it was compiled from. */
+  from: string;
+}
+
 /**
- * Turns the schema in the editor into the import-free module a project would
- * ship, then signs it so it can be pulled into a real repository with one
- * command — the same AOT path the CLI runs, executed in a browser worker.
+ * Turns the project in the editor into the import-free modules a repository
+ * would ship, then signs them so the tree can be pulled into a real project
+ * with one command.
+ *
+ * One compilation per file rather than one for the whole project: the layout
+ * the reader declared is the layout that lands, so `schemas/user.ts` generates
+ * `schemas/user.ts` and not a single flattened module with everything in it.
  */
-export function GeneratePanel({ code, editor }: { code: string; editor: EditorHandle | null }) {
-  const [fileName, setFileName] = useState("schemas.generated");
+export function GeneratePanel({ project, editor }: { project: WorkspaceProject; editor: EditorHandle | null }) {
   const [outputRoot, setOutputRoot] = useState("src/generated/jit");
   const [format, setFormat] = useState<"ts" | "js">("ts");
   const [packageManager, setPackageManager] = useState("pnpm");
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
-  const [compiled, setCompiled] = useState<LabCompilerResult>();
-  const [selectedFile, setSelectedFile] = useState("");
+  const [generated, setGenerated] = useState<GeneratedFile[]>([]);
+  const [skipped, setSkipped] = useState<LabCompilerResult["skipped"]>([]);
+  const [selected, setSelected] = useState("");
   const [published, setPublished] = useState<PublishedArtifact>();
   const [tab, setTab] = useState<"source" | "install">("source");
 
   const workerRef = useRef<Worker | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
 
   const generate = useCallback(async () => {
     if (!editor) return;
 
     setStatus("working");
-    setMessage("Type-checking");
+    setPublished(undefined);
 
     try {
-      const diagnostic = await editor.firstDiagnostic();
-      if (diagnostic) throw new Error(diagnostic);
-
-      const names = collectTopLevelNames(code);
-      if (names.length === 0) throw new Error("Declare at least one schema or compiled function");
-
-      setMessage("Compiling");
-      const js = await editor.transpile(code);
-
-      requestId.current += 1;
-      const id = requestId.current;
       const worker = new Worker(new URL("../../lib/lab/compiler/worker.ts", import.meta.url));
       workerRef.current?.terminate();
       workerRef.current = worker;
 
-      const result = await new Promise<LabCompilerResult>((resolve, reject) => {
-        timeoutRef.current = setTimeout(() => {
-          worker.terminate();
-          reject(new Error(`Compilation exceeded ${COMPILER_TIMEOUT_MS} ms`));
-        }, COMPILER_TIMEOUT_MS);
+      const files: GeneratedFile[] = [];
+      const skips: LabCompilerResult["skipped"][number][] = [];
 
-        worker.onmessage = (event: MessageEvent<LabCompilerResponse>) => {
-          if (event.data.id !== id) return;
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          if (event.data.ok) resolve(event.data.result);
-          else reject(new Error(event.data.error));
-        };
-        worker.onerror = () => {
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          reject(new Error("The AOT compiler worker crashed"));
-        };
+      for (const file of project.files) {
+        setMessage(`Type-checking ${file.path}`);
+        const diagnostic = await editor.firstDiagnostic(file.path);
+        if (diagnostic) throw new Error(`${file.path}: ${diagnostic}`);
 
-        worker.postMessage({ id, code: js, names, options: { format, fileName } } satisfies LabCompilerRequest);
-      });
+        const names = topLevelNames(file.source);
+        // a file that declares nothing generates nothing, which is not an error
+        if (names.length === 0) continue;
 
-      if (result.files.length === 0) {
-        throw new Error(result.skipped[0]?.reason ?? "No compiled functions were found");
+        setMessage(`Compiling ${file.path}`);
+        // dependencies first, each in a scope of its own, so two files may use
+        // the same name and an import still means what it says
+        const units = compilationOrder(project, file.path);
+        const transpiled = await Promise.all(
+          units.map(async (unit) => ({ path: unit.path, code: await editor.transpile(unit.path, unit.source) }))
+        );
+
+        const result = await compile(worker, ++requestId.current, {
+          code: bundleUnits(transpiled),
+          names,
+          options: { format, fileName: file.path },
+        });
+
+        for (const output of result.files) files.push({ ...output, from: file.path });
+        skips.push(...result.skipped);
+      }
+
+      if (files.length === 0) {
+        throw new Error(skips[0]?.reason ?? "No compiled functions were found in this project");
       }
 
       setMessage("Signing the artifact");
-      const artifact = await publishArtifact(result.files, outputRoot);
+      const artifact = await publishArtifact(
+        files.map((file) => ({ path: file.path, source: file.source })),
+        outputRoot
+      );
 
-      setCompiled(result);
-      setSelectedFile(result.files[0]?.path ?? "");
+      setGenerated(files);
+      setSkipped(skips);
+      setSelected(files[0]?.path ?? "");
       setPublished(artifact);
       setStatus("ready");
-      setMessage(`Generated ${result.files.length} file${result.files.length === 1 ? "" : "s"}`);
+      setMessage(`${files.length} file${files.length === 1 ? "" : "s"} in ${directoryCount(files)} directories`);
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Generation failed");
     }
-  }, [code, editor, fileName, format, outputRoot]);
+  }, [editor, format, outputRoot, project]);
 
-  const source = compiled?.files.find((file) => file.path === selectedFile)?.source ?? "";
+  const source = generated.find((file) => file.path === selected)?.source ?? "";
   const command = published ? installCommand(packageManager, published.token) : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PanelToolbar>
-        <div className="w-40">
+        <div className="w-36">
           <Select
             ariaLabel="Output format"
             value={format}
@@ -122,9 +137,9 @@ export function GeneratePanel({ code, editor }: { code: string; editor: EditorHa
           ) : (
             <PackageCheck aria-hidden className="size-3" />
           )}
-          {status === "working" ? message : "Generate"}
+          {status === "working" ? "Generating" : "Generate"}
         </button>
-        {status !== "working" && message && (
+        {message && (
           <span className={`truncate font-mono text-[11px] ${status === "error" ? "text-danger" : "text-fg-subtle"}`}>
             {message}
           </span>
@@ -132,53 +147,26 @@ export function GeneratePanel({ code, editor }: { code: string; editor: EditorHa
       </PanelToolbar>
 
       <PanelBody>
-        <div className="grid shrink-0 gap-3 sm:grid-cols-2">
-          <Field
-            label="module name"
-            value={fileName}
-            onChange={setFileName}
-            hint="the generated file, without an extension"
-          />
-          <Field
-            label="output directory"
-            value={outputRoot}
-            onChange={setOutputRoot}
-            hint="where the CLI will write it"
-          />
-        </div>
+        <Field
+          label="output directory"
+          value={outputRoot}
+          onChange={setOutputRoot}
+          hint="where the CLI writes the tree, relative to the project root"
+        />
 
-        {compiled && (
+        {generated.length > 0 && (
           <>
             <div className="flex shrink-0 items-center gap-1 border-b border-line-subtle">
-              <Tab active={tab === "source"} onClick={() => setTab("source")} label="generated source" />
+              <Tab active={tab === "source"} onClick={() => setTab("source")} label="generated tree" />
               <Tab active={tab === "install"} onClick={() => setTab("install")} label="pull into a project" />
               <span className="ml-auto pb-1">
                 <CopyButton text={tab === "source" ? source : command} label="Copy" />
               </span>
             </div>
 
-            {tab === "source" && compiled.files.length > 1 && (
-              <div className="flex shrink-0 flex-wrap gap-1">
-                {compiled.files.map((file) => (
-                  <button
-                    key={file.path}
-                    type="button"
-                    onClick={() => setSelectedFile(file.path)}
-                    className={`rounded-pill border px-2 py-0.5 font-mono text-[10px] transition-colors ${
-                      file.path === selectedFile
-                        ? "border-line-gold text-gold-200"
-                        : "border-line-subtle text-fg-subtle hover:text-ghost-100"
-                    }`}
-                  >
-                    {file.path}
-                  </button>
-                ))}
-              </div>
-            )}
-
             {tab === "install" ? (
               <div className="flex flex-col gap-2">
-                <div className="w-40">
+                <div className="w-36">
                   <Select
                     ariaLabel="Package manager"
                     value={packageManager}
@@ -194,21 +182,45 @@ export function GeneratePanel({ code, editor }: { code: string; editor: EditorHa
                 <pre className="overflow-x-auto rounded-control border border-line-subtle bg-night-1000/60 p-3 font-mono text-[12px] text-ghost-100">
                   <code>{command}</code>
                 </pre>
+                <OutputTree files={generated} outputRoot={outputRoot} />
                 <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-fg-muted">
                   <ShieldCheck aria-hidden className="mt-0.5 size-3 shrink-0 text-success" />
-                  The reference is signed and content-addressed: the CLI verifies the signature and the hash before it
-                  writes a single file into {outputRoot}.
+                  The reference is signed and content-addressed. The CLI verifies the signature and every digest before
+                  it writes a file, creates only the directories above, and leaves anything else in {outputRoot}{" "}
+                  untouched.
                 </p>
               </div>
             ) : (
-              <pre className="min-h-32 flex-1 overflow-auto rounded-control border border-line-subtle bg-night-1000/60 p-3 font-mono text-[12px] leading-relaxed text-ghost-100">
-                <code>{source}</code>
-              </pre>
+              <div className="flex min-h-0 flex-1 flex-col gap-2">
+                <ul className="flex shrink-0 flex-wrap gap-1">
+                  {generated.map((file) => (
+                    <li key={file.path}>
+                      <button
+                        type="button"
+                        onClick={() => setSelected(file.path)}
+                        title={`compiled from ${file.from}`}
+                        className={`inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 font-mono text-[10px] transition-colors ${
+                          file.path === selected
+                            ? "border-line-gold text-gold-200"
+                            : "border-line-subtle text-fg-subtle hover:text-ghost-100"
+                        }`}
+                      >
+                        <FileCode2 aria-hidden className="size-2.5" />
+                        {file.path}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                <pre className="min-h-32 flex-1 overflow-auto rounded-control border border-line-subtle bg-night-1000/60 p-3 font-mono text-[12px] leading-relaxed text-ghost-100">
+                  <code>{source}</code>
+                </pre>
+              </div>
             )}
 
-            {compiled.skipped.length > 0 && (
+            {skipped.length > 0 && (
               <ul className="flex flex-col gap-1 rounded-control border border-warning/30 p-2">
-                {compiled.skipped.map((skip) => (
+                {skipped.map((skip) => (
                   <li key={skip.schema + skip.operation} className="text-[11px] text-warning">
                     <span className="font-mono">{skip.schema}</span> · {skip.operation}: {skip.reason}
                   </li>
@@ -218,11 +230,11 @@ export function GeneratePanel({ code, editor }: { code: string; editor: EditorHa
           </>
         )}
 
-        {!compiled && status !== "working" && (
+        {generated.length === 0 && status !== "working" && (
           <p className="rounded-control border border-line-subtle bg-night-1000/40 p-3 text-[11px] leading-relaxed text-fg-muted">
-            Generate turns the declarations above into an import-free module — the same output{" "}
-            <code className="font-mono text-ghost-200">jit generate</code> writes in a project. jit itself never ships
-            to production.
+            Generate compiles every file in the project into an import-free module, keeping the directories you
+            declared. It is the same output <code className="font-mono text-ghost-200">jit generate</code> writes in a
+            repository, and jit itself never ships to production.
           </p>
         )}
       </PanelBody>
@@ -230,16 +242,52 @@ export function GeneratePanel({ code, editor }: { code: string; editor: EditorHa
   );
 }
 
-/** The declarations the AOT compiler should look at. */
-function collectTopLevelNames(source: string): string[] {
-  const names = new Set<string>();
-  const pattern = /(?:^|\n)\s*(?:export\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+/** The output as the directory tree the CLI will create. */
+function OutputTree({ files, outputRoot }: { files: GeneratedFile[]; outputRoot: string }) {
+  const directories = [...new Set(files.map((file) => parentOf(file.path)).filter(Boolean))].sort();
 
-  for (const match of source.matchAll(pattern)) {
-    if (match[1]) names.add(match[1]);
-  }
+  return (
+    <div className="rounded-control border border-line-subtle bg-night-1000/40 p-3 font-mono text-[11px] text-fg-muted">
+      <p className="text-ghost-100">{outputRoot}/</p>
+      {directories.map((directory) => (
+        <p key={directory} className="pl-3 text-ghost-200">
+          {directory}/
+        </p>
+      ))}
+      {files.map((file) => (
+        <p key={file.path} className={parentOf(file.path) ? "pl-6" : "pl-3"}>
+          {file.path.slice(parentOf(file.path) ? parentOf(file.path).length + 1 : 0)}
+        </p>
+      ))}
+    </div>
+  );
+}
 
-  return [...names];
+function directoryCount(files: GeneratedFile[]): number {
+  return new Set(files.map((file) => parentOf(file.path))).size;
+}
+
+/** One compilation, with the worker terminated if it does not come back. */
+function compile(worker: Worker, id: number, request: Omit<LabCompilerRequest, "id">): Promise<LabCompilerResult> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error(`Compilation exceeded ${COMPILER_TIMEOUT_MS} ms`));
+    }, COMPILER_TIMEOUT_MS);
+
+    worker.onmessage = (event: MessageEvent<LabCompilerResponse>) => {
+      if (event.data.id !== id) return;
+      clearTimeout(timer);
+      if (event.data.ok) resolve(event.data.result);
+      else reject(new Error(event.data.error));
+    };
+    worker.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("The AOT compiler worker crashed"));
+    };
+
+    worker.postMessage({ ...request, id } satisfies LabCompilerRequest);
+  });
 }
 
 function installCommand(manager: string, token: string): string {

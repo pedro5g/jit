@@ -20,13 +20,18 @@ free-form JIT TypeScript
 ## Generate in the workspace
 
 Open the [workspace](/workspace?mode=generate) and switch to Generate. The
-import is written for you:
+workspace holds a project rather than a file: create files and directories in
+the tree on the left, and the layout you declare is the layout the CLI writes.
+
+The entrypoint import belongs to the workspace and cannot be edited away — it
+is the one line with a right answer, and which subpath it names is exactly what
+Run and Generate disagree about:
 
 ```ts
 import { JIT } from "@jit-compiler/jit/define";
 ```
 
-The rest of the editor is unrestricted TypeScript. Declare as many schemas and
+The rest of each file is unrestricted TypeScript. Declare as many schemas and
 compiled functions as the generated file needs:
 
 ```ts
@@ -44,18 +49,22 @@ There is no field form or predefined schema. Monaco loads the package
 declarations used by the Playground, so factory chains, operation selection
 and `JIT.Typeof` inference retain normal IntelliSense and diagnostics.
 
-Configure the left sidebar:
+A file may compose a schema out of another one. `import { schema as User } from
+"./user-schemas"` resolves against the tree, the imported file is compiled
+first, and each file keeps a scope of its own — so two files may both call their
+schema `schema` without colliding.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| file name | `schemas.generated` | basename of every generated entry file |
 | output directory | `src/generated/jit` | relative destination used by the CLI |
 | format | `TypeScript` | exactly typed `.ts` or ready-to-run `.js` |
 | package manager | `pnpm` | formats the reconstruction command only |
 
-Press **Generate**. The Output panel is the exact source that the CLI will
-write. TypeScript mode emits structural types and typed functions without an
-import from `@jit-compiler/jit`.
+Press **Generate**. Every file in the project is compiled into its own module
+at the same path, so `schemas/user.ts` generates `schemas/user.ts`, and the
+Output panel shows the tree the CLI will create. TypeScript mode emits
+structural types and typed functions without an import from
+`@jit-compiler/jit`.
 
 ```ts
 export type User = {

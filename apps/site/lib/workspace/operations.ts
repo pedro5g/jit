@@ -1,4 +1,5 @@
 import type { PlaygroundOp } from "@/lib/playground/worker";
+import type { WorkspaceProject } from "./project";
 
 /**
  * What the workspace can run, and the sample data each operation needs.
@@ -38,7 +39,48 @@ const schema = JIT.object({
 
 // full type inference — hover User:
 type User = JIT.Typeof<typeof schema>;
+
+const isUser = JIT.validate.is(schema);
+
+export { schema, isUser };
+export type { User };
 `;
+
+/**
+ * The project a first visit opens with.
+ *
+ * Two files rather than one, because the thing the workspace is for is a
+ * schema layer, and a schema layer is never a single file. `account-schemas.ts`
+ * reads a schema out of `user-schemas.ts`, so the tree also shows the part that
+ * is easy to get wrong: a file that depends on another is compiled after it,
+ * and generation mirrors the layout into the directory the CLI writes.
+ */
+export const STARTER_PROJECT: WorkspaceProject = {
+  activePath: "user-schemas.ts",
+  directories: [],
+  files: [
+    { path: "user-schemas.ts", source: DEFAULT_CODE },
+    {
+      path: "account-schemas.ts",
+      source: `import { JIT } from "@jit-compiler/jit/runtime";
+import { schema as User } from "./user-schemas";
+
+// a schema from another file is an ordinary value: compose it
+const schema = JIT.object({
+  id: JIT.string().uuid(),
+  owner: User,
+  plan: JIT.union(JIT.literal("free"), JIT.literal("pro")),
+  seats: JIT.number().int().min(1).max(500),
+});
+
+const isAccount = JIT.validate.is(schema);
+const parseAccount = JIT.validate.parse(schema);
+
+export { schema, isAccount, parseAccount };
+`,
+    },
+  ],
+};
 
 export const DEFAULT_INPUT = `{
   "id": 1,

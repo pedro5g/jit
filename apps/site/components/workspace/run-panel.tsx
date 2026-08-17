@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CopyButton } from "@/components/code/copy-button";
 import { Select } from "@/components/ui/select";
 import type { PlaygroundOp, PlaygroundResponse } from "@/lib/playground/worker";
+import { bundleUnits } from "@/lib/workspace/bundle";
 import { DEFAULT_INPUT, OPERATIONS } from "@/lib/workspace/operations";
+import { compilationOrder, type WorkspaceProject } from "@/lib/workspace/project";
 import { PanelBody, PanelToolbar, Tab } from "./panel-parts";
 import type { EditorHandle } from "./workspace-editor";
 
@@ -19,11 +21,14 @@ type RunState =
   | { status: "error"; message: string };
 
 /**
- * Runs the schema in the editor against real values, in a worker that can be
- * terminated. Every operation the engine exposes is here, and the ones that
- * can show their generated source do.
+ * Runs the file the reader is looking at against real values, in a worker that
+ * can be terminated. Every operation the engine exposes is here, and the ones
+ * that can show their generated source do.
+ *
+ * The file arrives linked to whatever it imports, so a schema composed out of
+ * another file runs here exactly as it would in a repository.
  */
-export function RunPanel({ code, editor }: { code: string; editor: EditorHandle | null }) {
+export function RunPanel({ project, editor }: { project: WorkspaceProject; editor: EditorHandle | null }) {
   const [op, setOp] = useState<PlaygroundOp>("validate");
   const [inputA, setInputA] = useState(DEFAULT_INPUT);
   const [inputB, setInputB] = useState("");
@@ -57,7 +62,12 @@ export function RunPanel({ code, editor }: { code: string; editor: EditorHandle 
     const id = runId.current;
     setState({ status: "running" });
 
-    const js = await editor.transpile(code);
+    const units = compilationOrder(project, project.activePath);
+    const js = bundleUnits(
+      await Promise.all(
+        units.map(async (unit) => ({ path: unit.path, code: await editor.transpile(unit.path, unit.source) }))
+      )
+    );
 
     workerRef.current ??= new Worker(new URL("../../lib/playground/worker.ts", import.meta.url));
     const worker = workerRef.current;
@@ -80,7 +90,7 @@ export function RunPanel({ code, editor }: { code: string; editor: EditorHandle 
     };
 
     worker.postMessage({ id, code: js, op, inputA, inputB });
-  }, [code, editor, inputA, inputB, op]);
+  }, [project, editor, inputA, inputB, op]);
 
   const response = state.status === "done" ? state.response : null;
   const source = response?.ok ? (response.source ?? "") : "";

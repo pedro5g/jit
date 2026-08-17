@@ -24,6 +24,12 @@ export interface WorkspaceWriteDetail {
   mode: "run" | "generate";
   /** Explains the edit in the workspace's undo banner. */
   reason: string;
+  /**
+   * Which file to write. The workspace holds a tree now, and an answer about
+   * accounts belongs in `account-schemas.ts` rather than on top of whatever
+   * file happened to be open. Absent means the file the reader is looking at.
+   */
+  path?: string | undefined;
 }
 
 /**
