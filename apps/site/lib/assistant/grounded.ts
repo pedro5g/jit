@@ -50,6 +50,8 @@ interface Copy {
   lead: (subject: string) => string;
   how: string;
   example: string;
+  /** Said when the floor answers a request it cannot answer specifically. */
+  general: string;
   source: string;
   more: string;
 }
@@ -59,6 +61,8 @@ const COPY: Record<"pt" | "en", Copy> = {
     lead: (subject) => subject,
     how: "Na prática:",
     example: "Na prática, em código:",
+    general:
+      "Não consegui escrever um exemplo para o seu caso. Este é o exemplo verificado mais próximo — adapte os campos para os seus:",
     source: "Fonte:",
     more: "Posso detalhar qualquer um desses pontos.",
   },
@@ -66,6 +70,8 @@ const COPY: Record<"pt" | "en", Copy> = {
     lead: (subject) => subject,
     how: "Concretely:",
     example: "In code:",
+    general:
+      "I could not write an example for your case. This is the closest verified one — swap the fields for yours:",
     source: "Source:",
     more: "I can go deeper on any of these.",
   },
@@ -119,8 +125,15 @@ export function groundedAnswer(understanding: Understanding, sections: Retrieved
   // answer to "why", not to "show me".
   const wantsCode = understanding.intent === "howto" || understanding.intent === "api";
 
+  /**
+   * Asked to write a schema for a password-reset code table, the floor handed
+   * over the documentation's `User` example with no warning that it was a
+   * different subject. The example is still the most useful thing available —
+   * it is verified and it shows the shape — but presenting it as the answer to
+   * a request it does not answer is what made the ghost look lost.
+   */
   if (wantsCode && node.example) {
-    parts.push(`${copy.example}\n\n\`\`\`ts\n${node.example}\n\`\`\``);
+    parts.push(`${copy.general}\n\n\`\`\`ts\n${node.example}\n\`\`\``);
   }
 
   if (how.length > 0 && !wantsCode) {

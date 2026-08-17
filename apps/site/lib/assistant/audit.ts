@@ -506,12 +506,27 @@ export function ungroundedClaims(answer: string, evidence: string): string[] {
 }
 
 /**
+ * How many unsourced sentences stop being a footnote and become the answer.
+ *
+ * One or two is a framing sentence sharing few words with the documentation.
+ * Six is not an answer with a problem in it — it is a different library being
+ * described. A reader who was shown one of those, correctly labelled, still
+ * read it first and believed it, which is exactly the outcome the label was
+ * supposed to prevent.
+ */
+const UNSOURCED_SENTENCES_THAT_ARE_FATAL = 3;
+
+/**
  * An invented name or a denied fact makes the answer actively misleading; an
- * unsupported figure or an unsourced sentence makes it thin. The first pair
+ * unsupported figure or a single unsourced sentence makes it thin. The first
  * has to be read before the answer is, the second is a footnote — a warning
  * placed under something a reader already believed arrives too late.
  */
 export function isSevere(finding: AuditFinding): boolean {
+  if (finding.kind === "ungrounded-claim") {
+    return finding.sentences.length >= UNSOURCED_SENTENCES_THAT_ARE_FATAL;
+  }
+
   return (
     finding.kind === "invented-api" ||
     finding.kind === "invented-method" ||

@@ -524,8 +524,17 @@ export function useAssistant() {
          * executes, so the ghost hands over that one and says where it came
          * from.
          */
+        /**
+         * Only when the prose is sound. An answer whose sentences are not in
+         * the sections is not an answer with a bad example in it, and swapping
+         * the block would leave the reader with invented paragraphs under a
+         * verified snippet — which reads as if the paragraphs were verified
+         * too. Those go to the floor below instead.
+         */
         const severe = attempt.findings.filter(isSevere);
-        if (severe.length > 0 && severe.every(isAboutTheExample)) {
+        const proseIsSound = !attempt.findings.some((finding) => finding.kind === "ungrounded-claim");
+
+        if (severe.length > 0 && proseIsSound && severe.every(isAboutTheExample)) {
           const verified = verifiedExampleFor(understanding);
 
           if (verified) {

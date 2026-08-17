@@ -165,17 +165,38 @@ export class AssistantEngine {
       queryVector = embedded[0] ?? null;
     }
 
-    return retriever.search(query, {
-      limit: 6,
-      currentUrl,
-      queryVector,
-      conceptTerms: understanding ? conceptTerms(understanding.concepts) : [],
-      allowHistory: understanding?.wantsHistory ?? true,
-      conceptPages: understanding ? conceptPages(understanding.concepts) : [],
-    });
+    return distinct(
+      retriever.search(query, {
+        limit: 6,
+        currentUrl,
+        queryVector,
+        conceptTerms: understanding ? conceptTerms(understanding.concepts) : [],
+        allowHistory: understanding?.wantsHistory ?? true,
+        conceptPages: understanding ? conceptPages(understanding.concepts) : [],
+      })
+    );
   }
 
   dispose() {
     this.host.dispose();
   }
+}
+
+/**
+ * One entry per passage, not per slice of it.
+ *
+ * A long heading is indexed as several parts, and all of them rank together —
+ * so "why the generated code is fast" was cited three times in a row, as three
+ * separate-looking sources that are one section. The highest-scoring slice
+ * stands for the passage; the rest were never a second opinion.
+ */
+function distinct(sections: RetrievedSection[]): RetrievedSection[] {
+  const best = new Map<string, RetrievedSection>();
+
+  for (const section of sections) {
+    const key = `${section.section.url.split("#")[0]}#${section.section.heading}`;
+    if (!best.has(key)) best.set(key, section);
+  }
+
+  return [...best.values()];
 }

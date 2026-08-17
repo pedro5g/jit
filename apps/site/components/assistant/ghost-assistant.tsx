@@ -504,6 +504,9 @@ function Turn({
   onRegenerate: () => void;
 }) {
   const severe = message.findings.filter(isSevere);
+  // every code block already carries its own "run it" button, so repeating it
+  // in the action row offered the same thing twice under one answer
+  const offered = message.actions.filter((action) => action.kind !== "workspace");
 
   return (
     <div className="flex gap-2.5">
@@ -531,9 +534,9 @@ function Turn({
 
             {message.performed.length > 0 && <Performed actions={message.performed} />}
 
-            {message.actions.length > 0 && !message.streaming && (
+            {offered.length > 0 && !message.streaming && (
               <ul className="mt-2.5 flex flex-wrap gap-1.5">
-                {message.actions.map((action) => (
+                {offered.map((action) => (
                   <li key={action.kind + action.label}>
                     <button
                       type="button"

@@ -294,7 +294,7 @@ export function followUpsFor(sections: RetrievedSection[], asked: string): strin
   for (const { section } of sections.slice(1)) {
     const ambiguous = (headingCounts.get(normalize(section.heading)) ?? 0) > 1;
     const subject = ambiguous ? `${section.heading} in ${section.page}` : section.heading;
-    const question = `How does ${subject} work?`;
+    const question = questionFor(subject);
 
     if (seen.has(normalize(question))) continue;
 
@@ -304,6 +304,20 @@ export function followUpsFor(sections: RetrievedSection[], asked: string): strin
   }
 
   return questions;
+}
+
+/**
+ * A heading is sometimes a noun and sometimes already a sentence. Wrapping
+ * both in the same template produced "How does Why the generated code is fast
+ * in Why jit exists work?", which is not a question anyone would type.
+ */
+function questionFor(subject: string): string {
+  if (/^(why|how|what|when|where|which|should|can|do|does)\b/i.test(subject)) {
+    return subject.endsWith("?") ? subject : `${subject}?`;
+  }
+  if (subject.split(/\s+/).length > 5) return `Tell me about ${subject}.`;
+
+  return `How does ${subject} work?`;
 }
 
 function normalize(value: string): string {
