@@ -3,6 +3,29 @@ import type { RetrievedSection } from "./types";
 import type { Understanding } from "./understanding";
 
 /**
+ * Code that is known to work, for when the model's own could not be made to.
+ *
+ * Both sources are executed by the test suite on every run — the recipes in
+ * `solutions.ts` and the demonstration each concept carries — so an example
+ * taken from here has already been run against the real library today. It is
+ * the floor under a generated example, not a replacement for one: it answers
+ * the subject rather than the reader's exact question.
+ */
+export function verifiedExampleFor(understanding: Understanding): string | null {
+  const recipe = understanding.solutions[0];
+  if (recipe) return recipe.example;
+
+  for (const match of understanding.concepts) {
+    if (match.weight !== 1) continue;
+
+    const example = conceptById(match.id)?.example;
+    if (example) return example;
+  }
+
+  return null;
+}
+
+/**
  * The answer written from what is already known to be true.
  *
  * The models here are small — 0.8B by default — and there is a class of

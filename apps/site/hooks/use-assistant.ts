@@ -12,7 +12,9 @@ import {
 import { type AuditFinding, audit, isSevere } from "@/lib/assistant/audit";
 import { GENERATION_MODELS, type GenerationModel } from "@/lib/assistant/catalog";
 import { AssistantEngine } from "@/lib/assistant/engine";
-import { canAnswerFromGround, groundedAnswer } from "@/lib/assistant/grounded";
+import { describeFailure, mainExample, replaceMainExample } from "@/lib/assistant/example";
+import { createExampleVerifier, type ExampleVerifier } from "@/lib/assistant/example-runner";
+import { canAnswerFromGround, groundedAnswer, verifiedExampleFor } from "@/lib/assistant/grounded";
 import { inspectModel, type ModelPresence } from "@/lib/assistant/model-store";
 import { withRemainingTime } from "@/lib/assistant/progress";
 import { followUpsFor } from "@/lib/assistant/prompt";
@@ -46,6 +48,46 @@ const HISTORY_TURNS = 6;
  */
 const MAX_REPAIRS = 2;
 
+/**
+ * Characters between progress updates while the model writes. Small enough
+ * that the counter never looks stuck, large enough that a 300-token answer
+ * costs a handful of renders rather than one per token.
+ */
+const PROGRESS_STEP_CHARS = 48;
+
+/** Said under an example that came from the docs rather than from the model. */
+const VERIFIED_EXAMPLE_NOTE: Record<"pt" | "en", string> = {
+  pt: "Este exemplo vem da documentação e é executado pela suíte de testes. Não consegui escrever um que funcionasse para a sua pergunta.",
+  en: "This example comes from the documentation and is executed by the test suite. I could not write one of my own that ran.",
+};
+
+/** Findings that are about the code block rather than about the answer. */
+function isAboutTheExample(finding: AuditFinding): boolean {
+  return finding.kind === "example-failed" || finding.kind === "unusable-example";
+}
+
+/**
+ * Where an answer is in the pipeline, for a reader watching it happen.
+ *
+ * This replaces watching the text itself arrive. A streamed draft is the
+ * model's first attempt, and the first attempt is the one the audit most often
+ * rejects: the reader would read a wrong answer, believe it, and then watch it
+ * be replaced by a different one. Nothing about that sequence tells them which
+ * of the two to trust. So the text stays hidden until it has been checked, and
+ * what moves on screen is the work actually being done.
+ */
+export type AnswerStage =
+  /** Ranking the documentation for the question. */
+  | "reading"
+  /** The model is generating. */
+  | "writing"
+  /** Checking names, figures and claims against the real library. */
+  | "checking"
+  /** Executing the example it wrote. */
+  | "running"
+  /** The check failed and the model is rewriting. */
+  | "correcting";
+
 /** Something the ghost did on its own, shown in the transcript after the answer. */
 export interface PerformedAction {
   label: string;
@@ -64,13 +106,15 @@ export interface AssistantMessage {
   followUps: string[];
   /** What the audit found wrong with the answer before it was shown. */
   findings: AuditFinding[];
-  /** Set while the answer is still arriving. */
+  /** Set while the answer is still being produced and checked. */
   streaming?: boolean;
+  /** What is happening right now, while `streaming` is set. */
+  stage?: AnswerStage;
   /**
-   * The audit rejected the previous attempt and the model is rewriting it.
-   * Shown so a reader watching the text change knows why it changed.
+   * Characters the model has produced so far. The text stays hidden until it
+   * has been checked, so this is what shows the reader it is still moving.
    */
-  repairing?: boolean;
+  written?: number;
   /** How many rewrites it took, when it took any. */
   attempts?: number;
   error?: string;
@@ -124,6 +168,7 @@ function splitActions(
 export function useAssistant() {
   const engineRef = useRef<AssistantEngine | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const verifierRef = useRef<ExampleVerifier | null>(null);
   const nextId = useRef(1);
   /** What the last question turned out to be about, for continuity checks. */
   const lastUnderstanding = useRef<Understanding | null>(null);
@@ -140,10 +185,17 @@ export function useAssistant() {
     return engineRef.current;
   }, []);
 
+  /** Created on the first answer that contains code, and reused after that. */
+  const verifier = useCallback(() => {
+    verifierRef.current ??= createExampleVerifier();
+    return verifierRef.current;
+  }, []);
+
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
       engineRef.current?.dispose();
+      verifierRef.current?.dispose();
     };
   }, []);
 
@@ -313,6 +365,7 @@ export function useAssistant() {
           followUps: [],
           findings: [],
           streaming: true,
+          stage: "reading",
         },
       ]);
 
@@ -357,6 +410,7 @@ export function useAssistant() {
 
           update({
             streaming: false,
+            stage: undefined,
             content: withoutModel,
             ...splitActions(options.perform?.(derived, { asksToNavigate: understanding.asksToNavigate }), derived),
           });
@@ -383,16 +437,37 @@ export function useAssistant() {
         };
 
         /**
+         * Everything that decides whether an answer may be shown.
+         *
+         * The static half reads the answer against the library's real surface.
+         * The other half runs the example: a block that throws, loops or uses
+         * a value it never declared is not a style problem, it is an answer
+         * that does not work, and a regular expression cannot see it.
+         */
+        const judge = async (text: string) => {
+          const findings = audit(text, auditContext);
+          const block = mainExample(text);
+          if (!block) return findings;
+
+          update({ stage: "running" });
+          const failure = await verifier().verify(block);
+          if (failure) findings.push({ kind: "example-failed", reason: describeFailure(failure) });
+
+          return findings;
+        };
+
+        /**
          * One generation, judged when it lands.
          *
-         * Only the first attempt paints itself on screen. A rewrite used to
-         * stream too, so the reader watched an answer appear, get replaced by
-         * a second, then a third — the correction loop working correctly and
-         * looking exactly like the model losing its mind. A retry now happens
-         * behind a "checking" state and the accepted text is swapped in once.
+         * Nothing paints on screen while it arrives. The reader sees the stage
+         * and how much has been written, and reads the answer once — after it
+         * has been checked. Watching a wrong first attempt be replaced by a
+         * right second one taught them only that the ghost changes its mind.
          */
-        const runPass = async (messages: { role: "user" | "assistant"; content: string }[], visible: boolean) => {
+        const runPass = async (messages: { role: "user" | "assistant"; content: string }[]) => {
           let raw = "";
+          let shown = 0;
+
           for await (const delta of selected.generate({
             messages,
             context: sources,
@@ -405,17 +480,21 @@ export function useAssistant() {
             signal: controller.signal,
           })) {
             raw += delta;
-            if (!visible) continue;
+            // a counter that moves is enough; re-rendering per token is not
+            if (raw.length - shown < PROGRESS_STEP_CHARS) continue;
 
-            const streamed = parseActions(raw, context);
-            update({ content: streamed.text, actions: mergeActions(streamed.actions, derived) });
+            shown = raw.length;
+            update({ written: shown });
           }
 
+          update({ written: raw.length, stage: "checking" });
           const text = parseActions(raw, context).text;
-          return { raw, text, findings: audit(text, auditContext) };
+
+          return { raw, text, findings: await judge(text) };
         };
 
-        let attempt = await runPass(baseMessages, true);
+        update({ stage: "writing" });
+        let attempt = await runPass(baseMessages);
 
         // Generate, audit, correct, repeat. The audit already knows precisely
         // what is wrong and the model is still warm, so a wrong answer is worth
@@ -424,17 +503,38 @@ export function useAssistant() {
           const correction = repairTurn(attempt.text, attempt.findings, engine().surface);
           if (!correction) break;
 
-          update({ repairing: true, attempts: round + 2 });
-          const retry = await runPass(
-            [
-              ...baseMessages,
-              { role: "assistant" as const, content: attempt.raw },
-              { role: "user" as const, content: correction },
-            ],
-            false
-          );
+          update({ stage: "correcting", attempts: round + 2, written: 0 });
+          const retry = await runPass([
+            ...baseMessages,
+            { role: "assistant" as const, content: attempt.raw },
+            { role: "user" as const, content: correction },
+          ]);
 
           attempt = betterAttempt(attempt, retry);
+        }
+
+        /**
+         * When only the example is beyond saving, keep the answer and replace
+         * the example.
+         *
+         * The prose passed every check; the block did not run. Throwing the
+         * whole answer away for that loses an explanation the reader can use,
+         * and showing a broken block under it is worse. The documentation
+         * already contains an example of this subject that the test suite
+         * executes, so the ghost hands over that one and says where it came
+         * from.
+         */
+        const severe = attempt.findings.filter(isSevere);
+        if (severe.length > 0 && severe.every(isAboutTheExample)) {
+          const verified = verifiedExampleFor(understanding);
+
+          if (verified) {
+            attempt = {
+              raw: attempt.raw,
+              text: replaceMainExample(attempt.text, verified, VERIFIED_EXAMPLE_NOTE[understanding.language]),
+              findings: attempt.findings.filter((finding) => !isAboutTheExample(finding)),
+            };
+          }
         }
 
         /**
@@ -455,10 +555,13 @@ export function useAssistant() {
 
         if (grounded) attempt = { raw: grounded, text: grounded, findings: [] };
 
+        // The tags come from what the model wrote; the answer is what survived
+        // judging, which is not the same string once an example was replaced.
         const parsed = parseActions(attempt.raw, context);
+        const answer = attempt.text;
         // a schema the ghost wrote is an action too, and the one the reader
         // most likely wants carried out
-        const written = codeActionFrom(parsed.text);
+        const written = codeActionFrom(answer);
         const demo = demoActionFor(written, options.currentUrl);
         const fromModel = [written, demo, ...parsed.actions].filter((action): action is AssistantAction =>
           Boolean(action)
@@ -467,9 +570,9 @@ export function useAssistant() {
         // acting only once the answer is complete: navigating mid-sentence
         // pulls the page out from under whoever is still reading it
         update({
-          content: parsed.text,
+          content: answer,
           streaming: false,
-          repairing: false,
+          stage: undefined,
           // whatever survived the last pass — the banner reports only what the
           // model could not be talked out of
           findings: attempt.findings,
@@ -487,7 +590,7 @@ export function useAssistant() {
         setBusy(false);
       }
     },
-    [busy, engine, messages]
+    [busy, engine, messages, verifier]
   );
 
   return {

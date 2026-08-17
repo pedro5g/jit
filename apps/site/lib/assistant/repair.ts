@@ -105,6 +105,17 @@ export function repairTurn(answer: string, findings: AuditFinding[], surface: Ap
       problems.push(`Your code example is wrong: ${finding.reason}`);
     }
 
+    /**
+     * The one correction that comes from evidence rather than from reading.
+     * The example was executed, so this is not an opinion about the code — it
+     * is what happened when it ran, quoted back.
+     */
+    if (finding.kind === "example-failed") {
+      problems.push(
+        `Your example was executed against the real library and ${finding.reason} Write it so it runs exactly as printed: declare every schema and every value it uses, compile the operation, and call it with sample data written in the example itself.`
+      );
+    }
+
     if (finding.kind === "degenerated") {
       problems.push(
         `Your previous output was not an answer: ${finding.reason} Reply in plain prose, with at most one short code block, and stop when the question is answered.`

@@ -26,6 +26,11 @@ export type AuditFinding =
   | { kind: "invented-cli"; names: string[] }
   /** Showed code that does not demonstrate the library, or does not work. */
   | { kind: "unusable-example"; reason: string }
+  /**
+   * The example was executed against the real library and did not work. Every
+   * other finding reads the answer; this one is the result of running it.
+   */
+  | { kind: "example-failed"; reason: string }
   /** The generation came apart: a repetition loop, or raw machine output. */
   | { kind: "degenerated"; reason: string }
   /** Made a technical claim nothing it was given supports. */
@@ -514,6 +519,7 @@ export function isSevere(finding: AuditFinding): boolean {
     finding.kind === "contradiction" ||
     // a reader copies an example before they finish reading the prose
     finding.kind === "unusable-example" ||
+    finding.kind === "example-failed" ||
     finding.kind === "degenerated"
   );
 }

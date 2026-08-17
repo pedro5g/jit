@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Check,
   Maximize2,
   Minimize2,
   MousePointerClick,
@@ -22,7 +23,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AssistantAnswer, AssistantSources, FollowUps } from "@/components/assistant/assistant-answer";
 import { ModelPicker } from "@/components/assistant/model-picker";
 import { JitGhost } from "@/components/brand/jit-ghost";
-import { type AssistantMessage, type PerformContext, type PerformedAction, useAssistant } from "@/hooks/use-assistant";
+import {
+  type AnswerStage,
+  type AssistantMessage,
+  type PerformContext,
+  type PerformedAction,
+  useAssistant,
+} from "@/hooks/use-assistant";
 import { type AssistantAction, planActions } from "@/lib/assistant/actions";
 import { type AuditFinding, isSevere } from "@/lib/assistant/audit";
 import {
@@ -476,12 +483,10 @@ function Turn({
               </p>
             )}
 
-            {message.streaming && message.content === "" ? (
-              <Thinking sources={message.sources} />
+            {message.streaming ? (
+              <Working message={message} />
             ) : (
-              <div className={message.streaming ? "assistant-streaming" : undefined}>
-                <AssistantAnswer content={message.content} sources={message.sources} onRunCode={onRunCode} />
-              </div>
+              <AssistantAnswer content={message.content} sources={message.sources} onRunCode={onRunCode} />
             )}
 
             {message.performed.length > 0 && <Performed actions={message.performed} />}
@@ -571,6 +576,10 @@ function describe(finding: AuditFinding): string {
     return `The code example does not work: ${finding.reason}`;
   }
 
+  if (finding.kind === "example-failed") {
+    return `I ran this example before showing it, and ${finding.reason}`;
+  }
+
   if (finding.kind === "degenerated") {
     return `The model's output came apart: ${finding.reason}`;
   }
@@ -587,28 +596,69 @@ function describe(finding: AuditFinding): string {
   return `Nothing in the sources supports ${plural ? "these claims" : "this claim"}: ${finding.sentences.map((sentence) => `"${sentence}"`).join(" ")}`;
 }
 
+/** The stages, in the order they happen, with what each one is doing. */
+const STAGES: { id: AnswerStage; label: string }[] = [
+  { id: "reading", label: "reading the docs" },
+  { id: "writing", label: "writing the answer" },
+  { id: "checking", label: "checking it against the library" },
+  { id: "running", label: "running the example" },
+  { id: "correcting", label: "correcting what failed" },
+];
+
 /**
- * The pause before the first token. Naming the sections it just pulled is more
- * honest than a spinner and more useful: the reader can already see whether the
- * ghost found the right part of the docs, before a single word is generated.
+ * What the ghost is doing, while it is doing it.
+ *
+ * The answer itself is not shown until it has been checked, so this is the
+ * whole of the wait. It is built to be worth reading rather than to fill the
+ * gap: the sections it found are already on screen, so a reader can tell
+ * whether the ghost is looking in the right place before a word is generated,
+ * and "running the example" is a real step with a real outcome rather than a
+ * spinner with a caption.
  */
-function Thinking({ sources }: { sources: AssistantMessage["sources"] }) {
+function Working({ message }: { message: AssistantMessage }) {
+  const stage = message.stage ?? "reading";
+  const reached = STAGES.findIndex((entry) => entry.id === stage);
+  // correcting is a second pass over the same ground, so nothing before it is
+  // "done" in the way the first pass was
+  const passed = stage === "correcting" ? STAGES.length : reached;
+
   return (
-    <div className="flex flex-col gap-1 py-1">
-      <p className="flex items-center gap-1.5 text-xs text-fg-subtle">
-        <span className="assistant-dot" />
-        <span className="assistant-dot" style={{ animationDelay: "0.15s" }} />
-        <span className="assistant-dot" style={{ animationDelay: "0.3s" }} />
-        <span className="ml-1">{sources.length === 0 ? "searching the docs" : "reading"}</span>
-      </p>
-      {sources.slice(0, 3).map((source) => (
-        <p
-          key={source.section.url + source.section.part}
-          className="truncate pl-1 font-mono text-[10px] text-fg-subtle"
-        >
-          {source.section.page} — {source.section.heading}
-        </p>
-      ))}
+    <div className="flex flex-col gap-1.5 py-1">
+      <ol className="flex flex-col gap-1">
+        {STAGES.map((entry, index) => {
+          if (index > reached) return null;
+          const active = entry.id === stage;
+
+          return (
+            <li key={entry.id} className="flex items-center gap-1.5 text-xs">
+              {active ? (
+                <span className="flex items-center gap-0.5">
+                  <span className="assistant-dot" />
+                  <span className="assistant-dot" style={{ animationDelay: "0.15s" }} />
+                  <span className="assistant-dot" style={{ animationDelay: "0.3s" }} />
+                </span>
+              ) : (
+                <Check aria-hidden className="size-3 shrink-0 text-success" />
+              )}
+              <span className={active ? "text-ghost-100" : "text-fg-subtle"}>
+                {entry.label}
+                {active && entry.id === "writing" && message.written ? ` · ${message.written} chars` : ""}
+                {active && entry.id === "correcting" && message.attempts ? ` · attempt ${message.attempts}` : ""}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      {passed >= 0 &&
+        message.sources.slice(0, 3).map((source) => (
+          <p
+            key={source.section.url + source.section.part}
+            className="truncate pl-1 font-mono text-[10px] text-fg-subtle"
+          >
+            {source.section.page} · {source.section.heading}
+          </p>
+        ))}
     </div>
   );
 }

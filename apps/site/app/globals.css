@@ -478,20 +478,8 @@ button {
   }
 }
 
-.assistant-streaming p:last-of-type::after {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  background: var(--gold-200);
-  animation: cursor-blink 1s steps(2) infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .assistant-dot,
-  .assistant-streaming p:last-of-type::after {
+  .assistant-dot {
     animation: none;
   }
 }
