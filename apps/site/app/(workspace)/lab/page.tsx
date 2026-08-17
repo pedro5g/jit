@@ -1,11 +1,6 @@
-import type { Metadata } from "next";
-import { ArtifactLab } from "@/components/lab/artifact-lab";
+import { permanentRedirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Artifact Lab",
-  description: "Write JIT schemas, inspect exact AOT output and create a signed reconstruction reference.",
-};
-
+/** The Lab is the workspace's generate mode now. */
 export default function LabPage() {
-  return <ArtifactLab />;
+  permanentRedirect("/workspace?mode=generate");
 }

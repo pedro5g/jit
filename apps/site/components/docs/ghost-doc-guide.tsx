@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { type GhostState, JitGhost } from "@/components/brand/jit-ghost";
 import { useGhostVisibility } from "@/hooks/use-ghost-visibility";
+import { ASSISTANT_OPEN_EVENT, HIGHLIGHT_EVENT, type HighlightDetail } from "@/lib/assistant/bus";
 
 const GHOST_SIZE = 60;
 const LANE_WIDTH = 88;
@@ -86,6 +87,42 @@ export function GhostDocGuide() {
     }, 22);
     return () => clearInterval(interval);
   }, [target]);
+
+  /**
+   * The ghost pointing at something because it was asked to. Scrolling the
+   * heading into view is enough: the guide already tracks whatever sits at the
+   * reading line, so it flies there on the very next frame.
+   */
+  useEffect(() => {
+    const onHighlight = (event: Event) => {
+      const { heading } = (event as CustomEvent<HighlightDetail>).detail;
+      const wanted = heading.trim().toLowerCase();
+      if (!wanted) return;
+
+      const article = document.querySelector("article#nd-page") ?? document.querySelector("article");
+      if (!article) return;
+
+      // A heading is the usual target, but the ghost also points at the code
+      // block or the sentence that answers the question — so anything the
+      // reader can see is a candidate, headings first because they are the
+      // landmark someone scrolling actually recognizes.
+      const headings = Array.from(article.querySelectorAll<HTMLElement>("h1, h2[id], h3[id], h4[id]"));
+      const passages = Array.from(article.querySelectorAll<HTMLElement>("pre, li, p, table"));
+
+      const match =
+        headings.find((element) => element.textContent?.trim().toLowerCase().startsWith(wanted)) ??
+        headings.find((element) => element.textContent?.toLowerCase().includes(wanted)) ??
+        passages.find((element) => element.textContent?.toLowerCase().includes(wanted));
+      if (!match) return;
+
+      match.scrollIntoView({ behavior: "smooth", block: "center" });
+      match.classList.add("guide-pointed");
+      setTimeout(() => match.classList.remove("guide-pointed"), 2200);
+    };
+
+    window.addEventListener(HIGHLIGHT_EVENT, onHighlight);
+    return () => window.removeEventListener(HIGHLIGHT_EVENT, onHighlight);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(pathname): targets must be re-collected when the docs route changes
   useEffect(() => {
@@ -252,6 +289,20 @@ export function GhostDocGuide() {
                     {typed}
                     {typed.length < target.tip.length && <span aria-hidden className="guide-caret" />}
                   </span>
+                  {/* the guide points at a section; the assistant explains it */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent(ASSISTANT_OPEN_EVENT, {
+                          detail: { question: `Explain "${target.text}" in this page` },
+                        })
+                      )
+                    }
+                    className="mt-1 self-start text-[10px] text-gold-200 hover:underline"
+                  >
+                    ask about this ↗
+                  </button>
                 </output>
                 <button
                   type="button"

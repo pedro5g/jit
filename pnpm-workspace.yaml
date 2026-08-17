@@ -7,6 +7,10 @@ allowBuilds:
   sharp: true
   "@tailwindcss/oxide": true
   unrs-resolver: true
+  # Node-only native bindings pulled in by @huggingface/transformers. The
+  # assistant runs the WebGPU browser build, so these are never used.
+  onnxruntime-node: false
+  protobufjs: false
 
 minimumReleaseAgeExclude:
   - '@fumadocs/tailwind@0.1.1'

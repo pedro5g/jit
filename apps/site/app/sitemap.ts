@@ -26,7 +26,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 1,
     },
-    { url: `${siteUrl}/playground`, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${siteUrl}/workspace`, changeFrequency: "monthly", priority: 0.7 },
     ...benchmarks,
     ...docs,
   ];

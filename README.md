@@ -14,7 +14,7 @@ import { JIT } from "@jit-compiler/jit/runtime";
 const User = JIT.object({
   id: JIT.int().positive(),
   email: JIT.string().email(),
-  role: JIT.oneOf("admin", "user"),
+  role: JIT.enum(["admin", "user"] as const),
 });
 
 const parseUser = JIT.validate.safeParse(User);

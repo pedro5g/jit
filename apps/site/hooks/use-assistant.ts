@@ -9,9 +9,10 @@ import {
   mergeActions,
   parseActions,
 } from "@/lib/assistant/actions";
-import { type AuditFinding, audit } from "@/lib/assistant/audit";
+import { type AuditFinding, audit, isSevere } from "@/lib/assistant/audit";
 import { GENERATION_MODELS, type GenerationModel } from "@/lib/assistant/catalog";
 import { AssistantEngine } from "@/lib/assistant/engine";
+import { canAnswerFromGround, groundedAnswer } from "@/lib/assistant/grounded";
 import { inspectModel, type ModelPresence } from "@/lib/assistant/model-store";
 import { withRemainingTime } from "@/lib/assistant/progress";
 import { followUpsFor } from "@/lib/assistant/prompt";
@@ -344,11 +345,19 @@ export function useAssistant() {
 
         const selected = engine().selectProvider();
         if (!selected || (await selected.availability()) !== "ready") {
+          // No model at all, but the verified answer needs none: for an
+          // explanatory question the concept graph already holds it, so a
+          // reader on an unsupported browser gets the substance rather than an
+          // apology and a link.
+          const withoutModel =
+            (canAnswerFromGround(understanding) ? groundedAnswer(understanding, sources) : null) ??
+            (sources.length
+              ? "Here is where that lives in the docs. Load a local model and I can explain it in your own words."
+              : "I could not find anything about that in the documentation.");
+
           update({
             streaming: false,
-            content: sources.length
-              ? "Here is where that lives in the docs. Load a local model and I can explain it in your own words."
-              : "I could not find anything about that in the documentation.",
+            content: withoutModel,
             ...splitActions(options.perform?.(derived, { asksToNavigate: understanding.asksToNavigate }), derived),
           });
           return;
@@ -373,8 +382,16 @@ export function useAssistant() {
           ],
         };
 
-        /** One generation, streamed to the screen and judged when it lands. */
-        const runPass = async (messages: { role: "user" | "assistant"; content: string }[]) => {
+        /**
+         * One generation, judged when it lands.
+         *
+         * Only the first attempt paints itself on screen. A rewrite used to
+         * stream too, so the reader watched an answer appear, get replaced by
+         * a second, then a third — the correction loop working correctly and
+         * looking exactly like the model losing its mind. A retry now happens
+         * behind a "checking" state and the accepted text is swapped in once.
+         */
+        const runPass = async (messages: { role: "user" | "assistant"; content: string }[], visible: boolean) => {
           let raw = "";
           for await (const delta of selected.generate({
             messages,
@@ -388,6 +405,8 @@ export function useAssistant() {
             signal: controller.signal,
           })) {
             raw += delta;
+            if (!visible) continue;
+
             const streamed = parseActions(raw, context);
             update({ content: streamed.text, actions: mergeActions(streamed.actions, derived) });
           }
@@ -396,7 +415,7 @@ export function useAssistant() {
           return { raw, text, findings: audit(text, auditContext) };
         };
 
-        let attempt = await runPass(baseMessages);
+        let attempt = await runPass(baseMessages, true);
 
         // Generate, audit, correct, repeat. The audit already knows precisely
         // what is wrong and the model is still warm, so a wrong answer is worth
@@ -406,14 +425,35 @@ export function useAssistant() {
           if (!correction) break;
 
           update({ repairing: true, attempts: round + 2 });
-          const retry = await runPass([
-            ...baseMessages,
-            { role: "assistant" as const, content: attempt.raw },
-            { role: "user" as const, content: correction },
-          ]);
+          const retry = await runPass(
+            [
+              ...baseMessages,
+              { role: "assistant" as const, content: attempt.raw },
+              { role: "user" as const, content: correction },
+            ],
+            false
+          );
 
           attempt = betterAttempt(attempt, retry);
         }
+
+        /**
+         * When every attempt still fails, stop asking the model to say it.
+         *
+         * A 0.8B model handed six correct sections about why jit is fast still
+         * produced "compila o código na memória da memória RAM" and an example
+         * running a SQL query. Showing the reader its third attempt, wrong and
+         * labelled wrong, serves nobody — the right answer is already written
+         * down and verified in the concept graph, so the ghost says that
+         * instead. Only for explanatory questions: a how-to needs code shaped
+         * to what the reader is building, which a fixed paragraph cannot do.
+         */
+        const grounded =
+          attempt.findings.some(isSevere) && canAnswerFromGround(understanding)
+            ? groundedAnswer(understanding, sources)
+            : null;
+
+        if (grounded) attempt = { raw: grounded, text: grounded, findings: [] };
 
         const parsed = parseActions(attempt.raw, context);
         // a schema the ghost wrote is an action too, and the one the reader

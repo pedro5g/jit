@@ -148,10 +148,37 @@ function jitCodeBlocks(answer: string): string[] {
  * code with the jit version is doing something useful, and does it by showing
  * both.
  */
+/**
+ * Technology the answer drifted into.
+ *
+ * A model that has lost the thread reaches for whatever its training data
+ * associates with the words in front of it, and "query" plus "data engine" is
+ * enough to produce `User.query('SELECT * FROM users WHERE id = ?')` in the
+ * middle of an answer about compiling schemas. jit has no database, no
+ * connection, and no SQL, so any of this in an example is a hallucination with
+ * a very clear fingerprint — worth naming exactly, because a reader who sees
+ * SQL assumes the library has a database layer they have not found yet.
+ */
+const FOREIGN_TECHNOLOGY: [pattern: RegExp, name: string][] = [
+  [/\b(?:SELECT|INSERT INTO|UPDATE\s+\w+\s+SET|DELETE FROM)\b[\s\S]{0,60}\bFROM\b|\bSELECT\s+\*/i, "SQL"],
+  [/\b(?:mongoose|prisma|sequelize|knex|typeorm|drizzle)\b/i, "another ORM"],
+  [/\b(?:createConnection|getRepository|\.collection\(|\.findOne\(|\.aggregate\(\[)/, "a database client"],
+  [/\b(?:express|fastify|useState|useEffect|createSlice)\s*\(/, "an unrelated framework"],
+];
+
 export function unusableExample(answer: string): string | null {
   const blocks = scriptBlocks(answer);
   if (blocks.length === 0) return null;
-  if (blocks.some((code) => /\bJIT\./.test(code))) return null;
+
+  const code = blocks.join("\n");
+
+  for (const [pattern, name] of FOREIGN_TECHNOLOGY) {
+    if (pattern.test(code)) {
+      return `it contains ${name}, which has nothing to do with jit — jit compiles schemas, it is not a database or a framework. Remove it and write the example with JIT.* only.`;
+    }
+  }
+
+  if (blocks.some((block) => /\bJIT\./.test(block))) return null;
 
   return "it is plain JavaScript that never calls jit, so it does not show the reader how to do anything with the library. Write the example with JIT.* instead.";
 }

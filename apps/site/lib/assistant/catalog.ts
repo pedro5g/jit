@@ -25,22 +25,27 @@ const GIB = 1024 * 1024 * 1024;
 const MIB = 1024 * 1024;
 
 /**
- * Ordered lightest first. The default is the smallest model that can follow
- * "answer from these sections and emit an action tag", because a reader who
- * has to wait for three gigabytes before their first answer never gets one.
+ * Ordered lightest first, but the default is the second one.
  *
- * It is the floor, not a recommendation: measured against real questions it
- * navigates correctly and still states things backwards and invents API names,
- * which is why answers are verified against the real surface before they are
- * shown. Readers who want the answers themselves to be right should move up
- * one size.
+ * The 0.8B was the default for a while, on the reasoning that a reader who has
+ * to wait for a gigabyte never gets a first answer. Measured against real
+ * questions, it navigates correctly and then states things backwards, invents
+ * API names, and — asked why jit is fast, with six correct sections in front
+ * of it — writes "compila o código na memória da memória RAM" and an example
+ * running a SQL query. Every audit and rewrite in this pipeline still could not
+ * make it right, because the problem was never the evidence.
+ *
+ * So the download is twice the size and the answers are worth reading. The
+ * 0.8B stays available for machines that cannot spare the memory, labelled for
+ * what it is.
  */
 export const GENERATION_MODELS: GenerationModel[] = [
   {
     id: "qwen3.5-0.8b",
     repo: "onnx-community/Qwen3.5-0.8B-Text-ONNX",
     label: "Qwen3.5 0.8B",
-    summary: "Runs anywhere with WebGPU. Navigates well, but gets details wrong — expect invented names.",
+    summary:
+      "Smallest download. Finds the right page, but gets the explanation wrong — a fallback for constrained machines.",
     dtype: "q4f16",
     family: "qwen",
     approximateBytes: 490 * MIB,
@@ -49,7 +54,7 @@ export const GENERATION_MODELS: GenerationModel[] = [
     id: "qwen3-1.7b",
     repo: "onnx-community/Qwen3-1.7B-ONNX",
     label: "Qwen3 1.7B",
-    summary: "Recommended. Twice the download, and the first size that answers API questions reliably.",
+    summary: "Default. The first size that explains correctly and answers API questions reliably.",
     dtype: "q4f16",
     family: "qwen",
     approximateBytes: GIB,
@@ -65,7 +70,12 @@ export const GENERATION_MODELS: GenerationModel[] = [
   },
 ];
 
-export const DEFAULT_GENERATION_MODEL = GENERATION_MODELS[0];
+/**
+ * The 1.7B, not the 0.8B above it. Correctness is the product here; the extra
+ * half-gigabyte is what buys it, and it is downloaded once.
+ */
+export const DEFAULT_GENERATION_MODEL =
+  GENERATION_MODELS.find((model) => model.id === "qwen3-1.7b") ?? GENERATION_MODELS[0];
 
 export function findGenerationModel(id: string | null | undefined): GenerationModel {
   return GENERATION_MODELS.find((model) => model.id === id) ?? DEFAULT_GENERATION_MODEL;

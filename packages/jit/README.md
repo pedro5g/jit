@@ -172,7 +172,54 @@ deno add jsr:@jit/compiler
 import { JIT } from "jsr:@jit/compiler/runtime";
 ```
 
-## New in 1.0.4
+## New in 2.0.0
+
+Every capability is reached through exactly one path — `JIT.validate.*`,
+`JIT.compare.*`, `JIT.security.*`, `JIT.json.*`, `JIT.binary.*` — and an
+aggregate is a plain object of artifacts, which is also what grouped AOT
+generation reads. See the [migration guide](https://jit-site.vercel.app/docs/guides/migrating-to-2)
+for a direct replacement for every removed facade.
+
+A self-referencing schema now compiles everywhere. Each cycle participant is
+lifted into one named function instead of being inlined, in the validator and
+in clone, equal, diff, update, serialize, mask, sanitize, and the binary
+codec:
+
+```ts
+const Category = JIT.object({
+  name: JIT.string(),
+  children: JIT.array(JIT.lazy(() => Category)),
+});
+
+const isCategory = JIT.validate.is(Category);
+const cloneCategory = JIT.clone(Category);
+```
+
+`JIT.jsonSchema` is a two-way bridge, so a contract keeps one source of truth
+whichever side it starts on. `from` types the schema off the document literal,
+and AOT resolves the whole conversion at generation time:
+
+```ts
+JIT.jsonSchema.to(User, { target: "openapi-3.0", io: "input" });
+
+const Contract = JIT.jsonSchema.from({
+  type: "object",
+  properties: { name: { type: "string" }, age: { type: "number" } },
+  required: ["name", "age"],
+} as const);
+```
+
+Every compiled validation artifact implements Standard Schema through
+`~standard`, `JIT.ops` declares transformations as data so they survive ahead
+of time, and `JIT.mock` generates seeded values that satisfy the schema's own
+checks:
+
+```ts
+const Handle = JIT.string()
+  .min(3)
+  .pipe(JIT.ops.trim().lowercase().slice(0, 20));
+const sample = JIT.mock(User)();
+```
 
 Sanitization policies are compiled into the same specialized transform pass as
 parsing. Presets cover plain text, escaped HTML, SQL identifiers and path

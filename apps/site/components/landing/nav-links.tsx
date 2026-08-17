@@ -8,8 +8,7 @@ export const navLinks = [
   { href: "/#why-specialization", label: "Why jit" },
   { href: "/#operations", label: "Operations" },
   { href: "/benchmarks", label: "Benchmarks" },
-  { href: "/playground", label: "Playground" },
-  { href: "/lab", label: "Lab" },
+  { href: "/workspace", label: "Workspace" },
   { href: "/docs", label: "Docs" },
 ];
 

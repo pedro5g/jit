@@ -51,6 +51,14 @@ const DENSE_PENALTY = 0.75;
  */
 const CONCEPT_PAGE_BOOST = 1.35;
 
+/**
+ * How much of a section's vocabulary may already appear in one kept above it
+ * before it is redundant. Loose enough that two pages covering the same API
+ * from different angles both survive; tight enough that the same paragraph
+ * chunked twice does not.
+ */
+const NEAR_DUPLICATE = 0.72;
+
 interface IndexedSection {
   section: DocSection;
   frequencies: Map<string, number>;
@@ -215,16 +223,38 @@ function repeat(tokens: string[], times: number): string[] {
 function dedupeByPage(results: RetrievedSection[], limit: number): RetrievedSection[] {
   const perPage = new Map<string, number>();
   const kept: RetrievedSection[] = [];
+  const keptTokens: Set<string>[] = [];
 
   for (const result of results) {
     const page = result.section.url.split("#")[0];
     const seen = perPage.get(page) ?? 0;
     if (seen >= 2) continue;
 
+    // Six near-identical slices is the worst thing that can happen to a small
+    // model's context: "why is jit fast" returned three sections headed
+    // "Performance" and two headed "Why the generated code is fast", so most
+    // of the budget was spent restating one idea and the answer had nothing
+    // else to work from. A section that mostly repeats one already kept is
+    // dropped in favour of whatever comes after it.
+    const tokens = new Set(tokenize(result.section.text));
+    if (keptTokens.some((previous) => overlap(tokens, previous) > NEAR_DUPLICATE)) continue;
+
     perPage.set(page, seen + 1);
     kept.push(result);
+    keptTokens.push(tokens);
     if (kept.length >= limit) break;
   }
 
   return kept;
+}
+
+/** Share of the smaller section's vocabulary that the larger one already has. */
+function overlap(left: Set<string>, right: Set<string>): number {
+  const [small, large] = left.size <= right.size ? [left, right] : [right, left];
+  if (small.size === 0) return 0;
+
+  let shared = 0;
+  for (const token of small) if (large.has(token)) shared += 1;
+
+  return shared / small.size;
 }

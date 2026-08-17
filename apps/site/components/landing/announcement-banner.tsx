@@ -1,8 +1,8 @@
 "use client";
 
 import { X } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { githubUrl } from "@/lib/site";
 
 const DISMISS_KEY = "jit:banner-dismissed";
 
@@ -19,11 +19,12 @@ export function AnnouncementBanner() {
     <div className="relative z-50 border-b border-line-gold/40 bg-gold-200/10">
       <div className="mx-auto flex w-full max-w-[1200px] items-center justify-center gap-3 px-10 py-2 text-center">
         <p className="text-xs text-ghost-100 sm:text-sm">
-          <span className="font-pixel-badge uppercase tracking-wider text-gold-200">jit 1.0</span>{" "}
-          <span className="text-fg-muted">—</span> compiled validators, queries and codecs are out.{" "}
-          <a href={githubUrl} target="_blank" rel="noreferrer" className="font-semibold text-gold-200 underline">
-            Star it on GitHub →
-          </a>
+          <span className="font-pixel-badge uppercase tracking-wider text-gold-200">jit 2.0</span>{" "}
+          <span className="text-fg-muted">—</span> recursive schemas, a two-way JSON Schema bridge and one capability
+          API.{" "}
+          <Link href="/docs/whats-new" className="font-semibold text-gold-200 underline">
+            See what&apos;s new →
+          </Link>
         </p>
         <button
           type="button"

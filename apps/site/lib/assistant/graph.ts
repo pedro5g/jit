@@ -34,12 +34,24 @@ export interface ConceptNode {
    */
   fact?: string;
   /**
+   * The same fact in Portuguese.
+   *
+   * A large share of readers ask in Portuguese, and the grounded answer is
+   * shown verbatim rather than translated by the model — a 0.8B model handed
+   * an English paragraph to translate rewrites it, and rewriting is exactly
+   * what this path exists to avoid. Written by hand for the concepts that
+   * actually get asked about; the rest fall back to the English text.
+   */
+  factPt?: string;
+  /**
    * The concrete strategies behind the fact, for when a reader asks how or
    * why rather than what. A one-sentence fact stops the model contradicting
    * the docs; it does not let it explain the mechanism, which is what someone
    * evaluating the library actually wants to read.
    */
   mechanisms?: string[];
+  /** The mechanisms in Portuguese, for the same reason as `factPt`. */
+  mechanismsPt?: string[];
   /** The page that explains it, used when deciding where to navigate. */
   page?: string;
   /** Related concepts, and how much of this node's weight they inherit. */
@@ -60,6 +72,18 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["jit", "compiled", "engine", "schema"],
     apis: [],
     fact: "jit is a schema-first data engine for TypeScript: you describe a shape once with JIT.object({...}) and it compiles specialized JavaScript for every operation over that shape — validation, equality, cloning, diffing, queries, serialization and more.",
+    factPt:
+      "A jit é um data engine schema-first para TypeScript: você descreve um formato uma vez com JIT.object({...}) e ela compila JavaScript especializado para cada operação sobre esse formato — validação, igualdade, clonagem, diff, queries, serialização e mais.",
+    mechanisms: [
+      "One declaration drives every operation: validation, equality, cloning, diffing, hashing, immutable updates, queries, DTO mapping, PII masking, sanitizing, JSON, a versioned binary codec, binary rowsets and progressive streaming.",
+      "Capabilities are reached through namespaces — JIT.validate.*, JIT.compare.*, JIT.security.*, JIT.json.*, JIT.binary.* — and schema factories sit at the root: JIT.object, JIT.string, JIT.array.",
+      "Every artifact is lazy and callable: `.compile()` is an optional warm-up and `.plan` exposes the descriptor AOT consumes.",
+    ],
+    mechanismsPt: [
+      "Uma declaração alimenta todas as operações: validação, igualdade, clonagem, diff, hash, updates imutáveis, queries, mapeamento de DTO, mascaramento de PII, sanitização, JSON, um codec binário versionado, rowsets binários e validação progressiva em stream.",
+      "As capacidades são alcançadas por namespaces — JIT.validate.*, JIT.compare.*, JIT.security.*, JIT.json.*, JIT.binary.* — e as fábricas de schema ficam na raiz: JIT.object, JIT.string, JIT.array.",
+      "Todo artefato é lazy e chamável: `.compile()` é um aquecimento opcional e `.plan` expõe o descritor que o AOT consome.",
+    ],
     page: "/docs",
     edges: { purpose: 0.7, compilation: 0.6, validation: 0.3, aot: 0.3 },
   },
@@ -95,6 +119,14 @@ export const CONCEPTS: ConceptNode[] = [
     ],
     terms: ["problem", "interpret", "generic", "duplication", "handwritten", "once", "purpose"],
     apis: [],
+    factPt:
+      "A jit existe porque um mesmo schema é usado para uma dúzia de tarefas diferentes — validar uma requisição, comparar dois estados, clonar, gerar um diff, mascarar uma linha de log, serializar uma resposta — e uma biblioteca genérica relê esse schema a cada chamada, para cada uma delas. A jit lê uma vez, em tempo de compilação, e emite uma função dedicada por tarefa.",
+    mechanismsPt: [
+      "O custo: um schema é uma descrição, então uma biblioteca genérica precisa percorrer essa descrição em runtime — andar pela árvore, ramificar no tipo de cada nó, alocar intermediários — toda vez que valida ou clona um valor. Esse trabalho é idêntico em toda chamada e é pago em toda chamada.",
+      "A divergência: times acabam com uma lib para validação, outra para igualdade profunda, outra para clonagem, outra para serialização. Cada uma guarda sua própria ideia do mesmo formato, e as quatro saem de sincronia.",
+      "A resposta da jit para os dois: descreva o formato uma vez e compile uma função especializada para cada operação sobre ele. O schema é lido em build time e nunca em tempo de chamada, e toda operação deriva da mesma declaração — então elas não têm como discordar.",
+      "A geração AOT fecha o ciclo: o próprio motor nunca vai para produção, então o que sobra no bundle é só o código gerado que a aplicação de fato chama.",
+    ],
     fact: "jit exists because one schema is used for a dozen different jobs — validating a request, comparing two states, cloning, diffing, masking a log line, serializing a response — and a generic library re-reads that schema on every single call for every one of them. jit reads it once, at compile time, and emits a dedicated function per job.",
     mechanisms: [
       "The cost problem: a schema is a description, so a generic library has to walk that description at runtime — traverse the tree, branch on each node's type, allocate intermediates — every time it validates or clones a value. That work is identical on every call and is paid on every call.",
@@ -110,6 +142,15 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["compile", "compilar", "compilação", "compilation", "codegen", "generated", "gerado", "specialized"],
     terms: ["compile", "generated", "specialized", "emit", "monomorphic", "straightline", "source"],
     apis: [],
+    factPt:
+      "A jit percorre o schema uma vez, em tempo de compilação, e emite o código monomórfico e linear que um engenheiro de performance escreveria à mão. Uma biblioteca genérica repercorre o schema a cada chamada; a jit nunca faz isso.",
+    mechanismsPt: [
+      "Só acesso estático a propriedades: um formato conhecido é lido como `value.name`, nunca via for...in ou Object.keys.",
+      "Checagens ordenadas da mais barata para a mais cara — typeof, depois null, depois faixa numérica, depois comprimento, depois regex — então a rejeição comum custa uma comparação.",
+      "Laços indexados clássicos com retorno antecipado; sem closures, sem callback por elemento, sem Array.prototype.push em caminho quente.",
+      "Valores de runtime (regexes, callbacks de refine, argumentos de query) entram na função compilada como bindings externos, nunca interpolados no fonte — compilar não é concatenar string de dado do usuário.",
+      "O resultado é monomórfico: um formato entra, um caminho de código, então o motor JavaScript consegue inline e mantém o call site quente.",
+    ],
     fact: "jit walks a schema once, at compile time, and emits the monomorphic straight-line code a performance engineer would write by hand. A generic library re-walks its schema on every single call; jit never does.",
     mechanisms: [
       "Static property access only: a known shape is read as `value.name`, never through for...in or Object.keys.",
@@ -126,6 +167,15 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["fast", "rapido", "rápido", "velocidade", "speed", "performance", "desempenho", "benchmark", "slow"],
     terms: ["fast", "faster", "performance", "benchmark", "ns", "throughput", "allocation"],
     apis: [],
+    factPt:
+      "A velocidade vem de fazer o trabalho do schema uma vez, em vez de a cada chamada: acesso estático a propriedades em vez de lookup dinâmico, laços indexados clássicos, checagens ordenadas da mais barata para a mais cara (typeof, depois null, depois numérico, depois comprimento, depois regex), sem closures e sem alocações intermediárias. É mais rápida que um validador genérico pelo mesmo motivo que um compilador é mais rápido que um interpretador.",
+    mechanismsPt: [
+      "O schema é percorrido uma vez, em tempo de compilação; um validador genérico repercorre o schema a cada chamada, ramificando por tipo e alocando intermediários no caminho.",
+      "`is` devolve um booleano sem alocar array de issues, então um guard custa apenas as comparações em si.",
+      "`safeParse` começa por essa mesma checagem sem alocação onde o schema não precisa reconstruir a entrada, e só paga a travessia anotada quando é obrigada.",
+      "Operações estruturais são cirúrgicas: só os caminhos que contêm um campo alterado ou marcado são reconstruídos, e subárvores intocadas são compartilhadas por referência em vez de copiadas.",
+      "Queries se fundem em um único laço — filtros e projeções descem para uma só passada, sem arrays intermediários.",
+    ],
     fact: "The speed comes from doing the schema work once instead of per call: static property access rather than dynamic lookup, classic indexed loops, checks ordered cheapest-first (typeof, then null, then numeric, then length, then regex), no closures and no intermediate allocations. It is faster than a generic validator for the same reason a compiler is faster than an interpreter.",
     mechanisms: [
       "The schema is walked once at compile time; a generic validator re-walks its schema on every call, branching on types and allocating intermediates as it goes.",
@@ -143,6 +193,20 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["memory", "allocation", "allocates", "bytes", "columnar", "buffer"],
     apis: ["process"],
     fact: "Allocation is controlled rather than incidental: is() allocates nothing, surgical operations share untouched subtrees, and binary rowsets use fixed-width buffers.",
+    factPt:
+      "A alocação é controlada, não incidental: is() não aloca nada, operações cirúrgicas compartilham subárvores intocadas, e rowsets binários usam buffers de largura fixa.",
+    mechanisms: [
+      "`is` returns a boolean and allocates no issue array, so a guard costs only its comparisons.",
+      "Structural operations rebuild only the paths that changed; unchanged children keep their identity and are shared by reference.",
+      "Binary rowsets store rows in fixed-width memory, so a scan reads typed views instead of allocating an object per row.",
+      "`JIT.json.stringifyChunks` emits bounded chunks instead of building one large string for a big array.",
+    ],
+    mechanismsPt: [
+      "`is` devolve um booleano e não aloca array de issues, então um guard custa só as comparações.",
+      "Operações estruturais reconstroem apenas os caminhos que mudaram; filhos inalterados mantêm identidade e são compartilhados por referência.",
+      "Rowsets binários guardam linhas em memória de largura fixa, então um scan lê typed views em vez de alocar um objeto por linha.",
+      "`JIT.json.stringifyChunks` emite chunks limitados em vez de montar uma string gigante para um array grande.",
+    ],
     page: "/docs/runtime/binary-rowsets",
     edges: { binary: 0.7, performance: 0.5 },
   },
@@ -151,6 +215,14 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["validate", "validar", "validação", "validation", "validator", "parse", "guard", "check", "checar"],
     terms: ["validate", "parse", "safeparse", "issues", "predicate", "guard", "boundary"],
     apis: ["validate", "dto"],
+    factPt:
+      "JIT.validate.is é um type predicate que não aloca nada e retorna na primeira falha. JIT.validate.parse devolve a saída ou lança. JIT.validate.safeParse devolve uma união de sucesso carregando um vetor estruturado de issues.",
+    mechanismsPt: [
+      "`is` é um type predicate: retorna na primeira falha e não aloca nada.",
+      "`parse` devolve a saída transformada ou lança JITValidationError; para um schema que não precisa reconstruir a entrada, ele reusa o caminho rápido do `is`.",
+      "`safeParse` devolve uma união de sucesso cuja falha carrega um vetor estruturado de issues — cada issue tem um path, um code e uma message.",
+      "Sanitização e coerção rodam dentro da mesma passada especializada da validação, então o valor não é percorrido duas vezes.",
+    ],
     fact: "JIT.validate.is is a type predicate that allocates nothing and returns on the first failure. JIT.validate.parse returns the output or throws. JIT.validate.safeParse returns a success union carrying a structured issue vector.",
     mechanisms: [
       "`is` is a type predicate: it returns on the first failure and allocates nothing.",
@@ -170,6 +242,20 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["schema", "object", "field", "declare", "builder", "infer", "typeof"],
     apis: ["object", "string", "number", "array", "union", "literal", "record", "tuple", "optional", "nullable"],
     fact: "A schema is written once with zod-like builders and carries its resolved TypeScript type; JIT.Typeof<typeof Schema> reads it back.",
+    factPt:
+      "Um schema é escrito uma vez com builders no estilo zod e carrega seu tipo TypeScript resolvido; JIT.Typeof<typeof Schema> lê esse tipo de volta.",
+    mechanisms: [
+      "Builders are fluent and immutable: every call returns a new builder and leaves the input schema unchanged.",
+      "Check methods are gated by kind at the type level — `.email()` exists on a string, `.pick()` on an object, `.multipleOf()` on a number — so a wrong one is a type error before it is a runtime problem.",
+      "`JIT.Typeof<typeof User>` reads the inferred type back out, so the schema is the single declaration and the TypeScript type follows it.",
+      "The same schema object is the key the compile cache uses, so reusing one declaration reuses every function compiled from it.",
+    ],
+    mechanismsPt: [
+      "Builders são fluentes e imutáveis: cada chamada devolve um builder novo e deixa o schema de entrada intacto.",
+      "Métodos de check são restritos por tipo — `.email()` existe em string, `.pick()` em object, `.multipleOf()` em number — então o errado é erro de tipo antes de ser problema em runtime.",
+      "`JIT.Typeof<typeof User>` lê o tipo inferido de volta, então o schema é a única declaração e o tipo TypeScript segue dela.",
+      "O próprio objeto de schema é a chave do cache de compilação, então reusar uma declaração reusa toda função compilada a partir dela.",
+    ],
     page: "/docs/concepts/schemas-and-types",
     edges: { validation: 0.5, composition: 0.5 },
   },
@@ -197,6 +283,21 @@ export const CONCEPTS: ConceptNode[] = [
     ],
     terms: ["union", "intersection", "lazy", "recursive", "cycle", "discriminated", "refine", "pipe"],
     apis: ["union", "intersection", "lazy", "refine", "pipe", "discriminatedUnion", "xor", "brand"],
+    fact: "Composition helpers each return a NEW builder and leave the input schema unchanged: JIT.union, JIT.intersection, JIT.discriminatedUnion, JIT.optional, JIT.nullable, JIT.lazy, JIT.refine, JIT.pipe, JIT.brand and JIT.xor. Fluent equivalents exist where they read naturally, so JIT.optional(JIT.string()) and JIT.string().optional() are the same thing.",
+    factPt:
+      "Os helpers de composição devolvem sempre um builder NOVO e deixam o schema de entrada intacto: JIT.union, JIT.intersection, JIT.discriminatedUnion, JIT.optional, JIT.nullable, JIT.lazy, JIT.refine, JIT.pipe, JIT.brand e JIT.xor. Existem equivalentes fluentes onde fazem sentido, então JIT.optional(JIT.string()) e JIT.string().optional() são a mesma coisa.",
+    mechanisms: [
+      "`JIT.discriminatedUnion` dispatches on the tag field before comparing anything else, so a union costs one check rather than trying each variant.",
+      "`JIT.lazy` is what makes a self-referencing or cyclic schema work: the reference is resolved when it is first needed rather than while the declaration is still being built.",
+      "`JIT.refine` takes a predicate that travels into the compiled function as an external binding — never interpolated into its source.",
+      "A refine or transform callback that closes over its scope cannot be serialized ahead of time, so `jit generate` skips that artifact; a declarative `JIT.ops` chain has no closure and always generates.",
+    ],
+    mechanismsPt: [
+      "`JIT.discriminatedUnion` despacha pelo campo discriminante antes de comparar qualquer outra coisa, então a união custa uma checagem em vez de tentar cada variante.",
+      "`JIT.lazy` é o que faz um schema auto-referente ou cíclico funcionar: a referência é resolvida quando é necessária pela primeira vez, não enquanto a declaração ainda está sendo montada.",
+      "`JIT.refine` recebe um predicado que entra na função compilada como binding externo — nunca interpolado no fonte dela.",
+      "Um callback de refine ou transform que captura o escopo não pode ser serializado em build time, então o `jit generate` pula aquele artefato; uma cadeia declarativa `JIT.ops` não tem closure e sempre gera.",
+    ],
     page: "/docs/reference/functions/composition",
     edges: { schema: 0.6 },
   },
@@ -205,6 +306,15 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["aot", "generate", "gerar", "geração", "build", "cli", "artifact", "artefato", "token", "define"],
     terms: ["aot", "generate", "importfree", "module", "cli", "artifact", "define", "entries", "output"],
     apis: [],
+    factPt:
+      "A geração AOT (jit generate) roda o mesmo compilador em tempo de build e escreve um módulo autocontido com zero imports de runtime. O motor NÃO é embarcado: o módulo gerado é o único código da jit no bundle de produção — o oposto do modo runtime, onde o compilador faz parte da aplicação.",
+    mechanismsPt: [
+      "A geração roda o mesmo compilador que o runtime usa e escreve as funções resultantes em disco como JavaScript ou TypeScript comum.",
+      "O módulo emitido não importa nada: a classe de erro e os helpers de runtime são inlinados, então o motor nunca chega em produção e não tem como ser tree-shaken errado.",
+      "A diferença para o modo runtime é QUANDO o compilador roda, e portanto se ele é embarcado. Build time: não é. Primeiro uso: é.",
+      "Como nada é compilado em runtime, a saída não precisa de globalThis.Function e roda sob CSP estrita e em edge runtimes.",
+      "Só os artefatos que um arquivo de declaração nomeia são emitidos, então uma operação que a aplicação nunca pede nunca é gerada nem empacotada.",
+    ],
     fact: "AOT generation (jit generate) runs the same compiler at build time and writes a self-contained module with zero runtime imports. The engine does NOT ship: the generated module is the only jit code in the production bundle, which is the opposite of runtime mode, where the compiler is part of the application.",
     mechanisms: [
       "Generation runs the same compiler the runtime uses, then writes the resulting functions to disk as ordinary JavaScript or TypeScript.",
@@ -221,6 +331,14 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["runtime", "jit runtime", "em tempo de execução", "on the fly", "primeiro uso", "first use"],
     terms: ["runtime", "function", "cache", "compiled", "firstuse"],
     apis: [],
+    factPt:
+      "O modo runtime compila uma operação na primeira vez em que ela é usada, através de globalThis.Function, e guarda a função resultante em cache por identidade de schema. Nada é escrito em disco: a função compilada vive em memória pelo tempo de vida do processo.",
+    mechanismsPt: [
+      "A compilação acontece uma vez por par schema-e-operação, na primeira chamada, e toda chamada seguinte reusa a função em cache.",
+      "Nesse modo o motor faz parte da aplicação, então os builders de schema e o compilador estão no bundle.",
+      "Ele precisa de `globalThis.Function`, que uma Content Security Policy estrita proíbe — essa restrição é o motivo de o AOT existir, não um defeito do modo runtime.",
+      "É o modo certo para um processo de vida longa e para schemas que só são conhecidos quando o programa roda.",
+    ],
     fact: "Runtime mode compiles an operation the first time it is used, through globalThis.Function, and caches the resulting function by schema identity. Nothing is written to disk: the compiled function lives in memory for the life of the process.",
     mechanisms: [
       "The compile happens once per schema-and-operation pair, on first call, and every later call reuses the cached function.",
@@ -236,6 +354,19 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["bundle", "treeshaking", "tree shaking", "tamanho", "size", "csp", "browser", "navegador", "edge"],
     terms: ["bundle", "treeshaking", "imports", "csp", "browser", "edge"],
     apis: [],
+    fact: "Runtime JIT needs globalThis.Function, which strict Content Security Policy often blocks, and it also ships the schema builders and compiler. AOT does that work during the build and emits only ordinary JavaScript, so the bundle carries the generated functions and nothing else.",
+    factPt:
+      "O JIT em runtime precisa de globalThis.Function, que uma Content Security Policy estrita costuma bloquear, e além disso embarca os builders de schema e o compilador. O AOT faz esse trabalho durante o build e emite JavaScript comum, então o bundle carrega as funções geradas e mais nada.",
+    mechanisms: [
+      "The emitted module has zero runtime imports: the error class and helpers are inlined, so a bundler cannot accidentally pull the engine back in.",
+      "Only the artifacts a declaration file names are emitted, so an operation the application never imports is never generated and never bundled.",
+      "Because nothing compiles at runtime, the output needs no `globalThis.Function` and runs under strict CSP and on edge runtimes.",
+    ],
+    mechanismsPt: [
+      "O módulo emitido tem zero imports de runtime: a classe de erro e os helpers são inlinados, então um bundler não tem como puxar o motor de volta sem querer.",
+      "Só os artefatos que um arquivo de declaração nomeia são emitidos, então uma operação que a aplicação nunca importa nunca é gerada nem empacotada.",
+      "Como nada compila em runtime, a saída não precisa de `globalThis.Function` e roda sob CSP estrita e em edge runtimes.",
+    ],
     page: "/docs/guides/browser-and-edge",
     edges: { aot: 0.7 },
   },
@@ -245,6 +376,22 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["query", "filter", "projection", "orderby", "groupby", "iterator", "visitor", "fused"],
     apis: ["query", "from", "param", "const"],
     fact: "A query builder compiles to one fused loop over the collection: filters and projections are lowered into a single pass with no intermediate arrays.",
+    factPt:
+      "Um query builder compila para um único laço fundido sobre a coleção: filtros e projeções descem para uma só passada, sem arrays intermediários.",
+    mechanisms: [
+      "Filters and projections are lowered into one loop: the query preallocates a single output array, writes by cursor and trims once.",
+      "`count`, `sum`, `avg`, `min` and `max` allocate no output array at all. `count` and `sum` return zero for empty input; the other three return undefined.",
+      "`.params(shape)` is for values supplied per call and `JIT.const(value)` for a compiler literal; ordinary closure values become safe external bindings, and no untrusted value is interpolated into generated source.",
+      "`unique` keeps first occurrences, `keyed` returns a Map, `groupBy` returns arrays per key, and `orderBy` performs a global sort.",
+      "Mutation operators rebuild collections immutably and require a filter, so a full-table update cannot happen by accident.",
+    ],
+    mechanismsPt: [
+      "Filtros e projeções descem para um único laço: a query pré-aloca um array de saída, escreve por cursor e corta uma vez no fim.",
+      "`count`, `sum`, `avg`, `min` e `max` não alocam array de saída nenhum. `count` e `sum` devolvem zero para entrada vazia; os outros três devolvem undefined.",
+      "`.params(shape)` é para valores passados por chamada e `JIT.const(value)` para um literal de compilação; valores de closure comuns viram bindings externos seguros, e nenhum valor não confiável é interpolado no fonte gerado.",
+      "`unique` mantém as primeiras ocorrências, `keyed` devolve um Map, `groupBy` devolve arrays por chave, e `orderBy` faz uma ordenação global.",
+      "Operadores de mutação reconstroem coleções de forma imutável e exigem um filtro, então um update de tabela inteira não acontece por acidente.",
+    ],
     page: "/docs/runtime/queries",
     edges: { binary: 0.4, lazy: 0.5 },
   },
@@ -253,6 +400,19 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["lazy", "preguiçoso", "iterator", "generator", "stream", "chunk", "progressive"],
     terms: ["lazy", "iterator", "asynciterator", "visitor", "chunk", "stream", "ndjson"],
     apis: ["stream"],
+    fact: "Eager arrays are the default; lazy consumption is an explicit terminal contract. A compiled query reaches .to.iterator(), .to.asyncIterator(), .to.visitor() or .lazy(), and incremental operators include flatMap, take/takeWhile, drop/dropWhile, unique, chunk, window, pairwise, scan and groupAdjacentBy.",
+    factPt:
+      "Arrays eager são o padrão; consumo lazy é um contrato terminal explícito. Uma query compilada alcança .to.iterator(), .to.asyncIterator(), .to.visitor() ou .lazy(), e os operadores incrementais incluem flatMap, take/takeWhile, drop/dropWhile, unique, chunk, window, pairwise, scan e groupAdjacentBy.",
+    mechanisms: [
+      "The terminal call is what chooses the backend — the same query builder produces an eager array, an iterator, an async iterator or a visitor.",
+      "A lazy backend never materializes the full result, which is what makes `take(10)` over a large source stop early instead of filtering everything first.",
+      "`JIT.stream` is the sibling for data arriving in chunks: its boundary scanner keeps only the parser state needed to find complete values, so a token split across a chunk edge is resumed rather than rejected.",
+    ],
+    mechanismsPt: [
+      "A chamada terminal é o que escolhe o backend — o mesmo query builder produz um array eager, um iterator, um async iterator ou um visitor.",
+      "Um backend lazy nunca materializa o resultado completo, e é isso que faz `take(10)` sobre uma fonte grande parar cedo em vez de filtrar tudo antes.",
+      "`JIT.stream` é o irmão para dados que chegam em chunks: seu boundary scanner guarda só o estado de parser necessário para achar valores completos, então um token cortado na borda de um chunk é retomado, não rejeitado.",
+    ],
     page: "/docs/runtime/lazy-execution",
     edges: { query: 0.5, json: 0.4 },
   },
@@ -268,6 +428,14 @@ export const CONCEPTS: ConceptNode[] = [
       "Discriminated object unions use dense integer tags, so a union scan is an integer compare instead of a string compare.",
       "Columnar mode keeps masks and per-field typed lanes in one buffer, and generated scans use a cached column base index with no row cursor.",
     ],
+    factPt:
+      "Rowsets binários guardam lotes grandes de objetos planos em memória de largura fixa, então um scan lê typed views em vez de percorrer objetos.",
+    mechanismsPt: [
+      "As linhas ficam em memória de largura fixa, então um scan lê typed views em vez de percorrer objetos e perseguir ponteiros.",
+      "Strings de enum e literais, e booleanos, são comparados como códigos inteiros dentro dos laços de query, não como strings.",
+      "Uniões discriminadas de objetos usam tags inteiras densas, então um scan de união é uma comparação de inteiro em vez de comparação de string.",
+      "O modo colunar mantém máscaras e lanes tipadas por campo em um único buffer, e os scans gerados usam um índice-base de coluna em cache, sem cursor de linha.",
+    ],
     page: "/docs/runtime/binary-rowsets",
     edges: { memory: 0.6, query: 0.5 },
   },
@@ -276,6 +444,21 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["json", "stringify", "serializar", "serialize", "serialization", "encode", "decode"],
     terms: ["json", "stringify", "parse", "chunks", "escape", "wire"],
     apis: ["json", "jsonValue"],
+    fact: "JIT.json compiles serialization from the known shape: JIT.json.stringify(User) bakes known keys and punctuation into the generated source, JIT.json.parse(User).validate() decodes with native JSON.parse and runs the compiled validator in the same execution function, and JIT.json.stringifyChunks emits bounded chunks for large arrays.",
+    factPt:
+      "JIT.json compila a serialização a partir do formato conhecido: JIT.json.stringify(User) grava chaves e pontuação conhecidas direto no fonte gerado, JIT.json.parse(User).validate() decodifica com o JSON.parse nativo e roda o validador compilado na mesma função de execução, e JIT.json.stringifyChunks emite chunks limitados para arrays grandes.",
+    mechanisms: [
+      "Known JSON keys and punctuation are baked into the generated source, so serializing does not re-discover the shape.",
+      "Strings take a fast clean-string path and fall back to native escaping only when a character actually needs it.",
+      "`JIT.json.parse(schema).validate()` fuses decode and validation into one execution function, but JSON parsing always materializes the decoded value — fused does not mean zero-allocation.",
+      "`stringifyChunks(users, { chunkBytes })` yields bounded pieces instead of building one large string.",
+    ],
+    mechanismsPt: [
+      "Chaves e pontuação JSON conhecidas são gravadas no fonte gerado, então serializar não redescobre o formato.",
+      "Strings passam por um caminho rápido de string limpa e só caem no escape nativo quando algum caractere realmente exige.",
+      "`JIT.json.parse(schema).validate()` funde decode e validação em uma função de execução, mas o parse de JSON sempre materializa o valor decodificado — fundido não quer dizer sem alocação.",
+      "`stringifyChunks(users, { chunkBytes })` devolve pedaços limitados em vez de montar uma string gigante.",
+    ],
     page: "/docs/runtime/serialization",
     edges: { codec: 0.5, lazy: 0.3 },
   },
@@ -284,6 +467,23 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["codec", "wire", "binary format", "formato", "encode", "version", "versão"],
     terms: ["codec", "encode", "decode", "wire", "version", "bitmask"],
     apis: ["codec", "binary"],
+    fact: "Two different APIs share the word codec. JIT.codec(input, output, { decode, encode }) defines a value transformation inside a schema, for when the input and output TypeScript types differ. JIT.binary.codec(schema, { version }) compiles a binary transport, exposing encode, encodeInto and decode.",
+    factPt:
+      "Duas APIs diferentes dividem a palavra codec. JIT.codec(entrada, saida, { decode, encode }) define uma transformação de valor dentro de um schema, para quando os tipos TypeScript de entrada e saída diferem. JIT.binary.codec(schema, { version }) compila um transporte binário, expondo encode, encodeInto e decode.",
+    mechanisms: [
+      "In a value codec the input and output schemas make the direction explicit: decode/parse goes input to output, encode goes back.",
+      "The binary wire format is versioned by its first byte, and that byte is a breaking-change boundary: decoder and encoder must agree on schema contract and version.",
+      "Object optionals use a compact presence bitmask, integers are range-guarded and strings are UTF-8 length prefixed.",
+      "`encodeInto(value, target)` reuses caller-owned memory, which matters in a high-frequency socket loop where allocating a Uint8Array per message is measurable.",
+      "Binary rowsets are not codec payloads and must not be persisted as such — rowsets optimize process-local query memory and may change layout independently.",
+    ],
+    mechanismsPt: [
+      "Num codec de valor os schemas de entrada e saída tornam a direção explícita: decode/parse vai da entrada para a saída, encode volta.",
+      "O formato binário é versionado pelo primeiro byte, e esse byte é uma fronteira de breaking change: decoder e encoder precisam concordar em contrato de schema e versão.",
+      "Opcionais de objeto usam uma bitmask compacta de presença, inteiros têm guarda de faixa e strings levam prefixo de comprimento UTF-8.",
+      "`encodeInto(value, target)` reusa memória do chamador, o que importa num laço de socket de alta frequência onde alocar um Uint8Array por mensagem é mensurável.",
+      "Rowsets binários não são payloads de codec e não devem ser persistidos como tal — rowsets otimizam memória de query local ao processo e podem mudar de layout de forma independente.",
+    ],
     page: "/docs/reference/functions/codec",
     edges: { json: 0.4 },
   },
@@ -293,6 +493,20 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["mask", "sanitize", "pii", "redact", "xss", "policy", "leak"],
     apis: ["security", "format"],
     fact: "Fields marked with .pii() or .sanitize() are rebuilt into a safe copy; only paths containing a marked field are touched, and untouched subtrees are shared by reference.",
+    factPt:
+      "Campos marcados com .pii() ou .sanitize() são reconstruídos em uma cópia segura; só os caminhos que contêm um campo marcado são tocados, e subárvores intocadas são compartilhadas por referência.",
+    mechanisms: [
+      "The marking lives on the declaration, so every path that masks this shape agrees about what is sensitive — the miss-one-call-site failure cannot happen.",
+      "`JIT.security.mask` hides; `JIT.security.sanitize` cleans untrusted input. Both are compiled from the same marks.",
+      "Sanitization runs inside the same specialized pass as validation, so a value is not traversed twice.",
+      "Masking is surgical: only paths containing a marked field are rebuilt, and everything else is shared by reference rather than deep-copied.",
+    ],
+    mechanismsPt: [
+      "A marcação vive na declaração, então todo caminho que mascara esse formato concorda sobre o que é sensível — a falha de esquecer um call site não tem como acontecer.",
+      "`JIT.security.mask` esconde; `JIT.security.sanitize` limpa entrada não confiável. Os dois são compilados a partir das mesmas marcas.",
+      "A sanitização roda dentro da mesma passada especializada da validação, então o valor não é percorrido duas vezes.",
+      "O mascaramento é cirúrgico: só caminhos que contêm campo marcado são reconstruídos, e o resto é compartilhado por referência em vez de copiado.",
+    ],
     page: "/docs/reference/functions/mask",
     edges: { boundary: 0.5, validation: 0.3 },
   },
@@ -301,6 +515,23 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["boundary", "borda", "api", "endpoint", "request", "requisição", "input", "entrada", "dto"],
     terms: ["boundary", "inbound", "outbound", "dto", "whitelist", "payload"],
     apis: ["dto", "map", "transform"],
+    fact: "At an application boundary the untrusted payload is decoded and validated in one compiled step: JIT.json.parse(CreateUser).validate() takes the raw request text and returns a typed value. A .strict() object rejects unknown keys, which is what catches client and server drifting apart.",
+    factPt:
+      "Na borda da aplicação o payload não confiável é decodificado e validado em um passo compilado: JIT.json.parse(CreateUser).validate() recebe o texto cru da requisição e devolve um valor tipado. Um objeto .strict() rejeita chaves desconhecidas, e é isso que pega cliente e servidor saindo de sincronia.",
+    mechanisms: [
+      "Inbound: `JIT.json.parse(Schema).validate()` decodes with native JSON.parse and runs the compiled validator in the same execution function.",
+      "`.strict()` rejects unknown keys, so a field the client renamed fails loudly instead of arriving as undefined.",
+      "Normalizing checks — `.trim()`, `.toLowerCase()` — run as part of the same pass, so a value is cleaned and validated in one traversal.",
+      "Outbound: `JIT.dto` and `JIT.map` whitelist the destination shape, so a field added to the model does not silently start being returned.",
+      "Keep a calendar date as a calendar string or decode it to Temporal.PlainDate; inventing a UTC midnight Date is the classic boundary bug.",
+    ],
+    mechanismsPt: [
+      "Entrada: `JIT.json.parse(Schema).validate()` decodifica com o JSON.parse nativo e roda o validador compilado na mesma função de execução.",
+      "`.strict()` rejeita chaves desconhecidas, então um campo que o cliente renomeou falha alto em vez de chegar como undefined.",
+      "Checagens de normalização — `.trim()`, `.toLowerCase()` — rodam na mesma passada, então o valor é limpo e validado em uma travessia.",
+      "Saída: `JIT.dto` e `JIT.map` fazem whitelist do formato de destino, então um campo novo no modelo não começa a vazar sozinho na resposta.",
+      "Mantenha uma data de calendário como string de calendário ou decodifique para Temporal.PlainDate; inventar um Date à meia-noite UTC é o bug clássico de borda.",
+    ],
     page: "/docs/guides/boundary-recipes",
     edges: { validation: 0.6, security: 0.4 },
   },
@@ -309,6 +540,19 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["update", "atualizar", "patch", "immutable", "imutável", "state", "estado", "reactive", "draft"],
     terms: ["update", "patch", "immutable", "draft", "reactive", "watch"],
     apis: ["update", "watch", "watchedList"],
+    fact: "JIT.update(User) compiles an updater that applies a partial patch immutably: only changed branches are allocated, and unchanged children retain their identity.",
+    factPt:
+      "JIT.update(User) compila um updater que aplica um patch parcial de forma imutável: só os ramos alterados são alocados, e filhos inalterados mantêm sua identidade.",
+    mechanisms: [
+      "Only the paths a patch touches are rebuilt; every other subtree is the same object reference it was before, which is what makes an identity check enough to skip work downstream.",
+      "There is no Proxy and no draft to finalize: the updater is generated from the known shape, so the patch is applied by direct field writes.",
+      "`JIT.watch` and `JIT.watchedList` cover keyed collection changes — stateless snapshot diffs and stateful aggregates respectively.",
+    ],
+    mechanismsPt: [
+      "Só os caminhos que o patch toca são reconstruídos; toda outra subárvore continua sendo a mesma referência de antes, e é isso que faz uma comparação de identidade bastar para pular trabalho adiante.",
+      "Não há Proxy nem draft para finalizar: o updater é gerado a partir do formato conhecido, então o patch é aplicado por escrita direta de campo.",
+      "`JIT.watch` e `JIT.watchedList` cobrem mudanças em coleções com chave — diffs de snapshot sem estado e agregados com estado, respectivamente.",
+    ],
     page: "/docs/runtime/reactive-updates",
     edges: { compare: 0.5 },
   },
@@ -317,6 +561,23 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["equal", "igual", "compare", "comparar", "diff", "hash", "clone", "clonar", "copy", "cópia"],
     terms: ["equal", "diff", "hash", "clone", "structural", "identity"],
     apis: ["compare", "clone"],
+    fact: "JIT.compare.equal(schema) emits equality code from the known shape: objects use direct field access, arrays use indexed loops, tuples unroll fixed positions, and tagged unions dispatch on the tag before comparing variant fields. JIT.compare.diff reports the paths that differ and JIT.compare.hash produces a structural fingerprint.",
+    factPt:
+      "JIT.compare.equal(schema) emite código de igualdade a partir do formato conhecido: objetos usam acesso direto a campo, arrays usam laços indexados, tuplas desenrolam posições fixas, e uniões com tag despacham pela tag antes de comparar os campos da variante. JIT.compare.diff reporta os caminhos que diferem e JIT.compare.hash produz uma impressão digital estrutural.",
+    mechanisms: [
+      "Equality returns on the first difference and allocates no result object — there is no key enumeration because the keys were known when the function was written.",
+      "A tagged union dispatches on its discriminant first, so mismatched variants cost one comparison instead of a field-by-field walk.",
+      "`diff` gives the paths that changed, so a caller can act on what differed rather than only on the fact that something did.",
+      "`hash` is the cheap way to skip repeated comparisons, and `.keyed(key)` or `.indexBy(key)` turn equality over a large keyed array into indexed lookup. The structural hash cache goes stale if a value is mutated in place.",
+      "`JIT.clone` is the same idea for copying: a shape-specialized deep clone rather than a generic walk.",
+    ],
+    mechanismsPt: [
+      "A igualdade retorna na primeira diferença e não aloca objeto de resultado — não há enumeração de chaves porque as chaves eram conhecidas quando a função foi escrita.",
+      "Uma união com tag despacha primeiro pelo discriminante, então variantes diferentes custam uma comparação em vez de uma varredura campo a campo.",
+      "`diff` dá os caminhos que mudaram, então quem chama pode agir sobre o que diferiu, não só sobre o fato de algo ter diferido.",
+      "`hash` é o jeito barato de pular comparações repetidas, e `.keyed(key)` ou `.indexBy(key)` transformam igualdade sobre um array grande com chave em lookup indexado. O cache de hash estrutural fica obsoleto se um valor for mutado no lugar.",
+      "`JIT.clone` é a mesma ideia para cópia: um deep clone especializado no formato, em vez de uma varredura genérica.",
+    ],
     page: "/docs/reference/functions/equal",
     edges: { update: 0.4 },
   },
@@ -325,6 +586,21 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["error", "erro", "issue", "exception", "throw", "falha", "fail"],
     terms: ["issue", "issues", "error", "path", "code", "message"],
     apis: ["validate"],
+    fact: "JIT.validate.parse throws JITValidationError on failure. JIT.validate.safeParse returns a success union instead, and its failure carries a structured issue vector where each issue has a path, a code and a message. JIT.validate.issues returns that vector directly.",
+    factPt:
+      "JIT.validate.parse lança JITValidationError quando falha. JIT.validate.safeParse devolve uma união de sucesso no lugar, e a falha carrega um vetor estruturado de issues onde cada issue tem um path, um code e uma message. JIT.validate.issues devolve esse vetor diretamente.",
+    mechanisms: [
+      "An issue's `path` locates the offending field inside the value, which is what lets a form map an error back to an input.",
+      "`code` is the machine-readable reason and `message` the human one; a custom message can be passed to most checks as their last argument.",
+      "`is` reports nothing at all — it returns on the first failure without building the vector, which is why it is the hot-path choice.",
+      "Building the issue vector is the cost `safeParse` pays over `is`; where the schema cannot rebuild its input, `safeParse` leads with the allocation-free check first.",
+    ],
+    mechanismsPt: [
+      "O `path` de uma issue localiza o campo problemático dentro do valor, e é isso que permite a um formulário mapear o erro de volta para um input.",
+      "`code` é o motivo legível por máquina e `message` o legível por humano; uma mensagem customizada pode ser passada para a maioria dos checks como último argumento.",
+      "`is` não reporta nada — retorna na primeira falha sem montar o vetor, e é por isso que é a escolha de caminho quente.",
+      "Montar o vetor de issues é o custo que `safeParse` paga a mais que `is`; onde o schema não precisa reconstruir a entrada, o `safeParse` começa pela checagem sem alocação.",
+    ],
     page: "/docs/reference/functions/validation",
     edges: { validation: 0.7 },
   },
@@ -333,6 +609,21 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["cache", "identity", "identidade", "reuse", "reaproveitar", "invalidate"],
     terms: ["cache", "identity", "hash", "invalidation", "compiled"],
     apis: [],
+    fact: "jit has three independent ways to avoid repeated work: the compile cache reuses generated functions keyed by schema identity, the structural hash cache reuses the hash of an object reference, and the collection index cache reuses a Map for one array and one key. None of them is a query-result cache — calling the same compiled query twice still executes it twice.",
+    factPt:
+      "A jit tem três formas independentes de evitar trabalho repetido: o cache de compilação reusa funções geradas, com chave na identidade do schema; o cache de hash estrutural reusa o hash de uma referência de objeto; e o cache de índice de coleção reusa um Map para um array e uma chave. Nenhum deles é cache de resultado de query — chamar a mesma query compilada duas vezes ainda a executa duas vezes.",
+    mechanisms: [
+      "The compile cache is keyed by schema identity, so reusing one declaration reuses every function compiled from it; building a fresh schema per request reuses nothing.",
+      "The structural hash cache fits repeated comparisons of immutable values, and mutating a value in place makes its cached hash stale.",
+      "The collection index cache fits repeated equality over large keyed arrays, and requires the array and key fields to stay immutable.",
+      "Compilation caching removes code-generation work; hashes and indexes remove repeated traversal work. They are different costs and are cached separately.",
+    ],
+    mechanismsPt: [
+      "O cache de compilação tem chave na identidade do schema, então reusar uma declaração reusa toda função compilada dela; criar um schema novo por requisição não reusa nada.",
+      "O cache de hash estrutural serve para comparações repetidas de valores imutáveis, e mutar um valor no lugar deixa o hash em cache obsoleto.",
+      "O cache de índice de coleção serve para igualdade repetida sobre arrays grandes com chave, e exige que o array e os campos-chave permaneçam imutáveis.",
+      "O cache de compilação elimina trabalho de geração de código; hashes e índices eliminam trabalho de travessia repetida. São custos diferentes e são cacheados separadamente.",
+    ],
     page: "/docs/runtime/cache-hash-index",
     edges: { runtime: 0.5 },
   },
@@ -341,6 +632,19 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["json schema", "jsonschema", "openapi", "swagger", "contract", "contrato", "draft"],
     terms: ["jsonschema", "openapi", "draft", "document", "dialect", "ref"],
     apis: ["jsonSchema"],
+    fact: "JIT.jsonSchema bridges both directions so a contract has one source of truth whichever side it starts on: JIT.jsonSchema.to(Schema) produces a document, and JIT.jsonSchema.from(document) produces a schema.",
+    factPt:
+      "JIT.jsonSchema faz a ponte nos dois sentidos, para que um contrato tenha uma única fonte de verdade venha de que lado vier: JIT.jsonSchema.to(Schema) produz um documento, e JIT.jsonSchema.from(documento) produz um schema.",
+    mechanisms: [
+      "`to` derives the document from the declaration that already validates the request, so the published contract cannot describe something the endpoint does not enforce.",
+      "`from` reads an existing published contract back into a schema, which is what makes it usable rather than something to copy by hand.",
+      "Checks carry across: a `.email()` or an `.int32().positive()` becomes the corresponding constraint in the document instead of being lost.",
+    ],
+    mechanismsPt: [
+      "`to` deriva o documento da mesma declaração que já valida a requisição, então o contrato publicado não tem como descrever algo que o endpoint não exige.",
+      "`from` lê um contrato já publicado de volta para um schema, e é isso que o torna utilizável em vez de algo para copiar à mão.",
+      "Os checks atravessam: um `.email()` ou um `.int32().positive()` vira a restrição correspondente no documento, em vez de se perder.",
+    ],
     page: "/docs/reference/functions/json-schema",
     edges: { schema: 0.5 },
   },
@@ -350,6 +654,22 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["migrating", "removed", "replaced", "legacy", "facade"],
     apis: [],
     fact: "2.0 removed the JIT.validator, JIT.model, JIT.mapper and JIT.serializer facades. Capabilities are reached through namespaces, and an aggregate is a plain object of artifacts.",
+    factPt:
+      "A 2.0 removeu as fachadas JIT.validator, JIT.model, JIT.mapper e JIT.serializer. As capacidades passam a ser alcançadas por namespaces, e um agregado é um objeto simples de artefatos.",
+    mechanisms: [
+      "`JIT.validator(User)` became the `JIT.validate.*` namespace: `is`, `parse`, `safeParse`, `issues`, `async`.",
+      "`JIT.equal`, `JIT.diff` and `JIT.hash` became `JIT.compare.equal`, `JIT.compare.diff` and `JIT.compare.hash`.",
+      "`JIT.mask` and `JIT.sanitize` became `JIT.security.mask` and `JIT.security.sanitize`.",
+      "An aggregate is now written as an ordinary object literal of artifacts rather than through a facade constructor.",
+      "Names that appear only in the migration guide are counter-examples, not usable code.",
+    ],
+    mechanismsPt: [
+      "`JIT.validator(User)` virou o namespace `JIT.validate.*`: `is`, `parse`, `safeParse`, `issues`, `async`.",
+      "`JIT.equal`, `JIT.diff` e `JIT.hash` viraram `JIT.compare.equal`, `JIT.compare.diff` e `JIT.compare.hash`.",
+      "`JIT.mask` e `JIT.sanitize` viraram `JIT.security.mask` e `JIT.security.sanitize`.",
+      "Um agregado agora é escrito como um objeto literal comum de artefatos, não por um construtor de fachada.",
+      "Nomes que aparecem só no guia de migração são contraexemplos, não código utilizável.",
+    ],
     page: "/docs/guides/migrating-to-2",
     edges: { self: 0.3 },
   },
@@ -359,6 +679,16 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["workspace", "editor", "run", "generate", "artifact"],
     apis: [],
     fact: "The workspace runs a schema against real values, or generates the import-free module plus a signed reference the CLI can pull into a project.",
+    factPt:
+      "O workspace roda um schema contra valores reais, ou gera o módulo sem imports mais uma referência assinada que o CLI consegue puxar para dentro de um projeto.",
+    mechanisms: [
+      "Run executes the schema in the browser against the values in the input pane; Generate produces the import-free module. They are buttons in the workspace, not methods on a schema.",
+      "The editor holds an ordinary module that imports JIT from `@jit-compiler/jit/runtime`, so what runs there is what would run in an application.",
+    ],
+    mechanismsPt: [
+      "Run executa o schema no navegador contra os valores do painel de entrada; Generate produz o módulo sem imports. São botões do workspace, não métodos de um schema.",
+      "O editor guarda um módulo comum que importa a JIT de `@jit-compiler/jit/runtime`, então o que roda ali é o que rodaria numa aplicação.",
+    ],
     page: "/workspace",
     edges: { aot: 0.5 },
   },
@@ -367,6 +697,21 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["zod", "valibot", "typebox", "typia", "ajv", "yup", "versus", "vs", "comparar com", "alternativa"],
     terms: ["zod", "valibot", "typebox", "typia", "comparison", "standard"],
     apis: [],
+    fact: "There is no universally best schema library. The right choice depends on whether the primary artifact is a runtime schema, a small modular parser, a JSON Schema document, a transformed TypeScript type, or a family of compiled data operations — which is jit's answer.",
+    factPt:
+      "Não existe uma melhor biblioteca de schema universal. A escolha certa depende de qual é o artefato principal: um schema em runtime, um parser pequeno e modular, um documento JSON Schema, um tipo TypeScript transformado, ou uma família de operações de dados compiladas — que é a resposta da jit.",
+    mechanisms: [
+      "Zod 4 and Valibot are schema-first with no default compiler; TypeBox has a compiler available; Typia is type-first and compiles ahead of time as its primary model.",
+      "jit is schema-first, supports runtime and dynamic schema creation, and compiles specialized code ahead of time as well — the combination is what distinguishes it rather than any single row.",
+      "jit's differentiator is breadth over one declaration: not just validation but equality, cloning, diffing, queries, masking, serialization and a binary codec from the same schema.",
+      "If validation is all you need and it is not in your profile, the reason to move is the shared-declaration argument, not speed.",
+    ],
+    mechanismsPt: [
+      "Zod 4 e Valibot são schema-first sem compilador por padrão; TypeBox tem um compilador disponível; Typia é type-first e compila ahead-of-time como modelo principal.",
+      "A jit é schema-first, suporta criação de schema em runtime e dinâmica, e também compila código especializado em build time — é a combinação que a distingue, não uma linha isolada.",
+      "O diferencial da jit é abrangência sobre uma declaração: não só validação, mas igualdade, clonagem, diff, queries, mascaramento, serialização e um codec binário a partir do mesmo schema.",
+      "Se validação é tudo que você precisa e ela não aparece no seu profile, o motivo para mudar é o argumento da declaração compartilhada, não velocidade.",
+    ],
     page: "/docs/reference/library-comparison",
     edges: { performance: 0.4 },
   },
@@ -393,6 +738,18 @@ export const CONCEPTS: ConceptNode[] = [
     terms: ["install", "npm", "pnpm", "quickstart", "package", "dependency"],
     apis: [],
     fact: "jit installs as the npm package @jit-compiler/jit; schemas are written against `@jit-compiler/jit/runtime`, and a file that AOT generation reads imports from `@jit-compiler/jit/define` instead.",
+    factPt:
+      "A jit se instala como o pacote npm @jit-compiler/jit; schemas são escritos contra `@jit-compiler/jit/runtime`, e um arquivo que a geração AOT lê importa de `@jit-compiler/jit/define`.",
+    mechanisms: [
+      "`pnpm add @jit-compiler/jit`, then import JIT from `@jit-compiler/jit/runtime` and declare a schema.",
+      "`pnpm jit init` writes the AOT config and `jit generate` emits the module; the CLI subcommands are init, generate, watch, check and mcp.",
+      "A declaration file that AOT reads imports from `@jit-compiler/jit/define` instead of `/runtime` — that import is what marks it as a generation source.",
+    ],
+    mechanismsPt: [
+      "`pnpm add @jit-compiler/jit`, depois importe JIT de `@jit-compiler/jit/runtime` e declare um schema.",
+      "`pnpm jit init` escreve a config do AOT e `jit generate` emite o módulo; os subcomandos do CLI são init, generate, watch, check e mcp.",
+      "Um arquivo de declaração que o AOT lê importa de `@jit-compiler/jit/define` em vez de `/runtime` — esse import é o que o marca como fonte de geração.",
+    ],
     page: "/docs/quick-start",
     edges: { self: 0.4, aot: 0.3 },
   },
@@ -401,6 +758,19 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["mcp", "agent", "agente", "tool", "ferramenta", "claude", "cursor"],
     terms: ["mcp", "stdio", "tools", "resources", "prompts"],
     apis: [],
+    fact: "@jit-compiler/jit ships jit-mcp, a local MCP stdio server that uses the same declaration discovery and generator as the CLI, keeping the agent workflow inspectable and scoped to the workspace.",
+    factPt:
+      "O @jit-compiler/jit inclui o jit-mcp, um servidor MCP local via stdio que usa a mesma descoberta de declarações e o mesmo gerador do CLI, mantendo o fluxo do agente inspecionável e restrito ao workspace.",
+    mechanisms: [
+      "It is configured as an mcpServers entry running `pnpm exec jit-mcp`, and needs no MCP SDK dependency of its own.",
+      "The read-only tools cover project context, an AOT doctor, documentation search, declaration inspection and a generation preview; jit_api_surface reflects the real JIT namespace so an agent cannot invent a name.",
+      "Writing is explicit: jit_aot_generate requires write=true, and previewing first is the read-only path.",
+    ],
+    mechanismsPt: [
+      "É configurado como uma entrada em mcpServers rodando `pnpm exec jit-mcp`, e não precisa de dependência própria de SDK MCP.",
+      "As ferramentas somente-leitura cobrem contexto de projeto, um doctor de AOT, busca na documentação, inspeção de declarações e preview de geração; jit_api_surface reflete o namespace JIT real para o agente não inventar nome.",
+      "Escrever é explícito: jit_aot_generate exige write=true, e o preview é o caminho somente-leitura.",
+    ],
     page: "/docs/guides/mcp-server",
   },
 ];

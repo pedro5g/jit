@@ -3,6 +3,7 @@ import { RootProvider } from "fumadocs-ui/provider/next";
 import { GhostToggle } from "@/components/brand/ghost-toggle";
 import { JitLogo } from "@/components/brand/jit-logo";
 import { GhostDocGuide } from "@/components/docs/ghost-doc-guide";
+import { SnippetDemo } from "@/components/docs/snippet-demo";
 import { githubUrl } from "@/lib/site";
 import { source } from "@/lib/source";
 
@@ -24,6 +25,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {children}
       </DocsLayout>
       <GhostDocGuide />
+      <SnippetDemo />
     </RootProvider>
   );
 }
