@@ -1,6 +1,7 @@
 {
   "title": "Guides",
   "pages": [
+    "migrating-to-2",
     "choosing-an-execution-mode",
     "boundary-recipes",
     "browser-and-edge",

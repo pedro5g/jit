@@ -47,13 +47,13 @@ success path and only builds issues after failure. Observable callbacks,
 stateful regexes and transforming schemas remain single-pass. `safeParse`
 rebuilds output only when defaults, coercions or transforms require it.
 
-## Root aliases
+## One path per capability
 
-The common methods are exact aliases of the namespace factories, not parallel
-implementations:
+Every validation factory is reached through the `JIT.validate` namespace and
+nowhere else. There are no root aliases:
 
 ```ts
-JIT.is === JIT.validate.is; // the exact same factory
+const isUser = JIT.validate.is(User);
 const parseUser = JIT.validate.parse(User);
 const safeParseUser = JIT.validate.safeParse(User);
 ```

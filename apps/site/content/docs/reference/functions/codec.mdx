@@ -1,10 +1,12 @@
 ---
 title: codec
 description: Bidirectional value schemas and compact versioned binary encoding.
+related: /docs/runtime/serialization, /docs/runtime/binary-rowsets
 ---
 
-`JIT.codec` has two distinct overloads. One defines a value transformation;
-the other compiles a binary transport.
+Two different things share the word "codec". `JIT.codec` defines a value
+transformation inside a schema. `JIT.binary.codec` compiles a binary transport
+for a schema. They are separate APIs, not overloads of one.
 
 ## Value codec schema
 
@@ -28,7 +30,7 @@ one-direction conversion, a parse transform is simpler.
 ## Binary codec
 
 ```ts
-const EventWire = JIT.codec(Event, { version: 2 });
+const EventWire = JIT.binary.codec(Event, { version: 2 });
 
 const bytes = EventWire.encode(event);
 const decoded = EventWire.decode(bytes);

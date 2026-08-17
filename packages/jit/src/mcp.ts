@@ -16,6 +16,7 @@ import {
   resourceTemplates,
   searchDocs,
 } from "./mcp-project.js";
+import { JIT } from "./runtime.js";
 
 /**
  * JIT MCP server.
@@ -26,7 +27,7 @@ import {
  */
 
 const SERVER_NAME = "jit-mcp";
-const SERVER_VERSION = "1.0.4";
+const SERVER_VERSION = "2.0.0";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([LATEST_PROTOCOL_VERSION]);
 
@@ -111,6 +112,15 @@ const TOOLS: readonly ToolDefinition[] = [
     "AOT doctor",
     "Validate Node, config discovery, declaration loading, explicit compiled exports, and output settings.",
     objectSchema(AOT_PROPERTIES),
+    readOnlyAnnotations()
+  ),
+  tool(
+    "jit_api_surface",
+    "Verified API surface",
+    "The public JIT namespace reflected from the runtime itself: every top-level member and every member of every namespace. Use this before writing jit code — a name that is not here does not exist, whatever a model remembers.",
+    objectSchema({
+      member: optionalString('A single top-level member to describe, e.g. "validate". Omit for the whole surface.'),
+    }),
     readOnlyAnnotations()
   ),
   tool(
@@ -229,6 +239,7 @@ export async function callTool(params: unknown, cwd: string): Promise<JsonValue>
   try {
     if (name === "jit_project_context") return toolResult(projectContext(args, cwd));
     if (name === "jit_project_doctor") return toolResult(await doctorProject(args, cwd));
+    if (name === "jit_api_surface") return toolResult(apiSurface(args));
     if (name === "jit_docs_search") return toolResult(searchDocs(args, cwd));
     if (name === "jit_aot_inspect") return toolResult(await inspectAot(args, cwd));
     if (name === "jit_aot_preview") return toolResult(await previewAot(args, cwd));
@@ -378,6 +389,56 @@ function tool(
 
 function readOnlyAnnotations(): JsonValue {
   return { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+}
+
+/**
+ * The public surface, reflected rather than written down.
+ *
+ * Every agent that touches this library invents names — `JIT.compare.deepEqual`,
+ * `JIT.security.redact`, `.notEmpty()` — because two thirds of the surface lives
+ * below `JIT.x` and no list of it was ever reachable. Reflection is the only
+ * source that cannot drift: it is the same object the caller's code will run
+ * against, read at the moment it is asked for.
+ */
+function apiSurface(args: Readonly<Record<string, unknown>>): { readonly text: string; readonly data: JsonValue } {
+  const only = typeof args.member === "string" ? args.member : undefined;
+  const namespace = JIT as unknown as Record<string, unknown>;
+
+  const members = Object.keys(namespace)
+    .filter((name) => !only || name === only)
+    .sort()
+    .map((name) => {
+      const value = namespace[name];
+      const nested =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? Object.keys(value as object)
+              .filter((key) => !key.startsWith("__"))
+              .sort()
+          : [];
+
+      return { name, members: nested };
+    });
+
+  if (only && members.length === 0) {
+    return {
+      text: `JIT.${only} does not exist. Call jit_api_surface with no argument for the full list.`,
+      data: { members: [] },
+    };
+  }
+
+  const lines = members.map((member) =>
+    member.members.length > 0 ? `JIT.${member.name}.{ ${member.members.join(", ")} }` : `JIT.${member.name}`
+  );
+
+  return {
+    text: [
+      "The complete public JIT surface, reflected from the installed runtime.",
+      "A name that does not appear here does not exist.",
+      "",
+      ...lines,
+    ].join("\n"),
+    data: { members } as unknown as JsonValue,
+  };
 }
 
 function toolResult(payload: { readonly text: string; readonly data: JsonValue }): JsonValue {

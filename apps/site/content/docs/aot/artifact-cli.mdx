@@ -1,9 +1,9 @@
 ---
-title: Artifact Lab and native CLI
+title: Workspace artifacts and the native CLI
 description: Compile arbitrary JIT declarations in the browser and reconstruct signed AOT output safely.
 ---
 
-The Artifact Lab and native CLI move generated AOT files into an application
+The workspace and the native CLI move generated AOT files into an application
 without adding JIT as a development dependency.
 
 ```text
@@ -17,9 +17,10 @@ free-form JIT TypeScript
   -> native verification and transactional write
 ```
 
-## Use the Lab
+## Generate in the workspace
 
-Open [/lab](/lab). The import is fixed:
+Open the [workspace](/workspace?mode=generate) and switch to Generate. The
+import is written for you:
 
 ```ts
 import { JIT } from "@jit-compiler/jit/define";
@@ -70,7 +71,7 @@ export const isUser: (value: unknown) => value is User = function is(value) {
 
 ## Reconstruct in a project
 
-Run the command shown by the Lab:
+Run the command the workspace shows:
 
 ```bash
 pnpm dlx @jit-compiler/cli add jlr1_<reference>
@@ -140,7 +141,8 @@ This has three useful properties:
 
 The signature authenticates the registry and bytes it issued. It does not
 certify that arbitrary generated application code is safe, and it does not
-identify the person who created the Lab session. Review the Output panel and
+identify the person who created the workspace session. Review the generated
+source and
 the CLI diff exactly as you would review generated source in a pull request.
 
 It also means `add` needs network access to the official registry. Use the
@@ -221,4 +223,4 @@ paths and source, applies strict limits, canonicalizes the payload and signs
 the resulting content address.
 
 The worker boundary limits hangs and isolates execution from React state, but
-it is not a secret boundary: do not paste credentials into the Lab.
+it is not a secret boundary: do not paste credentials into the workspace.

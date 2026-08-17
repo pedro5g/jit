@@ -165,3 +165,5 @@ CLAUDE.md
 
 # Playground d.ts manifest (generated from packages/jit dist)
 apps/site/public/playground/jit-dts.json
+apps/site/public/assistant/docs-index.json
+apps/site/public/assistant/api-surface.json

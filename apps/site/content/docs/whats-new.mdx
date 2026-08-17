@@ -1,0 +1,169 @@
+---
+title: What's new in 2.0
+description: Recursive schemas everywhere, a two-way JSON Schema bridge, Standard Schema, composable execution, and one capability API.
+---
+
+2.0 is the release where the API stopped having more than one answer to the
+same question, and where the compiler stopped having shapes it refused. Every
+capability is reached through exactly one path, an aggregate is a plain
+object, and a self-referencing schema compiles in every emitter.
+
+Upgrading from 1.x? The [migration guide](/docs/guides/migrating-to-2) has a
+direct replacement for every removed call.
+
+## Recursive schemas compile everywhere
+
+A self-referencing schema used to overflow the stack at emit time. Each cycle
+participant is now lifted into one named function and called, the same shape
+the validator already used — in `clone`, `equal`, `diff`, `update`,
+`serialize`, `mask`, `sanitize`, the binary codec, and the AOT type emitter:
+
+```ts
+const Category = JIT.object({
+  name: JIT.string(),
+  children: JIT.array(JIT.lazy(() => Category)),
+});
+
+const isCategory = JIT.validate.is(Category);
+const cloneCategory = JIT.clone(Category);
+const diffCategory = JIT.compare.diff(Category);
+```
+
+Mutual recursion works, and so does a schema built from a recursive JSON
+Schema document. A schema without a cycle reaches no new code path and emits
+byte-identical source, so nothing regresses for the flat case.
+
+## A two-way JSON Schema bridge
+
+[`JIT.jsonSchema`](/docs/reference/functions/json-schema) keeps one source of
+truth whichever side a contract starts on.
+
+`to` targets draft-2020-12, draft-07, draft-04, and OpenAPI 3.0. Each version
+is a capability descriptor rather than a branch in the emitter, and `io` picks
+the described side — `"output"` applies defaults and closes the shape,
+`"input"` leaves defaulted fields optional and the shape open:
+
+```ts
+JIT.jsonSchema.to(User, { target: "openapi-3.0", io: "input" });
+```
+
+A type is representable exactly when JIT's own JSON serializer defines a wire
+form for it, so dates become date-time strings while `Map`, `Set`, and
+`bigint` throw with the failing path instead of silently becoming `{}`.
+
+`from` goes the other way, and the document literal types the schema — no
+duplicate declaration:
+
+```ts
+const User = JIT.jsonSchema.from({
+  type: "object",
+  properties: { name: { type: "string" }, age: { type: "number" } },
+  required: ["name", "age"],
+} as const);
+
+const isUser = JIT.validate.is(User); // (value) => value is { name: string; age: number }
+```
+
+It reads only the keywords the compiled validator can enforce, resolves local
+`$ref`, breaks cycles with a lazy back-edge, and refuses external refs rather
+than fetching them. Ahead of time, the whole conversion is resolved at
+generation: the module carries specialized functions, never the document.
+
+## Standard Schema
+
+Every compiled validation artifact implements
+[Standard Schema](/docs/reference/library-comparison) through `~standard`,
+sharing the schema's own adapter by identity, and the coverage now includes
+pipelines that end in validation — not only the `validate.*` factories.
+
+## One capability API
+
+Namespaces are the only access path: `JIT.validate.*`, `JIT.compare.*`,
+`JIT.security.*`, `JIT.json.*`, `JIT.binary.*`. `JIT.compile(schema, {...})`
+is replaced by a plain object of artifacts, and the AOT generator reads a
+declaration file literally instead of requiring a marker call:
+
+```ts
+export const User = {
+  is: JIT.validate.is(UserSchema),
+  parse: JIT.validate.parse(UserSchema),
+  equal: JIT.compare.equal(UserSchema),
+  findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")),
+};
+```
+
+Query builders are the query — call the builder, and reach the other backends
+through `.to.iterator()`, `.to.asyncIterator()`, and `.to.visitor()`. `q.and`
+and `q.or` take more than two conditions; before this, a third was silently
+dropped.
+
+## Declarative transformations, mocks, and metadata
+
+[`JIT.ops`](/docs/reference/functions/ops) builds a transformation as data, so
+the generated validator writes `o = o.trim().toLowerCase()` instead of calling
+an opaque binding, and the whole chain folds into one expression:
+
+```ts
+const Handle = JIT.string().min(3).pipe(JIT.ops.trim().lowercase().slice(0, 20));
+const Price = JIT.number().pipe(JIT.ops.clamp(0, 1000).toFixed(2));
+```
+
+This is not a runtime speed win, and the docs say so: measured over 3M values,
+the declarative and callback forms are within noise, because a monomorphic
+closure is inlined by the engine. What a chain buys is ahead-of-time coverage
+— a callback that closes over its scope cannot be serialized, so
+`jit generate` skips that artifact entirely, while a chain always generates.
+
+[`JIT.mock`](/docs/reference/functions/mock) is a seeded generator whose
+values satisfy the schema's own checks, and `.meta()` attaches documentation
+metadata that flows into JSON Schema output.
+
+## Composable execution
+
+An [execution plan](/docs/runtime/composable-execution) lowers JSON and binary
+sources, validation, query, map, transform, update, security, and sinks into
+one lazy callable. Incremental filters and projections fuse into a single
+stage, and a terminal batch map plus JSON encode skips the mapped output
+array. JSON decoding is schema-directed and always goes through native
+`JSON.parse`.
+
+## AOT: typed source and reconstruction
+
+Generation emits self-contained TypeScript by default — a schema names its
+generated type, an artifact keeps its binding name, and an object of artifacts
+becomes one frozen object. Configuration is now just discovery plus output:
+
+```ts
+export default {
+  entries: ["src/aot/**/*.jit.ts"],
+  output: { directory: "src/generated", format: "ts", perFile: false },
+};
+```
+
+The CLI reconstructs artifacts deterministically, and the
+[workspace](/workspace?mode=generate) generates and verifies signed artifacts
+from the browser.
+
+## Faster compilation and faster `safeParse`
+
+- `safeParse` leads with the allocation-free `is` check wherever the schema
+  cannot rebuild its input: roughly **18% faster on valid values**, in
+  generated modules and the runtime compiler alike.
+- The equal pipeline keeps only the four optimizer passes that demonstrably
+  rewrite source. Codegen over 2000 distinct schemas drops from **~328 ms to
+  ~280 ms** with byte-identical output.
+- `diff` binds a repeated operand once instead of re-walking the property
+  chain: **~12%** on values that actually differ.
+- Dead output stores are gone from the parse emitter, cutting `safeParse`
+  source by 10% and `parse` source by 8%.
+- The cycle set is cached per schema, so compiling a whole namespace for one
+  schema costs a single graph traversal.
+
+`equal` also learned four container types it used to refuse — tuples,
+records, sets, and maps — so a schema holding any of them can finally be
+compared as well as cloned, diffed, hashed, and serialized.
+
+## Full changelog
+
+Every entry, including the removals, lives in the
+[CHANGELOG](https://github.com/pedro5g/jit/blob/main/CHANGELOG.md).

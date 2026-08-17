@@ -1,0 +1,237 @@
+---
+title: Migrating to 2.0
+description: Move from the 1.x facades to capability namespaces and artifact objects, with a direct replacement for every removed call.
+---
+
+2.0 removes the parallel ways of reaching the same compiled function. In 1.x a
+validator could be created through `JIT.validate`, `JIT.validator`,
+`JIT.model`, or `JIT.compile`, and each one carried its own selection
+vocabulary. There is now exactly one path per capability, and an aggregate is
+an ordinary object.
+
+Nothing about the generated code changed. The compiler emits the same source
+it emitted for 1.x; only the surface that asks for it moved.
+
+## The whole migration in one table
+
+| 1.x                                    | 2.0                                          |
+| -------------------------------------- | -------------------------------------------- |
+| `JIT.validator(User)`                  | `JIT.validate.is/parse/safeParse(User)`      |
+| `JIT.validator(User).get("is","parse")`| an object literal with those two artifacts   |
+| `JIT.validator(Job).parseAsync(x)`     | `JIT.validate.async.parse(Job)(x)`           |
+| `JIT.validator(Job).safeParseAsync(x)` | `JIT.validate.async.safeParse(Job)(x)`       |
+| `JIT.model(User)`                      | an object literal of artifacts               |
+| `JIT.compile(User, { ... })`           | the same object, without the wrapper call    |
+| `JIT.equal(User)`                      | `JIT.compare.equal(User)`                    |
+| `JIT.diff(User)`                       | `JIT.compare.diff(User)`                     |
+| `JIT.hash(User)`                       | `JIT.compare.hash(User)`                     |
+| `JIT.mask(User)`                       | `JIT.security.mask(User)`                    |
+| `JIT.sanitize(Form)`                   | `JIT.security.sanitize(Form)`                |
+| `JIT.serializer(User)`                 | `JIT.json.stringify(User)` / `JIT.json.parse(User)` |
+| `JIT.json(User).stringify().compile()` | `JIT.json.stringify(User)`                   |
+| `JIT.mapper(A, B, overrides)`          | `JIT.map(A, B, overrides)`                   |
+| `JIT.mapper(A, B).get("many")`         | `JIT.map.many(A, B)`                         |
+| `JIT.map(Key, Value)` (Map schema)     | `JIT.mapSchema(Key, Value)`                  |
+| `JIT.query(Users)….compile()`          | `JIT.query(Users)…` — the builder is the query |
+| `….compileIterator()`                  | `….to.iterator()`                            |
+| `….compileVisitor()`                   | `….to.visitor()`                             |
+| `JIT.compileEqual`, `JIT.compileClone`, … | `Compiler.compileEqual`, `Compiler.compileClone`, … |
+| generated `UserStrict<T>`              | `JIT.Strict<typeof User, T>` in your source  |
+
+`JIT.clone`, `JIT.format`, `JIT.codec`, `JIT.update`, `JIT.stream`,
+`JIT.process`, `JIT.transform`, `JIT.watch`, and every schema factory are
+unchanged.
+
+## Validators
+
+`JIT.validator` bundled a facade, a selection object, and a `.get()` reader.
+Each method of `JIT.validate` returns one callable artifact, so a selection is
+just the set of artifacts you created:
+
+```ts
+// 1.x
+const Users = JIT.validator(User, { is: true, parse: true });
+Users.is(input);
+Users.parse(input);
+
+// 2.0
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
+isUser(input);
+parseUser(input);
+```
+
+Async validation moved under its own namespace, which keeps the sync and async
+surfaces from sharing a name:
+
+```ts
+// 1.x
+await JIT.validator(Job).parseAsync({ result: fetchResult() });
+
+// 2.0
+await JIT.validate.async.parse(Job)({ result: fetchResult() });
+```
+
+## Aggregates are plain objects
+
+`JIT.model` compiled every operation lazily; `JIT.compile` wrapped a hand-made
+selection in a marker call so the AOT generator could recognize it. The
+generator now reads a declaration file literally, so the marker is unnecessary
+and the object is the artifact:
+
+```ts
+// 1.x
+export const User = JIT.compile(UserSchema, {
+  is: JIT.validator(UserSchema).get("is").is,
+  findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")).compile(),
+  toDTO: JIT.mapper(UserSchema, PublicUser).get("many"),
+});
+
+// 2.0
+export const User = {
+  is: JIT.validate.is(UserSchema),
+  findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")),
+  toDTO: JIT.map.many(UserSchema, PublicUser),
+};
+```
+
+Selection is still physical: an artifact you never create is never compiled
+and never reaches the generated module. See
+[generation and tree shaking](/docs/aot/generation-and-tree-shaking) for how
+an object of artifacts is lowered into one frozen object.
+
+## Structural and security operations
+
+```ts
+// 1.x
+const equalUser = JIT.equal(User).compile();
+const diffUser = JIT.diff(User);
+const maskUser = JIT.mask(User);
+
+// 2.0
+const equalUser = JIT.compare.equal(User);
+const diffUser = JIT.compare.diff(User);
+const maskUser = JIT.security.mask(User);
+```
+
+Artifacts are callable and lazy. `.compile()` still exists as optional eager
+warm-up, so a 1.x call that ended in `.compile()` keeps working — it is simply
+no longer required to obtain a function.
+
+## Queries
+
+A query builder is the query. Calling it runs the eager backend; the other
+backends hang off `.to`:
+
+```ts
+// 1.x
+const findAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin")).compile();
+const streamAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin")).compileIterator();
+
+// 2.0
+const findAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin"));
+const streamAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin")).to.iterator();
+```
+
+`q.and` and `q.or` accept more than two conditions. In 1.x a third argument
+was silently dropped, so a condition list that grew past two filtered less
+than it claimed — check any call that passed three or more.
+
+## Mappers
+
+`JIT.map` is the mapper, and the Map *schema* factory it collided with moved
+to `JIT.mapSchema`. The `overrides` argument now exists in the type only while
+a target field cannot be inferred, so an exhaustive override object that used
+to be required often disappears:
+
+```ts
+// 1.x
+const toDTO = JIT.mapper(UserEntity, PublicUser, { name: { from: "fullName" } }).get("map", "many");
+toDTO.map(entity);
+toDTO.many(entities);
+
+// 2.0
+const toDTO = JIT.map(UserEntity, PublicUser, { name: { from: "fullName" } });
+const toDTOs = JIT.map.many(UserEntity, PublicUser, { name: { from: "fullName" } });
+toDTO(entity);
+toDTOs(entities);
+```
+
+## Low-level compilers
+
+The root namespace no longer re-exports the emitters. They are the `Compiler`
+namespace of the package root:
+
+```ts
+// 1.x
+import { JIT } from "@jit-compiler/jit/runtime";
+const source = JIT.compileEqual(schema);
+
+// 2.0
+import { Compiler } from "@jit-compiler/jit";
+const source = Compiler.compileEqual(schema);
+```
+
+See [low-level compilers](/docs/reference/functions/low-level-compilers).
+
+## AOT configuration
+
+The configuration file lost the legacy block, `packageName`, `clean`, and the
+`emit` block. What remains is discovery plus output:
+
+```ts
+// 2.0
+export default {
+  entries: ["src/aot/**/*.jit.ts"],
+  output: {
+    directory: "src/generated",
+    format: "ts",
+    perFile: false,
+  },
+};
+```
+
+Two consequences worth checking in a build:
+
+- Generation no longer emits a `package.json`, an exports map, or a
+  `sideEffects` declaration. If a build imported the generated directory as a
+  package, import the module path instead.
+- `clean` identifies generated files by their banner rather than by name, so a
+  file you added by hand to the output directory survives.
+
+The generated `UserStrict<T>` alias is gone. The equivalent lives on the
+source side and does not need generated output to exist:
+
+```ts
+type StrictUser = JIT.Strict<typeof User, { role: "admin" }>;
+```
+
+## Recursive schemas
+
+A self-referencing schema used to overflow the stack at compile time — in 1.x
+this was a hard limit, not a bug you could work around. It compiles in 2.0
+across the validator and every structural emitter, so a migration can delete
+whatever manual flattening was standing in for it:
+
+```ts
+const Category = JIT.object({
+  name: JIT.string(),
+  children: JIT.array(JIT.lazy(() => Category)),
+});
+
+const isCategory = JIT.validate.is(Category);
+const cloneCategory = JIT.clone(Category);
+const diffCategory = JIT.compare.diff(Category);
+```
+
+## Verifying the migration
+
+1. `pnpm jit doctor` reports config discovery, output target, and declaration
+   files under the new configuration shape.
+2. `jit generate` fails loudly on an artifact it cannot serialize instead of
+   skipping it silently — a callback that closes over its scope still reports
+   the reason, and [`JIT.ops`](/docs/reference/functions/ops) expresses the
+   common cases as data that always generates.
+3. The type checker finds the removed facades for you: every name in the first
+   table is gone from the published types, so a 1.x call site cannot compile
+   against 2.0.

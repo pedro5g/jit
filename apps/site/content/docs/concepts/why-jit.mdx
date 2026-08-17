@@ -1,0 +1,128 @@
+---
+title: Why jit exists
+description: The problem jit solves, why compiling a schema once is faster than interpreting it per call, and when it is not the right tool.
+related: /docs/concepts/compilation-model, /docs/reference/benchmarks, /docs/reference/library-comparison
+---
+
+A schema is a description of a shape. Every library that takes one has to turn that
+description into behaviour, and there are only two moments it can do that: on every
+call, or once.
+
+Doing it on every call is the normal choice, and it is why validation shows up in
+profiles. Doing it once is what jit does.
+
+## The problem
+
+### One shape, a dozen jobs
+
+A `User` shape is not only validated. Over the life of a request it is compared
+against a previous version, cloned before a mutation, diffed to produce a patch,
+stripped of PII before it reaches a log line, serialized to JSON, and maybe
+encoded to a binary frame. Six jobs, one shape.
+
+The usual answer is six libraries: one validator, one deep-equal, one clone, one
+diff, one masking helper, one serializer. Each one holds its own idea of what a
+`User` is, none of them knows about the others, and they drift — a field added to
+the validator is not added to the mask, and the PII leaks.
+
+### The same work, paid on every call
+
+A generic validator receives a schema object and walks it: read the node, branch
+on its type, look up the next key, allocate an issue array in case something
+fails, recurse. That traversal is identical on the first call and the millionth.
+The *shape* is known long before the value arrives, but a generic library cannot
+use that, because it is compiled against every possible schema rather than yours.
+
+```ts
+// what a generic library does, once per call, forever
+for (const key of Object.keys(schema.shape)) {
+  const child = schema.shape[key];
+  if (child.type === "string") { /* ...branch, branch, branch... */ }
+}
+```
+
+## The answer
+
+Describe the shape once, and compile a specialized function for each operation
+over it. The schema is read at build time; at call time there is no schema left —
+only straight-line JavaScript written for one known shape.
+
+```ts
+import { JIT } from "@jit-compiler/jit/runtime";
+
+const User = JIT.object({
+  id: JIT.string().uuid(),
+  email: JIT.string().email(),
+  age: JIT.number().int().min(0),
+});
+
+const isUser = JIT.validate.is(User);       // allocates nothing, returns on first failure
+const sameUser = JIT.compare.equal(User);   // structural equality, no generic walk
+const safeUser = JIT.security.mask(User);   // rebuilds only the paths that carry a marked field
+```
+
+Every one of those is derived from the same declaration, so they cannot disagree
+about what a `User` is. That is the drift problem solved by construction, not by
+discipline.
+
+## Why the generated code is fast
+
+The speed is not a trick, and it is not a faster interpreter. It is the absence
+of the interpreter. The generated function does the work a performance engineer
+would write by hand and no more:
+
+- **Static property access.** A known shape is read as `value.email`, never
+  through `for...in` or `Object.keys`. There is no key list to walk because the
+  keys were known when the function was written.
+- **Checks ordered cheapest-first.** `typeof` → null → numeric range → length →
+  regex. The common rejection costs one comparison, and the expensive check only
+  runs on a value that already passed the cheap ones.
+- **Classic indexed loops with early returns.** No closures, no per-element
+  callbacks, no `push` in a hot path.
+- **No incidental allocation.** `is` returns a boolean and allocates nothing;
+  `safeParse` only pays for the annotated traversal when the schema cannot
+  rebuild its input from the fast path.
+- **Monomorphic call sites.** One shape in, one code path out, so the JavaScript
+  engine can inline it and keep it hot — which a function that branches on every
+  schema node can never be.
+- **Surgical structural work.** Cloning, updating and masking rebuild only the
+  paths that contain a changed or marked field; untouched subtrees are shared by
+  reference rather than copied.
+
+It is faster than a generic validator for the same reason a compiler is faster
+than an interpreter: the decisions were made before the data arrived.
+
+See [compilation model](/docs/concepts/compilation-model) for how that pipeline
+is structured, and [benchmarks](/docs/reference/benchmarks) for the measured
+numbers.
+
+## Why two execution modes
+
+Compiling at runtime through `globalThis.Function` is ideal for a long-lived
+process and for schemas that are not known until the program runs. It is also
+exactly what a strict Content Security Policy forbids, and it puts the compiler
+itself in your bundle.
+
+So the same compiler runs at build time too. `jit generate` writes an
+import-free module — the error class and runtime helpers are inlined — and the
+engine never ships to production. The output runs under strict CSP and on edge
+runtimes. Same compiler, same generated code, different moment.
+
+See [choosing an execution mode](/docs/guides/choosing-an-execution-mode).
+
+## When jit is not the right tool
+
+Being honest about this is part of the answer:
+
+- **A shape you validate a handful of times.** Compilation is paid once, but it
+  is not free. If a schema runs a dozen times over a process's life, a generic
+  validator's per-call cost never adds up to jit's compile cost.
+- **A shape that changes on every call.** Compilation is cached by schema
+  identity; building a fresh schema per request pays the compile cost every time
+  and reuses nothing.
+- **You only need one operation and already have it.** If validation is all you
+  need and your current library is not in your profile, the reason to move is
+  the shared-declaration argument above, not speed.
+
+[Library comparison](/docs/reference/library-comparison) sets this out against
+Zod, Valibot, TypeBox and Typia.

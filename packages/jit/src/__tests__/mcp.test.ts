@@ -49,7 +49,7 @@ describe("jit MCP server", () => {
         result: {
           protocolVersion: "2025-11-25",
           capabilities: { tools: {}, resources: {}, prompts: {}, completions: {}, logging: {} },
-          serverInfo: { name: "jit-mcp", version: "1.0.4" },
+          serverInfo: { name: "jit-mcp", version: "2.0.0" },
         },
       });
       const listed = messages[1] as { readonly id: number; readonly result: { readonly tools: readonly unknown[] } };
@@ -109,6 +109,37 @@ describe("jit MCP server", () => {
       expect(context.structuredContent).toMatchObject({ name: "fixture", commands: ["pnpm test", "pnpm build"] });
       expect(search.content[0].text).toContain("docs/architecture.md:3");
       expect(search.structuredContent.matches).toHaveLength(1);
+    });
+
+    /**
+     * The tool that exists because agents invent names.
+     *
+     * Two thirds of this library's surface lives below `JIT.x` —
+     * `JIT.validate.safeParse`, `JIT.compare.equal` — and no list of it was
+     * reachable from an agent, so `JIT.compare.deepEqual` and
+     * `JIT.security.redact` were written confidently and often. Reflecting the
+     * installed runtime is the one source that cannot drift from what the
+     * caller's code will actually run against.
+     */
+    it("reflects the real API surface, namespaces included", async () => {
+      const surface = asTool(await callTool({ name: "jit_api_surface", arguments: {} }, projectDir));
+
+      expect(surface.isError).toBeUndefined();
+      expect(surface.content[0].text).toContain("JIT.validate.{ async, is, issues, parse, safeParse }");
+      expect(surface.content[0].text).toContain("JIT.compare.{ diff, equal, hash }");
+      expect(surface.content[0].text).toContain("A name that does not appear here does not exist");
+    });
+
+    it("describes a single member, and refuses one that does not exist", async () => {
+      const one = asTool(await callTool({ name: "jit_api_surface", arguments: { member: "security" } }, projectDir));
+      const missing = asTool(
+        await callTool({ name: "jit_api_surface", arguments: { member: "deepEqual" } }, projectDir)
+      );
+
+      expect(one.content[0].text).toContain("JIT.security.{ mask, sanitize }");
+      expect(one.structuredContent.members).toHaveLength(1);
+      expect(missing.content[0].text).toContain("JIT.deepEqual does not exist");
+      expect(missing.structuredContent.members).toHaveLength(0);
     });
 
     it("lists and reads fixed resources, templates, docs, and completion values", async () => {

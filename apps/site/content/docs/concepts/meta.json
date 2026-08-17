@@ -1,4 +1,4 @@
 {
   "title": "Core concepts",
-  "pages": ["compilation-model", "schemas-and-types"]
+  "pages": ["why-jit", "compilation-model", "schemas-and-types"]
 }
