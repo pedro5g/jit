@@ -87,19 +87,23 @@ export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode
           />
         </div>
 
-        <div className="min-w-40 max-w-56 flex-1">
+        <div className="min-w-44 max-w-60 flex-1">
           <Select
-            ariaLabel="Load an example"
+            ariaLabel="Add an example to the project"
             value={loadedExample}
             options={[
-              { value: "", label: "Examples", description: "Replace the open file with a ready-made schema" },
+              { value: "", label: "Add an example", description: "Opens as a new file; nothing you wrote is replaced" },
               ...EXAMPLES.map((example) => ({ value: example.id, label: example.label })),
             ]}
             onValueChange={(value) => {
               const example = EXAMPLES.find((item) => item.id === value);
               if (!example) return;
-              setLoadedExample(example.id);
-              workspace.setSource(active.path, lockEntrypoint(example.code, activeMode));
+
+              // Overwriting the open file was the wrong move: a reader picking
+              // an example to look at lost whatever they had been writing, with
+              // no warning and no way back beyond undo in the editor.
+              setLoadedExample("");
+              workspace.addFileWithSource(`examples/${example.id}.ts`, lockEntrypoint(example.code, activeMode));
             }}
           />
         </div>
@@ -195,6 +199,7 @@ export function Workspace({ initialMode = "run" }: { initialMode?: WorkspaceMode
             activePath={active.path}
             mode={activeMode}
             onChange={workspace.setSource}
+            onSelect={workspace.setActive}
             onReady={onReady}
           />
         </section>

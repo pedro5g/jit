@@ -1,10 +1,9 @@
 "use client";
 
-import Editor, { type Monaco } from "@monaco-editor/react";
-import { Lock } from "lucide-react";
+import Editor, { type Monaco, type OnMount } from "@monaco-editor/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { WorkspaceFile } from "@/lib/workspace/project";
-import { entrypointLine, lockEntrypoint, type WorkspaceMode } from "@/lib/workspace/store";
+import { nameOf, parentOf, type WorkspaceFile } from "@/lib/workspace/project";
+import { lockEntrypoint, type WorkspaceMode } from "@/lib/workspace/store";
 
 /**
  * The one editor the workspace has, holding the whole project.
@@ -49,18 +48,21 @@ export function WorkspaceEditor({
   activePath,
   mode,
   onChange,
+  onSelect,
   onReady,
 }: {
   files: readonly WorkspaceFile[];
   activePath: string;
   mode: WorkspaceMode;
   onChange: (path: string, source: string) => void;
+  onSelect: (path: string) => void;
   onReady: (handle: EditorHandle) => void;
 }) {
   const [monaco, setMonaco] = useState<Monaco | null>(null);
   const [dts, setDts] = useState<Record<string, string> | null>(null);
   const active = files.find((file) => file.path === activePath) ?? files[0];
   const guarding = useRef(false);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
   useEffect(() => {
     fetch("/playground/jit-dts.json")
@@ -163,7 +165,68 @@ export function WorkspaceEditor({
     ts.typescriptDefaults.setEagerModelSync(true);
   }, []);
 
-  const onMount = useCallback((_editor: unknown, instance: Monaco) => setMonaco(instance), []);
+  /**
+   * The entrypoint line is refused rather than corrected.
+   *
+   * Restoring it after the fact still lets the reader watch it change under
+   * their cursor, which reads as the editor fighting them. Blocking the
+   * keystroke while the selection is on line 1 means the line simply cannot be
+   * typed into; `lockEntrypoint` stays as the backstop for a paste or an undo,
+   * which no key handler sees.
+   */
+  const onMount = useCallback<OnMount>((instance, monacoInstance) => {
+    editorRef.current = instance;
+    setMonaco(monacoInstance);
+
+    instance.onKeyDown((event) => {
+      const selection = instance.getSelection();
+      if (!selection || selection.startLineNumber > 1) return;
+
+      const harmless =
+        event.metaKey ||
+        event.ctrlKey ||
+        [
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+          "Home",
+          "End",
+          "PageUp",
+          "PageDown",
+          "Escape",
+          "Tab",
+        ].includes(event.browserEvent.key);
+      if (harmless) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  }, []);
+
+  /** The locked line, greyed and marked, so it reads as chrome rather than code. */
+  // biome-ignore lint/correctness/useExhaustiveDependencies(activePath): the decoration belongs to the model on screen, so switching files has to redraw it
+  // biome-ignore lint/correctness/useExhaustiveDependencies(mode): the line it marks is the entrypoint the mode chose
+  useEffect(() => {
+    const instance = editorRef.current;
+    if (!instance || !monaco) return;
+
+    const collection = instance.createDecorationsCollection([
+      {
+        range: new monaco.Range(1, 1, 1, 1),
+        options: {
+          isWholeLine: true,
+          className: "workspace-locked-line",
+          linesDecorationsClassName: "workspace-locked-gutter",
+          hoverMessage: {
+            value: "The workspace owns this line. Run and Generate differ only in which subpath it names.",
+          },
+        },
+      },
+    ]);
+
+    return () => collection.clear();
+  }, [monaco, activePath, mode]);
 
   /**
    * The entrypoint import is the workspace's line, so an edit that breaks it
@@ -193,14 +256,36 @@ export function WorkspaceEditor({
   if (!active) return null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <p className="flex shrink-0 items-center gap-1.5 border-b border-line-subtle bg-night-1000/60 px-3 py-1">
-        <Lock aria-hidden className="size-2.5 shrink-0 text-fg-subtle" />
-        <code className="truncate font-mono text-[10px] text-fg-subtle">{entrypointLine(mode)}</code>
-        <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-subtle">
-          {mode === "run" ? "compiles in memory" : "read by the generator"}
-        </span>
-      </p>
+    <div className="flex h-full min-h-0 flex-col bg-night-1000">
+      {/* the tab strip: which file is open, and every other one a click away */}
+      <div
+        role="tablist"
+        aria-label="Open files"
+        className="flex shrink-0 items-stretch overflow-x-auto border-b border-line-subtle bg-night-950"
+      >
+        {files.map((file) => {
+          const current = file.path === active.path;
+
+          return (
+            <button
+              key={file.path}
+              type="button"
+              role="tab"
+              aria-selected={current}
+              onClick={() => onSelect(file.path)}
+              title={file.path}
+              className={`group relative flex shrink-0 items-center gap-1.5 border-r border-line-subtle px-3 py-1.5 font-mono text-[11px] transition-colors ${
+                current ? "bg-night-1000 text-ghost-100" : "text-fg-subtle hover:bg-surface-800/40 hover:text-fg-muted"
+              }`}
+            >
+              {current && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-gold-200" />}
+              <span className={current ? "text-gold-200" : "text-fg-subtle/70"}>TS</span>
+              <span>{nameOf(file.path)}</span>
+              {parentOf(file.path) && <span className="text-fg-subtle/60">{parentOf(file.path)}</span>}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="min-h-0 flex-1">
         <Editor

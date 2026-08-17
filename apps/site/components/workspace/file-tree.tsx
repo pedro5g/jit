@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, FilePlus2, FileText, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FilePlus2, Folder, FolderOpen, FolderPlus, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { buildTree, nameOf, parentOf, type TreeNode, type WorkspaceProject } from "@/lib/workspace/project";
 
@@ -88,7 +88,15 @@ export function FileTree({
               <Row
                 depth={depth}
                 active={project.activePath === node.path}
-                icon={<FileText aria-hidden className="size-3 shrink-0 text-fg-subtle" />}
+                icon={
+                  <span
+                    aria-hidden
+                    className="shrink-0 font-mono text-[9px] leading-none text-gold-200/70"
+                    title="TypeScript"
+                  >
+                    TS
+                  </span>
+                }
                 label={node.name}
                 onClick={() => onOpen(node.path)}
                 onRename={() => setPending({ kind: "rename", parent: "", target: node.path, value: node.name })}
@@ -116,11 +124,18 @@ export function FileTree({
               depth={depth}
               active={false}
               icon={
-                isCollapsed ? (
-                  <ChevronRight aria-hidden className="size-3 shrink-0 text-fg-subtle" />
-                ) : (
-                  <ChevronDown aria-hidden className="size-3 shrink-0 text-fg-subtle" />
-                )
+                <span aria-hidden className="flex shrink-0 items-center">
+                  {isCollapsed ? (
+                    <ChevronRight aria-hidden className="size-3 text-fg-subtle" />
+                  ) : (
+                    <ChevronDown aria-hidden className="size-3 text-fg-subtle" />
+                  )}
+                  {isCollapsed ? (
+                    <Folder aria-hidden className="size-3 text-gold-200/60" />
+                  ) : (
+                    <FolderOpen aria-hidden className="size-3 text-gold-200/60" />
+                  )}
+                </span>
               }
               label={node.name}
               directory
@@ -155,7 +170,7 @@ export function FileTree({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b border-line-subtle px-2 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-fg-subtle">project</span>
+        <span className="font-mono text-[10px] uppercase tracking-wide text-fg-subtle">explorer</span>
         <span className="ml-auto flex items-center gap-0.5">
           <IconButton
             label="New file"
@@ -219,11 +234,21 @@ function Row({
 }) {
   return (
     <div
-      className={`group flex items-center gap-1 pr-1 transition-colors ${
+      className={`group relative flex items-center gap-1 pr-1 transition-colors ${
         active ? "bg-gold-200/10 text-gold-200" : "text-fg-muted hover:bg-surface-800/60"
       }`}
-      style={{ paddingLeft: `${depth * 12 + 8}px` }}
+      style={{ paddingLeft: `${depth * 14 + 10}px` }}
     >
+      {active && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-gold-200" />}
+      {/* indent guides, so nesting is read rather than counted */}
+      {Array.from({ length: depth }, (_, level) => `guide-${level}`).map((guide, level) => (
+        <span
+          key={guide}
+          aria-hidden
+          className="absolute inset-y-0 w-px bg-line-subtle"
+          style={{ left: `${level * 14 + 16}px` }}
+        />
+      ))}
       <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left">
         {icon}
         <span className={`truncate font-mono text-[11px] ${directory ? "text-ghost-100" : ""}`}>{label}</span>

@@ -724,3 +724,22 @@ button {
     visibility: visible;
   }
 }
+
+/* The entrypoint line belongs to the workspace: dimmed, marked in the gutter,
+   and refused by the editor's key handler. It reads as chrome around the file
+   rather than as the first line of it. */
+.workspace-locked-line {
+  background: color-mix(in oklab, var(--night-950) 70%, transparent);
+  opacity: 0.62;
+}
+
+.workspace-locked-gutter::before {
+  content: "\25AA";
+  display: block;
+  width: 100%;
+  text-align: center;
+  color: var(--gold-200);
+  opacity: 0.55;
+  font-size: 9px;
+  line-height: 21px;
+}

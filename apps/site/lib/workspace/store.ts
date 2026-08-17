@@ -45,22 +45,42 @@ export function entrypointLine(mode: WorkspaceMode): string {
   return `import { JIT } from "${ENTRYPOINTS[mode]}";`;
 }
 
-/** Any import of the package, however the reader mangled it. */
-const ANY_JIT_IMPORT = /^[ \t]*import[^\n]*from[ \t]*["']@jit-compiler\/jit[^"']*["'];?[ \t]*$/gm;
+/**
+ * A line that is trying to be the package import, however badly.
+ *
+ * Loose on purpose. The guard exists because the reader can put anything on
+ * that line — delete a brace, rename the binding, change the subpath — and each
+ * of those produces a module error that reads like the editor is broken rather
+ * than like a line they edited. Anything naming the package, or sitting where
+ * the import sits and starting like one, is treated as an attempt at it.
+ */
+const JIT_IMPORT_ATTEMPT = /@jit-compiler\/jit/;
+const LOOKS_LIKE_AN_IMPORT = /^\s*(?:import|impor|mport|from)\b/;
 
 /**
- * The entrypoint is the workspace's, not the reader's.
+ * The entrypoint is the workspace's line, not the reader's.
  *
  * Which subpath a file imports is what Run and Generate disagree about, and it
- * is the one line in the buffer that has a right answer: `/runtime` compiles in
- * memory, `/define` is what the generator reads. An edited specifier does not
- * fail loudly — it produces a module error that reads like the editor is
- * broken — so the line is restored rather than diagnosed.
+ * is the one line in the buffer with a right answer: `/runtime` compiles in
+ * memory, `/define` is what the generator reads. So it is restored rather than
+ * diagnosed, and the editor refuses the keystroke before it gets that far.
  */
 export function lockEntrypoint(code: string, mode: WorkspaceMode): string {
-  const body = code.replace(ANY_JIT_IMPORT, "").replace(/^\n+/, "");
+  const expected = entrypointLine(mode);
+  const lines = code.split("\n");
+  const body: string[] = [];
 
-  return `${entrypointLine(mode)}\n${body.startsWith("\n") ? "" : "\n"}${body}`;
+  for (const [index, line] of lines.entries()) {
+    // the first line is the entrypoint's, whatever the reader left there
+    if (index === 0 && (JIT_IMPORT_ATTEMPT.test(line) || LOOKS_LIKE_AN_IMPORT.test(line))) continue;
+    // a second copy anywhere else is the same line in the wrong place
+    if (JIT_IMPORT_ATTEMPT.test(line) && LOOKS_LIKE_AN_IMPORT.test(line)) continue;
+    body.push(line);
+  }
+
+  while (body.length > 0 && body[0]?.trim() === "") body.shift();
+
+  return body.length > 0 ? `${expected}\n\n${body.join("\n")}` : `${expected}\n`;
 }
 
 /** The body without its import, which is what the ghost reads and writes. */
@@ -187,6 +207,21 @@ export function useWorkspaceProject() {
       },
       [mode]
     ),
+
+    /** A file whose contents are known: an example, or the ghost's work. */
+    addFileWithSource: useCallback((path: string, source: string) => {
+      setProject((current) => {
+        // a second copy of the same example is a new file, not a refusal
+        let candidate = path;
+        for (let attempt = 2; fileAt(current, candidate); attempt++) {
+          candidate = path.replace(/\.ts$/, `-${attempt}.ts`);
+        }
+
+        const change = createFile(current, candidate, source);
+        setProblem(change.problem ?? null);
+        return change.project;
+      });
+    }, []),
 
     addDirectory: useCallback(
       (path: string) => setProject((current) => applyChange(createDirectory(current, path), setProblem)),
