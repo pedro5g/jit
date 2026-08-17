@@ -63,11 +63,12 @@ fn adds_an_authenticated_content_addressed_lab_artifact() -> Result<(), Box<dyn 
             &token,
             "--root",
             workspace.path().to_string_lossy().as_ref(),
+            "--yes",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("authenticated"))
-        .stdout(predicate::str::contains("added 1 file(s)"));
+        .stdout(predicate::str::contains("wrote 1 file(s)"));
 
     server.join().map_err(|_| "registry server panicked")??;
     assert_eq!(
@@ -87,4 +88,40 @@ fn serve_once(listener: &TcpListener, body: &[u8]) -> std::io::Result<()> {
         body.len()
     )?;
     stream.write_all(body)
+}
+
+/**
+An environment mismatch is the commonest way a reference is refused, and the
+error has to carry its own fix: the token was produced by a Lab running on this
+machine, and the run defaulted to the published one.
+*/
+#[test]
+fn refuses_a_token_from_another_environment_and_names_the_fix()
+-> Result<(), Box<dyn std::error::Error>> {
+    let signing_key = SigningKey::from_bytes(&[9_u8; 32]);
+    let public_key = signing_key.verifying_key().to_public_key_der()?;
+    let key_digest = URL_SAFE_NO_PAD.encode(Sha256::digest(public_key.as_bytes()));
+    let payload = serde_json::to_vec(&json!({
+        "v": 1,
+        "h": URL_SAFE_NO_PAD.encode(Sha256::digest(b"artifact")),
+        "o": "src/generated/jit",
+        "r": "http://localhost:3000",
+        "k": &key_digest[..12],
+    }))?;
+    let encoded_payload = URL_SAFE_NO_PAD.encode(payload);
+    let signature = signing_key.sign(encoded_payload.as_bytes());
+    let token = format!(
+        "jlr1_{encoded_payload}.{}",
+        URL_SAFE_NO_PAD.encode(signature.to_bytes())
+    );
+
+    Command::cargo_bin("jit-artifact")?
+        .env_remove("JIT_LAB_REGISTRY")
+        .env_remove("JIT_LAB_ENV")
+        .args(["add", &token, "--yes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--env local"));
+
+    Ok(())
 }

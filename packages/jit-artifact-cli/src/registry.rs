@@ -17,7 +17,59 @@ use sha2::{Digest as _, Sha256};
 use crate::CliError;
 
 const REFERENCE_PREFIX: &str = "jlr1_";
-const OFFICIAL_REGISTRY: &str = "https://jit-site.vercel.app";
+
+/// Where the published Lab signs from.
+const PRODUCTION_REGISTRY: &str = "https://jit-site.vercel.app";
+/// Where it signs from while it is being developed.
+const LOCAL_REGISTRY: &str = "http://localhost:3000";
+
+/// The two places a reference can legitimately come from.
+///
+/// A token carries the origin that signed it, and the CLI refuses a token from
+/// anywhere it does not trust. That check is right and it is also the thing
+/// that makes a locally generated token unusable against a production default,
+/// so which origin is trusted has to be a decision the caller can state rather
+/// than a constant compiled into the binary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
+pub(crate) enum Environment {
+    /// The published Lab.
+    Production,
+    /// A Lab running on this machine.
+    Local,
+}
+
+impl Environment {
+    const fn origin(self) -> &'static str {
+        match self {
+            Self::Production => PRODUCTION_REGISTRY,
+            Self::Local => LOCAL_REGISTRY,
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, CliError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "production" | "prod" => Ok(Self::Production),
+            "local" | "development" | "dev" => Ok(Self::Local),
+            other => Err(CliError::config(format!(
+                "unknown environment {other:?}; expected production or local"
+            ))),
+        }
+    }
+
+    /// The environment an origin belongs to, when it is one of the known two.
+    fn of(origin: &str) -> Option<Self> {
+        [Self::Production, Self::Local]
+            .into_iter()
+            .find(|environment| environment.origin() == origin)
+    }
+}
+
+/// The registry in effect, and what decided it.
+#[derive(Clone, Debug)]
+pub(crate) struct Registry {
+    pub(crate) origin: String,
+    pub(crate) source: &'static str,
+}
 const MAX_KEY_RESPONSE_BYTES: u64 = 16 * 1024;
 const MAX_STORED_ARTIFACT_BYTES: u64 = 3 * 1024 * 1024;
 const MAX_FILES: usize = 128;
@@ -29,7 +81,6 @@ pub(crate) struct RegistryArtifact {
     pub(crate) files: Vec<ArtifactFile>,
     pub(crate) output_root: String,
     pub(crate) hash: String,
-    pub(crate) registry: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,7 +116,7 @@ struct StoredFile {
     source: String,
 }
 
-pub(crate) fn fetch(token: &str) -> Result<RegistryArtifact, CliError> {
+pub(crate) fn fetch(token: &str, registry: &Registry) -> Result<RegistryArtifact, CliError> {
     let (encoded_payload, encoded_signature) = split_reference(token)?;
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(encoded_payload)
@@ -74,11 +125,31 @@ pub(crate) fn fetch(token: &str) -> Result<RegistryArtifact, CliError> {
         .map_err(|error| CliError::integrity(format!("invalid artifact reference: {error}")))?;
     validate_reference(&reference)?;
 
-    let trusted_registry = trusted_registry()?;
+    let trusted_registry = registry.origin.clone();
     if reference.r != trusted_registry {
+        // The commonest mismatch by far is an environment mismatch, and it has
+        // an exact fix, so the error says it rather than leaving the reader to
+        // work out that the token came from the Lab they are running locally.
+        let hint = Environment::of(&reference.r).map_or_else(
+            || " Pass --registry with the origin that signed it.".to_owned(),
+            |environment| {
+                format!(
+                    " That token was signed by the {} Lab; re-run with --env {}.",
+                    match environment {
+                        Environment::Production => "published",
+                        Environment::Local => "local",
+                    },
+                    match environment {
+                        Environment::Production => "production",
+                        Environment::Local => "local",
+                    }
+                )
+            },
+        );
+
         return Err(CliError::integrity(format!(
-            "untrusted artifact registry {}; expected {}",
-            reference.r, trusted_registry
+            "untrusted artifact registry {}; this run trusts {trusted_registry} (from {}).{hint}",
+            reference.r, registry.source
         )));
     }
 
@@ -118,7 +189,6 @@ pub(crate) fn fetch(token: &str) -> Result<RegistryArtifact, CliError> {
         files,
         output_root: stored.output_root,
         hash: reference.h,
-        registry: trusted_registry,
     })
 }
 
@@ -163,22 +233,52 @@ fn validate_reference(reference: &CompactReference) -> Result<(), CliError> {
     Ok(())
 }
 
-pub(crate) fn trusted_registry() -> Result<String, CliError> {
-    let configured =
-        std::env::var("JIT_LAB_REGISTRY").unwrap_or_else(|_| OFFICIAL_REGISTRY.to_owned());
-    let normalized = configured.trim_end_matches('/').to_owned();
+/// Which registry this invocation trusts, in one documented order.
+///
+/// An explicit flag beats a named environment, a named environment beats the
+/// environment variables, and production is what a machine that says nothing
+/// gets. Every step is reported, because "untrusted registry" is impossible to
+/// act on without knowing which one the CLI decided to trust and why.
+pub(crate) fn resolve(
+    explicit: Option<&str>,
+    environment: Option<Environment>,
+) -> Result<Registry, CliError> {
+    if let Some(origin) = explicit {
+        return normalize(origin, "--registry");
+    }
+    if let Some(environment) = environment {
+        return normalize(environment.origin(), "--env");
+    }
+    if let Ok(origin) = std::env::var("JIT_LAB_REGISTRY") {
+        return normalize(&origin, "JIT_LAB_REGISTRY");
+    }
+    if let Ok(value) = std::env::var("JIT_LAB_ENV") {
+        return normalize(Environment::parse(&value)?.origin(), "JIT_LAB_ENV");
+    }
+
+    normalize(PRODUCTION_REGISTRY, "default")
+}
+
+fn normalize(origin: &str, source: &'static str) -> Result<Registry, CliError> {
+    let normalized = origin.trim().trim_end_matches('/').to_owned();
     let url = Url::parse(&normalized)
-        .map_err(|_| CliError::config("JIT_LAB_REGISTRY is not a valid URL"))?;
+        .map_err(|_| CliError::config(format!("{source} is not a valid URL: {normalized}")))?;
     let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
     if url.scheme() != "https" && !(local && url.scheme() == "http") {
-        return Err(CliError::config(
-            "JIT_LAB_REGISTRY must use HTTPS; HTTP is limited to localhost",
-        ));
+        return Err(CliError::config(format!(
+            "{source} must use HTTPS; HTTP is limited to localhost"
+        )));
     }
     if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
-        return Err(CliError::config("JIT_LAB_REGISTRY must be a bare origin"));
+        return Err(CliError::config(format!(
+            "{source} must be a bare origin, with no path"
+        )));
     }
-    Ok(normalized)
+
+    Ok(Registry {
+        origin: normalized,
+        source,
+    })
 }
 
 fn registry_url(registry: &str, path: &str) -> Result<Url, CliError> {

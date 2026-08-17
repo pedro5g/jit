@@ -14,7 +14,7 @@ free-form JIT TypeScript
   -> canonical SHA-256 content address
   -> private storage + Ed25519 site signature
   -> compact jlr1_ reference
-  -> native verification and transactional write
+  -> native verification and an exact write into the declared tree
 ```
 
 ## Generate in the workspace
@@ -99,12 +99,18 @@ The `add` command:
 4. verifies the signature before trusting destination metadata;
 5. downloads the immutable artifact and checks its exact SHA-256 address;
 6. validates file count, per-file bytes, total bytes and every relative path;
-7. previews creates and updates;
-8. stages, rereads and atomically swaps the complete output tree;
-9. records the committed transaction under `.jit-artifacts/transactions`.
+7. previews creates, updates and new directories;
+8. writes each file through a temporary in its own directory and renames it
+   into place, then rereads every byte it wrote.
 
 It does not install dependencies, run scripts, expand environment variables or
-execute content from an artifact.
+execute content from an artifact. It writes nothing besides the files and
+directories the artifact declares: no configuration, no journal, no control
+directory.
+
+Reconstruction merges into the destination. A file the artifact does not name
+is left exactly as it was, so a generated folder can sit inside a directory
+that also holds work of your own.
 
 Preview without writing:
 
@@ -112,18 +118,18 @@ Preview without writing:
 pnpm dlx @jit-compiler/cli add jlr1_<reference> --dry-run
 ```
 
-Choose another confined destination or conflict policy:
+Choose another confined destination:
 
 ```bash
 pnpm dlx @jit-compiler/cli add jlr1_<reference> \
   --root . \
-  --output-root src/generated/contracts \
-  --conflict backup
+  --output-root src/generated/contracts
 ```
 
-`abort` is the default conflict policy. `overwrite` removes the temporary
-backup after post-write verification. `backup` retains it for
-`jit-artifact rollback <transaction-id>`.
+A file that already exists and differs is never replaced silently. On a
+terminal the CLI asks; in automation it stops and tells you to pass
+`--conflict overwrite`. A file whose bytes already match is skipped, so running
+the same reconstruction twice writes nothing the second time.
 
 ## Why the token is short
 
@@ -161,6 +167,10 @@ pnpm artifact:build
 ./target/release/jit-artifact apply --file user-model.jit
 ```
 
+`pack` reads a directory as the tree it is: nested directories are kept, and a
+directory that holds no file is kept too, because an empty directory in a
+declared layout is part of the layout.
+
 `jit1_` uses the pinned Rebyte envelope, BLAKE3 content/envelope digests and
 optional Zstandard dictionary compression. It is byte-exact and works
 offline, but intentionally unsigned: integrity proves that decoded bytes match
@@ -169,18 +179,31 @@ the token, not that the official site published it.
 Use `jlr1_` for the short Lab-to-project workflow and `jit1_` for air-gapped or
 fully self-contained transport.
 
-## Local registry development
+## Choosing the environment
 
-The CLI trusts `https://jit-site.vercel.app` by default. A local Lab must be
-selected explicitly:
+A reference carries the origin that signed it, and the CLI refuses one it does
+not trust. The published Lab and a Lab running on your machine are different
+origins, so which one a run trusts is stated rather than assumed:
 
 ```bash
-JIT_LAB_REGISTRY=http://localhost:3000 \
-  cargo run -p jit-artifact-cli -- add jlr1_<reference>
+jit-artifact add jlr1_<reference> --env local
+jit-artifact add jlr1_<reference> --registry https://jit.example.com
 ```
 
-HTTP is accepted only for `localhost`, `127.0.0.1` or `::1`. Other registries
-must use HTTPS. The reference and configured origin must match exactly.
+| Source | Wins over |
+| --- | --- |
+| `--registry <url>` | everything |
+| `--env production \| local` | the variables |
+| `JIT_LAB_REGISTRY=<url>` | `JIT_LAB_ENV` |
+| `JIT_LAB_ENV=production \| local` | the default |
+| production | nothing |
+
+`jit-artifact doctor` prints the origin in effect and which of these decided
+it. When a reference is refused because it came from the other environment, the
+error names the flag that fixes it.
+
+HTTP is accepted only for `localhost`, `127.0.0.1` or `::1`. Every other
+registry must use HTTPS, and must be a bare origin with no path.
 
 ## Production registry configuration
 

@@ -1,8 +1,11 @@
 //! Native JIT artifact CLI.
+//!
+//! It reconstructs a generated file tree and does nothing else. It writes no
+//! configuration, keeps no journal and leaves no state behind: what it needs
+//! it is given on the command line, or it asks for on the terminal.
 
 #![forbid(unsafe_code)]
 
-mod config;
 mod fs_ops;
 mod registry;
 
@@ -15,13 +18,14 @@ use std::process::ExitCode;
 use clap::{Args, CommandFactory as _, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use jit_artifact::{
-    ArtifactFile, ArtifactReport, Compression, PackOptions, Profile, VerifiedArtifact, decode, pack,
+    ArtifactFile, ArtifactReport, ArtifactTree, Compression, PackOptions, Profile,
+    VerifiedArtifact, decode, pack_tree,
 };
 use rebyte_format::{RelativeArtifactPath, SecurityLimits};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
-use crate::config::Config;
+use crate::registry::Environment;
 
 const MAX_STDIN_BYTES: u64 = SecurityLimits::SIMPLE_ARTIFACT.max_token_bytes;
 
@@ -33,17 +37,12 @@ const MAX_STDIN_BYTES: u64 = SecurityLimits::SIMPLE_ARTIFACT.max_token_bytes;
     long_about = "Creates deterministic offline jit1_ tokens and reconstructs signed jlr1_ Lab references. Artifacts never install dependencies, execute commands or run lifecycle hooks."
 )]
 struct Cli {
-    /// JSON configuration file. Defaults to ./jit.artifact.json when present.
-    #[arg(long, global = true)]
-    config: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Create a documented jit.artifact.json in the project root.
-    Init(InitCommand),
     /// Pack a generated file tree into a deterministic jit1_ token.
     Pack(PackCommand),
     /// Download, authenticate and reconstruct a signed jlr1_ Lab artifact.
@@ -54,15 +53,11 @@ enum Command {
     Verify(ReadCommand),
     /// Compare verified artifact bytes with a local output directory.
     Diff(OutputCommand),
-    /// Preview and atomically reconstruct a verified artifact.
+    /// Preview and reconstruct a verified artifact.
     Apply(ApplyCommand),
     /// Compute a BLAKE3 digest for a local file.
     Hash(HashCommand),
-    /// List retained and completed artifact transactions.
-    Transactions(RootCommand),
-    /// Restore a retained backup from one transaction.
-    Rollback(RollbackCommand),
-    /// Report protocol, config and platform capabilities.
+    /// Report protocol, environment and platform capabilities.
     Doctor(DoctorCommand),
     /// Generate shell completion definitions.
     Completions {
@@ -70,6 +65,17 @@ enum Command {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+/// Which Lab a signed reference is allowed to have come from.
+#[derive(Debug, Args)]
+struct RegistryArguments {
+    /// Exact registry origin to trust; overrides --env and the environment.
+    #[arg(long, value_name = "URL")]
+    registry: Option<String>,
+    /// Named environment to trust.
+    #[arg(long, value_enum)]
+    env: Option<Environment>,
 }
 
 #[derive(Debug, Args)]
@@ -85,22 +91,17 @@ struct AddCommand {
     /// Verify and preview without modifying the filesystem.
     #[arg(long)]
     dry_run: bool,
-    /// Existing-output policy.
+    /// Skip confirmation; never skips verification or path checks.
+    #[arg(long)]
+    yes: bool,
+    /// What to do about a file that exists and differs.
     #[arg(long, value_enum)]
     conflict: Option<ConflictArgument>,
+    #[command(flatten)]
+    registry: RegistryArguments,
     /// Emit a stable JSON report.
     #[arg(long)]
     json: bool,
-}
-
-#[derive(Debug, Args)]
-struct InitCommand {
-    /// Configuration path.
-    #[arg(default_value = "jit.artifact.json")]
-    path: PathBuf,
-    /// Replace an existing configuration.
-    #[arg(long)]
-    force: bool,
 }
 
 #[derive(Debug, Args)]
@@ -111,11 +112,11 @@ struct PackCommand {
     #[arg(long)]
     output_root: Option<String>,
     /// Compression strategy.
-    #[arg(long, value_enum)]
-    compression: Option<CompressionArgument>,
+    #[arg(long, value_enum, default_value = "auto")]
+    compression: CompressionArgument,
     /// Compression effort.
-    #[arg(long, value_enum)]
-    profile: Option<ProfileArgument>,
+    #[arg(long, value_enum, default_value = "balanced")]
+    profile: ProfileArgument,
     /// Disable adaptive dictionary training.
     #[arg(long)]
     no_dictionary: bool,
@@ -143,7 +144,7 @@ struct OutputCommand {
     /// Project root that confines every file action.
     #[arg(long, default_value = ".")]
     root: PathBuf,
-    /// Relative output directory; overrides token metadata and config.
+    /// Relative output directory; overrides the token's own suggestion.
     #[arg(long)]
     output_root: Option<String>,
     /// Include unified text patches.
@@ -164,7 +165,7 @@ struct ApplyCommand {
     /// Skip confirmation; never skips verification or path checks.
     #[arg(long)]
     yes: bool,
-    /// Existing-output policy.
+    /// What to do about a file that exists and differs.
     #[arg(long, value_enum)]
     conflict: Option<ConflictArgument>,
 }
@@ -182,32 +183,12 @@ struct HashCommand {
 }
 
 #[derive(Debug, Args)]
-struct RootCommand {
-    /// Project root.
-    #[arg(long, default_value = ".")]
-    root: PathBuf,
-    /// Emit a stable JSON report.
-    #[arg(long)]
-    json: bool,
-}
-
-#[derive(Debug, Args)]
-struct RollbackCommand {
-    /// Transaction identifier.
-    id: String,
-    /// Project root.
-    #[arg(long, default_value = ".")]
-    root: PathBuf,
-    /// Emit a stable JSON report.
-    #[arg(long)]
-    json: bool,
-}
-
-#[derive(Debug, Args)]
 struct DoctorCommand {
     /// Project root.
     #[arg(long, default_value = ".")]
     root: PathBuf,
+    #[command(flatten)]
+    registry: RegistryArguments,
     /// Emit a stable JSON report.
     #[arg(long)]
     json: bool,
@@ -223,12 +204,12 @@ struct TokenInput {
     file: Option<PathBuf>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, ValueEnum)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum ConflictArgument {
+    /// Stop rather than change a file that exists and differs.
     Abort,
+    /// Replace it.
     Overwrite,
-    Backup,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -297,22 +278,16 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
-    let cwd = std::env::current_dir()
-        .map_err(|error| CliError::io(format!("cannot read cwd: {error}")))?;
-    let (config, config_file) = config::load(cli.config.as_deref(), &cwd)?;
 
     match cli.command {
-        Command::Init(command) => run_init(&command),
-        Command::Pack(command) => run_pack(&command, &config),
-        Command::Add(command) => run_add(&command, &config),
+        Command::Pack(command) => run_pack(&command),
+        Command::Add(command) => run_add(&command),
         Command::Inspect(command) => run_inspect(&command),
         Command::Verify(command) => run_verify(&command),
-        Command::Diff(command) => run_diff(&command, &config),
-        Command::Apply(command) => run_apply(&command, &config),
+        Command::Diff(command) => run_diff(&command),
+        Command::Apply(command) => run_apply(&command),
         Command::Hash(command) => run_hash(&command),
-        Command::Transactions(command) => run_transactions(&command),
-        Command::Rollback(command) => run_rollback(&command),
-        Command::Doctor(command) => run_doctor(&command, &config, config_file.as_deref()),
+        Command::Doctor(command) => run_doctor(&command),
         Command::Completions { shell } => {
             generate(
                 shell,
@@ -325,15 +300,16 @@ fn run() -> Result<(), CliError> {
     }
 }
 
-fn run_add(command: &AddCommand, config: &Config) -> Result<(), CliError> {
-    let downloaded = registry::fetch(&command.token)?;
+fn run_add(command: &AddCommand) -> Result<(), CliError> {
+    let registry = registry::resolve(command.registry.registry.as_deref(), command.registry.env)?;
+    let downloaded = registry::fetch(&command.token, &registry)?;
     let options = PackOptions {
         suggested_path: Some(downloaded.output_root.clone()),
         compression: Compression::None,
         profile: Profile::Fast,
         dictionary: false,
     };
-    let (token, _) = pack(&downloaded.files, &options)
+    let (token, _) = pack_tree(&ArtifactTree::from_files(downloaded.files), &options)
         .map_err(|error| CliError::integrity(error.to_string()))?;
     let artifact = decode(&token).map_err(|error| CliError::integrity(error.to_string()))?;
     let output = fs_ops::resolve_output(
@@ -341,7 +317,6 @@ fn run_add(command: &AddCommand, config: &Config) -> Result<(), CliError> {
         command
             .output_root
             .as_deref()
-            .or(config.output_root.as_deref())
             .or(Some(&downloaded.output_root)),
         &artifact,
     )?;
@@ -351,8 +326,8 @@ fn run_add(command: &AddCommand, config: &Config) -> Result<(), CliError> {
         print_json(&report)?;
     } else {
         println!(
-            "authenticated {} from {}",
-            downloaded.hash, downloaded.registry
+            "authenticated {} from {} ({})",
+            downloaded.hash, registry.origin, registry.source
         );
         print_diff(&report);
         println!("No dependencies will be installed. No commands will be executed.");
@@ -360,72 +335,34 @@ fn run_add(command: &AddCommand, config: &Config) -> Result<(), CliError> {
     if command.dry_run {
         return Ok(());
     }
+    if !command.json && !command.yes && !confirm("Write these verified files?")? {
+        return Err(CliError::conflict("cancelled"));
+    }
 
-    let conflict = command
-        .conflict
-        .or(config.conflict)
-        .unwrap_or(ConflictArgument::Abort);
+    let conflict = decide_conflict(
+        command.conflict,
+        report.updates,
+        command.yes || command.json,
+    )?;
     let applied = fs_ops::apply(&artifact, &output, &command.root, conflict)?;
     if command.json {
         print_json(&applied)
     } else {
-        println!(
-            "added {} file(s), {} byte(s) to {}",
-            applied.files_written, applied.bytes_written, applied.output
-        );
+        print_applied(&applied);
         Ok(())
     }
 }
 
-fn run_init(command: &InitCommand) -> Result<(), CliError> {
-    if command.path.exists() && !command.force {
-        return Err(CliError::conflict(format!(
-            "{} already exists; pass --force to replace it",
-            command.path.display()
-        )));
-    }
-    let source = concat!(
-        "{\n",
-        "  \"schemaVersion\": 1,\n",
-        "  \"outputRoot\": \"src/generated/jit\",\n",
-        "  \"compression\": \"auto\",\n",
-        "  \"profile\": \"balanced\",\n",
-        "  \"dictionary\": true,\n",
-        "  \"conflict\": \"abort\"\n",
-        "}\n"
-    );
-    if command.force {
-        let parent = command.path.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent).map_err(|error| {
-            CliError::io(format!("cannot create {}: {error}", parent.display()))
-        })?;
-        fs::write(&command.path, source).map_err(|error| {
-            CliError::io(format!("cannot write {}: {error}", command.path.display()))
-        })?;
-    } else {
-        write_new(&command.path, source.as_bytes())?;
-    }
-    println!("created {}", command.path.display());
-    Ok(())
-}
-
-fn run_pack(command: &PackCommand, config: &Config) -> Result<(), CliError> {
-    let files = read_artifact_files(&command.input)?;
+fn run_pack(command: &PackCommand) -> Result<(), CliError> {
+    let tree = read_artifact_tree(&command.input)?;
     let options = PackOptions {
-        suggested_path: command
-            .output_root
-            .clone()
-            .or_else(|| config.output_root.clone()),
-        compression: compression(command.compression, config.compression.as_deref())?,
-        profile: profile(command.profile, config.profile.as_deref())?,
-        dictionary: if command.no_dictionary {
-            false
-        } else {
-            config.dictionary.unwrap_or(true)
-        },
+        suggested_path: command.output_root.clone(),
+        compression: compression(command.compression),
+        profile: profile(command.profile),
+        dictionary: !command.no_dictionary,
     };
     let (token, report) =
-        pack(&files, &options).map_err(|error| CliError::integrity(error.to_string()))?;
+        pack_tree(&tree, &options).map_err(|error| CliError::integrity(error.to_string()))?;
 
     if let Some(output) = &command.output {
         write_new(output, format!("{token}\n").as_bytes())?;
@@ -480,16 +417,9 @@ fn run_verify(command: &ReadCommand) -> Result<(), CliError> {
     }
 }
 
-fn run_diff(command: &OutputCommand, config: &Config) -> Result<(), CliError> {
+fn run_diff(command: &OutputCommand) -> Result<(), CliError> {
     let artifact = read_verified(&command.input)?;
-    let output = fs_ops::resolve_output(
-        &command.root,
-        command
-            .output_root
-            .as_deref()
-            .or(config.output_root.as_deref()),
-        &artifact,
-    )?;
+    let output = fs_ops::resolve_output(&command.root, command.output_root.as_deref(), &artifact)?;
     let mut report = fs_ops::diff(&artifact, &output)?;
     if !command.patch {
         for file in &mut report.files {
@@ -504,15 +434,11 @@ fn run_diff(command: &OutputCommand, config: &Config) -> Result<(), CliError> {
     }
 }
 
-fn run_apply(command: &ApplyCommand, config: &Config) -> Result<(), CliError> {
+fn run_apply(command: &ApplyCommand) -> Result<(), CliError> {
     let artifact = read_verified(&command.output.input)?;
     let output = fs_ops::resolve_output(
         &command.output.root,
-        command
-            .output
-            .output_root
-            .as_deref()
-            .or(config.output_root.as_deref()),
+        command.output.output_root.as_deref(),
         &artifact,
     )?;
     let mut report = fs_ops::diff(&artifact, &output)?;
@@ -535,24 +461,20 @@ fn run_apply(command: &ApplyCommand, config: &Config) -> Result<(), CliError> {
     if command.dry_run {
         return Ok(());
     }
-    if !command.yes && !confirm()? {
+    if !command.output.json && !command.yes && !confirm("Write these verified files?")? {
         return Err(CliError::conflict("cancelled"));
     }
-    let conflict = command
-        .conflict
-        .or(config.conflict)
-        .unwrap_or(ConflictArgument::Abort);
+
+    let conflict = decide_conflict(
+        command.conflict,
+        report.updates,
+        command.yes || command.output.json,
+    )?;
     let applied = fs_ops::apply(&artifact, &output, &command.output.root, conflict)?;
     if command.output.json {
         print_json(&applied)
     } else {
-        println!(
-            "applied {} file(s), {} byte(s) to {}",
-            applied.files_written, applied.bytes_written, applied.output
-        );
-        if let Some(backup) = applied.backup {
-            println!("backup retained at {backup}");
-        }
+        print_applied(&applied);
         Ok(())
     }
 }
@@ -590,46 +512,14 @@ fn run_hash(command: &HashCommand) -> Result<(), CliError> {
     }
 }
 
-fn run_transactions(command: &RootCommand) -> Result<(), CliError> {
-    let transactions = fs_ops::list_transactions(&command.root)?;
-    if command.json {
-        print_json(&transactions)
-    } else {
-        if transactions.is_empty() {
-            println!("no artifact transactions");
-        }
-        for transaction in transactions {
-            println!(
-                "{}\t{}\t{}",
-                transaction.id, transaction.state, transaction.output
-            );
-        }
-        Ok(())
-    }
-}
-
-fn run_rollback(command: &RollbackCommand) -> Result<(), CliError> {
-    let transaction = fs_ops::rollback(&command.root, &command.id)?;
-    if command.json {
-        print_json(&transaction)
-    } else {
-        println!("rolled back {} to {}", transaction.id, transaction.output);
-        Ok(())
-    }
-}
-
-fn run_doctor(
-    command: &DoctorCommand,
-    config: &Config,
-    config_file: Option<&Path>,
-) -> Result<(), CliError> {
+fn run_doctor(command: &DoctorCommand) -> Result<(), CliError> {
+    let registry = registry::resolve(command.registry.registry.as_deref(), command.registry.env)?;
     let report = DoctorReport {
         schema_version: 1,
         protocols: ["jit1", "jlr1"],
         authenticated_references: true,
-        trusted_registry: registry::trusted_registry()?,
-        config: config_file.map(|path| path.to_string_lossy().into_owned()),
-        output_root: config.output_root.clone(),
+        trusted_registry: registry.origin.clone(),
+        registry_source: registry.source,
         root: command.root.to_string_lossy().into_owned(),
         max_token_bytes: SecurityLimits::SIMPLE_ARTIFACT.max_token_bytes,
         max_output_bytes: SecurityLimits::SIMPLE_ARTIFACT.max_uncompressed_payload_bytes,
@@ -641,20 +531,48 @@ fn run_doctor(
         println!("jit-artifact doctor");
         println!("protocols: {}", report.protocols.join(", "));
         println!(
-            "config: {}",
-            report.config.as_deref().unwrap_or("not found")
+            "trusted registry: {} (from {})",
+            report.trusted_registry, report.registry_source
         );
-        println!(
-            "outputRoot: {}",
-            report.output_root.as_deref().unwrap_or("not configured")
-        );
-        println!("signed registry: {}", report.trusted_registry);
+        println!("select another with --env local, --env production or --registry <url>");
         println!("authentication: jlr1_ signed; jit1_ integrity-only");
+        println!("state written: none besides the reconstructed files");
         println!(
             "limits: token={} output={} files={}",
             report.max_token_bytes, report.max_output_bytes, report.max_files
         );
         Ok(())
+    }
+}
+
+/**
+What to do about files that already exist, decided here rather than assumed.
+
+Overwriting without being told to is how a generator eats work someone did by
+hand, and refusing outright is how it becomes useless the second time it is
+run. So the answer is asked for when there is someone to ask, and demanded as a
+flag when there is not.
+*/
+fn decide_conflict(
+    explicit: Option<ConflictArgument>,
+    updates: usize,
+    unattended: bool,
+) -> Result<ConflictArgument, CliError> {
+    if let Some(conflict) = explicit {
+        return Ok(conflict);
+    }
+    if updates == 0 {
+        return Ok(ConflictArgument::Abort);
+    }
+    if unattended || !io::stdin().is_terminal() {
+        return Err(CliError::conflict(format!(
+            "{updates} file(s) already exist and differ; pass --conflict overwrite to replace them"
+        )));
+    }
+    if confirm(&format!("Replace {updates} file(s) that already exist?"))? {
+        Ok(ConflictArgument::Overwrite)
+    } else {
+        Err(CliError::conflict("cancelled"))
     }
 }
 
@@ -682,7 +600,8 @@ fn read_token(input: &TokenInput) -> Result<String, CliError> {
         .map_err(|_| CliError::usage("token is not UTF-8"))
 }
 
-fn read_artifact_files(input: &Path) -> Result<Vec<ArtifactFile>, CliError> {
+/// Reads a generated tree, keeping the directories it declares.
+fn read_artifact_tree(input: &Path) -> Result<ArtifactTree, CliError> {
     let metadata = fs::symlink_metadata(input)
         .map_err(|error| CliError::io(format!("cannot inspect {}: {error}", input.display())))?;
     if metadata.file_type().is_symlink() {
@@ -695,26 +614,22 @@ fn read_artifact_files(input: &Path) -> Result<Vec<ArtifactFile>, CliError> {
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(|| CliError::unsafe_path("input filename is not portable UTF-8"))?;
-        return Ok(vec![ArtifactFile::new(
+        return Ok(ArtifactTree::from_files(vec![ArtifactFile::new(
             name,
             read_bounded_file(input, SecurityLimits::SIMPLE_ARTIFACT.max_single_file_bytes)?,
-        )]);
+        )]));
     }
     if !metadata.is_dir() {
         return Err(CliError::usage(
             "artifact input must be a regular file or directory",
         ));
     }
-    let mut files = Vec::new();
-    collect_files(input, input, &mut files)?;
-    Ok(files)
+    let mut tree = ArtifactTree::default();
+    collect_tree(input, input, &mut tree)?;
+    Ok(tree)
 }
 
-fn collect_files(
-    root: &Path,
-    directory: &Path,
-    files: &mut Vec<ArtifactFile>,
-) -> Result<(), CliError> {
+fn collect_tree(root: &Path, directory: &Path, tree: &mut ArtifactTree) -> Result<(), CliError> {
     let mut entries = fs::read_dir(directory)
         .map_err(|error| CliError::io(format!("cannot read {}: {error}", directory.display())))?
         .collect::<Result<Vec<_>, _>>()
@@ -731,8 +646,17 @@ fn collect_files(
                 path.display()
             )));
         }
+        let relative = relative_path(root, &path)?;
+
         if metadata.is_dir() {
-            collect_files(root, &path, files)?;
+            let before = tree.files.len();
+            collect_tree(root, &path, tree)?;
+            // A directory with files under it is implied by their paths. One
+            // with none is only expressible as an entry of its own, and it is
+            // part of the layout that was declared.
+            if tree.files.len() == before {
+                tree.directories.push(relative);
+            }
             continue;
         }
         if !metadata.is_file() {
@@ -741,19 +665,25 @@ fn collect_files(
                 path.display()
             )));
         }
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|_| CliError::unsafe_path("input escaped source root"))?
-            .to_str()
-            .ok_or_else(|| CliError::unsafe_path("input path is not UTF-8"))?
-            .replace(std::path::MAIN_SEPARATOR, "/");
-        RelativeArtifactPath::new(&relative)
-            .map_err(|error| CliError::unsafe_path(format!("invalid input path: {error}")))?;
         let bytes =
             read_bounded_file(&path, SecurityLimits::SIMPLE_ARTIFACT.max_single_file_bytes)?;
-        files.push(ArtifactFile::new(relative, bytes).executable(is_executable(&metadata)));
+        tree.files
+            .push(ArtifactFile::new(relative, bytes).executable(is_executable(&metadata)));
     }
     Ok(())
+}
+
+fn relative_path(root: &Path, path: &Path) -> Result<String, CliError> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| CliError::unsafe_path("input escaped source root"))?
+        .to_str()
+        .ok_or_else(|| CliError::unsafe_path("input path is not UTF-8"))?
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    RelativeArtifactPath::new(&relative)
+        .map_err(|error| CliError::unsafe_path(format!("invalid input path: {error}")))?;
+
+    Ok(relative)
 }
 
 fn read_bounded_file(path: &Path, maximum: u64) -> Result<Vec<u8>, CliError> {
@@ -810,44 +740,29 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
         .map_err(|error| CliError::io(format!("cannot write {}: {error}", path.display())))
 }
 
-fn compression(
-    value: Option<CompressionArgument>,
-    configured: Option<&str>,
-) -> Result<Compression, CliError> {
-    let value = value.map_or(configured.unwrap_or("auto"), |value| match value {
-        CompressionArgument::Auto => "auto",
-        CompressionArgument::Zstd => "zstd",
-        CompressionArgument::None => "none",
-    });
+const fn compression(value: CompressionArgument) -> Compression {
     match value {
-        "auto" => Ok(Compression::Auto),
-        "zstd" => Ok(Compression::Zstd),
-        "none" => Ok(Compression::None),
-        other => Err(CliError::config(format!("unknown compression {other:?}"))),
+        CompressionArgument::Auto => Compression::Auto,
+        CompressionArgument::Zstd => Compression::Zstd,
+        CompressionArgument::None => Compression::None,
     }
 }
 
-fn profile(value: Option<ProfileArgument>, configured: Option<&str>) -> Result<Profile, CliError> {
-    let value = value.map_or(configured.unwrap_or("balanced"), |value| match value {
-        ProfileArgument::Fast => "fast",
-        ProfileArgument::Balanced => "balanced",
-        ProfileArgument::Maximum => "maximum",
-    });
+const fn profile(value: ProfileArgument) -> Profile {
     match value {
-        "fast" => Ok(Profile::Fast),
-        "balanced" => Ok(Profile::Balanced),
-        "maximum" => Ok(Profile::Maximum),
-        other => Err(CliError::config(format!("unknown profile {other:?}"))),
+        ProfileArgument::Fast => Profile::Fast,
+        ProfileArgument::Balanced => Profile::Balanced,
+        ProfileArgument::Maximum => Profile::Maximum,
     }
 }
 
-fn confirm() -> Result<bool, CliError> {
+fn confirm(question: &str) -> Result<bool, CliError> {
     if !io::stdin().is_terminal() {
         return Err(CliError::conflict(
             "confirmation requires a terminal; pass --yes in automation",
         ));
     }
-    eprint!("Apply these verified file changes? (y/N) ");
+    eprint!("{question} (y/N) ");
     io::stderr()
         .flush()
         .map_err(|error| CliError::io(format!("cannot prompt: {error}")))?;
@@ -869,6 +784,9 @@ fn print_report(report: &ArtifactReport, status: &str) {
         report.stored_bytes,
         report.compression
     );
+    for directory in &report.directories {
+        println!("  - {directory}/");
+    }
     for file in &report.files {
         println!("  - {} ({} bytes)", file.path, file.bytes);
     }
@@ -876,15 +794,28 @@ fn print_report(report: &ArtifactReport, status: &str) {
 
 fn print_diff(report: &fs_ops::DiffReport) {
     println!(
-        "changes: {} create, {} update, {} unchanged",
-        report.creates, report.updates, report.unchanged
+        "changes: {} create, {} update, {} unchanged, {} new directory(ies)",
+        report.creates,
+        report.updates,
+        report.unchanged,
+        report.directories.len()
     );
+    for directory in &report.directories {
+        println!("  {:9} {directory}/", "MKDIR");
+    }
     for file in &report.files {
         println!("  {:9} {}", file.change.to_uppercase(), file.path);
         if let Some(patch) = &file.patch {
             print!("{patch}");
         }
     }
+}
+
+fn print_applied(report: &fs_ops::ApplyReport) {
+    println!(
+        "wrote {} file(s), {} directory(ies), {} byte(s) to {}",
+        report.files_written, report.directories_created, report.bytes_written, report.output
+    );
 }
 
 fn print_json(value: &impl Serialize) -> Result<(), CliError> {
@@ -924,8 +855,7 @@ struct DoctorReport {
     protocols: [&'static str; 2],
     authenticated_references: bool,
     trusted_registry: String,
-    config: Option<String>,
-    output_root: Option<String>,
+    registry_source: &'static str,
     root: String,
     max_token_bytes: u64,
     max_output_bytes: u64,
@@ -949,7 +879,6 @@ impl fmt::Display for ConflictArgument {
         match self {
             Self::Abort => formatter.write_str("abort"),
             Self::Overwrite => formatter.write_str("overwrite"),
-            Self::Backup => formatter.write_str("backup"),
         }
     }
 }

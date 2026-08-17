@@ -48,6 +48,32 @@ impl ArtifactFile {
     }
 }
 
+/// One exact file tree, as it was declared.
+///
+/// A workspace declares directories, not only files: `schemas/user.ts` and
+/// `schemas/account.ts` belong to a `schemas` directory, and an empty
+/// directory a project structures itself around is part of the declaration
+/// too. Files alone cannot express the second, so the tree carries both and
+/// reconstruction recreates the shape rather than inferring it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ArtifactTree {
+    /// Exact files, in any order; canonical ordering is the encoder's job.
+    pub files: Vec<ArtifactFile>,
+    /// Directories that must exist even when they contain no file.
+    pub directories: Vec<String>,
+}
+
+impl ArtifactTree {
+    /// Creates a tree of files with no directories of their own.
+    #[must_use]
+    pub fn from_files(files: Vec<ArtifactFile>) -> Self {
+        Self {
+            files,
+            directories: Vec::new(),
+        }
+    }
+}
+
 /// Compression policy exposed by the JIT protocol.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Compression {
@@ -122,6 +148,8 @@ pub struct ArtifactReport {
     pub dictionary_bytes: u32,
     /// Untrusted relative destination suggestion.
     pub suggested_path: Option<String>,
+    /// Directories the tree declares, in canonical path order.
+    pub directories: Vec<String>,
     /// Verified files in canonical path order.
     pub files: Vec<ArtifactFileReport>,
 }
@@ -179,8 +207,8 @@ impl VerifiedArtifact {
 /// Protocol failures.
 #[derive(Debug, Error)]
 pub enum ArtifactError {
-    /// No file was supplied.
-    #[error("an artifact must contain at least one file")]
+    /// Nothing was supplied.
+    #[error("an artifact must contain at least one file or directory")]
     Empty,
     /// A path or canonical envelope failed validation.
     #[error("{0}")]
@@ -200,18 +228,52 @@ pub fn pack(
     files: &[ArtifactFile],
     options: &PackOptions,
 ) -> Result<(String, ArtifactReport), ArtifactError> {
-    if files.is_empty() {
+    pack_tree(
+        &ArtifactTree {
+            files: files.to_vec(),
+            directories: Vec::new(),
+        },
+        options,
+    )
+}
+
+/// Packs an exact file tree, including the directories it declares.
+///
+/// # Errors
+///
+/// Returns an error for an empty tree, unsafe or duplicate paths,
+/// resource-limit violations, compression failures or failed encoder
+/// self-verification.
+pub fn pack_tree(
+    tree: &ArtifactTree,
+    options: &PackOptions,
+) -> Result<(String, ArtifactReport), ArtifactError> {
+    if tree.files.is_empty() && tree.directories.is_empty() {
         return Err(ArtifactError::Empty);
     }
 
-    let entries = files
+    let directories = tree
+        .directories
         .iter()
-        .map(|file| {
-            RelativeArtifactPath::new(&file.path)
-                .map(|path| ArtifactEntry::file(path, file.bytes.clone(), file.executable))
+        .map(|path| {
+            RelativeArtifactPath::new(path)
+                .map(ArtifactEntry::directory)
                 .map_err(format_error)
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let entries = directories
+        .into_iter()
+        .chain(
+            tree.files
+                .iter()
+                .map(|file| {
+                    RelativeArtifactPath::new(&file.path)
+                        .map(|path| ArtifactEntry::file(path, file.bytes.clone(), file.executable))
+                        .map_err(format_error)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+        .collect::<Vec<_>>();
     let mut artifact = Artifact::directory(entries);
 
     if let Some(path) = &options.suggested_path {
@@ -285,6 +347,13 @@ fn report(decoded: &DecodedArtifact) -> ArtifactReport {
             .artifact()
             .suggested_path()
             .map(|path| path.as_str().to_string()),
+        directories: decoded
+            .artifact()
+            .entries()
+            .iter()
+            .filter(|entry| entry.kind() == ArtifactEntryKind::Directory)
+            .filter_map(|entry| entry.path().map(|path| path.as_str().to_string()))
+            .collect(),
         files: decoded
             .artifact()
             .entries()
@@ -318,7 +387,32 @@ mod tests {
 
     use rebyte_format::RelativeArtifactPath;
 
-    use super::{ArtifactFile, Compression, PackOptions, decode, pack};
+    use super::{ArtifactFile, ArtifactTree, Compression, PackOptions, decode, pack, pack_tree};
+
+    /**
+    A declared directory is part of the declaration.
+
+    The workspace lets a reader lay out `schemas/` beside `dto/`, and a layout
+    with an empty directory in it is a layout they chose. Reconstructing only
+    the files would quietly drop it, and the tree the CLI writes would differ
+    from the tree they declared.
+    */
+    #[test]
+    fn keeps_a_declared_directory_that_holds_no_file() {
+        let tree = ArtifactTree {
+            files: vec![ArtifactFile::new(
+                "schemas/user.ts",
+                b"export const isUser = () => true;\n".to_vec(),
+            )],
+            directories: vec!["dto".to_string()],
+        };
+        let (token, report) = pack_tree(&tree, &PackOptions::default()).expect("pack");
+        let decoded = decode(&token).expect("decode");
+
+        assert_eq!(report.directories, vec!["dto".to_string()]);
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(decoded.report().directories, vec!["dto".to_string()]);
+    }
 
     #[test]
     fn round_trips_exact_files_deterministically() {
