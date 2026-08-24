@@ -17,6 +17,8 @@ export interface ObjectNodeProp<TNode> {
   readonly key: string;
   readonly schema: ATS.AnyTypeSchema;
   readonly value: TNode;
+  /** Readonly fields are preserved verbatim by immutable update programs. */
+  readonly readonly: boolean;
 }
 
 export interface RecordNode<TNode> {
@@ -101,7 +103,12 @@ export function buildSchemaNode<TNode>(
 
       return {
         kind: "object",
-        props: Object.keys(props).map((key) => ({ key, schema: props[key], value: buildNode(props[key]) })),
+        props: Object.keys(props).map((key) => ({
+          key,
+          schema: props[key],
+          value: buildNode(props[key]),
+          readonly: props[key].type === ATS.TypeName.readonly,
+        })),
       };
     }
     default:

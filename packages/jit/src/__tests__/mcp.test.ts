@@ -38,7 +38,11 @@ describe("jit MCP server", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "initialize",
-          params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1" } },
+          params: {
+            protocolVersion: "2025-11-25",
+            capabilities: {},
+            clientInfo: { name: "test", version: "1" },
+          },
         },
         { jsonrpc: "2.0", method: "notifications/initialized" },
         { jsonrpc: "2.0", id: 2, method: "tools/list" },
@@ -48,18 +52,30 @@ describe("jit MCP server", () => {
         id: 1,
         result: {
           protocolVersion: "2025-11-25",
-          capabilities: { tools: {}, resources: {}, prompts: {}, completions: {}, logging: {} },
+          capabilities: {
+            tools: {},
+            resources: {},
+            prompts: {},
+            completions: {},
+            logging: {},
+          },
           serverInfo: { name: "jit-mcp", version: "2.0.0" },
         },
       });
-      const listed = messages[1] as { readonly id: number; readonly result: { readonly tools: readonly unknown[] } };
+      const listed = messages[1] as {
+        readonly id: number;
+        readonly result: { readonly tools: readonly unknown[] };
+      };
       expect(listed.id).toBe(2);
       expect(listed.result.tools).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             name: "jit_aot_generate",
             outputSchema: { type: "object", additionalProperties: true },
-            annotations: expect.objectContaining({ readOnlyHint: false, idempotentHint: true }),
+            annotations: expect.objectContaining({
+              readOnlyHint: false,
+              idempotentHint: true,
+            }),
           }),
           expect.objectContaining({
             name: "jit_aot_preview",
@@ -88,10 +104,17 @@ describe("jit MCP server", () => {
 
     it("responds with the newest supported protocol when the requested version is unsupported", async () => {
       const messages = await rpc(projectDir, [
-        { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2099-01-01" } },
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: "2099-01-01" },
+        },
       ]);
 
-      expect(messages[0]).toMatchObject({ result: { protocolVersion: "2025-11-25" } });
+      expect(messages[0]).toMatchObject({
+        result: { protocolVersion: "2025-11-25" },
+      });
     });
   });
 
@@ -106,7 +129,10 @@ describe("jit MCP server", () => {
 
       expect(context.isError).toBeUndefined();
       expect(context.content[0].text).toContain("jit project: fixture");
-      expect(context.structuredContent).toMatchObject({ name: "fixture", commands: ["pnpm test", "pnpm build"] });
+      expect(context.structuredContent).toMatchObject({
+        name: "fixture",
+        commands: ["pnpm test", "pnpm build"],
+      });
       expect(search.content[0].text).toContain("docs/architecture.md:3");
       expect(search.structuredContent.matches).toHaveLength(1);
     });
@@ -125,7 +151,9 @@ describe("jit MCP server", () => {
       const surface = asTool(await callTool({ name: "jit_api_surface", arguments: {} }, projectDir));
 
       expect(surface.isError).toBeUndefined();
-      expect(surface.content[0].text).toContain("JIT.validate.{ async, is, issues, parse, safeParse }");
+      expect(surface.content[0].text).toContain(
+        "JIT.validate.{ async, is, issues, parse, parseAsync, safeParse, safeParseAsync }"
+      );
       expect(surface.content[0].text).toContain("JIT.compare.{ diff, equal, hash }");
       expect(surface.content[0].text).toContain("A name that does not appear here does not exist");
     });
@@ -146,7 +174,12 @@ describe("jit MCP server", () => {
       const messages = await rpc(projectDir, [
         { jsonrpc: "2.0", id: 1, method: "resources/list" },
         { jsonrpc: "2.0", id: 2, method: "resources/templates/list" },
-        { jsonrpc: "2.0", id: 3, method: "resources/read", params: { uri: "jit://project/architecture" } },
+        {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "resources/read",
+          params: { uri: "jit://project/architecture" },
+        },
         {
           jsonrpc: "2.0",
           id: 4,
@@ -165,18 +198,26 @@ describe("jit MCP server", () => {
       ]);
 
       expect(messages[0]).toMatchObject({
-        result: { resources: expect.arrayContaining([expect.objectContaining({ uri: "jit://project/architecture" })]) },
+        result: {
+          resources: expect.arrayContaining([expect.objectContaining({ uri: "jit://project/architecture" })]),
+        },
       });
       expect(messages[1]).toMatchObject({
         result: {
           resourceTemplates: expect.arrayContaining([expect.objectContaining({ uriTemplate: "jit://docs/{path}" })]),
         },
       });
-      expect(messages[2]).toMatchObject({ result: { contents: [{ mimeType: "text/markdown" }] } });
-      expect(messages[3]).toMatchObject({
-        result: { contents: [{ text: expect.stringContaining("zero runtime imports") }] },
+      expect(messages[2]).toMatchObject({
+        result: { contents: [{ mimeType: "text/markdown" }] },
       });
-      expect(messages[4]).toMatchObject({ result: { completion: { values: ["aot"], hasMore: false } } });
+      expect(messages[3]).toMatchObject({
+        result: {
+          contents: [{ text: expect.stringContaining("zero runtime imports") }],
+        },
+      });
+      expect(messages[4]).toMatchObject({
+        result: { completion: { values: ["aot"], hasMore: false } },
+      });
     });
 
     it("returns a resource error when a template tries to leave its allowed directory", async () => {
@@ -204,28 +245,47 @@ describe("jit MCP server", () => {
           jsonrpc: "2.0",
           id: 2,
           method: "prompts/get",
-          params: { name: "jit_schema_design", arguments: { goal: "an API user", mode: "aot" } },
+          params: {
+            name: "jit_schema_design",
+            arguments: { goal: "an API user", mode: "aot" },
+          },
         },
-        { jsonrpc: "2.0", id: 3, method: "prompts/get", params: { name: "jit_aot_workflow" } },
+        {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "prompts/get",
+          params: { name: "jit_aot_workflow" },
+        },
         {
           jsonrpc: "2.0",
           id: 4,
           method: "prompts/get",
-          params: { name: "jit_performance_review", arguments: { operation: "validate", dataShape: "100k users" } },
+          params: {
+            name: "jit_performance_review",
+            arguments: { operation: "validate", dataShape: "100k users" },
+          },
         },
       ]);
 
       expect(messages[0]).toMatchObject({
-        result: { prompts: expect.arrayContaining([expect.objectContaining({ name: "jit_aot_workflow" })]) },
+        result: {
+          prompts: expect.arrayContaining([expect.objectContaining({ name: "jit_aot_workflow" })]),
+        },
       });
       expect(messages[1]).toMatchObject({
-        result: { messages: [{ content: { text: expect.stringContaining("an API user") } }] },
+        result: {
+          messages: [{ content: { text: expect.stringContaining("an API user") } }],
+        },
       });
       expect(messages[2]).toMatchObject({
-        result: { messages: [{ content: { text: expect.stringContaining("preview generated") } }] },
+        result: {
+          messages: [{ content: { text: expect.stringContaining("preview generated") } }],
+        },
       });
       expect(messages[3]).toMatchObject({
-        result: { messages: [{ content: { text: expect.stringContaining("100k users") } }] },
+        result: {
+          messages: [{ content: { text: expect.stringContaining("100k users") } }],
+        },
       });
     });
   });
@@ -240,9 +300,19 @@ describe("jit MCP server", () => {
       expect(inspect.content[0].text).toContain("standalone artifacts: User_is");
       expect(inspect.structuredContent).toMatchObject({
         configFile: "jit.config.mjs",
-        standalone: [{ name: "User_is", operations: ["value", "is"], source: "src/user.jit.ts" }],
+        standalone: [
+          {
+            name: "User_is",
+            operations: ["value", "is"],
+            source: "src/user.jit.ts",
+          },
+        ],
       });
-      expect(doctor.structuredContent).toMatchObject({ ok: true, grouped: 0, standalone: 1 });
+      expect(doctor.structuredContent).toMatchObject({
+        ok: true,
+        grouped: 0,
+        standalone: 1,
+      });
     });
 
     it("previews generated source without writing to the configured output", async () => {
@@ -284,10 +354,22 @@ describe("jit MCP server", () => {
     it("rejects roots, declaration files, and outputs outside the MCP workspace", async () => {
       const rootEscape = asTool(await callTool({ name: "jit_project_context", arguments: { root: ".." } }, projectDir));
       const fileEscape = asTool(
-        await callTool({ name: "jit_aot_inspect", arguments: { files: ["../outside.jit.ts"] } }, projectDir)
+        await callTool(
+          {
+            name: "jit_aot_inspect",
+            arguments: { files: ["../outside.jit.ts"] },
+          },
+          projectDir
+        )
       );
       const outputEscape = asTool(
-        await callTool({ name: "jit_aot_generate", arguments: { write: true, outDir: "../generated" } }, projectDir)
+        await callTool(
+          {
+            name: "jit_aot_generate",
+            arguments: { write: true, outDir: "../generated" },
+          },
+          projectDir
+        )
       );
 
       expect(rootEscape).toMatchObject({ isError: true });
@@ -303,7 +385,10 @@ describe("jit MCP server", () => {
         symlinkSync(outside, join(projectDir, "outside-link"), "dir");
         const result = asTool(
           await callTool(
-            { name: "jit_aot_generate", arguments: { write: true, outDir: "outside-link/not-created" } },
+            {
+              name: "jit_aot_generate",
+              arguments: { write: true, outDir: "outside-link/not-created" },
+            },
             projectDir
           )
         );

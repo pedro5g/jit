@@ -20,11 +20,13 @@ import { emitMaskSource } from "../compiler/mask.js";
 import { emitMockSource, MOCK_HELPERS } from "../compiler/mock.js";
 import { emitTransformSource } from "../compiler/object-ops.js";
 import { emitQuerySource, type QueryProgram } from "../compiler/query.js";
+import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitUpdateSource } from "../compiler/update.js";
 import { canUseFastParse, emitValidator } from "../compiler/validate/emit-validate.js";
 import type * as ATS from "../core/ats/index.js";
+import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { type CompiledArtifact, getArtifact } from "../runtime/artifact-registry.js";
@@ -100,6 +102,11 @@ interface EmittedModule {
 interface OutputLayout {
   readonly format: AotOutputFormat;
   readonly extension: ".js" | ".ts";
+}
+
+function resolveObjectSchema(schema: ATS.AnyTypeSchema): ATS.ObjectSchema | undefined {
+  const base = resolveWrappers(schema).base;
+  return base.type === TypeName.object ? (base as ATS.ObjectSchema) : undefined;
 }
 
 /** A group member or standalone export, already lowered to a binding. */
@@ -336,6 +343,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "execution")
       return emitExecutionArtifact(binding, declaration, artifact.plan, reportName, type);
     if (artifact.kind === "query-plan") return emitQueryPlanArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "class") return emitClassArtifact(binding, declaration, artifact, reportName, type);
 
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
 
@@ -360,7 +368,124 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "operation") return operationType(artifact, typeNames);
     if (artifact.kind === "execution") return executionPlanType(artifact.plan, typeNames);
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
+    if (artifact.kind === "class") {
+      const value = emitTypeScriptType(artifact.schema, typeNames);
+      return `{ new (state: ${value}): ${value}; create(input: unknown): ${value}; hydrate(state: ${value}): ${value} }`;
+    }
     return "unknown";
+  }
+
+  /** Lowers a class descriptor into a plain class expression with no engine dependency. */
+  function emitClassArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "class" }>,
+    reportName: string,
+    type: string
+  ): EmittedBinding | undefined {
+    const base = resolveObjectSchema(artifact.schema);
+
+    if (!base) {
+      skipped.push({ schema: reportName, operation: "class", reason: "JIT classes require an object schema" });
+      return undefined;
+    }
+    const validator = emitValidatorBinding(
+      binding,
+      artifact.domainEvent ? base.def.props.payload : artifact.schema,
+      reportName,
+      "class",
+      {
+        is: false,
+        safeParse: true,
+      }
+    );
+
+    if (!validator) return undefined;
+    needsValidationError = true;
+    const helpers: string[] = [];
+    const methods: string[] = [];
+    const capabilities = new Set(artifact.capabilities);
+    const fields = Object.keys(base.def.props);
+
+    if (capabilities.has("equals")) {
+      const source = tryEmit(reportName, "class.equals", skipped, () => emitEqualSource(artifact.schema));
+      if (!source) return undefined;
+      const equal = internalIdentifier(`${binding}_equal`);
+      helpers.push(`const ${equal} = ${asExpression(source, "equal")};`);
+      methods.push(`equals(other) { return ${equal}(this, other); }`);
+    }
+    if (capabilities.has("hashCode")) {
+      const hash = internalIdentifier(`${binding}_hash`);
+      if (!emitHashBinding(hash, artifact.schema, reportName)) return undefined;
+      methods.push(`hashCode() { return ${hash}(this); }`);
+    }
+    if (capabilities.has("diff")) {
+      const source = tryEmit(reportName, "class.diff", skipped, () => emitDiffSource(artifact.schema));
+      if (!source) return undefined;
+      const diff = internalIdentifier(`${binding}_diff`);
+      helpers.push(`const ${diff} = ${asExpression(source, "diff")};`);
+      methods.push(`diff(other) { return ${diff}(this, other); }`);
+    }
+    const needsUpdate = artifact.aggregate || capabilities.has("with");
+    let update: string | undefined;
+    if (needsUpdate) {
+      const source = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(artifact.schema));
+      if (!source) return undefined;
+      update = internalIdentifier(`${binding}_update`);
+      helpers.push(`const ${update} = ${asExpression(source, "update")};`);
+    }
+    if (capabilities.has("with") && update)
+      methods.push(`with(patch) { return new this.constructor(${update}(this, patch)); }`);
+    const identity = artifact.capabilities.find((capability) => capability.startsWith("identity:"));
+    if (identity) {
+      const key = JSON.stringify(identity.slice("identity:".length));
+      methods.push(
+        `identity() { return this[${key}]; }`,
+        `sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this[${key}], other[${key}]); }`
+      );
+    }
+    if (artifact.aggregate && update) {
+      const assignments = fields
+        .map((field) => `this[${JSON.stringify(field)}] = next[${JSON.stringify(field)}];`)
+        .join(" ");
+      methods.push(
+        `update(patch) { const next = ${update}(this, patch); ${assignments} }`,
+        "raise(event) { this.__jitEvents.push(event); }",
+        "peekEvents() { return this.__jitEvents.slice(); }",
+        "pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }"
+      );
+    }
+    const assignments = fields
+      .map((field) => `this[${JSON.stringify(field)}] = state[${JSON.stringify(field)}];`)
+      .join(" ");
+    const events = artifact.aggregate
+      ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });'
+      : "";
+    const freeze = artifact.frozen ? " Object.freeze(this);" : "";
+    const abstractGuard = artifact.abstract
+      ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); `
+      : "";
+    const eventCreate = artifact.domainEvent
+      ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data });`
+      : `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
+    const eventHydrate = artifact.domainEvent
+      ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string" || !(state.occurredAt instanceof Date)) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, payload: result.data });`
+      : `const result = ${validator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(`  ${helpers.join("\n  ")}`);
+    js.push(`  return class ${binding} {`);
+    js.push(`    constructor(state) { ${assignments}${events}${freeze} }`);
+    js.push(`    static create(input) { ${abstractGuard}${eventCreate} }`);
+    js.push(`    static hydrate(state) { ${abstractGuard}${eventHydrate} }`);
+    if (artifact.domainEvent)
+      js.push(
+        `    static type = ${JSON.stringify(artifact.domainEvent.type)};`,
+        `    static version = ${artifact.domainEvent.version};`
+      );
+    js.push(...methods.map((method) => `    ${method}`));
+    js.push("  };");
+    js.push("})();");
+    return { binding, type };
   }
 
   function emitValidatorArtifact(

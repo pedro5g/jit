@@ -167,6 +167,11 @@ function emitObjectUpdateTo(
         writer.line(`const ${propValue} = ${defaultedPropValue};`);
       }
 
+      if (prop.readonly) {
+        entries.push(`${emitLiteral(prop.key)}: ${propValue}`);
+        continue;
+      }
+
       emitUpdateTo(writer, state, prop.value, propValue, propPatch, propNext);
       changedVars.push(`${propNext} !== ${propValue}`);
       entries.push(`${emitLiteral(prop.key)}: ${propNext}`);

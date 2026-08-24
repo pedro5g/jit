@@ -14,15 +14,37 @@ export type { CompiledStream, StreamOptions } from "../compiler/stream.js";
 export { type JsonSchemaBuilder, jsonSchema } from "./json-schema.js";
 /** Resolves the output type of a schema or builder as `JIT.Typeof<typeof User>`. */
 export type Typeof<TSchemaLike> = import("../core/ats/typeof.js").Typeof<TSchemaLike>;
+/** Resolves the accepted boundary input of a schema or builder. */
+export type Input<TSchemaLike> = import("../core/ats/input.js").Input<TSchemaLike>;
+/** Resolves the immutable update patch accepted by a schema or builder. */
+export type Update<TSchemaLike> = import("../core/ats/input.js").Update<TSchemaLike>;
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
+export {
+  type AbstractRuntimeClass,
+  aggregateRoot,
+  type ClassFactory,
+  class,
+  type DomainEvent,
+  domainEvent,
+  entity,
+  type RuntimeClass,
+  valueObject,
+} from "./class.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
 export { dto } from "./dto.js";
 export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export * from "./object/index.js";
-export { type AnyOpChain, type DateOps, type NumberOps, type OpChain, ops, type StringOps } from "./ops.js";
+export {
+  type AnyOpChain,
+  type DateOps,
+  type NumberOps,
+  type OpChain,
+  ops,
+  type StringOps,
+} from "./ops.js";
 export * from "./primitive/index.js";
 export type {
   BinaryProcessBuilder,
@@ -44,9 +66,12 @@ export {
   compare,
   format,
   from,
+  is,
   json,
   map,
   mock,
+  parse,
+  safeParse,
   security,
   validate,
 } from "./runtime-ops.js";

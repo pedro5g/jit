@@ -14,6 +14,7 @@ import type { SchemaInput, StandardSchemaProps } from "../core/builder/index.js"
 import { getStandardSchema, unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
+import { getRuntimeClassTarget } from "./class.js";
 import { getQueryProgram, type QueryConditionBuilder, query } from "./query.js";
 
 type FunctionLike = (...args: never[]) => unknown;
@@ -233,6 +234,7 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues"
 ): CallableArtifact<FunctionLike> {
+  const classTarget = getRuntimeClassTarget(schema);
   const unwrapped = unwrapSchema(schema);
   const output = operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value";
   const plan = freezePlan(unwrapped, [
@@ -262,8 +264,19 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
       case "is":
         return compileValidatorSelection(unwrapped, ["is"] as const).is as FunctionLike;
       case "parse":
+        if (classTarget) {
+          const parse = compileValidatorSelection(unwrapped, ["parse"] as const).parse;
+          return (value: unknown) => classTarget.hydrate(parse(value));
+        }
         return compileValidatorSelection(unwrapped, ["parse"] as const).parse as FunctionLike;
       case "safeParse":
+        if (classTarget) {
+          const safeParse = compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse;
+          return (value: unknown) => {
+            const result = safeParse(value);
+            return result.success ? { success: true as const, data: classTarget.hydrate(result.data) } : result;
+          };
+        }
         return compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse as FunctionLike;
       case "parseAsync":
         return compileValidatorSelection(unwrapped, ["parseAsync"] as const).parseAsync as FunctionLike;

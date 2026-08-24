@@ -108,6 +108,7 @@ function assertUpdateable(schema: ATS.AnyTypeSchema): void {
     const objectSchema = schema as ATS.ObjectSchema<ATS.SchemaShape>;
 
     for (const child of Object.values(objectSchema.def.props)) {
+      if (child.type === TypeName.readonly) continue;
       assertUpdateable(child);
     }
   }

@@ -231,6 +231,88 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain('from "@jit-compiler/jit"');
   });
 
+  it("should lower runtime value objects as import-free classes", async () => {
+    const Money = JIT.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) }));
+    const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Money: {
+        create(input: { amount: number; currency: "BRL" | "USD" }): {
+          equals(other: unknown): boolean;
+          hashCode(): number;
+        };
+      };
+    };
+
+    const money = generated.Money.create({ amount: 10, currency: "BRL" });
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("return class Money");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(Object.isFrozen(money)).toBe(true);
+    expect(money.equals(generated.Money.create({ amount: 10, currency: "BRL" }))).toBe(true);
+    expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
+  });
+
+  it("should lower domain events without the JIT runtime", async () => {
+    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+      version: 1,
+      payload: JIT.object({ orderId: JIT.string() }),
+    });
+    const result = AOT.generate({ groups: {}, artifacts: { OrderConfirmed }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly OrderConfirmed: {
+        readonly type: string;
+        readonly version: number;
+        create(input: { orderId: string }): { readonly payload: { readonly orderId: string } };
+      };
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.OrderConfirmed.type).toBe("order.confirmed");
+    expect(generated.OrderConfirmed.version).toBe(1);
+    expect(generated.OrderConfirmed.create({ orderId: "o_1" })).toMatchObject({
+      type: "order.confirmed",
+      version: 1,
+      payload: { orderId: "o_1" },
+    });
+  });
+
+  it("should lower aggregate infrastructure into an extendable import-free base", async () => {
+    const OrderBase = JIT.aggregateRoot(
+      JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"] as const) }),
+      { id: "id" }
+    );
+    const result = AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
+    type OrderBaseConstructor = {
+      new (
+        state: unknown
+      ): {
+        update(patch: { status: "confirmed" }): void;
+        raise(event: unknown): void;
+        pullEvents(): unknown[];
+      };
+      create(input: { id: string; status: "draft" | "confirmed" }): InstanceType<new (state: unknown) => unknown>;
+    };
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly OrderBase: OrderBaseConstructor;
+    };
+
+    class Order extends generated.OrderBase {
+      confirm() {
+        this.update({ status: "confirmed" });
+        this.raise({ type: "order.confirmed" });
+      }
+    }
+
+    const order = Order.create({ id: "o_1", status: "draft" }) as Order;
+
+    expect(result.skipped).toHaveLength(0);
+    order.confirm();
+    expect(order.pullEvents()).toEqual([{ type: "order.confirmed" }]);
+    expect((order as Order & { status: string }).status).toBe("confirmed");
+  });
+
   it("should preserve transform, update, and security stages in an import-free composed pipeline", async () => {
     const User = JIT.object({
       id: JIT.number().int32(),

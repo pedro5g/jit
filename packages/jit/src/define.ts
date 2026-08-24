@@ -40,8 +40,30 @@ type RuntimeCollectionDescriptor = {
 export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
 export type { Strict } from "./core/builder/types.js";
 
-const NO_EFFECTS = Object.freeze({ mayThrow: false, mayAllocate: false, usesExternalBindings: false });
-const THROWING_EFFECTS = Object.freeze({ mayThrow: true, mayAllocate: false, usesExternalBindings: false });
+const NO_EFFECTS = Object.freeze({
+  mayThrow: false,
+  mayAllocate: false,
+  usesExternalBindings: false,
+});
+const THROWING_EFFECTS = Object.freeze({
+  mayThrow: true,
+  mayAllocate: false,
+  usesExternalBindings: false,
+});
+
+function parseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+  return validationStub(schema, "parseAsync") as unknown as ExecutionArtifact<
+    unknown,
+    Promise<ATS.TypeofSchema<TSchema>>
+  >;
+}
+
+function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+  return validationStub(schema, "safeParseAsync") as unknown as ExecutionArtifact<
+    unknown,
+    Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
+  >;
+}
 
 const validate = Object.freeze({
   is<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
@@ -59,21 +81,17 @@ const validate = Object.freeze({
   issues<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationStub(schema, "issues") as unknown as ExecutionArtifact<unknown, IterableIterator<unknown>>;
   },
+  parseAsync,
+  safeParseAsync,
   async: Object.freeze({
-    parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-      return validationStub(schema, "parseAsync") as unknown as ExecutionArtifact<
-        unknown,
-        Promise<ATS.TypeofSchema<TSchema>>
-      >;
-    },
-    safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-      return validationStub(schema, "safeParseAsync") as unknown as ExecutionArtifact<
-        unknown,
-        Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
-      >;
-    },
+    parse: parseAsync,
+    safeParse: safeParseAsync,
   }),
 });
+
+const is = validate.is;
+const parse = validate.parse;
+const safeParse = validate.safeParse;
 
 const json = Object.freeze({
   value: RuntimeJIT.json.value,
@@ -123,7 +141,10 @@ function from<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): SchemaArtifact<ATS.TypeofSchema<TSchema>, TSchema> {
   return executionStub<TSchema, (value: ATS.TypeofSchema<TSchema>) => ATS.TypeofSchema<TSchema>>(schema, [
-    { ...stage("value", "value", "value"), schema: unwrapSchema(schema) } as ExecutionStage,
+    {
+      ...stage("value", "value", "value"),
+      schema: unwrapSchema(schema),
+    } as ExecutionStage,
   ]) as unknown as SchemaArtifact<ATS.TypeofSchema<TSchema>, TSchema>;
 }
 
@@ -136,7 +157,10 @@ function map<TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeSchem
   const targetSchema = unwrapSchema(target);
 
   return executionStub<TTarget, (value: ATS.TypeofSchema<TSource>) => ATS.TypeofSchema<TTarget>>(targetSchema, [
-    { ...stage("value", "value", "value"), schema: sourceSchema } as ExecutionStage,
+    {
+      ...stage("value", "value", "value"),
+      schema: sourceSchema,
+    } as ExecutionStage,
     mapStage(sourceSchema, targetSchema, false, mapping),
   ]) as unknown as SchemaArtifact<ATS.TypeofSchema<TSource>, TTarget>;
 }
@@ -154,7 +178,10 @@ function mapMany<TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeS
   return executionStub<ATS.ArraySchema<TTarget>, (value: ATS.TypeofSchema<TSource>[]) => ATS.TypeofSchema<TTarget>[]>(
     result,
     [
-      { ...stage("value", "value", "value"), schema: collection } as ExecutionStage,
+      {
+        ...stage("value", "value", "value"),
+        schema: collection,
+      } as ExecutionStage,
       mapStage(sourceSchema, targetSchema, true, mapping),
     ]
   ) as unknown as SchemaArtifact<ATS.TypeofSchema<TSource>[], ATS.ArraySchema<TTarget>>;
@@ -211,7 +238,11 @@ const jsonSchema = Object.freeze({
   to<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ToJsonSchemaOptions) {
     const document = RuntimeJIT.jsonSchema.to(schema, options);
 
-    registerArtifact(document, { kind: "operation", schema: unwrapSchema(schema), op: "jsonSchema" });
+    registerArtifact(document, {
+      kind: "operation",
+      schema: unwrapSchema(schema),
+      op: "jsonSchema",
+    });
     return document;
   },
   from: RuntimeJIT.jsonSchema.from,
@@ -252,8 +283,15 @@ function executionStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...
   queryBuilder?: RuntimeCollectionDescriptor
 ): DefineFunction<TFunction> {
   const unwrapped = unwrapSchema(schema);
-  const plan: ExecutionPlan = Object.freeze({ version: 1, schema: unwrapped, stages: Object.freeze(stages) });
-  const operation: ArtifactDescriptor["operation"] = { kind: "operation", op: "fromJSON" };
+  const plan: ExecutionPlan = Object.freeze({
+    version: 1,
+    schema: unwrapped,
+    stages: Object.freeze(stages),
+  });
+  const operation: ArtifactDescriptor["operation"] = {
+    kind: "operation",
+    op: "fromJSON",
+  };
   const stub = function aotExecutionArtifact(): never {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -348,9 +386,15 @@ function executionStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...
       value: Object.freeze({
         array: () => append(unwrapped, stage("to.array", "value", "value")),
         json: () =>
-          append(unwrapped, { ...stage("json.encode", "value", "json-text"), schema: unwrapped } as ExecutionStage),
+          append(unwrapped, {
+            ...stage("json.encode", "value", "json-text"),
+            schema: unwrapped,
+          } as ExecutionStage),
         binary: () =>
-          append(unwrapped, { ...stage("binary.encode", "value", "binary"), schema: unwrapped } as ExecutionStage),
+          append(unwrapped, {
+            ...stage("binary.encode", "value", "binary"),
+            schema: unwrapped,
+          } as ExecutionStage),
       }),
     },
   });
@@ -397,7 +441,11 @@ function mapStage(
     many,
     bindings: [mapping],
     provides: ["mapped"],
-    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: Object.keys(mapping).length > 0 },
+    effects: {
+      ...NO_EFFECTS,
+      mayAllocate: true,
+      usesExternalBindings: Object.keys(mapping).length > 0,
+    },
   } as ExecutionStage;
 }
 
@@ -417,7 +465,11 @@ function transformStage(
     many,
     transforms: transforms as Readonly<Record<string, unknown>>,
     provides: ["transformed"],
-    effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: Object.keys(transforms).length > 0 },
+    effects: {
+      ...NO_EFFECTS,
+      mayAllocate: true,
+      usesExternalBindings: Object.keys(transforms).length > 0,
+    },
   } as ExecutionStage;
 }
 
@@ -492,6 +544,9 @@ function stage(kind: string, input: ExecutionStage["input"], output: ExecutionSt
 
 export const JIT = {
   ...RuntimeJIT,
+  is,
+  parse,
+  safeParse,
   validate,
   json,
   binary,
@@ -512,8 +567,24 @@ export const JIT = {
   security: Object.freeze({ mask, sanitize }),
 } as Omit<
   typeof RuntimeJIT,
-  "validate" | "json" | "binary" | "from" | "map" | "clone" | "format" | "jsonSchema" | "mock" | "compare" | "security"
+  | "is"
+  | "parse"
+  | "safeParse"
+  | "validate"
+  | "json"
+  | "binary"
+  | "from"
+  | "map"
+  | "clone"
+  | "format"
+  | "jsonSchema"
+  | "mock"
+  | "compare"
+  | "security"
 > & {
+  readonly is: typeof is;
+  readonly parse: typeof parse;
+  readonly safeParse: typeof safeParse;
   readonly validate: typeof validate;
   readonly json: typeof json;
   readonly binary: typeof binary;
@@ -523,11 +594,20 @@ export const JIT = {
   readonly format: typeof format;
   readonly jsonSchema: typeof jsonSchema;
   readonly mock: typeof mock;
-  readonly compare: { readonly equal: typeof equal; readonly diff: typeof diff; readonly hash: typeof hash };
-  readonly security: { readonly mask: typeof mask; readonly sanitize: typeof sanitize };
+  readonly compare: {
+    readonly equal: typeof equal;
+    readonly diff: typeof diff;
+    readonly hash: typeof hash;
+  };
+  readonly security: {
+    readonly mask: typeof mask;
+    readonly sanitize: typeof sanitize;
+  };
 };
 
 export namespace JIT {
   export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
+  export type Input<TSchemaLike> = import("./core/ats/input.js").Input<TSchemaLike>;
+  export type Update<TSchemaLike> = import("./core/ats/input.js").Update<TSchemaLike>;
   export type Strict<TSchemaLike, TValue> = import("./core/builder/types.js").Strict<TSchemaLike, TValue>;
 }

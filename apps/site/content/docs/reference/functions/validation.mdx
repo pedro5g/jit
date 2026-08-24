@@ -6,9 +6,9 @@ description: Create callable validation artifacts for a boundary.
 ## validate
 
 ```ts
-const isUser = JIT.validate.is(User);
-const parseUser = JIT.validate.parse(User);
-const safeParseUser = JIT.validate.safeParse(User);
+const isUser = JIT.is(User);
+const parseUser = JIT.parse(User);
+const safeParseUser = JIT.safeParse(User);
 ```
 
 `JIT.validate` is a capability namespace. Each method returns a callable,
@@ -20,8 +20,8 @@ same descriptor consumed by AOT.
 | `is(schema)`             | type predicate        | `false`, first failure        | checks current input   |
 | `parse(schema)`          | inferred output       | throws `JITValidationError`   | yes                    |
 | `safeParse(schema)`      | success union         | returns issue vector          | yes                    |
-| `async.parse(schema)`     | output promise        | rejects with validation error | yes                   |
-| `async.safeParse(schema)` | success-union promise | resolves with issues          | yes                   |
+| `parseAsync(schema)`      | output promise        | rejects with validation error | yes                   |
+| `safeParseAsync(schema)`  | success-union promise | resolves with issues          | yes                   |
 | `issues(schema)`         | iterator              | yields only issues            | no extra public vector |
 
 Use `is` in hot filtering and guards. Use `safeParse` at user-controlled
@@ -47,15 +47,16 @@ success path and only builds issues after failure. Observable callbacks,
 stateful regexes and transforming schemas remain single-pass. `safeParse`
 rebuilds output only when defaults, coercions or transforms require it.
 
-## One path per capability
+## Root aliases
 
-Every validation factory is reached through the `JIT.validate` namespace and
-nowhere else. There are no root aliases:
+`JIT.is`, `JIT.parse`, and `JIT.safeParse` are direct aliases for the matching
+`JIT.validate.*` leaf operation. They create the same descriptor and use the
+same compiler/cache path:
 
 ```ts
-const isUser = JIT.validate.is(User);
-const parseUser = JIT.validate.parse(User);
-const safeParseUser = JIT.validate.safeParse(User);
+const isUser = JIT.is(User);
+const parseUser = JIT.parse(User);
+const safeParseUser = JIT.safeParse(User);
 ```
 
 ## Async schemas
@@ -67,11 +68,12 @@ const Job = JIT.object({
   result: JIT.promise(JIT.object({ id: JIT.string() })),
 });
 
-const parseJob = JIT.validate.async.parse(Job);
+const parseJob = JIT.validate.parseAsync(Job);
 const job = await parseJob(input);
 ```
 
-Sync parsing does not silently await promises.
+`JIT.validate.async.parse(Job)` remains a compatibility spelling. Sync parsing
+does not silently await promises.
 
 ## Cache and AOT
 

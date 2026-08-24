@@ -66,12 +66,24 @@ interface ExecutionArtifact {
   readonly plan: ExecutionPlan;
 }
 
+/** A runtime class reduced to the data needed by the import-free AOT emitter. */
+interface ClassArtifact {
+  readonly kind: "class";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly abstract: boolean;
+  readonly frozen: boolean;
+  readonly aggregate: boolean;
+  readonly capabilities: readonly string[];
+  readonly domainEvent?: { readonly type: string; readonly version: number };
+}
+
 export type CompiledArtifact =
   | SourceArtifact
   | QueryPlanArtifact
   | ValidatorArtifact
   | OperationArtifact
-  | ExecutionArtifact;
+  | ExecutionArtifact
+  | ClassArtifact;
 
 const REGISTRY = new WeakMap<object, CompiledArtifact>();
 

@@ -1,0 +1,143 @@
+---
+title: Runtime classes
+description: Materialize a schema as a validated runtime class without reflection.
+---
+
+## Runtime classes
+
+`JIT.class(schema)` generates a class whose constructor assigns fields in schema
+order. `create()` resolves defaults and validates input; `hydrate()` validates
+persisted state. Both reuse one compiled validator.
+
+```ts
+const UserSchema = JIT.object({
+  id: JIT.string().default("generated"),
+  name: JIT.string().min(2),
+});
+
+const User = JIT.class(UserSchema).use(
+  JIT.class.equals,
+  JIT.class.with,
+);
+
+const ada = User.create({ name: "Ada" });
+const grace = ada.with({ name: "Grace" });
+
+ada.equals(grace); // false
+```
+
+Capabilities are explicit, installed once on the prototype, and reuse the
+structural compilers: `equals`, `hashCode`, `diff`, `with`, and
+`identity("field")`. `with` accepts the schema-derived update patch type; readonly
+schema fields cannot be patched and are preserved by the compiled update.
+
+## Abstract classes
+
+Use `JIT.class.abstract(schema)` for a domain base. Its static factories use
+polymorphic `this`, so subclasses receive their own instance type.
+
+```ts
+const UserBase = JIT.class.abstract(UserSchema);
+
+class User extends UserBase {
+  greeting() {
+    return `Hello ${this.name}`;
+  }
+}
+
+User.create({ name: "Ada" }).greeting();
+```
+
+The abstract base itself cannot create or hydrate an instance.
+
+## Value objects
+
+`JIT.valueObject(schema)` is a concrete, frozen runtime class with structural
+equality and hash code enabled by default.
+
+```ts
+const Money = JIT.valueObject(
+  JIT.object({
+    amount: JIT.number(),
+    currency: JIT.enum(["BRL", "USD"] as const),
+  }),
+);
+
+const price = Money.create({ amount: 10, currency: "BRL" });
+Object.isFrozen(price); // true
+```
+
+## Entities
+
+`JIT.entity(schema, { id })` creates an abstract base with identity semantics.
+Identity is intentionally distinct from structural equality.
+
+```ts
+const UserBase = JIT.entity(
+  JIT.object({ id: JIT.string(), name: JIT.string() }),
+  { id: "id" },
+);
+
+class User extends UserBase {}
+
+User.create({ id: "u_1", name: "Ada" })
+  .sameIdentity(User.create({ id: "u_1", name: "Grace" })); // true
+```
+
+## Domain events
+
+`JIT.domainEvent(type, { version, payload })` creates a frozen class whose
+schema contains `id`, literal `type`, literal `version`, `occurredAt`, and the
+validated payload. Creation accepts only the payload; id and time are resolved
+by defaults.
+
+```ts
+const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+  version: 1,
+  payload: JIT.object({ orderId: JIT.string().min(1) }),
+});
+
+const event = OrderConfirmed.create({ orderId: "o_1" });
+
+event.type; // "order.confirmed"
+event.version; // 1
+event.payload.orderId; // "o_1"
+```
+
+## Aggregate roots
+
+`JIT.aggregateRoot(schema, { id })` creates an abstract entity base with
+identity, an ordered pending-event queue, and a compiled in-place `update()`.
+Subclass methods express the domain transition, then raise the event that
+describes it. Readonly schema fields remain unavailable to `update()`.
+
+```ts
+const OrderBase = JIT.aggregateRoot(
+  JIT.object({
+    id: JIT.string().readonly(),
+    status: JIT.enum(["draft", "confirmed"] as const),
+  }),
+  { id: "id" },
+);
+
+class Order extends OrderBase {
+  confirm() {
+    this.update({ status: "confirmed" });
+    this.raise({ type: "order.confirmed" });
+  }
+}
+
+const order = Order.create({ id: "o_1", status: "draft" });
+order.confirm();
+order.pullEvents(); // [{ type: "order.confirmed" }]
+```
+
+`peekEvents()` returns a snapshot without clearing it. `pullEvents()` returns
+the queued events in insertion order and resets the queue.
+
+## AOT
+
+Runtime classes are AOT artifacts too. Pass a class to `AOT.generate()` and
+the generated module contains a plain specialized class: validation,
+construction, selected capabilities, and aggregate event storage are emitted
+locally, with no JIT runtime import.

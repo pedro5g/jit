@@ -18,7 +18,15 @@ describe("the reflected surface", () => {
   });
 
   it("carries the namespace members that the flat list never had", () => {
-    expect(surface.member("validate")?.members).toEqual(["async", "is", "issues", "parse", "safeParse"]);
+    expect(surface.member("validate")?.members).toEqual([
+      "async",
+      "is",
+      "issues",
+      "parse",
+      "parseAsync",
+      "safeParse",
+      "safeParseAsync",
+    ]);
     expect(surface.member("compare")?.members).toEqual(["diff", "equal", "hash"]);
     expect(surface.member("security")?.members).toEqual(["mask", "sanitize"]);
   });
@@ -229,7 +237,12 @@ describe("repairTurn", () => {
    */
   it("names what was wrong and what the valid methods are", () => {
     const answer = "```ts\nJIT.string().notEmpty()\n```";
-    const findings = audit(answer, { api: index.api, sections: [], concepts: [], surface });
+    const findings = audit(answer, {
+      api: index.api,
+      sections: [],
+      concepts: [],
+      surface,
+    });
     const correction = repairTurn(answer, findings, surface);
 
     expect(correction).toContain(".notEmpty()");

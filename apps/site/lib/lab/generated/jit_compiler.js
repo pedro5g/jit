@@ -636,7 +636,12 @@ function buildSchemaNode(schema, buildNode) {
       const props = schema.def.props;
       return {
         kind: "object",
-        props: Object.keys(props).map((key) => ({ key, schema: props[key], value: buildNode(props[key]) }))
+        props: Object.keys(props).map((key) => ({
+          key,
+          schema: props[key],
+          value: buildNode(props[key]),
+          readonly: props[key].type === TypeName.readonly
+        }))
       };
     }
     default:
@@ -3529,7 +3534,7 @@ function mergeHints(left, right) {
   if (!left) return right ?? {};
   if (!right) return left;
   const collection = mergeCollection(left.collection, right.collection);
-  const entity = right.entity ?? left.entity;
+  const entity2 = right.entity ?? left.entity;
   const index = right.index ?? left.index;
   const order = right.order ?? left.order;
   const compare2 = mergeOptional(left.compare, right.compare);
@@ -3538,7 +3543,7 @@ function mergeHints(left, right) {
   const diff3 = mergeOptional(left.diff, right.diff);
   const serialize = mergeOptional(left.serialize, right.serialize);
   return {
-    ...entity ? { entity } : {},
+    ...entity2 ? { entity: entity2 } : {},
     ...index ? { index } : {},
     ...order ? { order } : {},
     ...collection ? { collection } : {},
@@ -8019,6 +8024,10 @@ function emitObjectUpdateTo(writer, state, node, value, patch, target) {
       if (propValue !== rawPropValue) {
         writer.line(`const ${propValue} = ${defaultedPropValue};`);
       }
+      if (prop.readonly) {
+        entries.push(`${emitLiteral(prop.key)}: ${propValue}`);
+        continue;
+      }
       emitUpdateTo(writer, state, prop.value, propValue, propPatch, propNext);
       changedVars.push(`${propNext} !== ${propValue}`);
       entries.push(`${emitLiteral(prop.key)}: ${propNext}`);
@@ -8290,6 +8299,7 @@ function assertUpdateable(schema) {
   if (schema.type === TypeName.object) {
     const objectSchema = schema;
     for (const child of Object.values(objectSchema.def.props)) {
+      if (child.type === TypeName.readonly) continue;
       assertUpdateable(child);
     }
   }
@@ -11754,20 +11764,20 @@ function compileValidatorSelection(schema, ops2, options) {
       const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps, fastParse));
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values);
       const selection = {};
-      const is = compiled.is;
-      const safeParse = compiled.safeParse;
-      const fastSafeParse = fastParse && is && safeParse ? (value) => is(value) ? { success: true, data: value } : safeParse(value) : safeParse;
-      const parse = (value) => {
-        if (fastParse && is?.(value)) return value;
-        if (!safeParse) throw new Error("parse requires safeParse generation");
-        const result = safeParse(value);
+      const is3 = compiled.is;
+      const safeParse3 = compiled.safeParse;
+      const fastSafeParse = fastParse && is3 && safeParse3 ? (value) => is3(value) ? { success: true, data: value } : safeParse3(value) : safeParse3;
+      const parse3 = (value) => {
+        if (fastParse && is3?.(value)) return value;
+        if (!safeParse3) throw new Error("parse requires safeParse generation");
+        const result = safeParse3(value);
         if (result.success) return result.data;
         throw new JITValidationError(result.issues);
       };
-      const safeParseAsync = compiled.safeParseAsync ?? (safeParse ? async (value) => safeParse(value) : void 0);
-      const parseAsync = async (value) => {
-        if (!safeParseAsync) throw new Error("parseAsync requires async validation generation");
-        const result = await safeParseAsync(value);
+      const safeParseAsync3 = compiled.safeParseAsync ?? (safeParse3 ? async (value) => safeParse3(value) : void 0);
+      const parseAsync3 = async (value) => {
+        if (!safeParseAsync3) throw new Error("parseAsync requires async validation generation");
+        const result = await safeParseAsync3(value);
         if (result.success) return result.data;
         throw new JITValidationError(result.issues);
       };
@@ -11780,16 +11790,16 @@ function compileValidatorSelection(schema, ops2, options) {
         registerValidatorArtifact(fastSafeParse, schema, "safeParse");
       }
       if (normalizedOps.includes("parse")) {
-        selection.parse = parse;
-        registerValidatorArtifact(parse, schema, "parse");
+        selection.parse = parse3;
+        registerValidatorArtifact(parse3, schema, "parse");
       }
-      if (normalizedOps.includes("safeParseAsync") && safeParseAsync) {
-        selection.safeParseAsync = safeParseAsync;
-        registerValidatorArtifact(safeParseAsync, schema, "safeParseAsync");
+      if (normalizedOps.includes("safeParseAsync") && safeParseAsync3) {
+        selection.safeParseAsync = safeParseAsync3;
+        registerValidatorArtifact(safeParseAsync3, schema, "safeParseAsync");
       }
       if (normalizedOps.includes("parseAsync")) {
-        selection.parseAsync = parseAsync;
-        registerValidatorArtifact(parseAsync, schema, "parseAsync");
+        selection.parseAsync = parseAsync3;
+        registerValidatorArtifact(parseAsync3, schema, "parseAsync");
       }
       return selection;
     },
@@ -12722,12 +12732,12 @@ function getStandardSchema(schema) {
   return standard;
 }
 function createStandardSchema(schema) {
-  const safeParse = compileValidatorSelection(schema, ["safeParse"]).safeParse;
+  const safeParse3 = compileValidatorSelection(schema, ["safeParse"]).safeParse;
   return {
     version: 1,
     vendor: "jit",
     validate(value) {
-      const result = safeParse(value);
+      const result = safeParse3(value);
       if (result.success) return { value: result.data };
       return { issues: result.issues.map(toStandardIssue) };
     }
@@ -12912,6 +12922,10 @@ function wrapForSuffix(type) {
 // ../../packages/jit/src/aot/generate.ts
 var GENERATED_BANNER = "// Generated by jit \u2014 do not edit.";
 var CALL_HELPER = "type __JitCall<TFunction> = TFunction extends (...args: infer A) => infer R ? (...args: A) => R : never;";
+function resolveObjectSchema(schema) {
+  const base = resolveWrappers(schema).base;
+  return base.type === TypeName.object ? base : void 0;
+}
 function generate(options) {
   const layout = resolveOutputLayout(assertOutputFormat(options.format ?? "js"));
   const skipped = [];
@@ -13067,6 +13081,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "execution")
       return emitExecutionArtifact(binding, declaration, artifact.plan, reportName, type);
     if (artifact.kind === "query-plan") return emitQueryPlanArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "class") return emitClassArtifact(binding, declaration, artifact, reportName, type);
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
     if (inlined === void 0) {
       skipped.push({
@@ -13087,7 +13102,98 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "operation") return operationType(artifact, typeNames);
     if (artifact.kind === "execution") return executionPlanType(artifact.plan, typeNames);
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
+    if (artifact.kind === "class") return "unknown";
     return "unknown";
+  }
+  function emitClassArtifact(binding, declaration, artifact, reportName, type) {
+    const base = resolveObjectSchema(artifact.schema);
+    if (!base) {
+      skipped.push({ schema: reportName, operation: "class", reason: "JIT classes require an object schema" });
+      return void 0;
+    }
+    const validator = emitValidatorBinding(
+      binding,
+      artifact.domainEvent ? base.def.props.payload : artifact.schema,
+      reportName,
+      "class",
+      {
+        is: false,
+        safeParse: true
+      }
+    );
+    if (!validator) return void 0;
+    needsValidationError = true;
+    const helpers2 = [];
+    const methods = [];
+    const capabilities = new Set(artifact.capabilities);
+    const fields = Object.keys(base.def.props);
+    if (capabilities.has("equals")) {
+      const source2 = tryEmit(reportName, "class.equals", skipped, () => emitEqualSource(artifact.schema));
+      if (!source2) return void 0;
+      const equal3 = internalIdentifier(`${binding}_equal`);
+      helpers2.push(`const ${equal3} = ${asExpression(source2, "equal")};`);
+      methods.push(`equals(other) { return ${equal3}(this, other); }`);
+    }
+    if (capabilities.has("hashCode")) {
+      const hash4 = internalIdentifier(`${binding}_hash`);
+      if (!emitHashBinding(hash4, artifact.schema, reportName)) return void 0;
+      methods.push(`hashCode() { return ${hash4}(this); }`);
+    }
+    if (capabilities.has("diff")) {
+      const source2 = tryEmit(reportName, "class.diff", skipped, () => emitDiffSource(artifact.schema));
+      if (!source2) return void 0;
+      const diff3 = internalIdentifier(`${binding}_diff`);
+      helpers2.push(`const ${diff3} = ${asExpression(source2, "diff")};`);
+      methods.push(`diff(other) { return ${diff3}(this, other); }`);
+    }
+    const needsUpdate = artifact.aggregate || capabilities.has("with");
+    let update2;
+    if (needsUpdate) {
+      const source2 = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(artifact.schema));
+      if (!source2) return void 0;
+      update2 = internalIdentifier(`${binding}_update`);
+      helpers2.push(`const ${update2} = ${asExpression(source2, "update")};`);
+    }
+    if (capabilities.has("with") && update2)
+      methods.push(`with(patch) { return new this.constructor(${update2}(this, patch)); }`);
+    const identity = artifact.capabilities.find((capability2) => capability2.startsWith("identity:"));
+    if (identity) {
+      const key = JSON.stringify(identity.slice("identity:".length));
+      methods.push(
+        `identity() { return this[${key}]; }`,
+        `sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this[${key}], other[${key}]); }`
+      );
+    }
+    if (artifact.aggregate && update2) {
+      const assignments2 = fields.map((field) => `this[${JSON.stringify(field)}] = next[${JSON.stringify(field)}];`).join(" ");
+      methods.push(
+        `update(patch) { const next = ${update2}(this, patch); ${assignments2} }`,
+        "raise(event) { this.__jitEvents.push(event); }",
+        "peekEvents() { return this.__jitEvents.slice(); }",
+        "pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }"
+      );
+    }
+    const assignments = fields.map((field) => `this[${JSON.stringify(field)}] = state[${JSON.stringify(field)}];`).join(" ");
+    const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
+    const freeze = artifact.frozen ? " Object.freeze(this);" : "";
+    const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
+    const eventCreate = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data });` : `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
+    const eventHydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string" || !(state.occurredAt instanceof Date)) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, payload: result.data });` : `const result = ${validator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(`  ${helpers2.join("\n  ")}`);
+    js.push(`  return class ${binding} {`);
+    js.push(`    constructor(state) { ${assignments}${events}${freeze} }`);
+    js.push(`    static create(input) { ${abstractGuard}${eventCreate} }`);
+    js.push(`    static hydrate(state) { ${abstractGuard}${eventHydrate} }`);
+    if (artifact.domainEvent)
+      js.push(
+        `    static type = ${JSON.stringify(artifact.domainEvent.type)};`,
+        `    static version = ${artifact.domainEvent.version};`
+      );
+    js.push(...methods.map((method) => `    ${method}`));
+    js.push("  };");
+    js.push("})();");
+    return { binding, type };
   }
   function emitValidatorArtifact(binding, declaration, artifact, reportName, type) {
     if (artifact.op === "parseAsync" || artifact.op === "safeParseAsync") {
@@ -14477,12 +14583,14 @@ var factories_exports = {};
 __export(factories_exports, {
   KeyedWatchedList: () => KeyedWatchedList,
   WatchedList: () => WatchedList,
+  aggregateRoot: () => aggregateRoot,
   any: () => any,
   array: () => array,
   bigint: () => bigint2,
   binary: () => binary2,
   boolean: () => boolean2,
   brand: () => brand2,
+  class: () => classType,
   clone: () => clone,
   codec: () => codec,
   coerce: () => coerce2,
@@ -14492,7 +14600,9 @@ __export(factories_exports, {
   date: () => date2,
   default: () => defaultTo2,
   discriminatedUnion: () => discriminatedUnion,
+  domainEvent: () => domainEvent,
   dto: () => dto,
+  entity: () => entity,
   enum: () => nativeEnum,
   file: () => file,
   format: () => format,
@@ -14501,6 +14611,7 @@ __export(factories_exports, {
   instanceOf: () => instanceOf,
   int: () => int,
   intersection: () => intersection,
+  is: () => is,
   iso: () => iso,
   json: () => json,
   jsonSchema: () => jsonSchema,
@@ -14521,6 +14632,7 @@ __export(factories_exports, {
   ops: () => ops,
   optional: () => optional2,
   param: () => param,
+  parse: () => parse,
   pipe: () => pipe2,
   process: () => process,
   promise: () => promise2,
@@ -14530,6 +14642,7 @@ __export(factories_exports, {
   refine: () => refine2,
   regex: () => regex,
   regexes: () => regexes_exports,
+  safeParse: () => safeParse,
   security: () => security,
   set: () => set,
   stream: () => stream,
@@ -14545,6 +14658,7 @@ __export(factories_exports, {
   unknown: () => unknown,
   update: () => update,
   validate: () => validate,
+  valueObject: () => valueObject,
   void: () => voidType,
   watch: () => watch,
   watchedList: () => watchedList,
@@ -14560,6 +14674,1247 @@ var jsonSchema = Object.freeze({
     return createBuilder(compileSchemaFromJson(document, options));
   }
 });
+
+// ../../packages/jit/src/compiler/codec.ts
+function compileCodec(schema, options) {
+  const version = options?.version ?? 1;
+  return getCompileCached(
+    schema,
+    `codec:v${version}`,
+    () => {
+      const emitted = emitCodec(schema, { version });
+      const compiled = globalThis.Function(
+        ...emitted.bindingNames,
+        emitted.source
+      )(...emitted.bindingValues);
+      registerArtifact(compiled, {
+        kind: "operation",
+        schema,
+        op: "codec"
+      });
+      return compiled;
+    },
+    options
+  );
+}
+
+// ../../packages/jit/src/compiler/json-parse.ts
+function compileJsonParse(schema) {
+  warmJsonParseShape(schema);
+  return JSON.parse;
+}
+function warmJsonParseShape(schema) {
+  const sample = jsonWarmupSample(schema);
+  if (sample === void 0) return false;
+  JSON.parse(sample);
+  JSON.parse(sample);
+  return true;
+}
+function jsonWarmupSample(schema) {
+  const value = emitWarmupValue(schema, /* @__PURE__ */ new Set(), 0);
+  if (value === void 0) return void 0;
+  if (rootIsArray(schema)) {
+    const element = rootArrayElement(schema);
+    const item = element ? emitWarmupValue(element, /* @__PURE__ */ new Set(), 1) : void 0;
+    if (item !== void 0) return `[${item},${item}]`;
+  }
+  return value;
+}
+function emitWarmupValue(schema, seen, depth) {
+  if (depth > 12 || seen.has(schema)) return "null";
+  seen.add(schema);
+  const current = schema;
+  let output;
+  switch (current.type) {
+    case TypeName.string:
+      output = '""';
+      break;
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.bigint:
+    case TypeName.nan:
+      output = "0";
+      break;
+    case TypeName.boolean:
+      output = "false";
+      break;
+    case TypeName.null:
+    case TypeName.undefined:
+    case TypeName.void:
+    case TypeName.never:
+    case TypeName.unknown:
+    case TypeName.any:
+    case TypeName.json:
+      output = "null";
+      break;
+    case TypeName.literal:
+      output = jsonPrimitive(current.def.value);
+      break;
+    case TypeName.enum: {
+      const values = Object.values(current.def.values);
+      output = values.map(jsonPrimitive).find((value) => value !== void 0) ?? "null";
+      break;
+    }
+    case TypeName.array: {
+      const item = emitWarmupValue(current.def.element, seen, depth + 1);
+      output = item === void 0 ? "[]" : `[${item},${item}]`;
+      break;
+    }
+    case TypeName.tuple: {
+      const items = current.def.items ?? [];
+      output = `[${items.map((item) => emitWarmupValue(item, seen, depth + 1) ?? "null").join(",")}]`;
+      break;
+    }
+    case TypeName.object: {
+      const props = current.def.props;
+      const entries = Object.keys(props).map((key) => {
+        const value = emitWarmupValue(props[key], seen, depth + 1) ?? "null";
+        return `${JSON.stringify(key)}:${value}`;
+      });
+      output = `{${entries.join(",")}}`;
+      break;
+    }
+    case TypeName.record:
+    case TypeName.map:
+      output = "{}";
+      break;
+    case TypeName.set:
+      output = "[]";
+      break;
+    case TypeName.union:
+    case TypeName.xor:
+    case TypeName.discriminatedUnion:
+    case TypeName.intersection: {
+      const options = current.def.options ?? [];
+      output = options.length === 0 ? "null" : emitWarmupValue(options[0], seen, depth + 1);
+      break;
+    }
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.not:
+      output = emitWarmupValue(current.def.innerType, seen, depth + 1);
+      break;
+    case TypeName.lazy:
+      output = emitWarmupValue(current.def.getter(), seen, depth + 1);
+      break;
+    case TypeName.when:
+      output = emitWarmupValue(current.def.thenType, seen, depth + 1);
+      break;
+    case TypeName.codec:
+      output = emitWarmupValue(current.def.input, seen, depth + 1);
+      break;
+    default:
+      output = "null";
+  }
+  seen.delete(schema);
+  return output;
+}
+function jsonPrimitive(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return void 0;
+}
+function rootIsArray(schema, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  const current = schema;
+  if (current.type === TypeName.array) return true;
+  const inner = wrapperInner(current);
+  return inner === void 0 ? false : rootIsArray(inner, seen);
+}
+function rootArrayElement(schema, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(schema)) return void 0;
+  seen.add(schema);
+  const current = schema;
+  if (current.type === TypeName.array) return current.def.element;
+  const inner = wrapperInner(current);
+  return inner === void 0 ? void 0 : rootArrayElement(inner, seen);
+}
+function wrapperInner(schema) {
+  switch (schema.type) {
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.not:
+      return schema.def.innerType;
+    case TypeName.lazy:
+      return schema.def.getter();
+    default:
+      return void 0;
+  }
+}
+
+// ../../packages/jit/src/compiler/execution-lower.ts
+function emitExecutionPlan(plan) {
+  const setup = [];
+  const body = ["let value = input;"];
+  const bindingNames = [];
+  const bindingValues = [];
+  let helperIndex = 0;
+  let valueIndex = 0;
+  const bind = (value) => {
+    const name = `__e${bindingNames.length}`;
+    bindingNames.push(name);
+    bindingValues.push(value);
+    return name;
+  };
+  const helper = (prefix) => `__${prefix}${helperIndex++}`;
+  const emitBoundBlock = (prefix, localNames, values, source, expression = false) => {
+    const name = helper(prefix);
+    const args = values.map(bind);
+    setup.push(`const ${name} = ((${localNames.join(", ")}) => {`);
+    if (expression) setup.push(...indent(`return (${source});`));
+    else setup.push(...indent(source));
+    setup.push(`})(${args.join(", ")});`);
+    return name;
+  };
+  const emitMany = (helperName4, patchName) => {
+    const list = `__list${valueIndex}`;
+    const length = `__len${valueIndex}`;
+    const out = `__out${valueIndex}`;
+    const index = `__i${valueIndex++}`;
+    body.push(`const ${list} = value;`);
+    body.push(`const ${length} = ${list}.length;`);
+    body.push(`const ${out} = new Array(${length});`);
+    body.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+    body.push(`  ${out}[${index}] = ${helperName4}(${list}[${index}]${patchName ? `, ${patchName}` : ""});`);
+    body.push("}");
+    body.push(`value = ${out};`);
+  };
+  const stages = plan.stages;
+  for (let index = 0; index < stages.length; index++) {
+    const stage2 = stages[index];
+    switch (stage2.kind) {
+      case "value":
+      case "to.array":
+        break;
+      case "json.decode":
+        body.push("value = JSON.parse(value);");
+        break;
+      case "binary.decode": {
+        const codec2 = emitCodec(stage2.schema);
+        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
+        body.push(`value = ${codecName}.decode(value);`);
+        break;
+      }
+      case "validate": {
+        const fastParse = stage2.operation === "parse" && canUseFastParse(stage2.schema);
+        const validator = emitValidator(stage2.schema, {
+          is: stage2.operation === "is" || fastParse,
+          safeParse: stage2.operation === "parse" || stage2.operation === "safeParse" || stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync" || stage2.operation === "issues",
+          safeParseAsync: stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync"
+        });
+        const validatorName = emitBoundBlock(
+          "validator",
+          validator.bindings.names,
+          validator.bindings.values,
+          validator.source
+        );
+        switch (stage2.operation) {
+          case "is":
+            body.push(`value = ${validatorName}.is(value);`);
+            break;
+          case "parse": {
+            const error = bind(JITValidationError);
+            if (fastParse) {
+              const result = `__result${valueIndex++}`;
+              body.push(`if (!${validatorName}.is(value)) {`);
+              body.push(`  const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`  if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`  value = ${result}.data;`);
+              body.push("}");
+            } else {
+              const result = `__result${valueIndex++}`;
+              body.push(`const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`value = ${result}.data;`);
+            }
+            break;
+          }
+          case "safeParse":
+            body.push(`value = ${validatorName}.safeParse(value);`);
+            break;
+          case "parseAsync": {
+            const error = bind(JITValidationError);
+            body.push(
+              `return ${validatorName}.safeParseAsync(value).then((result) => { if (!result.success) throw new ${error}(result.issues); return result.data; });`
+            );
+            break;
+          }
+          case "safeParseAsync":
+            body.push(`return ${validatorName}.safeParseAsync(value);`);
+            break;
+          case "issues": {
+            const result = `__result${valueIndex++}`;
+            body.push(`const ${result} = ${validatorName}.safeParse(value);`);
+            body.push(`return (function* issues() { if (!${result}.success) yield* ${result}.issues; })();`);
+            break;
+          }
+        }
+        break;
+      }
+      case "query": {
+        let finalStage = stage2;
+        while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
+          index++;
+          finalStage = stages[index];
+        }
+        const queryName = emitBoundBlock(
+          "query",
+          finalStage.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
+          finalStage.program.bindings,
+          emitQuerySource(finalStage.source, finalStage.program),
+          true
+        );
+        body.push(`value = ${queryName}(value);`);
+        break;
+      }
+      case "map": {
+        const mapping = stage2.bindings[0];
+        const nextStage = stages[index + 1];
+        const fuseJsonEncode = nextStage?.kind === "json.encode";
+        if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
+          throw new JITError("INVALID_OPERATION", "mapping descriptor is malformed");
+        }
+        const mapperPlan = buildMapperPlan(stage2.source, stage2.target, mapping);
+        const mapperName = emitBoundBlock(
+          "mapper",
+          mapperPlan.bindingNames,
+          mapperPlan.bindings,
+          emitMapperSource(stage2.source, stage2.target, mapping, [
+            fuseJsonEncode || !stage2.many ? "map" : "many"
+          ]),
+          true
+        );
+        if (fuseJsonEncode) {
+          const stringifyName = helper("stringify");
+          setup.push(`const ${stringifyName} = ${emitSerialize(stage2.target)};`);
+          if (stage2.many) emitMappedJsonArray(mapperName, stringifyName, body, valueIndex++);
+          else body.push(`value = ${stringifyName}(${mapperName}.map(value));`);
+          index++;
+        } else {
+          body.push(`value = ${mapperName}.${stage2.many ? "many" : "map"}(value);`);
+        }
+        break;
+      }
+      case "transform": {
+        const keys = Object.keys(stage2.transforms);
+        const callbacks = keys.map((key) => stage2.transforms[key]);
+        const transformName = emitBoundBlock(
+          "transform",
+          keys.map((_, transformIndex) => `__t${transformIndex}`),
+          callbacks,
+          emitTransformSource(stage2.source, stage2.transforms),
+          true
+        );
+        if (stage2.many) emitMany(transformName);
+        else body.push(`value = ${transformName}(value);`);
+        break;
+      }
+      case "update": {
+        const updateName = helper("update");
+        const patchName = bind(stage2.patch);
+        setup.push(`const ${updateName} = (${emitUpdateSource(stage2.schema)});`);
+        if (stage2.many) emitMany(updateName, patchName);
+        else body.push(`value = ${updateName}(value, ${patchName});`);
+        break;
+      }
+      case "security": {
+        const source = stage2.operation === "mask" ? emitMaskSource(stage2.schema).replace("function scrub", "function mask") : emitSanitizeSource(stage2.schema).replace("function scrub", "function sanitize");
+        const securityName = stage2.operation === "sanitize" ? emitBoundBlock("sanitize", sanitizeChainBindings.names, sanitizeChainBindings.values, source, true) : (() => {
+          const name = helper("mask");
+          setup.push(`const ${name} = (${source});`);
+          return name;
+        })();
+        if (stage2.many) emitMany(securityName);
+        else body.push(`value = ${securityName}(value);`);
+        break;
+      }
+      case "json.encode": {
+        const stringifyName = helper("stringify");
+        setup.push(`const ${stringifyName} = ${emitSerialize(stage2.schema ?? plan.schema)};`);
+        body.push(`value = ${stringifyName}(value);`);
+        break;
+      }
+      case "binary.encode": {
+        const codec2 = emitCodec(stage2.schema);
+        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
+        body.push(`value = ${codecName}.encode(value);`);
+        break;
+      }
+      case "operation":
+        throw new JITError("INVALID_OPERATION", `operation ${stage2.operation} requires its dedicated runtime lowering`);
+    }
+  }
+  body.push("return value;");
+  return {
+    source: ['"use strict";', ...setup, "return function execution(input) {", ...indent(body.join("\n")), "}"].join(
+      "\n"
+    ),
+    bindingNames,
+    bindingValues
+  };
+}
+function lowerExecutionPlan(plan) {
+  const emitted = emitExecutionPlan(plan);
+  const compiled = globalThis.Function(
+    ...emitted.bindingNames,
+    emitted.source
+  )(...emitted.bindingValues);
+  const json3 = plan.stages.find((stage2) => stage2.kind === "json.decode");
+  if (json3?.schema) warmJsonParseShape(json3.schema);
+  return compiled;
+}
+function indent(source) {
+  return source.split("\n").map((line) => `  ${line}`);
+}
+function emitMappedJsonArray(mapper, stringify, body, index) {
+  const list = `__list${index}`;
+  const length = `__len${index}`;
+  const item = `__item${index}`;
+  const cursor = `__i${index}`;
+  const json3 = `__json${index}`;
+  body.push(`const ${list} = value;`);
+  body.push(`const ${length} = ${list}.length;`);
+  body.push(`let ${json3} = "[";`);
+  body.push(`for (let ${cursor} = 0; ${cursor} < ${length}; ${cursor}++) {`);
+  body.push(`  if (${cursor} !== 0) ${json3} += ",";`);
+  body.push(`  const ${item} = ${mapper}.map(${list}[${cursor}]);`);
+  body.push(`  ${json3} += ${stringify}(${item});`);
+  body.push("}");
+  body.push(`${json3} += "]";`);
+  body.push(`value = ${json3};`);
+}
+
+// ../../packages/jit/src/compiler/serialize.ts
+function emitSerializeSource(schema) {
+  return emitSerialize(schema);
+}
+function compileSerialize(schema, options) {
+  return getCompileCached(
+    schema,
+    "serialize",
+    () => {
+      const compiled = globalThis.Function(`return ${emitSerialize(schema)};`)();
+      registerArtifact(compiled, {
+        kind: "operation",
+        schema,
+        op: "stringify"
+      });
+      return compiled;
+    },
+    options
+  );
+}
+
+// ../../packages/jit/src/compiler/json-chunks.ts
+function emitStringifyChunksSource(schema, options = {}) {
+  const array2 = resolveWrappers(schema).base;
+  if (array2.type !== TypeName.array) {
+    throw new JITError("UNSUPPORTED_SCHEMA", "json.stringifyChunks currently expects an array schema");
+  }
+  const chunkBytes = options.chunkBytes ?? 16 * 1024;
+  if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
+    throw new JITError("INVALID_OPERATION", "json.stringifyChunks chunkBytes must be a positive integer");
+  }
+  const stringifyElement = emitSerializeSource(array2.def.element);
+  return `(function () {
+const stringifyElement = ${stringifyElement};
+function* stringifyChunks(value) {
+  let chunk = "[";
+  for (let i = 0, len = value.length; i < len; i++) {
+    const part = (i === 0 ? "" : ",") + stringifyElement(value[i]);
+    if (chunk.length !== 0 && chunk.length + part.length > ${chunkBytes}) {
+      yield chunk;
+      chunk = part;
+    } else {
+      chunk += part;
+    }
+  }
+  chunk += "]";
+  yield chunk;
+}
+return stringifyChunks;
+})()`;
+}
+function compileStringifyChunks(schema, chunks = {}, cache) {
+  const chunkBytes = chunks.chunkBytes ?? 16 * 1024;
+  return getCompileCached(
+    schema,
+    `stringifyChunks:${chunkBytes}`,
+    () => {
+      const source = emitStringifyChunksSource(schema, chunks);
+      const compiled = globalThis.Function(`return ${source};`)();
+      registerArtifact(compiled, {
+        kind: "query",
+        source,
+        bindingNames: [],
+        bindingValues: []
+      });
+      return compiled;
+    },
+    cache
+  );
+}
+
+// ../../packages/jit/src/runtime/stream/boundary-scanner.ts
+var ArrayBoundaryScanner = class {
+  constructor(hooks) {
+    this.hooks = hooks;
+    this.buffer = "";
+    this.scanPos = 0;
+    this.elementStart = -1;
+    this.depth = 0;
+    this.inString = false;
+    this.escaped = false;
+    this.rootStarted = false;
+    this.rootClosed = false;
+  }
+  get done() {
+    return this.rootClosed;
+  }
+  get hasOpenElement() {
+    return this.elementStart !== -1 || this.rootStarted && !this.rootClosed;
+  }
+  push(text) {
+    this.buffer += text;
+    const buf = this.buffer;
+    const len = buf.length;
+    let pos = this.scanPos;
+    for (; pos < len; pos++) {
+      const code = buf.charCodeAt(pos);
+      if (this.inString) {
+        if (this.escaped) {
+          this.escaped = false;
+        } else if (code === 92) {
+          this.escaped = true;
+        } else if (code === 34) {
+          this.inString = false;
+        }
+        continue;
+      }
+      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
+      if (this.rootClosed) {
+        this.hooks.fail("unexpected content after the root array closed");
+      }
+      if (!this.rootStarted) {
+        if (code !== 91) this.hooks.fail("expected the stream to start with an array");
+        this.rootStarted = true;
+        this.depth = 1;
+        continue;
+      }
+      if (this.depth === 1) {
+        if (code === 93) {
+          if (this.elementStart !== -1) {
+            this.hooks.onElement(buf.slice(this.elementStart, pos));
+            this.elementStart = -1;
+          }
+          this.depth = 0;
+          this.rootClosed = true;
+          continue;
+        }
+        if (code === 44) {
+          if (this.elementStart === -1) this.hooks.fail("unexpected comma in the root array");
+          this.hooks.onElement(buf.slice(this.elementStart, pos));
+          this.elementStart = -1;
+          continue;
+        }
+        if (this.elementStart === -1) this.elementStart = pos;
+        if (code === 123 || code === 91) this.depth++;
+        else if (code === 34) this.inString = true;
+        else if (code === 125) this.hooks.fail("unbalanced '}' in the root array");
+        continue;
+      }
+      if (code === 34) this.inString = true;
+      else if (code === 123 || code === 91) this.depth++;
+      else if (code === 125 || code === 93) {
+        this.depth--;
+        if (this.depth < 1) this.hooks.fail("unbalanced closing bracket");
+      }
+    }
+    if (this.elementStart !== -1) {
+      this.buffer = buf.slice(this.elementStart);
+      this.scanPos = this.buffer.length;
+      this.elementStart = 0;
+    } else {
+      this.buffer = "";
+      this.scanPos = 0;
+    }
+  }
+};
+var ValueBoundaryScanner = class {
+  constructor(hooks) {
+    this.hooks = hooks;
+    this.depth = 0;
+    this.inString = false;
+    this.escaped = false;
+    this.started = false;
+    this.closed = false;
+  }
+  /** True once a bracketed root has balanced back to depth zero. */
+  get complete() {
+    return this.closed;
+  }
+  push(text) {
+    const len = text.length;
+    for (let pos = 0; pos < len; pos++) {
+      const code = text.charCodeAt(pos);
+      if (this.inString) {
+        if (this.escaped) {
+          this.escaped = false;
+        } else if (code === 92) {
+          this.escaped = true;
+        } else if (code === 34) {
+          this.inString = false;
+          if (this.depth === 0 && this.started) this.closed = true;
+        }
+        continue;
+      }
+      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
+      if (this.closed) this.hooks.fail("unexpected content after the root value closed");
+      if (code === 34) {
+        this.inString = true;
+        this.started = true;
+      } else if (code === 123 || code === 91) {
+        this.depth++;
+        this.started = true;
+      } else if (code === 125 || code === 93) {
+        this.depth--;
+        if (this.depth < 0) this.hooks.fail("unbalanced closing bracket");
+        if (this.depth === 0) this.closed = true;
+      } else {
+        this.started = true;
+      }
+    }
+  }
+};
+
+// ../../packages/jit/src/compiler/stream.ts
+function resolveRoot(schema) {
+  let current = schema;
+  while (true) {
+    switch (current.type) {
+      case TypeName.default:
+      case TypeName.brand:
+      case TypeName.readonly:
+      case TypeName.refine:
+      case TypeName.coerce:
+      case TypeName.pipe:
+      case TypeName.transform:
+        current = current.def.innerType;
+        continue;
+      case TypeName.lazy:
+        current = current.def.getter();
+        continue;
+      default:
+        return current;
+    }
+  }
+}
+function rootGate(schema) {
+  switch (schema.type) {
+    case TypeName.array:
+    case TypeName.tuple:
+      return { test: (code) => code === 91, expected: "array" };
+    case TypeName.object:
+    case TypeName.record:
+      return { test: (code) => code === 123, expected: "object" };
+    case TypeName.string:
+      return { test: (code) => code === 34, expected: "string" };
+    case TypeName.number:
+    case TypeName.int:
+      return {
+        test: (code) => code === 45 || code >= 48 && code <= 57,
+        expected: "number"
+      };
+    case TypeName.boolean:
+      return {
+        test: (code) => code === 116 || code === 102,
+        expected: "boolean"
+      };
+    case TypeName.null:
+      return { test: (code) => code === 110, expected: "null" };
+    default:
+      return void 0;
+  }
+}
+function structuralIssue(message, path = "") {
+  return { path, code: "invalid_json", expected: "well-formed JSON", message };
+}
+function throwStructural(message, path = "") {
+  throw new JITValidationError([structuralIssue(message, path)]);
+}
+function prefixIssues(issues, prefix) {
+  return issues.map((issue) => ({
+    ...issue,
+    path: issue.path === "" ? prefix : `${prefix}${issue.path.startsWith("[") ? "" : "."}${issue.path}`
+  }));
+}
+function compileStream(schema, options = {}) {
+  const format3 = options.format ?? "json";
+  const root = resolveRoot(schema);
+  if (format3 === "ndjson") return createNdjsonStream(schema, options);
+  if (root.type === TypeName.array) return createArrayStream(root, options);
+  return createValueStream(schema, root, options);
+}
+function createDecoder() {
+  const decoder = new TextDecoder();
+  return (chunk, last2) => typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: !last2 });
+}
+function gateFirstChar(text, gateRef) {
+  const gate = gateRef.pending;
+  if (!gate) return;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    if (code === 32 || code === 9 || code === 10 || code === 13) continue;
+    gateRef.pending = void 0;
+    if (!gate.test(code)) {
+      throw new JITValidationError([
+        {
+          path: "",
+          code: "invalid_type",
+          expected: gate.expected,
+          message: `stream root must be ${gate.expected}`,
+          received: JSON.stringify(text[index])
+        }
+      ]);
+    }
+    return;
+  }
+}
+function createArrayStream(root, options) {
+  const element = root.def.element;
+  const checks = (root.def.checks ?? []).filter(
+    (check) => check.kind === "min" || check.kind === "max" || check.kind === "length" || check.kind === "nonEmpty"
+  );
+  const validator = compileValidator(element);
+  const decode = createDecoder();
+  const items = [];
+  const gateRef = { pending: rootGate(root) };
+  let failed = false;
+  let ended = false;
+  const scanner = new ArrayBoundaryScanner({
+    onElement(text) {
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throwStructural(`malformed JSON element at index ${items.length}`, `[${items.length}]`);
+      }
+      const result = validator.safeParse(parsed);
+      if (!result.success) {
+        throw new JITValidationError(prefixIssues(result.issues, `[${items.length}]`));
+      }
+      const index = items.length;
+      items.push(result.data);
+      for (const check of checks) {
+        if (check.kind === "max" && items.length > check.value) {
+          throwStructural(`expected at most ${check.value} items`, "");
+        }
+      }
+      options.onItem?.(result.data, index);
+    },
+    fail(message) {
+      throwStructural(message);
+    }
+  });
+  const guard = () => {
+    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
+    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
+  };
+  return {
+    items,
+    write(chunk) {
+      guard();
+      try {
+        const text = decode(chunk, false);
+        gateFirstChar(text, gateRef);
+        scanner.push(text);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    },
+    end() {
+      guard();
+      ended = true;
+      if (!scanner.done) {
+        failed = true;
+        throwStructural("unexpected end of stream: root array never closed");
+      }
+      for (const check of checks) {
+        if (check.kind === "min" && items.length < check.value) {
+          throwStructural(`expected at least ${check.value} items`);
+        }
+        if (check.kind === "nonEmpty" && items.length === 0) {
+          throwStructural("expected a non-empty array");
+        }
+        if (check.kind === "length" && items.length !== check.value) {
+          throwStructural(`expected exactly ${check.value} items`);
+        }
+        if (check.kind === "max" && items.length > check.value) {
+          throwStructural(`expected at most ${check.value} items`);
+        }
+      }
+      return items;
+    }
+  };
+}
+function createValueStream(schema, root, options) {
+  const validator = compileValidator(schema, options);
+  const decode = createDecoder();
+  const gateRef = { pending: rootGate(root) };
+  const scanner = new ValueBoundaryScanner({
+    fail(message) {
+      throwStructural(message);
+    }
+  });
+  let buffer = "";
+  let failed = false;
+  let ended = false;
+  const guard = () => {
+    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
+    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
+  };
+  return {
+    items: [],
+    write(chunk) {
+      guard();
+      try {
+        const text = decode(chunk, false);
+        gateFirstChar(text, gateRef);
+        scanner.push(text);
+        buffer += text;
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    },
+    end() {
+      guard();
+      ended = true;
+      let parsed;
+      try {
+        parsed = JSON.parse(buffer);
+      } catch {
+        failed = true;
+        throwStructural("unexpected end of stream: incomplete JSON document");
+      }
+      return validator.parse(parsed);
+    }
+  };
+}
+function createNdjsonStream(schema, options) {
+  const validator = compileValidator(schema, options);
+  const decode = createDecoder();
+  const items = [];
+  let buffer = "";
+  let line = 0;
+  let failed = false;
+  let ended = false;
+  const consume = (text) => {
+    if (text.trim() === "") {
+      line++;
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throwStructural(`malformed JSON on line ${line}`, `line ${line}`);
+    }
+    const result = validator.safeParse(parsed);
+    if (!result.success) {
+      throw new JITValidationError(prefixIssues(result.issues, `line ${line}`));
+    }
+    const index = items.length;
+    items.push(result.data);
+    line++;
+    options.onItem?.(result.data, index);
+  };
+  const guard = () => {
+    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
+    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
+  };
+  return {
+    items,
+    write(chunk) {
+      guard();
+      try {
+        buffer += decode(chunk, false);
+        let cut = buffer.indexOf("\n");
+        while (cut !== -1) {
+          consume(buffer.slice(0, cut));
+          buffer = buffer.slice(cut + 1);
+          cut = buffer.indexOf("\n");
+        }
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    },
+    end() {
+      guard();
+      ended = true;
+      try {
+        if (buffer.trim() !== "") consume(buffer);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+      return items;
+    }
+  };
+}
+
+// ../../packages/jit/src/compiler/watch.ts
+function compileWatch(schema, options) {
+  const program = emitWatchProgram(schema, options);
+  const bindingNames = program.bindings.map((_, index) => `__w${index}`);
+  const compiled = globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings);
+  registerArtifact(compiled, {
+    kind: "watch",
+    source: program.source,
+    bindingNames,
+    bindingValues: program.bindings
+  });
+  return compiled;
+}
+function emitWatchProgram(schema, options) {
+  const target = expectWatchTarget(schema, "emitWatchSource");
+  const key = options.key;
+  validateObjectKeys3(target.objectSchema, [key], "watch");
+  const bindings = [];
+  const onAdd = addOptionalBinding(bindings, options.onAdd);
+  const onRemove = addOptionalBinding(bindings, options.onRemove);
+  const onUpdate = addOptionalBinding(bindings, options.onUpdate);
+  const keyAccess = emitPropertyAccess("item", key);
+  const previousKeyAccess = emitPropertyAccess("previousItem", key);
+  const writer = new CodeWriter();
+  writer.line("function watch(previous, current) {");
+  writer.indent(() => {
+    writer.line("const previousIndex = new Map();");
+    writer.line("const currentIndex = new Map();");
+    writer.line("const initialItems = [];");
+    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
+      writer.line(`const id = ${previousKeyAccess};`);
+      writer.line("previousIndex.set(id, previousItem);");
+      writer.line("initialItems[initialItems.length] = previousItem;");
+    });
+    writer.line("const currentItems = [];");
+    writer.line("const newItems = [];");
+    writer.line("const removedItems = [];");
+    writer.line("const updatedItems = [];");
+    emitCollectionLoop(writer, target, "current", "item", () => {
+      writer.line(`const id = ${keyAccess};`);
+      writer.line("currentIndex.set(id, item);");
+      writer.line("currentItems[currentItems.length] = item;");
+      writer.line("const previousItem = previousIndex.get(id);");
+      writer.line("if (previousItem === undefined) {");
+      writer.indent(() => {
+        writer.line("newItems[newItems.length] = item;");
+        if (onAdd) writer.line(`${onAdd}(item);`);
+      });
+      writer.line("} else if (previousItem !== item) {");
+      writer.indent(() => {
+        writer.line("updatedItems[updatedItems.length] = { previous: previousItem, current: item };");
+        if (onUpdate) writer.line(`${onUpdate}(previousItem, item);`);
+      });
+      writer.line("}");
+    });
+    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
+      writer.line(`const id = ${previousKeyAccess};`);
+      writer.line("if (!currentIndex.has(id)) {");
+      writer.indent(() => {
+        writer.line("removedItems[removedItems.length] = previousItem;");
+        if (onRemove) writer.line(`${onRemove}(previousItem);`);
+      });
+      writer.line("}");
+    });
+    writer.line("const isChanged = newItems.length !== 0 || removedItems.length !== 0 || updatedItems.length !== 0;");
+    writer.line("return { currentItems, initialItems, newItems, removedItems, updatedItems, isChanged };");
+  });
+  writer.line("}");
+  return { source: writer.toString(), bindings };
+}
+function emitCollectionLoop(writer, target, collection, itemName, body) {
+  switch (target.kind) {
+    case "array":
+      writer.line(`for (let i = 0, len = ${collection}.length; i < len; i++) {`);
+      writer.indent(() => {
+        writer.line(`const ${itemName} = ${collection}[i];`);
+        body();
+      });
+      writer.line("}");
+      return;
+    case "set":
+      writer.line(`for (const ${itemName} of ${collection}) {`);
+      writer.indent(body);
+      writer.line("}");
+      return;
+    case "map":
+      writer.line(`for (const entry of ${collection}) {`);
+      writer.indent(() => {
+        writer.line(`const ${itemName} = entry[1];`);
+        body();
+      });
+      writer.line("}");
+      return;
+  }
+}
+function addOptionalBinding(bindings, value) {
+  if (value === void 0) return void 0;
+  const name = `__w${bindings.length}`;
+  bindings[bindings.length] = value;
+  return name;
+}
+function expectWatchTarget(schema, compilerName) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array, set, or map schema`);
+  }
+  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects a collection of object schema`);
+  }
+  return {
+    kind: resolved.type,
+    objectSchema: element
+  };
+}
+function validateObjectKeys3(schema, keys, compilerName) {
+  const props = schema.def.props;
+  for (const key of keys) {
+    if (!(key in props)) {
+      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+}
+
+// ../../packages/jit/src/factories/class.ts
+var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
+function getRuntimeClassTarget(value) {
+  if (typeof value !== "function" || !(CLASS_TARGET in value)) return void 0;
+  return value;
+}
+function classFactory(schema) {
+  return createRuntimeClass(unwrapSchema(schema), false, false, false);
+}
+function abstractClass(schema) {
+  return createRuntimeClass(unwrapSchema(schema), true, false, false);
+}
+function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "JIT.class() requires an object schema");
+  }
+  const objectSchema = resolved;
+  const properties = Object.keys(objectSchema.def.props);
+  const classTarget = emitConstructor(properties, freezeInstances, aggregate);
+  const parse3 = compileValidator(schema).parse;
+  const installedCapabilities = [];
+  function create(input) {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
+    }
+    return new this(parse3(input));
+  }
+  function hydrate(state) {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
+    }
+    return new this(parse3(state));
+  }
+  Object.defineProperties(classTarget, {
+    [CLASS_TARGET]: { enumerable: false, value: true },
+    schema: { enumerable: true, value: schema },
+    create: { configurable: true, enumerable: false, value: create },
+    hydrate: { enumerable: false, value: hydrate },
+    use: {
+      enumerable: false,
+      value: (...capabilities) => {
+        for (const capability2 of capabilities) {
+          capability2.install(classTarget, schema);
+          installedCapabilities.push(capability2.kind);
+        }
+        return classTarget;
+      }
+    }
+  });
+  registerArtifact(classTarget, {
+    kind: "class",
+    schema,
+    abstract: isAbstract,
+    frozen: freezeInstances,
+    aggregate,
+    capabilities: installedCapabilities
+  });
+  return classTarget;
+}
+function emitConstructor(properties, freezeInstances, aggregate) {
+  const assignments = properties.map(
+    (property) => `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};`
+  );
+  const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
+  const source = `return class JITRuntimeClass { constructor(state) { ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } };`;
+  return globalThis.Function(source)();
+}
+var classType = Object.assign(classFactory, {
+  abstract: abstractClass,
+  equals: capability("equals", (prototype, schema) => {
+    const equal3 = compileEqual(schema);
+    definePrototype(prototype, "equals", function equals(other) {
+      return equal3(this, other);
+    });
+  }),
+  hashCode: capability("hashCode", (prototype, schema) => {
+    const hash4 = compileHash(schema);
+    definePrototype(prototype, "hashCode", function hashCode() {
+      return hash4(this);
+    });
+  }),
+  with: (() => {
+    const base = capability("with", (prototype, schema) => {
+      const update2 = compileUpdate(schema);
+      definePrototype(prototype, "with", function withPatch(patch) {
+        const next = update2(this, patch);
+        return new this.constructor(next);
+      });
+    });
+    return Object.freeze({ ...base, __with: true });
+  })(),
+  diff: capability("diff", (prototype, schema) => {
+    const diff3 = compileDiff(schema);
+    definePrototype(prototype, "diff", function diffInstance(other) {
+      return diff3(this, other);
+    });
+  }),
+  identity(key) {
+    return capability(`identity:${key}`, (prototype, schema) => {
+      const base = resolveWrappers(schema).base;
+      const props = base.type === TypeName.object ? base.def.props : void 0;
+      if (!props || !(key in props)) {
+        throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
+      }
+      definePrototype(prototype, "identity", function identity() {
+        return this[key];
+      });
+      definePrototype(prototype, "sameIdentity", function sameIdentity(other) {
+        return typeof other === "object" && other !== null && Object.is(this[key], other[key]);
+      });
+    });
+  }
+});
+function valueObject(schema) {
+  return createRuntimeClass(unwrapSchema(schema), false, true, false).use(classType.equals, classType.hashCode);
+}
+valueObject.abstract = function abstractValueObject(schema) {
+  return createRuntimeClass(unwrapSchema(schema), true, true, false).use(classType.equals, classType.hashCode);
+};
+function entity(schema, options) {
+  return createRuntimeClass(unwrapSchema(schema), true, false, false).use(classType.identity(options.id));
+}
+function aggregateRoot(schema, options) {
+  const unwrapped = unwrapSchema(schema);
+  const aggregate = createRuntimeClass(unwrapped, true, false, true).use(
+    classType.identity(options.id)
+  );
+  const base = resolveWrappers(unwrapped).base;
+  const update2 = compileUpdate(unwrapped);
+  const fields = Object.keys(base.def.props);
+  const assign = globalThis.Function(
+    "__update",
+    `return function update(patch) { const next = __update(this, patch); ${fields.map((field) => `this${emitPropertyAccess("", field)} = next${emitPropertyAccess("", field)};`).join(" ")} };`
+  )(update2);
+  definePrototype(aggregate.prototype, "update", function updateAggregate(patch) {
+    assign.call(this, patch);
+  });
+  definePrototype(aggregate.prototype, "raise", function raise(event) {
+    this.__jitEvents[this.__jitEvents.length] = event;
+  });
+  definePrototype(aggregate.prototype, "peekEvents", function peekEvents() {
+    return this.__jitEvents.slice();
+  });
+  definePrototype(aggregate.prototype, "pullEvents", function pullEvents() {
+    const events = this.__jitEvents;
+    this.__jitEvents = [];
+    return events;
+  });
+  return aggregate;
+}
+function domainEvent(type, options) {
+  const payload = unwrapSchema(options.payload);
+  const schema = createDomainEventSchema(payload, type, options.version);
+  const event = createRuntimeClass(schema, false, true, false);
+  const createState = event.create.bind(event);
+  Object.defineProperties(event, {
+    create: {
+      configurable: false,
+      enumerable: false,
+      value: (input) => createState({ type, version: options.version, payload: input })
+    },
+    type: { enumerable: true, value: type },
+    version: { enumerable: true, value: options.version }
+  });
+  registerArtifact(event, {
+    kind: "class",
+    schema,
+    abstract: false,
+    frozen: true,
+    aggregate: false,
+    capabilities: [],
+    domainEvent: { type, version: options.version }
+  });
+  return event;
+}
+function createDomainEventSchema(payload, type, version) {
+  const id = defaultTo(createSchema(TypeName.string, {}), createEventId);
+  const occurredAt = defaultTo(createSchema(TypeName.date, {}), () => /* @__PURE__ */ new Date());
+  return createSchema(TypeName.object, {
+    props: {
+      id,
+      type: createSchema(TypeName.literal, { value: type }),
+      version: createSchema(TypeName.literal, { value: version }),
+      occurredAt,
+      payload
+    },
+    unknownKeys: void 0,
+    catchall: void 0,
+    checks: []
+  });
+}
+function createEventId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+function capability(kind, install) {
+  return Object.freeze({
+    kind,
+    install(classTarget, schema) {
+      install(classTarget.prototype, schema);
+    }
+  });
+}
+function definePrototype(prototype, key, value) {
+  Object.defineProperty(prototype, key, { configurable: false, enumerable: false, value, writable: false });
+}
 
 // ../../packages/jit/src/factories/collection/collection.ts
 function array(element) {
@@ -15336,503 +16691,6 @@ function isQueryConstRef2(value) {
   return value !== null && typeof value === "object" && value.__jitQueryValue === "const";
 }
 
-// ../../packages/jit/src/compiler/codec.ts
-function compileCodec(schema, options) {
-  const version = options?.version ?? 1;
-  return getCompileCached(
-    schema,
-    `codec:v${version}`,
-    () => {
-      const emitted = emitCodec(schema, { version });
-      const compiled = globalThis.Function(
-        ...emitted.bindingNames,
-        emitted.source
-      )(...emitted.bindingValues);
-      registerArtifact(compiled, {
-        kind: "operation",
-        schema,
-        op: "codec"
-      });
-      return compiled;
-    },
-    options
-  );
-}
-
-// ../../packages/jit/src/compiler/serialize.ts
-function emitSerializeSource(schema) {
-  return emitSerialize(schema);
-}
-function compileSerialize(schema, options) {
-  return getCompileCached(
-    schema,
-    "serialize",
-    () => {
-      const compiled = globalThis.Function(`return ${emitSerialize(schema)};`)();
-      registerArtifact(compiled, {
-        kind: "operation",
-        schema,
-        op: "stringify"
-      });
-      return compiled;
-    },
-    options
-  );
-}
-
-// ../../packages/jit/src/compiler/json-chunks.ts
-function emitStringifyChunksSource(schema, options = {}) {
-  const array2 = resolveWrappers(schema).base;
-  if (array2.type !== TypeName.array) {
-    throw new JITError("UNSUPPORTED_SCHEMA", "json.stringifyChunks currently expects an array schema");
-  }
-  const chunkBytes = options.chunkBytes ?? 16 * 1024;
-  if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
-    throw new JITError("INVALID_OPERATION", "json.stringifyChunks chunkBytes must be a positive integer");
-  }
-  const stringifyElement = emitSerializeSource(array2.def.element);
-  return `(function () {
-const stringifyElement = ${stringifyElement};
-function* stringifyChunks(value) {
-  let chunk = "[";
-  for (let i = 0, len = value.length; i < len; i++) {
-    const part = (i === 0 ? "" : ",") + stringifyElement(value[i]);
-    if (chunk.length !== 0 && chunk.length + part.length > ${chunkBytes}) {
-      yield chunk;
-      chunk = part;
-    } else {
-      chunk += part;
-    }
-  }
-  chunk += "]";
-  yield chunk;
-}
-return stringifyChunks;
-})()`;
-}
-function compileStringifyChunks(schema, chunks = {}, cache) {
-  const chunkBytes = chunks.chunkBytes ?? 16 * 1024;
-  return getCompileCached(
-    schema,
-    `stringifyChunks:${chunkBytes}`,
-    () => {
-      const source = emitStringifyChunksSource(schema, chunks);
-      const compiled = globalThis.Function(`return ${source};`)();
-      registerArtifact(compiled, {
-        kind: "query",
-        source,
-        bindingNames: [],
-        bindingValues: []
-      });
-      return compiled;
-    },
-    cache
-  );
-}
-
-// ../../packages/jit/src/compiler/json-parse.ts
-function compileJsonParse(schema) {
-  warmJsonParseShape(schema);
-  return JSON.parse;
-}
-function warmJsonParseShape(schema) {
-  const sample = jsonWarmupSample(schema);
-  if (sample === void 0) return false;
-  JSON.parse(sample);
-  JSON.parse(sample);
-  return true;
-}
-function jsonWarmupSample(schema) {
-  const value = emitWarmupValue(schema, /* @__PURE__ */ new Set(), 0);
-  if (value === void 0) return void 0;
-  if (rootIsArray(schema)) {
-    const element = rootArrayElement(schema);
-    const item = element ? emitWarmupValue(element, /* @__PURE__ */ new Set(), 1) : void 0;
-    if (item !== void 0) return `[${item},${item}]`;
-  }
-  return value;
-}
-function emitWarmupValue(schema, seen, depth) {
-  if (depth > 12 || seen.has(schema)) return "null";
-  seen.add(schema);
-  const current = schema;
-  let output;
-  switch (current.type) {
-    case TypeName.string:
-      output = '""';
-      break;
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.bigint:
-    case TypeName.nan:
-      output = "0";
-      break;
-    case TypeName.boolean:
-      output = "false";
-      break;
-    case TypeName.null:
-    case TypeName.undefined:
-    case TypeName.void:
-    case TypeName.never:
-    case TypeName.unknown:
-    case TypeName.any:
-    case TypeName.json:
-      output = "null";
-      break;
-    case TypeName.literal:
-      output = jsonPrimitive(current.def.value);
-      break;
-    case TypeName.enum: {
-      const values = Object.values(current.def.values);
-      output = values.map(jsonPrimitive).find((value) => value !== void 0) ?? "null";
-      break;
-    }
-    case TypeName.array: {
-      const item = emitWarmupValue(current.def.element, seen, depth + 1);
-      output = item === void 0 ? "[]" : `[${item},${item}]`;
-      break;
-    }
-    case TypeName.tuple: {
-      const items = current.def.items ?? [];
-      output = `[${items.map((item) => emitWarmupValue(item, seen, depth + 1) ?? "null").join(",")}]`;
-      break;
-    }
-    case TypeName.object: {
-      const props = current.def.props;
-      const entries = Object.keys(props).map((key) => {
-        const value = emitWarmupValue(props[key], seen, depth + 1) ?? "null";
-        return `${JSON.stringify(key)}:${value}`;
-      });
-      output = `{${entries.join(",")}}`;
-      break;
-    }
-    case TypeName.record:
-    case TypeName.map:
-      output = "{}";
-      break;
-    case TypeName.set:
-      output = "[]";
-      break;
-    case TypeName.union:
-    case TypeName.xor:
-    case TypeName.discriminatedUnion:
-    case TypeName.intersection: {
-      const options = current.def.options ?? [];
-      output = options.length === 0 ? "null" : emitWarmupValue(options[0], seen, depth + 1);
-      break;
-    }
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.readonly:
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-    case TypeName.not:
-      output = emitWarmupValue(current.def.innerType, seen, depth + 1);
-      break;
-    case TypeName.lazy:
-      output = emitWarmupValue(current.def.getter(), seen, depth + 1);
-      break;
-    case TypeName.when:
-      output = emitWarmupValue(current.def.thenType, seen, depth + 1);
-      break;
-    case TypeName.codec:
-      output = emitWarmupValue(current.def.input, seen, depth + 1);
-      break;
-    default:
-      output = "null";
-  }
-  seen.delete(schema);
-  return output;
-}
-function jsonPrimitive(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return void 0;
-}
-function rootIsArray(schema, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(schema)) return false;
-  seen.add(schema);
-  const current = schema;
-  if (current.type === TypeName.array) return true;
-  const inner = wrapperInner(current);
-  return inner === void 0 ? false : rootIsArray(inner, seen);
-}
-function rootArrayElement(schema, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(schema)) return void 0;
-  seen.add(schema);
-  const current = schema;
-  if (current.type === TypeName.array) return current.def.element;
-  const inner = wrapperInner(current);
-  return inner === void 0 ? void 0 : rootArrayElement(inner, seen);
-}
-function wrapperInner(schema) {
-  switch (schema.type) {
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.readonly:
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-    case TypeName.not:
-      return schema.def.innerType;
-    case TypeName.lazy:
-      return schema.def.getter();
-    default:
-      return void 0;
-  }
-}
-
-// ../../packages/jit/src/compiler/execution-lower.ts
-function emitExecutionPlan(plan) {
-  const setup = [];
-  const body = ["let value = input;"];
-  const bindingNames = [];
-  const bindingValues = [];
-  let helperIndex = 0;
-  let valueIndex = 0;
-  const bind = (value) => {
-    const name = `__e${bindingNames.length}`;
-    bindingNames.push(name);
-    bindingValues.push(value);
-    return name;
-  };
-  const helper = (prefix) => `__${prefix}${helperIndex++}`;
-  const emitBoundBlock = (prefix, localNames, values, source, expression = false) => {
-    const name = helper(prefix);
-    const args = values.map(bind);
-    setup.push(`const ${name} = ((${localNames.join(", ")}) => {`);
-    if (expression) setup.push(...indent(`return (${source});`));
-    else setup.push(...indent(source));
-    setup.push(`})(${args.join(", ")});`);
-    return name;
-  };
-  const emitMany = (helperName4, patchName) => {
-    const list = `__list${valueIndex}`;
-    const length = `__len${valueIndex}`;
-    const out = `__out${valueIndex}`;
-    const index = `__i${valueIndex++}`;
-    body.push(`const ${list} = value;`);
-    body.push(`const ${length} = ${list}.length;`);
-    body.push(`const ${out} = new Array(${length});`);
-    body.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
-    body.push(`  ${out}[${index}] = ${helperName4}(${list}[${index}]${patchName ? `, ${patchName}` : ""});`);
-    body.push("}");
-    body.push(`value = ${out};`);
-  };
-  const stages = plan.stages;
-  for (let index = 0; index < stages.length; index++) {
-    const stage2 = stages[index];
-    switch (stage2.kind) {
-      case "value":
-      case "to.array":
-        break;
-      case "json.decode":
-        body.push("value = JSON.parse(value);");
-        break;
-      case "binary.decode": {
-        const codec2 = emitCodec(stage2.schema);
-        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
-        body.push(`value = ${codecName}.decode(value);`);
-        break;
-      }
-      case "validate": {
-        const fastParse = stage2.operation === "parse" && canUseFastParse(stage2.schema);
-        const validator = emitValidator(stage2.schema, {
-          is: stage2.operation === "is" || fastParse,
-          safeParse: stage2.operation === "parse" || stage2.operation === "safeParse" || stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync" || stage2.operation === "issues",
-          safeParseAsync: stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync"
-        });
-        const validatorName = emitBoundBlock(
-          "validator",
-          validator.bindings.names,
-          validator.bindings.values,
-          validator.source
-        );
-        switch (stage2.operation) {
-          case "is":
-            body.push(`value = ${validatorName}.is(value);`);
-            break;
-          case "parse": {
-            const error = bind(JITValidationError);
-            if (fastParse) {
-              const result = `__result${valueIndex++}`;
-              body.push(`if (!${validatorName}.is(value)) {`);
-              body.push(`  const ${result} = ${validatorName}.safeParse(value);`);
-              body.push(`  if (!${result}.success) throw new ${error}(${result}.issues);`);
-              body.push(`  value = ${result}.data;`);
-              body.push("}");
-            } else {
-              const result = `__result${valueIndex++}`;
-              body.push(`const ${result} = ${validatorName}.safeParse(value);`);
-              body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
-              body.push(`value = ${result}.data;`);
-            }
-            break;
-          }
-          case "safeParse":
-            body.push(`value = ${validatorName}.safeParse(value);`);
-            break;
-          case "parseAsync": {
-            const error = bind(JITValidationError);
-            body.push(
-              `return ${validatorName}.safeParseAsync(value).then((result) => { if (!result.success) throw new ${error}(result.issues); return result.data; });`
-            );
-            break;
-          }
-          case "safeParseAsync":
-            body.push(`return ${validatorName}.safeParseAsync(value);`);
-            break;
-          case "issues": {
-            const result = `__result${valueIndex++}`;
-            body.push(`const ${result} = ${validatorName}.safeParse(value);`);
-            body.push(`return (function* issues() { if (!${result}.success) yield* ${result}.issues; })();`);
-            break;
-          }
-        }
-        break;
-      }
-      case "query": {
-        let finalStage = stage2;
-        while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
-          index++;
-          finalStage = stages[index];
-        }
-        const queryName = emitBoundBlock(
-          "query",
-          finalStage.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
-          finalStage.program.bindings,
-          emitQuerySource(finalStage.source, finalStage.program),
-          true
-        );
-        body.push(`value = ${queryName}(value);`);
-        break;
-      }
-      case "map": {
-        const mapping = stage2.bindings[0];
-        const nextStage = stages[index + 1];
-        const fuseJsonEncode = nextStage?.kind === "json.encode";
-        if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-          throw new JITError("INVALID_OPERATION", "mapping descriptor is malformed");
-        }
-        const mapperPlan = buildMapperPlan(stage2.source, stage2.target, mapping);
-        const mapperName = emitBoundBlock(
-          "mapper",
-          mapperPlan.bindingNames,
-          mapperPlan.bindings,
-          emitMapperSource(stage2.source, stage2.target, mapping, [
-            fuseJsonEncode || !stage2.many ? "map" : "many"
-          ]),
-          true
-        );
-        if (fuseJsonEncode) {
-          const stringifyName = helper("stringify");
-          setup.push(`const ${stringifyName} = ${emitSerialize(stage2.target)};`);
-          if (stage2.many) emitMappedJsonArray(mapperName, stringifyName, body, valueIndex++);
-          else body.push(`value = ${stringifyName}(${mapperName}.map(value));`);
-          index++;
-        } else {
-          body.push(`value = ${mapperName}.${stage2.many ? "many" : "map"}(value);`);
-        }
-        break;
-      }
-      case "transform": {
-        const keys = Object.keys(stage2.transforms);
-        const callbacks = keys.map((key) => stage2.transforms[key]);
-        const transformName = emitBoundBlock(
-          "transform",
-          keys.map((_, transformIndex) => `__t${transformIndex}`),
-          callbacks,
-          emitTransformSource(stage2.source, stage2.transforms),
-          true
-        );
-        if (stage2.many) emitMany(transformName);
-        else body.push(`value = ${transformName}(value);`);
-        break;
-      }
-      case "update": {
-        const updateName = helper("update");
-        const patchName = bind(stage2.patch);
-        setup.push(`const ${updateName} = (${emitUpdateSource(stage2.schema)});`);
-        if (stage2.many) emitMany(updateName, patchName);
-        else body.push(`value = ${updateName}(value, ${patchName});`);
-        break;
-      }
-      case "security": {
-        const source = stage2.operation === "mask" ? emitMaskSource(stage2.schema).replace("function scrub", "function mask") : emitSanitizeSource(stage2.schema).replace("function scrub", "function sanitize");
-        const securityName = stage2.operation === "sanitize" ? emitBoundBlock("sanitize", sanitizeChainBindings.names, sanitizeChainBindings.values, source, true) : (() => {
-          const name = helper("mask");
-          setup.push(`const ${name} = (${source});`);
-          return name;
-        })();
-        if (stage2.many) emitMany(securityName);
-        else body.push(`value = ${securityName}(value);`);
-        break;
-      }
-      case "json.encode": {
-        const stringifyName = helper("stringify");
-        setup.push(`const ${stringifyName} = ${emitSerialize(stage2.schema ?? plan.schema)};`);
-        body.push(`value = ${stringifyName}(value);`);
-        break;
-      }
-      case "binary.encode": {
-        const codec2 = emitCodec(stage2.schema);
-        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
-        body.push(`value = ${codecName}.encode(value);`);
-        break;
-      }
-      case "operation":
-        throw new JITError("INVALID_OPERATION", `operation ${stage2.operation} requires its dedicated runtime lowering`);
-    }
-  }
-  body.push("return value;");
-  return {
-    source: ['"use strict";', ...setup, "return function execution(input) {", ...indent(body.join("\n")), "}"].join(
-      "\n"
-    ),
-    bindingNames,
-    bindingValues
-  };
-}
-function lowerExecutionPlan(plan) {
-  const emitted = emitExecutionPlan(plan);
-  const compiled = globalThis.Function(
-    ...emitted.bindingNames,
-    emitted.source
-  )(...emitted.bindingValues);
-  const json3 = plan.stages.find((stage2) => stage2.kind === "json.decode");
-  if (json3?.schema) warmJsonParseShape(json3.schema);
-  return compiled;
-}
-function indent(source) {
-  return source.split("\n").map((line) => `  ${line}`);
-}
-function emitMappedJsonArray(mapper, stringify, body, index) {
-  const list = `__list${index}`;
-  const length = `__len${index}`;
-  const item = `__item${index}`;
-  const cursor = `__i${index}`;
-  const json3 = `__json${index}`;
-  body.push(`const ${list} = value;`);
-  body.push(`const ${length} = ${list}.length;`);
-  body.push(`let ${json3} = "[";`);
-  body.push(`for (let ${cursor} = 0; ${cursor} < ${length}; ${cursor}++) {`);
-  body.push(`  if (${cursor} !== 0) ${json3} += ",";`);
-  body.push(`  const ${item} = ${mapper}.map(${list}[${cursor}]);`);
-  body.push(`  ${json3} += ${stringify}(${item});`);
-  body.push("}");
-  body.push(`${json3} += "]";`);
-  body.push(`value = ${json3};`);
-}
-
 // ../../packages/jit/src/compiler/execution-plan.ts
 var NO_EFFECTS = Object.freeze({
   mayThrow: false,
@@ -15935,6 +16793,7 @@ function binaryDecode(schema) {
   return artifactForSchema(source, unwrapped);
 }
 function validationArtifact(schema, operation) {
+  const classTarget = getRuntimeClassTarget(schema);
   const unwrapped = unwrapSchema(schema);
   const output = operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value";
   const plan = freezePlan(unwrapped, [
@@ -15963,17 +16822,28 @@ function validationArtifact(schema, operation) {
       case "is":
         return compileValidatorSelection(unwrapped, ["is"]).is;
       case "parse":
+        if (classTarget) {
+          const parse3 = compileValidatorSelection(unwrapped, ["parse"]).parse;
+          return (value) => classTarget.hydrate(parse3(value));
+        }
         return compileValidatorSelection(unwrapped, ["parse"]).parse;
       case "safeParse":
+        if (classTarget) {
+          const safeParse3 = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
+          return (value) => {
+            const result = safeParse3(value);
+            return result.success ? { success: true, data: classTarget.hydrate(result.data) } : result;
+          };
+        }
         return compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
       case "parseAsync":
         return compileValidatorSelection(unwrapped, ["parseAsync"]).parseAsync;
       case "safeParseAsync":
         return compileValidatorSelection(unwrapped, ["safeParseAsync"]).safeParseAsync;
       case "issues": {
-        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
+        const safeParse3 = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
         return function* issues(value) {
-          const result = safeParse(value);
+          const result = safeParse3(value);
           if (!result.success) yield* result.issues;
         };
       }
@@ -16612,6 +17482,12 @@ var temporal = {
 };
 
 // ../../packages/jit/src/factories/runtime-ops.ts
+function parseAsync(schema) {
+  return validationArtifact(schema, "parseAsync");
+}
+function safeParseAsync(schema) {
+  return validationArtifact(schema, "safeParseAsync");
+}
 var validate = Object.freeze({
   is(schema) {
     return validationArtifact(schema, "is");
@@ -16625,15 +17501,16 @@ var validate = Object.freeze({
   issues(schema) {
     return validationArtifact(schema, "issues");
   },
+  parseAsync,
+  safeParseAsync,
   async: Object.freeze({
-    parse(schema) {
-      return validationArtifact(schema, "parseAsync");
-    },
-    safeParse(schema) {
-      return validationArtifact(schema, "safeParseAsync");
-    }
+    parse: parseAsync,
+    safeParse: safeParseAsync
   })
 });
+var is = validate.is;
+var parse = validate.parse;
+var safeParse = validate.safeParse;
 var json = Object.freeze({
   value: jsonValue,
   parse: jsonParse,
@@ -16702,7 +17579,9 @@ function arrayOf(schema) {
     annotations: void 0
   };
 }
-var map2 = Object.assign(mapCapability, { many: mapMany });
+var map2 = Object.assign(mapCapability, {
+  many: mapMany
+});
 
 // ../../packages/jit/src/factories/serialize.ts
 function codec(input, output, options) {
@@ -16714,416 +17593,6 @@ function codec(input, output, options) {
       encode: options.encode
     })
   );
-}
-
-// ../../packages/jit/src/runtime/stream/boundary-scanner.ts
-var ArrayBoundaryScanner = class {
-  constructor(hooks) {
-    this.hooks = hooks;
-    this.buffer = "";
-    this.scanPos = 0;
-    this.elementStart = -1;
-    this.depth = 0;
-    this.inString = false;
-    this.escaped = false;
-    this.rootStarted = false;
-    this.rootClosed = false;
-  }
-  get done() {
-    return this.rootClosed;
-  }
-  get hasOpenElement() {
-    return this.elementStart !== -1 || this.rootStarted && !this.rootClosed;
-  }
-  push(text) {
-    this.buffer += text;
-    const buf = this.buffer;
-    const len = buf.length;
-    let pos = this.scanPos;
-    for (; pos < len; pos++) {
-      const code = buf.charCodeAt(pos);
-      if (this.inString) {
-        if (this.escaped) {
-          this.escaped = false;
-        } else if (code === 92) {
-          this.escaped = true;
-        } else if (code === 34) {
-          this.inString = false;
-        }
-        continue;
-      }
-      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
-      if (this.rootClosed) {
-        this.hooks.fail("unexpected content after the root array closed");
-      }
-      if (!this.rootStarted) {
-        if (code !== 91) this.hooks.fail("expected the stream to start with an array");
-        this.rootStarted = true;
-        this.depth = 1;
-        continue;
-      }
-      if (this.depth === 1) {
-        if (code === 93) {
-          if (this.elementStart !== -1) {
-            this.hooks.onElement(buf.slice(this.elementStart, pos));
-            this.elementStart = -1;
-          }
-          this.depth = 0;
-          this.rootClosed = true;
-          continue;
-        }
-        if (code === 44) {
-          if (this.elementStart === -1) this.hooks.fail("unexpected comma in the root array");
-          this.hooks.onElement(buf.slice(this.elementStart, pos));
-          this.elementStart = -1;
-          continue;
-        }
-        if (this.elementStart === -1) this.elementStart = pos;
-        if (code === 123 || code === 91) this.depth++;
-        else if (code === 34) this.inString = true;
-        else if (code === 125) this.hooks.fail("unbalanced '}' in the root array");
-        continue;
-      }
-      if (code === 34) this.inString = true;
-      else if (code === 123 || code === 91) this.depth++;
-      else if (code === 125 || code === 93) {
-        this.depth--;
-        if (this.depth < 1) this.hooks.fail("unbalanced closing bracket");
-      }
-    }
-    if (this.elementStart !== -1) {
-      this.buffer = buf.slice(this.elementStart);
-      this.scanPos = this.buffer.length;
-      this.elementStart = 0;
-    } else {
-      this.buffer = "";
-      this.scanPos = 0;
-    }
-  }
-};
-var ValueBoundaryScanner = class {
-  constructor(hooks) {
-    this.hooks = hooks;
-    this.depth = 0;
-    this.inString = false;
-    this.escaped = false;
-    this.started = false;
-    this.closed = false;
-  }
-  /** True once a bracketed root has balanced back to depth zero. */
-  get complete() {
-    return this.closed;
-  }
-  push(text) {
-    const len = text.length;
-    for (let pos = 0; pos < len; pos++) {
-      const code = text.charCodeAt(pos);
-      if (this.inString) {
-        if (this.escaped) {
-          this.escaped = false;
-        } else if (code === 92) {
-          this.escaped = true;
-        } else if (code === 34) {
-          this.inString = false;
-          if (this.depth === 0 && this.started) this.closed = true;
-        }
-        continue;
-      }
-      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
-      if (this.closed) this.hooks.fail("unexpected content after the root value closed");
-      if (code === 34) {
-        this.inString = true;
-        this.started = true;
-      } else if (code === 123 || code === 91) {
-        this.depth++;
-        this.started = true;
-      } else if (code === 125 || code === 93) {
-        this.depth--;
-        if (this.depth < 0) this.hooks.fail("unbalanced closing bracket");
-        if (this.depth === 0) this.closed = true;
-      } else {
-        this.started = true;
-      }
-    }
-  }
-};
-
-// ../../packages/jit/src/compiler/stream.ts
-function resolveRoot(schema) {
-  let current = schema;
-  while (true) {
-    switch (current.type) {
-      case TypeName.default:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType;
-        continue;
-      case TypeName.lazy:
-        current = current.def.getter();
-        continue;
-      default:
-        return current;
-    }
-  }
-}
-function rootGate(schema) {
-  switch (schema.type) {
-    case TypeName.array:
-    case TypeName.tuple:
-      return { test: (code) => code === 91, expected: "array" };
-    case TypeName.object:
-    case TypeName.record:
-      return { test: (code) => code === 123, expected: "object" };
-    case TypeName.string:
-      return { test: (code) => code === 34, expected: "string" };
-    case TypeName.number:
-    case TypeName.int:
-      return {
-        test: (code) => code === 45 || code >= 48 && code <= 57,
-        expected: "number"
-      };
-    case TypeName.boolean:
-      return {
-        test: (code) => code === 116 || code === 102,
-        expected: "boolean"
-      };
-    case TypeName.null:
-      return { test: (code) => code === 110, expected: "null" };
-    default:
-      return void 0;
-  }
-}
-function structuralIssue(message, path = "") {
-  return { path, code: "invalid_json", expected: "well-formed JSON", message };
-}
-function throwStructural(message, path = "") {
-  throw new JITValidationError([structuralIssue(message, path)]);
-}
-function prefixIssues(issues, prefix) {
-  return issues.map((issue) => ({
-    ...issue,
-    path: issue.path === "" ? prefix : `${prefix}${issue.path.startsWith("[") ? "" : "."}${issue.path}`
-  }));
-}
-function compileStream(schema, options = {}) {
-  const format3 = options.format ?? "json";
-  const root = resolveRoot(schema);
-  if (format3 === "ndjson") return createNdjsonStream(schema, options);
-  if (root.type === TypeName.array) return createArrayStream(root, options);
-  return createValueStream(schema, root, options);
-}
-function createDecoder() {
-  const decoder = new TextDecoder();
-  return (chunk, last2) => typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: !last2 });
-}
-function gateFirstChar(text, gateRef) {
-  const gate = gateRef.pending;
-  if (!gate) return;
-  for (let index = 0; index < text.length; index++) {
-    const code = text.charCodeAt(index);
-    if (code === 32 || code === 9 || code === 10 || code === 13) continue;
-    gateRef.pending = void 0;
-    if (!gate.test(code)) {
-      throw new JITValidationError([
-        {
-          path: "",
-          code: "invalid_type",
-          expected: gate.expected,
-          message: `stream root must be ${gate.expected}`,
-          received: JSON.stringify(text[index])
-        }
-      ]);
-    }
-    return;
-  }
-}
-function createArrayStream(root, options) {
-  const element = root.def.element;
-  const checks = (root.def.checks ?? []).filter(
-    (check) => check.kind === "min" || check.kind === "max" || check.kind === "length" || check.kind === "nonEmpty"
-  );
-  const validator = compileValidator(element);
-  const decode = createDecoder();
-  const items = [];
-  const gateRef = { pending: rootGate(root) };
-  let failed = false;
-  let ended = false;
-  const scanner = new ArrayBoundaryScanner({
-    onElement(text) {
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throwStructural(`malformed JSON element at index ${items.length}`, `[${items.length}]`);
-      }
-      const result = validator.safeParse(parsed);
-      if (!result.success) {
-        throw new JITValidationError(prefixIssues(result.issues, `[${items.length}]`));
-      }
-      const index = items.length;
-      items.push(result.data);
-      for (const check of checks) {
-        if (check.kind === "max" && items.length > check.value) {
-          throwStructural(`expected at most ${check.value} items`, "");
-        }
-      }
-      options.onItem?.(result.data, index);
-    },
-    fail(message) {
-      throwStructural(message);
-    }
-  });
-  const guard = () => {
-    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
-    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
-  };
-  return {
-    items,
-    write(chunk) {
-      guard();
-      try {
-        const text = decode(chunk, false);
-        gateFirstChar(text, gateRef);
-        scanner.push(text);
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-    },
-    end() {
-      guard();
-      ended = true;
-      if (!scanner.done) {
-        failed = true;
-        throwStructural("unexpected end of stream: root array never closed");
-      }
-      for (const check of checks) {
-        if (check.kind === "min" && items.length < check.value) {
-          throwStructural(`expected at least ${check.value} items`);
-        }
-        if (check.kind === "nonEmpty" && items.length === 0) {
-          throwStructural("expected a non-empty array");
-        }
-        if (check.kind === "length" && items.length !== check.value) {
-          throwStructural(`expected exactly ${check.value} items`);
-        }
-        if (check.kind === "max" && items.length > check.value) {
-          throwStructural(`expected at most ${check.value} items`);
-        }
-      }
-      return items;
-    }
-  };
-}
-function createValueStream(schema, root, options) {
-  const validator = compileValidator(schema, options);
-  const decode = createDecoder();
-  const gateRef = { pending: rootGate(root) };
-  const scanner = new ValueBoundaryScanner({
-    fail(message) {
-      throwStructural(message);
-    }
-  });
-  let buffer = "";
-  let failed = false;
-  let ended = false;
-  const guard = () => {
-    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
-    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
-  };
-  return {
-    items: [],
-    write(chunk) {
-      guard();
-      try {
-        const text = decode(chunk, false);
-        gateFirstChar(text, gateRef);
-        scanner.push(text);
-        buffer += text;
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-    },
-    end() {
-      guard();
-      ended = true;
-      let parsed;
-      try {
-        parsed = JSON.parse(buffer);
-      } catch {
-        failed = true;
-        throwStructural("unexpected end of stream: incomplete JSON document");
-      }
-      return validator.parse(parsed);
-    }
-  };
-}
-function createNdjsonStream(schema, options) {
-  const validator = compileValidator(schema, options);
-  const decode = createDecoder();
-  const items = [];
-  let buffer = "";
-  let line = 0;
-  let failed = false;
-  let ended = false;
-  const consume = (text) => {
-    if (text.trim() === "") {
-      line++;
-      return;
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throwStructural(`malformed JSON on line ${line}`, `line ${line}`);
-    }
-    const result = validator.safeParse(parsed);
-    if (!result.success) {
-      throw new JITValidationError(prefixIssues(result.issues, `line ${line}`));
-    }
-    const index = items.length;
-    items.push(result.data);
-    line++;
-    options.onItem?.(result.data, index);
-  };
-  const guard = () => {
-    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
-    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
-  };
-  return {
-    items,
-    write(chunk) {
-      guard();
-      try {
-        buffer += decode(chunk, false);
-        let cut = buffer.indexOf("\n");
-        while (cut !== -1) {
-          consume(buffer.slice(0, cut));
-          buffer = buffer.slice(cut + 1);
-          cut = buffer.indexOf("\n");
-        }
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-    },
-    end() {
-      guard();
-      ended = true;
-      try {
-        if (buffer.trim() !== "") consume(buffer);
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-      return items;
-    }
-  };
 }
 
 // ../../packages/jit/src/factories/stream.ts
@@ -17610,132 +18079,6 @@ function hasInnerType2(schema) {
   return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
 }
 
-// ../../packages/jit/src/compiler/watch.ts
-function compileWatch(schema, options) {
-  const program = emitWatchProgram(schema, options);
-  const bindingNames = program.bindings.map((_, index) => `__w${index}`);
-  const compiled = globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings);
-  registerArtifact(compiled, {
-    kind: "watch",
-    source: program.source,
-    bindingNames,
-    bindingValues: program.bindings
-  });
-  return compiled;
-}
-function emitWatchProgram(schema, options) {
-  const target = expectWatchTarget(schema, "emitWatchSource");
-  const key = options.key;
-  validateObjectKeys3(target.objectSchema, [key], "watch");
-  const bindings = [];
-  const onAdd = addOptionalBinding(bindings, options.onAdd);
-  const onRemove = addOptionalBinding(bindings, options.onRemove);
-  const onUpdate = addOptionalBinding(bindings, options.onUpdate);
-  const keyAccess = emitPropertyAccess("item", key);
-  const previousKeyAccess = emitPropertyAccess("previousItem", key);
-  const writer = new CodeWriter();
-  writer.line("function watch(previous, current) {");
-  writer.indent(() => {
-    writer.line("const previousIndex = new Map();");
-    writer.line("const currentIndex = new Map();");
-    writer.line("const initialItems = [];");
-    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
-      writer.line(`const id = ${previousKeyAccess};`);
-      writer.line("previousIndex.set(id, previousItem);");
-      writer.line("initialItems[initialItems.length] = previousItem;");
-    });
-    writer.line("const currentItems = [];");
-    writer.line("const newItems = [];");
-    writer.line("const removedItems = [];");
-    writer.line("const updatedItems = [];");
-    emitCollectionLoop(writer, target, "current", "item", () => {
-      writer.line(`const id = ${keyAccess};`);
-      writer.line("currentIndex.set(id, item);");
-      writer.line("currentItems[currentItems.length] = item;");
-      writer.line("const previousItem = previousIndex.get(id);");
-      writer.line("if (previousItem === undefined) {");
-      writer.indent(() => {
-        writer.line("newItems[newItems.length] = item;");
-        if (onAdd) writer.line(`${onAdd}(item);`);
-      });
-      writer.line("} else if (previousItem !== item) {");
-      writer.indent(() => {
-        writer.line("updatedItems[updatedItems.length] = { previous: previousItem, current: item };");
-        if (onUpdate) writer.line(`${onUpdate}(previousItem, item);`);
-      });
-      writer.line("}");
-    });
-    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
-      writer.line(`const id = ${previousKeyAccess};`);
-      writer.line("if (!currentIndex.has(id)) {");
-      writer.indent(() => {
-        writer.line("removedItems[removedItems.length] = previousItem;");
-        if (onRemove) writer.line(`${onRemove}(previousItem);`);
-      });
-      writer.line("}");
-    });
-    writer.line("const isChanged = newItems.length !== 0 || removedItems.length !== 0 || updatedItems.length !== 0;");
-    writer.line("return { currentItems, initialItems, newItems, removedItems, updatedItems, isChanged };");
-  });
-  writer.line("}");
-  return { source: writer.toString(), bindings };
-}
-function emitCollectionLoop(writer, target, collection, itemName, body) {
-  switch (target.kind) {
-    case "array":
-      writer.line(`for (let i = 0, len = ${collection}.length; i < len; i++) {`);
-      writer.indent(() => {
-        writer.line(`const ${itemName} = ${collection}[i];`);
-        body();
-      });
-      writer.line("}");
-      return;
-    case "set":
-      writer.line(`for (const ${itemName} of ${collection}) {`);
-      writer.indent(body);
-      writer.line("}");
-      return;
-    case "map":
-      writer.line(`for (const entry of ${collection}) {`);
-      writer.indent(() => {
-        writer.line(`const ${itemName} = entry[1];`);
-        body();
-      });
-      writer.line("}");
-      return;
-  }
-}
-function addOptionalBinding(bindings, value) {
-  if (value === void 0) return void 0;
-  const name = `__w${bindings.length}`;
-  bindings[bindings.length] = value;
-  return name;
-}
-function expectWatchTarget(schema, compilerName) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array, set, or map schema`);
-  }
-  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
-  if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} expects a collection of object schema`);
-  }
-  return {
-    kind: resolved.type,
-    objectSchema: element
-  };
-}
-function validateObjectKeys3(schema, keys, compilerName) {
-  const props = schema.def.props;
-  for (const key of keys) {
-    if (!(key in props)) {
-      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
-}
-
 // ../../packages/jit/src/runtime/watch/watched-list.ts
 var WatchedList = class {
   /**
@@ -18038,8 +18381,22 @@ function coerceWith(schema, coercer) {
 var coerce2 = Object.assign(coerceWith, nativeCoercions);
 
 // ../../packages/jit/src/define.ts
-var NO_EFFECTS2 = Object.freeze({ mayThrow: false, mayAllocate: false, usesExternalBindings: false });
-var THROWING_EFFECTS2 = Object.freeze({ mayThrow: true, mayAllocate: false, usesExternalBindings: false });
+var NO_EFFECTS2 = Object.freeze({
+  mayThrow: false,
+  mayAllocate: false,
+  usesExternalBindings: false
+});
+var THROWING_EFFECTS2 = Object.freeze({
+  mayThrow: true,
+  mayAllocate: false,
+  usesExternalBindings: false
+});
+function parseAsync2(schema) {
+  return validationStub(schema, "parseAsync");
+}
+function safeParseAsync2(schema) {
+  return validationStub(schema, "safeParseAsync");
+}
 var validate2 = Object.freeze({
   is(schema) {
     return validationStub(schema, "is");
@@ -18053,15 +18410,16 @@ var validate2 = Object.freeze({
   issues(schema) {
     return validationStub(schema, "issues");
   },
+  parseAsync: parseAsync2,
+  safeParseAsync: safeParseAsync2,
   async: Object.freeze({
-    parse(schema) {
-      return validationStub(schema, "parseAsync");
-    },
-    safeParse(schema) {
-      return validationStub(schema, "safeParseAsync");
-    }
+    parse: parseAsync2,
+    safeParse: safeParseAsync2
   })
 });
+var is2 = validate2.is;
+var parse2 = validate2.parse;
+var safeParse2 = validate2.safeParse;
 var json2 = Object.freeze({
   value: json.value,
   parse(schema) {
@@ -18106,14 +18464,20 @@ var binary3 = Object.freeze({
 });
 function from2(schema) {
   return executionStub(schema, [
-    { ...stage("value", "value", "value"), schema: unwrapSchema(schema) }
+    {
+      ...stage("value", "value", "value"),
+      schema: unwrapSchema(schema)
+    }
   ]);
 }
 function map3(source, target, mapping = {}) {
   const sourceSchema = unwrapSchema(source);
   const targetSchema = unwrapSchema(target);
   return executionStub(targetSchema, [
-    { ...stage("value", "value", "value"), schema: sourceSchema },
+    {
+      ...stage("value", "value", "value"),
+      schema: sourceSchema
+    },
     mapStage2(sourceSchema, targetSchema, false, mapping)
   ]);
 }
@@ -18125,7 +18489,10 @@ function mapMany2(source, target, mapping = {}) {
   return executionStub(
     result,
     [
-      { ...stage("value", "value", "value"), schema: collection },
+      {
+        ...stage("value", "value", "value"),
+        schema: collection
+      },
       mapStage2(sourceSchema, targetSchema, true, mapping)
     ]
   );
@@ -18158,7 +18525,11 @@ function validationStub(schema, operation) {
 var jsonSchema2 = Object.freeze({
   to(schema, options) {
     const document = jsonSchema.to(schema, options);
-    registerArtifact(document, { kind: "operation", schema: unwrapSchema(schema), op: "jsonSchema" });
+    registerArtifact(document, {
+      kind: "operation",
+      schema: unwrapSchema(schema),
+      op: "jsonSchema"
+    });
     return document;
   },
   from: jsonSchema.from
@@ -18180,8 +18551,15 @@ function operationStub(schema, operation, output) {
 }
 function executionStub(schema, stages, queryBuilder) {
   const unwrapped = unwrapSchema(schema);
-  const plan = Object.freeze({ version: 1, schema: unwrapped, stages: Object.freeze(stages) });
-  const operation = { kind: "operation", op: "fromJSON" };
+  const plan = Object.freeze({
+    version: 1,
+    schema: unwrapped,
+    stages: Object.freeze(stages)
+  });
+  const operation = {
+    kind: "operation",
+    op: "fromJSON"
+  };
   const stub = function aotExecutionArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -18262,8 +18640,14 @@ function executionStub(schema, stages, queryBuilder) {
       enumerable: true,
       value: Object.freeze({
         array: () => append2(unwrapped, stage("to.array", "value", "value")),
-        json: () => append2(unwrapped, { ...stage("json.encode", "value", "json-text"), schema: unwrapped }),
-        binary: () => append2(unwrapped, { ...stage("binary.encode", "value", "binary"), schema: unwrapped })
+        json: () => append2(unwrapped, {
+          ...stage("json.encode", "value", "json-text"),
+          schema: unwrapped
+        }),
+        binary: () => append2(unwrapped, {
+          ...stage("binary.encode", "value", "binary"),
+          schema: unwrapped
+        })
       })
     }
   });
@@ -18300,7 +18684,11 @@ function mapStage2(source, target, many, mapping) {
     many,
     bindings: [mapping],
     provides: ["mapped"],
-    effects: { ...NO_EFFECTS2, mayAllocate: true, usesExternalBindings: Object.keys(mapping).length > 0 }
+    effects: {
+      ...NO_EFFECTS2,
+      mayAllocate: true,
+      usesExternalBindings: Object.keys(mapping).length > 0
+    }
   };
 }
 function transformStage2(source, target, many, transforms) {
@@ -18313,7 +18701,11 @@ function transformStage2(source, target, many, transforms) {
     many,
     transforms,
     provides: ["transformed"],
-    effects: { ...NO_EFFECTS2, mayAllocate: true, usesExternalBindings: Object.keys(transforms).length > 0 }
+    effects: {
+      ...NO_EFFECTS2,
+      mayAllocate: true,
+      usesExternalBindings: Object.keys(transforms).length > 0
+    }
   };
 }
 function assertTransformTarget2(source, target, transforms) {
@@ -18374,6 +18766,9 @@ function stage(kind, input, output) {
 }
 var JIT = {
   ...factories_exports,
+  is: is2,
+  parse: parse2,
+  safeParse: safeParse2,
   validate: validate2,
   json: json2,
   binary: binary3,

@@ -31,6 +31,10 @@ export * as AST from "./core/ats/index.js";
  * generated TypeScript source and application code can resolve schema output.
  */
 export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
+/** Accepted boundary input, before defaults and output transforms are resolved. */
+export type Input<TSchemaLike> = import("./core/ats/input.js").Input<TSchemaLike>;
+/** Immutable patch shape; readonly fields are excluded. */
+export type Update<TSchemaLike> = import("./core/ats/input.js").Update<TSchemaLike>;
 /** Fluent builder chain internals (`createBuilder`, builder types). */
 export * as Builder from "./core/builder/index.js";
 export type { Strict } from "./core/builder/types.js";

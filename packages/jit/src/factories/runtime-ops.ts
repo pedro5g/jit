@@ -14,6 +14,7 @@ import type * as ATS from "../core/ats/index.js";
 import type { Builder, SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import type { ValidationIssue } from "../errors/index.js";
+import type { RuntimeClass } from "./class.js";
 import {
   binaryDecode,
   binaryEncode,
@@ -67,14 +68,37 @@ export interface ValidateNamespace {
   is<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): StandardArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>>;
+  parse<TSchema extends ATS.AnyTypeSchema, TInstance>(
+    schema: RuntimeClass<TSchema, TInstance>
+  ): ExecutionArtifact<unknown, TInstance>;
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<unknown, TSchema>;
+  safeParse<TSchema extends ATS.AnyTypeSchema, TInstance>(
+    schema: RuntimeClass<TSchema, TInstance>
+  ): StandardArtifact<(value: unknown) => SafeParseResult<TInstance>, TInstance>;
   safeParse<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): StandardArtifact<(value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>, ATS.TypeofSchema<TSchema>>;
   issues<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
+  parseAsync<TSchema extends ATS.AnyTypeSchema>(
+    schema: SchemaInput<TSchema>
+  ): ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
+  safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
+    schema: SchemaInput<TSchema>
+  ): ExecutionArtifact<unknown, Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>>;
   readonly async: AsyncValidateNamespace;
+}
+
+function parseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+  return validationArtifact(schema, "parseAsync") as ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
+}
+
+function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
+  return validationArtifact(schema, "safeParseAsync") as ExecutionArtifact<
+    unknown,
+    Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
+  >;
 }
 
 /** Capability namespace for validation. It has no compile-selection chain. */
@@ -97,18 +121,18 @@ export const validate: ValidateNamespace = Object.freeze({
   issues<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationArtifact(schema, "issues") as ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
   },
+  parseAsync,
+  safeParseAsync,
   async: Object.freeze({
-    parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-      return validationArtifact(schema, "parseAsync") as ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
-    },
-    safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-      return validationArtifact(schema, "safeParseAsync") as ExecutionArtifact<
-        unknown,
-        Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
-      >;
-    },
+    parse: parseAsync,
+    safeParse: safeParseAsync,
   }),
 });
+
+/** Ergonomic validation leaf operations. They deliberately delegate to the namespace above. */
+export const is = validate.is;
+export const parse = validate.parse;
+export const safeParse = validate.safeParse;
 
 export interface JsonNamespace {
   value(): Builder<ATS.JsonSchema>;
@@ -287,4 +311,6 @@ function arrayOf<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): ATS.ArrayS
   };
 }
 
-export const map: MapNamespace = Object.assign(mapCapability, { many: mapMany });
+export const map: MapNamespace = Object.assign(mapCapability, {
+  many: mapMany,
+});
