@@ -182,7 +182,6 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
       issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v4 = v1.id;
-      let o5 = v4;
       if (typeof v4 !== "number") {
         issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v4 };
       } else {
@@ -193,7 +192,6 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "id", code: "not_positive", expected: "> 0", message: "expected a positive number" };
         }
       }
-      o5 = v4;
       let v6 = v1.name;
       let o7 = v6;
       if (typeof v6 !== "string") {
@@ -209,7 +207,6 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
       }
       o7 = v6;
       let v8 = v1.email;
-      let o9 = v8;
       if (typeof v8 !== "string") {
         issues[issues.length] = { path: "email", code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
       } else {
@@ -217,21 +214,15 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "email", code: "invalid_format", expected: "email", message: "expected a valid email" };
         }
       }
-      o9 = v8;
       let v10 = v1.role;
-      let o11 = v10;
       if (!((v10 === "admin") || (v10 === "member"))) {
         issues[issues.length] = { path: "role", code: "invalid_union", expected: "union", message: "value matched no union option" };
       }
-      o11 = v10;
       let v12 = v1.active;
-      let o13 = v12;
       if (typeof v12 !== "boolean") {
         issues[issues.length] = { path: "active", code: "expected_boolean", expected: "boolean", message: "expected boolean" };
       }
-      o13 = v12;
       let v14 = v1.score;
-      let o15 = v14;
       if (typeof v14 !== "number") {
         issues[issues.length] = { path: "score", code: "expected_number", expected: "number", message: "expected number", received: typeof v14 };
       } else {
@@ -245,9 +236,7 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "score", code: "too_big", expected: "<= 100", message: "expected a number <= 100" };
         }
       }
-      o15 = v14;
       let v16 = v1.tags;
-      let o17 = v16;
       if (!Array.isArray(v16)) {
         issues[issues.length] = { path: "tags", code: "expected_array", expected: "array", message: "expected array", received: typeof v16 };
       } else {
@@ -259,7 +248,6 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
         }
         for (let i18 = 0; i18 < v16.length; i18++) {
           let v19 = v16[i18];
-          let o20 = v19;
           if (typeof v19 !== "string") {
             issues[issues.length] = { path: "tags[" + i18 + "]", code: "expected_string", expected: "string", message: "expected string", received: typeof v19 };
           } else {
@@ -267,12 +255,9 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
               issues[issues.length] = { path: "tags[" + i18 + "]", code: "too_small", expected: "length >= 2", message: "expected at least 2 characters" };
             }
           }
-          o20 = v19;
         }
       }
-      o17 = v16;
       let v21 = v1.createdAt;
-      let o22 = v21;
       if (typeof v21 !== "string") {
         issues[issues.length] = { path: "createdAt", code: "expected_string", expected: "string", message: "expected string", received: typeof v21 };
       } else {
@@ -280,7 +265,6 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "createdAt", code: "invalid_format", expected: "datetime", message: "expected a valid datetime" };
         }
       }
-      o22 = v21;
       let v23 = v1.profile;
       let o24 = v23;
       if (v23 !== undefined) {
@@ -303,7 +287,7 @@ const Users_parse_validator = /*#__PURE__*/ (() => {
         if (b25 === undefined) { b25 = v23; }
         o24 = b25;
       }
-      b3 = { "id": o5, "name": o7, "email": o9, "role": o11, "active": o13, "score": o15, "tags": o17, "createdAt": o22, "profile": o24 };
+      b3 = { "id": v4, "name": o7, "email": v8, "role": v10, "active": v12, "score": v14, "tags": v16, "createdAt": v21, "profile": o24 };
     }
     if (b3 === undefined) { b3 = v1; }
     o2 = b3;
@@ -331,7 +315,6 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
       issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v4 = v1.id;
-      let o5 = v4;
       if (typeof v4 !== "number") {
         issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v4 };
       } else {
@@ -342,7 +325,6 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "id", code: "not_positive", expected: "> 0", message: "expected a positive number" };
         }
       }
-      o5 = v4;
       let v6 = v1.name;
       let o7 = v6;
       if (typeof v6 !== "string") {
@@ -358,7 +340,6 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
       }
       o7 = v6;
       let v8 = v1.email;
-      let o9 = v8;
       if (typeof v8 !== "string") {
         issues[issues.length] = { path: "email", code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
       } else {
@@ -366,21 +347,15 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "email", code: "invalid_format", expected: "email", message: "expected a valid email" };
         }
       }
-      o9 = v8;
       let v10 = v1.role;
-      let o11 = v10;
       if (!((v10 === "admin") || (v10 === "member"))) {
         issues[issues.length] = { path: "role", code: "invalid_union", expected: "union", message: "value matched no union option" };
       }
-      o11 = v10;
       let v12 = v1.active;
-      let o13 = v12;
       if (typeof v12 !== "boolean") {
         issues[issues.length] = { path: "active", code: "expected_boolean", expected: "boolean", message: "expected boolean" };
       }
-      o13 = v12;
       let v14 = v1.score;
-      let o15 = v14;
       if (typeof v14 !== "number") {
         issues[issues.length] = { path: "score", code: "expected_number", expected: "number", message: "expected number", received: typeof v14 };
       } else {
@@ -394,9 +369,7 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "score", code: "too_big", expected: "<= 100", message: "expected a number <= 100" };
         }
       }
-      o15 = v14;
       let v16 = v1.tags;
-      let o17 = v16;
       if (!Array.isArray(v16)) {
         issues[issues.length] = { path: "tags", code: "expected_array", expected: "array", message: "expected array", received: typeof v16 };
       } else {
@@ -408,7 +381,6 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
         }
         for (let i18 = 0; i18 < v16.length; i18++) {
           let v19 = v16[i18];
-          let o20 = v19;
           if (typeof v19 !== "string") {
             issues[issues.length] = { path: "tags[" + i18 + "]", code: "expected_string", expected: "string", message: "expected string", received: typeof v19 };
           } else {
@@ -416,12 +388,9 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
               issues[issues.length] = { path: "tags[" + i18 + "]", code: "too_small", expected: "length >= 2", message: "expected at least 2 characters" };
             }
           }
-          o20 = v19;
         }
       }
-      o17 = v16;
       let v21 = v1.createdAt;
-      let o22 = v21;
       if (typeof v21 !== "string") {
         issues[issues.length] = { path: "createdAt", code: "expected_string", expected: "string", message: "expected string", received: typeof v21 };
       } else {
@@ -429,7 +398,6 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "createdAt", code: "invalid_format", expected: "datetime", message: "expected a valid datetime" };
         }
       }
-      o22 = v21;
       let v23 = v1.profile;
       let o24 = v23;
       if (v23 !== undefined) {
@@ -452,7 +420,7 @@ const Users_safeParse_validator = /*#__PURE__*/ (() => {
         if (b25 === undefined) { b25 = v23; }
         o24 = b25;
       }
-      b3 = { "id": o5, "name": o7, "email": o9, "role": o11, "active": o13, "score": o15, "tags": o17, "createdAt": o22, "profile": o24 };
+      b3 = { "id": v4, "name": o7, "email": v8, "role": v10, "active": v12, "score": v14, "tags": v16, "createdAt": v21, "profile": o24 };
     }
     if (b3 === undefined) { b3 = v1; }
     o2 = b3;
@@ -538,9 +506,6 @@ const Users_clone = (function clone(value) {
 });
 const Users_diff = (function diff(left, right) {
   const changes = [];
-  if (Object.is(left, right)) {
-    return changes;
-  }
   if (!Object.is(left, right)) {
     if (!Object.is(left.id, right.id)) {
       changes[changes.length] = { type: "update", path: ["id"], value: right.id };
@@ -560,17 +525,19 @@ const Users_diff = (function diff(left, right) {
     if (!Object.is(left.score, right.score)) {
       changes[changes.length] = { type: "update", path: ["score"], value: right.score };
     }
-    if (!Object.is(left.tags, right.tags)) {
-      const leftLen = left.tags.length;
-      const rightLen = right.tags.length;
+    const la = left.tags;
+    const ra = right.tags;
+    if (!Object.is(la, ra)) {
+      const leftLen = la.length;
+      const rightLen = ra.length;
       const commonLen = leftLen < rightLen ? leftLen : rightLen;
       for (let i = 0; i < commonLen; i++) {
-        if (!Object.is(left.tags[i], right.tags[i])) {
-          changes[changes.length] = { type: "update", path: ["tags", i], value: right.tags[i] };
+        if (!Object.is(la[i], ra[i])) {
+          changes[changes.length] = { type: "update", path: ["tags", i], value: ra[i] };
         }
       }
       for (let i = commonLen; i < rightLen; i++) {
-        changes[changes.length] = { type: "add", path: ["tags", i], value: right.tags[i] };
+        changes[changes.length] = { type: "add", path: ["tags", i], value: ra[i] };
       }
       for (let i = commonLen; i < leftLen; i++) {
         changes[changes.length] = { type: "remove", path: ["tags", i] };
@@ -751,7 +718,6 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
       issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v4 = v1.id;
-      let o5 = v4;
       if (typeof v4 !== "number") {
         issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v4 };
       } else {
@@ -762,7 +728,6 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "id", code: "not_positive", expected: "> 0", message: "expected a positive number" };
         }
       }
-      o5 = v4;
       let v6 = v1.name;
       let o7 = v6;
       if (typeof v6 !== "string") {
@@ -778,7 +743,6 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
       }
       o7 = v6;
       let v8 = v1.email;
-      let o9 = v8;
       if (typeof v8 !== "string") {
         issues[issues.length] = { path: "email", code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
       } else {
@@ -786,21 +750,15 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "email", code: "invalid_format", expected: "email", message: "expected a valid email" };
         }
       }
-      o9 = v8;
       let v10 = v1.role;
-      let o11 = v10;
       if (!((v10 === "admin") || (v10 === "member"))) {
         issues[issues.length] = { path: "role", code: "invalid_union", expected: "union", message: "value matched no union option" };
       }
-      o11 = v10;
       let v12 = v1.active;
-      let o13 = v12;
       if (typeof v12 !== "boolean") {
         issues[issues.length] = { path: "active", code: "expected_boolean", expected: "boolean", message: "expected boolean" };
       }
-      o13 = v12;
       let v14 = v1.score;
-      let o15 = v14;
       if (typeof v14 !== "number") {
         issues[issues.length] = { path: "score", code: "expected_number", expected: "number", message: "expected number", received: typeof v14 };
       } else {
@@ -814,9 +772,7 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "score", code: "too_big", expected: "<= 100", message: "expected a number <= 100" };
         }
       }
-      o15 = v14;
       let v16 = v1.tags;
-      let o17 = v16;
       if (!Array.isArray(v16)) {
         issues[issues.length] = { path: "tags", code: "expected_array", expected: "array", message: "expected array", received: typeof v16 };
       } else {
@@ -828,7 +784,6 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
         }
         for (let i18 = 0; i18 < v16.length; i18++) {
           let v19 = v16[i18];
-          let o20 = v19;
           if (typeof v19 !== "string") {
             issues[issues.length] = { path: "tags[" + i18 + "]", code: "expected_string", expected: "string", message: "expected string", received: typeof v19 };
           } else {
@@ -836,12 +791,9 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
               issues[issues.length] = { path: "tags[" + i18 + "]", code: "too_small", expected: "length >= 2", message: "expected at least 2 characters" };
             }
           }
-          o20 = v19;
         }
       }
-      o17 = v16;
       let v21 = v1.createdAt;
-      let o22 = v21;
       if (typeof v21 !== "string") {
         issues[issues.length] = { path: "createdAt", code: "expected_string", expected: "string", message: "expected string", received: typeof v21 };
       } else {
@@ -849,7 +801,6 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
           issues[issues.length] = { path: "createdAt", code: "invalid_format", expected: "datetime", message: "expected a valid datetime" };
         }
       }
-      o22 = v21;
       let v23 = v1.profile;
       let o24 = v23;
       if (v23 !== undefined) {
@@ -872,7 +823,7 @@ const Users_fromJSON_validator = /*#__PURE__*/ (() => {
         if (b25 === undefined) { b25 = v23; }
         o24 = b25;
       }
-      b3 = { "id": o5, "name": o7, "email": o9, "role": o11, "active": o13, "score": o15, "tags": o17, "createdAt": o22, "profile": o24 };
+      b3 = { "id": v4, "name": o7, "email": v8, "role": v10, "active": v12, "score": v14, "tags": v16, "createdAt": v21, "profile": o24 };
     }
     if (b3 === undefined) { b3 = v1; }
     o2 = b3;
@@ -1110,7 +1061,7 @@ const Users: {
   mock: Users_mock,
 });
 
-const UserJsonSchema: { readonly [key: string]: unknown } = /*#__PURE__*/ Object.freeze({"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"id":{"type":"integer","format":"int32","exclusiveMinimum":0},"name":{"type":"string","minLength":3,"maxLength":80},"email":{"type":"string","format":"email"},"role":{"anyOf":[{"const":"admin"},{"const":"member"}]},"active":{"type":"boolean"},"score":{"type":"number","format":"float","minimum":0,"maximum":100},"tags":{"type":"array","items":{"type":"string","minLength":2},"minItems":1,"maxItems":8},"createdAt":{"type":"string","format":"date-time"},"profile":{"type":"object","properties":{"bio":{"anyOf":[{"type":"string"},{"type":"null"}]}},"required":["bio"],"additionalProperties":false}},"required":["id","name","email","role","active","score","tags","createdAt"],"additionalProperties":false});
+const UserJsonSchema: { readonly [key: string]: unknown } = /*#__PURE__*/ Object.freeze({"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"id":{"type":"integer","format":"int32","exclusiveMinimum":0},"name":{"type":"string","minLength":3,"maxLength":80},"email":{"type":"string","format":"email"},"role":{"anyOf":[{"const":"admin"},{"const":"member"}]},"active":{"type":"boolean"},"score":{"type":"number","format":"float","minimum":0,"maximum":100},"tags":{"type":"array","items":{"type":"string","minLength":2},"minItems":1,"maxItems":8},"createdAt":{"type":"string","format":"date-time"},"profile":{"type":"object","properties":{"bio":{"type":["string","null"]}},"required":["bio"],"additionalProperties":false}},"required":["id","name","email","role","active","score","tags","createdAt"],"additionalProperties":false});
 const findActiveAdmins: __JitCall<typeof import("../catalog.jit.js").findActiveAdmins> = /*#__PURE__*/ (() => {
   const __q0 = "admin";
   const __q1 = true;

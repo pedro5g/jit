@@ -1,0 +1,19 @@
+# Value objects
+
+Value objects are immutable and compared by value:
+
+```ts
+const Money = JIT.valueObject(
+  JIT.object({ amount: JIT.number(), currency: JIT.string() }),
+);
+
+const left = Money.create({ amount: 10, currency: "BRL" });
+const right = Money.hydrate({ amount: 10, currency: "BRL" });
+
+left.equals(right); // true
+left.hashCode() === right.hashCode(); // true
+```
+
+Instances are frozen. Equality and hashing are schema-specialized and shared by the prototype. Choose a value object when replacement of the complete value is the valid domain operation; do not use it for an identity-bearing lifecycle.
+
+`JIT.valueObject.abstract(schema)` supports domain-specific subclasses without allowing the base itself to be instantiated.

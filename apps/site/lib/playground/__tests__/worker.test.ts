@@ -129,9 +129,9 @@ const EntityUsers = JIT.array(schema).entity({ key: "id" });
 const IndexedUsers = JIT.array(schema).indexBy("id");
 const KeyedUsers = JIT.array(schema).keyed("id");
 const indexes = {
-  entityEqual: JIT.compare.equal(EntityUsers),
-  indexedEqual: JIT.compare.equal(IndexedUsers),
-  keyedEqual: JIT.compare.equal(KeyedUsers),
+  entityEqual: JIT.equal(EntityUsers),
+  indexedEqual: JIT.equal(IndexedUsers),
+  keyedEqual: JIT.equal(KeyedUsers),
   normalize: Compiler.compileNormalize(EntityUsers.schema),
   keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name"),
 };`,

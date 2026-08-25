@@ -182,7 +182,7 @@ export const binary: BinaryNamespace = Object.freeze({
   },
 });
 
-function equal<TSchema extends ATS.AnyTypeSchema>(
+export function equal<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Equal<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "equal", "value", "boolean", compileEqual) as RuntimeCompiledFunction<
@@ -198,7 +198,7 @@ export function clone<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-function diff<TSchema extends ATS.AnyTypeSchema>(
+export function diff<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Diff<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "diff", "value", "value", compileDiff) as RuntimeCompiledFunction<
@@ -206,7 +206,7 @@ function diff<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-function hash<TSchema extends ATS.AnyTypeSchema>(
+export function hash<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Hash<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "hash", "value", "value", compileHash) as RuntimeCompiledFunction<

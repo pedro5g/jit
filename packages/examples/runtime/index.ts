@@ -12,10 +12,10 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   };
   const parsedUsers = users.map((user) => validator.parse(user));
   const invalid = validator.safeParse(invalidUser);
-  const equal = JIT.compare.equal(UserSchema);
+  const equal = JIT.equal(UserSchema);
   const clone = JIT.clone(UserSchema);
-  const diff = JIT.compare.diff(UserSchema);
-  const hash = JIT.compare.hash(UserSchema);
+  const diff = JIT.diff(UserSchema);
+  const hash = JIT.hash(UserSchema);
   const update = JIT.update(UserSchema)
     .patch({ name: JIT.param("name") })
     .compile();

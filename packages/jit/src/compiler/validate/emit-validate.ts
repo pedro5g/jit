@@ -44,6 +44,7 @@ interface UnwrappedSchema {
   readonly refines: readonly RefineRecord[];
   readonly pipes: readonly PipeStep[];
   readonly fieldTransforms: Readonly<Record<string, string>> | undefined;
+  readonly materialize: string | undefined;
 }
 
 /** Static-when-possible issue path; loops switch it to a dynamic expression. */
@@ -76,7 +77,9 @@ class ValidatorEmitter {
 
   constructor(
     private mode: "is" | "parse",
-    private awaited = false
+    private awaited = false,
+    readonly resolveDefaults = true,
+    readonly materializeRuntimeTypes = true
   ) {
     this.rootMode = mode;
   }
@@ -204,6 +207,7 @@ class ValidatorEmitter {
               : `${output} = ${pipe.binding}(${output});`
           );
         }
+        if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
       }
     };
 
@@ -2001,6 +2005,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
   const refines: RefineRecord[] = [];
   const pipes: PipeStep[] = [];
   let fieldTransforms: Record<string, string> | undefined;
+  let materialize: string | undefined;
 
   while (true) {
     if (current.type === TypeName.optional) {
@@ -2023,7 +2028,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     }
 
     if (current.type === TypeName.default) {
-      if (!defaultValue) {
+      if (emitter.resolveDefaults && !defaultValue) {
         const raw = current.def.defaultValue;
 
         defaultValue = { binding: emitter.bind(raw), isFactory: typeof raw === "function" };
@@ -2076,6 +2081,12 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
       continue;
     }
 
+    if (current.type === TypeName.runtimeType) {
+      if (emitter.materializeRuntimeTypes) materialize = emitter.bind(current.def.materialize);
+      current = current.def.innerType as AnySchema;
+      continue;
+    }
+
     break;
   }
 
@@ -2089,6 +2100,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     refines,
     pipes,
     fieldTransforms,
+    materialize,
   };
 }
 
@@ -2122,6 +2134,7 @@ export function needsBuild(schema: ATS.AnyTypeSchema): boolean {
     // parseAsync settles promise wrappers, so the output always differs.
     case TypeName.promise:
     case TypeName.codec:
+    case TypeName.runtimeType:
       return true;
     case TypeName.when:
       return (
@@ -2273,6 +2286,10 @@ export interface EmitValidatorOptions {
   readonly is?: boolean;
   readonly safeParse?: boolean;
   readonly safeParseAsync?: boolean;
+  /** Keep defaults as required fields, for trusted persisted-state hydration. */
+  readonly resolveDefaults?: boolean;
+  /** Leave Runtime Type construction to an explicit execution `construct` stage. */
+  readonly materializeRuntimeTypes?: boolean;
 }
 
 /**
@@ -2371,12 +2388,14 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const emitIs = options.is ?? true;
   const emitSafeParse = options.safeParse ?? true;
   const emitSafeParseAsync = options.safeParseAsync ?? true;
+  const resolveDefaults = options.resolveDefaults ?? true;
+  const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
   const freezesOutput = rootHasReadonly(schema);
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter: ValidatorEmitter | undefined;
 
   if (emitSafeParse) {
-    const emitter = new ValidatorEmitter("parse");
+    const emitter = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes);
 
     emitter.markRecursive(recursive);
 
@@ -2402,7 +2421,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   let asyncEmitter: ValidatorEmitter | undefined;
 
   if (emitSafeParseAsync && containsPromise(schema)) {
-    const emitter = new ValidatorEmitter("parse", true);
+    const emitter = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes);
 
     emitter.markRecursive(recursive);
 
@@ -2430,7 +2449,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   // Bind the same values in the same order so every function can share one
   // Function parameter list; extras from either emitter are appended after.
   if (emitIs) {
-    const emitter = new ValidatorEmitter("is");
+    const emitter = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes);
 
     emitter.markRecursive(recursive);
 

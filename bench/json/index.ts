@@ -60,6 +60,7 @@ interface JsonAotModule {
   readonly User_parse: (json: string) => unknown;
   readonly Users_json: (json: string) => unknown;
   readonly Users_parse: (json: string) => unknown;
+  readonly Users_activeIdSum: (json: string) => number;
 }
 
 async function loadAot(): Promise<JsonAotModule> {
@@ -73,6 +74,11 @@ async function loadAot(): Promise<JsonAotModule> {
       User_parse: JIT.json.parse(User).validate(),
       Users_json: JIT.json.parse(Users),
       Users_parse: JIT.json.parse(Users).validate(),
+      Users_activeIdSum: JIT.json
+        .parse(Users)
+        .validate()
+        .filter((query) => query.eq("active", true))
+        .sum("id"),
     },
     outDir,
   });
@@ -97,6 +103,30 @@ registerJsonCase(
   typiaValidateParseSimple,
   (json) => zodSimple.parse(JSON.parse(json))
 );
+
+registerScenario({
+  op: "AOT JSON validate + filter + aggregate",
+  name: "10k nested objects",
+  args: [usersJson],
+  jit: aot.Users_activeIdSum,
+  competitors: [
+    {
+      name: "native JSON.parse + manual loop",
+      fn: (json: string) => {
+        const values = JSON.parse(json) as typeof users;
+        let total = 0;
+
+        for (let index = 0; index < values.length; index++) {
+          const value = values[index];
+
+          if (value?.active) total += value.id;
+        }
+        return total;
+      },
+      biased: "manual baseline decodes and aggregates but does not validate schema constraints",
+    },
+  ],
+});
 registerJsonCase(
   "nested constrained object",
   userJson,

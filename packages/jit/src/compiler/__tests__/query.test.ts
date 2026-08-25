@@ -580,6 +580,27 @@ describe("JIT compiler query", () => {
     >();
   });
 
+  it("should accumulate successive parameter declarations", () => {
+    const query = JIT.query(Users)
+      .params({ minimumAge: JIT.number() })
+      .filter((q, params) => q.gte("age", params.minimumAge))
+      .params({ role: JIT.string() })
+      .filter((q, params) => q.eq("role", params.role));
+
+    expect(query(input, { minimumAge: 18, role: "admin" })).toEqual([
+      { id: 1, name: "Ada", age: 37, role: "admin" },
+      { id: 1, name: "Ada v2", age: 38, role: "admin" },
+    ]);
+    expectTypeOf(query).toMatchTypeOf<
+      (
+        value: { id: number; name: string; age: number; role: string }[],
+        params: { readonly minimumAge: number; readonly role: string }
+      ) => { readonly id: number; readonly name: string; readonly age: number; readonly role: string }[]
+    >();
+
+    expect(() => JIT.query(Users).params({ role: JIT.string() }).params({ role: JIT.string() })).toThrow(/duplicated/i);
+  });
+
   it("should reject unknown keys and unsupported schemas", () => {
     // A query builder lowers on its first call, so key errors surface there.
     expect(() => JIT.query(Users).filter((q) => q.gt("missing" as "age", 1))([])).toThrow(Errors.JITError);

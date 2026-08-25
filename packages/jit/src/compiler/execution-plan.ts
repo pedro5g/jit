@@ -14,6 +14,7 @@ export type ExecutionFact =
   | "updated"
   | "filtered"
   | "projected"
+  | "aggregated"
   | "masked"
   | "sanitized"
   | "materialized";
@@ -66,6 +67,19 @@ export interface ValidateStage extends StageDescriptor {
   readonly output: "value" | "boolean" | "issues";
   readonly schema: ATS.AnyTypeSchema;
   readonly operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues";
+}
+
+/** Materializes one already-validated wire value as a Runtime Class instance. */
+export interface ConstructStage extends StageDescriptor {
+  readonly kind: "construct";
+  readonly input: "value";
+  readonly output: "value";
+  readonly schema: ATS.RuntimeTypeSchema;
+  /** Kept as a binding; constructors are never interpolated into source. */
+  readonly target: new (
+    input: unknown,
+    validated?: boolean
+  ) => unknown;
 }
 
 export interface JsonEncodeStage extends StageDescriptor {
@@ -137,6 +151,18 @@ export interface QueryStage extends StageDescriptor {
   readonly program: QueryProgram;
 }
 
+/** A terminal collection reduction. Its query program includes every preceding filter. */
+export interface AggregateStage extends StageDescriptor {
+  readonly kind: "aggregate";
+  readonly input: "value";
+  readonly output: "value";
+  readonly source: ATS.AnyTypeSchema;
+  readonly schema: ATS.AnyTypeSchema;
+  readonly operation: "count" | "sum" | "avg" | "min" | "max";
+  readonly key?: string;
+  readonly program: QueryProgram;
+}
+
 export interface ArraySinkStage extends StageDescriptor {
   readonly kind: "to.array";
   readonly input: "value";
@@ -155,6 +181,7 @@ export type ExecutionStage =
   | JsonDecodeStage
   | BinaryDecodeStage
   | ValidateStage
+  | ConstructStage
   | JsonEncodeStage
   | BinaryEncodeStage
   | MapStage
@@ -162,6 +189,7 @@ export type ExecutionStage =
   | UpdateStage
   | SecurityStage
   | QueryStage
+  | AggregateStage
   | ArraySinkStage
   | OperationStage;
 

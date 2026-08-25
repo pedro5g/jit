@@ -100,8 +100,8 @@ const User = JIT.object({
   tags: JIT.array(JIT.string()),
 }).hash("ordered");
 
-const equalUser = JIT.compare.equal(User).compile();
-const hashUser = JIT.compare.hash(User).compile();
+const equalUser = JIT.equal(User).compile();
+const hashUser = JIT.hash(User).compile();
 ```
 
 Hashing helps when:
@@ -164,7 +164,7 @@ const User = JIT.object({
 });
 
 const Users = JIT.array(User).entity({ key: "id" }).indexBy("id");
-const equalUsers = JIT.compare.equal(Users).compile();
+const equalUsers = JIT.equal(Users).compile();
 ```
 
 The three schema annotations have distinct contracts:

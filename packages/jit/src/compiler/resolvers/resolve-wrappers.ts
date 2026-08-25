@@ -7,12 +7,15 @@ export interface ResolvedWrappers {
   readonly base: ATS.AnyTypeSchema;
   readonly optional: boolean;
   readonly nullable: boolean;
+  /** True when readonly occurs anywhere in the transparent wrapper chain. */
+  readonly readonly: boolean;
 }
 
 export function resolveWrappers(schema: ATS.AnyTypeSchema): ResolvedWrappers {
   let current = schema;
   let optional = false;
   let nullable = false;
+  let readonly = false;
 
   while (true) {
     if (current.type === ATS.TypeName.optional) {
@@ -34,15 +37,25 @@ export function resolveWrappers(schema: ATS.AnyTypeSchema): ResolvedWrappers {
       continue;
     }
 
+    if (current.type === ATS.TypeName.readonly) {
+      readonly = true;
+      current = innerType(current);
+      continue;
+    }
+
     if (
       current.type === ATS.TypeName.default ||
       current.type === ATS.TypeName.brand ||
       current.type === ATS.TypeName.transform ||
       current.type === ATS.TypeName.pipe ||
-      current.type === ATS.TypeName.readonly ||
       current.type === ATS.TypeName.refine ||
       current.type === ATS.TypeName.coerce
     ) {
+      current = innerType(current);
+      continue;
+    }
+
+    if (current.type === ATS.TypeName.runtimeType) {
       current = innerType(current);
       continue;
     }
@@ -59,6 +72,7 @@ export function resolveWrappers(schema: ATS.AnyTypeSchema): ResolvedWrappers {
     base: current,
     optional,
     nullable,
+    readonly,
   };
 }
 

@@ -608,6 +608,8 @@ export const JIT = {
 export namespace JIT {
   export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
   export type Input<TSchemaLike> = import("./core/ats/input.js").Input<TSchemaLike>;
+  export type Hydrate<TSchemaLike> = import("./core/ats/representations.js").Hydrate<TSchemaLike>;
+  export type Wire<TSchemaLike> = import("./core/ats/representations.js").Wire<TSchemaLike>;
   export type Update<TSchemaLike> = import("./core/ats/input.js").Update<TSchemaLike>;
   export type Strict<TSchemaLike, TValue> = import("./core/builder/types.js").Strict<TSchemaLike, TValue>;
 }

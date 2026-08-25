@@ -85,16 +85,16 @@ export const CONCEPTS: ConceptNode[] = [
       "A jit é um data engine schema-first para TypeScript: você descreve um formato uma vez com JIT.object({...}) e ela compila JavaScript especializado para cada operação sobre esse formato — validação, igualdade, clonagem, diff, queries, serialização e mais.",
     mechanisms: [
       "One declaration drives every operation: validation, equality, cloning, diffing, hashing, immutable updates, queries, DTO mapping, PII masking, sanitizing, JSON, a versioned binary codec, binary rowsets and progressive streaming.",
-      "Capabilities are reached through namespaces — JIT.validate.*, JIT.compare.*, JIT.security.*, JIT.json.*, JIT.binary.* — and schema factories sit at the root: JIT.object, JIT.string, JIT.array.",
+      "Validation, security and transport are navigable namespaces; structural leaves are JIT.equal, JIT.diff, JIT.hash and JIT.clone; schema factories sit at the root.",
       "Every artifact is lazy and callable: `.compile()` is an optional warm-up and `.plan` exposes the descriptor AOT consumes.",
     ],
     mechanismsPt: [
       "Uma declaração alimenta todas as operações: validação, igualdade, clonagem, diff, hash, updates imutáveis, queries, mapeamento de DTO, mascaramento de PII, sanitização, JSON, um codec binário versionado, rowsets binários e validação progressiva em stream.",
-      "As capacidades são alcançadas por namespaces — JIT.validate.*, JIT.compare.*, JIT.security.*, JIT.json.*, JIT.binary.* — e as fábricas de schema ficam na raiz: JIT.object, JIT.string, JIT.array.",
+      "Validação, segurança e transporte são namespaces navegáveis; as operações estruturais são JIT.equal, JIT.diff, JIT.hash e JIT.clone; as fábricas de schema ficam na raiz.",
       "Todo artefato é lazy e chamável: `.compile()` é um aquecimento opcional e `.plan` expõe o descritor que o AOT consome.",
     ],
     example:
-      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n  age: JIT.number().int().min(0),\n});\n\n// one declaration, many compiled operations\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.compare.equal(User);\nconst cloneUser = JIT.clone(User);\nconst toJson = JIT.json.stringify(User);",
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n  age: JIT.number().int().min(0),\n});\n\n// one declaration, many compiled operations\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.equal(User);\nconst cloneUser = JIT.clone(User);\nconst toJson = JIT.json.stringify(User);",
     page: "/docs",
     edges: { purpose: 0.7, compilation: 0.6, validation: 0.3, aot: 0.3 },
   },
@@ -146,7 +146,7 @@ export const CONCEPTS: ConceptNode[] = [
       "AOT generation closes the loop: the engine itself never ships to production, so the only thing in the bundle is the generated code the application actually calls.",
     ],
     example:
-      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email().pii(),\n});\n\n// every one of these is derived from the SAME declaration,\n// so they cannot disagree about what a User is\nconst isUser = JIT.validate.is(User);\nconst safeForLogs = JIT.security.mask(User);\nconst sameUser = JIT.compare.equal(User);",
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email().pii(),\n});\n\n// every one of these is derived from the SAME declaration,\n// so they cannot disagree about what a User is\nconst isUser = JIT.validate.is(User);\nconst safeForLogs = JIT.security.mask(User);\nconst sameUser = JIT.equal(User);",
     page: "/docs/concepts/why-jit",
     edges: { compilation: 0.7, performance: 0.5, comparison: 0.4, self: 0.4 },
   },
@@ -402,6 +402,31 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { aot: 0.7 },
   },
   {
+    id: "schema-boundaries",
+    aliases: ["input", "output", "update", "default", "readonly", "hydrate", "hidratar", "atualização"],
+    terms: ["input", "typeof", "update", "default", "readonly", "hydrate"],
+    apis: ["parse", "update", "class"],
+    fact: "Input describes a boundary value before defaults are resolved, Typeof describes resolved state, and Update is an immutable patch that omits readonly fields. Runtime-class hydrate validates complete persisted state and never fills missing defaults.",
+    factPt:
+      "Input descreve o valor de fronteira antes de resolver defaults, Typeof descreve o estado resolvido e Update é um patch imutável que omite campos readonly. O hydrate de runtime classes valida o estado persistido completo e nunca preenche defaults ausentes.",
+    mechanisms: [
+      "A defaulted object property is optional in Input but required in Typeof.",
+      "optional and nullish preserve undefined/null in the output; default resolves undefined to the configured value.",
+      "Readonly remains effective through transparent wrappers such as readonly().default(), so it cannot reappear in Update.",
+      "create accepts the boundary input and resolves defaults; hydrate rejects incomplete persisted state instead of manufacturing data.",
+    ],
+    mechanismsPt: [
+      "Uma propriedade de objeto com default é opcional em Input, mas obrigatória em Typeof.",
+      "optional e nullish preservam undefined/null na saída; default resolve undefined para o valor configurado.",
+      "Readonly continua efetivo através de wrappers transparentes como readonly().default(), então não reaparece em Update.",
+      "create aceita o input de fronteira e resolve defaults; hydrate rejeita estado persistido incompleto em vez de fabricar dados.",
+    ],
+    example:
+      'const User = JIT.object({ id: JIT.string().readonly().default("generated"), name: JIT.string() });\nconst parseUser = JIT.parse(User);\n\nparseUser({ name: "Ada" }); // { id: "generated", name: "Ada" }',
+    page: "/docs/concepts/schemas-and-types#input-output-and-updates",
+    edges: { validation: 0.5, query: 0.2 },
+  },
+  {
     id: "query",
     aliases: ["query", "consulta", "filter", "filtro", "search", "buscar", "where", "sort", "ordenar", "aggregate"],
     terms: ["query", "filter", "projection", "orderby", "groupby", "iterator", "visitor", "fused"],
@@ -450,6 +475,29 @@ export const CONCEPTS: ConceptNode[] = [
       'const Users = JIT.array(JIT.object({ id: JIT.string(), active: JIT.boolean() }));\n\nconst query = JIT.query(Users)\n  .filter((q) => q.eq("active", true))\n  .select("id")\n  .take(10);\n\n// the terminal call chooses the backend\nconst rows = query.to.iterator();',
     page: "/docs/runtime/lazy-execution",
     edges: { query: 0.5, json: 0.4 },
+  },
+  {
+    id: "cqrs",
+    aliases: ["cqrs", "read model", "read-model", "query contract", "filtro dinamico", "filtro dinâmico", "api query"],
+    terms: ["cqrs", "contract", "dynamic filter", "sort", "pagination", "standard query", "~query"],
+    apis: ["cqrs"],
+    fact: "JIT.cqrs keeps read-model contracts separate from transport input: static queries reuse the compiled QueryProgram, while an input definition compiles its allowed filters, sort fields and offset pagination into a bounded normalizer.",
+    factPt:
+      "JIT.cqrs separa o contrato do read model da entrada de transporte: queries estáticas reutilizam o QueryProgram compilado, enquanto uma definição de input compila filtros permitidos, campos de ordenação e paginação offset em um normalizador limitado.",
+    mechanisms: [
+      "JIT.cqrs.query(Model) is a callable declarative read query; successive .where() calls combine with AND, successive .params() calls accumulate their typed shape, repeated select/order use the last declaration, limits use the smallest bound, and runtime/AOT/~query share the canonical plan.",
+      "JIT.cqrs.input(Model, options) declares the permitted dynamic surface. JIT.cqrs.parse(definition) emits a direct parser for known fields and operators, validates the structural budget, rejects duplicate sort/select fields, and never treats a client field name as generated source.",
+      "Sort fields and offset limits are checked before a query plan is formed, so application code receives normalized conditions rather than reparsing transport syntax in a hot query loop.",
+    ],
+    mechanismsPt: [
+      "JIT.cqrs.query(Model) cria uma query de leitura declarativa e chamável; chamadas .where() sucessivas combinam com AND, .params() acumula tipos, select/order repetidos usam a última declaração, limits usam o menor limite e runtime/AOT/~query compartilham o plano canônico.",
+      "JIT.cqrs.input(Model, options) declara a superfície dinâmica permitida. JIT.cqrs.parse(definition) emite um parser direto para campos e operadores conhecidos, valida o orçamento estrutural, rejeita campos repetidos de sort/select e nunca trata um campo enviado pelo cliente como fonte gerada.",
+      "Campos de ordenação e limites offset são checados antes de formar um plano de query, então a aplicação recebe condições normalizadas em vez de reprocessar sintaxe de transporte dentro do loop quente.",
+    ],
+    example:
+      'const User = JIT.object({ id: JIT.string(), active: JIT.boolean(), score: JIT.number() });\n\nconst activeUsers = JIT.cqrs\n  .query(User)\n  .where((q) => q.eq("active", true))\n  .select("id", "score")\n  .orderBy("score", "desc")\n  .limit(10);\n\nconst Search = JIT.cqrs.input(User, {\n  filter: { active: ["eq"], score: ["gte"] },\n  sort: ["score"],\n  pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },\n});\nconst parseSearch = JIT.cqrs.parse(Search);',
+    page: "/docs/reference/functions/query#cqrs",
+    edges: { query: 0.8, compilation: 0.5, aot: 0.3 },
   },
   {
     id: "binary",
@@ -607,10 +655,10 @@ export const CONCEPTS: ConceptNode[] = [
     id: "compare",
     aliases: ["equal", "igual", "compare", "comparar", "diff", "hash", "clone", "clonar", "copy", "cópia"],
     terms: ["equal", "diff", "hash", "clone", "structural", "identity"],
-    apis: ["compare", "clone"],
-    fact: "JIT.compare.equal(schema) emits equality code from the known shape: objects use direct field access, arrays use indexed loops, tuples unroll fixed positions, and tagged unions dispatch on the tag before comparing variant fields. JIT.compare.diff reports the paths that differ and JIT.compare.hash produces a structural fingerprint.",
+    apis: ["equal", "diff", "hash", "compare", "clone"],
+    fact: "JIT.equal(schema) emits equality code from the known shape: objects use direct field access, arrays use indexed loops, tuples unroll fixed positions, and tagged unions dispatch on the tag before comparing variant fields. JIT.diff reports the paths that differ and JIT.hash produces a structural fingerprint.",
     factPt:
-      "JIT.compare.equal(schema) emite código de igualdade a partir do formato conhecido: objetos usam acesso direto a campo, arrays usam laços indexados, tuplas desenrolam posições fixas, e uniões com tag despacham pela tag antes de comparar os campos da variante. JIT.compare.diff reporta os caminhos que diferem e JIT.compare.hash produz uma impressão digital estrutural.",
+      "JIT.equal(schema) emite código de igualdade a partir do formato conhecido: objetos usam acesso direto a campo, arrays usam laços indexados, tuplas desenrolam posições fixas, e uniões com tag despacham pela tag antes de comparar os campos da variante. JIT.diff reporta os caminhos que diferem e JIT.hash produz uma impressão digital estrutural.",
     mechanisms: [
       "Equality returns on the first difference and allocates no result object — there is no key enumeration because the keys were known when the function was written.",
       "A tagged union dispatches on its discriminant first, so mismatched variants cost one comparison instead of a field-by-field walk.",
@@ -626,7 +674,7 @@ export const CONCEPTS: ConceptNode[] = [
       "`JIT.clone` é a mesma ideia para cópia: um deep clone especializado no formato, em vez de uma varredura genérica.",
     ],
     example:
-      "const Order = JIT.object({\n  id: JIT.string(),\n  lines: JIT.array(JIT.object({ sku: JIT.string(), quantity: JIT.number() })),\n});\n\nconst same = JIT.compare.equal(Order);\nconst changes = JIT.compare.diff(Order);\nconst fingerprint = JIT.compare.hash(Order);",
+      "const Order = JIT.object({\n  id: JIT.string(),\n  lines: JIT.array(JIT.object({ sku: JIT.string(), quantity: JIT.number() })),\n});\n\nconst same = JIT.equal(Order);\nconst changes = JIT.diff(Order);\nconst fingerprint = JIT.hash(Order);",
     page: "/docs/reference/functions/equal",
     edges: { update: 0.4 },
   },
@@ -676,7 +724,7 @@ export const CONCEPTS: ConceptNode[] = [
       "O cache de compilação elimina trabalho de geração de código; hashes e índices eliminam trabalho de travessia repetida. São custos diferentes e são cacheados separadamente.",
     ],
     example:
-      "// ONE declaration, reused — this is what the compile cache is keyed by\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.compare.equal(User);\n\n// declaring a fresh schema per request reuses nothing and recompiles every time",
+      "// ONE declaration, reused — this is what the compile cache is keyed by\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.equal(User);\n\n// declaring a fresh schema per request reuses nothing and recompiles every time",
     page: "/docs/runtime/cache-hash-index",
     edges: { runtime: 0.5 },
   },
@@ -708,25 +756,25 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["migrate", "migrar", "migração", "upgrade", "atualizar versão", "2.0", "breaking", "removed", "removido"],
     terms: ["migrating", "removed", "replaced", "legacy", "facade"],
     apis: [],
-    fact: "2.0 removed the JIT.validator, JIT.model, JIT.mapper and JIT.serializer facades. Capabilities are reached through namespaces, and an aggregate is a plain object of artifacts.",
+    fact: "2.0 removed the JIT.validator, JIT.model, JIT.mapper and JIT.serializer facades. Each operation is a callable artifact, and an aggregate is a plain object of artifacts.",
     factPt:
-      "A 2.0 removeu as fachadas JIT.validator, JIT.model, JIT.mapper e JIT.serializer. As capacidades passam a ser alcançadas por namespaces, e um agregado é um objeto simples de artefatos.",
+      "A 2.0 removeu as fachadas JIT.validator, JIT.model, JIT.mapper e JIT.serializer. Cada operação é um artefato chamável, e um agregado é um objeto simples de artefatos.",
     mechanisms: [
       "`JIT.validator(User)` became the `JIT.validate.*` namespace: `is`, `parse`, `safeParse`, `issues`, `async`.",
-      "`JIT.equal`, `JIT.diff` and `JIT.hash` became `JIT.compare.equal`, `JIT.compare.diff` and `JIT.compare.hash`.",
+      "`JIT.equal`, `JIT.diff` and `JIT.hash` remain the canonical structural leaves; their `.compile()` call is optional warm-up.",
       "`JIT.mask` and `JIT.sanitize` became `JIT.security.mask` and `JIT.security.sanitize`.",
       "An aggregate is now written as an ordinary object literal of artifacts rather than through a facade constructor.",
       "Names that appear only in the migration guide are counter-examples, not usable code.",
     ],
     mechanismsPt: [
       "`JIT.validator(User)` virou o namespace `JIT.validate.*`: `is`, `parse`, `safeParse`, `issues`, `async`.",
-      "`JIT.equal`, `JIT.diff` e `JIT.hash` viraram `JIT.compare.equal`, `JIT.compare.diff` e `JIT.compare.hash`.",
+      "`JIT.equal`, `JIT.diff` e `JIT.hash` continuam sendo as operações estruturais canônicas; `.compile()` é apenas aquecimento opcional.",
       "`JIT.mask` e `JIT.sanitize` viraram `JIT.security.mask` e `JIT.security.sanitize`.",
       "Um agregado agora é escrito como um objeto literal comum de artefatos, não por um construtor de fachada.",
       "Nomes que aparecem só no guia de migração são contraexemplos, não código utilizável.",
     ],
     example:
-      "// 2.0 — capabilities are reached through namespaces\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User);        // was JIT.validator(User).is\nconst sameUser = JIT.compare.equal(User);    // was JIT.equal(User)\nconst safeUser = JIT.security.mask(User);    // was JIT.mask(User)\n\n// an aggregate is now a plain object literal\nconst artifacts = { isUser, sameUser, safeUser };",
+      "// 2.0 — one callable artifact per operation\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User); // was JIT.validator(User).is\nconst sameUser = JIT.equal(User);\nconst safeUser = JIT.security.mask(User); // was JIT.mask(User)\n\nconst artifacts = { isUser, sameUser, safeUser };",
     page: "/docs/guides/migrating-to-2",
     edges: { self: 0.3 },
   },
@@ -772,7 +820,7 @@ export const CONCEPTS: ConceptNode[] = [
       "Se validação é tudo que você precisa e ela não aparece no seu profile, o motivo para mudar é o argumento da declaração compartilhada, não velocidade.",
     ],
     example:
-      "// jit's distinguishing move: many operations from ONE declaration\nconst User = JIT.object({ id: JIT.string(), email: JIT.string().email() });\n\nconst isUser = JIT.validate.is(User);      // what a validator library gives you\nconst sameUser = JIT.compare.equal(User);  // and a deep-equal library\nconst cloneUser = JIT.clone(User);         // and a clone library\nconst toJson = JIT.json.stringify(User);   // and a serializer",
+      "// jit's distinguishing move: many operations from ONE declaration\nconst User = JIT.object({ id: JIT.string(), email: JIT.string().email() });\n\nconst isUser = JIT.validate.is(User);      // what a validator library gives you\nconst sameUser = JIT.equal(User);  // and a deep-equal library\nconst cloneUser = JIT.clone(User);         // and a clone library\nconst toJson = JIT.json.stringify(User);   // and a serializer",
     page: "/docs/reference/library-comparison",
     edges: { performance: 0.4 },
   },
@@ -848,7 +896,10 @@ const BY_ID = new Map(CONCEPTS.map((node) => [node.id, node]));
  * single words against its folded tokens, so "no" never fires inside "node".
  */
 const ALIASES: { words: string[]; id: string }[] = CONCEPTS.flatMap((node) =>
-  node.aliases.map((alias) => ({ words: alias.split(/\s+/).map(fold), id: node.id }))
+  node.aliases.map((alias) => ({
+    words: alias.split(/\s+/).map(fold),
+    id: node.id,
+  }))
 );
 
 export function conceptById(id: string): ConceptNode | undefined {
@@ -955,7 +1006,10 @@ function matchesWord(alias: string, present: Set<string>, words: string[]): bool
  * resolved to no concept and arrived with no ground truth attached. Every part
  * is kept alongside the whole, so `safeparse` still matches an alias of its own.
  */
-function questionWords(question: string): { words: string[]; sentence: string } {
+function questionWords(question: string): {
+  words: string[];
+  sentence: string;
+} {
   /** One entry per word the reader wrote, in order — multi-word aliases read this. */
   const spoken: string[] = [];
   /** Those plus every part of every identifier — single-word aliases read this. */

@@ -532,6 +532,234 @@ return { is: is };",
 }
 `;
 
+exports[`generated source snapshots > execution: JSON validation and Runtime Class construction 1`] = `
+{
+  "source": ""use strict";
+const __validator0 = ((__v0) => {
+  function safeParse(value) {
+    const issues = [];
+    let v1 = value;
+    let o2 = v1;
+    let b3;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+    } else {
+      let v4 = v1.id;
+      let o5 = v4;
+      if (v4 === undefined) {
+        o5 = __v0;
+      } else {
+        if (typeof v4 !== "string") {
+          issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+        } else {
+        }
+        o5 = v4;
+      }
+      let v6 = v1.name;
+      if (typeof v6 !== "string") {
+        issues[issues.length] = { path: "name", code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
+      } else {
+        if (v6.length < 2) {
+          issues[issues.length] = { path: "name", code: "too_small", expected: "length >= 2", message: "expected at least 2 characters" };
+        }
+      }
+      b3 = { "id": o5, "name": v6 };
+    }
+    if (b3 === undefined) { b3 = v1; }
+    o2 = b3;
+    if (issues.length !== 0) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: o2 };
+  }
+  return { safeParse: safeParse };
+})(__e0);
+return function execution(input) {
+  let value = input;
+  value = JSON.parse(value);
+  const __result0 = __validator0.safeParse(value);
+  if (!__result0.success) throw new __e1(__result0.issues);
+  value = __result0.data;
+  value = new __e2(value, true);
+  return value;
+}",
+  "stages": [
+    "json.decode",
+    "validate",
+    "construct",
+  ],
+}
+`;
+
+exports[`generated source snapshots > execution: JSON validation and filtered terminal aggregation 1`] = `
+""use strict";
+const __validator0 = ((__v0) => {
+  function is(value) {
+    let v1 = value;
+    if (!Array.isArray(v1)) {
+      return false;
+    }
+    for (let i3 = 0; i3 < v1.length; i3++) {
+      let v4 = v1[i3];
+      if (v4 === null || typeof v4 !== "object" || Array.isArray(v4)) {
+        return false;
+      }
+      let v6 = v4.id;
+      if (typeof v6 !== "number") {
+        return false;
+      }
+      if (!Number.isInteger(v6)) {
+        return false;
+      }
+      if (v6 <= 0) {
+        return false;
+      }
+      let v8 = v4.name;
+      if (typeof v8 !== "string") {
+        return false;
+      }
+      if (v8.length < 2) {
+        return false;
+      }
+      if (v8.length > 64) {
+        return false;
+      }
+      let v10 = v4.email;
+      if (typeof v10 !== "string") {
+        return false;
+      }
+      if (!__v0.test(v10)) {
+        return false;
+      }
+      let v12 = v4.role;
+      if (!((v12 === "admin") || (v12 === "user") || (v12 === "blocked"))) {
+        return false;
+      }
+      let v14 = v4.score;
+      if (v14 !== null) {
+        if (typeof v14 !== "number") {
+          return false;
+        }
+      }
+      let v16 = v4.tags;
+      if (!Array.isArray(v16)) {
+        return false;
+      }
+      if (v16.length > 8) {
+        return false;
+      }
+      for (let i18 = 0; i18 < v16.length; i18++) {
+        let v19 = v16[i18];
+        if (typeof v19 !== "string") {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  function safeParse(value) {
+    const issues = [];
+    let v1 = value;
+    if (!Array.isArray(v1)) {
+      issues[issues.length] = { path: "", code: "expected_array", expected: "array", message: "expected array", received: typeof v1 };
+    } else {
+      for (let i3 = 0; i3 < v1.length; i3++) {
+        let v4 = v1[i3];
+        if (v4 === null || typeof v4 !== "object" || Array.isArray(v4)) {
+          issues[issues.length] = { path: "[" + i3 + "]", code: "expected_object", expected: "object", message: "expected object", received: typeof v4 };
+        } else {
+          let v6 = v4.id;
+          if (typeof v6 !== "number") {
+            issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".id" : "id"), code: "expected_number", expected: "number", message: "expected number", received: typeof v6 };
+          } else {
+            if (!Number.isInteger(v6)) {
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".id" : "id"), code: "not_integer", expected: "integer", message: "expected an integer" };
+            }
+            if (v6 <= 0) {
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".id" : "id"), code: "not_positive", expected: "> 0", message: "expected a positive number" };
+            }
+          }
+          let v8 = v4.name;
+          if (typeof v8 !== "string") {
+            issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
+          } else {
+            if (v8.length < 2) {
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "too_small", expected: "length >= 2", message: "expected at least 2 characters" };
+            }
+            if (v8.length > 64) {
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "too_big", expected: "length <= 64", message: "expected at most 64 characters" };
+            }
+          }
+          let v10 = v4.email;
+          if (typeof v10 !== "string") {
+            issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".email" : "email"), code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
+          } else {
+            if (!__v0.test(v10)) {
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".email" : "email"), code: "invalid_format", expected: "email", message: "expected a valid email" };
+            }
+          }
+          let v12 = v4.role;
+          if (!((v12 === "admin") || (v12 === "user") || (v12 === "blocked"))) {
+            issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".role" : "role"), code: "invalid_union", expected: "union", message: "value matched no union option" };
+          }
+          let v14 = v4.score;
+          if (v14 !== null) {
+            if (typeof v14 !== "number") {
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".score" : "score"), code: "expected_number", expected: "number", message: "expected number", received: typeof v14 };
+            } else {
+            }
+          }
+          let v16 = v4.tags;
+          if (!Array.isArray(v16)) {
+            issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".tags" : "tags"), code: "expected_array", expected: "array", message: "expected array", received: typeof v16 };
+          } else {
+            if (v16.length > 8) {
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".tags" : "tags"), code: "too_big", expected: "length <= 8", message: "expected at most 8 items" };
+            }
+            for (let i18 = 0; i18 < v16.length; i18++) {
+              let v19 = v16[i18];
+              if (typeof v19 !== "string") {
+                issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".tags" : "tags") + "[" + i18 + "]", code: "expected_string", expected: "string", message: "expected string", received: typeof v19 };
+              } else {
+              }
+            }
+          }
+        }
+      }
+    }
+    if (issues.length !== 0) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: v1 };
+  }
+  return { is: is, safeParse: safeParse };
+})(__e0);
+const __query1 = ((__q0) => {
+  return (function query(value) {
+    const len = value.length;
+    let acc = 0;
+    for (let i = 0; i < len; i++) {
+      const item = value[i];
+      if ((item.role === __q0)) {
+        acc = (acc + item.id);
+      }
+    }
+    return acc;
+  });
+})(__e2);
+return function execution(input) {
+  let value = input;
+  value = JSON.parse(value);
+  if (!__validator0.is(value)) {
+    const __result0 = __validator0.safeParse(value);
+    if (!__result0.success) throw new __e1(__result0.issues);
+    value = __result0.data;
+  }
+  value = __query1(value);
+  return value;
+}"
+`;
+
 exports[`generated source snapshots > lazy query and chunked JSON backends 1`] = `
 {
   "iterator": "(function() {

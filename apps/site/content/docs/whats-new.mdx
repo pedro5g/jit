@@ -26,7 +26,7 @@ const Category = JIT.object({
 
 const isCategory = JIT.validate.is(Category);
 const cloneCategory = JIT.clone(Category);
-const diffCategory = JIT.compare.diff(Category);
+const diffCategory = JIT.diff(Category);
 ```
 
 Mutual recursion works, and so does a schema built from a recursive JSON
@@ -78,8 +78,9 @@ pipelines that end in validation — not only the `validate.*` factories.
 
 ## One capability API
 
-Namespaces are the only access path: `JIT.validate.*`, `JIT.compare.*`,
-`JIT.security.*`, `JIT.json.*`, `JIT.binary.*`. `JIT.compile(schema, {...})`
+Each operation has one canonical callable path: validation and transport use
+`JIT.validate.*`, `JIT.json.*`, and `JIT.binary.*`; structural leaves use
+`JIT.equal`, `JIT.diff`, `JIT.hash`, and `JIT.clone`. `JIT.compile(schema, {...})`
 is replaced by a plain object of artifacts, and the AOT generator reads a
 declaration file literally instead of requiring a marker call:
 
@@ -87,7 +88,7 @@ declaration file literally instead of requiring a marker call:
 export const User = {
   is: JIT.validate.is(UserSchema),
   parse: JIT.validate.parse(UserSchema),
-  equal: JIT.compare.equal(UserSchema),
+  equal: JIT.equal(UserSchema),
   findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")),
 };
 ```

@@ -6,7 +6,8 @@
 
 JIT is a compiled TypeScript data engine. Describe a schema once and compile
 specialized validation, equality, cloning, diffing, hashing, updates, queries,
-mapping, serialization, codecs, streaming, and binary processing operations.
+mapping, serialization, codecs, streaming, binary processing, and runtime
+domain classes.
 
 ```ts
 import { JIT } from "@jit-compiler/jit/runtime";
@@ -27,23 +28,38 @@ Runtime JIT compiles and caches an operation on first use. AOT reads your
 declaration files and emits standalone, typed, import-free functions, so the
 compiler never ships in the production bundle.
 
+The same schema can also be materialized as a class without reflection. Defaults
+belong to creation input; hydration requires complete persisted state.
+
+```ts
+const User = JIT.class(
+  JIT.object({ id: JIT.string().default("generated"), name: JIT.string() }),
+);
+
+const parseUser = JIT.json.parse(User).validate();
+const user = parseUser('{"name":"Ada"}');
+
+user instanceof User; // true
+```
+
 ## The API
 
-Every capability is reached through exactly one namespace. There are no root
-aliases and no `.compile()` step — a compiled artifact *is* the function.
+Every capability has a primary namespace and no `.compile()` step is needed —
+a compiled artifact _is_ the function. Domain primitives are top-level JIT
+factories, matching the schema factories they compose.
 
-| Namespace      | Members                                                              |
-| -------------- | -------------------------------------------------------------------- |
-| `JIT.validate` | `is`, `parse`, `safeParse`, `issues`, `async.parse`, `async.safeParse` |
-| `JIT.compare`  | `equal`, `diff`, `hash`                                              |
-| `JIT.security` | `mask`, `sanitize`                                                   |
-| `JIT.json`     | `parse`, `stringify`, `stringifyChunks`, `value`                     |
-| `JIT.binary`   | `encode`, `decode`, `codec`                                          |
-| root           | `clone`, `format`, `jsonSchema`, `mock`, `ops`, `from`, `map`, `query`, `transform`, `update`, `watch`, `stream`, `process`, `dto`, plus every schema factory |
+| Namespace      | Members                                                                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JIT.validate` | `is`, `parse`, `safeParse`, `issues`, `async.parse`, `async.safeParse`                                                                                        |
+| `JIT.compare`  | `equal`, `diff`, `hash`                                                                                                                                       |
+| `JIT.security` | `mask`, `sanitize`                                                                                                                                            |
+| `JIT.json`     | `parse`, `stringify`, `stringifyChunks`, `value`                                                                                                              |
+| `JIT.binary`   | `encode`, `decode`, `codec`                                                                                                                                   |
+| root           | `valueObject`, `entity`, `aggregateRoot`, `domainEvent`, `clone`, `format`, `jsonSchema`, `mock`, `ops`, `from`, `map`, `query`, `transform`, `update`, `watch`, `stream`, `process`, `dto`, plus every schema factory |
 
 ```ts
 const isUser = JIT.validate.is(User);
-const equalUser = JIT.compare.equal(User);
+const equalUser = JIT.equal(User);
 const maskUser = JIT.security.mask(User);
 const toJson = JIT.json.stringify(User);
 
@@ -79,15 +95,48 @@ Every compiled validation artifact also implements
 [Standard Schema](https://standardschema.dev), so it can be handed straight to
 any consumer in the ecosystem.
 
+## Domain primitives
+
+Value objects are frozen structural values; entities have explicit identity;
+aggregate roots add compiled controlled updates and an ordered pending-event
+buffer. Domain events are immutable, versioned schema-backed values.
+
+```ts
+const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+  version: 1,
+  payload: JIT.object({ orderId: JIT.string() }),
+});
+
+const OrderBase = JIT.aggregateRoot(
+  JIT.object({
+    id: JIT.string().readonly(),
+    status: JIT.enum(["draft", "confirmed"] as const),
+  }),
+  { id: "id" },
+);
+
+class Order extends OrderBase {
+  confirm() {
+    this.update({ status: "confirmed" });
+    this.raise(OrderConfirmed.create({ orderId: this.id }));
+  }
+}
+```
+
+See the [DDD guide](apps/site/content/docs/guides/domain-driven-design.mdx) for
+persistence, hydration and AOT boundaries.
+
 A transformation can be declared instead of written as a callback, which lets
 the emitter write it into the generated source — and, more importantly, lets
 AOT generate it at all, since a closure over outer scope cannot be serialized:
 
 ```ts
-const Handle = JIT.string().min(3).pipe(JIT.ops.trim().lowercase().slice(0, 20));
+const Handle = JIT.string()
+  .min(3)
+  .pipe(JIT.ops.trim().lowercase().slice(0, 20));
 ```
 
-Queries are builders that *are* the query, with alternative result shapes
+Queries are builders that _are_ the query, with alternative result shapes
 behind `.to`:
 
 ```ts
@@ -163,7 +212,9 @@ const UserMethods: {
   readonly is: (value: unknown) => value is User;
   readonly toJson: (value: User) => string;
   readonly toObject: (json: string) => User;
-} = /*#__PURE__*/ Object.freeze({ /* … */ });
+} = /*#__PURE__*/ Object.freeze({
+  /* … */
+});
 
 export { UserMethods, isUser };
 ```
@@ -216,6 +267,7 @@ import { JIT } from "jsr:@jit/compiler/runtime";
 - [Artifact tokens and Rust CLI](apps/site/content/docs/aot/artifact-cli.mdx)
 - [MCP server](docs/features/mcp-server.md)
 - [AOT audit](docs/aot/audit.md)
+- [Next-major migration](docs/migration/next-major.mdx)
 - [Release process](docs/maintainers/releases.md)
 - [Changelog](CHANGELOG.md)
 

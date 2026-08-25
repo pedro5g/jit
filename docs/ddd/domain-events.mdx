@@ -1,0 +1,18 @@
+# Domain events
+
+A domain event is an immutable, validated, serializable, and versioned fact:
+
+```ts
+const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+  version: 1,
+  payload: JIT.object({ orderId: JIT.string() }),
+});
+
+const event = OrderConfirmed.create({ orderId: "o_1" });
+const json = JIT.json.stringify(OrderConfirmed)(event);
+const restored = JIT.json.parse(OrderConfirmed).validate()(json);
+```
+
+The envelope contains `id`, literal `type`, literal `version`, `occurredAt: Date`, and `payload`. `create()` generates event metadata; `hydrate()` requires and validates the complete envelope. JSON hydration restores `occurredAt` to a `Date` in runtime and AOT.
+
+Domain events describe facts internal to the domain. They are not integration-event contracts and do not imply event sourcing, replay, snapshots, or an event-store adapter.

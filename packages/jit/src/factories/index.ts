@@ -18,6 +18,10 @@ export type Typeof<TSchemaLike> = import("../core/ats/typeof.js").Typeof<TSchema
 export type Input<TSchemaLike> = import("../core/ats/input.js").Input<TSchemaLike>;
 /** Resolves the immutable update patch accepted by a schema or builder. */
 export type Update<TSchemaLike> = import("../core/ats/input.js").Update<TSchemaLike>;
+/** Resolves complete persisted state accepted by `hydrate()`. */
+export type Hydrate<TSchemaLike> = import("../core/ats/representations.js").Hydrate<TSchemaLike>;
+/** Resolves the transport representation of a schema or Runtime Type. */
+export type Wire<TSchemaLike> = import("../core/ats/representations.js").Wire<TSchemaLike>;
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export {
@@ -27,12 +31,21 @@ export {
   class,
   type DomainEvent,
   domainEvent,
+  type EventPublisher,
   entity,
   type RuntimeClass,
+  type StandardEvent,
   valueObject,
 } from "./class.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
+export {
+  type CqrsInput,
+  type CqrsInputOptions,
+  type CqrsQuery,
+  cqrs,
+  type StandardQuery,
+} from "./cqrs.js";
 export { dto } from "./dto.js";
 export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
@@ -64,8 +77,11 @@ export {
   binary,
   clone,
   compare,
+  diff,
+  equal,
   format,
   from,
+  hash,
   is,
   json,
   map,

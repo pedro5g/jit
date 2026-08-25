@@ -214,7 +214,7 @@ export const isUser = JIT.validate.is(User);
     ],
     problem:
       "Two versions of the same shape have to be compared, and a generic deep-equal walks both values with no idea what the shape is.",
-    apis: ["JIT.compare.equal", "JIT.compare.diff", "JIT.compare.hash"],
+    apis: ["JIT.equal", "JIT.diff", "JIT.hash"],
     example: `import { JIT } from "@jit-compiler/jit/runtime";
 
 const Order = JIT.object({
@@ -223,9 +223,9 @@ const Order = JIT.object({
   lines: JIT.array(JIT.object({ sku: JIT.string(), quantity: JIT.number() })),
 });
 
-const same = JIT.compare.equal(Order);
-const changes = JIT.compare.diff(Order);
-const fingerprint = JIT.compare.hash(Order);
+const same = JIT.equal(Order);
+const changes = JIT.diff(Order);
+const fingerprint = JIT.hash(Order);
 
 if (!same(previous, next)) {
   changes(previous, next); // the paths that actually differ

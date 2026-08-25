@@ -14,10 +14,13 @@ import type { SchemaInput, StandardSchemaProps } from "../core/builder/index.js"
 import { getStandardSchema, unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
-import { getRuntimeClassTarget } from "./class.js";
 import { getQueryProgram, type QueryConditionBuilder, query } from "./query.js";
 
 type FunctionLike = (...args: never[]) => unknown;
+
+type NumericElementKey<TElement> = {
+  [TKey in Extract<keyof TElement, string>]: TElement[TKey] extends number ? TKey : never;
+}[Extract<keyof TElement, string>];
 
 const OPERATION_ARTIFACTS = new WeakMap<ATS.AnyTypeSchema, Map<string, CallableArtifact<FunctionLike>>>();
 
@@ -81,6 +84,11 @@ export type CollectionArtifact<
   update(patch: UpdatePatch<TElement>): CollectionArtifact<TInput, TElement, TSchema>;
   mask(): CollectionArtifact<TInput, TElement, TSchema>;
   sanitize(): CollectionArtifact<TInput, TElement, TSchema>;
+  count(): ExecutionArtifact<TInput, number>;
+  sum<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number>;
+  avg<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number | undefined>;
+  min<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number | undefined>;
+  max<TKey extends NumericElementKey<TElement>>(field: TKey): ExecutionArtifact<TInput, number | undefined>;
   readonly to: CollectionSinks<TInput, TElement>;
 };
 
@@ -114,6 +122,11 @@ interface CollectionState<TInput, TElement, TSchema extends ATS.ArraySchema<ATS.
 interface RuntimeQueryBuilder {
   filter(predicate: unknown): RuntimeQueryBuilder;
   select(...fields: string[]): RuntimeQueryBuilder;
+  count(): RuntimeQueryBuilder;
+  sum(field: string): RuntimeQueryBuilder;
+  avg(field: string): RuntimeQueryBuilder;
+  min(field: string): RuntimeQueryBuilder;
+  max(field: string): RuntimeQueryBuilder;
   compile(): (values: readonly unknown[]) => unknown;
 }
 
@@ -234,7 +247,6 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues"
 ): CallableArtifact<FunctionLike> {
-  const classTarget = getRuntimeClassTarget(schema);
   const unwrapped = unwrapSchema(schema);
   const output = operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value";
   const plan = freezePlan(unwrapped, [
@@ -264,19 +276,8 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
       case "is":
         return compileValidatorSelection(unwrapped, ["is"] as const).is as FunctionLike;
       case "parse":
-        if (classTarget) {
-          const parse = compileValidatorSelection(unwrapped, ["parse"] as const).parse;
-          return (value: unknown) => classTarget.hydrate(parse(value));
-        }
         return compileValidatorSelection(unwrapped, ["parse"] as const).parse as FunctionLike;
       case "safeParse":
-        if (classTarget) {
-          const safeParse = compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse;
-          return (value: unknown) => {
-            const result = safeParse(value);
-            return result.success ? { success: true as const, data: classTarget.hydrate(result.data) } : result;
-          };
-        }
         return compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse as FunctionLike;
       case "parseAsync":
         return compileValidatorSelection(unwrapped, ["parseAsync"] as const).parseAsync as FunctionLike;
@@ -370,6 +371,7 @@ export function appendValidation<TInput, TOutput, TSchema extends ATS.AnyTypeSch
   artifact: ExecutionArtifact<TInput, TOutput>,
   schema: TSchema
 ): SchemaArtifact<TInput, TSchema> {
+  const construct = runtimeConstructStage(schema);
   const plan = freezePlan(schema, [
     ...artifact.plan.stages,
     {
@@ -382,6 +384,7 @@ export function appendValidation<TInput, TOutput, TSchema extends ATS.AnyTypeSch
       provides: ["schema-validated"],
       effects: THROWING_EFFECTS,
     },
+    ...construct,
   ]);
   const next = createExecutionArtifact<(value: TInput) => ATS.TypeofSchema<TSchema>>(
     plan,
@@ -392,6 +395,25 @@ export function appendValidation<TInput, TOutput, TSchema extends ATS.AnyTypeSch
   // input the pipeline accepts rather than over the schema's own value.
   attachStandardSchema(next, schema, plan);
   return artifactForSchema(next, schema) as SchemaArtifact<TInput, TSchema>;
+}
+
+function runtimeConstructStage(schema: ATS.AnyTypeSchema): readonly ExecutionStage[] {
+  if (schema.type !== TypeName.runtimeType) return [];
+
+  const runtimeType = schema as ATS.RuntimeTypeSchema;
+
+  return [
+    {
+      kind: "construct",
+      input: "value",
+      output: "value",
+      schema: runtimeType,
+      target: runtimeType.def.materialize,
+      requires: ["schema-validated"],
+      provides: ["materialized"],
+      effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: true },
+    },
+  ];
 }
 
 export function jsonStringify<TSchema extends ATS.AnyTypeSchema>(
@@ -787,9 +809,52 @@ function createCollectionArtifact<TInput, TElement, TSchema extends ATS.ArraySch
       enumerable: false,
       value: () => securedCollection(state, "sanitize"),
     },
+    count: { enumerable: false, value: () => aggregateCollection(state, "count") },
+    sum: { enumerable: false, value: (field: string) => aggregateCollection(state, "sum", field) },
+    avg: { enumerable: false, value: (field: string) => aggregateCollection(state, "avg", field) },
+    min: { enumerable: false, value: (field: string) => aggregateCollection(state, "min", field) },
+    max: { enumerable: false, value: (field: string) => aggregateCollection(state, "max", field) },
     to: { enumerable: true, value: collectionSinks(compiled, state.schema) },
   });
   return Object.freeze(artifact);
+}
+
+function aggregateCollection<TInput, TElement, TSchema extends ATS.ArraySchema<ATS.AnyTypeSchema>>(
+  state: CollectionState<TInput, TElement, TSchema>,
+  operation: "count" | "sum" | "avg" | "min" | "max",
+  key?: string
+): ExecutionArtifact<TInput, number | undefined> {
+  const builder = operation === "count" ? state.builder.count() : state.builder[operation](key as string);
+  const program = getQueryProgram(builder as object);
+
+  if (!program) throw new JITError("INVALID_OPERATION", "aggregate pipeline lost its declarative program");
+  const schema = aggregateResultSchema(operation);
+  const plan = freezePlan(schema, [
+    ...state.plan.stages,
+    {
+      kind: "aggregate",
+      input: "value",
+      output: "value",
+      source: state.querySource,
+      schema,
+      operation,
+      ...(key === undefined ? {} : { key }),
+      program,
+      requires: [],
+      provides: ["aggregated"],
+      effects: NO_EFFECTS,
+    },
+  ]);
+  return createExecutionArtifact(plan, () => lowerExecutionPlan(plan) as (value: TInput) => number | undefined);
+}
+
+function aggregateResultSchema(operation: "count" | "sum" | "avg" | "min" | "max"): ATS.AnyTypeSchema {
+  const number = createSchema(TypeName.number, {});
+
+  if (operation === "count" || operation === "sum") return number;
+  return createSchema(TypeName.union, {
+    schemas: [number, createSchema(TypeName.undefined, {})],
+  });
 }
 
 function valueSinks<TInput, TOutput, TSchema extends ATS.AnyTypeSchema>(

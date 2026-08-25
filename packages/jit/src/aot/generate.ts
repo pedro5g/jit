@@ -4,11 +4,13 @@ import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
 import { emitDiffSource } from "../compiler/diff.js";
 import { emitEqualSource } from "../compiler/equal.js";
+import { optimizeExecutionPlan } from "../compiler/execution-optimize.js";
 import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
 import { compileJsonSchema } from "../compiler/json-schema/index.js";
 import {
+  emitQueryArraySource,
   emitQueryAsyncIteratorSource,
   emitQueryIteratorSource,
   emitQueryVisitorSource,
@@ -18,6 +20,7 @@ import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/b
 import { emitMapperSource } from "../compiler/mapper.js";
 import { emitMaskSource } from "../compiler/mask.js";
 import { emitMockSource, MOCK_HELPERS } from "../compiler/mock.js";
+import { buildMutationPlan, emitMutationPlanBody } from "../compiler/mutation-plan.js";
 import { emitTransformSource } from "../compiler/object-ops.js";
 import { emitQuerySource, type QueryProgram } from "../compiler/query.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
@@ -216,6 +219,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   const tsTypes: string[] = [];
   const exportNames: string[] = [];
   const typeNames = new Map<ATS.AnyTypeSchema, string>();
+  // A construct stage may refer to a Runtime Class emitted by this module.
+  // Keep the source-level binding instead of serializing the runtime
+  // constructor as an external closure value.
+  const classBindings = new Map<unknown, string>();
+  const classArtifacts = new Map<unknown, Extract<CompiledArtifact, { readonly kind: "class" }>>();
   const publicNames = new Set([...Object.keys(plan.artifacts), ...Object.keys(plan.groups)]);
   const internalNames = new Set<string>();
   const exported = options.exported ?? new Set<string>();
@@ -224,6 +232,16 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   let needsHashHelpers = false;
   let needsMockHelpers = false;
   let needsCallHelper = false;
+  let needsAggregateType = false;
+
+  for (const [name, value] of Object.entries(plan.artifacts)) {
+    const artifact = getArtifact(value);
+
+    if (isValidIdentifier(name) && artifact?.kind === "class") {
+      classBindings.set(value, name);
+      classArtifacts.set(value, artifact);
+    }
+  }
 
   // Every declared schema is named first, so a schema nested inside another
   // is emitted as its own name instead of being inlined a second time.
@@ -334,7 +352,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     annotate: boolean
   ): EmittedBinding | undefined {
     const type = importedType ?? artifactType(artifact);
-    const declaration = `const ${binding}${annotate && ts ? `: ${type}` : ""} =`;
+    const assertedClassType = artifact.kind === "class" && artifact.aggregate && annotate && ts ? type : undefined;
+    const declaration = `const ${binding}${annotate && ts && assertedClassType === undefined ? `: ${type}` : ""} =`;
 
     if (importedType !== undefined) needsCallHelper = needsCallHelper || importedType.startsWith("__JitCall<");
 
@@ -343,7 +362,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "execution")
       return emitExecutionArtifact(binding, declaration, artifact.plan, reportName, type);
     if (artifact.kind === "query-plan") return emitQueryPlanArtifact(binding, declaration, artifact, reportName, type);
-    if (artifact.kind === "class") return emitClassArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "class")
+      return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
 
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
 
@@ -368,9 +389,49 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "operation") return operationType(artifact, typeNames);
     if (artifact.kind === "execution") return executionPlanType(artifact.plan, typeNames);
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
+    if (artifact.kind === "cqrs-input")
+      return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
-      return `{ new (state: ${value}): ${value}; create(input: unknown): ${value}; hydrate(state: ${value}): ${value} }`;
+      if (artifact.domainEvent) {
+        const object = resolveObjectSchema(artifact.schema);
+        const payload = object ? emitTypeScriptType(object.def.props.payload, typeNames) : "unknown";
+        const event = `${value} & { readonly "~event": { readonly version: 1; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly schemaVersion: ${artifact.domainEvent.version} } }`;
+
+        return `{ new (state: ${value}): ${event}; create(input: ${payload}): ${event}; hydrate(state: ${value}): ${event}; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly version: ${artifact.domainEvent.version} }`;
+      }
+      const methods: string[] = [];
+      const capabilities = new Set(artifact.capabilities);
+      if (capabilities.has("equals")) methods.push("equals(other: unknown): boolean;");
+      if (capabilities.has("hashCode")) methods.push("hashCode(): number;");
+      if (capabilities.has("diff"))
+        methods.push(
+          'diff(other: unknown): ({ readonly type: "add" | "update"; readonly path: readonly PropertyKey[]; readonly value: unknown } | { readonly type: "remove"; readonly path: readonly PropertyKey[] })[];'
+        );
+      if (capabilities.has("with")) {
+        methods.push(`with(patch: ${classUpdateType(artifact.schema)}): this;`);
+      }
+      if (artifact.capabilities.some((capability) => capability.startsWith("identity:"))) {
+        methods.push("identity(): unknown;", "sameIdentity(other: unknown): boolean;");
+      }
+      const mixins: string[] = [];
+      if (methods.length > 0) mixins.push(`{ ${methods.join(" ")} }`);
+      if (artifact.aggregate) {
+        needsAggregateType = true;
+        mixins.push(`__JitAggregate<${classUpdateType(artifact.schema)}>`);
+        if (artifact.mutation?.deletedAt !== undefined)
+          mixins.push("{ softDelete(): void; restore(): void; readonly isDeleted: boolean }");
+      }
+      const instance = mixins.length === 0 ? value : `${value} & ${mixins.join(" & ")}`;
+      const factories = [
+        artifact.factories.create === false
+          ? ""
+          : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, input: unknown): InstanceType<TThis>;`,
+        artifact.factories.hydrate === false
+          ? ""
+          : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${value}): InstanceType<TThis>;`,
+      ].filter(Boolean);
+      return `{ new (state: ${value}): ${instance}; ${factories.join(" ")} }`;
     }
     return "unknown";
   }
@@ -381,7 +442,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     declaration: string,
     artifact: Extract<CompiledArtifact, { readonly kind: "class" }>,
     reportName: string,
-    type: string
+    type: string,
+    assertedType: string | undefined
   ): EmittedBinding | undefined {
     const base = resolveObjectSchema(artifact.schema);
 
@@ -401,11 +463,43 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     );
 
     if (!validator) return undefined;
+    const hydrateValidator = artifact.domainEvent
+      ? validator
+      : emitValidatorBinding(binding, artifact.schema, reportName, "class.hydrate", {
+          is: false,
+          safeParse: true,
+          resolveDefaults: false,
+        });
+    if (!hydrateValidator) return undefined;
     needsValidationError = true;
     const helpers: string[] = [];
     const methods: string[] = [];
     const capabilities = new Set(artifact.capabilities);
     const fields = Object.keys(base.def.props);
+    const accessorByKey = new Map(artifact.accessors?.map((accessor) => [accessor.key, accessor]));
+    const slots = new Map<string, string>();
+    let slotIndex = 0;
+
+    for (const field of fields) {
+      if (accessorByKey.get(field)?.field === "private") slots.set(field, `#p${slotIndex++}`);
+    }
+    const readField = (field: string) => {
+      const slot = slots.get(field);
+      return slot ? `this.${slot}` : `this[${JSON.stringify(field)}]`;
+    };
+    const writeField = (field: string, value: string) => `${readField(field)} = ${value};`;
+    const accessorDefinitions = (artifact.accessors ?? [])
+      .filter((accessor) => accessor.field === "private")
+      .flatMap((accessor) => {
+        const slot = slots.get(accessor.key) as string;
+        const definitions: string[] = [];
+
+        if (accessor.get !== false)
+          definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
+        if (accessor.set !== false)
+          definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
+        return definitions;
+      });
 
     if (capabilities.has("equals")) {
       const source = tryEmit(reportName, "class.equals", skipped, () => emitEqualSource(artifact.schema));
@@ -428,11 +522,32 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     }
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update: string | undefined;
+    let aggregateUpdateBody: string | undefined;
     if (needsUpdate) {
-      const source = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(artifact.schema));
-      if (!source) return undefined;
-      update = internalIdentifier(`${binding}_update`);
-      helpers.push(`const ${update} = ${asExpression(source, "update")};`);
+      if (artifact.aggregate) {
+        const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
+        const mutation = buildMutationPlan({
+          fields,
+          readonlyFields,
+          ...(artifact.mutation?.updatedAt === undefined ? {} : { updatedAt: artifact.mutation.updatedAt }),
+          ...(artifact.mutation?.version === undefined ? {} : { version: artifact.mutation.version }),
+        });
+        const updates = new Map<string, string>();
+        for (let index = 0; index < mutation.mutableFields.length; index++) {
+          const field = mutation.mutableFields[index];
+          const fieldUpdate = internalIdentifier(`${binding}_update_${index}`);
+          const source = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(base.def.props[field]));
+          if (!source) return undefined;
+          helpers.push(`const ${fieldUpdate} = ${asExpression(source, "update")};`);
+          updates.set(field, fieldUpdate);
+        }
+        aggregateUpdateBody = emitMutationPlanBody(mutation, updates);
+      } else {
+        const source = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(artifact.schema));
+        if (!source) return undefined;
+        update = internalIdentifier(`${binding}_update`);
+        helpers.push(`const ${update} = ${asExpression(source, "update")};`);
+      }
     }
     if (capabilities.has("with") && update)
       methods.push(`with(patch) { return new this.constructor(${update}(this, patch)); }`);
@@ -444,20 +559,25 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         `sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this[${key}], other[${key}]); }`
       );
     }
-    if (artifact.aggregate && update) {
-      const assignments = fields
-        .map((field) => `this[${JSON.stringify(field)}] = next[${JSON.stringify(field)}];`)
-        .join(" ");
+    if (artifact.aggregate && aggregateUpdateBody) {
       methods.push(
-        `update(patch) { const next = ${update}(this, patch); ${assignments} }`,
+        `update(patch) { ${aggregateUpdateBody} }`,
         "raise(event) { this.__jitEvents.push(event); }",
         "peekEvents() { return this.__jitEvents.slice(); }",
-        "pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }"
+        "pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }",
+        "async commit(publisher) { const pending = this.__jitEvents; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); this.__jitEvents.splice(0, pending.length); }"
       );
     }
-    const assignments = fields
-      .map((field) => `this[${JSON.stringify(field)}] = state[${JSON.stringify(field)}];`)
-      .join(" ");
+    if (artifact.aggregate && artifact.mutation?.deletedAt !== undefined) {
+      const deletedAt = artifact.mutation.deletedAt;
+      const updatedAt = artifact.mutation.updatedAt;
+      methods.push(
+        `softDelete() { const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "now")}`} }`,
+        `restore() { ${writeField(deletedAt, "null")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
+        `get isDeleted() { return ${readField(deletedAt)} !== null; }`
+      );
+    }
+    const assignments = fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
     const events = artifact.aggregate
       ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });'
       : "";
@@ -465,26 +585,35 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const abstractGuard = artifact.abstract
       ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); `
       : "";
-    const eventCreate = artifact.domainEvent
+    const create = artifact.domainEvent
       ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data });`
-      : `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
-    const eventHydrate = artifact.domainEvent
-      ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string" || !(state.occurredAt instanceof Date)) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, payload: result.data });`
-      : `const result = ${validator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
+      : "return new this(input);";
+    const hydrate = artifact.domainEvent
+      ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data });`
+      : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
+    const constructorSource = artifact.domainEvent
+      ? `constructor(state) { ${assignments}${events}${freeze} }`
+      : `constructor(input, validated) { const state = validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
-    js.push(`  ${helpers.join("\n  ")}`);
+    if (helpers.length > 0) js.push(`  ${helpers.join("\n  ")}`);
     js.push(`  return class ${binding} {`);
-    js.push(`    constructor(state) { ${assignments}${events}${freeze} }`);
-    js.push(`    static create(input) { ${abstractGuard}${eventCreate} }`);
-    js.push(`    static hydrate(state) { ${abstractGuard}${eventHydrate} }`);
+    js.push(...[...slots.values()].map((slot) => `    ${slot};`));
+    js.push(`    ${constructorSource}`);
+    if (artifact.factories.create !== false)
+      js.push(`    static ${classMemberName(artifact.factories.create)}(input) { ${abstractGuard}${create} }`);
+    if (artifact.factories.hydrate !== false)
+      js.push(`    static ${classMemberName(artifact.factories.hydrate)}(state) { ${abstractGuard}${hydrate} }`);
     if (artifact.domainEvent)
       js.push(
         `    static type = ${JSON.stringify(artifact.domainEvent.type)};`,
-        `    static version = ${artifact.domainEvent.version};`
+        `    static version = ${artifact.domainEvent.version};`,
+        `    static ["~event"] = /*#__PURE__*/ Object.freeze({ version: 1, type: ${JSON.stringify(artifact.domainEvent.type)}, schemaVersion: ${artifact.domainEvent.version} });`,
+        `    get ["~event"]() { return ${binding}["~event"]; }`
       );
+    js.push(...accessorDefinitions.map((definition) => `    ${definition}`));
     js.push(...methods.map((method) => `    ${method}`));
     js.push("  };");
-    js.push("})();");
+    js.push(`})()${assertedType === undefined ? "" : ` as unknown as ${assertedType}`};`);
     return { binding, type };
   }
 
@@ -541,10 +670,23 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     schema: ATS.AnyTypeSchema,
     reportName: string,
     operation: string,
-    selection: { readonly is: boolean; readonly safeParse: boolean }
+    selection: {
+      readonly is: boolean;
+      readonly safeParse: boolean;
+      readonly resolveDefaults?: boolean;
+      readonly materializeRuntimeTypes?: boolean;
+    }
   ): string | undefined {
     const validator = tryEmit(reportName, operation, skipped, () =>
-      emitValidator(schema, { is: selection.is, safeParse: selection.safeParse, safeParseAsync: false })
+      emitValidator(schema, {
+        is: selection.is,
+        safeParse: selection.safeParse,
+        safeParseAsync: false,
+        ...(selection.resolveDefaults === undefined ? {} : { resolveDefaults: selection.resolveDefaults }),
+        ...(selection.materializeRuntimeTypes === undefined
+          ? {}
+          : { materializeRuntimeTypes: selection.materializeRuntimeTypes }),
+      })
     );
 
     if (!validator) return undefined;
@@ -750,7 +892,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           ? emitQueryAsyncIteratorSource(artifact.schema, program)
           : artifact.mode === "visitor"
             ? emitQueryVisitorSource(artifact.schema, program)
-            : emitQuerySource(artifact.schema, program)
+            : hasIncrementalQueryNodes(program)
+              ? emitQueryArraySource(artifact.schema, program)
+              : emitQuerySource(artifact.schema, program)
     );
 
     if (!source) return undefined;
@@ -769,9 +913,53 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return undefined;
     }
 
+    const standard = artifact.standard === undefined ? undefined : JSON.stringify(artifact.standard);
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push(...inlined.map((line) => `  ${line}`));
-    js.push(...indentBlock(`return (${source});`));
+    js.push(
+      ...indentBlock(
+        standard === undefined
+          ? `return (${source});`
+          : `const query = (${source}); Object.defineProperty(query, "~query", { value: ${standard} }); return query;`
+      )
+    );
+    js.push("})();");
+    return { binding, type };
+  }
+
+  function hasIncrementalQueryNodes(program: LazyQueryProgram): boolean {
+    return program.nodes.some((node) =>
+      [
+        "flatMap",
+        "take",
+        "drop",
+        "takeWhile",
+        "dropWhile",
+        "chunk",
+        "window",
+        "pairwise",
+        "scan",
+        "groupAdjacentBy",
+      ].includes(node.kind)
+    );
+  }
+
+  function emitCqrsInputArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "cqrs-input" }>,
+    reportName: string,
+    type: string
+  ): EmittedBinding | undefined {
+    const definition = JSON.stringify(artifact.definition);
+    if (definition === undefined) {
+      skipped.push({ schema: reportName, operation: "cqrs-input", reason: "CQRS definition cannot be serialized" });
+      return undefined;
+    }
+    const parserSource = artifact.source.replace("return function parse", "const parse = function parse");
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...indentBlock(parserSource));
+    js.push(`  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse });`);
     js.push("})();");
     return { binding, type };
   }
@@ -783,7 +971,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     reportName: string,
     type: string
   ): EmittedBinding | undefined {
-    const stages = plan.stages;
+    const stages = optimizeExecutionPlan(plan).stages;
     const emitted = { binding, type };
     const validateStage = stages.find((stage) => stage.kind === "validate");
     const hasJsonDecode = stages.some((stage) => stage.kind === "json.decode");
@@ -792,6 +980,21 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const hasBinaryEncode = stages.some((stage) => stage.kind === "binary.encode");
     const operationStage = stages.find((stage) => stage.kind === "operation");
     const mapStage = stages.find((stage) => stage.kind === "map");
+    const constructStage = stages.find((stage) => stage.kind === "construct");
+
+    const constructBinding = constructStage ? classBindings.get(constructStage.target) : undefined;
+    const constructArtifact = constructStage ? classArtifacts.get(constructStage.target) : undefined;
+
+    // Classes are co-emitted as named sibling artifacts. A pipeline may use
+    // that declaration directly, but never captures a runtime constructor.
+    if (constructStage && !constructBinding) {
+      skipped.push({
+        schema: reportName,
+        operation: "construct",
+        reason: "AOT class construction requires exporting the Runtime Class artifact alongside the execution pipeline",
+      });
+      return undefined;
+    }
 
     if (stages.some((stage) => isComposedExecutionStage(stage))) {
       return emitComposedExecutionArtifact(binding, declaration, plan, reportName, type);
@@ -867,10 +1070,13 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
 
       const fastParse =
         (validateStage.operation === "parse" || validateStage.operation === "safeParse") &&
+        !constructBinding &&
         canUseFastParse(plan.schema);
       const validatorName = emitValidatorBinding(binding, plan.schema, reportName, validateStage.operation, {
         is: validateStage.operation === "is" || fastParse,
         safeParse: validateStage.operation !== "is",
+        ...(constructBinding ? { materializeRuntimeTypes: false } : {}),
+        ...(constructArtifact?.domainEvent ? { resolveDefaults: false } : {}),
       });
 
       if (!validatorName) return undefined;
@@ -900,7 +1106,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         js.push(
           fastParse
             ? `${declaration} (json) => { const value = JSON.parse(json); if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-            : `${declaration} (json) => { const r = ${validatorName}.safeParse(JSON.parse(json)); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+            : `${declaration} (json) => { const r = ${validatorName}.safeParse(JSON.parse(json)); if (r.success) return ${constructBinding ? `new ${constructBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
         );
       } else if (hasBinaryDecode) {
         const codec = tryEmit(reportName, "binary.decode", skipped, () => emitCodec(plan.schema));
@@ -920,7 +1126,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         js.push(
           fastParse
             ? `${declaration} /*#__PURE__*/ ((codec, is, safeParse) => (bytes) => { const value = codec.decode(bytes); if (is(value)) return value; const r = safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
-            : `${declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes) => { const r = safeParse(codec.decode(bytes)); if (r.success) return r.data; throw new JITValidationError(r.issues); })((() => {`
+            : `${declaration} /*#__PURE__*/ ((codec, safeParse) => (bytes) => { const r = safeParse(codec.decode(bytes)); if (r.success) return ${constructBinding ? `new ${constructBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); })((() => {`
         );
         js.push(...codecBindings.map((line) => `  ${line}`));
         js.push(...indentBlock(codec.source));
@@ -932,7 +1138,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         js.push(
           fastParse
             ? `${declaration} (value) => { if (${validatorName}.is(value)) return value; const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
-            : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return r.data; throw new JITValidationError(r.issues); };`
+            : `${declaration} (value) => { const r = ${validatorName}.safeParse(value); if (r.success) return ${constructBinding ? `new ${constructBinding}(r.data, true)` : "r.data"}; throw new JITValidationError(r.issues); };`
         );
       }
 
@@ -1002,12 +1208,12 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   ): EmittedBinding | undefined {
     const setup: string[] = [];
     const body: string[] = ["let value = input;"];
-    const stages = plan.stages;
+    const stages = optimizeExecutionPlan(plan).stages;
 
-    const emitComposedValidator = (schema: ATS.AnyTypeSchema): string | undefined => {
+    const emitComposedValidator = (schema: ATS.AnyTypeSchema, materializeRuntimeTypes = true): string | undefined => {
       const fastParse = canUseFastParse(schema);
       const validator = tryEmit(name, "validate", skipped, () =>
-        emitValidator(schema, { is: fastParse, safeParse: true, safeParseAsync: false })
+        emitValidator(schema, { is: fastParse, safeParse: true, safeParseAsync: false, materializeRuntimeTypes })
       );
 
       if (!validator) return undefined;
@@ -1052,7 +1258,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return codecName;
     };
 
-    const emitComposedQuery = (stage: Extract<(typeof stages)[number], { readonly kind: "query" }>) => {
+    const emitComposedQuery = (stage: Extract<(typeof stages)[number], { readonly kind: "query" | "aggregate" }>) => {
       const source = tryEmit(name, "query", skipped, () => emitQuerySource(stage.source, stage.program));
 
       if (!source) return undefined;
@@ -1258,7 +1464,19 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
             });
             return undefined;
           }
-          const validator = emitComposedValidator(stage.schema);
+          const construct = stages[index + 1];
+          const constructBinding = construct?.kind === "construct" ? classBindings.get(construct.target) : undefined;
+
+          if (construct?.kind === "construct" && !constructBinding) {
+            skipped.push({
+              schema: name,
+              operation: "construct",
+              reason:
+                "AOT class construction requires exporting the Runtime Class artifact alongside the execution pipeline",
+            });
+            return undefined;
+          }
+          const validator = emitComposedValidator(stage.schema, constructBinding === undefined);
 
           if (!validator) return undefined;
           needsValidationError = true;
@@ -1275,14 +1493,41 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           }
           break;
         }
+        case "construct": {
+          const classBinding = classBindings.get(stage.target);
+
+          if (!classBinding) {
+            skipped.push({
+              schema: name,
+              operation: "construct",
+              reason:
+                "AOT class construction requires exporting the Runtime Class artifact alongside the execution pipeline",
+            });
+            return undefined;
+          }
+          body.push(`value = new ${classBinding}(value, true);`);
+          break;
+        }
         case "query": {
-          let finalStage = stage;
+          let finalStage: Extract<ExecutionStage, { readonly kind: "query" | "aggregate" }> = stage;
 
           while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
             index++;
             finalStage = stages[index] as typeof finalStage;
           }
+          const aggregate = stages[index + 1];
+          if (aggregate?.kind === "aggregate") {
+            index++;
+            finalStage = aggregate;
+          }
           const query = emitComposedQuery(finalStage);
+
+          if (!query) return undefined;
+          body.push(`value = ${query}(value);`);
+          break;
+        }
+        case "aggregate": {
+          const query = emitComposedQuery(stage);
 
           if (!query) return undefined;
           body.push(`value = ${query}(value);`);
@@ -1380,6 +1625,30 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     return candidate;
   }
 
+  function classMemberName(name: string): string {
+    return isValidIdentifier(name) ? name : `[${JSON.stringify(name)}]`;
+  }
+
+  function classUpdateType(schema: ATS.AnyTypeSchema, seen = new Set<ATS.AnyTypeSchema>()): string {
+    if (seen.has(schema)) return emitTypeScriptType(schema, typeNames);
+    const resolved = resolveWrappers(schema);
+    const base = resolved.base;
+
+    if (base.type === TypeName.object) {
+      seen.add(schema);
+      const fields = Object.entries((base as ATS.ObjectSchema).def.props)
+        .filter(([, child]) => !resolveWrappers(child).readonly)
+        .map(([key, child]) => `${JSON.stringify(key)}?: ${classUpdateType(child, seen)}`);
+      seen.delete(schema);
+      return fields.length === 0 ? "{}" : `{ ${fields.join("; ")} }`;
+    }
+    if (base.type === TypeName.array) {
+      const element = (base as ATS.ArraySchema).def.element;
+      return `(${classUpdateType(element, seen)} | undefined)[]`;
+    }
+    return emitTypeScriptType(schema, typeNames);
+  }
+
   // Inlined runtime helpers keep the module import-free: nothing from the
   // engine is loaded in production, and cold start pays only this file.
   const helpers: string[] = [];
@@ -1444,6 +1713,19 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
 
   if (helpers.length > 0) js.splice(preludeIndex, 0, ...helpers);
   if (ts && tsTypes.length > 0) js.splice(preludeIndex, 0, ...tsTypes, "");
+  if (ts && needsAggregateType) {
+    js.splice(
+      preludeIndex,
+      0,
+      "declare class __JitAggregate<TPatch> {",
+      "  protected raise(event: unknown): void;",
+      "  protected update(patch: TPatch): void;",
+      "  peekEvents(): readonly unknown[];",
+      "  pullEvents(): unknown[];",
+      "  commit(publisher: { publish(event: unknown): void | Promise<void> }): Promise<void>;",
+      "}"
+    );
+  }
   if (ts && needsCallHelper) js.splice(preludeIndex, 0, CALL_HELPER);
 
   const source =
@@ -1639,6 +1921,7 @@ function executionPlanType(plan: ExecutionPlan, typeNames: TypeNames): string {
   const operation = plan.stages.find((stage) => stage.kind === "operation");
   const map = plan.stages.find((stage) => stage.kind === "map");
   const query = plan.stages.find((stage) => stage.kind === "query");
+  const aggregate = plan.stages.find((stage) => stage.kind === "aggregate");
   const hasJsonDecode = plan.stages.some((stage) => stage.kind === "json.decode");
   const hasBinaryDecode = plan.stages.some((stage) => stage.kind === "binary.decode");
   const valueSource = plan.stages.find((stage) => stage.kind === "value");
@@ -1667,6 +1950,10 @@ function executionPlanType(plan: ExecutionPlan, typeNames: TypeNames): string {
 
   if (last?.kind === "json.encode") return `(value: ${inputType}) => string`;
   if (last?.kind === "binary.encode") return `(value: ${inputType}) => Uint8Array`;
+  if (aggregate?.kind === "aggregate") {
+    const output = aggregate.operation === "count" || aggregate.operation === "sum" ? "number" : "number | undefined";
+    return `(value: ${inputType}) => ${output}`;
+  }
   if (hasJsonDecode) return `(json: string) => ${valueType}`;
   if (hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
   if (map?.kind === "map") return `(value: ${inputType}) => ${valueType}`;
@@ -1803,6 +2090,7 @@ function serializeStaticData(value: unknown, seen = new Set<object>()): string |
 function isComposedExecutionStage(stage: ExecutionStage): boolean {
   return (
     stage.kind === "query" ||
+    stage.kind === "aggregate" ||
     stage.kind === "map" ||
     stage.kind === "transform" ||
     stage.kind === "update" ||

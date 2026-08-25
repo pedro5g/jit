@@ -292,10 +292,10 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
   }
 
   if (plan.aggregate) {
-    if (plan.select || plan.collector || plan.orderBy || plan.mutation) {
+    if (plan.collector || plan.orderBy || plan.mutation) {
       throw new JITError(
         "INVALID_QUERY",
-        "query aggregate cannot be combined with select/keyed/groupBy/orderBy/delete/update in v1"
+        "query aggregate cannot be combined with keyed/groupBy/orderBy/delete/update in v1"
       );
     }
 

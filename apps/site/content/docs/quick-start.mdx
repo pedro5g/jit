@@ -43,9 +43,9 @@ safeParseUser(input); // { success, data | issues } — no exceptions
 ## Use the other compiled operations
 
 ```ts
-const equalUser = JIT.compare.equal(User);
+const equalUser = JIT.equal(User);
 const cloneUser = JIT.clone(User);
-const diffUser = JIT.compare.diff(User);
+const diffUser = JIT.diff(User);
 const stringifyUser = JIT.json.stringify(User);
 
 equalUser(a, b); // schema-aware deep equality

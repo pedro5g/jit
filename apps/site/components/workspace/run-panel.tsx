@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Play } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Play, Timer, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CopyButton } from "@/components/code/copy-button";
 import { Select } from "@/components/ui/select";
@@ -92,6 +92,7 @@ export function RunPanel({ project, editor }: { project: WorkspaceProject; edito
     worker.postMessage({ id, code: js, op, inputA, inputB });
   }, [project, editor, inputA, inputB, op]);
 
+  const inputProblem = jsonProblem(inputA);
   const response = state.status === "done" ? state.response : null;
   const source = response?.ok ? (response.source ?? "") : "";
   const failed = state.status === "error" || (response !== null && !response.ok);
@@ -124,7 +125,17 @@ export function RunPanel({ project, editor }: { project: WorkspaceProject; edito
       </PanelToolbar>
 
       <PanelBody>
-        <Input label={config.aLabel ?? "value (JSON)"} value={inputA} rows={5} onChange={setInputA} />
+        {/* Input first, output under it, and the cost between the two: the
+            timings are the whole claim the library makes, and they were being
+            measured and thrown away. */}
+        <Input
+          label={config.aLabel ?? "value (JSON)"}
+          value={inputA}
+          rows={5}
+          onChange={setInputA}
+          problem={inputProblem}
+          onFormat={() => setInputA(formatJson(inputA))}
+        />
 
         {config.needsB && (
           <Input
@@ -136,6 +147,23 @@ export function RunPanel({ project, editor }: { project: WorkspaceProject; edito
               setInputB(value);
             }}
           />
+        )}
+
+        {response?.ok && (
+          <dl className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-control border border-success/30 bg-success/5 px-3 py-2">
+            <div className="flex items-center gap-1.5">
+              <Check aria-hidden className="size-3 shrink-0 text-success" />
+              <dt className="font-mono text-[10px] uppercase tracking-wide text-fg-subtle">compiled</dt>
+              <dd className="font-mono text-[12px] text-ghost-100">{response.compileMs.toFixed(2)} ms</dd>
+              <span className="text-[10px] text-fg-subtle">once, then cached</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Timer aria-hidden className="size-3 shrink-0 text-gold-200" />
+              <dt className="font-mono text-[10px] uppercase tracking-wide text-fg-subtle">ran</dt>
+              <dd className="font-mono text-[12px] text-ghost-100">{response.runMs.toFixed(3)} ms</dd>
+              <span className="text-[10px] text-fg-subtle">every call after that</span>
+            </div>
+          </dl>
         )}
 
         <div className="flex min-h-0 flex-1 flex-col">
@@ -181,22 +209,68 @@ function Input({
   value,
   rows,
   onChange,
+  problem,
+  onFormat,
 }: {
   label: string;
   value: string;
   rows: number;
   onChange: (value: string) => void;
+  /** Set when the text is not the JSON it claims to be. */
+  problem?: string | null;
+  onFormat?: () => void;
 }) {
   return (
     <label className="flex shrink-0 flex-col gap-1.5">
-      <span className="font-mono text-[11px] uppercase tracking-wide text-fg-subtle">{label}</span>
+      <span className="flex items-center gap-2">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-fg-subtle">{label}</span>
+        {problem ? (
+          <span className="inline-flex items-center gap-1 font-mono text-[10px] text-warning">
+            <AlertTriangle aria-hidden className="size-2.5" />
+            {problem}
+          </span>
+        ) : (
+          onFormat && (
+            <button
+              type="button"
+              onClick={onFormat}
+              className="ml-auto inline-flex items-center gap-1 font-mono text-[10px] text-fg-subtle transition-colors hover:text-gold-200"
+            >
+              <Wand2 aria-hidden className="size-2.5" />
+              format
+            </button>
+          )
+        )}
+      </span>
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
         rows={rows}
         spellCheck={false}
-        className="resize-y rounded-control border border-line-subtle bg-night-1000/60 p-2.5 font-mono text-[12px] leading-relaxed text-fg outline-none transition-colors focus:border-line-gold"
+        className={`resize-y rounded-control border bg-night-1000/60 p-2.5 font-mono text-[12px] leading-relaxed text-fg outline-none transition-colors focus:border-line-gold ${
+          problem ? "border-warning/50" : "border-line-subtle"
+        }`}
       />
     </label>
   );
+}
+
+/** Says what is wrong with the value before the worker has to find out. */
+function jsonProblem(value: string): string | null {
+  if (!value.trim()) return null;
+
+  try {
+    JSON.parse(value);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message.replace(/^JSON\.parse: /, "") : "not valid JSON";
+  }
+}
+
+function formatJson(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 }

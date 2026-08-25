@@ -40,6 +40,7 @@ describe("Input and Update schema types", () => {
   it("removes readonly fields from update patches recursively", () => {
     const User = JIT.object({
       id: JIT.string().readonly(),
+      generatedId: JIT.string().readonly().default("generated"),
       name: JIT.string(),
       profile: JIT.object({
         createdAt: JIT.date().readonly(),
@@ -60,5 +61,8 @@ describe("Input and Update schema types", () => {
     // @ts-expect-error readonly fields are not patchable
     const invalid: JIT.Update<typeof User> = { id: "u_1" };
     expect(invalid).toBeDefined();
+    // @ts-expect-error transparent wrappers must not make readonly fields patchable
+    const invalidDefaulted: JIT.Update<typeof User> = { generatedId: "u_2" };
+    expect(invalidDefaulted).toBeDefined();
   });
 });

@@ -57,7 +57,7 @@ const User = JIT.object({
 });
 
 const isUser = JIT.validate.is(User);       // allocates nothing, returns on first failure
-const sameUser = JIT.compare.equal(User);   // structural equality, no generic walk
+const sameUser = JIT.equal(User);   // structural equality, no generic walk
 const safeUser = JIT.security.mask(User);   // rebuilds only the paths that carry a marked field
 ```
 

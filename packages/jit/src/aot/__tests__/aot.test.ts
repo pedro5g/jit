@@ -57,6 +57,116 @@ describe("JIT AOT generate", () => {
     expect(generated.Json.fromJSON('{"id":1,"name":"Ada"}')).toEqual({ id: 1, name: "Ada" });
   });
 
+  it("emits dynamic CQRS input as an import-free parser artifact", async () => {
+    const User = JIT.object({ id: JIT.string(), age: JIT.number() });
+    const ListUsers = JIT.cqrs.input(User, {
+      filter: { id: true, age: ["gte"] },
+      sort: ["id", "age"],
+      select: true,
+      pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
+    });
+
+    const result = AOT.generate({ artifacts: { ListUsers }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly ListUsers: {
+        readonly parse: (input: unknown) => unknown;
+        readonly "~query": { readonly version: number };
+      };
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).not.toContain("__reference");
+    expect(generated.ListUsers["~query"].version).toBe(1);
+    expect(generated.ListUsers.parse({ filter: { age: { $gte: 18 } } })).toEqual({
+      filter: [{ kind: "gte", path: ["age"], value: 18 }],
+      sort: [],
+      pagination: { kind: "offset", offset: 0, limit: 20 },
+    });
+    expect(() => generated.ListUsers.parse([])).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse({ filter: { id: { $eq: "u_1" } } })).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse({ sort: "age,age" })).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse({ fields: "id,id" })).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse({ fields: "" })).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse({ sort: 42 })).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse({ unknown: true })).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse({ page: Number.MAX_SAFE_INTEGER, limit: 100 })).toThrow(
+      /invalid CQRS input/i
+    );
+  });
+
+  it("preserves the structural query protocol on an AOT static CQRS query", async () => {
+    const User = JIT.object({ id: JIT.string(), age: JIT.number(), active: JIT.boolean() });
+    const ActiveUsers = JIT.cqrs
+      .query(User)
+      .params({ minimumAge: JIT.number() })
+      .where((query, params) => query.gte("age", params.minimumAge))
+      .where((query) => query.eq("active", true))
+      .select("id", "age")
+      .limit(1);
+    AOT.generate({ artifacts: { ActiveUsers }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly ActiveUsers: ((
+        rows: { id: string; age: number; active: boolean }[],
+        params: { minimumAge: number }
+      ) => unknown) & {
+        readonly "~query": {
+          readonly version: number;
+          readonly definition: {
+            readonly filter?: { readonly kind: string; readonly operator?: string };
+            readonly params?: readonly string[];
+            readonly projection?: readonly string[];
+            readonly limit?: number;
+          };
+        };
+      };
+    };
+
+    expect(generated.ActiveUsers["~query"]).toMatchObject({
+      version: 1,
+      definition: {
+        filter: { kind: "logical", operator: "and" },
+        params: ["minimumAge"],
+        projection: ["id", "age"],
+        limit: 1,
+      },
+    });
+    expect(
+      generated.ActiveUsers(
+        [
+          { id: "u_1", age: 30, active: true },
+          { id: "u_4", age: 50, active: true },
+          { id: "u_2", age: 17, active: true },
+          { id: "u_3", age: 40, active: false },
+        ],
+        { minimumAge: 18 }
+      )
+    ).toEqual([{ id: "u_1", age: 30 }]);
+  });
+
+  it("inlines compound cursor decoding for AOT CQRS input", async () => {
+    const User = JIT.object({ id: JIT.string(), createdAt: JIT.string() });
+    const ListUsers = JIT.cqrs.input(User, {
+      pagination: { type: "cursor", by: ["createdAt", "id"], defaultLimit: 20, maxLimit: 100 },
+    });
+    AOT.generate({ artifacts: { ListUsers }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly ListUsers: { readonly parse: (input: unknown) => unknown };
+    };
+
+    expect(source).toContain("function decodeCursor(value, size)");
+    expect(generated.ListUsers.parse({ after: btoa('["2026-01-01","u_1"]'), limit: 10 })).toEqual({
+      filter: [],
+      sort: [
+        { path: ["createdAt"], direction: "asc" },
+        { path: ["id"], direction: "asc" },
+      ],
+      pagination: { kind: "cursor", after: ["2026-01-01", "u_1"], limit: 10 },
+    });
+  });
+
   it("should emit one self-contained and directly typed TypeScript module", async () => {
     const UserSchema = JIT.object({
       id: JIT.number().int32(),
@@ -237,6 +347,13 @@ describe("JIT AOT generate", () => {
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly Money: {
+        new (input: {
+          amount: number;
+          currency: "BRL" | "USD";
+        }): {
+          equals(other: unknown): boolean;
+          hashCode(): number;
+        };
         create(input: { amount: number; currency: "BRL" | "USD" }): {
           equals(other: unknown): boolean;
           hashCode(): number;
@@ -245,13 +362,175 @@ describe("JIT AOT generate", () => {
     };
 
     const money = generated.Money.create({ amount: 10, currency: "BRL" });
+    const constructed = new generated.Money({ amount: 10, currency: "BRL" });
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("return class Money");
     expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(Object.isFrozen(money)).toBe(true);
+    expect(constructed.equals(money)).toBe(true);
     expect(money.equals(generated.Money.create({ amount: 10, currency: "BRL" }))).toBe(true);
     expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
+  });
+
+  it("should preserve abstract value-object behavior in AOT subclasses", async () => {
+    const MoneyBase = JIT.valueObject.abstract(
+      JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) })
+    );
+    const result = AOT.generate({ artifacts: { MoneyBase }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly MoneyBase: {
+        new (
+          input: unknown
+        ): {
+          equals(other: unknown): boolean;
+          hashCode(): number;
+        };
+        create(input: unknown): unknown;
+        hydrate(input: unknown): unknown;
+      };
+    };
+    class Money extends generated.MoneyBase {}
+
+    const money = Money.create({ amount: 10, currency: "BRL" }) as InstanceType<typeof Money>;
+    const restored = Money.hydrate({ amount: 10, currency: "BRL" }) as InstanceType<typeof Money>;
+
+    expect(result.skipped).toEqual([]);
+    expect(money).toBeInstanceOf(Money);
+    expect(Object.isFrozen(money)).toBe(true);
+    expect(money.equals(restored)).toBe(true);
+    expect(money.hashCode()).toBe(restored.hashCode());
+    expect(() => generated.MoneyBase.create({ amount: 10, currency: "BRL" })).toThrow(/abstract JIT class/i);
+  });
+
+  it("should keep creation defaults out of AOT hydration", async () => {
+    const User = JIT.class(JIT.object({ id: JIT.string().default("generated"), name: JIT.string() }));
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        create(input: { name: string }): { id: string; name: string };
+        hydrate(state: { id: string; name: string }): { id: string; name: string };
+      };
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.User.create({ name: "Ada" })).toEqual({ id: "generated", name: "Ada" });
+    expect(() => generated.User.hydrate({ name: "Ada" } as never)).toThrow();
+  });
+
+  it("should preserve configured class factories in runtime and typed AOT output", async () => {
+    const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() })).factories({
+      create: "make",
+      hydrate: "restore-state",
+    });
+    AOT.generate({ artifacts: { User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        make(input: unknown): { id: string; name: string };
+        readonly "restore-state": (state: { id: string; name: string }) => { id: string; name: string };
+      };
+    };
+
+    expect(source).toContain("static make(input)");
+    expect(source).toContain('static ["restore-state"](state)');
+    expect(generated.User.make({ id: "u_1", name: "Ada" })).toBeInstanceOf(generated.User);
+    expect(generated.User["restore-state"]({ id: "u_1", name: "Ada" })).toBeInstanceOf(generated.User);
+    expect("create" in generated.User).toBe(false);
+    expect("hydrate" in generated.User).toBe(false);
+
+    const typedOutDir = join(outDir, "typed");
+    AOT.generate({ artifacts: { User }, outDir: typedOutDir, format: "ts" });
+    const typedSource = readFileSync(join(typedOutDir, "index.ts"), "utf8");
+
+    expect(typedSource).toContain('"make"<TThis');
+    expect(typedSource).toContain('"restore-state"<TThis');
+    expect(typedSource).not.toContain("create(input:");
+    expect(typedSource).not.toContain("hydrate(state:");
+    writeFileSync(
+      join(typedOutDir, "consumer.ts"),
+      [
+        'import { User } from "./index.js";',
+        'User.make({ id: "u_1", name: "Ada" });',
+        'User["restore-state"]({ id: "u_1", name: "Ada" });',
+        "// @ts-expect-error canonical aliases were explicitly renamed",
+        'User.create({ id: "u_1", name: "Ada" });',
+        "// @ts-expect-error hydration requires complete persisted state",
+        'User["restore-state"]({ id: "u_1" });',
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      join(typedOutDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          exactOptionalPropertyTypes: true,
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmit: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["index.ts", "consumer.ts"],
+      })
+    );
+    writeFileSync(join(typedOutDir, "package.json"), '{"type":"module"}\n');
+
+    expect(() =>
+      execFileSync(process.execPath, [join(process.cwd(), "node_modules", "typescript", "bin", "tsc")], {
+        cwd: typedOutDir,
+        stdio: "pipe",
+      })
+    ).not.toThrow();
+  });
+
+  it("co-emits Runtime Classes for AOT JSON construction pipelines", async () => {
+    const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() }));
+    const parseUser = JIT.json.parse(User).validate();
+    const result = AOT.generate({ groups: {}, artifacts: { User, parseUser }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: new (state: { id: string; name: string }) => { id: string; name: string };
+      readonly parseUser: (json: string) => { id: string; name: string };
+    };
+    const user = generated.parseUser('{"id":"u_1","name":"Ada"}');
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("new User(r.data, true)");
+    expect(source).toMatchSnapshot("AOT JSON Runtime Class construction");
+    expect(user).toBeInstanceOf(generated.User);
+    expect(user).toEqual({ id: "u_1", name: "Ada" });
+  });
+
+  it("refuses AOT class-construction pipelines without their named class artifact", () => {
+    const User = JIT.class(JIT.object({ id: JIT.string() }));
+    const result = AOT.generate({ groups: {}, artifacts: { parseUser: JIT.json.parse(User).validate() }, outDir });
+
+    expect(result.files).toEqual([]);
+    expect(result.skipped).toEqual([
+      {
+        schema: "parseUser",
+        operation: "construct",
+        reason: "AOT class construction requires exporting the Runtime Class artifact alongside the execution pipeline",
+      },
+    ]);
+  });
+
+  it("should preserve private accessor storage in import-free runtime classes", async () => {
+    const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() })).accessors({
+      default: { field: "private", get: "public", set: false },
+    });
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: { create(input: { id: string; name: string }): { id: string; name: string } };
+    };
+    const user = generated.User.create({ id: "u_1", name: "Ada" });
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("#p0;");
+    expect(Object.keys(user)).toEqual([]);
+    expect(user).toMatchObject({ id: "u_1", name: "Ada" });
   });
 
   it("should lower domain events without the JIT runtime", async () => {
@@ -264,7 +543,10 @@ describe("JIT AOT generate", () => {
       readonly OrderConfirmed: {
         readonly type: string;
         readonly version: number;
-        create(input: { orderId: string }): { readonly payload: { readonly orderId: string } };
+        create(input: { orderId: string }): {
+          readonly payload: { readonly orderId: string };
+          readonly "~event": { readonly version: 1; readonly type: string; readonly schemaVersion: number };
+        };
       };
     };
 
@@ -276,14 +558,139 @@ describe("JIT AOT generate", () => {
       version: 1,
       payload: { orderId: "o_1" },
     });
+    expect(generated.OrderConfirmed.create({ orderId: "o_1" })["~event"]).toEqual({
+      version: 1,
+      type: "order.confirmed",
+      schemaVersion: 1,
+    });
   });
 
-  it("should lower aggregate infrastructure into an extendable import-free base", async () => {
+  it("should expose only the canonical DomainEvent factories in typed AOT modules", () => {
+    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+      version: 1,
+      payload: JIT.object({ orderId: JIT.string() }),
+    });
+    const typedOutDir = join(outDir, "typed");
+
+    AOT.generate({ groups: {}, artifacts: { OrderConfirmed }, outDir: typedOutDir, format: "ts" });
+    const source = readFileSync(join(typedOutDir, "index.ts"), "utf8");
+
+    expect(source).toContain("create(input: { orderId: string })");
+    expect(source).not.toContain('readonly "new"');
+    writeFileSync(
+      join(typedOutDir, "consumer.ts"),
+      [
+        'import { OrderConfirmed } from "./index.js";',
+        'OrderConfirmed.create({ orderId: "o_1" });',
+        "// @ts-expect-error payload fields are required",
+        "OrderConfirmed.create({});",
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      join(typedOutDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          exactOptionalPropertyTypes: true,
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmit: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["index.ts", "consumer.ts"],
+      })
+    );
+    writeFileSync(join(typedOutDir, "package.json"), '{"type":"module"}\n');
+
+    expect(() =>
+      execFileSync(process.execPath, [join(process.cwd(), "node_modules", "typescript", "bin", "tsc")], {
+        cwd: typedOutDir,
+        stdio: "pipe",
+      })
+    ).not.toThrow();
+  });
+
+  it("should preserve DDD capabilities and protected raise in typed AOT modules", () => {
+    const Money = JIT.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
+    const UserBase = JIT.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
     const OrderBase = JIT.aggregateRoot(
       JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"] as const) }),
       { id: "id" }
     );
+    const typedOutDir = join(outDir, "typed-ddd");
+
+    AOT.generate({ artifacts: { Money, UserBase, OrderBase }, outDir: typedOutDir, format: "ts" });
+    writeFileSync(
+      join(typedOutDir, "consumer.ts"),
+      [
+        'import { Money, OrderBase, UserBase } from "./index.js";',
+        'Money.create({ amount: 10, currency: "BRL" }).equals(Money.create({ amount: 10, currency: "BRL" }));',
+        "class User extends UserBase {}",
+        'User.create({ id: "u_1", name: "Ada" }).sameIdentity(User.create({ id: "u_1", name: "Grace" }));',
+        "class Order extends OrderBase {",
+        '  confirm() { this.update({ status: "confirmed" }); this.raise({ type: "order.confirmed" }); }',
+        "}",
+        'const order = Order.create({ id: "o_1", status: "draft" });',
+        "order.confirm();",
+        "order.peekEvents();",
+        "// @ts-expect-error raise is domain-internal",
+        'order.raise({ type: "external" });',
+        "// @ts-expect-error readonly identity is excluded from aggregate patches",
+        'order.update({ id: "o_2" });',
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      join(typedOutDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          exactOptionalPropertyTypes: true,
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmit: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["index.ts", "consumer.ts"],
+      })
+    );
+    writeFileSync(join(typedOutDir, "package.json"), '{"type":"module"}\n');
+
+    expect(() =>
+      execFileSync(process.execPath, [join(process.cwd(), "node_modules", "typescript", "bin", "tsc")], {
+        cwd: typedOutDir,
+        stdio: "pipe",
+      })
+    ).not.toThrow();
+  });
+
+  it("should round-trip domain events through AOT JSON construction", async () => {
+    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+      version: 1,
+      payload: JIT.object({ orderId: JIT.string() }),
+    });
+    const parseEvent = JIT.json.parse(OrderConfirmed).validate();
+    const result = AOT.generate({ groups: {}, artifacts: { OrderConfirmed, parseEvent }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly OrderConfirmed: { new (state: unknown): { occurredAt: Date } };
+      readonly parseEvent: (json: string) => { occurredAt: Date };
+    };
+    expect(result.skipped).toEqual([]);
+    const json = JIT.json.stringify(OrderConfirmed)(OrderConfirmed.create({ orderId: "o_1" }));
+    const restored = generated.parseEvent(json);
+
+    expect(restored).toBeInstanceOf(generated.OrderConfirmed);
+    expect(restored.occurredAt).toBeInstanceOf(Date);
+  });
+
+  it("should lower aggregate infrastructure into an extendable import-free base", async () => {
+    const OrderBase = JIT.aggregateRoot(
+      JIT.object({ id: JIT.string().readonly().default("o_1"), status: JIT.enum(["draft", "confirmed"] as const) }),
+      { id: "id" }
+    );
     const result = AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
     type OrderBaseConstructor = {
       new (
         state: unknown
@@ -291,8 +698,9 @@ describe("JIT AOT generate", () => {
         update(patch: { status: "confirmed" }): void;
         raise(event: unknown): void;
         pullEvents(): unknown[];
+        commit(publisher: { publish(event: unknown): void | Promise<void> }): Promise<void>;
       };
-      create(input: { id: string; status: "draft" | "confirmed" }): InstanceType<new (state: unknown) => unknown>;
+      create(input: { status: "draft" | "confirmed" }): InstanceType<new (state: unknown) => unknown>;
     };
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderBase: OrderBaseConstructor;
@@ -305,12 +713,91 @@ describe("JIT AOT generate", () => {
       }
     }
 
-    const order = Order.create({ id: "o_1", status: "draft" }) as Order;
+    const order = Order.create({ status: "draft" }) as Order;
 
     expect(result.skipped).toHaveLength(0);
+    expect(source).toMatchSnapshot("AOT aggregate mutation and event buffer");
     order.confirm();
     expect(order.pullEvents()).toEqual([{ type: "order.confirmed" }]);
     expect((order as Order & { status: string }).status).toBe("confirmed");
+    order.update({ id: "o_2" } as never);
+    expect((order as Order & { id: string }).id).toBe("o_1");
+    order.raise({ type: "order.persisted" });
+    await order.commit({ publish: () => undefined });
+    expect(order.pullEvents()).toEqual([]);
+  });
+
+  it("should emit aggregate timestamp mutations without the runtime", async () => {
+    const OrderBase = JIT.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), updatedAt: JIT.date() }), {
+      id: "id",
+    }).timestamps({ updatedAt: "updatedAt" });
+    AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly OrderBase: {
+        new (input: unknown): { update(patch: { status: string }): void; updatedAt: Date };
+        create(input: { id: string; status: string; updatedAt: Date }): {
+          update(patch: { status: string }): void;
+          updatedAt: Date;
+        };
+      };
+    };
+    class Order extends generated.OrderBase {}
+    const initial = new Date(0);
+    const order = Order.create({ id: "o_1", status: "draft", updatedAt: initial });
+
+    order.update({ status: "confirmed" });
+    expect(order.updatedAt.getTime()).toBeGreaterThan(initial.getTime());
+  });
+
+  it("should emit soft-delete metadata with a shared timestamp instant", async () => {
+    const OrderBase = JIT.aggregateRoot(
+      JIT.object({ id: JIT.string(), updatedAt: JIT.date(), deletedAt: JIT.date().nullable() }),
+      { id: "id" }
+    )
+      .timestamps({ updatedAt: "updatedAt" })
+      .softDelete({ field: "deletedAt" });
+    AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly OrderBase: {
+        new (
+          input: unknown
+        ): {
+          softDelete(): void;
+          restore(): void;
+          readonly isDeleted: boolean;
+          updatedAt: Date;
+          deletedAt: Date | null;
+        };
+      };
+    };
+    class Order extends generated.OrderBase {}
+    const order = new Order({ id: "o_1", updatedAt: new Date(0), deletedAt: null });
+
+    order.softDelete();
+    expect(order.isDeleted).toBe(true);
+    expect(order.deletedAt).toBe(order.updatedAt);
+    order.restore();
+    expect(order.isDeleted).toBe(false);
+  });
+
+  it("should lower static CQRS queries through the existing query artifact", async () => {
+    const User = JIT.object({ id: JIT.string(), active: JIT.boolean() });
+    const activeUsers = JIT.cqrs
+      .query(User)
+      .where((query) => query.eq("active", true))
+      .select("id");
+    const result = AOT.generate({ groups: {}, artifacts: { activeUsers }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly activeUsers: (users: { id: string; active: boolean }[]) => { id: string }[];
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(
+      generated.activeUsers([
+        { id: "a", active: true },
+        { id: "b", active: false },
+      ])
+    ).toEqual([{ id: "a" }]);
   });
 
   it("should preserve transform, update, and security stages in an import-free composed pipeline", async () => {
@@ -344,6 +831,30 @@ describe("JIT AOT generate", () => {
     expect(
       generated.publicUsers('[{"id":1,"role":"admin","name":" Ada ","email":"ada@math.org","note":"<b>ok</b>"}]')
     ).toBe('[{"id":1,"name":"PUBLIC","email":"***.org","note":"ok"}]');
+  });
+
+  it("should emit filtered terminal aggregates as one import-free AOT loop", async () => {
+    const Orders = JIT.array(JIT.object({ id: JIT.number().int32(), active: JIT.boolean(), total: JIT.number() }));
+    const activeTotal = JIT.from(Orders)
+      .filter((query) => query.eq("active", true))
+      .sum("total");
+    const result = AOT.generate({ groups: {}, artifacts: { activeTotal }, outDir, format: "ts" });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
+      readonly activeTotal: (orders: readonly { id: number; active: boolean; total: number }[]) => number;
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).not.toContain("new Array");
+    expect(source).toContain("let acc = 0");
+    expect(
+      generated.activeTotal([
+        { id: 1, active: true, total: 10 },
+        { id: 2, active: false, total: 100 },
+        { id: 3, active: true, total: 20 },
+      ])
+    ).toBe(30);
   });
 
   it("should emit the source input and target output types for a transformed value artifact", async () => {

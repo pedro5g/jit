@@ -309,6 +309,7 @@ function resolveCodecWrappers(schema: ATS.AnyTypeSchema): ResolvedCodecWrappers 
       case TypeName.coerce:
       case TypeName.pipe:
       case TypeName.transform:
+      case TypeName.runtimeType:
         current = current.def.innerType as AnySchema;
         continue;
       case TypeName.lazy:

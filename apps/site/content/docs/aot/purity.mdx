@@ -1,0 +1,44 @@
+---
+title: Zero runtime dependency
+description: What AOT output contains, what it deliberately excludes, and how class construction remains self-contained.
+related: /docs/aot/generation-and-tree-shaking, /docs/guides/domain-driven-design
+---
+
+AOT output is ordinary ESM. It does not import `@jit-compiler/jit`, schema
+builders, the artifact registry, execution descriptors, or class capabilities.
+The generator writes only the specialized functions, classes and tiny helpers
+required by the declarations you export.
+
+```ts
+const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() }));
+
+export const parseUser = JIT.json.parse(User).validate();
+export { User };
+```
+
+When both declarations are generated in the same module, the output has the
+same essential shape as this plain JavaScript:
+
+```ts
+const parseUser = (json) => {
+  const result = validateUser(JSON.parse(json));
+  if (!result.success) throw validationError(result.issues);
+  return new User(result.data, true);
+};
+```
+
+The second constructor argument is internal generated-code protocol: it tells
+the local class that its state has already been validated. It is never a public
+API and prevents a second validation traversal. Direct `new User(input)` and
+`User.create(input)` still validate their input normally.
+
+## Explicit dependency boundary
+
+The class must be named in the same AOT generation request as the construction
+pipeline. If it is absent, generation reports a `construct` skip instead of
+capturing a runtime constructor in a closure. This makes the generated file
+portable to browsers, edge workers and services that do not install JIT.
+
+Tree shaking remains granular: an application that imports `parseUser` keeps
+that local class because the pipeline needs it, but unrelated generated
+operations and their helpers are removed by a bundler.

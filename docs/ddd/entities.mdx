@@ -1,0 +1,18 @@
+# Entities
+
+Entities are compared by stable identity rather than by every field:
+
+```ts
+const UserBase = JIT.entity(
+  JIT.object({ id: JIT.string().readonly(), name: JIT.string() }),
+  { id: "id" },
+);
+
+class User extends UserBase {}
+
+const before = User.hydrate({ id: "u_1", name: "Ada" });
+const after = User.hydrate({ id: "u_1", name: "Ada Lovelace" });
+before.sameIdentity(after); // true
+```
+
+The entity preset is abstract: application code owns the concrete class and its behavior. `create()` is for new state; `hydrate()` is for complete persisted state. The identity field must be declared by the schema and remains part of the ordinary validation and transport representation.

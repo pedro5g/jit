@@ -1,0 +1,69 @@
+# Next-major migration
+
+This release replaces facade-style compilation with callable artifacts and
+typed execution pipelines. A schema remains the source of truth; operations
+are explicit and compile lazily on first use. There is no schema interpreter in
+the hot path.
+
+## API replacements
+
+| Previous style                         | Current style                                   |
+| -------------------------------------- | ----------------------------------------------- |
+| `JIT.validate(User).parse().compile()` | `JIT.parse(User)` or `JIT.validate.parse(User)` |
+| `JIT.validate(User).is()`              | `JIT.is(User)` or `JIT.validate.is(User)`       |
+| `JIT.model(User).get("is", "parse")`   | `{ is: JIT.is(User), parse: JIT.parse(User) }`  |
+| `JIT.dto(Source, Target).get("map")`   | `JIT.map(Source, Target)`                       |
+| `JIT.dto(Source, Target).get("many")`  | `JIT.map.many(Source, Target)`                  |
+| `JIT.json(User).parse().compile()`     | `JIT.json.parse(User).validate()`               |
+| `JIT.query(Users).compile()`           | `JIT.query(Users)`                              |
+| `query.compileIterator()`              | `query.to.iterator()`                           |
+| `JIT.compileEqual(schema)`             | `Compiler.compileEqual(schema)`                 |
+
+`artifact.compile()` remains an optional eager warm-up hook. Calling an
+artifact directly is the normal API.
+
+## Boundary types
+
+Replace ad-hoc input and patch interfaces with views derived from the schema:
+
+```ts
+import type { Hydrate, Input, Typeof, Update } from "@jit-compiler/jit";
+
+type CreateUser = Input<typeof User>; // defaults may be omitted
+type UserState = Typeof<typeof User>; // defaults and transforms resolved
+type UserPatch = Update<typeof User>; // readonly fields removed
+type StoredUser = Hydrate<typeof User>; // complete persisted state
+```
+
+`create`/`new` accepts `Input`. `hydrate` accepts `Hydrate` and intentionally
+does not resolve missing defaults. Treat a failed hydrate as a corrupt or
+incompatible persisted record rather than silently creating a new one.
+
+## JSON and classes
+
+Use an execution pipeline at an external boundary. The plan makes decoding,
+validation and runtime-class materialization explicit:
+
+```ts
+const User = JIT.class(
+  JIT.object({ id: JIT.string().default("generated"), name: JIT.string() }),
+);
+const parseUser = JIT.json.parse(User).validate();
+
+parseUser('{"name":"Ada"}'); // User instance
+```
+
+For AOT, generate `User` and `parseUser` in the same declaration module. This
+allows the generated pipeline to construct the generated class without a JIT
+runtime dependency.
+
+## Domain code
+
+Use `JIT.valueObject`, `JIT.entity`, `JIT.aggregateRoot`, and
+`JIT.domainEvent` for domain roles. Aggregate
+mutation is schema-derived: readonly fields are excluded from patches, and
+domain events remain in an ordered pending buffer until `pullEvents()` or
+`commit()` succeeds.
+
+See the site migration guide for a broader API table and the DDD guide for an
+end-to-end aggregate example.

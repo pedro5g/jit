@@ -176,6 +176,19 @@ describe("JIT streaming validation", () => {
         { id: 3, name: "Marie" },
       ]);
       expect(seen).toEqual([0, 1, 2]);
+      expectTypeOf(stream.end).returns.toEqualTypeOf<{ id: number; name: string }[]>();
+    });
+
+    it("should expose explicit JSON and NDJSON namespace specializations", () => {
+      const json = JIT.stream.json(JIT.array(Event));
+      const ndjson = JIT.stream.ndjson(Event);
+
+      json.write('[{"id":1,"name":"Ada"}]');
+      ndjson.write('{"id":1,"name":"Ada"}\n');
+      expect(json.end()).toEqual([{ id: 1, name: "Ada" }]);
+      expect(ndjson.end()).toEqual([{ id: 1, name: "Ada" }]);
+      expectTypeOf(json.end).returns.toEqualTypeOf<{ id: number; name: string }[]>();
+      expectTypeOf(ndjson.end).returns.toEqualTypeOf<{ id: number; name: string }[]>();
     });
 
     it("should fail fast with the offending line number", () => {

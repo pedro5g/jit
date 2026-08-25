@@ -39,6 +39,21 @@ A terminal `.map(target, overrides).to.json()` maps and serializes each item
 in one output loop, so it does not allocate a mapped collection. Individual
 target objects may still be needed for mapper callbacks or nested values.
 
+Terminal `count()`, `sum(field)`, `avg(field)`, `min(field)`, and `max(field)`
+reduce the filtered collection directly. The query program carries the
+preceding predicates into one indexed loop and allocates no output array:
+
+```ts
+const activeTotal = JIT.json
+  .parse(Orders)
+  .validate()
+  .filter((query) => query.eq("active", true))
+  .sum("total");
+```
+
+`count` and `sum` return zero for no matches. `avg`, `min`, and `max` return
+`undefined`. Aggregate field arguments are restricted to numeric fields.
+
 There are deliberate materialization boundaries: native JSON decode,
 binary decode, query output, mapper batches, and serializers must produce
 their semantic output. The planner never reorders observable operations just
@@ -61,6 +76,22 @@ program on success and only emits issue records after a failure. Observable or
 transforming schemas stay single-pass. The checked-in `pnpm bench:json` suite
 measures native parsing and parse-plus-validation independently against
 generated Typia and Zod.
+
+When the target is a Runtime Class, the plan makes construction explicit:
+
+```ts
+const User = JIT.class(JIT.object({ id: JIT.string().default("generated"), name: JIT.string() }));
+const parseUser = JIT.json.parse(User).validate();
+
+parseUser.plan.stages.map((stage) => stage.kind);
+// ["json.decode", "validate", "construct"]
+```
+
+The validator first produces the schema-shaped state; `construct` then assigns
+that state to the generated instance in schema-field order. The instance does
+not run the validator a second time. AOT co-emits this construction when the
+named class artifact is in the same generated module; otherwise it reports a
+skip rather than capturing a runtime constructor.
 
 ## Transform and update
 

@@ -2,6 +2,7 @@ import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
+import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { buildUpdateIR } from "./update/build-update-ir.js";
 import { emitUpdate, emitUpdateBody } from "./update/emit-update.js";
 
@@ -108,7 +109,7 @@ function assertUpdateable(schema: ATS.AnyTypeSchema): void {
     const objectSchema = schema as ATS.ObjectSchema<ATS.SchemaShape>;
 
     for (const child of Object.values(objectSchema.def.props)) {
-      if (child.type === TypeName.readonly) continue;
+      if (resolveWrappers(child).readonly) continue;
       assertUpdateable(child);
     }
   }

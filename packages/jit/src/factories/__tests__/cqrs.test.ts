@@ -1,0 +1,509 @@
+import * as fc from "fast-check";
+
+import { JIT } from "../../index.js";
+import { emitCqrsAotParserSource, emitCqrsInputParser, encodeCqrsCursor } from "../cqrs.js";
+
+describe("JIT.cqrs", () => {
+  it("lowers static queries through the existing QueryProgram", () => {
+    const Order = JIT.object({
+      id: JIT.string(),
+      status: JIT.enum(["draft", "confirmed"] as const),
+      total: JIT.number(),
+    });
+    const recent = JIT.cqrs
+      .query(Order)
+      .where((query) => query.eq("status", "confirmed"))
+      .select("id", "total")
+      .orderBy("total", "desc")
+      .limit(1);
+
+    expect(
+      recent([
+        { id: "o_1", status: "confirmed", total: 10 },
+        { id: "o_2", status: "draft", total: 20 },
+        { id: "o_3", status: "confirmed", total: 30 },
+      ])
+    ).toEqual([{ id: "o_3", total: 30 }]);
+    expect(recent["~query"].version).toBe(1);
+    expect(recent["~query"].definition).toEqual({
+      source: { kind: "object", fields: ["id", "status", "total"] },
+      filter: {
+        kind: "compare",
+        operator: "eq",
+        left: { kind: "field", path: ["status"] },
+        right: { kind: "literal", value: "confirmed" },
+      },
+      projection: ["id", "total"],
+      order: [{ path: ["total"], direction: "desc" }],
+      limit: 1,
+      params: [],
+    });
+    expectTypeOf(recent).toMatchTypeOf<
+      (orders: { id: string; status: "draft" | "confirmed"; total: number }[]) => {
+        id: string;
+        total: number;
+      }[]
+    >();
+  });
+
+  it("combines successive where clauses in runtime and the portable descriptor", () => {
+    const User = JIT.object({ id: JIT.string(), age: JIT.number(), active: JIT.boolean(), role: JIT.string() });
+    const adults = JIT.cqrs
+      .query(User)
+      .where((query) => query.gte("age", 18))
+      .where((query) => query.and(query.eq("active", true), query.not(query.eq("role", "blocked"))))
+      .select("id", "age");
+    const rows = [
+      { id: "a", age: 20, active: true, role: "member" },
+      { id: "b", age: 17, active: true, role: "member" },
+      { id: "c", age: 30, active: true, role: "blocked" },
+      { id: "d", age: 40, active: false, role: "member" },
+    ];
+
+    expect(adults(rows)).toEqual([{ id: "a", age: 20 }]);
+    expect(adults["~query"].definition.filter).toMatchObject({
+      kind: "logical",
+      operator: "and",
+      left: { kind: "compare", operator: "gte" },
+      right: {
+        kind: "logical",
+        operator: "and",
+        left: { kind: "compare", operator: "eq" },
+        right: { kind: "not", inner: { kind: "compare", operator: "eq" } },
+      },
+    });
+    expectTypeOf(adults(rows)).toEqualTypeOf<{ id: string; age: number }[]>();
+  });
+
+  it("canonicalizes repeated operators identically in runtime and the descriptor", () => {
+    const User = JIT.object({ id: JIT.string(), age: JIT.number(), active: JIT.boolean() });
+    const query = JIT.cqrs
+      .query(User)
+      .limit(3)
+      .where((builder) => builder.gte("age", 18))
+      .orderBy("age", "desc")
+      .orderBy("id", "asc")
+      .select("id", "age")
+      .select("id")
+      .limit(1)
+      .where((builder) => builder.eq("active", true));
+    const rows = [
+      { id: "c", age: 30, active: true },
+      { id: "a", age: 17, active: true },
+      { id: "b", age: 20, active: true },
+      { id: "d", age: 40, active: false },
+    ];
+
+    expect(query(rows)).toEqual([{ id: "b" }]);
+    expect(query["~query"].definition).toMatchObject({
+      filter: { kind: "logical", operator: "and" },
+      projection: ["id"],
+      order: [{ path: ["id"], direction: "asc" }],
+      limit: 1,
+    });
+  });
+
+  it("keeps every comparison and logical filter equivalent to its direct predicate", () => {
+    const Entry = JIT.object({
+      id: JIT.number(),
+      age: JIT.number(),
+      score: JIT.number(),
+      active: JIT.boolean(),
+      role: JIT.string(),
+    });
+
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            id: fc.integer(),
+            age: fc.integer(),
+            score: fc.integer(),
+            active: fc.boolean(),
+            role: fc.constantFrom("member", "blocked", "admin"),
+          }),
+          { maxLength: 40 }
+        ),
+        fc.integer(),
+        fc.integer(),
+        fc.integer(),
+        fc.integer(),
+        (rows, firstBound, secondBound, scoreFloor, idFloor) => {
+          const minimumAge = Math.min(firstBound, secondBound);
+          const maximumAge = Math.max(firstBound, secondBound);
+          const query = JIT.cqrs
+            .query(Entry)
+            .where((builder) => builder.and(builder.gte("age", minimumAge), builder.lte("age", maximumAge)))
+            .where((builder) => builder.or(builder.eq("active", true), builder.neq("role", "blocked")))
+            .where((builder) => builder.not(builder.lt("score", scoreFloor)))
+            .where((builder) => builder.gt("id", idFloor));
+
+          expect(query(rows)).toEqual(
+            rows.filter(
+              (row) =>
+                row.age >= minimumAge &&
+                row.age <= maximumAge &&
+                (row.active === true || row.role !== "blocked") &&
+                !(row.score < scoreFloor) &&
+                row.id > idFloor
+            )
+          );
+        }
+      ),
+      { numRuns: 300 }
+    );
+  });
+
+  it("rejects non-object read models", () => {
+    expect(() => JIT.cqrs.query(JIT.string())).toThrow(/object or Runtime Type/i);
+  });
+
+  it("registers typed parameters in the existing query program", () => {
+    const User = JIT.object({ id: JIT.string(), active: JIT.boolean() });
+    const byActive = JIT.cqrs
+      .query(User)
+      .params({ active: JIT.boolean() })
+      .where((query, params) => query.eq("active", params.active));
+
+    expect(
+      byActive(
+        [
+          { id: "a", active: true },
+          { id: "b", active: false },
+        ],
+        { active: true }
+      )
+    ).toEqual([{ id: "a", active: true }]);
+    expect(byActive["~query"].definition.params).toEqual(["active"]);
+  });
+
+  it("accumulates successive typed parameter declarations", () => {
+    const User = JIT.object({ id: JIT.string(), age: JIT.number(), active: JIT.boolean() });
+    const query = JIT.cqrs
+      .query(User)
+      .params({ minimumAge: JIT.number() })
+      .where((builder, params) => builder.gte("age", params.minimumAge))
+      .params({ active: JIT.boolean() })
+      .where((builder, params) => builder.eq("active", params.active));
+
+    expect(query([{ id: "a", age: 20, active: true }], { minimumAge: 18, active: true })).toHaveLength(1);
+    expect(query["~query"].definition.params).toEqual(["minimumAge", "active"]);
+    expect(() => JIT.cqrs.query(User).params({ active: JIT.boolean() }).params({ active: JIT.boolean() })).toThrow(
+      /duplicated/i
+    );
+  });
+
+  it("is consumable by a structural adapter without JIT internals", () => {
+    const User = JIT.object({ id: JIT.string(), active: JIT.boolean(), score: JIT.number() });
+    const query = JIT.cqrs
+      .query(User)
+      .where((builder) => builder.eq("active", true))
+      .select("id", "score")
+      .orderBy("score", "desc")
+      .limit(1);
+    const definition = query["~query"].definition;
+    const rows = [
+      { id: "a", active: true, score: 10 },
+      { id: "b", active: false, score: 50 },
+      { id: "c", active: true, score: 30 },
+    ];
+
+    // This intentionally knows only the public V1 shape; it is a stand-in for
+    // an ORM/SQL adapter, not an in-memory fallback provided by JIT.
+    const filter = definition.filter;
+    let value = rows;
+    if (filter?.kind === "compare" && filter.left.kind === "field" && filter.right.kind === "literal") {
+      const field = filter.left.path[0] as keyof (typeof rows)[number];
+      const expected = filter.right.value;
+      value = rows.filter((row) => row[field] === expected);
+    }
+    const ordered = [...value].sort((left, right) => right.score - left.score);
+    const result = ordered.slice(0, definition.limit).map((row) => ({ id: row.id, score: row.score }));
+
+    expect(result).toEqual(query(rows));
+  });
+
+  it("normalizes permitted dynamic filter input and rejects unsupported syntax", () => {
+    const User = JIT.object({
+      name: JIT.string(),
+      age: JIT.number(),
+      status: JIT.string(),
+    });
+    const input = JIT.cqrs.input(User, {
+      filter: {
+        name: true,
+        age: ["gte", "lte", "between"],
+        status: ["eq", "in"],
+      },
+      select: true,
+      sort: ["name", "age"],
+      pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
+    });
+    const parse = JIT.cqrs.parse(input);
+
+    expect(input["~query"]).toEqual({
+      version: 1,
+      definition: {
+        source: { kind: "object", fields: ["name", "age", "status"] },
+        filters: { name: true, age: ["gte", "lte", "between"], status: ["eq", "in"] },
+        projection: true,
+        sorting: ["name", "age"],
+        pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
+        limits: { maxConditions: 32, maxSortFields: 3, maxSelectFields: 30 },
+      },
+    });
+
+    expect(parse({ filter: { age: { $gte: 18 }, status: "active" } })).toEqual({
+      filter: [
+        { kind: "gte", path: ["age"], value: 18 },
+        { kind: "eq", path: ["status"], value: "active" },
+      ],
+      sort: [],
+      pagination: { kind: "offset", offset: 0, limit: 20 },
+    });
+    expect(() => parse({ filter: { missing: 1 } })).toThrow(/not allowed/i);
+    expect(() => parse({ filter: { age: { $contains: 1 } } })).toThrow(/operator/i);
+    expect(() => parse({ filter: { name: { $contains: "Ada" } } })).toThrow(/only allows equality/i);
+    expect(() => parse([])).toThrow(/must be an object/i);
+    expect(() => parse({ unknown: true })).toThrow(/not allowed/i);
+  });
+
+  it("normalizes allowed sort fields and bounded offset pagination", () => {
+    const User = JIT.object({ name: JIT.string(), createdAt: JIT.date() });
+    const parse = JIT.cqrs.parse(
+      JIT.cqrs.input(User, {
+        sort: ["name", "createdAt"],
+        pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
+      })
+    );
+
+    expect(parse({ sort: "-createdAt,name", page: 3, limit: 10 })).toEqual({
+      filter: [],
+      sort: [
+        { path: ["createdAt"], direction: "desc" },
+        { path: ["name"], direction: "asc" },
+      ],
+      pagination: { kind: "offset", offset: 20, limit: 10 },
+    });
+    expect(() => parse({ sort: "missing" })).toThrow(/sort field/i);
+    expect(() => parse({ sort: "name,name" })).toThrow(/repeats/i);
+    expect(() => parse({ sort: "name," })).toThrow(/empty|not allowed/i);
+    expect(() => parse({ sort: 42 })).toThrow(/non-empty string/i);
+    expect(() => parse({ sort: "" })).toThrow(/non-empty string/i);
+    expect(() => parse({ limit: 101 })).toThrow(/pagination/i);
+    expect(() => parse({ page: Number.MAX_SAFE_INTEGER, limit: 100 })).toThrow(/pagination/i);
+  });
+
+  it("keeps permitted operator aliases on the compiled path", () => {
+    const User = JIT.object({ age: JIT.number() });
+    const parse = JIT.cqrs.parse(JIT.cqrs.input(User, { filter: { age: ["gte"] } }));
+
+    expect(parse({ filter: { age: { gte: 18, $gte: 21 } } })).toEqual({
+      filter: [
+        { kind: "gte", path: ["age"], value: 21 },
+        { kind: "gte", path: ["age"], value: 18 },
+      ],
+      sort: [],
+    });
+  });
+
+  it("normalizes opaque compound cursors with stable ordering", () => {
+    const User = JIT.object({ id: JIT.string(), createdAt: JIT.string() });
+    const parse = JIT.cqrs.parse(
+      JIT.cqrs.input(User, {
+        pagination: { type: "cursor", by: ["createdAt", "id"], defaultLimit: 20, maxLimit: 100 },
+      })
+    );
+    const after = encodeCqrsCursor(["2026-01-01T00:00:00.000Z", "u_1"]);
+
+    expect(parse({ after, limit: 10 })).toEqual({
+      filter: [],
+      sort: [
+        { path: ["createdAt"], direction: "asc" },
+        { path: ["id"], direction: "asc" },
+      ],
+      pagination: { kind: "cursor", after: ["2026-01-01T00:00:00.000Z", "u_1"], limit: 10 },
+    });
+    expect(() => parse({ after, before: after })).toThrow(/either after or before/i);
+    expect(() => parse({ after: "not-a-cursor" })).toThrow(/cursor/i);
+    expect(() => parse({ after, sort: "-createdAt,id" })).toThrow(/stable ordering/i);
+  });
+
+  it("enforces the configured structural filter budget", () => {
+    const User = JIT.object({ name: JIT.string(), status: JIT.string() });
+    const parse = JIT.cqrs.parse(
+      JIT.cqrs.input(User, {
+        filter: { name: true, status: true },
+        maxFilters: 1,
+      })
+    );
+
+    expect(() => parse({ filter: { name: "Ada", status: "active" } })).toThrow(/structural limit/i);
+  });
+
+  it("enforces condition and sort budgets in the compiled request parser", () => {
+    const User = JIT.object({ age: JIT.number(), name: JIT.string(), id: JIT.string() });
+    const parse = JIT.cqrs.parse(
+      JIT.cqrs.input(User, {
+        filter: { age: ["gte", "lte"] },
+        sort: ["age", "name", "id"],
+        limits: { maxConditions: 1, maxSortFields: 1 },
+      })
+    );
+
+    expect(() => parse({ filter: { age: { $gte: 18, $lte: 30 } } })).toThrow(/condition limit/i);
+    expect(() => parse({ sort: "age,name" })).toThrow(/structural limit/i);
+  });
+
+  it("normalizes bounded sparse fieldsets against the schema", () => {
+    const User = JIT.object({ id: JIT.string(), name: JIT.string(), email: JIT.string() });
+    const parse = JIT.cqrs.parse(JIT.cqrs.input(User, { select: true, limits: { maxSelectFields: 2 } }));
+
+    expect(parse({ fields: "id,name" })).toEqual({ filter: [], sort: [], select: ["id", "name"] });
+    expect(() => parse({ fields: "id,name,email" })).toThrow(/select exceeds/i);
+    expect(() => parse({ fields: "password" })).toThrow(/select field/i);
+    expect(() => parse({ fields: "id,id" })).toThrow(/repeats/i);
+    expect(() => parse({ fields: "id," })).toThrow(/empty|not allowed/i);
+    expect(() => parse({ fields: "" })).toThrow(/empty/i);
+    expect(() => JIT.cqrs.parse(JIT.cqrs.input(User, {}))({ fields: "id" })).toThrow(/sparse fields/i);
+  });
+
+  it("normalizes declared nested filter paths in compiled source", () => {
+    const User = JIT.object({ profile: JIT.object({ age: JIT.number() }) });
+    const parse = JIT.cqrs.parse(JIT.cqrs.input(User, { filter: { "profile.age": ["gte"] } }));
+
+    expect(parse({ filter: { "profile.age": { $gte: 18 } } })).toEqual({
+      filter: [{ kind: "gte", path: ["profile", "age"], value: 18 }],
+      sort: [],
+    });
+  });
+
+  it("validates static parser configuration before generating source", () => {
+    const User = JIT.object({ name: JIT.string() });
+    expect(() => JIT.cqrs.input(User, { maxFilters: -1 })).toThrow(/maxFilters/i);
+    expect(() =>
+      JIT.cqrs.input(User, {
+        pagination: { type: "offset", defaultLimit: 10, maxLimit: 5 },
+      })
+    ).toThrow(/pagination/i);
+    expect(() =>
+      JIT.cqrs.input(User, {
+        pagination: { type: "cursor", by: [], defaultLimit: 10, maxLimit: 20 },
+      })
+    ).toThrow(/stable ordering/i);
+    expect(() => JIT.cqrs.input(User, { limits: { maxSortFields: -1 } })).toThrow(/structural limits/i);
+    expect(() => JIT.cqrs.input(User, { filter: { missing: true } as never })).toThrow(/not declared/i);
+    expect(() => JIT.cqrs.input(User, { sort: ["missing"] as never })).toThrow(/not declared/i);
+    expect(() => JIT.cqrs.input(User, { sort: ["name", "name"] })).toThrow(/repeats/i);
+    expect(() => JIT.cqrs.input(User, { filter: { name: ["eq", "eq"] } })).toThrow(/repeats operator/i);
+    expect(() => JIT.cqrs.input(User, { filter: { name: [] } })).toThrow(/empty operator list/i);
+    expect(() => JIT.cqrs.input(User, { filter: { name: ["$eq"] } })).toThrow(/invalid operator/i);
+    expect(() =>
+      JIT.cqrs.input(User, {
+        pagination: { type: "cursor", by: ["name", "name"], defaultLimit: 10, maxLimit: 20 },
+      })
+    ).toThrow(/repeats/i);
+  });
+
+  it("snapshots nested configuration before compiling the parser", () => {
+    const User = JIT.object({ age: JIT.number() });
+    const operators = ["gte"];
+    const input = JIT.cqrs.input(User, { filter: { age: operators } });
+
+    operators.push("lte");
+    expect(input.options.filter?.age).toEqual(["gte"]);
+    expect(() => (input.options.filter?.age as string[]).push("lte")).toThrow();
+    expect(JIT.cqrs.parse(input)({ filter: { age: { $gte: 18 } } })).toEqual({
+      filter: [{ kind: "gte", path: ["age"], value: 18 }],
+      sort: [],
+    });
+  });
+
+  it("emits deterministic direct source for filter, sort and offset pagination", () => {
+    const first = emitCqrsInputParser([["age", ["gte", "lte"]]], 8, ["age"], {
+      type: "offset",
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
+    const second = emitCqrsInputParser([["age", ["gte", "lte"]]], 8, ["age"], {
+      type: "offset",
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
+
+    expect(first).toBe(second);
+    expect(first).toContain("const sortText = input.sort");
+    expect(first).toContain("const offset = (page - 1) * limit");
+    expect(first).toContain('pagination: { kind: "offset", offset, limit }');
+    expect(first).toContain("out[j++]");
+  });
+
+  it("emits an import-free parser for AOT", () => {
+    const source = emitCqrsAotParserSource(
+      [
+        ["age", ["gte"]],
+        ["name", true],
+      ],
+      8,
+      ["age", "name"],
+      undefined,
+      8,
+      3,
+      ["age", "name"]
+    );
+    const parse = globalThis.Function(source)() as (input: unknown) => unknown;
+    expect(source).not.toContain("__reference");
+    expect(parse({ filter: { age: { $gte: 18 } } })).toEqual({
+      filter: [{ kind: "gte", path: ["age"], value: 18 }],
+      sort: [],
+    });
+    expect(() => parse([])).toThrow(/invalid CQRS input/i);
+    expect(() => parse({ filter: { name: { $contains: "Ada" } } })).toThrow(/invalid CQRS input/i);
+    expect(() => parse({ sort: "age,age" })).toThrow(/invalid CQRS input/i);
+    expect(() => parse({ fields: "name,name" })).toThrow(/invalid CQRS input/i);
+    expect(() => parse({ fields: "" })).toThrow(/invalid CQRS input/i);
+    expect(() => parse({ sort: 42 })).toThrow(/invalid CQRS input/i);
+    expect(() => parse({ unknown: true })).toThrow(/invalid CQRS input/i);
+  });
+
+  it("keeps valid dynamic requests equivalent between runtime and import-free AOT", () => {
+    const User = JIT.object({ age: JIT.number(), name: JIT.string() });
+    const input = JIT.cqrs.input(User, {
+      filter: { age: ["gte", "lte"], name: true },
+      sort: ["age", "name"],
+      select: true,
+      pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
+    });
+    const runtime = JIT.cqrs.parse(input);
+    const source = emitCqrsAotParserSource(
+      [
+        ["age", ["gte", "lte"]],
+        ["name", true],
+      ],
+      32,
+      ["age", "name"],
+      { type: "offset", defaultLimit: 20, maxLimit: 100 },
+      3,
+      3,
+      ["age", "name"]
+    );
+    const aot = globalThis.Function(source)() as (value: unknown) => unknown;
+
+    fc.assert(
+      fc.property(
+        fc.integer(),
+        fc.integer(),
+        fc.string(),
+        fc.constantFrom("age", "-age", "name", "-name", "age,-name"),
+        fc.constantFrom("age", "name", "age,name"),
+        fc.integer({ min: 1, max: 5 }),
+        fc.integer({ min: 1, max: 100 }),
+        (gte, lte, name, sort, fields, page, limit) => {
+          const request = { filter: { age: { $gte: gte, $lte: lte }, name }, sort, fields, page, limit };
+          expect(aot(request)).toEqual(runtime(request));
+        }
+      ),
+      { numRuns: 300 }
+    );
+  });
+});

@@ -94,6 +94,38 @@ export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
   return compileValidatorSelection(schema, VALIDATOR_OPS, options) as CompiledValidator<ATS.TypeofSchema<TSchema>>;
 }
 
+/**
+ * Compiles the persisted-state boundary used by runtime-class `hydrate()`.
+ * Defaults remain required: persistence must not silently turn a truncated
+ * record into a newly-created entity.
+ */
+export function compileHydrator<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): (state: unknown) => ATS.TypeofSchema<TSchema> {
+  return getCompileCached(
+    schema,
+    "hydrator",
+    () => {
+      const emitted = emitValidator(schema, {
+        is: false,
+        safeParse: true,
+        safeParseAsync: false,
+        resolveDefaults: false,
+      });
+      const safeParse = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values)
+        .safeParse as (value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>;
+
+      return (state: unknown) => {
+        const result = safeParse(state);
+        if (result.success) return result.data;
+        throw new JITValidationError(result.issues);
+      };
+    },
+    options
+  );
+}
+
 export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, const TOps extends readonly ValidatorOp[]>(
   schema: TSchema,
   ops: TOps,

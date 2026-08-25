@@ -68,7 +68,7 @@ const isOutput = `function is(value) {
   return true;
 }`;
 
-const equalInput = `const equalUser = JIT.compare.equal(User).compile();
+const equalInput = `const equalUser = JIT.equal(User).compile();
 
 equalUser(a, b); // schema-aware deep equality`;
 
@@ -151,7 +151,7 @@ function stringify(value) {
   return s;
 }`;
 
-const diffInput = `const diffUser = JIT.compare.diff(User).compile();
+const diffInput = `const diffUser = JIT.diff(User).compile();
 
 diffUser(before, after); // structural diff entries`;
 

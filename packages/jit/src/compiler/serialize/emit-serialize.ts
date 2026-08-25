@@ -173,6 +173,7 @@ function hasStringLeaf(schema: ATS.AnyTypeSchema, seen: Set<ATS.AnyTypeSchema>):
     case TypeName.coerce:
     case TypeName.pipe:
     case TypeName.transform:
+    case TypeName.runtimeType:
       return hasStringLeaf(current.def.innerType as ATS.AnyTypeSchema, seen);
     case TypeName.lazy:
       return hasStringLeaf((current.def.getter as () => ATS.AnyTypeSchema)(), seen);
@@ -449,6 +450,7 @@ function resolveSerializeWrappers(schema: ATS.AnyTypeSchema): ResolvedSerializeW
       case TypeName.coerce:
       case TypeName.pipe:
       case TypeName.transform:
+      case TypeName.runtimeType:
         current = current.def.innerType as AnySchema;
         continue;
       case TypeName.lazy:

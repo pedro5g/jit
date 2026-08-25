@@ -1,4 +1,5 @@
 import * as ATS from "../core/ats/index.js";
+import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { resolveLazySchema } from "./schema-recursion.js";
 
 export interface GuardNode<TNode> {
@@ -107,7 +108,7 @@ export function buildSchemaNode<TNode>(
           key,
           schema: props[key],
           value: buildNode(props[key]),
-          readonly: props[key].type === ATS.TypeName.readonly,
+          readonly: resolveWrappers(props[key]).readonly,
         })),
       };
     }

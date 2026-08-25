@@ -19,11 +19,12 @@ describe("composable capability API", () => {
     >().toEqualTypeOf<never>();
   });
 
-  it("keeps structural capabilities namespaced while validation has direct leaf aliases", () => {
-    for (const alias of ["equal", "diff", "hash", "mask", "sanitize"] as const) {
-      expect(JIT, `JIT.${alias} must only exist on its capability namespace`).not.toHaveProperty(alias);
-    }
-    expectTypeOf<Extract<"equal" | "diff" | "hash" | "mask" | "sanitize", keyof typeof JIT>>().toEqualTypeOf<never>();
+  it("exposes the structural leaf operations named by the public plan", () => {
+    expect(JIT.equal(User)(ada, { ...ada })).toBe(true);
+    expect(JIT.diff(User)(ada, { ...ada, name: "Grace" })).not.toHaveLength(0);
+    expect(JIT.hash(User)(ada)).toBe(JIT.compare.hash(User)(ada));
+    expectTypeOf<Extract<"equal" | "diff" | "hash", keyof typeof JIT>>().toEqualTypeOf<"equal" | "diff" | "hash">();
+    expectTypeOf<Extract<"mask" | "sanitize", keyof typeof JIT>>().toEqualTypeOf<never>();
   });
 
   it("compiles validation through the validate namespace", () => {
@@ -89,6 +90,43 @@ describe("composable capability API", () => {
       JSON.stringify([{ id: 1, name: "Ada" }])
     );
     expectTypeOf(publicUsers).toMatchTypeOf<(value: string) => string>();
+  });
+
+  it("fuses filtered terminal aggregates without materializing an output array", () => {
+    const Orders = JIT.array(
+      JIT.object({
+        id: JIT.number().int(),
+        active: JIT.boolean(),
+        total: JIT.number(),
+      })
+    );
+    const active = JIT.from(Orders).filter((query) => query.eq("active", true));
+    const total = active.sum("total");
+    const count = active.count();
+    const average = active.avg("total");
+    const minimum = active.min("total");
+    const maximum = active.max("total");
+    const values = [
+      { id: 1, active: true, total: 10 },
+      { id: 2, active: false, total: 100 },
+      { id: 3, active: true, total: 20 },
+    ];
+    const source = Compiler.emitExecutionPlan(total.plan).source;
+
+    expect(total.plan.stages.map((stage) => stage.kind)).toEqual(["value", "query", "aggregate"]);
+    expect(total(values)).toBe(30);
+    expect(count(values)).toBe(2);
+    expect(average(values)).toBe(15);
+    expect(minimum(values)).toBe(10);
+    expect(maximum(values)).toBe(20);
+    expect(average([{ id: 2, active: false, total: 100 }])).toBeUndefined();
+    expect(active.select("total").sum("total")(values)).toBe(30);
+    expect(source.match(/function query/g)).toHaveLength(1);
+    expect(source).not.toContain("new Array");
+    expectTypeOf(total).toMatchTypeOf<(value: AST.Typeof<typeof Orders>) => number>();
+    expectTypeOf(average).toMatchTypeOf<(value: AST.Typeof<typeof Orders>) => number | undefined>();
+    // @ts-expect-error aggregate fields must be numeric
+    active.sum("active");
   });
 
   it("fuses transforms, updates, security rewrites, queries, and sinks in one runtime program", () => {

@@ -17,6 +17,39 @@ type User = JIT.Typeof<typeof User>;
 The runtime AST has a stable `{ type, _type, def, annotations }` shape. `_type` is
 always `null` at runtime and carries inference only at compile time.
 
+## Input, output and updates
+
+One schema has three useful TypeScript views. `Input` is the boundary value
+accepted by creation and parsing, `Typeof` is the resolved state, and
+`Update` is the immutable patch shape. Defaults make a field optional only
+for input; readonly fields are removed from updates, even when `readonly()` is
+wrapped by `default()` or another transparent wrapper.
+
+```ts
+import { JIT, type Input, type Typeof, type Update } from "@jit-compiler/jit";
+
+const User = JIT.object({
+  id: JIT.string().readonly().default("generated"),
+  name: JIT.string(),
+  nickname: JIT.string().optional(),
+  note: JIT.string().nullish(),
+});
+
+type CreateUser = Input<typeof User>;
+// { id?: string; name: string; nickname?: string; note?: string | null }
+
+type UserState = Typeof<typeof User>;
+// { readonly id: string; name: string; nickname: string | undefined; note: string | null | undefined }
+
+type ChangeUser = Update<typeof User>;
+// { name?: string; nickname?: string; note?: string | null }
+```
+
+`JIT.class(schema).create(input)` accepts `Input`; `hydrate(state)` accepts the
+complete persisted state. Hydration validates invariants but never fills a
+missing default, which prevents a truncated stored record from silently becoming
+a newly-created entity.
+
 ## Object transforms
 
 ```ts

@@ -1,0 +1,92 @@
+---
+title: Domain-driven design
+description: Model value objects, entities, aggregate roots and domain events with generated runtime classes.
+related: /docs/reference/functions/runtime-classes, /docs/aot/generation-and-tree-shaking
+---
+
+JIT's DDD primitives are runtime classes backed by the same schema AST used at
+every boundary. They do not use reflection or proxies: validation, construction,
+identity and selected capabilities are compiled once and shared by instances.
+
+Use the top-level domain factories so each role remains explicit while sharing
+the same class and schema infrastructure.
+
+## A complete order transition
+
+Value objects are immutable structural values. Entities use an identity key.
+Aggregate roots add a controlled state transition and an ordered event buffer.
+
+```ts
+const Money = JIT.valueObject(
+  JIT.object({
+    amount: JIT.number().positive(),
+    currency: JIT.enum(["BRL", "USD"] as const),
+  }),
+);
+
+const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+  version: 1,
+  payload: JIT.object({
+    orderId: JIT.string(),
+    total: JIT.number().positive(),
+  }),
+});
+
+const OrderBase = JIT.aggregateRoot(
+  JIT.object({
+    id: JIT.string().readonly(),
+    status: JIT.enum(["draft", "confirmed"] as const),
+    total: Money,
+  }),
+  { id: "id" },
+);
+
+class Order extends OrderBase {
+  confirm() {
+    if (this.status === "confirmed") return;
+    this.update({ status: "confirmed" });
+    this.raise(
+      OrderConfirmed.create({ orderId: this.id, total: this.total.amount }),
+    );
+  }
+}
+
+const order = Order.create({
+  id: "o_1",
+  status: "draft",
+  total: { amount: 120, currency: "BRL" },
+});
+
+order.confirm();
+order.pullEvents(); // [OrderConfirmed instance], in insertion order
+```
+
+`update()` applies only schema-derived mutable fields. A readonly identity such
+as `id` is never accepted in an update patch. Put domain behavior in subclass
+methods; call `raise()` only after the state transition succeeds.
+
+## Persistence boundaries
+
+`create` accepts schema `Input`, so defaults may be omitted. `hydrate`
+accepts complete persisted state and does not fill missing defaults. That keeps
+an incomplete database record from becoming a newly-created aggregate.
+
+```ts
+const encodeOrder = JIT.json.stringify(Order);
+
+const snapshot = encodeOrder(order);
+const restored = Order.hydrate(JSON.parse(snapshot));
+
+restored.sameIdentity(order); // true
+```
+
+Use `peekEvents()` to inspect pending events without changing them, and
+`pullEvents()` to hand them to an outbox/publisher and clear the buffer. The
+library intentionally does not provide event sourcing: domain events describe
+facts that occurred; they are not an aggregate's persistence model.
+
+## AOT
+
+Export both a runtime class and any `JSON → validate → construct` pipeline from
+the same AOT manifest. The generated module then emits a local class and calls
+it after validation, with no JIT runtime import or captured constructor.

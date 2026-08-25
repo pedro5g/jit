@@ -6,7 +6,7 @@ description: Validate JSON and NDJSON incrementally across arbitrary chunk bound
 ## JSON array stream
 
 ```ts
-const input = JIT.stream(JIT.array(Event), {
+const input = JIT.stream.json(JIT.array(Event), {
   onItem(event, index) {
     queue.write({ index, event });
   },
@@ -24,14 +24,15 @@ scanner retains only parser state needed to find complete values.
 ## NDJSON
 
 ```ts
-const lines = JIT.stream(Event, {
-  format: "ndjson",
+const lines = JIT.stream.ndjson(Event, {
   onItem: consume,
 });
 ```
 
 Each non-empty line is parsed and validated against `Event`. The schema
-describes one line, not an array.
+describes one line, not an array, while `end()` returns the validated line
+array. The callable `JIT.stream(schema, { format })` form remains available;
+the named forms make the transport contract and return type explicit.
 
 ## Interface
 

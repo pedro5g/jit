@@ -24,6 +24,22 @@ export type AnySchema =
   | AnyWrapperSchema
   | AnySpecialSchema;
 
+/** A schema-backed runtime constructor used when a generated class is nested in another schema. */
+export interface RuntimeTypeDef<TInner extends AnyTypeSchema = AnyTypeSchema> extends InnerTypeDef<TInner> {
+  /** Internal validated flag avoids a second parse when validation already built the state. */
+  readonly materialize: new (
+    input: unknown,
+    validated?: boolean
+  ) => unknown;
+}
+
+export interface RuntimeTypeSchema<TInner extends AnyTypeSchema = AnyTypeSchema, TInstance = TypeofSchema<TInner>> {
+  readonly type: "runtimeType";
+  readonly _type: TInstance;
+  readonly def: Readonly<RuntimeTypeDef<TInner>>;
+  readonly annotations: unknown;
+}
+
 export type SchemaShape = Readonly<Record<string, AnyTypeSchema>>;
 
 export type TypeofSchema<TSchema extends AnyTypeSchema> = TSchema["_type"];

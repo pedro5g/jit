@@ -541,10 +541,10 @@ const KeyedUsers = JIT.array(schema).keyed("id");
 
 const indexes = {
   // entity alone keeps positional equality
-  entityEqual: JIT.compare.equal(EntityUsers),
+  entityEqual: JIT.equal(EntityUsers),
   // indexBy/keyed match reordered entities by id
-  indexedEqual: JIT.compare.equal(IndexedUsers),
-  keyedEqual: JIT.compare.equal(KeyedUsers),
+  indexedEqual: JIT.equal(IndexedUsers),
+  keyedEqual: JIT.equal(KeyedUsers),
   // entity metadata supplies the default normalization key
   normalize: Compiler.compileNormalize(EntityUsers.schema),
   // query keyed() is a fresh Map collector, not a retained schema index

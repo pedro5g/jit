@@ -34,6 +34,14 @@ export type QueryIteratorCompiled<
   ? (input: Iterable<TElement>) => IterableIterator<TOutput>
   : (input: Iterable<TElement>, params: TParams) => IterableIterator<TOutput>;
 
+export type QueryArrayCompiled<
+  TElement,
+  TOutput,
+  TParams extends Readonly<Record<string, unknown>>,
+> = keyof TParams extends never
+  ? (input: Iterable<TElement>) => TOutput[]
+  : (input: Iterable<TElement>, params: TParams) => TOutput[];
+
 export type QueryAsyncIteratorCompiled<
   TElement,
   TOutput,
@@ -80,6 +88,43 @@ export function explainQueryExecution(program: LazyQueryProgram, outputMode: Que
 
 export function emitQueryIteratorSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
   return emitPipelineSource(schema, program, false);
+}
+
+/** Materializes an incremental pipeline while preserving its exact operator order for eager/AOT exports. */
+export function emitQueryArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
+  if (program.nodes.every(isFusibleNode)) return emitDirectArraySource(schema, program);
+  const iterator = emitQueryIteratorSource(schema, program);
+  const hasParams = Boolean(program.params?.length);
+  return `(function() {\nconst iterate = ${iterator};\nfunction query(input${hasParams ? ", params" : ""}) {\n  return Array.from(iterate(input${hasParams ? ", params" : ""}));\n}\nreturn query;\n})()`;
+}
+
+export function compileQueryArray<
+  TElement,
+  TOutput,
+  TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+>(
+  schema: ATS.AnyTypeSchema,
+  program: LazyQueryProgram,
+  options?: CompileCacheOptions
+): QueryArrayCompiled<TElement, TOutput, TParams> {
+  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const template = getCompileCached(
+    schema,
+    `query:eager-array:${serializePipeline(program.nodes)}`,
+    () => {
+      const source = emitQueryArraySource(schema, program);
+      return { source, create: globalThis.Function(...bindingNames, `return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create(...program.bindings) as QueryArrayCompiled<TElement, TOutput, TParams>;
+  registerArtifact(compiled as object, {
+    kind: "query",
+    source: template.source,
+    bindingNames,
+    bindingValues: program.bindings,
+  });
+  return compiled;
 }
 
 export function emitQueryAsyncIteratorSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
@@ -315,6 +360,63 @@ function emitPipelineSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram
   lines.push(`  return ${stage};`);
   lines.push("}");
   lines.push("return query;");
+  return `(function() {\n${lines.join("\n")}\n})()`;
+}
+
+function emitDirectArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
+  const collection = resolveCollection(schema);
+  validatePipeline(program.nodes, collection.props);
+  const hasParams = Boolean(program.params?.length);
+  const lines = [`function query(input${hasParams ? ", params" : ""}) {`, "  const out = [];", "  let j = 0;"];
+
+  program.nodes.forEach((node, index) => {
+    if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
+    else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
+    else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
+  });
+
+  const body = ["let output = item;"];
+  program.nodes.forEach((node, index) => {
+    switch (node.kind) {
+      case "filter":
+        body.push(`if (!(${emitCondition(node.condition)})) continue;`);
+        break;
+      case "select:fields":
+        body.push(`output = ${emitProjection(node.fields)};`);
+        break;
+      case "take":
+        body.push(`if (count${index}++ === ${node.count}) return out;`);
+        break;
+      case "drop":
+        body.push(`if (count${index}++ < ${node.count}) continue;`);
+        break;
+      case "takeWhile":
+        body.push(`if (!(${emitCondition(node.condition)})) return out;`);
+        break;
+      case "dropWhile":
+        body.push(`if (dropping${index} && (${emitCondition(node.condition)})) continue;`);
+        body.push(`dropping${index} = false;`);
+        break;
+      case "unique":
+        body.push(`const key${index} = item${emitPropertyAccess("", node.key)};`);
+        body.push(`if (seen${index}.has(key${index})) continue;`);
+        body.push(`seen${index}.add(key${index});`);
+        break;
+      default:
+        break;
+    }
+  });
+  body.push("out[j++] = output;");
+
+  if (collection.kind === "array") {
+    lines.push("  for (let i = 0, len = input.length; i < len; i++) {", "    const item = input[i];");
+  } else if (collection.kind === "map") {
+    lines.push("  for (const entry of input) {", "    const item = entry[1];");
+  } else {
+    lines.push("  for (const item of input) {");
+  }
+  for (const line of body) lines.push(`    ${line}`);
+  lines.push("  }", "  return out;", "}", "return query;");
   return `(function() {\n${lines.join("\n")}\n})()`;
 }
 
@@ -556,6 +658,9 @@ function resolveCollection(schema: ATS.AnyTypeSchema): {
 
 function validatePipeline(nodes: readonly QueryPipelineNode[], props: ATS.SchemaShape): void {
   for (const node of nodes) {
+    if (node.kind === "filter" || node.kind === "takeWhile" || node.kind === "dropWhile") {
+      validateConditionFields(node.condition, props);
+    }
     if (
       node.kind === "select:fields" ||
       node.kind === "flatMap" ||
@@ -567,6 +672,21 @@ function validatePipeline(nodes: readonly QueryPipelineNode[], props: ATS.Schema
       for (const key of keys)
         if (!(key in props)) throw new JITError("INVALID_QUERY", `lazy query received unknown key ${key}`);
     }
+  }
+}
+
+function validateConditionFields(condition: QueryConditionNode, props: ATS.SchemaShape): void {
+  if (condition.kind === "compare") {
+    for (const value of [condition.left, condition.right]) {
+      if (value.kind === "field" && !(value.key in props)) {
+        throw new JITError("INVALID_QUERY", `lazy query received unknown key ${value.key}`);
+      }
+    }
+  } else if (condition.kind === "logical") {
+    validateConditionFields(condition.left, props);
+    validateConditionFields(condition.right, props);
+  } else {
+    validateConditionFields(condition.inner, props);
   }
 }
 

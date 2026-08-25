@@ -1,6 +1,6 @@
 ---
 title: Migrating to 2.0
-description: Move from the 1.x facades to capability namespaces and artifact objects, with a direct replacement for every removed call.
+description: Move from the 1.x facades to callable artifacts and artifact objects, with a direct replacement for every removed call.
 ---
 
 2.0 removes the parallel ways of reaching the same compiled function. In 1.x a
@@ -22,9 +22,9 @@ it emitted for 1.x; only the surface that asks for it moved.
 | `JIT.validator(Job).safeParseAsync(x)` | `JIT.validate.async.safeParse(Job)(x)`       |
 | `JIT.model(User)`                      | an object literal of artifacts               |
 | `JIT.compile(User, { ... })`           | the same object, without the wrapper call    |
-| `JIT.equal(User)`                      | `JIT.compare.equal(User)`                    |
-| `JIT.diff(User)`                       | `JIT.compare.diff(User)`                     |
-| `JIT.hash(User)`                       | `JIT.compare.hash(User)`                     |
+| `JIT.equal(User).compile()`            | `JIT.equal(User)`                            |
+| `JIT.diff(User)`                       | `JIT.diff(User)`                             |
+| `JIT.hash(User)`                       | `JIT.hash(User)`                             |
 | `JIT.mask(User)`                       | `JIT.security.mask(User)`                    |
 | `JIT.sanitize(Form)`                   | `JIT.security.sanitize(Form)`                |
 | `JIT.serializer(User)`                 | `JIT.json.stringify(User)` / `JIT.json.parse(User)` |
@@ -109,8 +109,8 @@ const diffUser = JIT.diff(User);
 const maskUser = JIT.mask(User);
 
 // 2.0
-const equalUser = JIT.compare.equal(User);
-const diffUser = JIT.compare.diff(User);
+const equalUser = JIT.equal(User);
+const diffUser = JIT.diff(User);
 const maskUser = JIT.security.mask(User);
 ```
 
@@ -221,7 +221,7 @@ const Category = JIT.object({
 
 const isCategory = JIT.validate.is(Category);
 const cloneCategory = JIT.clone(Category);
-const diffCategory = JIT.compare.diff(Category);
+const diffCategory = JIT.diff(Category);
 ```
 
 ## Verifying the migration

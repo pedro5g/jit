@@ -7,6 +7,7 @@ import {
   isBinaryRowSet,
 } from "../compiler/binary-rowset.js";
 import {
+  compileQueryArray,
   compileQueryAsyncIterator,
   compileQueryIterator,
   compileQueryVisitor,
@@ -137,7 +138,7 @@ export interface QueryBuilderOps<
 > {
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
-  ): QueryBuilder<TSchema, TOutput, TResult, TypeofParamShape<TShape>>;
+  ): QueryBuilder<TSchema, TOutput, TResult, TParams & TypeofParamShape<TShape>>;
   filter(
     predicate: (
       query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
@@ -263,7 +264,7 @@ export interface BinaryQueryBuilderOps<
 > {
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
-  ): BinaryQueryBuilder<TElement, TOutput, TResult, TypeofParamShape<TShape>>;
+  ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams & TypeofParamShape<TShape>>;
   filter(
     predicate: (query: QueryConditionBuilder<TElement>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
   ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
@@ -369,11 +370,11 @@ function createBinaryQueryBuilder<
 
   const builder: BinaryQueryBuilder<TElement, TOutput, TResult, TParams> = Object.assign(callable, {
     params(shape) {
-      return createBinaryQueryBuilder<TElement, TOutput, TResult, TypeofParamShape<typeof shape>>(
+      return createBinaryQueryBuilder<TElement, TOutput, TResult, TParams & TypeofParamShape<typeof shape>>(
         target,
         nodes,
         bindings,
-        Object.keys(shape)
+        mergeParamNames(paramNames, shape)
       );
     },
 
@@ -453,17 +454,10 @@ function createQueryBuilder<
       }) as (value: ATS.TypeofSchema<TSchema>, params?: TParams) => TResult;
     }
 
-    const iterator = compileQueryIterator(schema, { nodes, bindings, params: paramNames });
-
-    return (value, params) =>
-      Array.from(
-        paramNames.length > 0
-          ? (iterator as (input: Iterable<unknown>, params: TParams) => Iterable<unknown>)(
-              value as Iterable<unknown>,
-              params as TParams
-            )
-          : (iterator as (input: Iterable<unknown>) => Iterable<unknown>)(value as Iterable<unknown>)
-      ) as TResult;
+    return compileQueryArray<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }) as (
+      value: ATS.TypeofSchema<TSchema>,
+      params?: TParams
+    ) => TResult;
   };
 
   const callable = function query(value: ATS.TypeofSchema<TSchema>, params?: TParams): TResult {
@@ -473,11 +467,11 @@ function createQueryBuilder<
 
   const builder: QueryBuilder<TSchema, TOutput, TResult, TParams> = Object.assign(callable, {
     params(shape) {
-      return createQueryBuilder<TSchema, TOutput, TResult, TypeofParamShape<typeof shape>>(
+      return createQueryBuilder<TSchema, TOutput, TResult, TParams & TypeofParamShape<typeof shape>>(
         schema,
         nodes,
         bindings,
-        Object.keys(shape)
+        mergeParamNames(paramNames, shape)
       );
     },
 
@@ -781,6 +775,18 @@ function fold(
   const tail = rest.length === 0 ? right : fold(op, right, rest[0], rest.slice(1));
 
   return { kind: "logical", op, left, right: tail };
+}
+
+function mergeParamNames(current: readonly string[], shape: ParamSchemaShape): readonly string[] {
+  const next = [...current];
+  const seen = new Set(current);
+
+  for (const name of Object.keys(shape)) {
+    if (seen.has(name)) throw new JITError("INVALID_QUERY", `query parameter ${JSON.stringify(name)} is duplicated`);
+    seen.add(name);
+    next.push(name);
+  }
+  return next;
 }
 
 function createParamRefs<TParams extends Readonly<Record<string, unknown>>>(

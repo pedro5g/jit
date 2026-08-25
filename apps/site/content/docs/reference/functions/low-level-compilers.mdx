@@ -13,14 +13,14 @@ import { Compiler } from "@jit-compiler/jit";
 Compiler.compileEqual(User.schema);
 ```
 
-The capability namespaces — `JIT.compare`, `JIT.clone`, `JIT.query`,
+The capability namespaces — `JIT.equal`, `JIT.clone`, `JIT.query`,
 `JIT.transform`, `JIT.update` — provide metadata, builder ergonomics and the
 clearest AOT registration, and are what application code should use.
 
 ## compileEqual
 
 Compiles equality directly from an unwrapped schema AST. Prefer
-`JIT.compare.equal` for application exports.
+`JIT.equal` for application exports.
 
 ## compileClone
 
@@ -28,11 +28,11 @@ Compiles direct schema-shaped cloning. Prefer `JIT.clone`.
 
 ## compileDiff
 
-Compiles direct structural diff. Prefer `JIT.compare.diff`.
+Compiles direct structural diff. Prefer `JIT.diff`.
 
 ## compileHash
 
-Compiles direct structural hashing. Prefer `JIT.compare.hash`.
+Compiles direct structural hashing. Prefer `JIT.hash`.
 
 ## compileUpdate
 
@@ -81,6 +81,14 @@ is a lazy-query barrier.
 
 Compiles key-based uniqueness. The operation retains a Set/Map proportional to
 observed identities.
+
+## Query source emitters
+
+`emitQuerySource` emits the specialized eager query loop.
+`emitQueryIteratorSource`, `emitQueryAsyncIteratorSource`, and
+`emitQueryVisitorSource` target explicit streaming terminals.
+`emitQueryArraySource` preserves incremental operator order for eager/AOT
+materialization and emits a direct indexed loop when the stages can be fused.
 
 ## When direct compilers are appropriate
 

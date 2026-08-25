@@ -37,6 +37,8 @@ export interface CompiledStream<T, TItem = unknown> {
   readonly items: readonly TItem[];
 }
 
+type StreamArrayItem<TValue> = TValue extends readonly (infer TItem)[] ? TItem : never;
+
 interface SchemaCheckRecord {
   readonly kind: string;
   readonly value?: unknown;
@@ -121,12 +123,21 @@ function prefixIssues(issues: readonly ValidationIssue[], prefix: string): Valid
  */
 export function compileStream<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
+  options: StreamOptions<ATS.TypeofSchema<TSchema>> & CompileCacheOptions & { readonly format: "ndjson" }
+): CompiledStream<ATS.TypeofSchema<TSchema>[], ATS.TypeofSchema<TSchema>>;
+export function compileStream<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: StreamOptions<StreamArrayItem<ATS.TypeofSchema<TSchema>>> &
+    CompileCacheOptions & { readonly format?: "json" }
+): CompiledStream<ATS.TypeofSchema<TSchema>, StreamArrayItem<ATS.TypeofSchema<TSchema>>>;
+export function compileStream<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
   options: StreamOptions & CompileCacheOptions = {}
-): CompiledStream<ATS.TypeofSchema<TSchema>> {
+): CompiledStream<unknown> {
   const format = options.format ?? "json";
   const root = resolveRoot(schema);
 
-  if (format === "ndjson") return createNdjsonStream(schema, options) as CompiledStream<ATS.TypeofSchema<TSchema>>;
+  if (format === "ndjson") return createNdjsonStream(schema, options);
   if (root.type === TypeName.array) return createArrayStream<TSchema>(root, options);
   return createValueStream(schema, root, options);
 }

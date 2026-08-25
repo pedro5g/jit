@@ -1,6 +1,8 @@
 import { JITError, JITValidationError } from "../errors/index.js";
+import { getArtifact } from "../runtime/artifact-registry.js";
 import { emitCodec } from "./codec/emit-codec.js";
-import type { ExecutionPlan } from "./execution-plan.js";
+import { optimizeExecutionPlan } from "./execution-optimize.js";
+import type { ExecutionPlan, ExecutionStage } from "./execution-plan.js";
 import { warmJsonParseShape } from "./json-parse.js";
 import { buildMapperPlan, type MapperOverridesInput } from "./mapper/build-mapper-plan.js";
 import { emitMapperSource } from "./mapper.js";
@@ -30,6 +32,7 @@ export interface EmittedExecutionPlan {
 
 /** Emits the runtime source and bindings for the complete execution plan. */
 export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
+  const optimized = optimizeExecutionPlan(plan);
   const setup: string[] = [];
   const body: string[] = ["let value = input;"];
   const bindingNames: string[] = [];
@@ -79,7 +82,7 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
     body.push(`value = ${out};`);
   };
 
-  const stages = plan.stages;
+  const stages = optimized.stages;
 
   for (let index = 0; index < stages.length; index++) {
     const stage = stages[index];
@@ -99,6 +102,10 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
         break;
       }
       case "validate": {
+        const nextStage = stages[index + 1];
+        const constructNext = nextStage?.kind === "construct";
+        const constructArtifact = constructNext ? getArtifact(nextStage.target) : undefined;
+        const strictDomainEvent = constructArtifact?.kind === "class" && constructArtifact.domainEvent !== undefined;
         const fastParse = stage.operation === "parse" && canUseFastParse(stage.schema);
         const validator = emitValidator(stage.schema, {
           is: stage.operation === "is" || fastParse,
@@ -109,6 +116,8 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
             stage.operation === "safeParseAsync" ||
             stage.operation === "issues",
           safeParseAsync: stage.operation === "parseAsync" || stage.operation === "safeParseAsync",
+          materializeRuntimeTypes: !constructNext,
+          resolveDefaults: !strictDomainEvent,
         });
         const validatorName = emitBoundBlock(
           "validator",
@@ -165,18 +174,41 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
         }
         break;
       }
+      case "construct": {
+        const target = bind(stage.target);
+
+        body.push(`value = new ${target}(value, true);`);
+        break;
+      }
       case "query": {
-        let finalStage = stage;
+        let finalStage: Extract<ExecutionStage, { readonly kind: "query" | "aggregate" }> = stage;
 
         while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
           index++;
           finalStage = stages[index] as typeof finalStage;
+        }
+        const aggregate = stages[index + 1];
+        if (aggregate?.kind === "aggregate") {
+          index++;
+          finalStage = aggregate;
         }
         const queryName = emitBoundBlock(
           "query",
           finalStage.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
           finalStage.program.bindings,
           emitQuerySource(finalStage.source, finalStage.program),
+          true
+        );
+
+        body.push(`value = ${queryName}(value);`);
+        break;
+      }
+      case "aggregate": {
+        const queryName = emitBoundBlock(
+          "query",
+          stage.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
+          stage.program.bindings,
+          emitQuerySource(stage.source, stage.program),
           true
         );
 
@@ -260,7 +292,7 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
       case "json.encode": {
         const stringifyName = helper("stringify");
 
-        setup.push(`const ${stringifyName} = ${emitSerialize(stage.schema ?? plan.schema)};`);
+        setup.push(`const ${stringifyName} = ${emitSerialize(stage.schema ?? optimized.schema)};`);
         body.push(`value = ${stringifyName}(value);`);
         break;
       }

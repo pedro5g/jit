@@ -98,3 +98,70 @@ are available on that builder.
 
 More operator examples are in [queries](/docs/runtime/queries) and [lazy
 execution](/docs/runtime/lazy-execution).
+## CQRS
+
+`JIT.cqrs.query(Model)` is a semantic facade over the existing compiled query
+IR. It supports `where`, `select`, `orderBy`, `limit`, typed `params`, and a
+portable `~query` descriptor; it does not execute a database query itself.
+Successive `where` calls are combined with logical AND in both execution and
+the portable descriptor. Successive `params` calls accumulate their declared
+shape, and `select` narrows the callable result type to the projected fields.
+The static CQRS facade is declarative: filters run before ordering, projection,
+and limit regardless of chain assembly order. Repeated `select`/`orderBy` use
+the last declaration, while repeated limits use the smallest bound; runtime,
+AOT, and `~query` share that canonical form.
+
+```ts
+const ActiveUsers = JIT.cqrs
+  .query(JIT.object({ id: JIT.string(), active: JIT.boolean() }))
+  .where((q) => q.eq("active", true))
+  .select("id");
+
+ActiveUsers([{ id: "u_1", active: true }]); // [{ id: "u_1" }]
+```
+
+`JIT.cqrs.input(Model, options)` declares permitted external filters, sorting,
+and offset pagination. `JIT.cqrs.parse(definition)` normalizes input into the
+portable filter representation; configured fields and operators are rejected
+before a backend adapter sees them.
+
+`filter: { field: true }` is the equality shorthand and accepts only a direct
+value. Declare an operator list such as `filter: { age: ["gte", "lte"] }` to
+accept operator objects. Top-level arrays, unknown request keys, malformed or
+repeated sort/select fields, undeclared fields, and undeclared operators are
+rejected identically by runtime and AOT parsers. Offset pagination also rejects
+page/limit combinations whose computed offset is not a safe integer.
+
+Cursor pagination uses an opaque compound tuple and always fixes the ordering
+to its declared `by` fields. A request may provide exactly one of `after` or
+`before`; arbitrary ordering is rejected so a cursor cannot drift between
+pages.
+
+Use `limits` to bound untrusted request complexity before it reaches an
+adapter. `maxConditions` limits normalized filter operations and
+`maxSortFields` limits comma-separated ordering fields; both are enforced by
+the generated parser.
+
+Set `select: true` to permit sparse fieldsets such as `fields=id,name`. The
+parser checks every selected field against the model schema and can bound the
+fieldset with `limits.maxSelectFields`.
+
+Nested filter paths use an explicit dotted key and are normalized as a path in
+the standard request: `filter: { "profile.age": { $gte: 18 } }` becomes a
+condition with `path: ["profile", "age"]`. The parser validates every segment
+against the declared model before an adapter receives it.
+
+```ts
+const Users = JIT.object({ id: JIT.string(), createdAt: JIT.string() });
+const ListUsers = JIT.cqrs.input(Users, {
+  pagination: {
+    type: "cursor",
+    by: ["createdAt", "id"],
+    defaultLimit: 20,
+    maxLimit: 100,
+  },
+});
+
+const parseListUsers = JIT.cqrs.parse(ListUsers);
+// parseListUsers({ after: opaqueCursor, limit: 10 })
+```

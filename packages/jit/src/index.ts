@@ -33,6 +33,10 @@ export * as AST from "./core/ats/index.js";
 export type Typeof<TSchemaLike> = import("./core/ats/typeof.js").Typeof<TSchemaLike>;
 /** Accepted boundary input, before defaults and output transforms are resolved. */
 export type Input<TSchemaLike> = import("./core/ats/input.js").Input<TSchemaLike>;
+/** Complete persisted state accepted by `hydrate()`. */
+export type Hydrate<TSchemaLike> = import("./core/ats/representations.js").Hydrate<TSchemaLike>;
+/** Transport representation used at JSON/query/persistence boundaries. */
+export type Wire<TSchemaLike> = import("./core/ats/representations.js").Wire<TSchemaLike>;
 /** Immutable patch shape; readonly fields are excluded. */
 export type Update<TSchemaLike> = import("./core/ats/input.js").Update<TSchemaLike>;
 /** Fluent builder chain internals (`createBuilder`, builder types). */

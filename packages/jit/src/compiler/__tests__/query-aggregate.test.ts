@@ -120,8 +120,21 @@ describe("JIT compiler query aggregates", () => {
     expect(uniqueCustomerCount(orders)).toBe(2);
   });
 
-  it("should reject aggregate combinations and unknown keys", () => {
-    expect(() => JIT.query(Orders).select("total").sum("total")([])).toThrow(Errors.JITError);
+  it("should eliminate a terminal projection before aggregation", () => {
+    const sum = JIT.query(Orders).select("total").sum("total");
+    const source = Compiler.emitQuerySource(Orders.schema, {
+      nodes: [
+        { kind: "select:fields", fields: ["total"] },
+        { kind: "aggregate", op: "sum", key: "total" },
+      ],
+      bindings: [],
+    });
+
+    expect(sum(orders)).toBe(375);
+    expect(source).not.toContain("new Array");
+  });
+
+  it("should reject incompatible aggregate combinations and unknown keys", () => {
     expect(() => JIT.query(Orders).keyed("id").sum("total")([])).toThrow(Errors.JITError);
     expect(() => JIT.query(Orders).orderBy("total").sum("total")([])).toThrow(Errors.JITError);
     expect(() => JIT.query(Orders).sum("missing" as "total")([])).toThrow(Errors.JITError);

@@ -229,7 +229,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "equal": {
-        const equal = JIT.compare.equal(requireSchema());
+        const equal = JIT.equal(requireSchema());
         source = sourceOf(equal);
         run = () => equal(requireA(), requireB("a second value"));
         break;
@@ -244,13 +244,13 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "diff": {
-        const diff = JIT.compare.diff(requireSchema());
+        const diff = JIT.diff(requireSchema());
         source = sourceOf(diff);
         run = () => diff(requireA(), requireB("a second value"));
         break;
       }
       case "hash": {
-        const hashFn = JIT.compare.hash(requireSchema());
+        const hashFn = JIT.hash(requireSchema());
         source = sourceOf(hashFn);
         run = () => hashFn(requireA());
         break;

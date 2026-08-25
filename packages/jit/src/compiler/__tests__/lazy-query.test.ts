@@ -140,4 +140,30 @@ describe("lazy query execution", () => {
     expect(source).toMatch(/if \(count\d+\+\+ === 10\) return;/);
     expect(source).not.toContain('from "');
   });
+
+  it("emits eager incremental arrays as one direct indexed loop", () => {
+    const source = Compiler.emitQueryArraySource(Events.schema, {
+      nodes: [
+        {
+          kind: "filter",
+          condition: {
+            kind: "compare",
+            op: "eq",
+            left: { kind: "field", key: "active" },
+            right: { kind: "literal", value: true },
+          },
+        },
+        { kind: "select:fields", fields: ["id"] },
+        { kind: "take", count: 2 },
+      ],
+      bindings: [],
+    });
+    const query = globalThis.Function(`return ${source};`)() as (input: typeof events) => { id: number }[];
+
+    expect(query(events)).toEqual([{ id: 2 }, { id: 3 }]);
+    expect(source).toContain("for (let i = 0, len = input.length; i < len; i++)");
+    expect(source).toContain("out[j++] = output");
+    expect(source).not.toContain("function*");
+    expect(source).not.toContain("Array.from");
+  });
 });

@@ -136,6 +136,7 @@ The current stage surface is deliberately explicit:
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | JSON / binary source | JSON always uses native `JSON.parse`; runtime compilation performs bounded shape warm-up, then generated validation runs immediately after parsing. Binary uses the emitted codec. |
 | Validation           | Pure schemas use the allocation-free generated `is` path on successful `parse`; issue collection runs only after failure. Transforming or observable schemas use one generated `safeParse` pass. |
+| Runtime-class construction | A `construct` stage materializes a generated class only after its wire state validates. The class constructor receives an internal validated-state marker, so compiled validation is not executed twice. Standalone AOT construction requires the named class artifact to be emitted in the same module. |
 | Query                | Consecutive filter/select descriptors retain the final program and emit one indexed output loop.                                                                |
 | Mapping              | Shape-specific single/batch mapper. A terminal batch map plus JSON sink serializes in the mapper loop and avoids the mapped output array.                       |
 | Transform            | Per-field emitted transform; collection mode emits an indexed loop. The target schema is explicit.                                                              |

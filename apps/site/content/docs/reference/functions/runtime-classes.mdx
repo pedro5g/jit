@@ -15,10 +15,7 @@ const UserSchema = JIT.object({
   name: JIT.string().min(2),
 });
 
-const User = JIT.class(UserSchema).use(
-  JIT.class.equals,
-  JIT.class.with,
-);
+const User = JIT.class(UserSchema).use(JIT.class.equals, JIT.class.with);
 
 const ada = User.create({ name: "Ada" });
 const grace = ada.with({ name: "Grace" });
@@ -30,6 +27,64 @@ Capabilities are explicit, installed once on the prototype, and reuse the
 structural compilers: `equals`, `hashCode`, `diff`, `with`, and
 `identity("field")`. `with` accepts the schema-derived update patch type; readonly
 schema fields cannot be patched and are preserved by the compiled update.
+
+## Accessors
+
+`accessors()` rematerializes a class with its configured backing layout. Private
+fields use JavaScript `#` slots; getters and setters are emitted directly on the
+prototype, including in AOT output. Per-field settings override `default`.
+
+```ts
+const Account = JIT.class(
+  JIT.object({ id: JIT.string(), passwordHash: JIT.string() }),
+).accessors({
+  default: { field: "private", get: "public", set: "protected" },
+  fields: {
+    id: { set: false },
+    passwordHash: { get: "protected", set: "protected" },
+  },
+});
+
+const account = Account.create({ id: "a_1", passwordHash: "..." });
+account.id; // "a_1"
+```
+
+## Construction factories
+
+Every generated class exposes the canonical `create(input)` and
+`hydrate(state)` factories. `create` resolves defaults; `hydrate` requires the
+complete persisted state and does not apply creation defaults. When an
+integration requires different names, `.factories(...)` changes them
+explicitly and removes the canonical aliases:
+
+```ts
+const User = JIT.class(UserSchema).factories({
+  create: "make",
+  hydrate: "restore",
+});
+
+// The static factories are now named `make` and `restore`.
+```
+
+Runtime and AOT preserve the same configured names.
+
+## DDD factories
+
+The domain-oriented factories are `JIT.valueObject`, `JIT.entity`,
+`JIT.aggregateRoot`, and `JIT.domainEvent`. They are presets over the same
+runtime-class machinery.
+
+```ts
+const UserBase = JIT.entity(
+  JIT.object({ id: JIT.string(), name: JIT.string() }),
+  { id: "id" },
+);
+
+class User extends UserBase {}
+
+const user = User.create({ id: "u_1", name: "Ada" });
+user.identity; // "u_1"
+```
 
 ## Abstract classes
 
@@ -80,21 +135,22 @@ const UserBase = JIT.entity(
 
 class User extends UserBase {}
 
-User.create({ id: "u_1", name: "Ada" })
-  .sameIdentity(User.create({ id: "u_1", name: "Grace" })); // true
+User.create({ id: "u_1", name: "Ada" }).sameIdentity(
+  User.create({ id: "u_1", name: "Grace" }),
+); // true
 ```
 
 ## Domain events
 
-`JIT.domainEvent(type, { version, payload })` creates a frozen class whose
+`JIT.domainEvent(type, { payload, version })` creates a frozen class whose
 schema contains `id`, literal `type`, literal `version`, `occurredAt`, and the
 validated payload. Creation accepts only the payload; id and time are resolved
 by defaults.
 
 ```ts
 const OrderConfirmed = JIT.domainEvent("order.confirmed", {
-  version: 1,
   payload: JIT.object({ orderId: JIT.string().min(1) }),
+  version: 1,
 });
 
 const event = OrderConfirmed.create({ orderId: "o_1" });
@@ -102,6 +158,7 @@ const event = OrderConfirmed.create({ orderId: "o_1" });
 event.type; // "order.confirmed"
 event.version; // 1
 event.payload.orderId; // "o_1"
+event["~event"].type; // "order.confirmed"
 ```
 
 ## Aggregate roots
@@ -140,4 +197,6 @@ the queued events in insertion order and resets the queue.
 Runtime classes are AOT artifacts too. Pass a class to `AOT.generate()` and
 the generated module contains a plain specialized class: validation,
 construction, selected capabilities, and aggregate event storage are emitted
-locally, with no JIT runtime import.
+locally, with no JIT runtime import. Generated Domain Events preserve
+`create(payload)` and `hydrate(state)`; direct construction and `hydrate()` use
+the complete persisted event envelope.

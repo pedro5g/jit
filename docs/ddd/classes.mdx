@@ -1,0 +1,21 @@
+# Runtime classes
+
+Create and hydrate have different boundary semantics:
+
+```ts
+const User = JIT.class(
+  JIT.object({
+    id: JIT.string().default(() => crypto.randomUUID()),
+    name: JIT.string(),
+  }),
+);
+
+const created = User.create({ name: "Ada" });
+const restored = User.hydrate({ id: "u_1", name: "Ada" });
+```
+
+`create()` accepts `JIT.Input<typeof Schema>` and resolves creation defaults. `hydrate()` accepts complete `JIT.Hydrate<typeof Schema>` state and never regenerates missing persisted values. Both preserve the subclass type when called on a derived class.
+
+Use `.factories({ create, hydrate })` only to configure the two factory names. Use `.accessors(...)` for visibility/storage policy and `.use(...)` for explicit capabilities such as `JIT.class.equals`, `hashCode`, `diff`, and `with`. Compiled helpers live on the constructor/prototype, never per instance.
+
+`JIT.class.abstract(schema)` prevents direct creation and hydration while preserving inherited static factories for concrete subclasses.

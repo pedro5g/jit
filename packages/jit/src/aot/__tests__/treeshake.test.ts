@@ -111,6 +111,40 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("function map(source)");
   });
 
+  it("should retain only the co-emitted class required by a construction pipeline", async () => {
+    const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() }));
+    const parseUser = JIT.json.parse(User).validate();
+
+    AOT.generate({ groups: {}, artifacts: { User, parseUser }, outDir });
+    const bundled = await bundle(
+      `import { parseUser } from "./index.js";\nconsole.log(parseUser('{"id":"u_1","name":"Ada"}'));\n`
+    );
+
+    expect(bundled).toContain("class User");
+    expect(bundled).toContain("new User(r.data, true)");
+    expect(bundled).not.toContain("@jit-compiler/jit");
+    expect(bundled).not.toContain("ExecutionPlan");
+    expect(bundled).not.toContain("artifact-registry");
+  });
+
+  it("should emit only configured class capabilities and drop unused classes", async () => {
+    const Shape = JIT.object({ id: JIT.string(), value: JIT.number() });
+    const Comparable = JIT.class(Shape).use(JIT.class.equals);
+    const Hashable = JIT.class(Shape).use(JIT.class.hashCode);
+
+    AOT.generate({ groups: {}, artifacts: { Comparable, Hashable }, outDir });
+    const generated = readFileSync(join(outDir, "index.js"), "utf8");
+    const bundled = await bundle(
+      `import { Comparable } from "./index.js";\nconst value = Comparable.create({ id: "a", value: 1 });\nconsole.log(value.equals(value));\n`
+    );
+
+    expect(generated).toContain("equals(other)");
+    expect(generated).toContain("hashCode()");
+    expect(bundled).toContain("equals(other)");
+    expect(bundled).not.toContain("hashCode()");
+    expect(bundled).not.toContain("Hashable");
+  });
+
   it("should drop entire schemas that are never imported", async () => {
     const User = JIT.object({ id: JIT.number() });
     const Order = JIT.object({ sku: JIT.string() });

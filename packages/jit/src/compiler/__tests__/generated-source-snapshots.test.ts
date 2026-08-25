@@ -54,6 +54,16 @@ describe("generated source snapshots", () => {
     expect(sourceOf(compiled)).toMatchSnapshot();
   });
 
+  it("execution: JSON validation and filtered terminal aggregation", () => {
+    const total = JIT.json
+      .parse(Users)
+      .validate()
+      .filter((query) => query.eq("role", "user"))
+      .sum("id");
+
+    expect(Compiler.emitExecutionPlan(total.plan).source).toMatchSnapshot();
+  });
+
   it("validator: deep unions, formats, coercion, transforms, and messages", () => {
     const Payment = JIT.object({
       id: JIT.string().ulid("id deve ser ULID"),
@@ -307,6 +317,21 @@ describe("generated source snapshots", () => {
       is: Compiler.emitValidatorSource(Public.schema, { ops: ["is"] }),
       from: Compiler.emitMapperSource(Entity.schema, Public.schema, { name: { from: "fullName" } }, ["map"]),
       many: Compiler.emitMapperSource(Entity.schema, Public.schema, { name: { from: "fullName" } }, ["many"]),
+    }).toMatchSnapshot();
+  });
+
+  it("execution: JSON validation and Runtime Class construction", () => {
+    const User = JIT.class(
+      JIT.object({
+        id: JIT.string().default("generated"),
+        name: JIT.string().min(2),
+      })
+    );
+    const parseUser = JIT.json.parse(User).validate();
+
+    expect({
+      stages: parseUser.plan.stages.map((stage) => stage.kind),
+      source: Compiler.emitExecutionPlan(parseUser.plan).source,
     }).toMatchSnapshot();
   });
 });

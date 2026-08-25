@@ -17,7 +17,10 @@ documentation.
 | `JIT.is`          | [Validation](./validation)           | Root alias for `JIT.validate.is`              |
 | `JIT.parse`       | [Validation](./validation)           | Root alias for `JIT.validate.parse`           |
 | `JIT.safeParse`   | [Validation](./validation)           | Root alias for `JIT.validate.safeParse`       |
-| `JIT.compare`     | [Equal](./equal)                     | `equal`, `diff`, `hash`                       |
+| `JIT.equal`       | [Equal](./equal)                     | Shape-specialized structural equality         |
+| `JIT.diff`        | [Diff](./diff)                       | Shape-specialized structural changes          |
+| `JIT.hash`        | [Hash](./hash)                       | Shape-specialized structural fingerprint      |
+| `JIT.compare`     | [Equal](./equal)                     | Compatibility namespace for the three leaves  |
 | `JIT.security`    | [Mask](./mask)                       | `mask`, `sanitize`                            |
 | `JIT.json`        | [JSON](./json)                       | `value`, `parse`, `stringify`, `stringifyChunks` |
 | `JIT.binary`      | [Codec](./codec)                     | `encode`, `decode`, `codec`                   |
@@ -32,12 +35,14 @@ documentation.
 | `JIT.from`        | [Query](./query)                     | Starts a value-source execution pipeline      |
 | `JIT.transform`   | [Transform](./transform)             | Select and transform object fields            |
 | `JIT.query`       | [Query](./query)                     | Eager and lazy compiled collection query      |
+| `JIT.cqrs`        | [Query](./query#cqrs)                | `query`, `input`, `parse` query contracts      |
 | `JIT.process`     | [Process](./process)                 | Fused load-and-query binary pipeline          |
 | `JIT.stream`      | [Stream](./stream)                   | Incremental JSON and NDJSON validation        |
 | `JIT.watch`       | [Watch](./watch)                     | Stateless keyed collection changes            |
 | `JIT.watchedList` | [Watch](./watch#watchedlist)         | Stateful aggregate collection                 |
 | `JIT.dto`         | [DTO](./dto)                         | Application-boundary schema annotation        |
 | `JIT.class`       | [Runtime classes](./runtime-classes) | Generated class, construction and capabilities |
+| DDD factories     | [Runtime classes](./runtime-classes#ddd-factories) | `valueObject`, `entity`, `aggregateRoot`, `domainEvent` |
 | `JIT.valueObject` | [Runtime classes](./runtime-classes#value-objects) | Immutable structural value object |
 | `JIT.entity`      | [Runtime classes](./runtime-classes#entities) | Abstract identity-bearing domain base |
 | `JIT.domainEvent` | [Runtime classes](./runtime-classes#domain-events) | Immutable, versioned domain event |

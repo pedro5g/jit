@@ -50,6 +50,7 @@ export const TypeName = {
   temporal: "temporal",
   codec: "codec",
   when: "when",
+  runtimeType: "runtimeType",
 } as const;
 
 export type AnyTypeName = TypeName[keyof TypeName];

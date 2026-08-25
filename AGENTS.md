@@ -117,6 +117,27 @@ Legacy schemas may still use fields such as `item`, `props`, `schemas`, `literal
 - `partial`, `required`, `pick`, `omit`, `extend`, and `merge` are transforms over existing schemas, not new AST node types.
 - Transform functions should be independent from builders.
 
+## Execution Plans, Runtime Classes, And DDD
+
+- New boundary composition belongs in an immutable `ExecutionPlan`; lower it once
+  to one specialized function rather than chaining runtime closures.
+- A `construct` stage may materialize a Runtime Class only after a validation
+  stage establishes `schema-validated`. Pass the internal validated-state marker
+  only across that proven boundary; ordinary constructors and `with()` must
+  retain validation.
+- AOT output must never capture runtime constructors, descriptors, registries,
+  or the JIT package. A class-construction pipeline is AOT-compatible only when
+  its named Runtime Class artifact is emitted in the same generated module.
+- Capabilities are immutable descriptors installed once on a prototype. Keep
+  them tree-shakeable and do not add per-instance infrastructure for methods.
+- `valueObject`, `entity`, `aggregateRoot`, and `domainEvent` reuse Runtime
+  Class machinery. Aggregates keep controlled mutation and an ordered event
+  buffer; readonly schema fields stay out of patches. These DDD presets remain
+  top-level `JIT` factories and preserve canonical `create()`/`hydrate()` names.
+  Domain-event `create()` accepts payload input, while direct construction and
+  hydration use the complete event envelope. Rename factories only through an
+  explicit `.factories(...)` call.
+
 ## Tests
 
 - Use Vitest.

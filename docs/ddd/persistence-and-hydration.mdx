@@ -1,0 +1,17 @@
+# Persistence and hydration
+
+Persist wire-safe state, not arbitrary class internals. A Runtime Type remains SchemaLike, so the same transport operations serve ordinary schemas and domain classes:
+
+```ts
+const encode = JIT.json.stringify(User);
+const decode = JIT.json.parse(User).validate();
+
+const json = encode(user);
+const restored = decode(json);
+```
+
+`JIT.Wire<T>` describes the transport representation. `JIT.Hydrate<T>` describes complete persisted state. They differ from `JIT.Input<T>`, which may omit fields with creation defaults.
+
+Use `hydrate()` when loading trusted-format persisted state that must still satisfy the current schema. Use `create()` for new domain input. Never call `create()` as a hydration shortcut: doing so can regenerate identifiers, timestamps, or other defaults.
+
+AOT co-emits required Runtime Classes beside construction pipelines, producing import-free ordinary JavaScript. The generated module contains validators, assignments, factories, and selected capabilities but no JIT runtime import.

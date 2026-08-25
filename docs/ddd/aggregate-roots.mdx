@@ -1,0 +1,24 @@
+# Aggregate roots
+
+An aggregate root is an entity that owns a consistency boundary and an ordered pending-event queue. Persistence and repositories stay outside it.
+
+```ts
+const OrderBase = JIT.aggregateRoot(
+  JIT.object({
+    id: JIT.string().readonly(),
+    status: JIT.enum(["draft", "confirmed"] as const),
+  }),
+  { id: "id" },
+);
+
+class Order extends OrderBase {
+  confirm(event: unknown): void {
+    this.update({ status: "confirmed" });
+    this.raise(event);
+  }
+}
+```
+
+`update()` and `raise()` are protected. External direct mutation remains rejected by TypeScript, and readonly schema fields cannot appear in the update patch. Known fields are assigned with compiled field-specific code rather than `Object.assign`.
+
+`peekEvents()` returns a snapshot without exposing the internal array. `pullEvents()` preserves order and clears the queue. `commit(publisher)` publishes sequentially, clears the queue after the full sequence succeeds, and leaves it intact when publishing fails.

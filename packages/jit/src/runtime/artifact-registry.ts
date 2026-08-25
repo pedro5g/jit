@@ -29,6 +29,14 @@ interface QueryPlanArtifact {
     readonly params?: readonly string[];
   };
   readonly mode: "array" | "iterator" | "async-iterator" | "visitor";
+  readonly standard?: unknown;
+}
+
+interface CqrsInputArtifact {
+  readonly kind: "cqrs-input";
+  readonly definition: unknown;
+  /** Import-free function-body source that returns the specialized parser. */
+  readonly source: string;
 }
 
 interface ValidatorArtifact {
@@ -74,12 +82,23 @@ interface ClassArtifact {
   readonly frozen: boolean;
   readonly aggregate: boolean;
   readonly capabilities: readonly string[];
+  readonly factories: { readonly create: string | false; readonly hydrate: string | false };
+  readonly accessors?:
+    | readonly {
+        readonly key: string;
+        readonly field: "public" | "protected" | "private" | false;
+        readonly get: string | false;
+        readonly set: string | false;
+      }[]
+    | undefined;
+  readonly mutation?: { readonly updatedAt?: string; readonly version?: string; readonly deletedAt?: string };
   readonly domainEvent?: { readonly type: string; readonly version: number };
 }
 
 export type CompiledArtifact =
   | SourceArtifact
   | QueryPlanArtifact
+  | CqrsInputArtifact
   | ValidatorArtifact
   | OperationArtifact
   | ExecutionArtifact
@@ -94,4 +113,14 @@ export function registerArtifact(value: object, artifact: CompiledArtifact): voi
 export function getArtifact(value: unknown): CompiledArtifact | undefined {
   if ((typeof value !== "object" || value === null) && typeof value !== "function") return undefined;
   return REGISTRY.get(value as object);
+}
+
+/** Updates class-only declarative metadata without changing the class identity. */
+export function setClassMutationArtifact(
+  value: object,
+  mutation: { readonly updatedAt?: string; readonly version?: string; readonly deletedAt?: string }
+): void {
+  const artifact = REGISTRY.get(value);
+  if (artifact?.kind !== "class") return;
+  REGISTRY.set(value, { ...artifact, mutation });
 }

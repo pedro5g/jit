@@ -1,11 +1,8 @@
+import type { Runtime } from "./representations.js";
 import type { AnyTypeSchema, OptionalSchema, ReadonlySchema, SchemaShape, TypeofSchema } from "./type-schema.js";
 
 /** Resolves the output represented by a schema or builder. */
-export type Typeof<TSchemaLike> = TSchemaLike extends { readonly schema: infer TSchema extends AnyTypeSchema }
-  ? TypeofSchema<TSchema>
-  : TSchemaLike extends AnyTypeSchema
-    ? TypeofSchema<TSchemaLike>
-    : never;
+export type Typeof<TSchemaLike> = Runtime<TSchemaLike>;
 
 export type SchemaLike<TSchema extends AnyTypeSchema = AnyTypeSchema> = TSchema | { readonly schema: TSchema };
 
