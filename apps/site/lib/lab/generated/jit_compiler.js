@@ -4684,6 +4684,13 @@ function emitEqualSource(schema) {
   const strategy = resolveEqualStrategy(schema);
   return emitEqual(optimizeIR(buildEqualIR(schema, strategy)));
 }
+function emitEqualMethodBody(schema) {
+  const strategy = resolveEqualStrategy(schema);
+  const program = optimizeIR(buildEqualIR(schema, strategy));
+  return `const l = this;
+const r = other;
+${emitEqualBody(program)}`;
+}
 function compileEqual(schema, options) {
   return getCompileCached(
     schema,
@@ -4706,6 +4713,28 @@ ${body}
         op: "equal"
       });
       return compiled;
+    },
+    options
+  );
+}
+function compileEqualMethod(schema, options) {
+  return getCompileCached(
+    schema,
+    "equal:method",
+    () => {
+      const strategy = resolveEqualStrategy(schema);
+      const program = optimizeIR(buildEqualIR(schema, strategy));
+      const body = emitEqualBody(program);
+      const hash4 = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : void 0;
+      return globalThis.Function(
+        "__hash",
+        "__getIndex",
+        `return function equals(other) {
+const l = this;
+const r = other;
+${body}
+};`
+      )(hash4, getIndex);
     },
     options
   );
@@ -8165,8 +8194,10 @@ function emitQueryVisitorSource(schema, program) {
   }
   const hasParams = Boolean(program.params?.length);
   const lines = ["(function () {", `function visit(input${hasParams ? ", params" : ""}, consume) {`];
+  const terminalTakeIndex = terminalTake(program.nodes);
   program.nodes.forEach((node, index) => {
-    if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
+    if (node.kind === "take" && index !== terminalTakeIndex || node.kind === "drop")
+      lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
   });
@@ -8191,6 +8222,7 @@ function emitQueryVisitorSource(schema, program) {
 }
 function emitVisitorBody(nodes) {
   const body = ["let output = item;"];
+  const terminalTakeIndex = terminalTake(nodes);
   nodes.forEach((node, index) => {
     switch (node.kind) {
       case "filter":
@@ -8200,7 +8232,7 @@ function emitVisitorBody(nodes) {
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        body.push(`if (count${index}++ === ${node.count}) return emitted;`);
+        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return emitted;`);
         break;
       case "drop":
         body.push(`if (count${index}++ < ${node.count}) continue;`);
@@ -8222,6 +8254,10 @@ function emitVisitorBody(nodes) {
     }
   });
   body.push("consume(output);", "emitted++;");
+  if (terminalTakeIndex !== -1) {
+    const node = nodes[terminalTakeIndex];
+    body.push(`if (emitted === ${node.count}) return emitted;`);
+  }
   return body;
 }
 function compileLazy(schema, program, mode, options) {
@@ -8290,8 +8326,10 @@ function emitDirectArraySource(schema, program) {
   validatePipeline(program.nodes, collection.props);
   const hasParams = Boolean(program.params?.length);
   const lines = [`function query(input${hasParams ? ", params" : ""}) {`, "  const out = [];", "  let j = 0;"];
+  const terminalTakeIndex = terminalTake(program.nodes);
   program.nodes.forEach((node, index) => {
-    if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
+    if (node.kind === "take" && index !== terminalTakeIndex || node.kind === "drop")
+      lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
   });
@@ -8305,7 +8343,7 @@ function emitDirectArraySource(schema, program) {
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        body.push(`if (count${index}++ === ${node.count}) return out;`);
+        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return out;`);
         break;
       case "drop":
         body.push(`if (count${index}++ < ${node.count}) continue;`);
@@ -8327,6 +8365,10 @@ function emitDirectArraySource(schema, program) {
     }
   });
   body.push("out[j++] = output;");
+  if (terminalTakeIndex !== -1) {
+    const node = program.nodes[terminalTakeIndex];
+    body.push(`if (j === ${node.count}) return out;`);
+  }
   if (collection.kind === "array") {
     lines.push("  for (let i = 0, len = input.length; i < len; i++) {", "    const item = input[i];");
   } else if (collection.kind === "map") {
@@ -8344,6 +8386,7 @@ function isFusibleNode(node) {
   return node.kind === "filter" || node.kind === "select:fields" || node.kind === "take" || node.kind === "drop" || node.kind === "takeWhile" || node.kind === "dropWhile" || node.kind === "unique";
 }
 function emitFusedStage(lines, nodes, forAwait, directArray) {
+  const terminalTakeIndex = terminalTake(nodes);
   nodes.forEach((node, index) => {
     if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
@@ -8359,7 +8402,7 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        body.push(`if (count${index}++ === ${node.count}) return;`);
+        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return;`);
         break;
       case "drop":
         body.push(`if (count${index}++ < ${node.count}) continue;`);
@@ -8381,6 +8424,10 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
     }
   });
   body.push("yield output;");
+  if (terminalTakeIndex !== -1) {
+    const node = nodes[terminalTakeIndex];
+    body.push(`if (++count${terminalTakeIndex} === ${node.count}) return;`);
+  }
   if (directArray) {
     lines.push("  if (Array.isArray(input)) {");
     lines.push("    for (let i = 0, len = input.length; i < len; i++) {");
@@ -8393,6 +8440,10 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
   lines.push(`  ${forAwait} (const item of input) {`);
   for (const line of body) lines.push(`    ${line}`);
   lines.push("  }");
+}
+function terminalTake(nodes) {
+  const index = nodes.length - 1;
+  return index >= 0 && nodes[index]?.kind === "take" ? index : -1;
 }
 function emitStage(lines, node, previous, async, awaitPrefix, forAwait) {
   const loop = (body) => {
@@ -9188,7 +9239,7 @@ function emitMutationPlanBody(plan, updates) {
     const fieldPatch = `patch${emitPropertyAccess("", field)}`;
     writer.line(`if (${fieldPatch} !== undefined) {`);
     writer.indent(() => {
-      writer.line(`const next = ${update2}(${current}, ${fieldPatch});`);
+      writer.line(`const next = ${update2 === null ? fieldPatch : `${update2}(${current}, ${fieldPatch})`};`);
       writer.line(`if (next !== ${current}) { ${current} = next; changed = true; }`);
     });
     writer.line("}");
@@ -13437,11 +13488,15 @@ function emitModule(plan, options, layout) {
       return definitions;
     });
     if (capabilities.has("equals")) {
-      const source2 = tryEmit(reportName, "class.equals", skipped, () => emitEqualSource(artifact.schema));
-      if (!source2) return void 0;
-      const equal3 = internalIdentifier(`${binding}_equal`);
-      helpers2.push(`const ${equal3} = ${asExpression(source2, "equal")};`);
-      methods.push(`equals(other) { return ${equal3}(this, other); }`);
+      const body = tryEmit(reportName, "class.equals", skipped, () => emitEqualMethodBody(artifact.schema));
+      if (!body) return void 0;
+      if (body.includes("__getIndex")) needsRuntimeGetIndex = true;
+      if (body.includes("__hash")) {
+        const hash4 = internalIdentifier(`${binding}_equal_hash`);
+        if (!emitHashBinding(hash4, artifact.schema, reportName)) return void 0;
+        helpers2.push(`const __hash = ${hash4};`);
+      }
+      methods.push(`equals(other) { ${body} }`);
     }
     if (capabilities.has("hashCode")) {
       const hash4 = internalIdentifier(`${binding}_hash`);
@@ -13470,6 +13525,10 @@ function emitModule(plan, options, layout) {
         const updates = /* @__PURE__ */ new Map();
         for (let index = 0; index < mutation.mutableFields.length; index++) {
           const field = mutation.mutableFields[index];
+          if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
+            updates.set(field, null);
+            continue;
+          }
           const fieldUpdate = internalIdentifier(`${binding}_update_${index}`);
           const source2 = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(base.def.props[field]));
           if (!source2) return void 0;
@@ -16396,10 +16455,7 @@ function resolveAccessorMember(key, member) {
 var classType = Object.assign(classFactory, {
   abstract: abstractClass,
   equals: capability("equals", (prototype, schema) => {
-    const equal3 = compileEqual(schema);
-    definePrototype(prototype, "equals", function equals(other) {
-      return equal3(this, other);
-    });
+    definePrototype(prototype, "equals", compileEqualMethod(schema));
   }),
   hashCode: capability("hashCode", (prototype, schema) => {
     const hash4 = compileHash(schema);
@@ -16462,6 +16518,10 @@ function aggregateRoot(schema, options) {
   for (let index = 0; index < fields.length; index++) {
     const field = fields[index];
     if (readonlyFields.includes(field)) continue;
+    if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
+      updateBindings.set(field, null);
+      continue;
+    }
     const name = `__update${index}`;
     updateBindings.set(field, name);
     updateNames.push(name);
@@ -16484,9 +16544,7 @@ function aggregateRoot(schema, options) {
     Object.defineProperty(aggregate.prototype, "update", {
       configurable: true,
       enumerable: false,
-      value: function updateAggregate(patch) {
-        assign.call(this, patch);
-      }
+      value: assign
     });
   };
   installMutation();

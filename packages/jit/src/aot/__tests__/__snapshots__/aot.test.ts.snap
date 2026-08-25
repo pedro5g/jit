@@ -231,7 +231,22 @@ const OrderBase_validator = /*#__PURE__*/ (() => {
       if (v6 !== "draft" && v6 !== "confirmed") {
         issues[issues.length] = { path: "status", code: "invalid_enum", expected: "draft | confirmed", message: "expected one of the enum values" };
       }
-      b3 = { "id": o5, "status": v6 };
+      let v8 = v1.shipping;
+      if (v8 === null || typeof v8 !== "object" || Array.isArray(v8)) {
+        issues[issues.length] = { path: "shipping", code: "expected_object", expected: "object", message: "expected object", received: typeof v8 };
+      } else {
+        let v10 = v8.city;
+        if (typeof v10 !== "string") {
+          issues[issues.length] = { path: "shipping.city", code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
+        } else {
+        }
+        let v12 = v8.country;
+        if (typeof v12 !== "string") {
+          issues[issues.length] = { path: "shipping.country", code: "expected_string", expected: "string", message: "expected string", received: typeof v12 };
+        } else {
+        }
+      }
+      b3 = { "id": o5, "status": v6, "shipping": v8 };
     }
     if (b3 === undefined) { b3 = v1; }
     o2 = b3;
@@ -262,7 +277,22 @@ const OrderBase_validator_1 = /*#__PURE__*/ (() => {
       if (v6 !== "draft" && v6 !== "confirmed") {
         issues[issues.length] = { path: "status", code: "invalid_enum", expected: "draft | confirmed", message: "expected one of the enum values" };
       }
-      b3 = { "id": o5, "status": v6 };
+      let v8 = v1.shipping;
+      if (v8 === null || typeof v8 !== "object" || Array.isArray(v8)) {
+        issues[issues.length] = { path: "shipping", code: "expected_object", expected: "object", message: "expected object", received: typeof v8 };
+      } else {
+        let v10 = v8.city;
+        if (typeof v10 !== "string") {
+          issues[issues.length] = { path: "shipping.city", code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
+        } else {
+        }
+        let v12 = v8.country;
+        if (typeof v12 !== "string") {
+          issues[issues.length] = { path: "shipping.country", code: "expected_string", expected: "string", message: "expected string", received: typeof v12 };
+        } else {
+        }
+      }
+      b3 = { "id": o5, "status": v6, "shipping": v8 };
     }
     if (b3 === undefined) { b3 = v1; }
     o2 = b3;
@@ -274,23 +304,37 @@ const OrderBase_validator_1 = /*#__PURE__*/ (() => {
   return { safeParse: safeParse };
 })();
 const OrderBase = /*#__PURE__*/ (() => {
-  const OrderBase_update_0 = (function update(value, patch) {
+  const OrderBase_update_1 = (function update(value, patch) {
   let out = value;
-  if (patch !== undefined && !Object.is(value, patch)) {
-    out = patch;
+  if (patch !== undefined) {
+    let next_city = value.city;
+    if (patch.city !== undefined && !Object.is(value.city, patch.city)) {
+      next_city = patch.city;
+    }
+    let next_country = value.country;
+    if (patch.country !== undefined && !Object.is(value.country, patch.country)) {
+      next_country = patch.country;
+    }
+    if (next_city !== value.city || next_country !== value.country) {
+      out = { "city": next_city, "country": next_country };
+    }
   }
   return out;
 });
   return class OrderBase {
-    constructor(input, validated) { const state = validated === true ? input : (() => { const result = OrderBase_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this["id"] = state["id"]; this["status"] = state["status"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
+    constructor(input, validated) { const state = validated === true ? input : (() => { const result = OrderBase_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this["id"] = state["id"]; this["status"] = state["status"]; this["shipping"] = state["shipping"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
     static create(input) { if (this === OrderBase) throw new Error("Cannot create an instance of an abstract JIT class"); return new this(input); }
     static hydrate(state) { if (this === OrderBase) throw new Error("Cannot create an instance of an abstract JIT class"); const result = OrderBase_validator_1.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data); }
     identity() { return this["id"]; }
     sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this["id"], other["id"]); }
     update(patch) { let changed = false;
 if (patch.status !== undefined) {
-  const next = OrderBase_update_0(this.status, patch.status);
+  const next = patch.status;
   if (next !== this.status) { this.status = next; changed = true; }
+}
+if (patch.shipping !== undefined) {
+  const next = OrderBase_update_1(this.shipping, patch.shipping);
+  if (next !== this.shipping) { this.shipping = next; changed = true; }
 }
 if (!changed) return; }
     raise(event) { this.__jitEvents.push(event); }

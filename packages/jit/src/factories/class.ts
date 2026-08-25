@@ -1,9 +1,10 @@
 import { compileDiff } from "../compiler/diff.js";
-import { compileEqual } from "../compiler/equal.js";
+import { compileEqualMethod } from "../compiler/equal.js";
 import { compileHash } from "../compiler/hash.js";
 import { compileUpdate, type DiffChange, type UpdatePatch } from "../compiler/index.js";
 import { buildMutationPlan, emitMutationPlanBody } from "../compiler/mutation-plan.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
+import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
 import { emitPropertyAccess } from "../compiler/source/access.js";
 import { compileHydrator, compileValidator } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
@@ -439,10 +440,7 @@ export interface ClassFactory {
 export const classType: ClassFactory = Object.assign(classFactory, {
   abstract: abstractClass,
   equals: capability<EqualsMethods>("equals", (prototype, schema) => {
-    const equal = compileEqual(schema);
-    definePrototype(prototype, "equals", function equals(this: unknown, other: unknown) {
-      return equal(this, other);
-    });
+    definePrototype(prototype, "equals", compileEqualMethod(schema));
   }),
   hashCode: capability<HashCodeMethods>("hashCode", (prototype, schema) => {
     const hash = compileHash(schema);
@@ -526,13 +524,17 @@ export function aggregateRoot<
   const base = resolveWrappers(unwrapped).base as ATS.ObjectSchema;
   const fields = Object.keys(base.def.props);
   const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
-  const updateBindings = new Map<string, string>();
+  const updateBindings = new Map<string, string | null>();
   const updateNames: string[] = [];
   const updateValues: ((value: unknown, patch: unknown) => unknown)[] = [];
 
   for (let index = 0; index < fields.length; index++) {
     const field = fields[index];
     if (readonlyFields.includes(field)) continue;
+    if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
+      updateBindings.set(field, null);
+      continue;
+    }
     const name = `__update${index}`;
     updateBindings.set(field, name);
     updateNames.push(name);
@@ -556,9 +558,7 @@ export function aggregateRoot<
     Object.defineProperty(aggregate.prototype, "update", {
       configurable: true,
       enumerable: false,
-      value: function updateAggregate(this: object, patch: SchemaUpdate<TSchema>) {
-        assign.call(this, patch);
-      },
+      value: assign,
     });
   };
 

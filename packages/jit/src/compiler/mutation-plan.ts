@@ -31,7 +31,7 @@ export function buildMutationPlan(options: MutationPlanOptions): MutationPlan {
 }
 
 /** Emits the hot aggregate mutation body with at most one clock read. */
-export function emitMutationPlanBody(plan: MutationPlan, updates: ReadonlyMap<string, string>): string {
+export function emitMutationPlanBody(plan: MutationPlan, updates: ReadonlyMap<string, string | null>): string {
   const writer = new CodeWriter();
 
   writer.line("let changed = false;");
@@ -42,7 +42,7 @@ export function emitMutationPlanBody(plan: MutationPlan, updates: ReadonlyMap<st
     const fieldPatch = `patch${emitPropertyAccess("", field)}`;
     writer.line(`if (${fieldPatch} !== undefined) {`);
     writer.indent(() => {
-      writer.line(`const next = ${update}(${current}, ${fieldPatch});`);
+      writer.line(`const next = ${update === null ? fieldPatch : `${update}(${current}, ${fieldPatch})`};`);
       writer.line(`if (next !== ${current}) { ${current} = next; changed = true; }`);
     });
     writer.line("}");

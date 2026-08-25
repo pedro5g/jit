@@ -66,3 +66,20 @@ rejected: flatten a DTO or use regular `JIT.query`.
 Only touched columns/views/dictionaries are bound. Filtered string constants
 become integer IDs outside the loop. Rows that fail never hydrate back into JS
 objects. AOT queries are import-free and retain only selected low-level helpers.
+
+## Comparing binary scans fairly
+
+Binary rowsets are a specialized physical representation, not a universally
+faster spelling of a JavaScript loop. Keep the data state equal on both sides:
+
+- compare a preloaded rowset scan with another scan over a prebuilt analytical
+  representation when measuring repeated-query throughput;
+- include `load()` when the source starts as objects and the rowset is used once;
+- include hydration or projection on both sides when the caller needs objects;
+- report a manual fused loop separately from idiomatic `filter`/`map` chains.
+
+Columnar count and sum can beat a loop over hydrated objects because their lanes
+are contiguous and enum/boolean values are already encoded. That advantage is
+real for repeated scans, but it does not erase conversion cost. For small or
+one-shot object arrays, regular `JIT.query` or a manual loop can be the correct
+choice.

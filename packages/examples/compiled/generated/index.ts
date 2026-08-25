@@ -1090,8 +1090,8 @@ function* stage0(input, params) {
       let output = item;
       if (!(item.active === __q0)) continue;
       output = { "id": item.id, "name": item.name };
-      if (count2++ === 10) return;
       yield output;
+      if (++count2 === 10) return;
     }
     return;
   }
@@ -1099,8 +1099,8 @@ function* stage0(input, params) {
     let output = item;
     if (!(item.active === __q0)) continue;
     output = { "id": item.id, "name": item.name };
-    if (count2++ === 10) return;
     yield output;
+    if (++count2 === 10) return;
   }
 }
 function query(input) {

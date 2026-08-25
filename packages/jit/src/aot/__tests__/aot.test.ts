@@ -342,7 +342,9 @@ describe("JIT AOT generate", () => {
   });
 
   it("should lower runtime value objects as import-free classes", async () => {
-    const Money = JIT.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) }));
+    const Money = JIT.valueObject(
+      JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) }).hash("ordered")
+    );
     const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
@@ -366,6 +368,8 @@ describe("JIT AOT generate", () => {
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("return class Money");
+    expect(source).toContain("const __hash = Money_equal_hash");
+    expect(source).not.toContain("Money_equal(this, other)");
     expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(Object.isFrozen(money)).toBe(true);
     expect(constructed.equals(money)).toBe(true);
@@ -686,7 +690,11 @@ describe("JIT AOT generate", () => {
 
   it("should lower aggregate infrastructure into an extendable import-free base", async () => {
     const OrderBase = JIT.aggregateRoot(
-      JIT.object({ id: JIT.string().readonly().default("o_1"), status: JIT.enum(["draft", "confirmed"] as const) }),
+      JIT.object({
+        id: JIT.string().readonly().default("o_1"),
+        status: JIT.enum(["draft", "confirmed"] as const),
+        shipping: JIT.object({ city: JIT.string(), country: JIT.string() }),
+      }),
       { id: "id" }
     );
     const result = AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
@@ -695,12 +703,15 @@ describe("JIT AOT generate", () => {
       new (
         state: unknown
       ): {
-        update(patch: { status: "confirmed" }): void;
+        update(patch: { status?: "confirmed"; shipping?: { city?: string; country?: string } }): void;
         raise(event: unknown): void;
         pullEvents(): unknown[];
         commit(publisher: { publish(event: unknown): void | Promise<void> }): Promise<void>;
       };
-      create(input: { status: "draft" | "confirmed" }): InstanceType<new (state: unknown) => unknown>;
+      create(input: {
+        status: "draft" | "confirmed";
+        shipping: { city: string; country: string };
+      }): InstanceType<new (state: unknown) => unknown>;
     };
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderBase: OrderBaseConstructor;
@@ -713,7 +724,7 @@ describe("JIT AOT generate", () => {
       }
     }
 
-    const order = Order.create({ status: "draft" }) as Order;
+    const order = Order.create({ status: "draft", shipping: { city: "Recife", country: "BR" } }) as Order;
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toMatchSnapshot("AOT aggregate mutation and event buffer");
@@ -722,6 +733,11 @@ describe("JIT AOT generate", () => {
     expect((order as Order & { status: string }).status).toBe("confirmed");
     order.update({ id: "o_2" } as never);
     expect((order as Order & { id: string }).id).toBe("o_1");
+    order.update({ shipping: { city: "Sao Paulo" } });
+    expect((order as Order & { shipping: { city: string; country: string } }).shipping).toEqual({
+      city: "Sao Paulo",
+      country: "BR",
+    });
     order.raise({ type: "order.persisted" });
     await order.commit({ publish: () => undefined });
     expect(order.pullEvents()).toEqual([]);

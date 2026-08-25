@@ -3,7 +3,7 @@ import { basename, join, relative, resolve } from "node:path";
 import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
 import { emitDiffSource } from "../compiler/diff.js";
-import { emitEqualSource } from "../compiler/equal.js";
+import { emitEqualMethodBody, emitEqualSource } from "../compiler/equal.js";
 import { optimizeExecutionPlan } from "../compiler/execution-optimize.js";
 import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
@@ -25,6 +25,7 @@ import { emitTransformSource } from "../compiler/object-ops.js";
 import { emitQuerySource, type QueryProgram } from "../compiler/query.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
+import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitUpdateSource } from "../compiler/update.js";
 import { canUseFastParse, emitValidator } from "../compiler/validate/emit-validate.js";
@@ -502,11 +503,15 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
 
     if (capabilities.has("equals")) {
-      const source = tryEmit(reportName, "class.equals", skipped, () => emitEqualSource(artifact.schema));
-      if (!source) return undefined;
-      const equal = internalIdentifier(`${binding}_equal`);
-      helpers.push(`const ${equal} = ${asExpression(source, "equal")};`);
-      methods.push(`equals(other) { return ${equal}(this, other); }`);
+      const body = tryEmit(reportName, "class.equals", skipped, () => emitEqualMethodBody(artifact.schema));
+      if (!body) return undefined;
+      if (body.includes("__getIndex")) needsRuntimeGetIndex = true;
+      if (body.includes("__hash")) {
+        const hash = internalIdentifier(`${binding}_equal_hash`);
+        if (!emitHashBinding(hash, artifact.schema, reportName)) return undefined;
+        helpers.push(`const __hash = ${hash};`);
+      }
+      methods.push(`equals(other) { ${body} }`);
     }
     if (capabilities.has("hashCode")) {
       const hash = internalIdentifier(`${binding}_hash`);
@@ -532,9 +537,13 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           ...(artifact.mutation?.updatedAt === undefined ? {} : { updatedAt: artifact.mutation.updatedAt }),
           ...(artifact.mutation?.version === undefined ? {} : { version: artifact.mutation.version }),
         });
-        const updates = new Map<string, string>();
+        const updates = new Map<string, string | null>();
         for (let index = 0; index < mutation.mutableFields.length; index++) {
           const field = mutation.mutableFields[index];
+          if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
+            updates.set(field, null);
+            continue;
+          }
           const fieldUpdate = internalIdentifier(`${binding}_update_${index}`);
           const source = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(base.def.props[field]));
           if (!source) return undefined;

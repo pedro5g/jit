@@ -17,6 +17,7 @@ import { resolveEqualStrategy } from "./strategy/resolve-strategy.js";
  * @returns `true` when both values are equal according to the compiled schema.
  */
 export type Equal<T = unknown> = (left: T, right: T) => boolean;
+export type EqualMethod<T = unknown> = (this: T, other: T) => boolean;
 
 /**
  * Emits the optimized JavaScript source for a schema-aware equality function.
@@ -27,6 +28,13 @@ export type Equal<T = unknown> = (left: T, right: T) => boolean;
 export function emitEqualSource(schema: ATS.AnyTypeSchema): string {
   const strategy = resolveEqualStrategy(schema);
   return emitEqual(optimizeIR(buildEqualIR(schema, strategy)));
+}
+
+/** Emits an equality body specialized for direct installation as an instance method. */
+export function emitEqualMethodBody(schema: ATS.AnyTypeSchema): string {
+  const strategy = resolveEqualStrategy(schema);
+  const program = optimizeIR(buildEqualIR(schema, strategy));
+  return `const l = this;\nconst r = other;\n${emitEqualBody(program)}`;
 }
 
 /**
@@ -64,6 +72,30 @@ export function compileEqual<TSchema extends ATS.AnyTypeSchema>(
         op: "equal",
       });
       return compiled;
+    },
+    options
+  );
+}
+
+/** Compiles equality with `this` as the left operand, removing a wrapper call from class hot paths. */
+export function compileEqualMethod<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): EqualMethod<ATS.Typeof<TSchema>> {
+  return getCompileCached(
+    schema,
+    "equal:method",
+    () => {
+      const strategy = resolveEqualStrategy(schema);
+      const program = optimizeIR(buildEqualIR(schema, strategy));
+      const body = emitEqualBody(program);
+      const hash = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : undefined;
+
+      return globalThis.Function(
+        "__hash",
+        "__getIndex",
+        `return function equals(other) {\nconst l = this;\nconst r = other;\n${body}\n};`
+      )(hash, getIndex) as EqualMethod<ATS.Typeof<TSchema>>;
     },
     options
   );

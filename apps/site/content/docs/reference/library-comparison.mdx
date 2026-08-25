@@ -145,6 +145,13 @@ Selected Node 22.17.1 / Ryzen 7 5800H results:
 | `is`, 100k valid users        |       7.01 ms / 96 B | TypeBox compiled: 7.22 ms / 5.34 MiB; Typia: 7.17 ms / 152 B |
 | binary load + query, 1M       | 52.67 ms / 28.26 MiB |              Zod parse + native flow: 454.89 ms / 110.31 MiB |
 
+The last row is a complete object-to-rowset-to-result flow. Separate preloaded
+binary count/sum results measure a different state of the system: data is already
+packed and can be reused for multiple scans. They must not be presented as an
+end-to-end victory over a manual loop whose objects are already hydrated. For a
+one-shot object-array query, include `load()` or use the regular generated JS-array
+query as the comparison.
+
 These results are evidence for the checked fixtures, not universal rankings.
 Rerun them after dependency, Node, CPU or schema changes.
 

@@ -18,6 +18,18 @@ Mitata results are persisted under `bench/results/*.latest.json` with timing, he
 statistics. Comparisons that do different work are marked as not comparable and excluded
 from win/loss summaries.
 
+Use three baselines when interpreting a generated operation:
+
+- an idiomatic library or built-in chain, which represents common application code;
+- an expert fused loop, which is a lower bound for that exact fixture and is marked not
+  comparable when it omits reusable schema semantics;
+- an end-to-end boundary that performs the same validation, conversion and output work.
+
+A faster unchecked constructor is not evidence against a validating factory, and a
+preloaded binary scan is not an end-to-end replacement for a loop over objects that are
+already in memory. The benchmark metadata records these differences rather than folding
+them into the win/loss ratio.
+
 Representative local results on Node 22.17.1 and Ryzen 7 5800H:
 
 | Scenario                          |                  JIT |                      Baseline |
@@ -25,6 +37,19 @@ Representative local results on Node 22.17.1 and Ryzen 7 5800H:
 | Binary adaptive load + query, 1M  | 52.67 ms / 28.26 MiB |    Zod 454.89 ms / 110.31 MiB |
 | Tagged union count, 1M            |              0.78 ms |  string discriminator 2.64 ms |
 | Lazy direct visitor, 800k outputs |      3.81 ms / 760 B | generator 15.21 ms / 7.75 MiB |
+
+The current generated object-query path filters 10k rows in about 24.94 us versus
+56.67 us for `Array.prototype.filter`, and filters plus projects them in 53.81 us
+versus 187.05 us for `filter().map()`. A fused filter-plus-sum is about 15.42 us
+with roughly 154 B heap per operation. For a 100-row filter, native `filter` is
+still faster (about 223 ns versus 404 ns), so compilation is aimed at hot or
+composed paths rather than claiming every tiny array.
+
+Generated aggregate mutation now emits scalar assignments directly: the local
+toggle fixture measures about 1.30 ns with effectively zero allocation, versus
+0.83 ns for the handwritten field assignment. The 1,000-row CQRS
+filter/projection/limit fixture is about 1.00 us and stops immediately after its
+50th emitted projection.
 
 Always benchmark the production shape. Cardinality, selectivity, string uniqueness,
 engine version and cache reuse can change the winning physical plan.

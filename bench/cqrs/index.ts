@@ -29,6 +29,8 @@ registerScenario({
         sort: [{ path: ["age"], direction: "desc" as const }],
         pagination: { kind: "offset" as const, offset: (value.page - 1) * value.limit, limit: value.limit },
       }),
+      biased:
+        "assumes an already valid exact input and does not enforce the CQRS schema, allowed fields, operators or pagination budgets",
     },
   ],
 });

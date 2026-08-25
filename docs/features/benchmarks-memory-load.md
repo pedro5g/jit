@@ -91,6 +91,11 @@ Read this suite differently from normal validation benchmarks:
 - `heap/op` tells you whether `exact`, `dynamic`, or `static` is the right
   allocation strategy for the workload.
 
+Never divide a preloaded binary scan by a manual loop over an already hydrated
+array and call the ratio an end-to-end speedup. The rowset has already paid to
+encode fields and arrange columns. Use preloaded results to evaluate repeated
+analytical scans; use `load + query` when the operation begins with objects.
+
 ## How To Read Heap Numbers
 
 Heap numbers are more important than they look. A function that is only a bit
@@ -142,6 +147,10 @@ the user actually ships.
 - Compare `is()` with other boolean guards and `safeParse()` with other
   diagnostic validators.
 - Mark biased baselines clearly.
+- Make competitors consume their benchmark arguments; closures over fixed
+  constants can let V8 fold away the work being measured.
+- Match semantic boundaries: validation with validation, diagnostics with
+  diagnostics, and construction with the same trust assumptions.
 - Always inspect memory, not only time.
 
 ## CI And Review

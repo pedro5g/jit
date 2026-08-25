@@ -137,7 +137,7 @@ describe("lazy query execution", () => {
     expect(source).toContain("function* stage0(input, params)");
     expect(source).toContain("for (let i = 0, len = input.length; i < len; i++)");
     expect(source).toContain("if (!(item.active === true)) continue;");
-    expect(source).toMatch(/if \(count\d+\+\+ === 10\) return;/);
+    expect(source).toMatch(/if \(\+\+count\d+ === 10\) return;/);
     expect(source).not.toContain('from "');
   });
 
@@ -165,5 +165,25 @@ describe("lazy query execution", () => {
     expect(source).toContain("out[j++] = output");
     expect(source).not.toContain("function*");
     expect(source).not.toContain("Array.from");
+  });
+
+  it("stops a terminal take immediately after the final emitted item", () => {
+    let reads = 0;
+    const rows = [1, 2, 3].map((id) => ({
+      id,
+      active: true,
+      get score() {
+        reads++;
+        return id;
+      },
+      category: "a",
+      tags: [],
+    }));
+    const query = JIT.query(Events).select("score").take(2);
+
+    expect(query(rows)).toEqual([{ score: 1 }, { score: 2 }]);
+    expect(reads).toBe(2);
+    expect([...query.to.iterator()(rows)]).toEqual([{ score: 1 }, { score: 2 }]);
+    expect(reads).toBe(4);
   });
 });

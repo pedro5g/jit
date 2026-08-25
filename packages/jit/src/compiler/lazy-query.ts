@@ -227,9 +227,11 @@ export function emitQueryVisitorSource(schema: ATS.AnyTypeSchema, program: LazyQ
   }
   const hasParams = Boolean(program.params?.length);
   const lines = ["(function () {", `function visit(input${hasParams ? ", params" : ""}, consume) {`];
+  const terminalTakeIndex = terminalTake(program.nodes);
 
   program.nodes.forEach((node, index) => {
-    if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
+    if ((node.kind === "take" && index !== terminalTakeIndex) || node.kind === "drop")
+      lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
   });
@@ -256,6 +258,7 @@ export function emitQueryVisitorSource(schema: ATS.AnyTypeSchema, program: LazyQ
 
 function emitVisitorBody(nodes: readonly QueryPipelineNode[]): readonly string[] {
   const body = ["let output = item;"];
+  const terminalTakeIndex = terminalTake(nodes);
 
   nodes.forEach((node, index) => {
     switch (node.kind) {
@@ -266,7 +269,7 @@ function emitVisitorBody(nodes: readonly QueryPipelineNode[]): readonly string[]
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        body.push(`if (count${index}++ === ${node.count}) return emitted;`);
+        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return emitted;`);
         break;
       case "drop":
         body.push(`if (count${index}++ < ${node.count}) continue;`);
@@ -288,6 +291,10 @@ function emitVisitorBody(nodes: readonly QueryPipelineNode[]): readonly string[]
     }
   });
   body.push("consume(output);", "emitted++;");
+  if (terminalTakeIndex !== -1) {
+    const node = nodes[terminalTakeIndex] as Extract<QueryPipelineNode, { readonly kind: "take" }>;
+    body.push(`if (emitted === ${node.count}) return emitted;`);
+  }
   return body;
 }
 
@@ -368,9 +375,11 @@ function emitDirectArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProg
   validatePipeline(program.nodes, collection.props);
   const hasParams = Boolean(program.params?.length);
   const lines = [`function query(input${hasParams ? ", params" : ""}) {`, "  const out = [];", "  let j = 0;"];
+  const terminalTakeIndex = terminalTake(program.nodes);
 
   program.nodes.forEach((node, index) => {
-    if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
+    if ((node.kind === "take" && index !== terminalTakeIndex) || node.kind === "drop")
+      lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
   });
@@ -385,7 +394,7 @@ function emitDirectArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProg
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        body.push(`if (count${index}++ === ${node.count}) return out;`);
+        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return out;`);
         break;
       case "drop":
         body.push(`if (count${index}++ < ${node.count}) continue;`);
@@ -407,6 +416,10 @@ function emitDirectArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProg
     }
   });
   body.push("out[j++] = output;");
+  if (terminalTakeIndex !== -1) {
+    const node = program.nodes[terminalTakeIndex] as Extract<QueryPipelineNode, { readonly kind: "take" }>;
+    body.push(`if (j === ${node.count}) return out;`);
+  }
 
   if (collection.kind === "array") {
     lines.push("  for (let i = 0, len = input.length; i < len; i++) {", "    const item = input[i];");
@@ -438,6 +451,7 @@ function emitFusedStage(
   forAwait: string,
   directArray: boolean
 ): void {
+  const terminalTakeIndex = terminalTake(nodes);
   nodes.forEach((node, index) => {
     if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
@@ -454,7 +468,7 @@ function emitFusedStage(
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        body.push(`if (count${index}++ === ${node.count}) return;`);
+        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return;`);
         break;
       case "drop":
         body.push(`if (count${index}++ < ${node.count}) continue;`);
@@ -476,6 +490,10 @@ function emitFusedStage(
     }
   });
   body.push("yield output;");
+  if (terminalTakeIndex !== -1) {
+    const node = nodes[terminalTakeIndex] as Extract<QueryPipelineNode, { readonly kind: "take" }>;
+    body.push(`if (++count${terminalTakeIndex} === ${node.count}) return;`);
+  }
 
   if (directArray) {
     lines.push("  if (Array.isArray(input)) {");
@@ -489,6 +507,11 @@ function emitFusedStage(
   lines.push(`  ${forAwait} (const item of input) {`);
   for (const line of body) lines.push(`    ${line}`);
   lines.push("  }");
+}
+
+function terminalTake(nodes: readonly QueryPipelineNode[]): number {
+  const index = nodes.length - 1;
+  return index >= 0 && nodes[index]?.kind === "take" ? index : -1;
 }
 
 function emitStage(

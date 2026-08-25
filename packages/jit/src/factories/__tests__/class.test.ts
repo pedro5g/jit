@@ -390,6 +390,28 @@ describe("JIT.class", () => {
     }
   });
 
+  it("keeps compiled structural sharing for composite aggregate fields", () => {
+    const OrderBase = JIT.aggregateRoot(
+      JIT.object({
+        id: JIT.string().readonly(),
+        shipping: JIT.object({ city: JIT.string(), country: JIT.string() }),
+      }),
+      { id: "id" }
+    );
+    class Order extends OrderBase {
+      shipTo(city: string) {
+        this.update({ shipping: { city } });
+      }
+    }
+    const order = Order.create({ id: "o_1", shipping: { city: "Recife", country: "BR" } });
+
+    order.shipTo("Sao Paulo");
+    expect(order.shipping).toEqual({ city: "Sao Paulo", country: "BR" });
+    const updated = order.shipping;
+    order.shipTo("Sao Paulo");
+    expect(order.shipping).toBe(updated);
+  });
+
   it("commits aggregate events in order and retains them when publication fails", async () => {
     const OrderBase = JIT.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string() }), { id: "id" });
     class Order extends OrderBase {

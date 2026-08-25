@@ -38,19 +38,6 @@ class HandwrittenUser {
   }
 }
 
-class HandwrittenMoney {
-  constructor(
-    readonly amount: number,
-    readonly currency: string
-  ) {
-    Object.freeze(this);
-  }
-
-  equals(other: HandwrittenMoney): boolean {
-    return this.amount === other.amount && this.currency === other.currency;
-  }
-}
-
 class HandwrittenOrder {
   readonly events: unknown[] = [];
 
@@ -73,12 +60,8 @@ const userInput = { id: "u_1", name: "Ada", active: true };
 const moneyInput = { amount: 10, currency: "BRL" };
 const runtimeUser = User.create(userInput);
 const runtimeSameUser = User.create({ ...userInput, name: "Grace" });
-const handwrittenUser = new HandwrittenUser(userInput.id, userInput.name, userInput.active);
-const handwrittenSameUser = new HandwrittenUser(userInput.id, "Grace", true);
 const runtimeMoney = Money.create(moneyInput);
 const runtimeSameMoney = Money.create(moneyInput);
-const handwrittenMoney = new HandwrittenMoney(moneyInput.amount, moneyInput.currency);
-const handwrittenSameMoney = new HandwrittenMoney(moneyInput.amount, moneyInput.currency);
 const runtimeOrder = Order.create({ id: "o_1", status: "draft" });
 const handwrittenOrder = new HandwrittenOrder("o_1", "draft");
 const parseUser = JIT.json.parse(User).validate();
@@ -93,6 +76,7 @@ registerScenario({
     {
       name: "handwritten class",
       fn: (input: typeof userInput) => new HandwrittenUser(input.id, input.name, input.active),
+      biased: "constructs trusted fields without applying the schema validation performed by User.create",
     },
   ],
 });
@@ -102,7 +86,13 @@ registerScenario({
   name: "flat money",
   args: [runtimeMoney, runtimeSameMoney],
   jit: (left: InstanceType<typeof Money>, right: InstanceType<typeof Money>) => left.equals(right),
-  competitors: [{ name: "handwritten class", fn: () => handwrittenMoney.equals(handwrittenSameMoney) }],
+  competitors: [
+    {
+      name: "handwritten class",
+      fn: (left: InstanceType<typeof Money>, right: InstanceType<typeof Money>) =>
+        left.amount === right.amount && left.currency === right.currency,
+    },
+  ],
 });
 
 registerScenario({
@@ -110,7 +100,12 @@ registerScenario({
   name: "flat entity",
   args: [runtimeUser, runtimeSameUser],
   jit: (left: User, right: User) => left.sameIdentity(right),
-  competitors: [{ name: "handwritten class", fn: () => handwrittenUser.sameIdentity(handwrittenSameUser) }],
+  competitors: [
+    {
+      name: "handwritten class",
+      fn: (left: User, right: User) => left.id === right.id,
+    },
+  ],
 });
 
 registerScenario({
