@@ -69,7 +69,7 @@ The schema may be the row object or an array of it — `JIT.sort(User)` and
   ascending and **after** them descending. `null` and `undefined` are treated as
   equally absent and never ordered relative to each other — two absent values
   fall through to the next criterion.
-- A key must resolve to a statically orderable scalar: string, number, int,
+- A key must resolve to a statically comparable scalar: string, number, int,
   bigint, boolean, literal, enum, or `Date`, optionally wrapped in
   optional/nullable/branded/runtime-type wrappers. An object or array key is
   rejected at construction.
@@ -80,7 +80,7 @@ The schema may be the row object or an array of it — `JIT.sort(User)` and
 ```ts
 JIT.sort(User).by("missing"); // unknown key
 JIT.sort(User).by("id").thenBy("id"); // repeated key
-JIT.sort(Nested).by("value"); // not a statically orderable scalar
+JIT.sort(Nested).by("value"); // not a statically comparable scalar
 ```
 
 ## 5. Compilation

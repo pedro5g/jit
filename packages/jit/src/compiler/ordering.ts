@@ -1,13 +1,12 @@
 import type * as ATS from "../core/ats/index.js";
-import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import type { CodeWriter } from "./emitter/code-writer.js";
 import { CodeWriter as OrderingCodeWriter } from "./emitter/code-writer.js";
-import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
+import { isNullishField, resolveRowField, resolveRowObjectSchema, resolveScalarKeyKind } from "./row-keys.js";
 import { emitPropertyAccess } from "./source/access.js";
 
 export type OrderDirection = "asc" | "desc";
-export type OrderingValueKind = "direct" | "numeric" | "date";
+export type OrderingValueKind = import("./row-keys.js").ScalarKeyKind;
 
 export interface OrderingCriterion {
   readonly key: string;
@@ -21,13 +20,11 @@ export interface OrderingDescriptor {
   readonly criteria: readonly OrderingCriterion[];
 }
 
-type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
-
 export function resolveOrderingDescriptor(
   schema: ATS.AnyTypeSchema,
   criteria: readonly { readonly key: string; readonly direction: OrderDirection }[]
 ): OrderingDescriptor {
-  const object = resolveOrderingObjectSchema(schema);
+  const object = resolveRowObjectSchema(schema, "ordering");
 
   if (criteria.length === 0) {
     throw new JITError("INVALID_OPERATION", "ordering requires at least one criterion");
@@ -35,19 +32,11 @@ export function resolveOrderingDescriptor(
 
   const seen = new Set<string>();
   const resolved = criteria.map((criterion) => {
-    if (typeof criterion.key !== "string" || criterion.key.length === 0) {
-      throw new JITError("INVALID_OPERATION", "ordering keys must be non-empty strings");
-    }
     if (criterion.direction !== "asc" && criterion.direction !== "desc") {
       throw new JITError("INVALID_OPERATION", "ordering direction must be asc or desc");
     }
-    const field = object.def.props[criterion.key];
+    const field = resolveRowField(object, criterion.key, "ordering");
 
-    if (!field) {
-      throw new JITError("INVALID_OPERATION", `ordering received unknown key ${JSON.stringify(criterion.key)}`, {
-        path: [criterion.key],
-      });
-    }
     if (seen.has(criterion.key)) {
       throw new JITError("INVALID_OPERATION", `ordering repeats key ${JSON.stringify(criterion.key)}`, {
         path: [criterion.key],
@@ -58,8 +47,8 @@ export function resolveOrderingDescriptor(
     return Object.freeze({
       key: criterion.key,
       direction: criterion.direction,
-      valueKind: resolveOrderingValueKind(field, criterion.key),
-      nullish: isNullish(field),
+      valueKind: resolveScalarKeyKind(field, criterion.key, "ordering"),
+      nullish: isNullishField(field),
     });
   });
 
@@ -138,48 +127,4 @@ export function emitOrderingComparatorBodySource(descriptor: OrderingDescriptor)
   const writer = new OrderingCodeWriter();
   emitOrderingComparatorBody(writer, descriptor);
   return writer.toString();
-}
-
-function resolveOrderingObjectSchema(schema: ATS.AnyTypeSchema): ObjectSchema {
-  let base = resolveWrappers(schema).base;
-
-  if (base.type === TypeName.array) {
-    base = resolveWrappers((base.def as ATS.ElementDef).element).base;
-  }
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers((base.def as ATS.RuntimeTypeDef).innerType).base;
-  }
-  if (base.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "ordering expects an object or array-of-objects schema");
-  }
-  return base as ObjectSchema;
-}
-
-function resolveOrderingValueKind(schema: ATS.AnyTypeSchema, key: string): OrderingValueKind {
-  let base = resolveWrappers(schema).base;
-
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers((base.def as ATS.RuntimeTypeDef).innerType).base;
-  }
-  if (base.type === TypeName.date) return "date";
-  // Float64 keys subtract without branching; bigint cannot (it yields a BigInt).
-  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
-  if (
-    base.type === TypeName.string ||
-    base.type === TypeName.bigint ||
-    base.type === TypeName.boolean ||
-    base.type === TypeName.literal ||
-    base.type === TypeName.enum
-  ) {
-    return "direct";
-  }
-  throw new JITError(
-    "INVALID_OPERATION",
-    `ordering key ${JSON.stringify(key)} must resolve to a statically orderable scalar`
-  );
-}
-
-function isNullish(schema: ATS.AnyTypeSchema): boolean {
-  const resolved = resolveWrappers(schema);
-  return resolved.optional || resolved.nullable;
 }

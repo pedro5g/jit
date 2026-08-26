@@ -21,6 +21,7 @@ work and for production performance. Each page explains:
 - [Queries, mappers, and high-volume flows](./query-mapper-flows.md)
 - [Canonical CQRS queries](./cqrs.md)
 - [Sort and ordering plans](./sort.md)
+- [Indexing](./indexing.md)
 - [Lazy queries, iterators, and visitors](./lazy-execution.md)
 - [Serialization and binary codec](./serialization-codec.md)
 - [Binary rowsets](./binary-rowsets.md)
@@ -38,6 +39,7 @@ work and for production performance. Each page explains:
 | Model date/time boundaries        | Temporal, ISO, codecs   | ISO string vs Date vs Temporal              |
 | Filter/project application arrays | Queries and mappers     | eager result vs iterator/visitor            |
 | Order a collection by fields      | Sort and ordering       | callable copy vs `inPlace` vs `compare`     |
+| Look rows up by a key             | Indexing                | fresh build vs `cached` vs a scan           |
 | Process unbounded/cursor input    | Lazy execution          | sync iterator vs async iterator             |
 | Scan million-row flat batches     | Binary rowsets          | packed/aligned/columnar and memory strategy |
 | Send JSON or binary data          | Serialization and codec | full string, chunks, or versioned bytes     |

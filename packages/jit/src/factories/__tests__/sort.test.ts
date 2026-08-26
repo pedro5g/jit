@@ -76,7 +76,7 @@ describe("JIT.sort", () => {
     expect(() => JIT.sort(User).by("id").thenBy("id")).toThrow(/repeats key/i);
 
     const Nested = JIT.object({ value: JIT.object({ id: JIT.number() }) });
-    expect(() => JIT.sort(Nested).by("value")).toThrow(/statically orderable scalar/i);
+    expect(() => JIT.sort(Nested).by("value")).toThrow(/statically comparable scalar/i);
 
     const Optional = JIT.object({ rank: JIT.number().optional() });
     const optionalSort = JIT.sort(Optional).by("rank");

@@ -18,6 +18,7 @@
     "transform",
     "query",
     "sort",
+    "index-plans",
     "process",
     "stream",
     "watch",

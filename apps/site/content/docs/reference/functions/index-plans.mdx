@@ -1,0 +1,94 @@
+---
+title: index
+description: Materialize an index over a collection from the key it already declares.
+---
+
+## Signature
+
+```ts
+const User = JIT.object({ id: JIT.number(), tenantId: JIT.string(), email: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const byId = JIT.index(Users);
+const byEmail = JIT.index(Users).by("email");
+const byTenantEmail = JIT.index(Users).by("tenantId", "email");
+const perTenant = JIT.index(Users).by("tenantId").grouped();
+```
+
+The key comes from the collection's own facts — `.keyed()`, `.indexBy()`,
+`.uniqueBy()` or an entity hint. `by()` overrides it and is what gives the index
+a precise key type; the inferred form types its key as `unknown`.
+
+## Building and reusing
+
+```ts
+const User = JIT.object({ id: JIT.number(), email: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+const byId = JIT.index(Users);
+
+const users = [
+  { id: 1, email: "ada@x.com" },
+  { id: 2, email: "grace@x.com" },
+];
+
+console.log(byId(users).get(2)?.email);
+console.log(byId(users) !== byId(users));
+console.log(byId.cached(users) === byId.cached(users));
+```
+
+| Member   | Behavior                                                    |
+| -------- | ----------------------------------------------------------- |
+| callable | builds a new index on every call                             |
+| `cached` | one index per array reference, held in a `WeakMap`           |
+
+A cached index is valid only while that array's contents are. An array mutated
+in place keeps its stale index, so build fresh for data you mutate.
+
+## Shapes
+
+```ts
+const User = JIT.object({ id: JIT.number(), tenantId: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const rows = [
+  { id: 1, tenantId: "t1" },
+  { id: 2, tenantId: "t1" },
+  { id: 3, tenantId: "t2" },
+];
+
+const perTenant = JIT.index(Users).by("tenantId").grouped();
+const lastPerTenant = JIT.index(Users).by("tenantId");
+
+console.log(perTenant(rows).get("t1")?.map((row) => row.id));
+console.log(lastPerTenant(rows).get("t1")?.id);
+```
+
+A unique index keeps the **last** row for a key; `grouped()` keeps every row in
+input order. Compound keys nest one `Map` per level, which stays exact where a
+concatenated composite key would need an escaping rule.
+
+## Date keys
+
+A `Date` object matches a `Map` key by identity, so a date key is indexed by its
+timestamp.
+
+```ts
+const Event = JIT.object({ at: JIT.date(), id: JIT.number() });
+const Events = JIT.array(Event);
+const byAt = JIT.index(Events).by("at");
+
+const events = [{ at: new Date(2_000), id: 7 }];
+
+console.log(byAt(events).get(2_000)?.id);
+console.log(byAt(events).get(new Date(2_000) as never));
+```
+
+## When it pays
+
+Building an index through JIT is at parity with writing the loop by hand — it is
+dominated by `Map.set`. What it buys is reuse: measured on 10 000 rows, a cached
+lookup is 68.5 ns against 456 µs for an index rebuilt per lookup and 5.13 µs for
+a linear scan. Use it for the schema-checked key, `Date` handling and AOT, and
+reach for `cached` when the same collection is looked up more than once. See
+[the indexing feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/indexing.md)
+for the full tables.

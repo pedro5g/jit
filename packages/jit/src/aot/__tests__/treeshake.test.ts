@@ -153,6 +153,29 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("function clone");
   });
 
+  it("should keep an index plan free of unrelated compilers and of a schema walker", async () => {
+    const User = JIT.object({ id: JIT.number(), tenantId: JIT.string(), email: JIT.string() });
+    const Users = JIT.array(User).keyed("id");
+    const byId = JIT.index(Users);
+    const unrelated = JIT.sort(User).by("email");
+
+    AOT.generate({ artifacts: { byId, unrelated }, outDir });
+    const bundled = await bundle(
+      `import { byId } from "./index.js";\nconsole.log(byId([{ id: 1, tenantId: "t", email: "a@x" }]).get(1));\n`
+    );
+
+    // The key is inlined from the schema: static access, no key list at runtime.
+    expect(bundled).toContain("row.id");
+    expect(bundled).toContain("new Map()");
+    expect(bundled).not.toContain("Object.keys");
+    expect(bundled).not.toContain("descriptor");
+    // Neighbouring artifacts and unrelated operation families are dropped.
+    expect(bundled).not.toContain("unrelated");
+    expect(bundled).not.toContain("function stringify");
+    expect(bundled).not.toContain("encodeInto");
+    expect(bundled).not.toContain("function clone");
+  });
+
   it("should retain only the co-emitted class required by a construction pipeline", async () => {
     const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() }));
     const parseUser = JIT.json.parse(User).validate();

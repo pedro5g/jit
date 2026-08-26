@@ -10,6 +10,7 @@ import type { Equal } from "./compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
 import type { Format } from "./compiler/format.js";
 import type { Hash } from "./compiler/hash.js";
+import { type IndexShape, resolveIndexDescriptor, resolveIndexKeysFromFacts } from "./compiler/indexing.js";
 import type { JsonChunksOptions } from "./compiler/json-chunks.js";
 import type { ToJsonSchemaOptions } from "./compiler/json-schema/index.js";
 import type { Mask } from "./compiler/mask.js";
@@ -28,6 +29,7 @@ import { JITError } from "./errors/index.js";
 import type { CqrsInput, CqrsQuery, ParsedCqrsInput } from "./factories/cqrs.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
 import * as RuntimeJIT from "./factories/index.js";
+import type { IndexBuilder, KeyedIndexPlan } from "./factories/indexing.js";
 import type { SortBuilder, SortPlan } from "./factories/sort.js";
 import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
 
@@ -333,6 +335,51 @@ function createDefineSortPlan<TSchema extends ATS.AnyTypeSchema>(
     },
   });
   registerArtifact(stub, { kind: "sort-plan", schema, descriptor });
+  return stub;
+}
+
+function defineIndex<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): IndexBuilder<TSchema> {
+  const unwrapped = unwrapSchema(schema);
+  const plan = createDefineIndexPlan(
+    unwrapped,
+    resolveIndexKeysFromFacts(unwrapped),
+    "unique"
+  ) as IndexBuilder<TSchema>;
+
+  Object.defineProperty(plan, "by", {
+    value: (...keys: string[]) => createDefineIndexPlan(unwrapped, keys, "unique"),
+  });
+  return plan;
+}
+
+function createDefineIndexPlan<TRow, TIndex>(
+  schema: ATS.AnyTypeSchema,
+  keys: readonly string[] | undefined,
+  shape: IndexShape
+): KeyedIndexPlan<TRow, TIndex> {
+  const stub = function aotIndexArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as KeyedIndexPlan<TRow, TIndex>;
+
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:index",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "index" },
+      } satisfies ArtifactDescriptor,
+    },
+    cached: { value: stub },
+    grouped: { value: () => createDefineIndexPlan(schema, keys, "grouped") },
+  });
+  // Resolving here keeps a definition file honest: an index with no key fact
+  // and no `.by()` fails at declaration rather than at generation.
+  if (keys || resolveIndexKeysFromFacts(schema)) {
+    registerArtifact(stub, { kind: "index-plan", schema, descriptor: resolveIndexDescriptor(schema, keys, shape) });
+  }
   return stub;
 }
 
@@ -759,6 +806,7 @@ export const JIT = {
   jsonSchema,
   mock,
   sort: defineSort,
+  index: defineIndex,
   cqrs,
   compare: Object.freeze({ equal, diff, hash }),
   security: Object.freeze({ mask, sanitize }),
@@ -777,6 +825,7 @@ export const JIT = {
   | "jsonSchema"
   | "mock"
   | "sort"
+  | "index"
   | "cqrs"
   | "compare"
   | "security"
@@ -794,6 +843,7 @@ export const JIT = {
   readonly jsonSchema: typeof jsonSchema;
   readonly mock: typeof mock;
   readonly sort: typeof defineSort;
+  readonly index: typeof defineIndex;
   readonly cqrs: typeof cqrs;
   readonly compare: {
     readonly equal: typeof equal;

@@ -5,6 +5,7 @@
  */
 
 import type { ExecutionPlan } from "../compiler/execution-plan.js";
+import type { IndexDescriptor } from "../compiler/indexing.js";
 import type { OrderingDescriptor } from "../compiler/ordering.js";
 import type * as ATS from "../core/ats/index.js";
 
@@ -45,6 +46,12 @@ interface CqrsParserArtifact {
   readonly definition: unknown;
   /** Import-free function-body source that returns the specialized parser. */
   readonly source: string;
+}
+
+interface IndexPlanArtifact {
+  readonly kind: "index-plan";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly descriptor: IndexDescriptor;
 }
 
 interface SortPlanArtifact {
@@ -115,6 +122,7 @@ export type CompiledArtifact =
   | CqrsInputArtifact
   | CqrsParserArtifact
   | SortPlanArtifact
+  | IndexPlanArtifact
   | ValidatorArtifact
   | OperationArtifact
   | ExecutionArtifact

@@ -51,6 +51,7 @@ export {
   type StandardQueryValue,
 } from "./cqrs.js";
 export { dto } from "./dto.js";
+export { type IndexBuilder, type IndexPlan, index, type KeyedIndexPlan } from "./indexing.js";
 export { type IsoFactories, iso } from "./iso.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export * from "./object/index.js";

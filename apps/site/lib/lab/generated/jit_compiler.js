@@ -251,9 +251,9 @@ function stringify_literal(v) {
 function key_access(key, isOptional) {
   return typeof key !== "string" ? "" : isValidIdentifier(key) ? `${isOptional ? "?." : isQuoted(key) ? "" : "."}${isQuoted(key) ? `[${key.startsWith('"') && key.endsWith('"') ? key : `"${key}"`}]` : key}` : `${isOptional ? "?." : ""}[${parseKey(key)}]`;
 }
-function index_accessor(index, isOptional) {
+function index_accessor(index2, isOptional) {
   const safe = isOptional ? "?." : "";
-  return typeof index !== "number" ? "" : `${safe}[${index}]`;
+  return typeof index2 !== "number" ? "" : `${safe}[${index2}]`;
 }
 function join_path(path, isOptional) {
   return path.reduce((xs, k, i) => {
@@ -866,8 +866,8 @@ function schemaGuard(schema, value) {
 function loadProp(base, key) {
   return { kind: "load_prop", base, key };
 }
-function loadIndex(base, index) {
-  return { kind: "load_index", base, index };
+function loadIndex(base, index2) {
+  return { kind: "load_index", base, index: index2 };
 }
 function call(callee, args = []) {
   return { kind: "call", callee, args };
@@ -896,8 +896,8 @@ function store(target, expr) {
 function exprStmt(expr) {
   return { kind: "expr_stmt", expr };
 }
-function forRange(index, length, body) {
-  return { kind: "for_range", index, length, body };
+function forRange(index2, length, body) {
+  return { kind: "for_range", index: index2, length, body };
 }
 function forOf(item, iterable, body) {
   return { kind: "for_of", item, iterable, body };
@@ -1170,8 +1170,8 @@ function createEmitState() {
 function emitPropertyAccess(base, key) {
   return `${base}${parse_exports.key_access(key, false)}`;
 }
-function emitIndexAccess(base, index) {
-  return `${base}[${index}]`;
+function emitIndexAccess(base, index2) {
+  return `${base}[${index2}]`;
 }
 
 // ../../packages/jit/src/compiler/source/guard.ts
@@ -1454,8 +1454,8 @@ function emitInlineObjectClone(node, source) {
 }
 function emitInlineTupleClone(node, source) {
   const items = [];
-  for (let index = 0; index < node.items.length; index++) {
-    const cloned = emitInlineClone(node.items[index], `${source}[${index}]`);
+  for (let index2 = 0; index2 < node.items.length; index2++) {
+    const cloned = emitInlineClone(node.items[index2], `${source}[${index2}]`);
     if (!cloned) {
       return void 0;
     }
@@ -1480,49 +1480,49 @@ function emitObjectClone(writer, state, node, source, target) {
 }
 function emitTupleClone(writer, state, node, source, target) {
   const entries = [];
-  for (let index = 0; index < node.items.length; index++) {
-    const itemSource = `${source}[${index}]`;
-    const inline = emitInlineClone(node.items[index], itemSource);
+  for (let index2 = 0; index2 < node.items.length; index2++) {
+    const itemSource = `${source}[${index2}]`;
+    const inline = emitInlineClone(node.items[index2], itemSource);
     if (inline) {
       entries.push(inline);
       continue;
     }
-    const itemTarget = state.nextVar(`${target}_${index}`);
-    emitCloneTo(writer, state, node.items[index], itemSource, itemTarget);
+    const itemTarget = state.nextVar(`${target}_${index2}`);
+    emitCloneTo(writer, state, node.items[index2], itemSource, itemTarget);
     entries.push(itemTarget);
   }
   writer.line(`const ${target} = [${entries.join(", ")}];`);
 }
 function emitArrayClone(writer, state, node, source, target) {
   const len = state.nextVar("len");
-  const index = state.nextVar("i");
+  const index2 = state.nextVar("i");
   const item = state.nextVar("item");
   writer.line(`const ${len} = ${source}.length;`);
   writer.line(`const ${target} = new Array(${len});`);
-  writer.line(`for (let ${index} = 0; ${index} < ${len}; ${index}++) {`);
+  writer.line(`for (let ${index2} = 0; ${index2} < ${len}; ${index2}++) {`);
   writer.indent(() => {
-    const itemSource = `${source}[${index}]`;
+    const itemSource = `${source}[${index2}]`;
     const inline = emitInlineClone(node.element, itemSource);
     if (inline) {
-      writer.line(`${target}[${index}] = ${inline};`);
+      writer.line(`${target}[${index2}] = ${inline};`);
       return;
     }
     emitCloneTo(writer, state, node.element, itemSource, item);
-    writer.line(`${target}[${index}] = ${item};`);
+    writer.line(`${target}[${index2}] = ${item};`);
   });
   writer.line("}");
 }
 function emitRecordClone(writer, state, node, source, target) {
   const keys = state.nextVar("keys");
   const len = state.nextVar("len");
-  const index = state.nextVar("i");
+  const index2 = state.nextVar("i");
   const key = state.nextVar("key");
   const clonedValue = state.nextVar("clonedValue");
   writer.line(`const ${keys} = Object.keys(${source});`);
   writer.line(`const ${target} = {};`);
-  writer.line(`for (let ${index} = 0, ${len} = ${keys}.length; ${index} < ${len}; ${index}++) {`);
+  writer.line(`for (let ${index2} = 0, ${len} = ${keys}.length; ${index2} < ${len}; ${index2}++) {`);
   writer.indent(() => {
-    writer.line(`const ${key} = ${keys}[${index}];`);
+    writer.line(`const ${key} = ${keys}[${index2}];`);
     emitCloneTo(writer, state, node.value, `${source}[${key}]`, clonedValue);
     writer.line(`${target}[${key}] = ${clonedValue};`);
   });
@@ -1568,12 +1568,12 @@ function emitGuardClone(writer, state, node, source, target) {
 }
 function emitUnionClone(writer, state, node, source, target) {
   writer.line(`let ${target};`);
-  for (let index = 0; index < node.options.length; index++) {
-    const option = node.options[index];
-    const keyword = index === 0 ? "if" : "else if";
+  for (let index2 = 0; index2 < node.options.length; index2++) {
+    const option = node.options[index2];
+    const keyword = index2 === 0 ? "if" : "else if";
     writer.line(`${keyword} (${emitSchemaGuard(option.schema, source)}) {`);
     writer.indent(() => {
-      const optionTarget = state.nextVar(`${target}_${index}`);
+      const optionTarget = state.nextVar(`${target}_${index2}`);
       emitCloneTo(writer, state, option.node, source, optionTarget);
       writer.line(`${target} = ${optionTarget};`);
     });
@@ -1582,9 +1582,9 @@ function emitUnionClone(writer, state, node, source, target) {
 }
 function emitIntersectionClone(writer, state, node, source, target) {
   const parts = [];
-  for (let index = 0; index < node.options.length; index++) {
-    const optionTarget = state.nextVar(`${target}_${index}`);
-    emitCloneTo(writer, state, node.options[index], source, optionTarget);
+  for (let index2 = 0; index2 < node.options.length; index2++) {
+    const optionTarget = state.nextVar(`${target}_${index2}`);
+    emitCloneTo(writer, state, node.options[index2], source, optionTarget);
     parts.push(optionTarget);
   }
   writer.line(`const ${target} = Object.assign({}, ${parts.join(", ")});`);
@@ -1592,14 +1592,14 @@ function emitIntersectionClone(writer, state, node, source, target) {
 function emitDiscriminatedUnionClone(writer, state, node, source, target) {
   const tag = emitPropertyAccess(source, node.discriminator);
   writer.line(`let ${target};`);
-  for (let index = 0; index < node.options.length; index++) {
-    const option = node.options[index];
+  for (let index2 = 0; index2 < node.options.length; index2++) {
+    const option = node.options[index2];
     const value = literalDiscriminatorValue(option.schema, node.discriminator);
     if (value === void 0) continue;
-    const keyword = index === 0 ? "if" : "else if";
+    const keyword = index2 === 0 ? "if" : "else if";
     writer.line(`${keyword} (${tag} === ${emitLiteral(value)}) {`);
     writer.indent(() => {
-      const optionTarget = state.nextVar(`${target}_${index}`);
+      const optionTarget = state.nextVar(`${target}_${index2}`);
       emitCloneTo(writer, state, option.node, source, optionTarget);
       writer.line(`${target} = ${optionTarget};`);
     });
@@ -1954,12 +1954,12 @@ function emitBaseSizeInner(context, schema, valueExpr) {
     case TypeName.array: {
       const element = schema.def.element;
       const holder = hoist(context, valueExpr);
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       const item = nextVar(context, "e");
       writer.line("size += 4;");
-      writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${holder}.length; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`const ${item} = ${holder}[${index}];`);
+        writer.line(`const ${item} = ${holder}[${index2}];`);
         emitSize(context, element, item);
       });
       writer.line("}");
@@ -1973,11 +1973,11 @@ function emitBaseSizeInner(context, schema, valueExpr) {
         emitSize(context, item, `${holder}[${position}]`);
       });
       if (rest) {
-        const index = nextVar(context, "i");
+        const index2 = nextVar(context, "i");
         writer.line("size += 4;");
-        writer.line(`for (let ${index} = ${items.length}; ${index} < ${holder}.length; ${index}++) {`);
+        writer.line(`for (let ${index2} = ${items.length}; ${index2} < ${holder}.length; ${index2}++) {`);
         writer.indent(() => {
-          emitSize(context, rest, `${holder}[${index}]`);
+          emitSize(context, rest, `${holder}[${index2}]`);
         });
         writer.line("}");
       }
@@ -2013,13 +2013,13 @@ function emitBaseSizeInner(context, schema, valueExpr) {
       const valueSchema = schema.def.value;
       const holder = hoist(context, valueExpr);
       const keys = nextVar(context, "k");
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       writer.line(`const ${keys} = Object.keys(${holder});`);
       writer.line("size += 4;");
-      writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`size += 4 + ${keys}[${index}].length * 3;`);
-        emitSize(context, valueSchema, `${holder}[${keys}[${index}]]`);
+        writer.line(`size += 4 + ${keys}[${index2}].length * 3;`);
+        emitSize(context, valueSchema, `${holder}[${keys}[${index2}]]`);
       });
       writer.line("}");
       return;
@@ -2190,12 +2190,12 @@ function emitBaseWriteInner(context, schema, valueExpr) {
     case TypeName.array: {
       const element = schema.def.element;
       const holder = hoist(context, valueExpr);
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       const item = nextVar(context, "e");
       writer.line(`dv.setUint32(o, ${holder}.length, true); o += 4;`);
-      writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${holder}.length; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`const ${item} = ${holder}[${index}];`);
+        writer.line(`const ${item} = ${holder}[${index2}];`);
         emitWrite(context, element, item);
       });
       writer.line("}");
@@ -2209,11 +2209,11 @@ function emitBaseWriteInner(context, schema, valueExpr) {
         emitWrite(context, item, `${holder}[${position}]`);
       });
       if (rest) {
-        const index = nextVar(context, "i");
+        const index2 = nextVar(context, "i");
         writer.line(`dv.setUint32(o, ${holder}.length - ${items.length}, true); o += 4;`);
-        writer.line(`for (let ${index} = ${items.length}; ${index} < ${holder}.length; ${index}++) {`);
+        writer.line(`for (let ${index2} = ${items.length}; ${index2} < ${holder}.length; ${index2}++) {`);
         writer.indent(() => {
-          emitWrite(context, rest, `${holder}[${index}]`);
+          emitWrite(context, rest, `${holder}[${index2}]`);
         });
         writer.line("}");
       }
@@ -2249,13 +2249,13 @@ function emitBaseWriteInner(context, schema, valueExpr) {
       const valueSchema = schema.def.value;
       const holder = hoist(context, valueExpr);
       const keys = nextVar(context, "k");
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       writer.line(`const ${keys} = Object.keys(${holder});`);
       writer.line(`dv.setUint32(o, ${keys}.length, true); o += 4;`);
-      writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
       writer.indent(() => {
-        emitStringWrite(context, `${keys}[${index}]`);
-        emitWrite(context, valueSchema, `${holder}[${keys}[${index}]]`);
+        emitStringWrite(context, `${keys}[${index2}]`);
+        emitWrite(context, valueSchema, `${holder}[${keys}[${index2}]]`);
       });
       writer.line("}");
       return;
@@ -2432,12 +2432,12 @@ function emitBaseReadInner(context, schema) {
       const element = schema.def.element;
       const length = nextVar(context, "l");
       const out = nextVar(context, "a");
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       writer.line(`const ${length} = dv.getUint32(o, true); o += 4;`);
       writer.line(`const ${out} = new Array(${length});`);
-      writer.line(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`${out}[${index}] = ${emitRead(context, element)};`);
+        writer.line(`${out}[${index2}] = ${emitRead(context, element)};`);
       });
       writer.line("}");
       return out;
@@ -2456,15 +2456,15 @@ function emitBaseReadInner(context, schema) {
         return out;
       }
       const length = nextVar(context, "l");
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       writer.line(`const ${length} = dv.getUint32(o, true); o += 4;`);
       writer.line(`const ${out} = new Array(${items.length} + ${length});`);
       slots.forEach((slot, position) => {
         writer.line(`${out}[${position}] = ${slot};`);
       });
-      writer.line(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`${out}[${items.length} + ${index}] = ${emitRead(context, rest)};`);
+        writer.line(`${out}[${items.length} + ${index2}] = ${emitRead(context, rest)};`);
       });
       writer.line("}");
       return out;
@@ -2473,10 +2473,10 @@ function emitBaseReadInner(context, schema) {
       const element = schema.def.element;
       const length = nextVar(context, "l");
       const out = nextVar(context, "a");
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       writer.line(`const ${length} = dv.getUint32(o, true); o += 4;`);
       writer.line(`const ${out} = new Set();`);
-      writer.line(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
       writer.indent(() => {
         writer.line(`${out}.add(${emitRead(context, element)});`);
       });
@@ -2488,10 +2488,10 @@ function emitBaseReadInner(context, schema) {
       const valueSchema = schema.def.value;
       const length = nextVar(context, "l");
       const out = nextVar(context, "a");
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       writer.line(`const ${length} = dv.getUint32(o, true); o += 4;`);
       writer.line(`const ${out} = new Map();`);
-      writer.line(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
       writer.indent(() => {
         const key = nextVar(context, "e");
         writer.line(`const ${key} = ${emitRead(context, keySchema)};`);
@@ -2504,10 +2504,10 @@ function emitBaseReadInner(context, schema) {
       const valueSchema = schema.def.value;
       const length = nextVar(context, "l");
       const out = nextVar(context, "a");
-      const index = nextVar(context, "i");
+      const index2 = nextVar(context, "i");
       writer.line(`const ${length} = dv.getUint32(o, true); o += 4;`);
       writer.line(`const ${out} = {};`);
-      writer.line(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
       writer.indent(() => {
         const key = emitStringRead(context);
         writer.line(`${out}[${key}] = ${emitRead(context, valueSchema)};`);
@@ -2817,10 +2817,10 @@ function emitTupleDiff(writer, state, node, left, right, path) {
   const rightBase = node.items.length > 1 ? hoistOperand(writer, state, right, "rt") : right;
   writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
   writer.indent(() => {
-    for (let index = 0; index < node.items.length; index++) {
-      emitDiffNode(writer, state, node.items[index], `${leftBase}[${index}]`, `${rightBase}[${index}]`, [
+    for (let index2 = 0; index2 < node.items.length; index2++) {
+      emitDiffNode(writer, state, node.items[index2], `${leftBase}[${index2}]`, `${rightBase}[${index2}]`, [
         ...path,
-        index
+        index2
       ]);
     }
   });
@@ -2830,7 +2830,7 @@ function emitArrayDiff(writer, state, node, left, right, path) {
   const leftLen = state.nextVar("leftLen");
   const rightLen = state.nextVar("rightLen");
   const commonLen = state.nextVar("commonLen");
-  const index = state.nextVar("i");
+  const index2 = state.nextVar("i");
   const leftBase = hoistOperand(writer, state, left, "la");
   const rightBase = hoistOperand(writer, state, right, "ra");
   writer.line(`if (!Object.is(${leftBase}, ${rightBase})) {`);
@@ -2838,19 +2838,19 @@ function emitArrayDiff(writer, state, node, left, right, path) {
     writer.line(`const ${leftLen} = ${leftBase}.length;`);
     writer.line(`const ${rightLen} = ${rightBase}.length;`);
     writer.line(`const ${commonLen} = ${leftLen} < ${rightLen} ? ${leftLen} : ${rightLen};`);
-    writer.line(`for (let ${index} = 0; ${index} < ${commonLen}; ${index}++) {`);
+    writer.line(`for (let ${index2} = 0; ${index2} < ${commonLen}; ${index2}++) {`);
     writer.indent(() => {
-      emitDiffNode(writer, state, node.element, `${leftBase}[${index}]`, `${rightBase}[${index}]`, [
+      emitDiffNode(writer, state, node.element, `${leftBase}[${index2}]`, `${rightBase}[${index2}]`, [
         ...path,
-        { expr: index }
+        { expr: index2 }
       ]);
     });
     writer.line("}");
-    writer.line(`for (let ${index} = ${commonLen}; ${index} < ${rightLen}; ${index}++) {`);
-    writer.indent(() => emitChange(writer, "add", [...path, { expr: index }], `${rightBase}[${index}]`));
+    writer.line(`for (let ${index2} = ${commonLen}; ${index2} < ${rightLen}; ${index2}++) {`);
+    writer.indent(() => emitChange(writer, "add", [...path, { expr: index2 }], `${rightBase}[${index2}]`));
     writer.line("}");
-    writer.line(`for (let ${index} = ${commonLen}; ${index} < ${leftLen}; ${index}++) {`);
-    writer.indent(() => emitChange(writer, "remove", [...path, { expr: index }]));
+    writer.line(`for (let ${index2} = ${commonLen}; ${index2} < ${leftLen}; ${index2}++) {`);
+    writer.indent(() => emitChange(writer, "remove", [...path, { expr: index2 }]));
     writer.line("}");
   });
   writer.line("}");
@@ -2859,7 +2859,7 @@ function emitRecordDiff(writer, state, node, left, right, path) {
   const leftKeys = state.nextVar("leftKeys");
   const rightKeys = state.nextVar("rightKeys");
   const len = state.nextVar("len");
-  const index = state.nextVar("i");
+  const index2 = state.nextVar("i");
   const key = state.nextVar("key");
   const leftBase = hoistOperand(writer, state, left, "lr");
   const rightBase = hoistOperand(writer, state, right, "rr");
@@ -2867,9 +2867,9 @@ function emitRecordDiff(writer, state, node, left, right, path) {
   writer.indent(() => {
     writer.line(`const ${leftKeys} = Object.keys(${leftBase});`);
     writer.line(`const ${rightKeys} = Object.keys(${rightBase});`);
-    writer.line(`for (let ${index} = 0, ${len} = ${rightKeys}.length; ${index} < ${len}; ${index}++) {`);
+    writer.line(`for (let ${index2} = 0, ${len} = ${rightKeys}.length; ${index2} < ${len}; ${index2}++) {`);
     writer.indent(() => {
-      writer.line(`const ${key} = ${rightKeys}[${index}];`);
+      writer.line(`const ${key} = ${rightKeys}[${index2}];`);
       writer.line(`if (!Object.prototype.hasOwnProperty.call(${leftBase}, ${key})) {`);
       writer.indent(() => emitChange(writer, "add", [...path, { expr: key }], `${rightBase}[${key}]`));
       writer.line("} else {");
@@ -2879,9 +2879,9 @@ function emitRecordDiff(writer, state, node, left, right, path) {
       writer.line("}");
     });
     writer.line("}");
-    writer.line(`for (let ${index} = 0, ${len} = ${leftKeys}.length; ${index} < ${len}; ${index}++) {`);
+    writer.line(`for (let ${index2} = 0, ${len} = ${leftKeys}.length; ${index2} < ${len}; ${index2}++) {`);
     writer.indent(() => {
-      writer.line(`const ${key} = ${leftKeys}[${index}];`);
+      writer.line(`const ${key} = ${leftKeys}[${index2}];`);
       writer.line(`if (!Object.prototype.hasOwnProperty.call(${rightBase}, ${key})) {`);
       writer.indent(() => emitChange(writer, "remove", [...path, { expr: key }]));
       writer.line("}");
@@ -2995,46 +2995,110 @@ ${body}
 
 // ../../packages/jit/src/runtime/index/build-index.ts
 function buildIndex(items, key) {
-  const index = /* @__PURE__ */ new Map();
+  const index2 = /* @__PURE__ */ new Map();
   for (let i = 0, len = items.length; i < len; i++) {
     const item = items[i];
-    index.set(item[key], item);
+    index2.set(item[key], item);
   }
-  return index;
+  return index2;
 }
 
 // ../../packages/jit/src/runtime/index/index-cache.ts
 var INDEX_CACHE = /* @__PURE__ */ new WeakMap();
+function indexesOf(items) {
+  let entry = INDEX_CACHE.get(items);
+  if (entry === void 0) {
+    entry = { legacyKey: void 0, legacyMap: void 0, plans: void 0 };
+    INDEX_CACHE.set(items, entry);
+  }
+  return entry;
+}
 function getIndex(items, key) {
-  const cached = INDEX_CACHE.get(items);
-  if (cached && cached.key === key) {
-    return cached.map;
+  const entry = indexesOf(items);
+  if (entry.legacyMap !== void 0 && entry.legacyKey === key) {
+    return entry.legacyMap;
   }
   const map4 = buildIndex(items, key);
-  INDEX_CACHE.set(items, { key, map: map4 });
+  entry.legacyKey = key;
+  entry.legacyMap = map4;
   return map4;
+}
+function getCachedIndex(items, cacheKey, build) {
+  const entry = indexesOf(items);
+  const plans = entry.plans ?? (entry.plans = /* @__PURE__ */ new Map());
+  const cached = plans.get(cacheKey);
+  if (cached !== void 0) return cached;
+  const built = build(items);
+  plans.set(cacheKey, built);
+  return built;
+}
+
+// ../../packages/jit/src/compiler/row-keys.ts
+function resolveRowObjectSchema(schema, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.array || base.type === TypeName.set) {
+    base = resolveWrappers(base.def.element).base;
+  }
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${operation} expects an object or collection-of-objects schema`);
+  }
+  return base;
+}
+function resolveRowField(object2, key, operation) {
+  if (typeof key !== "string" || key.length === 0) {
+    throw new JITError("INVALID_OPERATION", `${operation} keys must be non-empty strings`);
+  }
+  const field = object2.def.props[key];
+  if (!field) {
+    throw new JITError("INVALID_OPERATION", `${operation} received unknown key ${JSON.stringify(key)}`, {
+      path: [key]
+    });
+  }
+  return field;
+}
+function resolveScalarKeyKind(schema, key, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type === TypeName.date) return "date";
+  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
+  if (base.type === TypeName.union) {
+    const options = base.def.options;
+    if (options.length > 0) {
+      const kinds = options.map((option) => resolveScalarKeyKind(option, key, operation));
+      if (kinds.every((kind) => kind === kinds[0])) return kinds[0];
+    }
+  }
+  if (base.type === TypeName.string || base.type === TypeName.bigint || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum) {
+    return "direct";
+  }
+  throw new JITError(
+    "INVALID_OPERATION",
+    `${operation} key ${JSON.stringify(key)} must resolve to a statically comparable scalar`,
+    { path: [key] }
+  );
+}
+function isNullishField(schema) {
+  const resolved = resolveWrappers(schema);
+  return resolved.optional || resolved.nullable;
 }
 
 // ../../packages/jit/src/compiler/ordering.ts
 function resolveOrderingDescriptor(schema, criteria) {
-  const object2 = resolveOrderingObjectSchema(schema);
+  const object2 = resolveRowObjectSchema(schema, "ordering");
   if (criteria.length === 0) {
     throw new JITError("INVALID_OPERATION", "ordering requires at least one criterion");
   }
   const seen = /* @__PURE__ */ new Set();
   const resolved = criteria.map((criterion) => {
-    if (typeof criterion.key !== "string" || criterion.key.length === 0) {
-      throw new JITError("INVALID_OPERATION", "ordering keys must be non-empty strings");
-    }
     if (criterion.direction !== "asc" && criterion.direction !== "desc") {
       throw new JITError("INVALID_OPERATION", "ordering direction must be asc or desc");
     }
-    const field = object2.def.props[criterion.key];
-    if (!field) {
-      throw new JITError("INVALID_OPERATION", `ordering received unknown key ${JSON.stringify(criterion.key)}`, {
-        path: [criterion.key]
-      });
-    }
+    const field = resolveRowField(object2, criterion.key, "ordering");
     if (seen.has(criterion.key)) {
       throw new JITError("INVALID_OPERATION", `ordering repeats key ${JSON.stringify(criterion.key)}`, {
         path: [criterion.key]
@@ -3044,8 +3108,8 @@ function resolveOrderingDescriptor(schema, criteria) {
     return Object.freeze({
       key: criterion.key,
       direction: criterion.direction,
-      valueKind: resolveOrderingValueKind(field, criterion.key),
-      nullish: isNullish(field)
+      valueKind: resolveScalarKeyKind(field, criterion.key, "ordering"),
+      nullish: isNullishField(field)
     });
   });
   return Object.freeze({ criteria: Object.freeze(resolved) });
@@ -3053,8 +3117,8 @@ function resolveOrderingDescriptor(schema, criteria) {
 function emitOrderingComparatorBody(writer, descriptor, left = "left", right = "right") {
   const last2 = descriptor.criteria.length - 1;
   let terminated = false;
-  descriptor.criteria.forEach((criterion, index) => {
-    const suffix = descriptor.criteria.length === 1 ? "" : String(index);
+  descriptor.criteria.forEach((criterion, index2) => {
+    const suffix = descriptor.criteria.length === 1 ? "" : String(index2);
     const date3 = criterion.valueKind === "date";
     const leftRaw = `left${date3 ? "Raw" : "Value"}${suffix}`;
     const rightRaw = `right${date3 ? "Raw" : "Value"}${suffix}`;
@@ -3062,7 +3126,7 @@ function emitOrderingComparatorBody(writer, descriptor, left = "left", right = "
     const rightValue = `rightValue${suffix}`;
     const leftPresentWins = criterion.direction === "desc" ? "-1" : "1";
     const rightPresentWins = criterion.direction === "desc" ? "1" : "-1";
-    const subtract = criterion.valueKind === "numeric" && index === last2;
+    const subtract = criterion.valueKind === "numeric" && index2 === last2;
     const emitCompare2 = () => {
       if (date3) {
         writer.line(`const ${leftValue} = ${leftRaw}.getTime();`);
@@ -3104,38 +3168,6 @@ function emitOrderingComparatorBodySource(descriptor) {
   const writer = new CodeWriter();
   emitOrderingComparatorBody(writer, descriptor);
   return writer.toString();
-}
-function resolveOrderingObjectSchema(schema) {
-  let base = resolveWrappers(schema).base;
-  if (base.type === TypeName.array) {
-    base = resolveWrappers(base.def.element).base;
-  }
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers(base.def.innerType).base;
-  }
-  if (base.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "ordering expects an object or array-of-objects schema");
-  }
-  return base;
-}
-function resolveOrderingValueKind(schema, key) {
-  let base = resolveWrappers(schema).base;
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers(base.def.innerType).base;
-  }
-  if (base.type === TypeName.date) return "date";
-  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
-  if (base.type === TypeName.string || base.type === TypeName.bigint || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum) {
-    return "direct";
-  }
-  throw new JITError(
-    "INVALID_OPERATION",
-    `ordering key ${JSON.stringify(key)} must resolve to a statically orderable scalar`
-  );
-}
-function isNullish(schema) {
-  const resolved = resolveWrappers(schema);
-  return resolved.optional || resolved.nullable;
 }
 
 // ../../packages/jit/src/compiler/emitter/emit-expr.ts
@@ -3263,8 +3295,8 @@ function emitNode(writer, node) {
       writer.line("}");
       return;
     case "for_range": {
-      const index = node.index.name;
-      writer.line(`for (let ${index} = 0; ${index} < ${emitExpr(node.length)}; ${index}++) {`);
+      const index2 = node.index.name;
+      writer.line(`for (let ${index2} = 0; ${index2} < ${emitExpr(node.length)}; ${index2}++) {`);
       writer.indent(() => {
         for (const child of node.body) emitNode(writer, child);
       });
@@ -3667,7 +3699,7 @@ function mergeHints(left, right) {
   if (!right) return left;
   const collection = mergeCollection(left.collection, right.collection);
   const entity2 = right.entity ?? left.entity;
-  const index = right.index ?? left.index;
+  const index2 = right.index ?? left.index;
   const order = right.order ?? left.order;
   const compare2 = mergeOptional(left.compare, right.compare);
   const clone3 = mergeOptional(left.clone, right.clone);
@@ -3676,7 +3708,7 @@ function mergeHints(left, right) {
   const serialize = mergeOptional(left.serialize, right.serialize);
   return {
     ...entity2 ? { entity: entity2 } : {},
-    ...index ? { index } : {},
+    ...index2 ? { index: index2 } : {},
     ...order ? { order } : {},
     ...collection ? { collection } : {},
     ...compare2 ? { compare: compare2 } : {},
@@ -4009,12 +4041,12 @@ function appendArrayCompare(body, schema, left, right, scope, strategy, recursio
 }
 function appendTupleCompare(body, schema, left, right, scope, strategy, recursion) {
   const items = schema.def.items;
-  for (let index = 0; index < items.length; index++) {
+  for (let index2 = 0; index2 < items.length; index2++) {
     appendSchemaCompare(
       body,
-      items[index],
-      loadIndex(left, literal(index)),
-      loadIndex(right, literal(index)),
+      items[index2],
+      loadIndex(left, literal(index2)),
+      loadIndex(right, literal(index2)),
       scope,
       strategy,
       recursion
@@ -4764,7 +4796,7 @@ function reorderNodes2(nodes) {
 function reorderExpr(expr) {
   const next = mapExprChildren(expr, reorderExpr);
   if (next.kind !== "nary" || next.operands.length < 2) return next;
-  const ranked = next.operands.map((operand, index) => ({ operand, index, cost: exprCost3(operand) }));
+  const ranked = next.operands.map((operand, index2) => ({ operand, index: index2, cost: exprCost3(operand) }));
   ranked.sort((left, right) => left.cost - right.cost || left.index - right.index);
   return { ...next, operands: ranked.map((entry) => entry.operand) };
 }
@@ -5001,13 +5033,13 @@ function emitScrubBase(context, schema, valueExpr) {
       return guard((source) => {
         const holder = hoist2(context, source);
         const out = nextVar2(context, "a");
-        const index = nextVar2(context, "i");
+        const index2 = nextVar2(context, "i");
         const item = nextVar2(context, "e");
         writer.line(`const ${out} = new Array(${holder}.length);`);
-        writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
+        writer.line(`for (let ${index2} = 0; ${index2} < ${holder}.length; ${index2}++) {`);
         writer.indent(() => {
-          writer.line(`const ${item} = ${holder}[${index}];`);
-          writer.line(`${out}[${index}] = ${emitScrubExpr(context, element, item)};`);
+          writer.line(`const ${item} = ${holder}[${index2}];`);
+          writer.line(`${out}[${index2}] = ${emitScrubExpr(context, element, item)};`);
         });
         writer.line("}");
         return out;
@@ -5219,33 +5251,33 @@ function resolveSanitizeSpec(spec) {
   };
 }
 function staticRegexReference(pattern) {
-  const index = SANITIZE_VALUES.indexOf(pattern);
-  return index === -1 ? String(pattern) : SANITIZE_BINDINGS[index];
+  const index2 = SANITIZE_VALUES.indexOf(pattern);
+  return index2 === -1 ? String(pattern) : SANITIZE_BINDINGS[index2];
 }
 
 // ../../packages/jit/src/compiler/source/format-mask.ts
 function countFormatPlaceholders(pattern) {
   let count = 0;
-  for (let index = 0; index < pattern.length; index++) {
-    if (pattern.charCodeAt(index) === 35) count++;
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    if (pattern.charCodeAt(index2) === 35) count++;
   }
   return count;
 }
 function emitFormatMaskExpression(value, pattern) {
   const parts = [];
   let cursor = 0;
-  for (let index = 0; index < pattern.length; index++) {
-    const character = pattern[index];
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    const character = pattern[index2];
     parts.push(character === "#" ? `${value}[${cursor++}]` : emitLiteral(character));
   }
   return parts.length === 0 ? '""' : parts.join(" + ");
 }
 function emitStrictFormatCondition(value, pattern) {
   const checks = [`${value}.length !== ${pattern.length}`];
-  for (let index = 0; index < pattern.length; index++) {
-    const code = pattern.charCodeAt(index);
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    const code = pattern.charCodeAt(index2);
     checks.push(
-      code === 35 ? `(${value}.charCodeAt(${index}) < 48 || ${value}.charCodeAt(${index}) > 57)` : `${value}.charCodeAt(${index}) !== ${code}`
+      code === 35 ? `(${value}.charCodeAt(${index2}) < 48 || ${value}.charCodeAt(${index2}) > 57)` : `${value}.charCodeAt(${index2}) !== ${code}`
     );
   }
   return checks.join(" || ");
@@ -6349,12 +6381,12 @@ var ValidatorEmitter = class {
               break;
           }
         }
-        const index = this.nextVar("i");
+        const index2 = this.nextVar("i");
         if (build) this.writer.line(`${out} = new Array(${value}.length);`);
-        this.writer.line(`for (let ${index} = 0; ${index} < ${value}.length; ${index}++) {`);
+        this.writer.line(`for (let ${index2} = 0; ${index2} < ${value}.length; ${index2}++) {`);
         this.writer.indent(() => {
-          const elementOut = this.emitNode(element, `${value}[${index}]`, dynamicChild(path, index));
-          if (build) this.writer.line(`${out}[${index}] = ${elementOut};`);
+          const elementOut = this.emitNode(element, `${value}[${index2}]`, dynamicChild(path, index2));
+          if (build) this.writer.line(`${out}[${index2}] = ${elementOut};`);
         });
         this.writer.line("}");
       },
@@ -6390,11 +6422,11 @@ var ValidatorEmitter = class {
           if (build) this.writer.line(`${out}[${position}] = ${itemOut};`);
         });
         if (rest) {
-          const index = this.nextVar("i");
-          this.writer.line(`for (let ${index} = ${items.length}; ${index} < ${value}.length; ${index}++) {`);
+          const index2 = this.nextVar("i");
+          this.writer.line(`for (let ${index2} = ${items.length}; ${index2} < ${value}.length; ${index2}++) {`);
           this.writer.indent(() => {
-            const restOut = this.emitNode(rest, `${value}[${index}]`, dynamicChild(path, index));
-            if (build) this.writer.line(`${out}[${index}] = ${restOut};`);
+            const restOut = this.emitNode(rest, `${value}[${index2}]`, dynamicChild(path, index2));
+            if (build) this.writer.line(`${out}[${index2}] = ${restOut};`);
           });
           this.writer.line("}");
         }
@@ -6471,17 +6503,17 @@ var ValidatorEmitter = class {
       "expected a plain object",
       () => {
         const keys = this.nextVar("k");
-        const index = this.nextVar("i");
+        const index2 = this.nextVar("i");
         if (build) this.writer.line(`${out} = {};`);
         this.writer.line(`const ${keys} = Object.keys(${value});`);
-        this.writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
+        this.writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
         this.writer.indent(() => {
           const valueOut = this.emitNode(
             valueSchema,
-            `${value}[${keys}[${index}]]`,
-            dynamicKeyChild(path, `${keys}[${index}]`)
+            `${value}[${keys}[${index2}]]`,
+            dynamicKeyChild(path, `${keys}[${index2}]`)
           );
-          if (build) this.writer.line(`${out}[${keys}[${index}]] = ${valueOut};`);
+          if (build) this.writer.line(`${out}[${keys}[${index2}]] = ${valueOut};`);
         });
         this.writer.line("}");
       },
@@ -6518,16 +6550,16 @@ var ValidatorEmitter = class {
         }
         if (unknownKeys === "strict" || catchall2 !== void 0) {
           const known = this.nextVar("k");
-          const index = this.nextVar("i");
-          const keyTest = keys.map((key) => `${known}[${index}] !== ${emitLiteral(key)}`).join(" && ");
+          const index2 = this.nextVar("i");
+          const keyTest = keys.map((key) => `${known}[${index2}] !== ${emitLiteral(key)}`).join(" && ");
           const unknownTest = keys.length === 0 ? "true" : keyTest;
           this.writer.line(`const ${known} = Object.keys(${value});`);
-          this.writer.line(`for (let ${index} = 0; ${index} < ${known}.length; ${index}++) {`);
+          this.writer.line(`for (let ${index2} = 0; ${index2} < ${known}.length; ${index2}++) {`);
           this.writer.indent(() => {
             if (unknownKeys === "strict") {
               this.failIf(
                 unknownTest,
-                dynamicKeyChild(path, `${known}[${index}]`),
+                dynamicKeyChild(path, `${known}[${index2}]`),
                 "unknown_key",
                 "known keys only",
                 "object contains unknown keys"
@@ -6539,10 +6571,10 @@ var ValidatorEmitter = class {
               this.writer.indent(() => {
                 const catchallOut = this.emitNode(
                   catchall2,
-                  `${value}[${known}[${index}]]`,
-                  dynamicKeyChild(path, `${known}[${index}]`)
+                  `${value}[${known}[${index2}]]`,
+                  dynamicKeyChild(path, `${known}[${index2}]`)
                 );
-                if (build && catchallBuild) this.writer.line(`${out}[${known}[${index}]] = ${catchallOut};`);
+                if (build && catchallBuild) this.writer.line(`${out}[${known}[${index2}]] = ${catchallOut};`);
               });
               this.writer.line("}");
             }
@@ -7259,7 +7291,7 @@ function optimizeExecutionPlan(plan) {
 }
 function normalizeExecutionPlan(plan) {
   const stages = plan.stages.filter(
-    (stage2, index, all) => stage2.kind !== "to.array" || all[index - 1]?.kind !== "to.array"
+    (stage2, index2, all) => stage2.kind !== "to.array" || all[index2 - 1]?.kind !== "to.array"
   );
   return stages.length === plan.stages.length ? plan : freezePlan(plan, stages);
 }
@@ -7528,13 +7560,13 @@ function emitBaseAppend(context, schema, valueExpr) {
     case TypeName.array: {
       const element = schema.def.element;
       const holder = hoist3(context, valueExpr);
-      const index = nextVar3(context, "i");
+      const index2 = nextVar3(context, "i");
       const item = nextVar3(context, "e");
       writer.line(`s += "[";`);
-      writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${holder}.length; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`if (${index} !== 0) s += ",";`);
-        writer.line(`const ${item} = ${holder}[${index}];`);
+        writer.line(`if (${index2} !== 0) s += ",";`);
+        writer.line(`const ${item} = ${holder}[${index2}];`);
         emitAppend(context, element, item);
       });
       writer.line("}");
@@ -7556,15 +7588,15 @@ function emitBaseAppend(context, schema, valueExpr) {
       const valueSchema = schema.def.value;
       const holder = hoist3(context, valueExpr);
       const keys = nextVar3(context, "k");
-      const index = nextVar3(context, "i");
+      const index2 = nextVar3(context, "i");
       const item = nextVar3(context, "e");
       writer.line(`s += "{";`);
       writer.line(`const ${keys} = Object.keys(${holder});`);
-      writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0; ${index2} < ${keys}.length; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`if (${index} !== 0) s += ",";`);
-        writer.line(`s += str(${keys}[${index}]) + ":";`);
-        writer.line(`const ${item} = ${holder}[${keys}[${index}]];`);
+        writer.line(`if (${index2} !== 0) s += ",";`);
+        writer.line(`s += str(${keys}[${index2}]) + ":";`);
+        writer.line(`const ${item} = ${holder}[${keys}[${index2}]];`);
         emitAppend(context, valueSchema, item);
       });
       writer.line("}");
@@ -7963,12 +7995,12 @@ var SchemaBuilder = class {
     for (const keyword of ["anyOf", "oneOf"]) {
       const options = node[keyword];
       if (Array.isArray(options)) {
-        return union(options.map((option, index) => this.build(option, [...path, keyword, index])));
+        return union(options.map((option, index2) => this.build(option, [...path, keyword, index2])));
       }
     }
     if (Array.isArray(node.allOf)) {
       const options = node.allOf.map(
-        (option, index) => this.build(option, [...path, "allOf", index])
+        (option, index2) => this.build(option, [...path, "allOf", index2])
       );
       return options.length === 1 ? options[0] : createSchema(TypeName.intersection, { options });
     }
@@ -8011,7 +8043,7 @@ var SchemaBuilder = class {
     if (prefix) {
       const rest = node.additionalItems ?? (Array.isArray(node.items) ? void 0 : node.items);
       return createSchema(TypeName.tuple, {
-        items: prefix.map((item, index) => this.build(item, [...path, index])),
+        items: prefix.map((item, index2) => this.build(item, [...path, index2])),
         ...rest && typeof rest === "object" ? { rest: this.build(rest, [...path, "items"]) } : {}
       });
     }
@@ -8292,7 +8324,7 @@ var JsonSchemaEmitter = class {
       case TypeName.intersection:
         return {
           allOf: current.def.options.map(
-            (option, index) => this.emit(option, [...path, "allOf", index])
+            (option, index2) => this.emit(option, [...path, "allOf", index2])
           )
         };
       case TypeName.nullable:
@@ -8335,7 +8367,7 @@ var JsonSchemaEmitter = class {
     return this.dialect.constKeyword ? { const: value } : { enum: [value] };
   }
   unionShape(options, keyword, path) {
-    return { [keyword]: options.map((option, index) => this.emit(option, [...path, keyword, index])) };
+    return { [keyword]: options.map((option, index2) => this.emit(option, [...path, keyword, index2])) };
   }
   nullableShape(inner, path) {
     const node = this.emit(inner, path);
@@ -8348,7 +8380,7 @@ var JsonSchemaEmitter = class {
   tupleShape(schema, path) {
     const items = schema.def.items ?? [];
     const rest = schema.def.rest;
-    const entries = items.map((item, index) => this.emit(item, [...path, index]));
+    const entries = items.map((item, index2) => this.emit(item, [...path, index2]));
     if (!this.dialect.prefixItems) {
       return {
         type: "array",
@@ -8651,7 +8683,7 @@ return query;
 })()`;
 }
 function compileQueryArray(schema, program, options) {
-  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
   const template = getCompileCached(
     schema,
     `query:eager-array:${serializePipeline(program.nodes)}`,
@@ -8707,7 +8739,7 @@ function compileQueryVisitor(schema, program, options) {
     };
     return visitor2;
   }
-  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
   const template = getCompileCached(
     schema,
     `query:visitor:${serializePipeline(program.nodes)}`,
@@ -8735,11 +8767,11 @@ function emitQueryVisitorSource(schema, program) {
   const hasParams = Boolean(program.params?.length);
   const lines = ["(function () {", `function visit(input${hasParams ? ", params" : ""}, consume) {`];
   const terminalTakeIndex = terminalTake(program.nodes);
-  program.nodes.forEach((node, index) => {
-    if (node.kind === "take" && index !== terminalTakeIndex || node.kind === "drop")
-      lines.push(`  let count${index} = 0;`);
-    else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
-    else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
+  program.nodes.forEach((node, index2) => {
+    if (node.kind === "take" && index2 !== terminalTakeIndex || node.kind === "drop")
+      lines.push(`  let count${index2} = 0;`);
+    else if (node.kind === "dropWhile") lines.push(`  let dropping${index2} = true;`);
+    else if (node.kind === "unique") lines.push(`  const seen${index2} = new Set();`);
   });
   lines.push("  let emitted = 0;");
   const body = emitVisitorBody(program.nodes);
@@ -8763,7 +8795,7 @@ function emitQueryVisitorSource(schema, program) {
 function emitVisitorBody(nodes) {
   const body = ["let output = item;"];
   const terminalTakeIndex = terminalTake(nodes);
-  nodes.forEach((node, index) => {
+  nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
         body.push(`if (!(${emitCondition(node.condition)})) continue;`);
@@ -8772,22 +8804,22 @@ function emitVisitorBody(nodes) {
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return emitted;`);
+        if (index2 !== terminalTakeIndex) body.push(`if (count${index2}++ === ${node.count}) return emitted;`);
         break;
       case "drop":
-        body.push(`if (count${index}++ < ${node.count}) continue;`);
+        body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
         body.push(`if (!(${emitCondition(node.condition)})) return emitted;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index} && (${emitCondition(node.condition)})) continue;`);
-        body.push(`dropping${index} = false;`);
+        body.push(`if (dropping${index2} && (${emitCondition(node.condition)})) continue;`);
+        body.push(`dropping${index2} = false;`);
         break;
       case "unique":
-        body.push(`const key${index} = item${emitPropertyAccess("", node.key)};`);
-        body.push(`if (seen${index}.has(key${index})) continue;`);
-        body.push(`seen${index}.add(key${index});`);
+        body.push(`const key${index2} = item${emitPropertyAccess("", node.key)};`);
+        body.push(`if (seen${index2}.has(key${index2})) continue;`);
+        body.push(`seen${index2}.add(key${index2});`);
         break;
       default:
         break;
@@ -8801,7 +8833,7 @@ function emitVisitorBody(nodes) {
   return body;
 }
 function compileLazy(schema, program, mode, options) {
-  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
   const key = `query:${mode}:${serializePipeline(program.nodes)}`;
   const template = getCompileCached(
     schema,
@@ -8867,14 +8899,14 @@ function emitDirectArraySource(schema, program) {
   const hasParams = Boolean(program.params?.length);
   const lines = [`function query(input${hasParams ? ", params" : ""}) {`, "  const out = [];", "  let j = 0;"];
   const terminalTakeIndex = terminalTake(program.nodes);
-  program.nodes.forEach((node, index) => {
-    if (node.kind === "take" && index !== terminalTakeIndex || node.kind === "drop")
-      lines.push(`  let count${index} = 0;`);
-    else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
-    else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
+  program.nodes.forEach((node, index2) => {
+    if (node.kind === "take" && index2 !== terminalTakeIndex || node.kind === "drop")
+      lines.push(`  let count${index2} = 0;`);
+    else if (node.kind === "dropWhile") lines.push(`  let dropping${index2} = true;`);
+    else if (node.kind === "unique") lines.push(`  const seen${index2} = new Set();`);
   });
   const body = ["let output = item;"];
-  program.nodes.forEach((node, index) => {
+  program.nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
         body.push(`if (!(${emitCondition(node.condition)})) continue;`);
@@ -8883,22 +8915,22 @@ function emitDirectArraySource(schema, program) {
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return out;`);
+        if (index2 !== terminalTakeIndex) body.push(`if (count${index2}++ === ${node.count}) return out;`);
         break;
       case "drop":
-        body.push(`if (count${index}++ < ${node.count}) continue;`);
+        body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
         body.push(`if (!(${emitCondition(node.condition)})) return out;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index} && (${emitCondition(node.condition)})) continue;`);
-        body.push(`dropping${index} = false;`);
+        body.push(`if (dropping${index2} && (${emitCondition(node.condition)})) continue;`);
+        body.push(`dropping${index2} = false;`);
         break;
       case "unique":
-        body.push(`const key${index} = item${emitPropertyAccess("", node.key)};`);
-        body.push(`if (seen${index}.has(key${index})) continue;`);
-        body.push(`seen${index}.add(key${index});`);
+        body.push(`const key${index2} = item${emitPropertyAccess("", node.key)};`);
+        body.push(`if (seen${index2}.has(key${index2})) continue;`);
+        body.push(`seen${index2}.add(key${index2});`);
         break;
       default:
         break;
@@ -8927,13 +8959,13 @@ function isFusibleNode(node) {
 }
 function emitFusedStage(lines, nodes, forAwait, directArray) {
   const terminalTakeIndex = terminalTake(nodes);
-  nodes.forEach((node, index) => {
-    if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
-    else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
-    else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
+  nodes.forEach((node, index2) => {
+    if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index2} = 0;`);
+    else if (node.kind === "dropWhile") lines.push(`  let dropping${index2} = true;`);
+    else if (node.kind === "unique") lines.push(`  const seen${index2} = new Set();`);
   });
   const body = ["let output = item;"];
-  nodes.forEach((node, index) => {
+  nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
         body.push(`if (!(${emitCondition(node.condition)})) continue;`);
@@ -8942,22 +8974,22 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
         body.push(`output = ${emitProjection(node.fields)};`);
         break;
       case "take":
-        if (index !== terminalTakeIndex) body.push(`if (count${index}++ === ${node.count}) return;`);
+        if (index2 !== terminalTakeIndex) body.push(`if (count${index2}++ === ${node.count}) return;`);
         break;
       case "drop":
-        body.push(`if (count${index}++ < ${node.count}) continue;`);
+        body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
         body.push(`if (!(${emitCondition(node.condition)})) return;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index} && (${emitCondition(node.condition)})) continue;`);
-        body.push(`dropping${index} = false;`);
+        body.push(`if (dropping${index2} && (${emitCondition(node.condition)})) continue;`);
+        body.push(`dropping${index2} = false;`);
         break;
       case "unique":
-        body.push(`const key${index} = item${emitPropertyAccess("", node.key)};`);
-        body.push(`if (seen${index}.has(key${index})) continue;`);
-        body.push(`seen${index}.add(key${index});`);
+        body.push(`const key${index2} = item${emitPropertyAccess("", node.key)};`);
+        body.push(`if (seen${index2}.has(key${index2})) continue;`);
+        body.push(`seen${index2}.add(key${index2});`);
         break;
       default:
         break;
@@ -8982,8 +9014,8 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
   lines.push("  }");
 }
 function terminalTake(nodes) {
-  const index = nodes.length - 1;
-  return index >= 0 && nodes[index]?.kind === "take" ? index : -1;
+  const index2 = nodes.length - 1;
+  return index2 >= 0 && nodes[index2]?.kind === "take" ? index2 : -1;
 }
 function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSchema) {
   const loop = (body) => {
@@ -9368,17 +9400,17 @@ function buildFieldValue(field, base, prefix, prelude) {
       const src = irVar(`${prefix}_src`);
       const len = irVar(`${prefix}_len`);
       const out = irVar(`${prefix}_out`);
-      const index = irVar(`${prefix}_i`);
+      const index2 = irVar(`${prefix}_i`);
       const item = irVar(`${prefix}_item`);
       const inner = [];
       const element = source.element === void 0 ? item : objectLiteral(buildEntries(source.element, item, prefix, inner));
       const loop = [
         { kind: "assign", target: len, expr: loadProp(src, "length") },
         { kind: "assign", target: out, expr: construct("Array", [len]) },
-        forRange(index, len, [
-          { kind: "assign", target: item, expr: loadIndex(src, index) },
+        forRange(index2, len, [
+          { kind: "assign", target: item, expr: loadIndex(src, index2) },
           ...inner,
-          store(loadIndex(out, index), element)
+          store(loadIndex(out, index2), element)
         ])
       ];
       if (!source.fromOptional) {
@@ -9423,8 +9455,8 @@ function emitMapper(plan, operations) {
   const writer = new CodeWriter();
   writer.line("{");
   writer.indent(() => {
-    operations.forEach((operation, index) => {
-      emitMapperFunctionBody(writer, programs, operation, index < operations.length - 1 ? "," : "");
+    operations.forEach((operation, index2) => {
+      emitMapperFunctionBody(writer, programs, operation, index2 < operations.length - 1 ? "," : "");
     });
   });
   writer.line("}");
@@ -9488,11 +9520,11 @@ function selectPii(base) {
       return (value, writer, nextVar4) => {
         if (!isString) return `(Math.imul(2166136261 ^ ${value}, 16777619) >>> 0)`;
         const hash4 = nextVar4("h");
-        const index = nextVar4("i");
+        const index2 = nextVar4("i");
         writer.line(`let ${hash4} = 2166136261;`);
-        writer.line(`for (let ${index} = 0; ${index} < ${value}.length; ${index}++) {`);
+        writer.line(`for (let ${index2} = 0; ${index2} < ${value}.length; ${index2}++) {`);
         writer.indent(() => {
-          writer.line(`${hash4} = Math.imul(${hash4} ^ ${value}.charCodeAt(${index}), 16777619);`);
+          writer.line(`${hash4} = Math.imul(${hash4} ^ ${value}.charCodeAt(${index2}), 16777619);`);
         });
         writer.line("}");
         return `(${hash4} >>> 0).toString(16)`;
@@ -9602,7 +9634,7 @@ function emitValue2(schema, depth) {
       const options = current.def.options ?? [];
       if (options.length === 0) return "undefined";
       if (options.length === 1) return emitValue2(options[0], depth + 1);
-      return `(() => { switch (__int(0, ${options.length - 1})) { ${options.map((option, index) => `case ${index}: return ${emitValue2(option, depth + 1)};`).join(" ")} } })()`;
+      return `(() => { switch (__int(0, ${options.length - 1})) { ${options.map((option, index2) => `case ${index2}: return ${emitValue2(option, depth + 1)};`).join(" ")} } })()`;
     }
     case TypeName.intersection: {
       const options = current.def.options ?? [];
@@ -9800,7 +9832,7 @@ function emitMutationPlanBody(plan, updates) {
 function emitTransformSource(schema, transforms) {
   const objectSchema = expectObjectSchema2(schema, "compileTransform");
   const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
-  const transformNames = new Map(transformKeys.map((key, index) => [key, `__t${index}`]));
+  const transformNames = new Map(transformKeys.map((key, index2) => [key, `__t${index2}`]));
   const entries = Object.keys(objectSchema.def.props).map((key) => {
     const source = emitPropertyAccess("value", key);
     const transformName = transformNames.get(key);
@@ -10129,7 +10161,7 @@ function emitQuerySource(schema, program) {
   );
 }
 function compileQuery(schema, program, options) {
-  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
   const template = getCompileCached(
     schema,
     `query:${serializeQueryNodes(program.nodes)}`,
@@ -10340,6 +10372,121 @@ function validateValue(schema, value) {
 }
 function last(values) {
   return values[values.length - 1];
+}
+
+// ../../packages/jit/src/compiler/indexing.ts
+function resolveIndexKeysFromFacts(schema) {
+  const hints = resolveHints(schema);
+  const key = resolveHintKey(hints.index?.key) ?? resolveHintKey(hints.collection?.identify) ?? resolveHintKey(hints.collection?.uniqueBy) ?? resolveHintKey(hints.entity?.key);
+  return key ? [key] : void 0;
+}
+function resolveIndexDescriptor(schema, keys, shape) {
+  const object2 = resolveRowObjectSchema(schema, "index");
+  const resolvedKeys = keys ?? resolveIndexKeysFromFacts(schema);
+  if (!resolvedKeys || resolvedKeys.length === 0) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      "index requires a key: declare one with .keyed(), .indexBy() or .uniqueBy(), or pass it to .by()"
+    );
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const indexKeys = resolvedKeys.map((key) => {
+    const field = resolveRowField(object2, key, "index");
+    if (seen.has(key)) {
+      throw new JITError("INVALID_OPERATION", `index repeats key ${JSON.stringify(key)}`, { path: [key] });
+    }
+    seen.add(key);
+    return Object.freeze({
+      key,
+      valueKind: resolveIndexKeyKind(field, key),
+      nullish: isNullishField(field)
+    });
+  });
+  const hints = resolveHints(schema);
+  return Object.freeze({
+    keys: Object.freeze(indexKeys),
+    shape,
+    uniqueByFact: hints.collection?.unique === true || hints.entity?.key !== void 0
+  });
+}
+function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}") {
+  const depth = descriptor.keys.length;
+  writer.line(open);
+  writer.indent(() => {
+    writer.line("const index = new Map();");
+    writer.line("const len = value.length;");
+    writer.line("for (let i = 0; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const row = value[i];");
+      descriptor.keys.forEach((key, level) => {
+        writer.line(`const key${level} = ${emitIndexKeyRead("row", key)};`);
+      });
+      for (let level = 0; level < depth - 1; level++) {
+        const parent = level === 0 ? "index" : `level${level}`;
+        writer.line(`let level${level + 1} = ${parent}.get(key${level});`);
+        writer.line(`if (level${level + 1} === undefined) {`);
+        writer.indent(() => {
+          writer.line(`level${level + 1} = new Map();`);
+          writer.line(`${parent}.set(key${level}, level${level + 1});`);
+        });
+        writer.line("}");
+      }
+      const bucket = depth === 1 ? "index" : `level${depth - 1}`;
+      const lastKey = `key${depth - 1}`;
+      if (descriptor.shape === "grouped") {
+        writer.line(`const group = ${bucket}.get(${lastKey});`);
+        writer.line("if (group === undefined) {");
+        writer.indent(() => writer.line(`${bucket}.set(${lastKey}, [row]);`));
+        writer.line("} else {");
+        writer.indent(() => writer.line("group[group.length] = row;"));
+        writer.line("}");
+      } else {
+        writer.line(`${bucket}.set(${lastKey}, row);`);
+      }
+    });
+    writer.line("}");
+    writer.line("return index;");
+  });
+  writer.line(close);
+}
+function emitIndexPlanSource(descriptor, cacheKey) {
+  const writer = new CodeWriter();
+  writer.line("((__cache) => {");
+  writer.indent(() => {
+    emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
+    writer.line(`const cached = (value) => __cache(value, ${JSON.stringify(cacheKey)}, build);`);
+    writer.line('Object.defineProperty(build, "cached", { value: cached });');
+    writer.line("return build;");
+  });
+  writer.line("})");
+  return writer.toString();
+}
+function emitIndexKeyRead(row, key) {
+  const access = emitPropertyAccess(row, key.key);
+  if (key.valueKind !== "date") return access;
+  return key.nullish ? `(${access} == null ? ${access} : ${access}.getTime())` : `${access}.getTime()`;
+}
+function indexCacheKey(descriptor) {
+  return `index:${descriptor.shape}:${descriptor.keys.map(({ key, valueKind, nullish: nullish3 }) => `${key}:${valueKind}:${nullish3}`).join(",")}`;
+}
+function compileIndex(schema, descriptor, runtimeIndexCache, options) {
+  const cacheKey = indexCacheKey(descriptor);
+  const template = getCompileCached(
+    schema,
+    cacheKey,
+    () => {
+      const source = emitIndexPlanSource(descriptor, cacheKey);
+      return { source, create: globalThis.Function(`return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create()(runtimeIndexCache);
+  registerArtifact(compiled, { kind: "index-plan", schema, descriptor });
+  return compiled;
+}
+function resolveIndexKeyKind(schema, key) {
+  const kind = resolveScalarKeyKind(schema, key, "index");
+  return kind === "numeric" ? "direct" : kind;
 }
 
 // ../../packages/jit/src/compiler/sort.ts
@@ -10627,10 +10774,10 @@ function emitTupleUpdateTo(writer, state, node, value, patch, target) {
   writer.indent(() => {
     const entries = [];
     const changedVars = [];
-    for (let index = 0; index < node.items.length; index++) {
-      const itemNext = state.nextVar(`next_${index}`);
-      emitUpdateTo(writer, state, node.items[index], `${value}[${index}]`, `${patch}[${index}]`, itemNext);
-      changedVars.push(`${itemNext} !== ${value}[${index}]`);
+    for (let index2 = 0; index2 < node.items.length; index2++) {
+      const itemNext = state.nextVar(`next_${index2}`);
+      emitUpdateTo(writer, state, node.items[index2], `${value}[${index2}]`, `${patch}[${index2}]`, itemNext);
+      changedVars.push(`${itemNext} !== ${value}[${index2}]`);
       entries.push(itemNext);
     }
     writer.line(`if (${changedVars.join(" || ")}) {`);
@@ -10642,7 +10789,7 @@ function emitTupleUpdateTo(writer, state, node, value, patch, target) {
 function emitArrayUpdateTo(writer, state, node, value, patch, target) {
   const len = state.nextVar("len");
   const patchLen = state.nextVar("patchLen");
-  const index = state.nextVar("i");
+  const index2 = state.nextVar("i");
   const item = state.nextVar("item");
   const patchItem = state.nextVar("patchItem");
   const next = state.nextVar("next");
@@ -10651,28 +10798,28 @@ function emitArrayUpdateTo(writer, state, node, value, patch, target) {
   writer.indent(() => {
     writer.line(`const ${len} = ${value}.length;`);
     writer.line(`const ${patchLen} = ${patch}.length;`);
-    writer.line(`for (let ${index} = 0; ${index} < ${patchLen}; ${index}++) {`);
+    writer.line(`for (let ${index2} = 0; ${index2} < ${patchLen}; ${index2}++) {`);
     writer.indent(() => {
-      writer.line(`const ${patchItem} = ${patch}[${index}];`);
+      writer.line(`const ${patchItem} = ${patch}[${index2}];`);
       writer.line(`if (${patchItem} !== undefined) {`);
       writer.indent(() => {
-        writer.line(`if (${index} >= ${len}) {`);
+        writer.line(`if (${index2} >= ${len}) {`);
         writer.indent(() => {
           writer.line(`if (${target} === ${value}) {`);
           writer.indent(() => writer.line(`${target} = ${value}.slice();`));
           writer.line("}");
-          writer.line(`${target}[${index}] = ${patchItem};`);
+          writer.line(`${target}[${index2}] = ${patchItem};`);
         });
         writer.line("} else {");
         writer.indent(() => {
-          writer.line(`const ${item} = ${value}[${index}];`);
+          writer.line(`const ${item} = ${value}[${index2}];`);
           emitUpdateTo(writer, state, node.element, item, patchItem, next);
           writer.line(`if (${next} !== ${item}) {`);
           writer.indent(() => {
             writer.line(`if (${target} === ${value}) {`);
             writer.indent(() => writer.line(`${target} = ${value}.slice();`));
             writer.line("}");
-            writer.line(`${target}[${index}] = ${next};`);
+            writer.line(`${target}[${index2}] = ${next};`);
           });
           writer.line("}");
         });
@@ -10688,7 +10835,7 @@ function emitRecordUpdateTo(writer, state, node, value, patch, target) {
   const keys = state.nextVar("keys");
   const patchKeys = state.nextVar("patchKeys");
   const len = state.nextVar("len");
-  const index = state.nextVar("i");
+  const index2 = state.nextVar("i");
   const key = state.nextVar("key");
   const next = state.nextVar("next");
   const recordOut = state.nextVar("recordOut");
@@ -10701,9 +10848,9 @@ function emitRecordUpdateTo(writer, state, node, value, patch, target) {
     writer.line(`if (${keys}.length !== ${patchKeys}.length) {`);
     writer.indent(() => writer.line("changed = true;"));
     writer.line("}");
-    writer.line(`for (let ${index} = 0, ${len} = ${patchKeys}.length; ${index} < ${len}; ${index}++) {`);
+    writer.line(`for (let ${index2} = 0, ${len} = ${patchKeys}.length; ${index2} < ${len}; ${index2}++) {`);
     writer.indent(() => {
-      writer.line(`const ${key} = ${patchKeys}[${index}];`);
+      writer.line(`const ${key} = ${patchKeys}[${index2}];`);
       emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
       writer.line(`if (${next} !== ${value}[${key}]) {`);
       writer.indent(() => {
@@ -10716,9 +10863,9 @@ function emitRecordUpdateTo(writer, state, node, value, patch, target) {
     writer.line("if (changed) {");
     writer.indent(() => {
       writer.line(`const ${recordOut} = {};`);
-      writer.line(`for (let ${index} = 0, ${len} = ${patchKeys}.length; ${index} < ${len}; ${index}++) {`);
+      writer.line(`for (let ${index2} = 0, ${len} = ${patchKeys}.length; ${index2} < ${len}; ${index2}++) {`);
       writer.indent(() => {
-        writer.line(`const ${key} = ${patchKeys}[${index}];`);
+        writer.line(`const ${key} = ${patchKeys}[${index2}];`);
         emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
         writer.line(`${recordOut}[${key}] = ${next};`);
       });
@@ -10962,7 +11109,7 @@ function emitBinaryQuerySource(layout, program) {
 function compileBinaryQuery(target, program, options) {
   const layout = target.layout;
   const schema = target.schema;
-  const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
   const cacheKey = `binary-query:${serializeBinaryLayout(layout)}:${serializeQueryNodes2(program.nodes)}`;
   const template = getCompileCached(
     schema,
@@ -11170,8 +11317,8 @@ function prepareAdaptiveDictionaries(input, count, layout, dictionaries) {
     if (field.dictionaryMode !== "adaptive" || field.dictionaryIndex === void 0) continue;
     const values = /* @__PURE__ */ new Set();
     let present = 0;
-    for (let index = 0; index < sampleSize; index++) {
-      const value = input[index][field.key];
+    for (let index2 = 0; index2 < sampleSize; index2++) {
+      const value = input[index2][field.key];
       if (typeof value !== "string" && typeof value !== "number") continue;
       present++;
       values.add(value);
@@ -13529,6 +13676,7 @@ function emitModule(plan, options, layout) {
   const internalNames = /* @__PURE__ */ new Set();
   const exported = options.exported ?? /* @__PURE__ */ new Set();
   let needsRuntimeGetIndex = false;
+  let needsRuntimeCachedIndex = false;
   let needsValidationError = false;
   let needsHashHelpers = false;
   let needsMockHelpers = false;
@@ -13626,6 +13774,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
@@ -13652,6 +13801,7 @@ function emitModule(plan, options, layout) {
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
+    if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -13693,6 +13843,13 @@ function emitModule(plan, options, layout) {
   }
   function emitSortPlanArtifact(binding, declaration, artifact, type) {
     js.push(`${declaration} /*#__PURE__*/ ${emitSortSource(artifact.descriptor)};`);
+    return { binding, type };
+  }
+  function emitIndexPlanArtifact(binding, declaration, artifact, type) {
+    needsRuntimeCachedIndex = true;
+    js.push(
+      `${declaration} /*#__PURE__*/ ${emitIndexPlanSource(artifact.descriptor, indexCacheKey(artifact.descriptor))}(__cachedIndex);`
+    );
     return { binding, type };
   }
   function emitClassArtifact(binding, declaration, artifact, reportName, type, assertedType) {
@@ -13779,13 +13936,13 @@ function emitModule(plan, options, layout) {
           ...artifact.mutation?.version === void 0 ? {} : { version: artifact.mutation.version }
         });
         const updates = /* @__PURE__ */ new Map();
-        for (let index = 0; index < mutation.mutableFields.length; index++) {
-          const field = mutation.mutableFields[index];
+        for (let index2 = 0; index2 < mutation.mutableFields.length; index2++) {
+          const field = mutation.mutableFields[index2];
           if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
             updates.set(field, null);
             continue;
           }
-          const fieldUpdate = internalIdentifier(`${binding}_update_${index}`);
+          const fieldUpdate = internalIdentifier(`${binding}_update_${index2}`);
           const source2 = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(base.def.props[field]));
           if (!source2) return void 0;
           helpers2.push(`const ${fieldUpdate} = ${asExpression(source2, "update")};`);
@@ -14050,7 +14207,7 @@ function emitModule(plan, options, layout) {
     );
     if (!source2) return void 0;
     const inlined = inlineBindings(
-      program.bindings.map((_, index) => `__q${index}`),
+      program.bindings.map((_, index2) => `__q${index2}`),
       program.bindings
     );
     if (inlined === void 0) {
@@ -14356,7 +14513,7 @@ function emitModule(plan, options, layout) {
       const source2 = tryEmit(name, "query", skipped, () => emitQuerySource(stage2.source, stage2.program));
       if (!source2) return void 0;
       const bindings = inlineBindings(
-        stage2.program.bindings.map((_, index) => `__q${index}`),
+        stage2.program.bindings.map((_, index2) => `__q${index2}`),
         stage2.program.bindings
       );
       if (bindings === void 0) {
@@ -14413,7 +14570,7 @@ function emitModule(plan, options, layout) {
     const emitComposedTransform = (stage2) => {
       const keys = Object.keys(stage2.transforms);
       const bindings = inlineBindings(
-        keys.map((_, index) => `__t${index}`),
+        keys.map((_, index2) => `__t${index2}`),
         keys.map((key) => stage2.transforms[key])
       );
       if (bindings === void 0) {
@@ -14484,12 +14641,12 @@ function emitModule(plan, options, layout) {
       const list = `list${manyIndex}`;
       const length = `len${manyIndex}`;
       const out = `out${manyIndex}`;
-      const index = `i${manyIndex++}`;
+      const index2 = `i${manyIndex++}`;
       body.push(`const ${list} = value;`);
       body.push(`const ${length} = ${list}.length;`);
       body.push(`const ${out} = new Array(${length});`);
-      body.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
-      body.push(`  ${out}[${index}] = ${applied}(${list}[${index}]${patch ? `, ${patch}` : ""});`);
+      body.push(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
+      body.push(`  ${out}[${index2}] = ${applied}(${list}[${index2}]${patch ? `, ${patch}` : ""});`);
       body.push("}");
       body.push(`value = ${out};`);
     };
@@ -14497,21 +14654,21 @@ function emitModule(plan, options, layout) {
       const list = `mappedList${manyIndex}`;
       const length = `mappedLen${manyIndex}`;
       const item = `mappedItem${manyIndex}`;
-      const index = `mappedIndex${manyIndex++}`;
+      const index2 = `mappedIndex${manyIndex++}`;
       const json3 = `mappedJson${manyIndex}`;
       body.push(`const ${list} = value;`);
       body.push(`const ${length} = ${list}.length;`);
       body.push(`let ${json3} = "[";`);
-      body.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
-      body.push(`  if (${index} !== 0) ${json3} += ",";`);
-      body.push(`  const ${item} = ${mapper}.map(${list}[${index}]);`);
+      body.push(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
+      body.push(`  if (${index2} !== 0) ${json3} += ",";`);
+      body.push(`  const ${item} = ${mapper}.map(${list}[${index2}]);`);
       body.push(`  ${json3} += ${stringify}(${item});`);
       body.push("}");
       body.push(`${json3} += "]";`);
       body.push(`value = ${json3};`);
     };
-    for (let index = 0; index < stages.length; index++) {
-      const stage2 = stages[index];
+    for (let index2 = 0; index2 < stages.length; index2++) {
+      const stage2 = stages[index2];
       switch (stage2.kind) {
         case "value":
         case "to.array":
@@ -14534,7 +14691,7 @@ function emitModule(plan, options, layout) {
             });
             return void 0;
           }
-          const construct2 = stages[index + 1];
+          const construct2 = stages[index2 + 1];
           const constructBinding = construct2?.kind === "construct" ? classBindings.get(construct2.target) : void 0;
           if (construct2?.kind === "construct" && !constructBinding) {
             skipped.push({
@@ -14575,13 +14732,13 @@ function emitModule(plan, options, layout) {
         }
         case "query": {
           let finalStage = stage2;
-          while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
-            index++;
-            finalStage = stages[index];
+          while (index2 + 1 < stages.length && stages[index2 + 1]?.kind === "query") {
+            index2++;
+            finalStage = stages[index2];
           }
-          const aggregate = stages[index + 1];
+          const aggregate = stages[index2 + 1];
           if (aggregate?.kind === "aggregate") {
-            index++;
+            index2++;
             finalStage = aggregate;
           }
           const query2 = emitComposedQuery(finalStage);
@@ -14596,7 +14753,7 @@ function emitModule(plan, options, layout) {
           break;
         }
         case "map": {
-          const nextStage = stages[index + 1];
+          const nextStage = stages[index2 + 1];
           const fuseJsonEncode = nextStage?.kind === "json.encode";
           const mapper = emitComposedMapper(stage2, fuseJsonEncode || !stage2.many ? "map" : "many");
           if (!mapper) return void 0;
@@ -14607,7 +14764,7 @@ function emitModule(plan, options, layout) {
             setup.push(`const ${stringifyName} = ${asExpression(stringify, "stringify")};`);
             if (stage2.many) emitMappedJsonArray2(mapper, stringifyName);
             else body.push(`value = ${stringifyName}(${mapper}.map(value));`);
-            index++;
+            index2++;
           } else {
             body.push(`value = ${mapper}.${stage2.many ? "many" : "map"}(value);`);
           }
@@ -14748,6 +14905,20 @@ function emitModule(plan, options, layout) {
       "}"
     );
   }
+  if (needsRuntimeCachedIndex) {
+    helpers.push(
+      "const __planCache = new WeakMap();",
+      "function __cachedIndex(items, cacheKey, build) {",
+      "  let plans = __planCache.get(items);",
+      "  if (plans === undefined) { plans = new Map(); __planCache.set(items, plans); }",
+      "  const cached = plans.get(cacheKey);",
+      "  if (cached !== undefined) return cached;",
+      "  const built = build(items);",
+      "  plans.set(cacheKey, built);",
+      "  return built;",
+      "}"
+    );
+  }
   const preludeIndex = ts ? 2 : 1;
   if (helpers.length > 0) js.splice(preludeIndex, 0, ...helpers);
   if (ts && tsTypes.length > 0) js.splice(preludeIndex, 0, ...tsTypes, "");
@@ -14805,6 +14976,17 @@ function sortPlanType(artifact, typeNames) {
   const row = schema.type === TypeName.array ? schema.def.element : schema.type === TypeName.runtimeType ? schema.def.innerType : schema;
   const value = namedType(row, typeNames);
   return `((value: readonly ${value}[]) => ${value}[]) & { readonly compare: (left: ${value}, right: ${value}) => number; readonly inPlace: (value: ${value}[]) => ${value}[] }`;
+}
+function indexPlanType(artifact, typeNames) {
+  const schema = resolveWrappers(artifact.schema).base;
+  const row = schema.type === TypeName.array ? schema.def.element : schema.type === TypeName.runtimeType ? schema.def.innerType : schema;
+  const value = namedType(row, typeNames);
+  const leaf = artifact.descriptor.shape === "grouped" ? `${value}[]` : value;
+  let index2 = `Map<unknown, ${leaf}>`;
+  for (let level = artifact.descriptor.keys.length - 1; level > 0; level--) {
+    index2 = `Map<unknown, ${index2}>`;
+  }
+  return `((value: readonly ${value}[]) => ${index2}) & { readonly cached: (value: readonly ${value}[]) => ${index2} }`;
 }
 function moduleNameFromSource(sourceFile) {
   const rawName = basename(sourceFile).replace(/\.jit\.(ts|mts|cts|js|mjs|cjs)$/, "").replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "");
@@ -14919,19 +15101,19 @@ function executionPlanType(plan, typeNames) {
 }
 function inlineBindings(names, values) {
   const lines = [];
-  for (let index = 0; index < names.length; index++) {
-    const value = values[index];
+  for (let index2 = 0; index2 < names.length; index2++) {
+    const value = values[index2];
     const literal4 = serializeBindingValue(value);
     if (literal4 === void 0) return void 0;
-    lines.push(`const ${names[index]} = ${literal4};`);
+    lines.push(`const ${names[index2]} = ${literal4};`);
   }
   return lines;
 }
 function inlineCodecBindings(names, values) {
   const lines = [];
-  for (let index = 0; index < names.length; index++) {
-    const name = names[index];
-    const value = values[index];
+  for (let index2 = 0; index2 < names.length; index2++) {
+    const name = names[index2];
+    const value = values[index2];
     if (name === "__enc") {
       lines.push("const __enc = new TextEncoder();");
       continue;
@@ -15193,13 +15375,13 @@ function hasUnsupportedClosureReferences(source) {
 function collectBindingIdentifiers(source, target) {
   for (const match of source.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) target.add(match[0]);
 }
-function previousNonWhitespace(source, index) {
-  while (index >= 0 && /\s/.test(source[index] ?? "")) index--;
-  return source[index];
+function previousNonWhitespace(source, index2) {
+  while (index2 >= 0 && /\s/.test(source[index2] ?? "")) index2--;
+  return source[index2];
 }
-function nextNonWhitespace(source, index) {
-  while (index < source.length && /\s/.test(source[index] ?? "")) index++;
-  return source[index];
+function nextNonWhitespace(source, index2) {
+  while (index2 < source.length && /\s/.test(source[index2] ?? "")) index2++;
+  return source[index2];
 }
 function maskCallbackLiterals(source) {
   const output = source.split("");
@@ -15208,43 +15390,43 @@ function maskCallbackLiterals(source) {
   let expressionDepth;
   let escaped = false;
   let regexClass = false;
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index] ?? "";
-    const next = source[index + 1] ?? "";
+  for (let index2 = 0; index2 < source.length; index2++) {
+    const char = source[index2] ?? "";
+    const next = source[index2 + 1] ?? "";
     if (state === "line") {
       if (char === "\n") state = "code";
-      else output[index] = " ";
+      else output[index2] = " ";
       continue;
     }
     if (state === "block") {
-      output[index] = " ";
+      output[index2] = " ";
       if (char === "*" && next === "/") {
-        output[++index] = " ";
+        output[++index2] = " ";
         state = "code";
       }
       continue;
     }
     if (state === "single" || state === "double") {
-      output[index] = " ";
+      output[index2] = " ";
       if (escaped) escaped = false;
       else if (char === "\\") escaped = true;
       else if (state === "single" && char === "'" || state === "double" && char === '"') state = "code";
       continue;
     }
     if (state === "regex") {
-      output[index] = " ";
+      output[index2] = " ";
       if (escaped) escaped = false;
       else if (char === "\\") escaped = true;
       else if (char === "[") regexClass = true;
       else if (char === "]") regexClass = false;
       else if (char === "/" && !regexClass) {
-        while (/[A-Za-z]/.test(source[index + 1] ?? "")) output[++index] = " ";
+        while (/[A-Za-z]/.test(source[index2 + 1] ?? "")) output[++index2] = " ";
         state = "code";
       }
       continue;
     }
     if (state === "template") {
-      output[index] = " ";
+      output[index2] = " ";
       if (escaped) {
         escaped = false;
       } else if (char === "\\") {
@@ -15253,7 +15435,7 @@ function maskCallbackLiterals(source) {
         expressionDepth = templateOuterDepths.pop();
         state = "code";
       } else if (char === "$" && next === "{") {
-        output[++index] = "{";
+        output[++index2] = "{";
         expressionDepth = 1;
         state = "code";
       }
@@ -15262,39 +15444,39 @@ function maskCallbackLiterals(source) {
     if (expressionDepth !== void 0) {
       if (char === "{") expressionDepth++;
       else if (char === "}" && --expressionDepth === 0) {
-        output[index] = " ";
+        output[index2] = " ";
         expressionDepth = void 0;
         state = "template";
         continue;
       }
     }
     if (char === "/" && next === "/") {
-      output[index] = output[++index] = " ";
+      output[index2] = output[++index2] = " ";
       state = "line";
     } else if (char === "/" && next === "*") {
-      output[index] = output[++index] = " ";
+      output[index2] = output[++index2] = " ";
       state = "block";
     } else if (char === "'") {
-      output[index] = " ";
+      output[index2] = " ";
       state = "single";
     } else if (char === '"') {
-      output[index] = " ";
+      output[index2] = " ";
       state = "double";
     } else if (char === "`") {
-      output[index] = " ";
+      output[index2] = " ";
       templateOuterDepths.push(expressionDepth);
       expressionDepth = void 0;
       state = "template";
-    } else if (char === "/" && startsRegexLiteral(output, index)) {
-      output[index] = " ";
+    } else if (char === "/" && startsRegexLiteral(output, index2)) {
+      output[index2] = " ";
       regexClass = false;
       state = "regex";
     }
   }
   return output.join("");
 }
-function startsRegexLiteral(masked, index) {
-  let cursor = index - 1;
+function startsRegexLiteral(masked, index2) {
+  let cursor = index2 - 1;
   while (cursor >= 0 && /\s/.test(masked[cursor] ?? "")) cursor--;
   if (cursor < 0) return true;
   const previous = masked[cursor] ?? "";
@@ -15429,6 +15611,7 @@ __export(factories_exports, {
   from: () => from,
   function: () => functionSchema,
   hash: () => hash2,
+  index: () => index,
   instanceOf: () => instanceOf,
   int: () => int,
   intersection: () => intersection,
@@ -15710,18 +15893,18 @@ function emitExecutionPlan(plan) {
     const list = `__list${valueIndex}`;
     const length = `__len${valueIndex}`;
     const out = `__out${valueIndex}`;
-    const index = `__i${valueIndex++}`;
+    const index2 = `__i${valueIndex++}`;
     body.push(`const ${list} = value;`);
     body.push(`const ${length} = ${list}.length;`);
     body.push(`const ${out} = new Array(${length});`);
-    body.push(`for (let ${index} = 0; ${index} < ${length}; ${index}++) {`);
-    body.push(`  ${out}[${index}] = ${helperName4}(${list}[${index}]${patchName ? `, ${patchName}` : ""});`);
+    body.push(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
+    body.push(`  ${out}[${index2}] = ${helperName4}(${list}[${index2}]${patchName ? `, ${patchName}` : ""});`);
     body.push("}");
     body.push(`value = ${out};`);
   };
   const stages = optimized.stages;
-  for (let index = 0; index < stages.length; index++) {
-    const stage2 = stages[index];
+  for (let index2 = 0; index2 < stages.length; index2++) {
+    const stage2 = stages[index2];
     switch (stage2.kind) {
       case "value":
       case "to.array":
@@ -15736,7 +15919,7 @@ function emitExecutionPlan(plan) {
         break;
       }
       case "validate": {
-        const nextStage = stages[index + 1];
+        const nextStage = stages[index2 + 1];
         const constructNext = nextStage?.kind === "construct";
         const constructArtifact = constructNext ? getArtifact(nextStage.target) : void 0;
         const strictDomainEvent = constructArtifact?.kind === "class" && constructArtifact.domainEvent !== void 0;
@@ -15804,13 +15987,13 @@ function emitExecutionPlan(plan) {
       }
       case "query": {
         let finalStage = stage2;
-        while (index + 1 < stages.length && stages[index + 1]?.kind === "query") {
-          index++;
-          finalStage = stages[index];
+        while (index2 + 1 < stages.length && stages[index2 + 1]?.kind === "query") {
+          index2++;
+          finalStage = stages[index2];
         }
-        const aggregate = stages[index + 1];
+        const aggregate = stages[index2 + 1];
         if (aggregate?.kind === "aggregate") {
-          index++;
+          index2++;
           finalStage = aggregate;
         }
         const queryName = emitBoundBlock(
@@ -15836,7 +16019,7 @@ function emitExecutionPlan(plan) {
       }
       case "map": {
         const mapping = stage2.bindings[0];
-        const nextStage = stages[index + 1];
+        const nextStage = stages[index2 + 1];
         const fuseJsonEncode = nextStage?.kind === "json.encode";
         if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
           throw new JITError("INVALID_OPERATION", "mapping descriptor is malformed");
@@ -15856,7 +16039,7 @@ function emitExecutionPlan(plan) {
           setup.push(`const ${stringifyName} = ${emitSerialize(stage2.target)};`);
           if (stage2.many) emitMappedJsonArray(mapperName, stringifyName, body, valueIndex++);
           else body.push(`value = ${stringifyName}(${mapperName}.map(value));`);
-          index++;
+          index2++;
         } else {
           body.push(`value = ${mapperName}.${stage2.many ? "many" : "map"}(value);`);
         }
@@ -15943,12 +16126,12 @@ function lowerExecutionPlan(plan) {
 function indent(source) {
   return source.split("\n").map((line) => `  ${line}`);
 }
-function emitMappedJsonArray(mapper, stringify, body, index) {
-  const list = `__list${index}`;
-  const length = `__len${index}`;
-  const item = `__item${index}`;
-  const cursor = `__i${index}`;
-  const json3 = `__json${index}`;
+function emitMappedJsonArray(mapper, stringify, body, index2) {
+  const list = `__list${index2}`;
+  const length = `__len${index2}`;
+  const item = `__item${index2}`;
+  const cursor = `__i${index2}`;
+  const json3 = `__json${index2}`;
   body.push(`const ${list} = value;`);
   body.push(`const ${length} = ${list}.length;`);
   body.push(`let ${json3} = "[";`);
@@ -16168,8 +16351,8 @@ function createDecoder() {
 function gateFirstChar(text, gateRef) {
   const gate = gateRef.pending;
   if (!gate) return;
-  for (let index = 0; index < text.length; index++) {
-    const code = text.charCodeAt(index);
+  for (let index2 = 0; index2 < text.length; index2++) {
+    const code = text.charCodeAt(index2);
     if (code === 32 || code === 9 || code === 10 || code === 13) continue;
     gateRef.pending = void 0;
     if (!gate.test(code)) {
@@ -16179,7 +16362,7 @@ function gateFirstChar(text, gateRef) {
           code: "invalid_type",
           expected: gate.expected,
           message: `stream root must be ${gate.expected}`,
-          received: JSON.stringify(text[index])
+          received: JSON.stringify(text[index2])
         }
       ]);
     }
@@ -16209,14 +16392,14 @@ function createArrayStream(root, options) {
       if (!result.success) {
         throw new JITValidationError(prefixIssues(result.issues, `[${items.length}]`));
       }
-      const index = items.length;
+      const index2 = items.length;
       items.push(result.data);
       for (const check of checks) {
         if (check.kind === "max" && items.length > check.value) {
           throwStructural(`expected at most ${check.value} items`, "");
         }
       }
-      options.onItem?.(result.data, index);
+      options.onItem?.(result.data, index2);
     },
     fail(message) {
       throwStructural(message);
@@ -16331,10 +16514,10 @@ function createNdjsonStream(schema, options) {
     if (!result.success) {
       throw new JITValidationError(prefixIssues(result.issues, `line ${line}`));
     }
-    const index = items.length;
+    const index2 = items.length;
     items.push(result.data);
     line++;
-    options.onItem?.(result.data, index);
+    options.onItem?.(result.data, index2);
   };
   const guard = () => {
     if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
@@ -16374,7 +16557,7 @@ function createNdjsonStream(schema, options) {
 // ../../packages/jit/src/compiler/watch.ts
 function compileWatch(schema, options) {
   const program = emitWatchProgram(schema, options);
-  const bindingNames = program.bindings.map((_, index) => `__w${index}`);
+  const bindingNames = program.bindings.map((_, index2) => `__w${index2}`);
   const compiled = globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings);
   registerArtifact(compiled, {
     kind: "watch",
@@ -16743,14 +16926,14 @@ function aggregateRoot(schema, options) {
   const updateBindings = /* @__PURE__ */ new Map();
   const updateNames = [];
   const updateValues = [];
-  for (let index = 0; index < fields.length; index++) {
-    const field = fields[index];
+  for (let index2 = 0; index2 < fields.length; index2++) {
+    const field = fields[index2];
     if (readonlyFields.includes(field)) continue;
     if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
       updateBindings.set(field, null);
       continue;
     }
-    const name = `__update${index}`;
+    const name = `__update${index2}`;
     updateBindings.set(field, name);
     updateNames.push(name);
     updateValues.push(compileUpdate(base.def.props[field]));
@@ -16875,7 +17058,7 @@ function aggregateRoot(schema, options) {
     "commit",
     async function commit(publisher) {
       const pending = this.__jitEvents;
-      for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]);
+      for (let index2 = 0; index2 < pending.length; index2++) await publisher.publish(pending[index2]);
       this.__jitEvents.splice(0, pending.length);
     }
   );
@@ -17096,7 +17279,7 @@ function createBinaryQueryBuilder(target, nodes, bindings, paramNames) {
       return emitBinaryQuerySource(target.layout, { nodes, bindings, params: paramNames });
     },
     get bindingNames() {
-      return bindings.map((_, index) => `__q${index}`);
+      return bindings.map((_, index2) => `__q${index2}`);
     },
     bindingValues: bindings
   });
@@ -17306,9 +17489,9 @@ function createPatchBindings(startIndex, patch) {
   const bindings = [];
   const boundPatch = {};
   for (const key of Object.keys(patch)) {
-    const index = startIndex + bindings.length;
+    const index2 = startIndex + bindings.length;
     bindings[bindings.length] = patch[key];
-    boundPatch[key] = { kind: "binding", name: `__q${index}` };
+    boundPatch[key] = { kind: "binding", name: `__q${index2}` };
   }
   return { patch: boundPatch, bindings };
 }
@@ -17317,9 +17500,9 @@ function createConditionBuilder(startIndex) {
   const toValueNode = (value) => {
     if (isQueryParamRef(value)) return { kind: "param", name: value.name };
     if (isQueryConstRef(value)) return { kind: "literal", value: value.value };
-    const index = startIndex + bindings.length;
+    const index2 = startIndex + bindings.length;
     bindings[bindings.length] = value;
-    return { kind: "binding", name: `__q${index}` };
+    return { kind: "binding", name: `__q${index2}` };
   };
   const compare2 = (op, key, value) => ({
     kind: "compare",
@@ -17554,9 +17737,9 @@ function toStandardValue(value, bindings) {
   if (value.kind === "field") return Object.freeze({ kind: "field", path: Object.freeze([value.key]) });
   if (value.kind === "literal") return Object.freeze({ kind: "literal", value: value.value });
   if (value.kind === "binding") {
-    const index = Number.parseInt(value.name.slice(3), 10);
-    if (Number.isSafeInteger(index) && index >= 0 && index < bindings.length && isStandardData(bindings[index])) {
-      return Object.freeze({ kind: "literal", value: bindings[index] });
+    const index2 = Number.parseInt(value.name.slice(3), 10);
+    if (Number.isSafeInteger(index2) && index2 >= 0 && index2 < bindings.length && isStandardData(bindings[index2])) {
+      return Object.freeze({ kind: "literal", value: bindings[index2] });
     }
     return Object.freeze({ kind: "binding", name: value.name });
   }
@@ -17871,15 +18054,15 @@ function normalizeCqrsSelect(source, definition) {
   return fields;
 }
 function sameCursorOrdering(sort2, fields) {
-  return sort2.length === fields.length && sort2.every((entry, index) => entry.direction === "asc" && entry.path[0] === fields[index]);
+  return sort2.length === fields.length && sort2.every((entry, index2) => entry.direction === "asc" && entry.path[0] === fields[index2]);
 }
 function decodeCqrsCursor(value, size) {
   if (typeof value !== "string") throw new JITError("INVALID_QUERY", "Cursor must be an opaque string");
   try {
     const bytes = globalThis.atob(value);
     let escaped = "";
-    for (let index = 0; index < bytes.length; index++)
-      escaped += `%${bytes.charCodeAt(index).toString(16).padStart(2, "0")}`;
+    for (let index2 = 0; index2 < bytes.length; index2++)
+      escaped += `%${bytes.charCodeAt(index2).toString(16).padStart(2, "0")}`;
     const decoded = JSON.parse(decodeURIComponent(escaped));
     if (!Array.isArray(decoded) || decoded.length !== size) throw new Error("Invalid cursor tuple");
     return decoded;
@@ -18247,9 +18430,9 @@ function createConditionBuilder2(startIndex) {
   const toValueNode = (value) => {
     if (isQueryParamRef2(value)) return { kind: "param", name: value.name };
     if (isQueryConstRef2(value)) return { kind: "literal", value: value.value };
-    const index = startIndex + bindings.length;
+    const index2 = startIndex + bindings.length;
     bindings[bindings.length] = value;
-    return { kind: "binding", name: `__q${index}` };
+    return { kind: "binding", name: `__q${index2}` };
   };
   const compare2 = (op, key, value) => ({
     kind: "compare",
@@ -19242,6 +19425,30 @@ function codec(input, output, options) {
   );
 }
 
+// ../../packages/jit/src/factories/indexing.ts
+function index(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const inferred = resolveIndexKeysFromFacts(unwrapped);
+  const plan = createIndexPlan(unwrapped, inferred, "unique");
+  Object.defineProperty(plan, "by", {
+    value: (...keys) => createIndexPlan(unwrapped, keys, "unique")
+  });
+  return plan;
+}
+function createIndexPlan(schema, keys, shape) {
+  const plan = keys || resolveIndexKeysFromFacts(schema) ? compileIndex(schema, resolveIndexDescriptor(schema, keys, shape), getCachedIndex) : unresolvedIndexPlan(schema, shape);
+  Object.defineProperty(plan, "grouped", {
+    value: () => createIndexPlan(schema, keys, "grouped")
+  });
+  return plan;
+}
+function unresolvedIndexPlan(schema, shape) {
+  const fail = () => resolveIndexDescriptor(schema, void 0, shape);
+  const plan = ((_value) => fail());
+  Object.defineProperty(plan, "cached", { value: fail });
+  return plan;
+}
+
 // ../../packages/jit/src/factories/sort.ts
 function sort(schema) {
   const unwrapped = unwrapSchema(schema);
@@ -19619,9 +19826,9 @@ function normalizePath(path) {
 }
 function readPath(value, path) {
   let current = value;
-  for (let index = 0; index < path.length; index++) {
+  for (let index2 = 0; index2 < path.length; index2++) {
     if (current === null || current === void 0) return void 0;
-    current = current[path[index]];
+    current = current[path[index2]];
   }
   return current;
 }
@@ -19705,15 +19912,15 @@ function materializePatch(writes) {
   const root = {};
   for (const write of writes) {
     let current = root;
-    for (let index = 0; index < write.path.length; index++) {
-      const segment = write.path[index];
+    for (let index2 = 0; index2 < write.path.length; index2++) {
+      const segment = write.path[index2];
       const key = normalizeKey(segment);
-      const isLast = index === write.path.length - 1;
+      const isLast = index2 === write.path.length - 1;
       if (isLast) {
         current[key] = write.value;
         continue;
       }
-      const nextSegment = write.path[index + 1];
+      const nextSegment = write.path[index2 + 1];
       const existing = current[key];
       if (existing === void 0) {
         const next = isArrayKey(nextSegment) ? [] : {};
@@ -19829,8 +20036,8 @@ var WatchedList = class {
     const newItems = [];
     const removedItems = [];
     const updatedItems = [];
-    for (let index = 0; index < items.length; index++) {
-      const item = items[index];
+    for (let index2 = 0; index2 < items.length; index2++) {
+      const item = items[index2];
       const previous = this.lookup(previousIndex, previousItems, item);
       if (!previous) {
         newItems[newItems.length] = item;
@@ -19838,8 +20045,8 @@ var WatchedList = class {
         updatedItems[updatedItems.length] = { previous: previous.item, current: item };
       }
     }
-    for (let index = 0; index < previousItems.length; index++) {
-      const item = previousItems[index];
+    for (let index2 = 0; index2 < previousItems.length; index2++) {
+      const item = previousItems[index2];
       const next = this.lookup(nextIndex, items, item);
       if (!next) removedItems[removedItems.length] = item;
     }
@@ -19860,26 +20067,26 @@ var WatchedList = class {
   }
   findIndex(items, item) {
     if (this.key || !this.compare) {
-      const index = this.createIndex(items);
-      const found = this.lookup(index, items, item);
+      const index2 = this.createIndex(items);
+      const found = this.lookup(index2, items, item);
       return found?.index ?? -1;
     }
-    for (let index = 0; index < items.length; index++) {
-      if (this.compareItems(item, items[index])) return index;
+    for (let index2 = 0; index2 < items.length; index2++) {
+      if (this.compareItems(item, items[index2])) return index2;
     }
     return -1;
   }
   createIndex(items) {
     if (this.compare && !this.key) return void 0;
-    const index = /* @__PURE__ */ new Map();
+    const index2 = /* @__PURE__ */ new Map();
     for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
       const item = items[itemIndex];
-      index.set(this.identityOf(item), { item, index: itemIndex });
+      index2.set(this.identityOf(item), { item, index: itemIndex });
     }
-    return index;
+    return index2;
   }
-  lookup(index, items, item) {
-    if (index) return index.get(this.identityOf(item));
+  lookup(index2, items, item) {
+    if (index2) return index2.get(this.identityOf(item));
     for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
       const current = items[itemIndex];
       if (this.compareItems(item, current)) return { item: current, index: itemIndex };
@@ -19889,8 +20096,8 @@ var WatchedList = class {
   identityOf(item) {
     return this.key ? item[this.key] : item;
   }
-  removeAt(items, index) {
-    for (let next = index + 1; next < items.length; next++) {
+  removeAt(items, index2) {
+    for (let next = index2 + 1; next < items.length; next++) {
       items[next - 1] = items[next];
     }
     items.length = items.length - 1;
@@ -19956,19 +20163,19 @@ var KeyedWatchedList = class extends WatchedList {
     const newItems = [];
     const removedItems = [];
     const updatedItems = [];
-    for (let index = 0; index < items.length; index++) {
-      const item = items[index];
+    for (let index2 = 0; index2 < items.length; index2++) {
+      const item = items[index2];
       const id = this.identityOf(item);
       const previous = previousIndex.get(id);
-      nextIndex.set(id, { item, index });
+      nextIndex.set(id, { item, index: index2 });
       if (!previous) {
         newItems[newItems.length] = item;
       } else if (previous.item !== item) {
         updatedItems[updatedItems.length] = { previous: previous.item, current: item };
       }
     }
-    for (let index = 0; index < previousItems.length; index++) {
-      const item = previousItems[index];
+    for (let index2 = 0; index2 < previousItems.length; index2++) {
+      const item = previousItems[index2];
       const id = this.identityOf(item);
       if (!nextIndex.has(id)) removedItems[removedItems.length] = item;
     }
@@ -19980,11 +20187,11 @@ var KeyedWatchedList = class extends WatchedList {
     this.reindex(this.newIndex, this.newItems);
     this.reindex(this.removedIndex, this.removedItems);
   }
-  reindex(index, items) {
-    index.clear();
+  reindex(index2, items) {
+    index2.clear();
     for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
       const item = items[itemIndex];
-      index.set(this.identityOf(item), { item, index: itemIndex });
+      index2.set(this.identityOf(item), { item, index: itemIndex });
     }
   }
 };
@@ -20276,6 +20483,37 @@ function createDefineSortPlan(schema, criteria) {
     }
   });
   registerArtifact(stub, { kind: "sort-plan", schema, descriptor });
+  return stub;
+}
+function defineIndex(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = createDefineIndexPlan(unwrapped, resolveIndexKeysFromFacts(unwrapped), "unique");
+  Object.defineProperty(plan, "by", {
+    value: (...keys) => createDefineIndexPlan(unwrapped, keys, "unique")
+  });
+  return plan;
+}
+function createDefineIndexPlan(schema, keys, shape) {
+  const stub = function aotIndexArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:index",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "index" }
+      }
+    },
+    cached: { value: stub },
+    grouped: { value: () => createDefineIndexPlan(schema, keys, "grouped") }
+  });
+  if (keys || resolveIndexKeysFromFacts(schema)) {
+    registerArtifact(stub, { kind: "index-plan", schema, descriptor: resolveIndexDescriptor(schema, keys, shape) });
+  }
   return stub;
 }
 function defineCqrsQuery(schema) {
@@ -20633,6 +20871,7 @@ var JIT = {
   jsonSchema: jsonSchema2,
   mock: mock2,
   sort: defineSort,
+  index: defineIndex,
   cqrs: cqrs2,
   compare: Object.freeze({ equal: equal2, diff: diff2, hash: hash3 }),
   security: Object.freeze({ mask: mask2, sanitize: sanitize2 })

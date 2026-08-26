@@ -52,6 +52,8 @@ describe("runtime and define entrypoints", () => {
     const defineInputParser = DefineJIT.cqrs.parse(DefineJIT.cqrs.input(DefineUser, { filter: { id: true } }));
     const runtimeSorted = RuntimeJIT.sort(RuntimeUser).by("name", "desc").thenBy("id");
     const defineSorted = DefineJIT.sort(DefineUser).by("name", "desc").thenBy("id");
+    const runtimeIndexed = RuntimeJIT.index(RuntimeJIT.array(RuntimeUser)).by("id");
+    const defineIndexed = DefineJIT.index(DefineJIT.array(DefineUser)).by("id");
 
     const cases: readonly ApiParityCase[] = [
       {
@@ -100,6 +102,12 @@ describe("runtime and define entrypoints", () => {
         name: "sortedUsers",
         runtime: runtimeSorted as UnknownArtifact,
         define: defineSorted as UnknownArtifact,
+        args: [[value, { id: 2, name: "Grace" }]],
+      },
+      {
+        name: "usersById",
+        runtime: runtimeIndexed as UnknownArtifact,
+        define: defineIndexed as UnknownArtifact,
         args: [[value, { id: 2, name: "Grace" }]],
       },
     ];

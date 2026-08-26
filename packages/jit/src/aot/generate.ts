@@ -8,6 +8,7 @@ import { optimizeExecutionPlan } from "../compiler/execution-optimize.js";
 import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
+import { emitIndexPlanSource, indexCacheKey } from "../compiler/indexing.js";
 import { emitStringifyChunksSource } from "../compiler/json-chunks.js";
 import { compileJsonSchema } from "../compiler/json-schema/index.js";
 import {
@@ -231,6 +232,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   const internalNames = new Set<string>();
   const exported = options.exported ?? new Set<string>();
   let needsRuntimeGetIndex = false;
+  let needsRuntimeCachedIndex = false;
   let needsValidationError = false;
   let needsHashHelpers = false;
   let needsMockHelpers = false;
@@ -369,6 +371,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
 
@@ -399,6 +402,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
+    if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -451,6 +455,19 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     type: string
   ): EmittedBinding {
     js.push(`${declaration} /*#__PURE__*/ ${emitSortSource(artifact.descriptor)};`);
+    return { binding, type };
+  }
+
+  function emitIndexPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "index-plan" }>,
+    type: string
+  ): EmittedBinding {
+    needsRuntimeCachedIndex = true;
+    js.push(
+      `${declaration} /*#__PURE__*/ ${emitIndexPlanSource(artifact.descriptor, indexCacheKey(artifact.descriptor))}(__cachedIndex);`
+    );
     return { binding, type };
   }
 
@@ -1764,6 +1781,20 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       "}"
     );
   }
+  if (needsRuntimeCachedIndex) {
+    helpers.push(
+      "const __planCache = new WeakMap();",
+      "function __cachedIndex(items, cacheKey, build) {",
+      "  let plans = __planCache.get(items);",
+      "  if (plans === undefined) { plans = new Map(); __planCache.set(items, plans); }",
+      "  const cached = plans.get(cacheKey);",
+      "  if (cached !== undefined) return cached;",
+      "  const built = build(items);",
+      "  plans.set(cacheKey, built);",
+      "  return built;",
+      "}"
+    );
+  }
 
   const preludeIndex = ts ? 2 : 1;
 
@@ -1877,6 +1908,29 @@ function sortPlanType(
   const value = namedType(row, typeNames);
 
   return `((value: readonly ${value}[]) => ${value}[]) & { readonly compare: (left: ${value}, right: ${value}) => number; readonly inPlace: (value: ${value}[]) => ${value}[] }`;
+}
+
+function indexPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "index-plan" }>,
+  typeNames: TypeNames
+): string {
+  const schema = resolveWrappers(artifact.schema).base;
+  const row =
+    schema.type === TypeName.array
+      ? (schema.def as ATS.ElementDef).element
+      : schema.type === TypeName.runtimeType
+        ? (schema.def as ATS.RuntimeTypeDef).innerType
+        : schema;
+  const value = namedType(row, typeNames);
+  const leaf = artifact.descriptor.shape === "grouped" ? `${value}[]` : value;
+  // Compound keys nest one Map per level; key types stay `unknown` because the
+  // generated module is read back through the declaration, not the schema.
+  let index = `Map<unknown, ${leaf}>`;
+
+  for (let level = artifact.descriptor.keys.length - 1; level > 0; level--) {
+    index = `Map<unknown, ${index}>`;
+  }
+  return `((value: readonly ${value}[]) => ${index}) & { readonly cached: (value: readonly ${value}[]) => ${index} }`;
 }
 
 function moduleNameFromSource(sourceFile: string): string {

@@ -760,6 +760,53 @@ return function execution(input) {
 }"
 `;
 
+exports[`generated source snapshots > index: compound keys nest one map per level 1`] = `
+"((__cache) => {
+  const build = (value) => {
+    const index = new Map();
+    const len = value.length;
+    for (let i = 0; i < len; i++) {
+      const row = value[i];
+      const key0 = row.role;
+      const key1 = row.id;
+      let level1 = index.get(key0);
+      if (level1 === undefined) {
+        level1 = new Map();
+        index.set(key0, level1);
+      }
+      level1.set(key1, row);
+    }
+    return index;
+  };
+  const cached = (value) => __cache(value, "index:unique:role:direct:false,id:direct:false", build);
+  Object.defineProperty(build, "cached", { value: cached });
+  return build;
+})"
+`;
+
+exports[`generated source snapshots > index: grouped shape collects rows per key 1`] = `
+"((__cache) => {
+  const build = (value) => {
+    const index = new Map();
+    const len = value.length;
+    for (let i = 0; i < len; i++) {
+      const row = value[i];
+      const key0 = row.role;
+      const group = index.get(key0);
+      if (group === undefined) {
+        index.set(key0, [row]);
+      } else {
+        group[group.length] = row;
+      }
+    }
+    return index;
+  };
+  const cached = (value) => __cache(value, "index:grouped:role:direct:false", build);
+  Object.defineProperty(build, "cached", { value: cached });
+  return build;
+})"
+`;
+
 exports[`generated source snapshots > lazy query and chunked JSON backends 1`] = `
 {
   "iterator": "(function() {

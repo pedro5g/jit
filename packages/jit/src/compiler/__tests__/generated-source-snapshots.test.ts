@@ -15,6 +15,9 @@ function sourceOf(compiled: object): string {
   if (artifact.kind === "query-plan") return Compiler.emitQuerySource(artifact.schema, artifact.program as never);
   // A sort plan carries its ordering descriptor; the comparator is emitted from it.
   if (artifact.kind === "sort-plan") return Compiler.emitSortSource(artifact.descriptor);
+  // An index plan carries its descriptor; the builder is emitted from it.
+  if (artifact.kind === "index-plan")
+    return Compiler.emitIndexPlanSource(artifact.descriptor, Compiler.indexCacheKey(artifact.descriptor));
   if (!("source" in artifact)) throw new Error("compiled source artifact not registered");
   return artifact.source;
 }
@@ -42,6 +45,18 @@ describe("generated source snapshots", () => {
 
   it("sort: multi-criterion comparator over string, nullable number, and int keys", () => {
     const compiled = JIT.sort(Users).by("name").thenBy("score", "desc").thenBy("id");
+
+    expect(sourceOf(compiled)).toMatchSnapshot();
+  });
+
+  it("index: compound keys nest one map per level", () => {
+    const compiled = JIT.index(Users).by("role", "id");
+
+    expect(sourceOf(compiled)).toMatchSnapshot();
+  });
+
+  it("index: grouped shape collects rows per key", () => {
+    const compiled = JIT.index(Users).by("role").grouped();
 
     expect(sourceOf(compiled)).toMatchSnapshot();
   });
