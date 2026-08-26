@@ -4,6 +4,7 @@ import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
+import { emitOrderingComparatorBodySource, resolveOrderingDescriptor } from "./ordering.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
@@ -357,7 +358,7 @@ function emitPipelineSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram
     if (fused.length > 0) {
       emitFusedStage(lines, fused, forAwait, !async && collection.kind === "array" && stageIndex === 1);
     } else {
-      emitStage(lines, node, "input", async, awaitPrefix, forAwait);
+      emitStage(lines, node, "input", async, awaitPrefix, forAwait, collection.objectSchema);
       nodeIndex++;
     }
     lines.push("}");
@@ -520,7 +521,8 @@ function emitStage(
   previous: string,
   async: boolean,
   awaitPrefix: string,
-  forAwait: string
+  forAwait: string,
+  objectSchema: ATS.ObjectSchema
 ): void {
   const loop = (body: readonly string[]) => {
     lines.push(`  ${forAwait} (const item of ${previous}) {`);
@@ -615,13 +617,13 @@ function emitStage(
     case "orderBy":
       lines.push(`  const values = ${async ? "[]" : `Array.from(${previous})`};`);
       if (async) lines.push(`  ${forAwait} (const item of ${previous}) values[values.length] = item;`);
-      lines.push(
-        `  values.sort((left, right) => left${emitPropertyAccess("", node.key)} < right${emitPropertyAccess("", node.key)} ? ${
-          node.direction === "asc" ? -1 : 1
-        } : left${emitPropertyAccess("", node.key)} > right${emitPropertyAccess("", node.key)} ? ${
-          node.direction === "asc" ? 1 : -1
-        } : 0);`
-      );
+      lines.push("  values.sort((left, right) => {");
+      for (const line of emitOrderingComparatorBodySource(
+        resolveOrderingDescriptor(objectSchema, [{ key: node.key, direction: node.direction }])
+      ).split("\n")) {
+        lines.push(`    ${line}`);
+      }
+      lines.push("  });");
       lines.push("  yield* values;");
       return;
     case "keyed":
@@ -666,6 +668,7 @@ function emitProjection(fields: readonly string[]): string {
 function resolveCollection(schema: ATS.AnyTypeSchema): {
   readonly kind: "array" | "set" | "map";
   readonly props: ATS.SchemaShape;
+  readonly objectSchema: ATS.ObjectSchema;
 } {
   const collection = resolveWrappers(schema).base;
   if (collection.type !== TypeName.array && collection.type !== TypeName.set && collection.type !== TypeName.map) {
@@ -676,7 +679,8 @@ function resolveCollection(schema: ATS.AnyTypeSchema): {
       ? resolveWrappers((collection as ATS.MapSchema).def.value).base
       : resolveWrappers((collection as ATS.ArraySchema | ATS.SetSchema).def.element).base;
   if (element.type !== TypeName.object) throw new JITError("INVALID_QUERY", "lazy query expects object elements");
-  return { kind: collection.type, props: (element as ATS.ObjectSchema).def.props };
+  const objectSchema = element as ATS.ObjectSchema;
+  return { kind: collection.type, props: objectSchema.def.props, objectSchema };
 }
 
 function validatePipeline(nodes: readonly QueryPipelineNode[], props: ATS.SchemaShape): void {

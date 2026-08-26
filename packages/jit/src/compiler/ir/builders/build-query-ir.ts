@@ -6,6 +6,7 @@ import type {
   QueryValueNode,
 } from "../../../core/ast/index.js";
 import { JITError } from "../../../errors/index.js";
+import { resolveOrderingDescriptor } from "../../ordering.js";
 import type { OptimizedQueryPlan, QueryObjectSchema, QueryTarget } from "../../query.js";
 import {
   allOf,
@@ -90,7 +91,14 @@ function buildArrayQuery(target: QueryTarget, plan: OptimizedQueryPlan): readonl
     store(loadProp(OUT, "length"), CURSOR),
   ];
 
-  if (plan.orderBy) body.push(sortByKey(OUT, plan.orderBy.key, plan.orderBy.direction));
+  if (plan.orderBy) {
+    body.push(
+      sortByKey(
+        OUT,
+        resolveOrderingDescriptor(target.objectSchema, [{ key: plan.orderBy.key, direction: plan.orderBy.direction }])
+      )
+    );
+  }
 
   body.push({ kind: "return", value: OUT });
   return body;
@@ -105,7 +113,14 @@ function buildArrayQueryWithPostOrderProjection(target: QueryTarget, plan: Optim
     store(loadProp(OUT, "length"), CURSOR),
   ];
 
-  if (orderBy) body.push(sortByKey(OUT, orderBy.key, orderBy.direction));
+  if (orderBy) {
+    body.push(
+      sortByKey(
+        OUT,
+        resolveOrderingDescriptor(target.objectSchema, [{ key: orderBy.key, direction: orderBy.direction }])
+      )
+    );
+  }
 
   body.push(
     { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },

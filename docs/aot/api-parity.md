@@ -84,6 +84,7 @@ remain when their semantics require them.
 | eager CQRS query          | yes     | yes    | yes            | define artifacts are deliberately non-executable |
 | iterator/visitor query    | yes     | yes    | yes            | backend is part of the query artifact            |
 | CQRS input/parser         | yes     | yes    | yes            | structural `~query` remains V1                   |
+| sort / ordering plans     | yes     | yes    | yes            | descriptor stays off the compiled plan           |
 | Runtime Classes and DDD   | yes     | yes    | yes            | class artifact emitted in the same module        |
 
 New public operation families must add a row only when runtime behavior,

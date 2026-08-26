@@ -185,7 +185,7 @@ describe("JIT compiler object operations", () => {
     expect(sortBy(input)).not.toBe(input);
     expect(source).toContain("const out = value.slice();");
     expect(source).toContain("const leftValue = left.id;");
-    expect(source).toContain("return leftValue < rightValue ? 1 : -1;");
+    expect(source).toContain("return rightValue - leftValue;");
     expectTypeOf(sortBy(input)).toMatchTypeOf<typeof input>();
   });
 

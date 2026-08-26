@@ -1,4 +1,5 @@
 import type { IRExpr, IRNode } from "../ir/ir.js";
+import { emitOrderingComparatorBody } from "../ordering.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitLiteral } from "../source/literal.js";
 import type { CodeWriter } from "./code-writer.js";
@@ -79,16 +80,7 @@ export function emitNode(writer: CodeWriter, node: IRNode): void {
       return;
     case "sort_by_key":
       writer.line(`${node.target.name}.sort((left, right) => {`);
-      writer.indent(() => {
-        writer.line(`const leftValue = ${emitPropertyAccess("left", node.key)};`);
-        writer.line(`const rightValue = ${emitPropertyAccess("right", node.key)};`);
-        writer.line("if (leftValue === rightValue) return 0;");
-        if (node.direction === "desc") {
-          writer.line("return leftValue < rightValue ? 1 : -1;");
-        } else {
-          writer.line("return leftValue < rightValue ? -1 : 1;");
-        }
-      });
+      writer.indent(() => emitOrderingComparatorBody(writer, node.ordering));
       writer.line("});");
       return;
     case "return":

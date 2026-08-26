@@ -1,0 +1,137 @@
+---
+title: sort
+description: Compile a schema-specialized comparator and reuse it as an ordering plan.
+---
+
+## Signature
+
+```ts
+const User = JIT.object({
+  id: JIT.number(),
+  lastName: JIT.string(),
+  createdAt: JIT.date(),
+});
+
+const sortUsers = JIT.sort(User).by("lastName").thenBy("createdAt", "desc");
+```
+
+`by` starts an ordering and `thenBy` appends a criterion. Direction defaults to
+`"asc"`. Keys come from the schema, so an unknown key does not compile.
+
+The schema may be the row or an array of it: `JIT.sort(User)` and
+`JIT.sort(JIT.array(User))` produce the same plan.
+
+## Calling a plan
+
+```ts
+const User = JIT.object({ id: JIT.number(), lastName: JIT.string() });
+const sortUsers = JIT.sort(User).by("lastName");
+
+const users = [
+  { id: 1, lastName: "Silva" },
+  { id: 2, lastName: "Lovelace" },
+];
+
+const ordered = sortUsers(users);
+const same = sortUsers.inPlace(users);
+const sign = sortUsers.compare(users[0], users[1]);
+
+console.log(ordered.map((user) => user.lastName));
+console.log(same === users, typeof sign);
+```
+
+| Member    | Behavior                                             |
+| --------- | ---------------------------------------------------- |
+| callable  | returns a new array; the input is never mutated       |
+| `inPlace` | sorts and returns the same array reference            |
+| `compare` | the compiled comparator, for APIs that take one       |
+
+Sorting is stable, because it delegates to `Array.prototype.sort`.
+
+## Ordering rules
+
+Criteria are evaluated in order. The first that distinguishes two rows decides,
+and later criteria are not evaluated.
+
+Absent values (`null` and `undefined`) order before present values ascending and
+after them descending. They are treated as equally absent, so two absent values
+fall through to the next criterion.
+
+```ts
+const Row = JIT.object({
+  rank: JIT.number().nullable().optional(),
+  id: JIT.number(),
+});
+const byRank = JIT.sort(Row).by("rank").thenBy("id");
+
+console.log(byRank([{ rank: 5, id: 1 }, { rank: null, id: 2 }, { rank: 1, id: 3 }]).map((row) => row.id));
+```
+
+## Specialization
+
+The schema decides how each key is compared.
+
+| Key type                               | Emitted comparison                |
+| -------------------------------------- | --------------------------------- |
+| number, int                            | float64 subtraction where safe    |
+| Date                                   | `getTime()` read once per row     |
+| string, bigint, boolean, literal, enum | `!==` then `<`                    |
+
+Branded and runtime-type wrappers resolve to the type they wrap. A key that is
+not a statically orderable scalar, an unknown key, or a repeated key is rejected
+when the plan is built.
+
+```ts
+const User = JIT.object({ id: JIT.number(), profile: JIT.object({ city: JIT.string() }) });
+
+try {
+  JIT.sort(User).by("profile");
+} catch (error) {
+  console.log((error as Error).message);
+}
+```
+
+## AOT
+
+`JIT.sort` has the same signature on `@jit-compiler/jit/define`. Generated output
+is a self-contained comparator with no import from the JIT package:
+
+```js
+const sortUsers = /*#__PURE__*/ (() => {
+  const compare = (left, right) => {
+    const leftValue0 = left.lastName;
+    const rightValue0 = right.lastName;
+    if (leftValue0 !== rightValue0) {
+      return leftValue0 < rightValue0 ? -1 : 1;
+    }
+    const leftRaw1 = left.createdAt;
+    const rightRaw1 = right.createdAt;
+    const leftValue1 = leftRaw1.getTime();
+    const rightValue1 = rightRaw1.getTime();
+    if (leftValue1 !== rightValue1) {
+      return leftValue1 < rightValue1 ? 1 : -1;
+    }
+    return 0;
+  };
+  const sort = (value) => {
+    const out = value.slice();
+    out.sort(compare);
+    return out;
+  };
+  Object.defineProperties(sort, {
+    compare: { value: compare },
+    inPlace: { value: (value) => value.sort(compare) },
+  });
+  return sort;
+})();
+```
+
+## When it pays
+
+Measured on 1000 rows, `JIT.sort` is ahead of an idiomatic comparator on `Date`
+(≈1.07x) and short strings (≈1.10x), and at parity on single numeric keys — a
+compiled comparator cannot beat `(a, b) => a.id - b.id`, because that is the
+same specialization. Use it for schema-checked keys, correct absent-value and
+`Date` handling, and AOT parity; see
+[the sort feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/sort.md)
+for the full table.

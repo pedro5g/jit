@@ -4,6 +4,7 @@ import { resolveHints } from "../core/hints/index.js";
 import { JITError } from "../errors/index.js";
 import { CodeWriter } from "./emitter/code-writer.js";
 import { createEmitState, type EmitState } from "./emitter/emit-state.js";
+import { emitOrderingComparatorBody, resolveOrderingDescriptor } from "./ordering.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
@@ -431,26 +432,16 @@ export function emitSortBySource<TSchema extends ATS.AnyTypeSchema>(
 
   const { objectSchema } = expectArrayObjectKey(schema, sortKey, "compileSortBy", () => sortKey);
   const sortDirection = direction ?? (typeof hints.order?.direction === "string" ? hints.order.direction : "asc");
-  const leftAccess = emitPropertyAccess("left", sortKey);
-  const rightAccess = emitPropertyAccess("right", sortKey);
   const writer = new CodeWriter();
 
   validateObjectKeys(objectSchema, [sortKey], "compileSortBy");
+  const ordering = resolveOrderingDescriptor(objectSchema, [{ key: sortKey, direction: sortDirection }]);
 
   writer.line("function sortBy(value) {");
   writer.indent(() => {
     writer.line("const out = value.slice();");
     writer.line("out.sort((left, right) => {");
-    writer.indent(() => {
-      writer.line(`const leftValue = ${leftAccess};`);
-      writer.line(`const rightValue = ${rightAccess};`);
-      writer.line("if (leftValue === rightValue) return 0;");
-      if (sortDirection === "desc") {
-        writer.line("return leftValue < rightValue ? 1 : -1;");
-      } else {
-        writer.line("return leftValue < rightValue ? -1 : 1;");
-      }
-    });
+    writer.indent(() => emitOrderingComparatorBody(writer, ordering));
     writer.line("});");
     writer.line("return out;");
   });

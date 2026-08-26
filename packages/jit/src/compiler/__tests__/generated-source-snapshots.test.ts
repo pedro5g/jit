@@ -13,6 +13,8 @@ function sourceOf(compiled: object): string {
   if (!artifact) throw new Error("compiled source artifact not registered");
   // A query builder carries its program; everything else carries its source.
   if (artifact.kind === "query-plan") return Compiler.emitQuerySource(artifact.schema, artifact.program as never);
+  // A sort plan carries its ordering descriptor; the comparator is emitted from it.
+  if (artifact.kind === "sort-plan") return Compiler.emitSortSource(artifact.descriptor);
   if (!("source" in artifact)) throw new Error("compiled source artifact not registered");
   return artifact.source;
 }
@@ -34,6 +36,12 @@ describe("generated source snapshots", () => {
       .select("id", "name", "role")
       .unique("id")
       .orderBy("name", "asc");
+
+    expect(sourceOf(compiled)).toMatchSnapshot();
+  });
+
+  it("sort: multi-criterion comparator over string, nullable number, and int keys", () => {
+    const compiled = JIT.sort(Users).by("name").thenBy("score", "desc").thenBy("id");
 
     expect(sourceOf(compiled)).toMatchSnapshot();
   });

@@ -131,6 +131,28 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("rules.filter");
   });
 
+  it("should keep a sort plan free of every unrelated compiler and of a generic comparator", async () => {
+    const User = JIT.object({ id: JIT.number(), lastName: JIT.string(), createdAt: JIT.date() });
+    const sortUsers = JIT.sort(User).by("lastName").thenBy("createdAt", "desc");
+    const unrelated = JIT.cqrs.query(JIT.array(User)).where((query) => query.eq("id", 1));
+
+    AOT.generate({ artifacts: { sortUsers, unrelated }, outDir });
+    const bundled = await bundle(
+      `import { sortUsers } from "./index.js";\nconsole.log(sortUsers([{ id: 1, lastName: "Ada", createdAt: new Date(0) }]));\n`
+    );
+
+    // The comparator is inlined against the schema: static access, no key list.
+    expect(bundled).toContain("left.lastName");
+    expect(bundled).toContain("leftRaw1.getTime()");
+    expect(bundled).not.toContain("Object.keys");
+    expect(bundled).not.toContain("criteria");
+    // Neighbouring artifacts and unrelated operation families are dropped.
+    expect(bundled).not.toContain("unrelated");
+    expect(bundled).not.toContain("function stringify");
+    expect(bundled).not.toContain("encodeInto");
+    expect(bundled).not.toContain("function clone");
+  });
+
   it("should retain only the co-emitted class required by a construction pipeline", async () => {
     const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() }));
     const parseUser = JIT.json.parse(User).validate();

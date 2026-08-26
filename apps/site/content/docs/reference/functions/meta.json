@@ -17,6 +17,7 @@
     "mapper",
     "transform",
     "query",
+    "sort",
     "process",
     "stream",
     "watch",

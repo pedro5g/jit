@@ -1,4 +1,5 @@
 import type * as ATS from "../../core/ats/index.js";
+import type { OrderingDescriptor } from "../ordering.js";
 
 export interface IRVar {
   readonly kind: "var";
@@ -101,8 +102,7 @@ export type IRNode =
   | {
       readonly kind: "sort_by_key";
       readonly target: IRVar;
-      readonly key: string;
-      readonly direction: "asc" | "desc";
+      readonly ordering: OrderingDescriptor;
     }
   | { readonly kind: "return"; readonly value: IRExpr };
 
@@ -222,8 +222,8 @@ export function append(target: IRVar, cursor: IRVar, value: IRExpr): IRNode {
   return { kind: "append", target, cursor, value };
 }
 
-export function sortByKey(target: IRVar, key: string, direction: "asc" | "desc"): IRNode {
-  return { kind: "sort_by_key", target, key, direction };
+export function sortByKey(target: IRVar, ordering: OrderingDescriptor): IRNode {
+  return { kind: "sort_by_key", target, ordering };
 }
 
 /**

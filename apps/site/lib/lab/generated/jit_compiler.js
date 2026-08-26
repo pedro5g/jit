@@ -905,8 +905,8 @@ function forOf(item, iterable, body) {
 function append(target, cursor, value) {
   return { kind: "append", target, cursor, value };
 }
-function sortByKey(target, key, direction) {
-  return { kind: "sort_by_key", target, key, direction };
+function sortByKey(target, ordering) {
+  return { kind: "sort_by_key", target, ordering };
 }
 function mapExprChildren(expr, mapExpr) {
   switch (expr.kind) {
@@ -3015,6 +3015,129 @@ function getIndex(items, key) {
   return map4;
 }
 
+// ../../packages/jit/src/compiler/ordering.ts
+function resolveOrderingDescriptor(schema, criteria) {
+  const object2 = resolveOrderingObjectSchema(schema);
+  if (criteria.length === 0) {
+    throw new JITError("INVALID_OPERATION", "ordering requires at least one criterion");
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const resolved = criteria.map((criterion) => {
+    if (typeof criterion.key !== "string" || criterion.key.length === 0) {
+      throw new JITError("INVALID_OPERATION", "ordering keys must be non-empty strings");
+    }
+    if (criterion.direction !== "asc" && criterion.direction !== "desc") {
+      throw new JITError("INVALID_OPERATION", "ordering direction must be asc or desc");
+    }
+    const field = object2.def.props[criterion.key];
+    if (!field) {
+      throw new JITError("INVALID_OPERATION", `ordering received unknown key ${JSON.stringify(criterion.key)}`, {
+        path: [criterion.key]
+      });
+    }
+    if (seen.has(criterion.key)) {
+      throw new JITError("INVALID_OPERATION", `ordering repeats key ${JSON.stringify(criterion.key)}`, {
+        path: [criterion.key]
+      });
+    }
+    seen.add(criterion.key);
+    return Object.freeze({
+      key: criterion.key,
+      direction: criterion.direction,
+      valueKind: resolveOrderingValueKind(field, criterion.key),
+      nullish: isNullish(field)
+    });
+  });
+  return Object.freeze({ criteria: Object.freeze(resolved) });
+}
+function emitOrderingComparatorBody(writer, descriptor, left = "left", right = "right") {
+  const last2 = descriptor.criteria.length - 1;
+  let terminated = false;
+  descriptor.criteria.forEach((criterion, index) => {
+    const suffix = descriptor.criteria.length === 1 ? "" : String(index);
+    const date3 = criterion.valueKind === "date";
+    const leftRaw = `left${date3 ? "Raw" : "Value"}${suffix}`;
+    const rightRaw = `right${date3 ? "Raw" : "Value"}${suffix}`;
+    const leftValue = `leftValue${suffix}`;
+    const rightValue = `rightValue${suffix}`;
+    const leftPresentWins = criterion.direction === "desc" ? "-1" : "1";
+    const rightPresentWins = criterion.direction === "desc" ? "1" : "-1";
+    const subtract = criterion.valueKind === "numeric" && index === last2;
+    const emitCompare2 = () => {
+      if (date3) {
+        writer.line(`const ${leftValue} = ${leftRaw}.getTime();`);
+        writer.line(`const ${rightValue} = ${rightRaw}.getTime();`);
+      }
+      if (subtract) {
+        writer.line(
+          criterion.direction === "desc" ? `return ${rightValue} - ${leftValue};` : `return ${leftValue} - ${rightValue};`
+        );
+        return;
+      }
+      writer.line(`if (${leftValue} !== ${rightValue}) {`);
+      writer.indent(() => {
+        writer.line(
+          criterion.direction === "desc" ? `return ${leftValue} < ${rightValue} ? 1 : -1;` : `return ${leftValue} < ${rightValue} ? -1 : 1;`
+        );
+      });
+      writer.line("}");
+    };
+    writer.line(`const ${leftRaw} = ${emitPropertyAccess(left, criterion.key)};`);
+    writer.line(`const ${rightRaw} = ${emitPropertyAccess(right, criterion.key)};`);
+    if (!criterion.nullish) {
+      emitCompare2();
+      terminated = subtract;
+      return;
+    }
+    writer.line(`if (${leftRaw} == null || ${rightRaw} == null) {`);
+    writer.indent(() => {
+      writer.line(`if (${leftRaw} != null) return ${leftPresentWins};`);
+      writer.line(`if (${rightRaw} != null) return ${rightPresentWins};`);
+    });
+    writer.line("} else {");
+    writer.indent(emitCompare2);
+    writer.line("}");
+  });
+  if (!terminated) writer.line("return 0;");
+}
+function emitOrderingComparatorBodySource(descriptor) {
+  const writer = new CodeWriter();
+  emitOrderingComparatorBody(writer, descriptor);
+  return writer.toString();
+}
+function resolveOrderingObjectSchema(schema) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.array) {
+    base = resolveWrappers(base.def.element).base;
+  }
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "ordering expects an object or array-of-objects schema");
+  }
+  return base;
+}
+function resolveOrderingValueKind(schema, key) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type === TypeName.date) return "date";
+  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
+  if (base.type === TypeName.string || base.type === TypeName.bigint || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum) {
+    return "direct";
+  }
+  throw new JITError(
+    "INVALID_OPERATION",
+    `ordering key ${JSON.stringify(key)} must resolve to a statically orderable scalar`
+  );
+}
+function isNullish(schema) {
+  const resolved = resolveWrappers(schema);
+  return resolved.optional || resolved.nullable;
+}
+
 // ../../packages/jit/src/compiler/emitter/emit-expr.ts
 var BINARY_OPERATORS = {
   strictEqual: "===",
@@ -3160,16 +3283,7 @@ function emitNode(writer, node) {
       return;
     case "sort_by_key":
       writer.line(`${node.target.name}.sort((left, right) => {`);
-      writer.indent(() => {
-        writer.line(`const leftValue = ${emitPropertyAccess("left", node.key)};`);
-        writer.line(`const rightValue = ${emitPropertyAccess("right", node.key)};`);
-        writer.line("if (leftValue === rightValue) return 0;");
-        if (node.direction === "desc") {
-          writer.line("return leftValue < rightValue ? 1 : -1;");
-        } else {
-          writer.line("return leftValue < rightValue ? -1 : 1;");
-        }
-      });
+      writer.indent(() => emitOrderingComparatorBody(writer, node.ordering));
       writer.line("});");
       return;
     case "return":
@@ -8733,7 +8847,7 @@ function emitPipelineSource(schema, program, async) {
     if (fused.length > 0) {
       emitFusedStage(lines, fused, forAwait, !async && collection.kind === "array" && stageIndex === 1);
     } else {
-      emitStage(lines, node, "input", async, awaitPrefix, forAwait);
+      emitStage(lines, node, "input", async, awaitPrefix, forAwait, collection.objectSchema);
       nodeIndex++;
     }
     lines.push("}");
@@ -8871,7 +8985,7 @@ function terminalTake(nodes) {
   const index = nodes.length - 1;
   return index >= 0 && nodes[index]?.kind === "take" ? index : -1;
 }
-function emitStage(lines, node, previous, async, awaitPrefix, forAwait) {
+function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSchema) {
   const loop = (body) => {
     lines.push(`  ${forAwait} (const item of ${previous}) {`);
     for (const line of body) lines.push(`    ${line}`);
@@ -8964,9 +9078,13 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait) {
     case "orderBy":
       lines.push(`  const values = ${async ? "[]" : `Array.from(${previous})`};`);
       if (async) lines.push(`  ${forAwait} (const item of ${previous}) values[values.length] = item;`);
-      lines.push(
-        `  values.sort((left, right) => left${emitPropertyAccess("", node.key)} < right${emitPropertyAccess("", node.key)} ? ${node.direction === "asc" ? -1 : 1} : left${emitPropertyAccess("", node.key)} > right${emitPropertyAccess("", node.key)} ? ${node.direction === "asc" ? 1 : -1} : 0);`
-      );
+      lines.push("  values.sort((left, right) => {");
+      for (const line of emitOrderingComparatorBodySource(
+        resolveOrderingDescriptor(objectSchema, [{ key: node.key, direction: node.direction }])
+      ).split("\n")) {
+        lines.push(`    ${line}`);
+      }
+      lines.push("  });");
       lines.push("  yield* values;");
       return;
     case "keyed":
@@ -9011,7 +9129,8 @@ function resolveCollection(schema) {
   }
   const element = collection.type === TypeName.map ? resolveWrappers(collection.def.value).base : resolveWrappers(collection.def.element).base;
   if (element.type !== TypeName.object) throw new JITError("INVALID_QUERY", "lazy query expects object elements");
-  return { kind: collection.type, props: element.def.props };
+  const objectSchema = element;
+  return { kind: collection.type, props: objectSchema.def.props, objectSchema };
 }
 function validatePipeline(nodes, props) {
   for (const node of nodes) {
@@ -9760,7 +9879,14 @@ function buildArrayQuery(target, plan) {
     buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, selected)])),
     store(loadProp(OUT2, "length"), CURSOR)
   ];
-  if (plan.orderBy) body.push(sortByKey(OUT2, plan.orderBy.key, plan.orderBy.direction));
+  if (plan.orderBy) {
+    body.push(
+      sortByKey(
+        OUT2,
+        resolveOrderingDescriptor(target.objectSchema, [{ key: plan.orderBy.key, direction: plan.orderBy.direction }])
+      )
+    );
+  }
   body.push({ kind: "return", value: OUT2 });
   return body;
 }
@@ -9772,7 +9898,14 @@ function buildArrayQueryWithPostOrderProjection(target, plan) {
     buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, ITEM)])),
     store(loadProp(OUT2, "length"), CURSOR)
   ];
-  if (orderBy) body.push(sortByKey(OUT2, orderBy.key, orderBy.direction));
+  if (orderBy) {
+    body.push(
+      sortByKey(
+        OUT2,
+        resolveOrderingDescriptor(target.objectSchema, [{ key: orderBy.key, direction: orderBy.direction }])
+      )
+    );
+  }
   body.push(
     { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },
     forRange(INDEX2, CURSOR, [
@@ -10207,6 +10340,49 @@ function validateValue(schema, value) {
 }
 function last(values) {
   return values[values.length - 1];
+}
+
+// ../../packages/jit/src/compiler/sort.ts
+function emitSortSource(descriptor) {
+  const writer = new CodeWriter();
+  writer.line("(() => {");
+  writer.indent(() => {
+    writer.line("const compare = (left, right) => {");
+    writer.indent(() => emitOrderingComparatorBody(writer, descriptor));
+    writer.line("};");
+    writer.line("const sort = (value) => {");
+    writer.indent(() => {
+      writer.line("const out = value.slice();");
+      writer.line("out.sort(compare);");
+      writer.line("return out;");
+    });
+    writer.line("};");
+    writer.line("Object.defineProperties(sort, {");
+    writer.indent(() => {
+      writer.line("compare: { value: compare },");
+      writer.line("inPlace: { value: (value) => value.sort(compare) },");
+    });
+    writer.line("});");
+    writer.line("return sort;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function compileSort(schema, descriptor, options) {
+  const ordering = resolveOrderingDescriptor(schema, descriptor.criteria);
+  const cacheKey = `sort:${ordering.criteria.map(({ key, direction, valueKind, nullish: nullish3 }) => `${key}:${direction}:${valueKind}:${nullish3}`).join(",")}`;
+  const template = getCompileCached(
+    schema,
+    cacheKey,
+    () => {
+      const source = emitSortSource(ordering);
+      return { source, create: globalThis.Function(`return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create();
+  registerArtifact(compiled, { kind: "sort-plan", schema, descriptor: ordering });
+  return compiled;
 }
 
 // ../../packages/jit/src/compiler/update/build-update-ir.ts
@@ -13449,6 +13625,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
@@ -13474,6 +13651,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
+    if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -13512,6 +13690,10 @@ function emitModule(plan, options, layout) {
       return `{ new (state: ${value}): ${instance}; ${factories.join(" ")} }`;
     }
     return "unknown";
+  }
+  function emitSortPlanArtifact(binding, declaration, artifact, type) {
+    js.push(`${declaration} /*#__PURE__*/ ${emitSortSource(artifact.descriptor)};`);
+    return { binding, type };
   }
   function emitClassArtifact(binding, declaration, artifact, reportName, type, assertedType) {
     const base = resolveObjectSchema(artifact.schema);
@@ -14618,6 +14800,12 @@ function queryPlanType(artifact, typeNames) {
       return `(value: ${input}) => unknown[]`;
   }
 }
+function sortPlanType(artifact, typeNames) {
+  const schema = resolveWrappers(artifact.schema).base;
+  const row = schema.type === TypeName.array ? schema.def.element : schema.type === TypeName.runtimeType ? schema.def.innerType : schema;
+  const value = namedType(row, typeNames);
+  return `((value: readonly ${value}[]) => ${value}[]) & { readonly compare: (left: ${value}, right: ${value}) => number; readonly inPlace: (value: ${value}[]) => ${value}[] }`;
+}
 function moduleNameFromSource(sourceFile) {
   const rawName = basename(sourceFile).replace(/\.jit\.(ts|mts|cts|js|mjs|cjs)$/, "").replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "");
   const normalized = rawName.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^-+|-+$/g, "");
@@ -15278,6 +15466,7 @@ __export(factories_exports, {
   safeParse: () => safeParse,
   security: () => security,
   set: () => set,
+  sort: () => sort,
   stream: () => stream,
   string: () => string,
   symbol: () => symbol,
@@ -17601,7 +17790,7 @@ function normalizeCqrsTail(source, definition, filter) {
   if (source.sort !== void 0 && (typeof source.sort !== "string" || source.sort.length === 0)) {
     throw new JITError("INVALID_QUERY", "CQRS sort must be a non-empty string");
   }
-  const sort = typeof source.sort === "string" ? source.sort.split(",").map((token) => {
+  const sort2 = typeof source.sort === "string" ? source.sort.split(",").map((token) => {
     const descending = token.startsWith("-");
     const field = descending ? token.slice(1) : token;
     if (!allowedSort.has(field))
@@ -17612,18 +17801,18 @@ function normalizeCqrsTail(source, definition, filter) {
     };
   }) : [];
   const sortFields = /* @__PURE__ */ new Set();
-  for (const entry of sort) {
+  for (const entry of sort2) {
     const field = entry.path[0];
     if (field.length === 0) throw new JITError("INVALID_QUERY", "CQRS sort field cannot be empty");
     if (sortFields.has(field)) throw new JITError("INVALID_QUERY", `CQRS sort repeats ${JSON.stringify(field)}`);
     sortFields.add(field);
   }
-  if (sort.length > (definition.options.limits?.maxSortFields ?? 3)) {
+  if (sort2.length > (definition.options.limits?.maxSortFields ?? 3)) {
     throw new JITError("INVALID_QUERY", "CQRS sort exceeds the configured structural limit");
   }
-  if (!pagination) return { filter, sort, ...select === void 0 ? {} : { select } };
+  if (!pagination) return { filter, sort: sort2, ...select === void 0 ? {} : { select } };
   if (pagination.type === "cursor") {
-    if (sort.length > 0 && !sameCursorOrdering(sort, pagination.by)) {
+    if (sort2.length > 0 && !sameCursorOrdering(sort2, pagination.by)) {
       throw new JITError("INVALID_QUERY", "Cursor pagination requires its configured stable ordering");
     }
     const after = source.after === void 0 ? void 0 : decodeCqrsCursor(source.after, pagination.by.length);
@@ -17655,7 +17844,7 @@ function normalizeCqrsTail(source, definition, filter) {
   }
   return {
     filter,
-    sort,
+    sort: sort2,
     ...select === void 0 ? {} : { select },
     pagination: { kind: "offset", offset, limit }
   };
@@ -17681,8 +17870,8 @@ function normalizeCqrsSelect(source, definition) {
   }
   return fields;
 }
-function sameCursorOrdering(sort, fields) {
-  return sort.length === fields.length && sort.every((entry, index) => entry.direction === "asc" && entry.path[0] === fields[index]);
+function sameCursorOrdering(sort2, fields) {
+  return sort2.length === fields.length && sort2.every((entry, index) => entry.direction === "asc" && entry.path[0] === fields[index]);
 }
 function decodeCqrsCursor(value, size) {
   if (typeof value !== "string") throw new JITError("INVALID_QUERY", "Cursor must be an opaque string");
@@ -19053,6 +19242,29 @@ function codec(input, output, options) {
   );
 }
 
+// ../../packages/jit/src/factories/sort.ts
+function sort(schema) {
+  const unwrapped = unwrapSchema(schema);
+  return Object.freeze({
+    by(key, direction = "asc") {
+      return createSortPlan(unwrapped, [{ key, direction }]);
+    }
+  });
+}
+function createSortPlan(schema, criteria) {
+  const descriptor = resolveOrderingDescriptor(schema, criteria);
+  const compiled = compileSort(schema, descriptor);
+  Object.defineProperties(compiled, {
+    by: {
+      value: (key, direction = "asc") => createSortPlan(schema, [{ key, direction }])
+    },
+    thenBy: {
+      value: (key, direction = "asc") => createSortPlan(schema, [...criteria, { key, direction }])
+    }
+  });
+  return compiled;
+}
+
 // ../../packages/jit/src/factories/stream.ts
 function streamFactory(schema, options) {
   return compileStream(unwrapSchema(schema), options);
@@ -20024,6 +20236,48 @@ function mask2(schema) {
 function sanitize2(schema) {
   return operationStub(schema, "sanitize", "value");
 }
+function defineSort(schema) {
+  const unwrapped = unwrapSchema(schema);
+  return Object.freeze({
+    by(key, direction = "asc") {
+      return createDefineSortPlan(unwrapped, [{ key, direction }]);
+    }
+  });
+}
+function createDefineSortPlan(schema, criteria) {
+  const descriptor = resolveOrderingDescriptor(schema, criteria);
+  const stub = function aotSortArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  const fail = () => {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:sort",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "sort" }
+      }
+    },
+    compare: { value: fail },
+    inPlace: { value: fail },
+    by: {
+      value: (key, direction = "asc") => createDefineSortPlan(schema, [{ key, direction }])
+    },
+    thenBy: {
+      value: (key, direction = "asc") => createDefineSortPlan(schema, [...criteria, { key, direction }])
+    }
+  });
+  registerArtifact(stub, { kind: "sort-plan", schema, descriptor });
+  return stub;
+}
 function defineCqrsQuery(schema) {
   return wrapDefineCqrsQuery(cqrs.query(schema));
 }
@@ -20378,6 +20632,7 @@ var JIT = {
   format: format2,
   jsonSchema: jsonSchema2,
   mock: mock2,
+  sort: defineSort,
   cqrs: cqrs2,
   compare: Object.freeze({ equal: equal2, diff: diff2, hash: hash3 }),
   security: Object.freeze({ mask: mask2, sanitize: sanitize2 })

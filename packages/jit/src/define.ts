@@ -14,6 +14,7 @@ import type { JsonChunksOptions } from "./compiler/json-chunks.js";
 import type { ToJsonSchemaOptions } from "./compiler/json-schema/index.js";
 import type { Mask } from "./compiler/mask.js";
 import type { Mock } from "./compiler/mock.js";
+import { type OrderDirection, resolveOrderingDescriptor } from "./compiler/ordering.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
 import type { Sanitize } from "./compiler/sanitize.js";
 import type { Serialize } from "./compiler/serialize.js";
@@ -27,6 +28,7 @@ import { JITError } from "./errors/index.js";
 import type { CqrsInput, CqrsQuery, ParsedCqrsInput } from "./factories/cqrs.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
 import * as RuntimeJIT from "./factories/index.js";
+import type { SortBuilder, SortPlan } from "./factories/sort.js";
 import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
 
 type DefineFunction<TFunction extends (...args: never[]) => unknown> = AOTArtifact<TFunction> &
@@ -282,6 +284,56 @@ function sanitize<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): DefineFunction<Sanitize<ATS.TypeofSchema<TSchema>>> {
   return operationStub<TSchema, Sanitize<ATS.TypeofSchema<TSchema>>>(schema, "sanitize", "value");
+}
+
+function defineSort<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SortBuilder<TSchema> {
+  const unwrapped = unwrapSchema(schema);
+
+  return Object.freeze({
+    by(key: string, direction: OrderDirection = "asc") {
+      return createDefineSortPlan(unwrapped, [{ key, direction }]);
+    },
+  }) as SortBuilder<TSchema>;
+}
+
+function createDefineSortPlan<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  criteria: readonly { readonly key: string; readonly direction: OrderDirection }[]
+): SortPlan<TSchema> {
+  const descriptor = resolveOrderingDescriptor(schema, criteria);
+  const stub = function aotSortArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as SortPlan<TSchema>;
+  const fail = (): never => {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:sort",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "sort" },
+      } satisfies ArtifactDescriptor,
+    },
+    compare: { value: fail },
+    inPlace: { value: fail },
+    by: {
+      value: (key: string, direction: OrderDirection = "asc") => createDefineSortPlan(schema, [{ key, direction }]),
+    },
+    thenBy: {
+      value: (key: string, direction: OrderDirection = "asc") =>
+        createDefineSortPlan(schema, [...criteria, { key, direction }]),
+    },
+  });
+  registerArtifact(stub, { kind: "sort-plan", schema, descriptor });
+  return stub;
 }
 
 function defineCqrsQuery<TSchema extends ATS.AnyTypeSchema>(
@@ -706,6 +758,7 @@ export const JIT = {
   format,
   jsonSchema,
   mock,
+  sort: defineSort,
   cqrs,
   compare: Object.freeze({ equal, diff, hash }),
   security: Object.freeze({ mask, sanitize }),
@@ -723,6 +776,7 @@ export const JIT = {
   | "format"
   | "jsonSchema"
   | "mock"
+  | "sort"
   | "cqrs"
   | "compare"
   | "security"
@@ -739,6 +793,7 @@ export const JIT = {
   readonly format: typeof format;
   readonly jsonSchema: typeof jsonSchema;
   readonly mock: typeof mock;
+  readonly sort: typeof defineSort;
   readonly cqrs: typeof cqrs;
   readonly compare: {
     readonly equal: typeof equal;

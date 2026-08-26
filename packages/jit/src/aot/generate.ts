@@ -28,6 +28,7 @@ import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
+import { emitSortSource } from "../compiler/sort.js";
 import { emitUpdateSource } from "../compiler/update.js";
 import { canUseFastParse, emitValidator } from "../compiler/validate/emit-validate.js";
 import type * as ATS from "../core/ats/index.js";
@@ -367,6 +368,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
 
@@ -396,6 +398,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
+    if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -439,6 +442,16 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return `{ new (state: ${value}): ${instance}; ${factories.join(" ")} }`;
     }
     return "unknown";
+  }
+
+  function emitSortPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "sort-plan" }>,
+    type: string
+  ): EmittedBinding {
+    js.push(`${declaration} /*#__PURE__*/ ${emitSortSource(artifact.descriptor)};`);
+    return { binding, type };
   }
 
   /** Lowers a class descriptor into a plain class expression with no engine dependency. */
@@ -1848,6 +1861,22 @@ function queryPlanType(
     default:
       return `(value: ${input}) => unknown[]`;
   }
+}
+
+function sortPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "sort-plan" }>,
+  typeNames: TypeNames
+): string {
+  const schema = resolveWrappers(artifact.schema).base;
+  const row =
+    schema.type === TypeName.array
+      ? (schema.def as ATS.ElementDef).element
+      : schema.type === TypeName.runtimeType
+        ? (schema.def as ATS.RuntimeTypeDef).innerType
+        : schema;
+  const value = namedType(row, typeNames);
+
+  return `((value: readonly ${value}[]) => ${value}[]) & { readonly compare: (left: ${value}, right: ${value}) => number; readonly inPlace: (value: ${value}[]) => ${value}[] }`;
 }
 
 function moduleNameFromSource(sourceFile: string): string {

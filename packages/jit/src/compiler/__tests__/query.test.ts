@@ -297,8 +297,7 @@ describe("JIT compiler query", () => {
   out.sort((left, right) => {
     const leftValue = left.age;
     const rightValue = right.age;
-    if (leftValue === rightValue) return 0;
-    return leftValue < rightValue ? 1 : -1;
+    return rightValue - leftValue;
   });
   const projected = new Array(j);
   for (let i = 0; i < j; i++) {

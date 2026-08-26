@@ -96,6 +96,7 @@ export {
   validate,
 } from "./runtime-ops.js";
 export { codec } from "./serialize.js";
+export { type SortBuilder, type SortPlan, sort } from "./sort.js";
 export * from "./special/index.js";
 export { stream } from "./stream.js";
 export type { TransformBuilder, TransformFieldOps } from "./transform.js";
