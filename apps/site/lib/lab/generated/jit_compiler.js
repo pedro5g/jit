@@ -10028,7 +10028,7 @@ var COMPARE_OPERATORS = {
   lte: "lessThanOrEqual"
 };
 function buildQueryIR(target, plan, options = {}) {
-  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.composite ? buildCompositeAggregateQuery(target, plan, plan.composite) : plan.terminal ? buildTerminalQuery(target, plan, plan.terminal) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
+  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.composite ? plan.collector ? buildGroupedAggregateQuery(target, plan, plan.composite, plan.collector.key) : buildCompositeAggregateQuery(target, plan, plan.composite) : plan.terminal ? buildTerminalQuery(target, plan, plan.terminal) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
   return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
 }
 function buildArrayQuery(target, plan) {
@@ -10104,6 +10104,77 @@ function buildCollectedQuery(target, plan) {
 }
 var ACC = irVar("acc");
 var ACC_COUNT = irVar("n");
+var ACC_MAP = irVar("acc");
+var GROUP_KEY = irVar("key");
+function buildGroupedAggregateQuery(target, plan, composite, groupKey) {
+  const hasAverage = composite.fields.some((field) => field.op === "avg");
+  const counter = "__n";
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  const emptyRecord = call(loadProp(irVar("Object"), "create"), [literal(null)]);
+  const accumulator = hasAverage ? ACC_MAP : OUT2;
+  body.push({ kind: "assign", target: accumulator, expr: hasAverage ? construct("Map") : emptyRecord });
+  const initial = composite.fields.map((field) => ({
+    key: field.name,
+    value: field.op === "count" || field.op === "sum" || field.op === "avg" ? literal(0) : literal(void 0)
+  }));
+  const create = [
+    store(GROUP, objectLiteral(hasAverage ? [...initial, { key: counter, value: literal(0) }] : initial)),
+    hasAverage ? exprStmt(call(loadProp(ACC_MAP, "set"), [COLLECT_KEY, GROUP])) : store(loadIndex(OUT2, COLLECT_KEY), GROUP)
+  ];
+  const step = [
+    { kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, groupKey) },
+    letDecl(GROUP, hasAverage ? call(loadProp(ACC_MAP, "get"), [COLLECT_KEY]) : loadIndex(OUT2, COLLECT_KEY)),
+    { kind: "if", test: strictEqual(GROUP, literal(void 0)), then: create }
+  ];
+  if (hasAverage) step.push(store(loadProp(GROUP, counter), binary("add", loadProp(GROUP, counter), literal(1))));
+  for (const field of composite.fields) {
+    const slot = loadProp(GROUP, field.name);
+    const read = field.key === void 0 ? ITEM : loadProp(ITEM, field.key);
+    if (field.op === "count") step.push(store(slot, binary("add", slot, literal(1))));
+    else if (field.op === "sum" || field.op === "avg") step.push(store(slot, binary("add", slot, read)));
+    else {
+      step.push({
+        kind: "if",
+        test: {
+          kind: "nary",
+          op: "or",
+          operands: [
+            strictEqual(slot, literal(void 0)),
+            binary(field.op === "min" ? "lessThan" : "greaterThan", read, slot)
+          ]
+        },
+        then: [store(slot, read)]
+      });
+    }
+  }
+  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
+  if (!hasAverage) {
+    body.push({ kind: "return", value: OUT2 });
+    return body;
+  }
+  body.push(
+    { kind: "assign", target: OUT2, expr: emptyRecord },
+    forOf(ENTRY, ACC_MAP, [
+      { kind: "assign", target: GROUP_KEY, expr: loadIndex(ENTRY, literal(0)) },
+      { kind: "assign", target: GROUP, expr: loadIndex(ENTRY, literal(1)) },
+      store(
+        loadIndex(OUT2, GROUP_KEY),
+        objectLiteral(
+          composite.fields.map((field) => ({
+            key: field.name,
+            value: field.op === "avg" ? binary("divide", loadProp(GROUP, field.name), loadProp(GROUP, counter)) : loadProp(GROUP, field.name)
+          }))
+        )
+      )
+    ]),
+    { kind: "return", value: OUT2 }
+  );
+  return body;
+}
 function buildCompositeAggregateQuery(target, plan, composite) {
   const body = [];
   if (target.kind === "array") {
@@ -10694,8 +10765,8 @@ function validateQueryPlan(schema, plan) {
         "query aggregate({...}) cannot be combined with select/orderBy/scalar aggregates/terminals/delete/update in v1"
       );
     }
-    if (plan.collector) {
-      throw new JITError("INVALID_QUERY", "grouped aggregate({...}) is not supported in v1");
+    if (plan.collector && plan.collector.kind !== "groupBy") {
+      throw new JITError("INVALID_QUERY", "query aggregate({...}) cannot be combined with keyed in v1");
     }
     if (plan.composite.fields.length === 0) {
       throw new JITError("INVALID_QUERY", "query aggregate({...}) requires at least one field");
@@ -15289,7 +15360,9 @@ function eagerQueryResultType(artifact, typeNames) {
     const fields = composite.fields.map(
       (field) => `readonly ${JSON.stringify(field.name)}: ${field.op === "sum" || field.op === "count" ? "number" : "number | undefined"}`
     );
-    return `{ ${fields.join("; ")} }`;
+    const aggregates = `{ ${fields.join("; ")} }`;
+    const grouped = artifact.program.nodes.some((node) => node.kind === "groupBy");
+    return grouped ? `Record<PropertyKey, ${aggregates}>` : aggregates;
   }
   if (terminal) {
     if (terminal.op === "some" || terminal.op === "every") return "boolean";
@@ -18074,7 +18147,11 @@ function toStandardStep(node, bindings) {
         kind: "aggregate:composite",
         fields: Object.freeze(
           node.fields.map(
-            (field) => Object.freeze({ name: field.name, operation: field.op, ...field.key === void 0 ? {} : { key: field.key } })
+            (field) => Object.freeze({
+              name: field.name,
+              operation: field.op,
+              ...field.key === void 0 ? {} : { key: field.key }
+            })
           )
         )
       });

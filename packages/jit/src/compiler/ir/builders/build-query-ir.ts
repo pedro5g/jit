@@ -74,7 +74,9 @@ export function buildQueryIR(
   const body = plan.mutation
     ? buildMutationQuery(target, plan)
     : plan.composite
-      ? buildCompositeAggregateQuery(target, plan, plan.composite)
+      ? plan.collector
+        ? buildGroupedAggregateQuery(target, plan, plan.composite, plan.collector.key)
+        : buildCompositeAggregateQuery(target, plan, plan.composite)
       : plan.terminal
         ? buildTerminalQuery(target, plan, plan.terminal)
         : plan.aggregate
@@ -173,6 +175,107 @@ function buildCollectedQuery(target: QueryTarget, plan: OptimizedQueryPlan): rea
 
 const ACC = irVar("acc");
 const ACC_COUNT = irVar("n");
+
+const ACC_MAP = irVar("acc");
+const GROUP_KEY = irVar("key");
+
+/**
+ * Emits a hash aggregate: one accumulator per group, never a group array.
+ *
+ * With no average the accumulator is already the result, so the record is
+ * filled directly. An average needs a per-group row count, so accumulation
+ * goes through a Map — whose iteration yields key and accumulator together —
+ * and the record is written once at the end.
+ */
+function buildGroupedAggregateQuery(
+  target: QueryTarget,
+  plan: OptimizedQueryPlan,
+  composite: QueryCompositeAggregateNode,
+  groupKey: string
+): readonly IRNode[] {
+  const hasAverage = composite.fields.some((field) => field.op === "avg");
+  const counter = "__n";
+  const body: IRNode[] = [];
+
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+
+  const emptyRecord = call(loadProp(irVar("Object"), "create"), [literal(null)]);
+  const accumulator = hasAverage ? ACC_MAP : OUT;
+
+  body.push({ kind: "assign", target: accumulator, expr: hasAverage ? construct("Map") : emptyRecord });
+
+  const initial = composite.fields.map((field) => ({
+    key: field.name,
+    value: field.op === "count" || field.op === "sum" || field.op === "avg" ? literal(0) : literal(undefined),
+  }));
+  const create: IRNode[] = [
+    store(GROUP, objectLiteral(hasAverage ? [...initial, { key: counter, value: literal(0) }] : initial)),
+    hasAverage
+      ? exprStmt(call(loadProp(ACC_MAP, "set"), [COLLECT_KEY, GROUP]))
+      : store(loadIndex(OUT, COLLECT_KEY), GROUP),
+  ];
+  const step: IRNode[] = [
+    { kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, groupKey) },
+    letDecl(GROUP, hasAverage ? call(loadProp(ACC_MAP, "get"), [COLLECT_KEY]) : loadIndex(OUT, COLLECT_KEY)),
+    { kind: "if", test: strictEqual(GROUP, literal(undefined)), then: create },
+  ];
+
+  if (hasAverage) step.push(store(loadProp(GROUP, counter), binary("add", loadProp(GROUP, counter), literal(1))));
+  for (const field of composite.fields) {
+    const slot = loadProp(GROUP, field.name);
+    const read = field.key === undefined ? ITEM : loadProp(ITEM, field.key);
+
+    if (field.op === "count") step.push(store(slot, binary("add", slot, literal(1))));
+    else if (field.op === "sum" || field.op === "avg") step.push(store(slot, binary("add", slot, read)));
+    else {
+      step.push({
+        kind: "if",
+        test: {
+          kind: "nary",
+          op: "or",
+          operands: [
+            strictEqual(slot, literal(undefined)),
+            binary(field.op === "min" ? "lessThan" : "greaterThan", read, slot),
+          ],
+        },
+        then: [store(slot, read)],
+      });
+    }
+  }
+  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
+
+  if (!hasAverage) {
+    body.push({ kind: "return", value: OUT });
+    return body;
+  }
+
+  // One pass over the groups — not the rows — resolves the averages and drops
+  // the internal counter from the shape that is handed back.
+  body.push(
+    { kind: "assign", target: OUT, expr: emptyRecord },
+    forOf(ENTRY, ACC_MAP, [
+      { kind: "assign", target: GROUP_KEY, expr: loadIndex(ENTRY, literal(0)) },
+      { kind: "assign", target: GROUP, expr: loadIndex(ENTRY, literal(1)) },
+      store(
+        loadIndex(OUT, GROUP_KEY),
+        objectLiteral(
+          composite.fields.map((field) => ({
+            key: field.name,
+            value:
+              field.op === "avg"
+                ? binary("divide", loadProp(GROUP, field.name), loadProp(GROUP, counter))
+                : loadProp(GROUP, field.name),
+          }))
+        )
+      ),
+    ]),
+    { kind: "return", value: OUT }
+  );
+  return body;
+}
 
 /**
  * Emits every requested reduction into one pass. Each field owns its own

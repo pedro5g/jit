@@ -1928,8 +1928,11 @@ function eagerQueryResultType(
       (field) =>
         `readonly ${JSON.stringify(field.name)}: ${field.op === "sum" || field.op === "count" ? "number" : "number | undefined"}`
     );
+    const aggregates = `{ ${fields.join("; ")} }`;
+    // A grouped composite keeps the record shape and reduces the rows under it.
+    const grouped = (artifact.program.nodes as readonly QueryNode[]).some((node) => node.kind === "groupBy");
 
-    return `{ ${fields.join("; ")} }`;
+    return grouped ? `Record<PropertyKey, ${aggregates}>` : aggregates;
   }
 
   if (terminal) {

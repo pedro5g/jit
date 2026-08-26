@@ -365,8 +365,10 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
         "query aggregate({...}) cannot be combined with select/orderBy/scalar aggregates/terminals/delete/update in v1"
       );
     }
-    if (plan.collector) {
-      throw new JITError("INVALID_QUERY", "grouped aggregate({...}) is not supported in v1");
+    // `groupBy` gives every group its own accumulator; `keyed` produces one row
+    // per key, which leaves nothing to reduce.
+    if (plan.collector && plan.collector.kind !== "groupBy") {
+      throw new JITError("INVALID_QUERY", "query aggregate({...}) cannot be combined with keyed in v1");
     }
     if (plan.composite.fields.length === 0) {
       throw new JITError("INVALID_QUERY", "query aggregate({...}) requires at least one field");

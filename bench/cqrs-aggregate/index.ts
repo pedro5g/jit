@@ -128,4 +128,86 @@ registerScenario({
   ],
 });
 
+// Grouped: the cost that matters is the group arrays a hash aggregate avoids.
+const perCustomer = JIT.cqrs
+  .query(Orders)
+  .groupBy("customerId")
+  .aggregate({
+    count: JIT.cqrs.count(),
+    total: JIT.cqrs.sum("total"),
+    lowest: JIT.cqrs.min("total"),
+  });
+const perCustomerAvg = JIT.cqrs
+  .query(Orders)
+  .groupBy("customerId")
+  .aggregate({
+    count: JIT.cqrs.count(),
+    average: JIT.cqrs.avg("total"),
+  });
+const grouped = JIT.cqrs.query(Orders).groupBy("customerId");
+
+registerScenario({
+  op: "cqrs-aggregate",
+  name: "grouped / 10000 rows, 250 groups",
+  args: [rows],
+  jit: perCustomer,
+  competitors: [
+    {
+      name: "JIT groupBy then reduce",
+      fn: (value: Order[]) =>
+        Object.fromEntries(
+          Object.entries(grouped(value)).map(([key, group]) => [
+            key,
+            {
+              count: group.length,
+              total: group.reduce((sum, order) => sum + order.total, 0),
+              lowest: group.reduce<number | undefined>(
+                (low, order) => (low === undefined || order.total < low ? order.total : low),
+                undefined
+              ),
+            },
+          ])
+        ),
+    },
+    {
+      name: "handwritten accumulator map",
+      fn: (value: Order[]) => {
+        const out: Record<string, { count: number; total: number; lowest: number | undefined }> = Object.create(null);
+
+        for (let i = 0, len = value.length; i < len; i++) {
+          const row = value[i];
+          let group = out[row.customerId];
+          if (group === undefined) {
+            group = { count: 0, total: 0, lowest: undefined };
+            out[row.customerId] = group;
+          }
+          group.count++;
+          group.total += row.total;
+          if (group.lowest === undefined || row.total < group.lowest) group.lowest = row.total;
+        }
+        return out;
+      },
+    },
+  ],
+});
+
+registerScenario({
+  op: "cqrs-aggregate",
+  name: "grouped with average / 10000 rows, 250 groups",
+  args: [rows],
+  jit: perCustomerAvg,
+  competitors: [
+    {
+      name: "JIT groupBy then reduce",
+      fn: (value: Order[]) =>
+        Object.fromEntries(
+          Object.entries(grouped(value)).map(([key, group]) => [
+            key,
+            { count: group.length, average: group.reduce((sum, order) => sum + order.total, 0) / group.length },
+          ])
+        ),
+    },
+  ],
+});
+
 await runSuite("cqrs-aggregate");

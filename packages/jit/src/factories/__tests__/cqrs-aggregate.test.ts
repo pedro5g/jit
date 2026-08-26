@@ -147,14 +147,102 @@ describe("CQRS composite aggregate", () => {
     });
   });
 
+  it("gives every group its own accumulator, never a group array", () => {
+    const perCustomer = JIT.cqrs
+      .query(Orders)
+      .groupBy("customerId")
+      .aggregate({
+        count: JIT.cqrs.count(),
+        total: JIT.cqrs.sum("total"),
+        lowest: JIT.cqrs.min("total"),
+      });
+
+    expect(perCustomer(rows)).toEqual({
+      c1: { count: 2, total: 150, lowest: 50 },
+      c2: { count: 1, total: 25, lowest: 25 },
+    });
+    expectTypeOf(perCustomer(rows)).toEqualTypeOf<
+      Record<string, { readonly count: number; readonly total: number; readonly lowest: number | undefined }>
+    >();
+
+    const source = sourceOf(perCustomer);
+
+    // One pass, and the accumulator is written straight into the record.
+    expect(source.match(/for \(/g)).toHaveLength(1);
+    expect(source).toContain("out[collectKey] = group;");
+    expect(source).toContain("group = {");
+    expect(source).not.toContain("group = [");
+    expect(source).not.toContain("new Map()");
+    expect(source).not.toContain(".push(");
+  });
+
+  it("resolves a grouped average over the groups, not the rows", () => {
+    const perCustomer = JIT.cqrs
+      .query(Orders)
+      .groupBy("customerId")
+      .aggregate({
+        count: JIT.cqrs.count(),
+        average: JIT.cqrs.avg("total"),
+      });
+
+    expect(perCustomer(rows)).toEqual({
+      c1: { count: 2, average: 75 },
+      c2: { count: 1, average: 25 },
+    });
+    // The internal row counter never reaches the result.
+    expect(Object.keys(perCustomer(rows).c1)).toEqual(["count", "average"]);
+
+    const source = sourceOf(perCustomer);
+
+    // Two loops: one over the rows, one over the groups.
+    expect(source.match(/for \(/g)).toHaveLength(2);
+    expect(source).toContain("for (const entry of acc)");
+    expect(source).not.toContain("group = [");
+  });
+
+  it("filters before grouping, and drops groups with no matching row", () => {
+    const perCustomer = JIT.cqrs
+      .query(Orders)
+      .where((query) => query.gt("total", 30))
+      .groupBy("customerId")
+      .aggregate({ count: JIT.cqrs.count(), average: JIT.cqrs.avg("total") });
+
+    expect(perCustomer(rows)).toEqual({ c1: { count: 2, average: 75 } });
+    expect(Object.keys(perCustomer(rows))).not.toContain("c2");
+  });
+
+  it("agrees with grouping into arrays and reducing them", () => {
+    const grouped = JIT.cqrs.query(Orders).groupBy("customerId");
+    const aggregated = JIT.cqrs
+      .query(Orders)
+      .groupBy("customerId")
+      .aggregate({
+        count: JIT.cqrs.count(),
+        total: JIT.cqrs.sum("total"),
+        average: JIT.cqrs.avg("total"),
+      });
+    const byHand = Object.fromEntries(
+      Object.entries(grouped(rows)).map(([key, group]) => [
+        key,
+        {
+          count: group.length,
+          total: group.reduce((sum, order) => sum + order.total, 0),
+          average: group.reduce((sum, order) => sum + order.total, 0) / group.length,
+        },
+      ])
+    );
+
+    expect(aggregated(rows)).toEqual(byHand);
+  });
+
   it("rejects the chains a single reduction cannot answer", () => {
     const count = { count: JIT.cqrs.count() };
 
     expect(() => JIT.cqrs.query(Orders).orderBy("total").aggregate(count)(rows)).toThrow(/cannot be combined with/i);
     expect(() => JIT.cqrs.query(Orders).select("total").aggregate(count)(rows)).toThrow(/cannot be combined with/i);
     expect(() => JIT.cqrs.query(Orders).aggregate(count).first()(rows)).toThrow(/cannot be combined with/i);
-    expect(() => JIT.cqrs.query(Orders).groupBy("customerId").aggregate(count)(rows)).toThrow(
-      /grouped aggregate.*not supported/i
+    expect(() => JIT.cqrs.query(Orders).keyed("customerId").aggregate(count)(rows)).toThrow(
+      /cannot be combined with keyed/i
     );
     expect(() => JIT.cqrs.query(Orders).aggregate({})(rows)).toThrow(/at least one field/i);
     expect(() => JIT.cqrs.query(Orders).aggregate({ missing: JIT.cqrs.sum("nope") })(rows)).toThrow(/unknown key/i);

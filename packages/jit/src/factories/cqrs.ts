@@ -178,6 +178,9 @@ type Row<TSchema extends ATS.AnyTypeSchema> = ATS.TypeofSchema<TSchema>;
 type CqrsAggregateResult<TSpec> = {
   readonly [TKey in keyof TSpec]: TSpec[TKey] extends CqrsAggregateSpec<infer TResult> ? TResult : never;
 };
+/** A grouped query keeps its record shape and replaces the rows per key. */
+type CqrsAggregateOutput<TResult, TAggregates> =
+  TResult extends Record<infer TKey extends PropertyKey, unknown[]> ? Record<TKey, TAggregates> : TAggregates;
 type CqrsKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof Row<TSchema>, string>;
 type CqrsNumericKey<TSchema extends ATS.AnyTypeSchema> = {
   [TKey in CqrsKey<TSchema>]: Row<TSchema>[TKey] extends number ? TKey : never;
@@ -255,7 +258,7 @@ interface CqrsQueryOps<
    */
   aggregate<const TSpec extends Readonly<Record<string, CqrsAggregateSpec<unknown>>>>(
     spec: TSpec
-  ): CqrsQuery<TSchema, TOutput, CqrsAggregateResult<TSpec>, TParams>;
+  ): CqrsQuery<TSchema, TOutput, CqrsAggregateOutput<TResult, CqrsAggregateResult<TSpec>>, TParams>;
   /**
    * Returns the first matching row, or `undefined`. The answer comes from
    * inside the loop, so nothing is collected and the scan stops there.

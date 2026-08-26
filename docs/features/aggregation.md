@@ -56,6 +56,24 @@ Result names are yours. The result type follows the spec: `count` and `sum`
 are `number`, and `avg`, `min` and `max` are `number | undefined`, because an
 empty pass has no answer for them.
 
+### Grouped
+
+```ts
+const perCustomer = JIT.cqrs
+  .query(Orders)
+  .groupBy("customerId")
+  .aggregate({
+    count: JIT.cqrs.count(),
+    total: JIT.cqrs.sum("total"),
+    average: JIT.cqrs.avg("total"),
+  });
+
+perCustomer(orders); // { "c1": { count, total, average }, ... }
+```
+
+Grouping keeps the record shape it already had and replaces the rows under each
+key with the reductions. No group array is ever built.
+
 ## 4. Semantics
 
 - Every field sees the same rows: the filters and `unique` run first, once.
@@ -66,8 +84,13 @@ empty pass has no answer for them.
 - Repeating a result name is rejected, as is a non-`count` field with no key,
   or a key the schema does not declare.
 - A composite reduces the whole pass to one answer, so it is rejected next to
-  `select`, `orderBy`, scalar aggregates, terminals and mutations. Grouped
-  aggregation is not supported yet and says so explicitly.
+  `select`, `orderBy`, scalar aggregates, terminals and mutations.
+- `groupBy` is the one collector it composes with: each group gets its own
+  accumulator. `keyed` is rejected — it produces one row per key, which leaves
+  nothing to reduce.
+- A group only exists if a row reached it, so a grouped `avg` never divides by
+  zero and a grouped `min` is never `undefined`. The ungrouped guarantees still
+  apply to the whole pass being empty.
 
 ## 5. Compilation
 
@@ -113,6 +136,46 @@ function query(value) {
 One loop. No callbacks, no intermediate array, no second reduce pass, and the
 division that would have been guarded per row happens once.
 
+### Grouped
+
+With no average, the accumulator is already the result and is written straight
+into the record:
+
+```js
+const out = Object.create(null);
+for (let i = 0; i < len; i++) {
+  const item = value[i];
+  const collectKey = item.customerId;
+  let group = out[collectKey];
+  if (group === undefined) {
+    group = { "count": 0, "total": 0, "lowest": undefined };
+    out[collectKey] = group;
+  }
+  group.count = (group.count + 1);
+  group.total = (group.total + item.total);
+  if ((group.lowest === undefined) || (item.total < group.lowest)) {
+    group.lowest = item.total;
+  }
+}
+return out;
+```
+
+An average needs a per-group row count, so accumulation goes through a `Map` —
+whose iteration yields key and accumulator together — and one pass **over the
+groups**, not the rows, resolves the divisions and drops the internal counter:
+
+```js
+const out = Object.create(null);
+for (const entry of acc) {
+  const key = entry[0];
+  const group = entry[1];
+  out[key] = { "count": group.count, "average": (group.average / group.__n) };
+}
+return out;
+```
+
+There is no `Map<key, Order[]>` and no second pass over rows in either shape.
+
 ## 7. Allocation model
 
 | Allocation                  | Count |
@@ -122,14 +185,29 @@ division that would have been guarded per row happens once.
 | intermediate arrays         | 0     |
 | per-row closures or objects | 0     |
 
-Measured at 436 bytes per call over 10 000 rows against 251.4 kB for the
+Measured at 427 bytes per call over 10 000 rows against 251.4 kB for the
 idiomatic `filter` + `reduce` chain, whose intermediate array is the difference.
+
+Grouped, over 10 000 rows in 250 groups:
+
+| Allocation                | Hash aggregate      | `groupBy` then reduce |
+| ------------------------- | ------------------- | --------------------- |
+| accumulator per group     | 1                   | 1 (the result)        |
+| **array per group**       | **0**               | **1**                 |
+| rows copied into groups   | 0                   | 10 000                |
+| heap per call             | 36.8 kB             | 298.7 kB              |
+
+An average adds one `Map` and one result object per group — 83.5 kB — which is
+still a third of what materializing the groups costs.
 
 ## 8. Complexity
 
 ```text
 k reductions, separately:   k passes, O(k·n)
 composite:                  1 pass,  O(n)
+
+grouped, materialized:      O(n) to group + O(n) to reduce, plus g arrays
+hash aggregate:             O(n), plus O(g) only when an average is asked for
 ```
 
 The per-row work still grows with `k`; what disappears is re-reading the
@@ -163,10 +241,10 @@ Captured     2026-08-26
 
 | Approach                        | Five reductions | Heap/call | Two reductions |
 | ------------------------------- | --------------: | --------: | -------------: |
-| idiomatic `filter` + `reduce`   |       325.55 µs |  251.4 kB |              — |
-| separate JIT scalar aggregates  |        70.93 µs |     414 B |       24.52 µs |
-| **`aggregate({...})`**          |    **25.24 µs** | **436 B** |   **13.56 µs** |
-| handwritten one-pass loop       |        25.75 µs |     314 B |       14.04 µs |
+| idiomatic `filter` + `reduce`   |       325.08 µs |  251.4 kB |              — |
+| separate JIT scalar aggregates  |        69.40 µs |     428 B |       24.50 µs |
+| **`aggregate({...})`**          |    **25.22 µs** | **427 B** |   **13.65 µs** |
+| handwritten one-pass loop       |        25.17 µs |     291 B |       13.78 µs |
 
 Against the scalar aggregates it replaces, the composite is 2.8x faster at five
 reductions and 1.8x at two — close to the pass count it removes. Against the
@@ -176,10 +254,26 @@ materializes the filtered array before reducing it four more times.
 It is level with a handwritten one-pass loop, which is the ceiling: the
 composite emits that loop.
 
+### Grouped, 10 000 rows in 250 groups
+
+| Approach                     |      Time | Heap/call |
+| ---------------------------- | --------: | --------: |
+| `groupBy` then reduce        | 216.07 µs |  298.7 kB |
+| **grouped `aggregate`**      |  **99.27 µs** | **36.8 kB** |
+| handwritten accumulator map  | 102.63 µs |   36.7 kB |
+
+2.2x faster and 8.1x less heap than grouping into arrays first, and level with
+the accumulator map written by hand. With an average the same query is
+148.51 µs and 83.5 kB against 201.63 µs and 301.6 kB — the `Map` and the
+finalization pass are what that costs.
+
 ## 12. Tradeoffs
 
 - Two reductions save less than five. One reduction should stay a scalar
   aggregate — there is no pass to remove.
+- A grouped average is measurably more expensive than the other reductions: it
+  routes accumulation through a `Map` and adds a pass over the groups. Ask for
+  `count` and `sum` and divide yourself if that pass matters.
 - Reduction keys are strings on the factory (`JIT.cqrs.sum("total")`) and are
   checked when the query compiles, not where the factory is called. An unknown
   key is a clear compile-time error rather than an editor error.
@@ -195,9 +289,8 @@ composite emits that loop.
 
 ## 14. Non-goals
 
-- No grouped aggregation yet. `groupBy(...).aggregate({...})` is rejected
-  explicitly rather than silently materializing a group array per key; it is
-  the next milestone.
+- No grouping by more than one key, and no `keyed` collector — one row per key
+  leaves nothing to reduce.
 - No user-defined reductions. A callback per row is exactly the cost this
   operation exists to remove.
 - No distinct-within-aggregate (`countDistinct`). `unique` before the aggregate

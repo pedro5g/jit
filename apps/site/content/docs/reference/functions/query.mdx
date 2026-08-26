@@ -107,7 +107,36 @@ and `.max(key)`. `count` and `sum` are `number`; `avg`, `min` and `max` are
 Declaration order is the result key order and the emission order, so the same
 declaration always produces the same source. A composite reduces the whole pass
 to one answer, so it cannot be combined with `select`, `orderBy`, scalar
-aggregates, terminals or mutations. Grouped aggregation is not supported yet.
+aggregates, terminals or mutations.
+
+### Grouped
+
+`groupBy` is the one collector it composes with. Each group gets its own
+accumulator and no group array is ever built.
+
+```ts
+const Order = JIT.object({ customerId: JIT.string(), total: JIT.number() });
+
+const perCustomer = JIT.cqrs
+  .query(JIT.array(Order))
+  .groupBy("customerId")
+  .aggregate({ count: JIT.cqrs.count(), total: JIT.cqrs.sum("total") });
+
+console.log(
+  perCustomer([
+    { customerId: "c1", total: 100 },
+    { customerId: "c1", total: 50 },
+    { customerId: "c2", total: 25 },
+  ])
+);
+```
+
+Measured on 10 000 rows in 250 groups: 99.27 µs and 36.8 kB against 216.07 µs
+and 298.7 kB for grouping into arrays and reducing them. A grouped average
+costs more — it routes accumulation through a `Map` and adds one pass over the
+groups — so ask for `count` and `sum` if that pass matters.
+
+`keyed` is rejected: one row per key leaves nothing to reduce.
 
 ## Terminal sinks
 
