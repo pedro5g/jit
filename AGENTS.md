@@ -132,8 +132,10 @@ Legacy schemas may still use fields such as `item`, `props`, `schemas`, `literal
   them tree-shakeable and do not add per-instance infrastructure for methods.
 - `valueObject`, `entity`, `aggregateRoot`, and `domainEvent` reuse Runtime
   Class machinery. Aggregates keep controlled mutation and an ordered event
-  buffer; readonly schema fields stay out of patches. These DDD presets remain
-  top-level `JIT` factories and preserve canonical `create()`/`hydrate()` names.
+  buffer; readonly schema fields stay out of patches. These DDD presets live
+  under the `JIT.ddd` namespace and preserve canonical `create()`/`hydrate()`
+  names. `JIT.class` stays top level: it is the primitive the presets
+  configure, and non-domain features build on it directly.
   Domain-event `create()` accepts payload input, while direct construction and
   hydration use the complete event envelope. Rename factories only through an
   explicit `.factories(...)` call.

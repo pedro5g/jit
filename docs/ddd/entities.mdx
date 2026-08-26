@@ -3,7 +3,7 @@
 Entities are compared by stable identity rather than by every field:
 
 ```ts
-const UserBase = JIT.entity(
+const UserBase = JIT.ddd.entity(
   JIT.object({ id: JIT.string().readonly(), name: JIT.string() }),
   { id: "id" },
 );

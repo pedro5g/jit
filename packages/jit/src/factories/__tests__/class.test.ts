@@ -8,9 +8,9 @@ describe("JIT.class", () => {
   });
 
   it("exposes DDD presets at the top level with canonical factories", () => {
-    const User = JIT.entity(JIT.object({ id: JIT.string() }), { id: "id" });
-    const Order = JIT.aggregateRoot(JIT.object({ id: JIT.string() }), { id: "id" });
-    const Registered = JIT.domainEvent("user.registered", {
+    const User = JIT.ddd.entity(JIT.object({ id: JIT.string() }), { id: "id" });
+    const Order = JIT.ddd.aggregateRoot(JIT.object({ id: JIT.string() }), { id: "id" });
+    const Registered = JIT.ddd.domainEvent("user.registered", {
       payload: JIT.object({ id: JIT.string() }),
       version: 1,
     });
@@ -156,7 +156,7 @@ describe("JIT.class", () => {
   });
 
   it("preserves value-object capabilities through an abstract subclass", () => {
-    const MoneyBase = JIT.valueObject.abstract(
+    const MoneyBase = JIT.ddd.valueObject.abstract(
       JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) })
     );
     class Money extends MoneyBase {}
@@ -188,9 +188,11 @@ describe("JIT.class", () => {
   });
 
   it("touches a configured timestamp once for an effective aggregate mutation", () => {
-    const OrderBase = JIT.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), updatedAt: JIT.date() }), {
-      id: "id",
-    }).timestamps({ updatedAt: "updatedAt" });
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), updatedAt: JIT.date() }), {
+        id: "id",
+      })
+      .timestamps({ updatedAt: "updatedAt" });
     class Order extends OrderBase {
       confirm() {
         this.update({ status: "confirmed" });
@@ -205,10 +207,10 @@ describe("JIT.class", () => {
   });
 
   it("combines soft-delete and timestamp metadata in one clock read", () => {
-    const OrderBase = JIT.aggregateRoot(
-      JIT.object({ id: JIT.string(), updatedAt: JIT.date(), deletedAt: JIT.date().nullable() }),
-      { id: "id" }
-    )
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), updatedAt: JIT.date(), deletedAt: JIT.date().nullable() }), {
+        id: "id",
+      })
       .timestamps({ updatedAt: "updatedAt" })
       .softDelete({ field: "deletedAt" });
     class Order extends OrderBase {}
@@ -222,9 +224,11 @@ describe("JIT.class", () => {
   });
 
   it("increments a schema-bound version only after an effective mutation", () => {
-    const OrderBase = JIT.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), version: JIT.int() }), {
-      id: "id",
-    }).versioned({ field: "version" });
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), version: JIT.int() }), {
+        id: "id",
+      })
+      .versioned({ field: "version" });
     class Order extends OrderBase {
       confirm() {
         this.update({ status: "confirmed" });
@@ -303,7 +307,7 @@ describe("JIT.class", () => {
   });
 
   it("preserves readonly fields when default is the outer wrapper of aggregate state", () => {
-    const OrderBase = JIT.aggregateRoot(
+    const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({
         id: JIT.string().readonly().default("o_1"),
         status: JIT.string(),
@@ -329,7 +333,7 @@ describe("JIT.class", () => {
   });
 
   it("builds frozen value objects from the same class capabilities", () => {
-    const Money = JIT.valueObject(
+    const Money = JIT.ddd.valueObject(
       JIT.object({
         amount: JIT.number(),
         currency: JIT.enum(["BRL", "USD"] as const),
@@ -343,7 +347,7 @@ describe("JIT.class", () => {
   });
 
   it("builds abstract entities with identity separate from structural equality", () => {
-    const UserBase = JIT.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
+    const UserBase = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
 
     class User extends UserBase {}
 
@@ -351,12 +355,12 @@ describe("JIT.class", () => {
     expect(() => UserBase.create({ id: "u_1", name: "Ada" })).toThrow(/abstract JIT class/i);
     if (Object.is(1, 2)) {
       // @ts-expect-error identity must name an existing schema field
-      JIT.entity(JIT.object({ id: JIT.string() }), { id: "missing" });
+      JIT.ddd.entity(JIT.object({ id: JIT.string() }), { id: "missing" });
     }
   });
 
   it("keeps aggregate events ordered and applies updates through static assignments", () => {
-    const OrderBase = JIT.aggregateRoot(
+    const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({
         id: JIT.string().readonly(),
         status: JIT.enum(["draft", "confirmed"] as const),
@@ -391,7 +395,7 @@ describe("JIT.class", () => {
   });
 
   it("keeps compiled structural sharing for composite aggregate fields", () => {
-    const OrderBase = JIT.aggregateRoot(
+    const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({
         id: JIT.string().readonly(),
         shipping: JIT.object({ city: JIT.string(), country: JIT.string() }),
@@ -413,7 +417,7 @@ describe("JIT.class", () => {
   });
 
   it("commits aggregate events in order and retains them when publication fails", async () => {
-    const OrderBase = JIT.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string() }), { id: "id" });
+    const OrderBase = JIT.ddd.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string() }), { id: "id" });
     class Order extends OrderBase {
       record(event: unknown) {
         this.raise(event);
@@ -438,19 +442,19 @@ describe("JIT.class", () => {
   });
 
   it("preserves the exact order of typed domain-event history", () => {
-    const OrderCreated = JIT.domainEvent("order.created", {
+    const OrderCreated = JIT.ddd.domainEvent("order.created", {
       version: 1,
       payload: JIT.object({ orderId: JIT.string() }),
     });
-    const ItemAdded = JIT.domainEvent("order.item-added", {
+    const ItemAdded = JIT.ddd.domainEvent("order.item-added", {
       version: 1,
       payload: JIT.object({ orderId: JIT.string(), sku: JIT.string() }),
     });
-    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+    const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
       version: 1,
       payload: JIT.object({ orderId: JIT.string() }),
     });
-    const OrderBase = JIT.aggregateRoot(JIT.object({ id: JIT.string().readonly() }), { id: "id" });
+    const OrderBase = JIT.ddd.aggregateRoot(JIT.object({ id: JIT.string().readonly() }), { id: "id" });
     class Order extends OrderBase {
       recordHistory() {
         this.raise(OrderCreated.create({ orderId: this.id }));
@@ -476,7 +480,7 @@ describe("JIT.class", () => {
   });
 
   it("creates immutable, versioned domain events from payload input", () => {
-    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+    const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
       version: 1,
       payload: JIT.object({ orderId: JIT.string().min(1) }),
     });
@@ -514,5 +518,23 @@ describe("JIT.class", () => {
       // @ts-expect-error direct construction receives the event envelope, not only its payload
       new OrderConfirmed({ orderId: "o_1" });
     }
+  });
+});
+
+describe("JIT.ddd", () => {
+  it("is the only place the domain presets are reachable from", () => {
+    expect(Object.keys(JIT.ddd)).toEqual(["valueObject", "entity", "aggregateRoot", "domainEvent"]);
+
+    // The presets are a vocabulary, not schema factories: they do not sit next
+    // to JIT.string() where someone reaching for an entity has to scan past them.
+    for (const preset of ["valueObject", "entity", "aggregateRoot", "domainEvent"] as const) {
+      expect(JIT).not.toHaveProperty(preset);
+      expect(typeof JIT.ddd[preset]).toBe("function");
+    }
+    // The primitive the presets configure stays top level: DTOs, JSON
+    // pipelines and AOT class artifacts build on it with no domain meaning.
+    expect(typeof JIT.class).toBe("function");
+    // Statics survive the move.
+    expect(typeof JIT.ddd.valueObject.abstract).toBe("function");
   });
 });

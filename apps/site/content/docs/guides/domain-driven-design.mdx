@@ -17,14 +17,14 @@ Value objects are immutable structural values. Entities use an identity key.
 Aggregate roots add a controlled state transition and an ordered event buffer.
 
 ```ts
-const Money = JIT.valueObject(
+const Money = JIT.ddd.valueObject(
   JIT.object({
     amount: JIT.number().positive(),
     currency: JIT.enum(["BRL", "USD"] as const),
   }),
 );
 
-const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
   version: 1,
   payload: JIT.object({
     orderId: JIT.string(),
@@ -32,7 +32,7 @@ const OrderConfirmed = JIT.domainEvent("order.confirmed", {
   }),
 });
 
-const OrderBase = JIT.aggregateRoot(
+const OrderBase = JIT.ddd.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
     status: JIT.enum(["draft", "confirmed"] as const),

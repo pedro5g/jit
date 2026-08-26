@@ -15990,7 +15990,6 @@ var factories_exports = {};
 __export(factories_exports, {
   KeyedWatchedList: () => KeyedWatchedList,
   WatchedList: () => WatchedList,
-  aggregateRoot: () => aggregateRoot,
   any: () => any,
   array: () => array,
   bigint: () => bigint2,
@@ -16006,12 +16005,11 @@ __export(factories_exports, {
   cqrs: () => cqrs,
   custom: () => custom,
   date: () => date2,
+  ddd: () => ddd,
   default: () => defaultTo2,
   diff: () => diff,
   discriminatedUnion: () => discriminatedUnion,
-  domainEvent: () => domainEvent,
   dto: () => dto,
-  entity: () => entity,
   enum: () => nativeEnum,
   equal: () => equal,
   file: () => file,
@@ -16071,7 +16069,6 @@ __export(factories_exports, {
   unknown: () => unknown,
   update: () => update,
   validate: () => validate,
-  valueObject: () => valueObject,
   void: () => voidType,
   watch: () => watch,
   watchedList: () => watchedList,
@@ -17535,6 +17532,18 @@ function capability(kind, install) {
 function definePrototype(prototype, key, value) {
   Object.defineProperty(prototype, key, { configurable: false, enumerable: false, value, writable: false });
 }
+
+// ../../packages/jit/src/factories/ddd.ts
+var ddd = Object.freeze({
+  /** Structural equality, hashing and immutability. `.abstract` for a base. */
+  valueObject,
+  /** Identity semantics; abstract, and meant to be subclassed. */
+  entity,
+  /** Abstract entity with controlled mutation and an ordered event buffer. */
+  aggregateRoot,
+  /** Immutable, versioned event; `create()` takes the payload. */
+  domainEvent
+});
 
 // ../../packages/jit/src/factories/collection/collection.ts
 function array(element) {

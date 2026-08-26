@@ -342,7 +342,7 @@ describe("JIT AOT generate", () => {
   });
 
   it("should lower runtime value objects as import-free classes", async () => {
-    const Money = JIT.valueObject(
+    const Money = JIT.ddd.valueObject(
       JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) }).hash("ordered")
     );
     const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
@@ -378,7 +378,7 @@ describe("JIT AOT generate", () => {
   });
 
   it("should preserve abstract value-object behavior in AOT subclasses", async () => {
-    const MoneyBase = JIT.valueObject.abstract(
+    const MoneyBase = JIT.ddd.valueObject.abstract(
       JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) })
     );
     const result = AOT.generate({ artifacts: { MoneyBase }, outDir });
@@ -538,7 +538,7 @@ describe("JIT AOT generate", () => {
   });
 
   it("should lower domain events without the JIT runtime", async () => {
-    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+    const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
       version: 1,
       payload: JIT.object({ orderId: JIT.string() }),
     });
@@ -570,7 +570,7 @@ describe("JIT AOT generate", () => {
   });
 
   it("should expose only the canonical DomainEvent factories in typed AOT modules", () => {
-    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+    const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
       version: 1,
       payload: JIT.object({ orderId: JIT.string() }),
     });
@@ -616,9 +616,9 @@ describe("JIT AOT generate", () => {
   });
 
   it("should preserve DDD capabilities and protected raise in typed AOT modules", () => {
-    const Money = JIT.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
-    const UserBase = JIT.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
-    const OrderBase = JIT.aggregateRoot(
+    const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
+    const UserBase = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
+    const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"] as const) }),
       { id: "id" }
     );
@@ -670,7 +670,7 @@ describe("JIT AOT generate", () => {
   });
 
   it("should round-trip domain events through AOT JSON construction", async () => {
-    const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+    const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
       version: 1,
       payload: JIT.object({ orderId: JIT.string() }),
     });
@@ -689,7 +689,7 @@ describe("JIT AOT generate", () => {
   });
 
   it("should lower aggregate infrastructure into an extendable import-free base", async () => {
-    const OrderBase = JIT.aggregateRoot(
+    const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({
         id: JIT.string().readonly().default("o_1"),
         status: JIT.enum(["draft", "confirmed"] as const),
@@ -744,9 +744,11 @@ describe("JIT AOT generate", () => {
   });
 
   it("should emit aggregate timestamp mutations without the runtime", async () => {
-    const OrderBase = JIT.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), updatedAt: JIT.date() }), {
-      id: "id",
-    }).timestamps({ updatedAt: "updatedAt" });
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), updatedAt: JIT.date() }), {
+        id: "id",
+      })
+      .timestamps({ updatedAt: "updatedAt" });
     AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderBase: {
@@ -766,10 +768,10 @@ describe("JIT AOT generate", () => {
   });
 
   it("should emit soft-delete metadata with a shared timestamp instant", async () => {
-    const OrderBase = JIT.aggregateRoot(
-      JIT.object({ id: JIT.string(), updatedAt: JIT.date(), deletedAt: JIT.date().nullable() }),
-      { id: "id" }
-    )
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), updatedAt: JIT.date(), deletedAt: JIT.date().nullable() }), {
+        id: "id",
+      })
       .timestamps({ updatedAt: "updatedAt" })
       .softDelete({ field: "deletedAt" });
     AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });

@@ -59,8 +59,8 @@ runtime dependency.
 
 ## Domain code
 
-Use `JIT.valueObject`, `JIT.entity`, `JIT.aggregateRoot`, and
-`JIT.domainEvent` for domain roles. Aggregate
+Use `JIT.ddd.valueObject`, `JIT.ddd.entity`, `JIT.ddd.aggregateRoot`, and
+`JIT.ddd.domainEvent` for domain roles. Aggregate
 mutation is schema-derived: readonly fields are excluded from patches, and
 domain events remain in an ordered pending buffer until `pullEvents()` or
 `commit()` succeeds.

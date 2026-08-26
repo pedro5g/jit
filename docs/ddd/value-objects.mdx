@@ -3,7 +3,7 @@
 Value objects are immutable and compared by value:
 
 ```ts
-const Money = JIT.valueObject(
+const Money = JIT.ddd.valueObject(
   JIT.object({ amount: JIT.number(), currency: JIT.string() }),
 );
 
@@ -16,4 +16,4 @@ left.hashCode() === right.hashCode(); // true
 
 Instances are frozen. Equality and hashing are schema-specialized and shared by the prototype. Choose a value object when replacement of the complete value is the valid domain operation; do not use it for an identity-bearing lifecycle.
 
-`JIT.valueObject.abstract(schema)` supports domain-specific subclasses without allowing the base itself to be instantiated.
+`JIT.ddd.valueObject.abstract(schema)` supports domain-specific subclasses without allowing the base itself to be instantiated.

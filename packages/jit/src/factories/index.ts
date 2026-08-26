@@ -26,16 +26,12 @@ export type Wire<TSchemaLike> = import("../core/ats/representations.js").Wire<TS
 export * as regexes from "../shared/regexes.js";
 export {
   type AbstractRuntimeClass,
-  aggregateRoot,
   type ClassFactory,
   class,
   type DomainEvent,
-  domainEvent,
   type EventPublisher,
-  entity,
   type RuntimeClass,
   type StandardEvent,
-  valueObject,
 } from "./class.js";
 export * from "./collection/index.js";
 export * from "./composition/index.js";
@@ -50,6 +46,7 @@ export {
   type StandardQueryStep,
   type StandardQueryValue,
 } from "./cqrs.js";
+export { ddd } from "./ddd.js";
 export { dto } from "./dto.js";
 export { type IndexBuilder, type IndexPlan, index, type KeyedIndexPlan } from "./indexing.js";
 export { type IsoFactories, iso } from "./iso.js";

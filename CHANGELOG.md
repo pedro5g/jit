@@ -6,6 +6,16 @@ npm and JSR.
 
 ## [Unreleased]
 
+### Changed
+
+- Group the domain-driven design presets under `JIT.ddd`: `JIT.ddd.valueObject`,
+  `JIT.ddd.entity`, `JIT.ddd.aggregateRoot` and `JIT.ddd.domainEvent`. They are
+  a vocabulary, and someone reaching for an entity was previously shopping for
+  it among the schema factories. The top-level names are removed rather than
+  aliased. `JIT.class` stays top level: it is the primitive the presets
+  configure, and DTOs, JSON pipelines and AOT class artifacts build on it with
+  no domain meaning attached.
+
 ### Added
 
 - Add `JIT.sort`, a schema-specialized comparator with `by`/`thenBy`, a

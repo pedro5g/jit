@@ -70,12 +70,18 @@ Runtime and AOT preserve the same configured names.
 
 ## DDD factories
 
-The domain-oriented factories are `JIT.valueObject`, `JIT.entity`,
-`JIT.aggregateRoot`, and `JIT.domainEvent`. They are presets over the same
-runtime-class machinery.
+The domain-oriented factories live under `JIT.ddd`: `JIT.ddd.valueObject`,
+`JIT.ddd.entity`, `JIT.ddd.aggregateRoot`, and `JIT.ddd.domainEvent`. They are
+presets over the same runtime-class machinery, grouped because they are a
+vocabulary — someone reaching for an entity is not shopping among the schema
+factories.
+
+`JIT.class` stays at the top level. It is the primitive the presets configure,
+and DTOs, JSON pipelines and AOT class artifacts build on it without any
+domain meaning attached.
 
 ```ts
-const UserBase = JIT.entity(
+const UserBase = JIT.ddd.entity(
   JIT.object({ id: JIT.string(), name: JIT.string() }),
   { id: "id" },
 );
@@ -107,11 +113,11 @@ The abstract base itself cannot create or hydrate an instance.
 
 ## Value objects
 
-`JIT.valueObject(schema)` is a concrete, frozen runtime class with structural
+`JIT.ddd.valueObject(schema)` is a concrete, frozen runtime class with structural
 equality and hash code enabled by default.
 
 ```ts
-const Money = JIT.valueObject(
+const Money = JIT.ddd.valueObject(
   JIT.object({
     amount: JIT.number(),
     currency: JIT.enum(["BRL", "USD"] as const),
@@ -124,11 +130,11 @@ Object.isFrozen(price); // true
 
 ## Entities
 
-`JIT.entity(schema, { id })` creates an abstract base with identity semantics.
+`JIT.ddd.entity(schema, { id })` creates an abstract base with identity semantics.
 Identity is intentionally distinct from structural equality.
 
 ```ts
-const UserBase = JIT.entity(
+const UserBase = JIT.ddd.entity(
   JIT.object({ id: JIT.string(), name: JIT.string() }),
   { id: "id" },
 );
@@ -142,13 +148,13 @@ User.create({ id: "u_1", name: "Ada" }).sameIdentity(
 
 ## Domain events
 
-`JIT.domainEvent(type, { payload, version })` creates a frozen class whose
+`JIT.ddd.domainEvent(type, { payload, version })` creates a frozen class whose
 schema contains `id`, literal `type`, literal `version`, `occurredAt`, and the
 validated payload. Creation accepts only the payload; id and time are resolved
 by defaults.
 
 ```ts
-const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
   payload: JIT.object({ orderId: JIT.string().min(1) }),
   version: 1,
 });
@@ -163,13 +169,13 @@ event["~event"].type; // "order.confirmed"
 
 ## Aggregate roots
 
-`JIT.aggregateRoot(schema, { id })` creates an abstract entity base with
+`JIT.ddd.aggregateRoot(schema, { id })` creates an abstract entity base with
 identity, an ordered pending-event queue, and a compiled in-place `update()`.
 Subclass methods express the domain transition, then raise the event that
 describes it. Readonly schema fields remain unavailable to `update()`.
 
 ```ts
-const OrderBase = JIT.aggregateRoot(
+const OrderBase = JIT.ddd.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
     status: JIT.enum(["draft", "confirmed"] as const),

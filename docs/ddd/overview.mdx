@@ -5,10 +5,10 @@ JIT's domain primitives are presets over the same schema AST, class plan, execut
 Use the smallest semantic primitive that describes the domain:
 
 - `JIT.class(schema)` materializes validated state.
-- `JIT.valueObject(schema)` adds structural equality, hashing, and immutability.
-- `JIT.entity(schema, { id })` adds identity semantics and is intended to be subclassed.
-- `JIT.aggregateRoot(schema, { id })` adds controlled internal mutation and an ordered domain-event buffer.
-- `JIT.domainEvent(type, { version, payload })` describes an immutable versioned fact.
+- `JIT.ddd.valueObject(schema)` adds structural equality, hashing, and immutability.
+- `JIT.ddd.entity(schema, { id })` adds identity semantics and is intended to be subclassed.
+- `JIT.ddd.aggregateRoot(schema, { id })` adds controlled internal mutation and an ordered domain-event buffer.
+- `JIT.ddd.domainEvent(type, { version, payload })` describes an immutable versioned fact.
 
 All five are SchemaLike. They can be passed directly to `JIT.parse`, `JIT.json.parse`, `JIT.json.stringify`, mapping, and AOT generation.
 

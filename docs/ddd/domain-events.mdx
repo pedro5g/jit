@@ -3,7 +3,7 @@
 A domain event is an immutable, validated, serializable, and versioned fact:
 
 ```ts
-const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
   version: 1,
   payload: JIT.object({ orderId: JIT.string() }),
 });
