@@ -8,8 +8,9 @@ specialized array loop the builder itself runs.
 ## Output Contracts
 
 ```ts
-const query = JIT.query(Users)
-  .filter((q) => q.eq("active", true))
+const query = JIT.cqrs
+  .query(Users)
+  .where((q) => q.eq("active", true))
   .select("id", "name")
   .take(10);
 
@@ -44,9 +45,10 @@ The lazy planner supports:
 - `orderBy()`, with an explicit materialization barrier.
 
 ```ts
-const tags = JIT.query(Posts).flatMap("tags").to.iterator();
-const batches = JIT.query(Events).chunk(1_024).to.iterator();
-const balances = JIT.query(Transactions)
+const tags = JIT.cqrs.query(Posts).flatMap("tags").to.iterator();
+const batches = JIT.cqrs.query(Events).chunk(1_024).to.iterator();
+const balances = JIT.cqrs
+  .query(Transactions)
   .scan({ initial: 0, update: (total, item) => total + item.amount })
   .to.iterator();
 ```
@@ -149,13 +151,13 @@ same JSON as the compiled full serializer.
 Run `pnpm bench:lazy`. On Node 22.17.1, linux-x64, Ryzen 7 5800H, one million
 input rows:
 
-| Flow | Average | Heap/op |
-| --- | ---: | ---: |
-| JIT iterator, first 10 matches | 4.39 us | 138 B |
-| JIT eager array, first 10 matches | 4.60 us | 1.39 KiB |
-| JIT iterator, 800k projected results | 18.04 ms | 7.75 MiB |
-| JIT direct visitor, 800k results | **3.81 ms** | **760 B** |
-| Handwritten generator, 800k results | 15.21 ms | 7.75 MiB |
+| Flow                                 |     Average |   Heap/op |
+| ------------------------------------ | ----------: | --------: |
+| JIT iterator, first 10 matches       |     4.39 us |     138 B |
+| JIT eager array, first 10 matches    |     4.60 us |  1.39 KiB |
+| JIT iterator, 800k projected results |    18.04 ms |  7.75 MiB |
+| JIT direct visitor, 800k results     | **3.81 ms** | **760 B** |
+| Handwritten generator, 800k results  |    15.21 ms |  7.75 MiB |
 
 The visitor is the high-throughput terminal when the consumer can be a
 callback. The iterator is the ergonomic terminal for early termination,

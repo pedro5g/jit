@@ -28,7 +28,8 @@ Implemented and covered by tests:
 - `JIT.json.stringify(schema)`.
 - `JIT.json.parse(schema).validate()` as AOT `fromJSON`.
 - `JIT.update(schema).patch({ field: JIT.param("name") }).compile()`.
-- `JIT.query(schema).params({...}).filter((q, params) => ...)`.
+- `JIT.cqrs.query(schema).params({...}).where((q, params) => ...)`, with
+  top-level `JIT.query(collection)` retained for compatibility.
 - `JIT.const(value)` and `q.constant(value)` for build-time query literals.
 - `JIT.transform(schema).select(...).map(...)` for built-in field
   transforms such as `lowercase`, `uppercase`, and `trim`.

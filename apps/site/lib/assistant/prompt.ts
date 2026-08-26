@@ -195,7 +195,7 @@ function framing(understanding: Understanding | undefined): string | null {
   // The recipe for the problem they described, when there is one. It goes
   // above the shape hint because it decides the whole answer: someone who
   // knows the library reads "meu array está lento ao filtrar" and answers with
-  // JIT.query and .indexBy, not with whatever page mentions "filter".
+  // the fused JIT.cqrs.query recipe, not with whatever page mentions "filter".
   const recipe = solutionBlock(understanding.solutions);
   if (recipe) parts.push(recipe);
 

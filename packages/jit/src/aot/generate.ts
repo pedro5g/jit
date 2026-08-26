@@ -365,6 +365,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return emitExecutionArtifact(binding, declaration, artifact.plan, reportName, type);
     if (artifact.kind === "query-plan") return emitQueryPlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "cqrs-parser")
+      return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
 
@@ -393,6 +395,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
+    if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -970,6 +973,23 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push(...indentBlock(parserSource));
     js.push(`  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse });`);
+    js.push("})();");
+    return { binding, type };
+  }
+
+  function emitCqrsParserArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "cqrs-parser" }>,
+    reportName: string,
+    type: string
+  ): EmittedBinding | undefined {
+    if (JSON.stringify(artifact.definition) === undefined) {
+      skipped.push({ schema: reportName, operation: "cqrs-parser", reason: "CQRS definition cannot be serialized" });
+      return undefined;
+    }
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...indentBlock(artifact.source));
     js.push("})();");
     return { binding, type };
   }

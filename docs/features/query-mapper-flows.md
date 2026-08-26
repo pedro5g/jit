@@ -16,17 +16,19 @@ const User = JIT.object({
   score: JIT.number(),
 });
 
-const Users = JIT.array(User);
-
-const findAdmins = JIT.query(Users)
-  .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true), q.gt("score", 500)))
+const findAdmins = JIT.cqrs
+  .query(User)
+  .where((q) =>
+    q.and(q.eq("role", "admin"), q.eq("active", true), q.gt("score", 500)),
+  )
   .select("id", "name", "score");
 ```
 
 With parameters:
 
 ```ts
-const findByRole = JIT.query(Users)
+const findByRole = JIT.cqrs
+  .query(User)
   .params({ role: JIT.string() })
   .filter((q, params) => q.eq("role", params.role));
 
@@ -36,9 +38,11 @@ findByRole(users, { role: "admin" });
 Build-time constants can be embedded:
 
 ```ts
-JIT.query(Users)
-  .filter((q) => q.eq("role", JIT.const("admin")));
+JIT.cqrs.query(User).where((q) => q.eq("role", JIT.const("admin")));
 ```
+
+`JIT.query(JIT.array(User))` remains a compatibility path over the same engine.
+New query capabilities are introduced through `JIT.cqrs`.
 
 ## Mapper API
 
@@ -88,9 +92,7 @@ Queries and mappers can be members of an artifact object:
 ```ts
 export const User = {
   is: JIT.validate.is(UserSchema),
-  findAdmins: JIT.query(JIT.array(UserSchema))
-    .filter((q) => q.eq("role", "admin"))
-    ,
+  findAdmins: JIT.cqrs.query(UserSchema).where((q) => q.eq("role", "admin")),
   toPublic: JIT.map.many(UserSchema, PublicUser, {}),
 };
 ```
@@ -129,7 +131,7 @@ const valid = input.flatMap((value) => {
 const output = JSON.stringify(
   valid
     .filter((user) => user.role === "admin")
-    .map((user) => ({ id: user.id, name: user.name }))
+    .map((user) => ({ id: user.id, name: user.name })),
 );
 ```
 
@@ -137,8 +139,9 @@ The JIT version compiles each stage and keeps the hot loops direct:
 
 ```ts
 const isUser = JIT.validate.is(User);
-const selectAdmins = JIT.query(Users)
-  .filter((q) => q.eq("role", "admin"))
+const selectAdmins = JIT.cqrs
+  .query(User)
+  .where((q) => q.eq("role", "admin"))
   .select("id", "name");
 const stringifyPublicUsers = JIT.json.stringify(PublicUsers);
 ```

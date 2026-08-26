@@ -430,7 +430,7 @@ export const CONCEPTS: ConceptNode[] = [
     id: "query",
     aliases: ["query", "consulta", "filter", "filtro", "search", "buscar", "where", "sort", "ordenar", "aggregate"],
     terms: ["query", "filter", "projection", "orderby", "groupby", "iterator", "visitor", "fused"],
-    apis: ["query", "from", "param", "const"],
+    apis: ["cqrs", "from", "param", "const"],
     fact: "A query builder compiles to one fused loop over the collection: filters and projections are lowered into a single pass with no intermediate arrays.",
     factPt:
       "Um query builder compila para um único laço fundido sobre a coleção: filtros e projeções descem para uma só passada, sem arrays intermediários.",
@@ -449,7 +449,7 @@ export const CONCEPTS: ConceptNode[] = [
       "Operadores de mutação reconstroem coleções de forma imutável e exigem um filtro, então um update de tabela inteira não acontece por acidente.",
     ],
     example:
-      'const Users = JIT.array(\n  JIT.object({ id: JIT.string(), role: JIT.string(), score: JIT.number() })\n).indexBy("id");\n\nconst topAdmins = JIT.query(Users)\n  .params({ minimumScore: JIT.number() })\n  .filter((q, params) => q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)))\n  .select("id", "score");',
+      'const Users = JIT.array(\n  JIT.object({ id: JIT.string(), role: JIT.string(), score: JIT.number() })\n);\n\nconst topAdmins = JIT.cqrs.query(Users)\n  .params({ minimumScore: JIT.number() })\n  .where((q, params) => q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)))\n  .select("id", "score");',
     page: "/docs/runtime/queries",
     edges: { binary: 0.4, lazy: 0.5 },
   },
@@ -472,7 +472,7 @@ export const CONCEPTS: ConceptNode[] = [
       "`JIT.stream` é o irmão para dados que chegam em chunks: seu boundary scanner guarda só o estado de parser necessário para achar valores completos, então um token cortado na borda de um chunk é retomado, não rejeitado.",
     ],
     example:
-      'const Users = JIT.array(JIT.object({ id: JIT.string(), active: JIT.boolean() }));\n\nconst query = JIT.query(Users)\n  .filter((q) => q.eq("active", true))\n  .select("id")\n  .take(10);\n\n// the terminal call chooses the backend\nconst rows = query.to.iterator();',
+      'const Users = JIT.array(JIT.object({ id: JIT.string(), active: JIT.boolean() }));\n\nconst query = JIT.cqrs.query(Users)\n  .where((q) => q.eq("active", true))\n  .select("id")\n  .limit(10);\n\n// the terminal call chooses the backend\nconst rows = query.to.iterator();',
     page: "/docs/runtime/lazy-execution",
     edges: { query: 0.5, json: 0.4 },
   },

@@ -1,18 +1,18 @@
-import { compileQueryArray, type LazyQueryProgram } from "../compiler/lazy-query.js";
-import { compileQuery, type QueryProgram } from "../compiler/query.js";
-import type { QueryConditionNode, QueryNode, QueryPipelineNode, QueryValueNode } from "../core/ast/index.js";
+import type { QueryConditionNode, QueryPipelineNode, QueryValueNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
-import { registerArtifact } from "../runtime/artifact-registry.js";
+import { getArtifact, registerArtifact } from "../runtime/artifact-registry.js";
 import { array } from "./collection/collection.js";
 import {
   query as createQuery,
   getQueryProgram,
+  type LazyQueryBuilder,
   type QueryBuilder,
   type QueryConditionBuilder,
   type QueryRuntimeParams,
+  type QuerySinks,
 } from "./query.js";
 
 export interface StandardQuery {
@@ -23,12 +23,34 @@ export interface StandardQuery {
 /** Portable V1 description; deliberately independent from JIT's execution IR. */
 export interface StandardQueryDefinition {
   readonly source: { readonly kind: "object"; readonly fields: readonly string[] };
+  /** Ordered portable semantics. Private query and physical-plan nodes never cross this boundary. */
+  readonly pipeline: readonly StandardQueryStep[];
   readonly filter?: StandardQueryCondition;
   readonly projection?: readonly string[];
   readonly order?: readonly { readonly path: readonly string[]; readonly direction: "asc" | "desc" }[];
   readonly limit?: number;
   readonly params: readonly string[];
 }
+
+export type StandardQueryStep =
+  | { readonly kind: "where"; readonly condition: StandardQueryCondition }
+  | { readonly kind: "select"; readonly fields: readonly string[] }
+  | {
+      readonly kind: "unique" | "keyed" | "groupBy" | "orderBy" | "flatMap" | "groupAdjacentBy";
+      readonly key: string;
+      readonly direction?: "asc" | "desc";
+    }
+  | { readonly kind: "take" | "drop"; readonly count: number }
+  | { readonly kind: "takeWhile" | "dropWhile"; readonly condition: StandardQueryCondition }
+  | { readonly kind: "chunk" | "window"; readonly size: number }
+  | { readonly kind: "pairwise" | "delete" }
+  | {
+      readonly kind: "scan";
+      readonly initial: StandardQueryValue;
+      readonly update: { readonly kind: "binding"; readonly name: string };
+    }
+  | { readonly kind: "update"; readonly patch: Readonly<Record<string, StandardQueryValue>> }
+  | { readonly kind: "aggregate"; readonly operation: "sum" | "count" | "avg" | "min" | "max"; readonly key?: string };
 
 export type StandardQueryValue =
   | { readonly kind: "field"; readonly path: readonly string[] }
@@ -139,80 +161,167 @@ export interface ParsedCqrsInput {
 }
 
 type Row<TSchema extends ATS.AnyTypeSchema> = ATS.TypeofSchema<TSchema>;
+type CqrsKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof Row<TSchema>, string>;
+type CqrsNumericKey<TSchema extends ATS.AnyTypeSchema> = {
+  [TKey in CqrsKey<TSchema>]: Row<TSchema>[TKey] extends number ? TKey : never;
+}[CqrsKey<TSchema>];
+type CqrsSelectResult<TResult, TSelected> =
+  TResult extends Map<infer TKey, unknown>
+    ? Map<TKey, TSelected>
+    : TResult extends Record<infer TKey extends PropertyKey, unknown[]>
+      ? Record<TKey, TSelected[]>
+      : TSelected[];
+type IterableElement<TValue> = TValue extends Iterable<infer TElement> ? TElement : never;
 type ParamShape = Readonly<Record<string, SchemaInput>>;
 type Params<TShape extends ParamShape> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.TypeofSchema<TSchema> : never;
 };
+interface CqrsQueryOps<
+  TSchema extends ATS.AnyTypeSchema,
+  TOutput,
+  TResult,
+  TParams extends Readonly<Record<string, unknown>>,
+> {
+  params<const TShape extends ParamShape>(
+    shape: TShape
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams & Params<TShape>>;
+  filter(
+    predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  select<const TKeys extends readonly Extract<keyof TOutput, string>[]>(
+    ...fields: TKeys
+  ): CqrsQuery<TSchema, Pick<TOutput, TKeys[number]>, CqrsSelectResult<TResult, Pick<TOutput, TKeys[number]>>, TParams>;
+  unique<TKey extends CqrsKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  keyed<TKey extends CqrsKey<TSchema>>(
+    key: TKey
+  ): CqrsQuery<TSchema, TOutput, Map<Row<TSchema>[TKey], TOutput>, TParams>;
+  groupBy<TKey extends CqrsKey<TSchema>>(
+    key: TKey
+  ): CqrsQuery<TSchema, TOutput, Record<Extract<Row<TSchema>[TKey], PropertyKey>, TOutput[]>, TParams>;
+  orderBy<TKey extends CqrsKey<TSchema>>(
+    key: TKey,
+    direction?: "asc" | "desc"
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  flatMap<TKey extends Extract<keyof TOutput, string>>(
+    key: TKey
+  ): CqrsQuery<TSchema, IterableElement<TOutput[TKey]>, IterableElement<TOutput[TKey]>[], TParams>;
+  take(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  drop(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  takeWhile(
+    predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  dropWhile(
+    predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  chunk(size: number): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams>;
+  window(size: number): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams>;
+  pairwise(): CqrsQuery<TSchema, readonly [TOutput, TOutput], (readonly [TOutput, TOutput])[], TParams>;
+  scan<TAccumulator>(options: {
+    readonly initial: TAccumulator;
+    readonly update: (accumulator: TAccumulator, value: TOutput) => TAccumulator | Promise<TAccumulator>;
+  }): CqrsQuery<TSchema, TAccumulator, TAccumulator[], TParams>;
+  groupAdjacentBy<TKey extends Extract<keyof TOutput, string>>(
+    key: TKey
+  ): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams>;
+  delete(): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams>;
+  update(
+    patch: { readonly [TKey in CqrsKey<TSchema>]?: Row<TSchema>[TKey] }
+  ): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams>;
+  sum<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number, TParams>;
+  count(): CqrsQuery<TSchema, TOutput, number, TParams>;
+  avg<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
+  min<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
+  max<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
+  readonly to: QuerySinks<ATS.ArraySchema<TSchema>, TOutput, TParams>;
+  lazy(): LazyQueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TParams>;
+  explain(
+    outputMode?: "eager-array" | "generator" | "async-generator" | "visitor"
+  ): ReturnType<QueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TResult, TParams>["explain"]>;
+}
 export type CqrsQuery<
   TSchema extends ATS.AnyTypeSchema,
   TOutput = Row<TSchema>,
+  TResult = TOutput[],
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
-> = ((value: Row<TSchema>[], params?: TParams) => TOutput[]) & {
-  params<const TShape extends ParamShape>(shape: TShape): CqrsQuery<TSchema, TOutput, TParams & Params<TShape>>;
-  where(
-    predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
-  ): CqrsQuery<TSchema, TOutput, TParams>;
-  select<const TFields extends readonly Extract<keyof Row<TSchema>, string>[]>(
-    ...fields: TFields
-  ): CqrsQuery<TSchema, Pick<Row<TSchema>, TFields[number]>, TParams>;
-  orderBy(key: Extract<keyof Row<TSchema>, string>, direction?: "asc" | "desc"): CqrsQuery<TSchema, TOutput, TParams>;
-  limit(count: number): CqrsQuery<TSchema, TOutput, TParams>;
-  readonly "~query": StandardQuery;
-};
+> = ((value: Row<TSchema>[], params?: TParams) => TResult) &
+  CqrsQueryOps<TSchema, TOutput, TResult, TParams> & {
+    where(
+      predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
+    ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+    limit(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+    readonly "~query": StandardQuery;
+  };
 
-export function cqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQuery<TSchema> {
-  const row = unwrapSchema(schema);
+export function cqrsQuery<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<ATS.ArraySchema<TSchema>>
+): CqrsQuery<TSchema>;
+export function cqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQuery<TSchema>;
+export function cqrsQuery(schema: SchemaInput): CqrsQuery<ATS.AnyTypeSchema> {
+  const target = unwrapSchema(schema);
+  const row = target.type === "array" ? (target as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : target;
   if (row.type !== "object" && row.type !== "runtimeType") {
-    throw new JITError("INVALID_QUERY", "JIT.cqrs.query() requires an object or Runtime Type schema");
+    throw new JITError("INVALID_QUERY", "JIT.cqrs.query() requires an object or Runtime Type, or an array of either");
   }
-  const collection = array(row).schema;
+  const collection = target.type === "array" ? (target as ATS.ArraySchema<ATS.AnyTypeSchema>) : array(row).schema;
   return wrap(
     row,
     collection,
-    createQuery(collection) as QueryBuilder<ATS.ArraySchema<TSchema>, Row<TSchema>, Row<TSchema>[]>
+    createQuery(collection) as QueryBuilder<ATS.ArraySchema<ATS.AnyTypeSchema>, unknown, unknown[]>
   );
 }
 
-function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TParams extends Readonly<Record<string, unknown>>>(
+function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams extends Readonly<Record<string, unknown>>>(
   schema: TSchema,
   collection: ATS.ArraySchema<TSchema>,
-  builder: QueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TOutput[], TParams>
-): CqrsQuery<TSchema, TOutput, TParams> {
-  const rawProgram = getQueryProgram(builder);
-  const program = rawProgram ? normalizeCqrsProgram(rawProgram) : undefined;
-  let compiled: ((value: Row<TSchema>[], params?: TParams) => TOutput[]) | undefined;
-  const callable = ((value: Row<TSchema>[], params?: TParams) => {
-    if (!program) return builder(value, params);
-    compiled ??= hasIncrementalQueryNodes(program)
-      ? (compileQueryArray<Row<TSchema>, TOutput, TParams>(collection, program as LazyQueryProgram) as (
-          value: Row<TSchema>[],
-          params?: TParams
-        ) => TOutput[])
-      : (compileQuery(collection, program) as (value: Row<TSchema>[], params?: TParams) => TOutput[]);
-    return compiled(value, params);
-  }) as CqrsQuery<TSchema, TOutput, TParams>;
-  Object.defineProperties(callable, {
-    params: {
-      value: <TShape extends ParamShape>(shape: TShape) => wrap(schema, collection, builder.params(shape)),
-    },
+  builder: QueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TResult, TParams>
+): CqrsQuery<TSchema, TOutput, TResult, TParams> {
+  const program = getQueryProgram(builder);
+  const record = builder as unknown as Record<string, unknown>;
+  const filterMethod = record.filter as (
+    ...args: unknown[]
+  ) => QueryBuilder<ATS.ArraySchema<TSchema>, unknown, unknown>;
+  const takeMethod = record.take as (...args: unknown[]) => QueryBuilder<ATS.ArraySchema<TSchema>, unknown, unknown>;
+  const chainMethods = [
+    "params",
+    "filter",
+    "select",
+    "unique",
+    "keyed",
+    "groupBy",
+    "orderBy",
+    "flatMap",
+    "take",
+    "drop",
+    "takeWhile",
+    "dropWhile",
+    "chunk",
+    "window",
+    "pairwise",
+    "scan",
+    "groupAdjacentBy",
+    "delete",
+    "update",
+    "sum",
+    "count",
+    "avg",
+    "min",
+    "max",
+  ] as const;
+
+  for (const key of chainMethods) {
+    const method = record[key] as (...args: unknown[]) => QueryBuilder<ATS.ArraySchema<TSchema>, unknown, unknown>;
+
+    Object.defineProperty(builder, key, {
+      value: (...args: unknown[]) => wrap(schema, collection, method(...args)),
+    });
+  }
+
+  Object.defineProperties(builder, {
     where: {
-      value: (
-        predicate: (
-          query: QueryConditionBuilder<Row<TSchema>>,
-          params: QueryRuntimeParams<TParams>
-        ) => QueryConditionNode
-      ) => wrap(schema, collection, builder.filter(predicate)),
-    },
-    select: {
-      value: (...fields: readonly Extract<keyof Row<TSchema>, string>[]) =>
-        wrap(schema, collection, builder.select(...fields)),
-    },
-    orderBy: {
-      value: (key: Extract<keyof Row<TSchema>, string>, direction: "asc" | "desc" = "asc") =>
-        wrap(schema, collection, builder.orderBy(key, direction)),
+      value: (...args: unknown[]) => wrap(schema, collection, filterMethod(...args)),
     },
     limit: {
-      value: (count: number) => wrap(schema, collection, builder.take(count)),
+      value: (count: number) => wrap(schema, collection, takeMethod(count)),
     },
     "~query": {
       get: () =>
@@ -223,63 +332,21 @@ function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TParams extends Readon
     },
   });
   if (program)
-    registerArtifact(callable, {
+    registerArtifact(builder, {
       kind: "query-plan",
       schema: collection,
       program,
       mode: "array",
-      standard: callable["~query"],
+      standard: (builder as unknown as CqrsQuery<TSchema>)["~query"],
     });
-  return callable;
-}
-
-function normalizeCqrsProgram(program: QueryProgram): QueryProgram {
-  const source = program.nodes as readonly QueryPipelineNode[];
-  const filters = source.filter((node) => node.kind === "filter");
-  let select: Extract<QueryPipelineNode, { readonly kind: "select:fields" }> | undefined;
-  let orderBy: Extract<QueryPipelineNode, { readonly kind: "orderBy" }> | undefined;
-  let take: Extract<QueryPipelineNode, { readonly kind: "take" }> | undefined;
-
-  for (const node of source) {
-    if (node.kind === "select:fields") select = node;
-    else if (node.kind === "orderBy") orderBy = node;
-    else if (node.kind === "take" && (take === undefined || node.count < take.count)) take = node;
-  }
-
-  return {
-    nodes: [
-      ...filters,
-      ...(orderBy ? [orderBy] : []),
-      ...(select ? [select] : []),
-      ...(take ? [take] : []),
-    ] as readonly QueryNode[],
-    bindings: program.bindings,
-    ...(program.params === undefined ? {} : { params: program.params }),
-  };
-}
-
-function hasIncrementalQueryNodes(program: QueryProgram): boolean {
-  return program.nodes.some((node) =>
-    [
-      "flatMap",
-      "take",
-      "drop",
-      "takeWhile",
-      "dropWhile",
-      "chunk",
-      "window",
-      "pairwise",
-      "scan",
-      "groupAdjacentBy",
-    ].includes(node.kind)
-  );
+  return builder as unknown as CqrsQuery<TSchema, TOutput, TResult, TParams>;
 }
 
 function toStandardQuery(
   schema: ATS.AnyTypeSchema,
   program: import("../compiler/query.js").QueryProgram | undefined
 ): StandardQueryDefinition {
-  const nodes = (program?.nodes ?? []) as readonly (QueryNode | { readonly kind: "take"; readonly count: number })[];
+  const nodes = (program?.nodes ?? []) as readonly QueryPipelineNode[];
   let filter: StandardQueryCondition | undefined;
   let projection: readonly string[] | undefined;
   let order: readonly { readonly path: readonly string[]; readonly direction: "asc" | "desc" }[] | undefined;
@@ -292,21 +359,66 @@ function toStandardQuery(
         : condition;
     } else if (node.kind === "select:fields") projection = Object.freeze([...node.fields]);
     else if (node.kind === "orderBy") {
-      const previous = order ?? [];
-      order = Object.freeze([
-        ...previous,
-        Object.freeze({ path: Object.freeze([node.key]), direction: node.direction }),
-      ]);
+      order = Object.freeze([Object.freeze({ path: Object.freeze([node.key]), direction: node.direction })]);
     } else if (node.kind === "take") limit = limit === undefined ? node.count : Math.min(limit, node.count);
   }
   return Object.freeze({
     source: Object.freeze({ kind: "object" as const, fields: Object.freeze(objectFields(schema)) }),
+    pipeline: Object.freeze(nodes.map((node) => toStandardStep(node, program?.bindings ?? []))),
     ...(filter ? { filter } : {}),
     ...(projection ? { projection } : {}),
     ...(order ? { order } : {}),
     ...(limit === undefined ? {} : { limit }),
     params: Object.freeze([...(program?.params ?? [])]),
   });
+}
+
+function toStandardStep(node: QueryPipelineNode, bindings: readonly unknown[]): StandardQueryStep {
+  switch (node.kind) {
+    case "filter":
+      return Object.freeze({ kind: "where", condition: toStandardCondition(node.condition, bindings) });
+    case "select:fields":
+      return Object.freeze({ kind: "select", fields: Object.freeze([...node.fields]) });
+    case "orderBy":
+      return Object.freeze({ kind: "orderBy", key: node.key, direction: node.direction });
+    case "unique":
+    case "keyed":
+    case "groupBy":
+    case "flatMap":
+    case "groupAdjacentBy":
+      return Object.freeze({ kind: node.kind, key: node.key });
+    case "take":
+    case "drop":
+      return Object.freeze({ kind: node.kind, count: node.count });
+    case "takeWhile":
+    case "dropWhile":
+      return Object.freeze({ kind: node.kind, condition: toStandardCondition(node.condition, bindings) });
+    case "chunk":
+    case "window":
+      return Object.freeze({ kind: node.kind, size: node.size });
+    case "pairwise":
+    case "delete":
+      return Object.freeze({ kind: node.kind });
+    case "scan":
+      return Object.freeze({
+        kind: "scan",
+        initial: toStandardValue({ kind: "binding", name: node.initialBinding }, bindings),
+        update: Object.freeze({ kind: "binding" as const, name: node.updateBinding }),
+      });
+    case "update":
+      return Object.freeze({
+        kind: "update",
+        patch: Object.freeze(
+          Object.fromEntries(Object.entries(node.patch).map(([key, value]) => [key, toStandardValue(value, bindings)]))
+        ),
+      });
+    case "aggregate":
+      return Object.freeze({
+        kind: "aggregate",
+        operation: node.op,
+        ...(node.key === undefined ? {} : { key: node.key }),
+      });
+  }
 }
 
 function objectFields(schema: ATS.AnyTypeSchema): string[] {
@@ -351,12 +463,22 @@ function toStandardValue(value: QueryValueNode, bindings: readonly unknown[]): S
   if (value.kind === "literal") return Object.freeze({ kind: "literal" as const, value: value.value });
   if (value.kind === "binding") {
     const index = Number.parseInt(value.name.slice(3), 10);
-    if (Number.isSafeInteger(index) && index >= 0 && index < bindings.length) {
+    if (Number.isSafeInteger(index) && index >= 0 && index < bindings.length && isStandardData(bindings[index])) {
       return Object.freeze({ kind: "literal" as const, value: bindings[index] });
     }
     return Object.freeze({ kind: "binding" as const, name: value.name });
   }
   return Object.freeze({ kind: "param" as const, name: value.name });
+}
+
+function isStandardData(value: unknown, seen = new Set<object>()): boolean {
+  if (value === null) return true;
+  if (["string", "number", "bigint", "boolean", "undefined"].includes(typeof value)) return true;
+  if (typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) return value.every((item) => isStandardData(item, seen));
+  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return false;
+  return Object.values(value).every((item) => isStandardData(item, seen));
 }
 
 export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
@@ -528,9 +650,14 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
     definition.options.select ? objectFields(definition.schema) : [],
     definition.options.limits?.maxSelectFields ?? 30
   );
-  return globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor) as (
+  const parser = globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor) as (
     input: unknown
   ) => ParsedCqrsInput;
+  const artifact = getArtifact(definition);
+  if (artifact?.kind === "cqrs-input") {
+    registerArtifact(parser, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+  }
+  return parser;
 }
 
 function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {

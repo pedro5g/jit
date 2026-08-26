@@ -31,7 +31,7 @@ in the compilation path. The emitted function interprets nothing.
 | `transforms`   | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers)                                                                                                    |
 | `compiler`     | one emitter per operation; shared IR (`ir/ir.ts`) + optimizer passes for equal and query; string emitters (validate/serialize/codec/scrub/stream) follow the same codegen rules |
 | `runtime`      | compile cache, keyed-index cache, hash primitives, boundary scanner (stream), artifact registry                                                                                 |
-| `factories`    | the public `JIT.*` namespace: schema factories, callable capability artifacts, composition chains, and explicit `compile` aggregations                                         |
+| `factories`    | the public `JIT.*` namespace: schema factories, callable capability artifacts, composition chains, and explicit `compile` aggregations                                          |
 | `aot`          | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary                                                                              |
 | `mcp.ts`       | MCP stdio protocol, tools/resources/prompts/completion dispatch; `mcp-project.ts` owns workspace-safe docs and AOT operations                                                   |
 | `shared`       | source-emission helpers (`parse.ts`: escaping, identifiers, key access) and the `regexes` format library                                                                        |
@@ -132,17 +132,17 @@ its lexical scope. It does **not** create the historical nesting of
 
 The current stage surface is deliberately explicit:
 
-| Stage family         | Composition and physical behavior                                                                                                                               |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| JSON / binary source | JSON always uses native `JSON.parse`; runtime compilation performs bounded shape warm-up, then generated validation runs immediately after parsing. Binary uses the emitted codec. |
-| Validation           | Pure schemas use the allocation-free generated `is` path on successful `parse`; issue collection runs only after failure. Transforming or observable schemas use one generated `safeParse` pass. |
+| Stage family               | Composition and physical behavior                                                                                                                                                                                                                                                                        |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JSON / binary source       | JSON always uses native `JSON.parse`; runtime compilation performs bounded shape warm-up, then generated validation runs immediately after parsing. Binary uses the emitted codec.                                                                                                                       |
+| Validation                 | Pure schemas use the allocation-free generated `is` path on successful `parse`; issue collection runs only after failure. Transforming or observable schemas use one generated `safeParse` pass.                                                                                                         |
 | Runtime-class construction | A `construct` stage materializes a generated class only after its wire state validates. The class constructor receives an internal validated-state marker, so compiled validation is not executed twice. Standalone AOT construction requires the named class artifact to be emitted in the same module. |
-| Query                | Consecutive filter/select descriptors retain the final program and emit one indexed output loop.                                                                |
-| Mapping              | Shape-specific single/batch mapper. A terminal batch map plus JSON sink serializes in the mapper loop and avoids the mapped output array.                       |
-| Transform            | Per-field emitted transform; collection mode emits an indexed loop. The target schema is explicit.                                                              |
-| Update               | Schema-aware immutable patch; collection mode applies the static patch to each element in an indexed loop.                                                      |
-| Security             | `sanitize` and `mask` are emitted source rewrites, applied per value or per collection element.                                                                 |
-| JSON / binary sink   | Specialized serializer or codec creates the final transport representation.                                                                                     |
+| Query                      | Consecutive filter/select descriptors retain the final program and emit one indexed output loop.                                                                                                                                                                                                         |
+| Mapping                    | Shape-specific single/batch mapper. A terminal batch map plus JSON sink serializes in the mapper loop and avoids the mapped output array.                                                                                                                                                                |
+| Transform                  | Per-field emitted transform; collection mode emits an indexed loop. The target schema is explicit.                                                                                                                                                                                                       |
+| Update                     | Schema-aware immutable patch; collection mode applies the static patch to each element in an indexed loop.                                                                                                                                                                                               |
+| Security                   | `sanitize` and `mask` are emitted source rewrites, applied per value or per collection element.                                                                                                                                                                                                          |
+| JSON / binary sink         | Specialized serializer or codec creates the final transport representation.                                                                                                                                                                                                                              |
 
 “One execution function” must not be misread as “no allocations.” The
 native `JSON.parse` still materializes its result, while codec
@@ -162,7 +162,9 @@ requires runtime, type, generated-source, runtime-AOT, and `define`-stub AOT
 coverage. See [composable execution pipelines](features/composable-execution.md)
 for the public contract.
 
-Query output is a physical-plan choice. `.compile()` keeps the specialized
+`JIT.cqrs` is the canonical public query surface; top-level `JIT.query` is a
+compatibility path over the same `QueryProgram`. Query output is a
+physical-plan choice. `.compile()` keeps the specialized
 eager-array backend; `.to.iterator()`, `.to.asyncIterator()`, and
 `.to.visitor()` select explicit incremental backends. The lazy emitter
 fuses adjacent filter/select/control nodes, emits direct indexed array loops,

@@ -4,6 +4,69 @@ import { JIT } from "../../index.js";
 import { emitCqrsAotParserSource, emitCqrsInputParser, encodeCqrsCursor } from "../cqrs.js";
 
 describe("JIT.cqrs", () => {
+  it("exposes the complete query engine through the canonical CQRS surface", () => {
+    const Entry = JIT.object({
+      id: JIT.number(),
+      group: JIT.string(),
+      score: JIT.number(),
+      tags: JIT.array(JIT.string()),
+    });
+    const base = JIT.cqrs.query(Entry);
+    const fromCollection = JIT.cqrs.query(JIT.array(Entry).keyed("id"));
+    const rows = [
+      { id: 1, group: "a", score: 10, tags: ["x", "y"] },
+      { id: 1, group: "a", score: 20, tags: ["z"] },
+      { id: 2, group: "b", score: 30, tags: ["w"] },
+    ];
+
+    expect(
+      [
+        "where",
+        "filter",
+        "select",
+        "unique",
+        "keyed",
+        "groupBy",
+        "orderBy",
+        "flatMap",
+        "take",
+        "drop",
+        "takeWhile",
+        "dropWhile",
+        "chunk",
+        "window",
+        "pairwise",
+        "scan",
+        "groupAdjacentBy",
+        "delete",
+        "update",
+        "sum",
+        "count",
+        "avg",
+        "min",
+        "max",
+        "lazy",
+        "explain",
+      ].every((method) => typeof base[method as keyof typeof base] === "function")
+    ).toBe(true);
+    expect(base.unique("id")(rows)).toEqual([rows[0], rows[2]]);
+    expect(fromCollection.where((query) => query.eq("id", 2))(rows)).toEqual([rows[2]]);
+    expect(base.keyed("id")(rows).get(2)).toEqual(rows[2]);
+    expect(base.groupBy("group")(rows).a).toHaveLength(2);
+    expect(base.drop(1).take(1)(rows)).toEqual([rows[1]]);
+    expect(base.flatMap("tags")(rows)).toEqual(["x", "y", "z", "w"]);
+    expect(base.sum("score")(rows)).toBe(60);
+    expect(base.count()(rows)).toBe(3);
+    expect(base.avg("score")(rows)).toBe(20);
+    expect(base.min("score")(rows)).toBe(10);
+    expect(base.max("score")(rows)).toBe(30);
+    expect([...base.where((query) => query.gt("score", 10)).to.iterator()(rows)]).toEqual([rows[1], rows[2]]);
+    expect(base.take(1)["~query"].definition.pipeline).toEqual([{ kind: "take", count: 1 }]);
+    expectTypeOf(base.count()(rows)).toEqualTypeOf<number>();
+    expectTypeOf(base.keyed("id")(rows)).toEqualTypeOf<Map<number, (typeof rows)[number]>>();
+    expectTypeOf(fromCollection(rows)).toEqualTypeOf<(typeof rows)[number][]>();
+  });
+
   it("lowers static queries through the existing QueryProgram", () => {
     const Order = JIT.object({
       id: JIT.string(),
@@ -27,6 +90,20 @@ describe("JIT.cqrs", () => {
     expect(recent["~query"].version).toBe(1);
     expect(recent["~query"].definition).toEqual({
       source: { kind: "object", fields: ["id", "status", "total"] },
+      pipeline: [
+        {
+          kind: "where",
+          condition: {
+            kind: "compare",
+            operator: "eq",
+            left: { kind: "field", path: ["status"] },
+            right: { kind: "literal", value: "confirmed" },
+          },
+        },
+        { kind: "select", fields: ["id", "total"] },
+        { kind: "orderBy", key: "total", direction: "desc" },
+        { kind: "take", count: 1 },
+      ],
       filter: {
         kind: "compare",
         operator: "eq",
@@ -156,6 +233,16 @@ describe("JIT.cqrs", () => {
 
   it("rejects non-object read models", () => {
     expect(() => JIT.cqrs.query(JIT.string())).toThrow(/object or Runtime Type/i);
+  });
+
+  it("rejects invalid CQRS keys and aggregate types statically", () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const query = JIT.cqrs.query(User);
+
+    // @ts-expect-error missing is not a field in the read model
+    query.orderBy("missing");
+    // @ts-expect-error sum accepts numeric fields only
+    query.sum("name");
   });
 
   it("registers typed parameters in the existing query program", () => {

@@ -40,6 +40,16 @@ describe("runtime and define entrypoints", () => {
     const DefineUsers = DefineJIT.array(DefineUser);
     const value = { id: 1, name: "Ada" };
     const equalValue = { id: 1, name: "Ada" };
+    const runtimeSelected = RuntimeJIT.cqrs
+      .query(RuntimeUser)
+      .where((query) => query.eq("id", 1))
+      .select("name");
+    const defineSelected = DefineJIT.cqrs
+      .query(DefineUser)
+      .where((query) => query.eq("id", 1))
+      .select("name");
+    const runtimeInputParser = RuntimeJIT.cqrs.parse(RuntimeJIT.cqrs.input(RuntimeUser, { filter: { id: true } }));
+    const defineInputParser = DefineJIT.cqrs.parse(DefineJIT.cqrs.input(DefineUser, { filter: { id: true } }));
 
     const cases: readonly ApiParityCase[] = [
       {
@@ -71,6 +81,18 @@ describe("runtime and define entrypoints", () => {
         runtime: RuntimeJIT.json.stringifyChunks(RuntimeUsers, { chunkBytes: 8 }) as UnknownArtifact,
         define: DefineJIT.json.stringifyChunks(DefineUsers, { chunkBytes: 8 }) as UnknownArtifact,
         args: [[value, equalValue]],
+      },
+      {
+        name: "selectedUsers",
+        runtime: runtimeSelected as UnknownArtifact,
+        define: defineSelected as UnknownArtifact,
+        args: [[value, { id: 2, name: "Grace" }]],
+      },
+      {
+        name: "parseUserQuery",
+        runtime: runtimeInputParser as UnknownArtifact,
+        define: defineInputParser as UnknownArtifact,
+        args: [{ filter: { id: 1 } }],
       },
     ];
 

@@ -53,10 +53,14 @@ Parity applies to complete compositions, not only leaf operations:
 
 ```ts
 export const activeIds = DefineJIT.json
-  .parse(DefineJIT.array(DefineJIT.object({
-    id: DefineJIT.number(),
-    active: DefineJIT.boolean(),
-  })))
+  .parse(
+    DefineJIT.array(
+      DefineJIT.object({
+        id: DefineJIT.number(),
+        active: DefineJIT.boolean(),
+      }),
+    ),
+  )
   .validate()
   .filter((query) => query.eq("active", true))
   .select("id")
@@ -70,23 +74,21 @@ remain when their semantics require them.
 
 ## Operation matrix
 
-| Family | Runtime | Define | Standalone AOT | Notes |
-| --- | --- | --- | --- | --- |
-| validation | yes | yes | yes | selection-aware validation source |
-| equal, diff, hash, clone | yes | yes | yes | schema-specialized operations |
-| JSON and binary codec | yes | yes | yes | transport representation is preserved |
-| mapper, transform, update | yes | yes | yes | reconstructible bindings required |
-| mask and sanitize | yes | yes | yes | static schema security metadata |
-| eager query | yes | declaration-compatible | yes | canonical migration to `JIT.cqrs` is in progress |
-| iterator/visitor query | yes | declaration-compatible | yes | backend is part of the query artifact |
-| CQRS input | yes | declaration-compatible | yes | structural `~query` remains V1 |
-| Runtime Classes and DDD | yes | yes | yes | class artifact emitted in the same module |
+| Family                    | Runtime | Define | Standalone AOT | Notes                                            |
+| ------------------------- | ------- | ------ | -------------- | ------------------------------------------------ |
+| validation                | yes     | yes    | yes            | selection-aware validation source                |
+| equal, diff, hash, clone  | yes     | yes    | yes            | schema-specialized operations                    |
+| JSON and binary codec     | yes     | yes    | yes            | transport representation is preserved            |
+| mapper, transform, update | yes     | yes    | yes            | reconstructible bindings required                |
+| mask and sanitize         | yes     | yes    | yes            | static schema security metadata                  |
+| eager CQRS query          | yes     | yes    | yes            | define artifacts are deliberately non-executable |
+| iterator/visitor query    | yes     | yes    | yes            | backend is part of the query artifact            |
+| CQRS input/parser         | yes     | yes    | yes            | structural `~query` remains V1                   |
+| Runtime Classes and DDD   | yes     | yes    | yes            | class artifact emitted in the same module        |
 
 New public operation families must add a row only when runtime behavior,
 define stubs, generated JavaScript/TypeScript, parity tests and tree-shaking
-coverage all exist. “Declaration-compatible” entries are tracked migration
-work: they share reconstructive query artifacts today, while the define host is
-being made deliberately non-executable for every terminal artifact.
+coverage all exist.
 
 ## Generated TypeScript and JavaScript
 
@@ -113,12 +115,12 @@ all operations.
 Parity is a correctness guarantee, not a blanket speed claim. Hot-operation
 benchmarks compare:
 
-| Variant | Includes compile cost | Runtime compiler dependency |
-| --- | --- | --- |
-| idiomatic JavaScript | no | no |
-| handwritten optimized ceiling | no | no |
-| runtime JIT | reported separately | yes |
-| generated AOT | no | no |
+| Variant                       | Includes compile cost | Runtime compiler dependency |
+| ----------------------------- | --------------------- | --------------------------- |
+| idiomatic JavaScript          | no                    | no                          |
+| handwritten optimized ceiling | no                    | no                          |
+| runtime JIT                   | reported separately   | yes                         |
+| generated AOT                 | no                    | no                          |
 
 Each feature document records environment, data set, warm-up, iterations,
 throughput or latency, generated source size and allocation measurements where
@@ -146,4 +148,3 @@ Before merging a public operation:
 8. document barriers, allocation model, complexity and measured benchmarks;
 9. run format, lint, test and build checks;
 10. inspect the generated source for generic walkers and unnecessary helpers.
-

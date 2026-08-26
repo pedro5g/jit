@@ -5,10 +5,10 @@ import { fold } from "./tokenize";
  *
  * The rest of the pipeline answers questions about the library. This answers
  * questions about the reader's program — "meu array tem muitos registros e
- * filtrar está lento" is not a question about `JIT.query`, and retrieval
+ * filtrar está lento" is not a question about `JIT.cqrs.query`, and retrieval
  * cannot turn it into one, because the query page never uses the word "lento".
  * Someone who knows the library reads that sentence and immediately knows the
- * answer is `JIT.query` fused with `.indexBy()`, and can say why.
+ * answer is a fused `JIT.cqrs.query`, and can say why.
  *
  * Each entry is that knowledge written down: the symptom in the words a reader
  * uses, the problem restated precisely, the combination of APIs that solves it,
@@ -53,11 +53,10 @@ export const SOLUTIONS: Solution[] = [
       ["query", "lento"],
     ],
     problem:
-      "Filtering a large collection with Array.prototype.filter allocates an intermediate array per stage, re-reads every element for each stage, and looks up by scanning.",
-    apis: ["JIT.query", "indexBy", "filter", "select"],
+      "Filtering a large collection with Array.prototype.filter allocates an intermediate array per stage and re-reads every element for each stage.",
+    apis: ["JIT.cqrs.query", "where", "select"],
     example: `import { JIT } from "@jit-compiler/jit/runtime";
 
-// .indexBy tells the compiler that lookup by this field is worth an index
 const Users = JIT.array(
   JIT.object({
     id: JIT.string(),
@@ -65,12 +64,12 @@ const Users = JIT.array(
     score: JIT.number(),
     email: JIT.string(),
   })
-).indexBy("id");
+);
 
 // one compiled pass: filter and projection are fused, no intermediate array
-const findTopAdmins = JIT.query(Users)
+const findTopAdmins = JIT.cqrs.query(Users)
   .params({ minimumScore: JIT.number() })
-  .filter((q, params) => q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)))
+  .where((q, params) => q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)))
   .select("id", "email");
 
 findTopAdmins(users, { minimumScore: 50 });`,
@@ -78,7 +77,7 @@ findTopAdmins(users, { minimumScore: 50 });`,
       "The filter and the projection are lowered into a single loop, so the collection is walked once instead of once per stage.",
       "No intermediate array is allocated: the query preallocates one output, writes by cursor and trims once at the end.",
       'The predicate is compiled to straight-line comparisons on known fields — `row.role === "admin"` — instead of calling a closure per element.',
-      '`.indexBy("id")` records that keyed lookup is a profitable strategy for this collection, which is what makes identity comparisons and lookups indexed rather than scans.',
+      "This query remains a scan today; index and binary-search access paths are selected only after the physical-planner milestone can prove the predicate matches a declared fact.",
       "Aggregates go further: `.count()`, `.sum()`, `.avg()`, `.min()` and `.max()` allocate no output array at all.",
     ],
     page: "/docs/runtime/queries",

@@ -81,8 +81,8 @@ describe("resolveSolutions", () => {
     const matched = resolveSolutions("meu array tem muitos registros e está lento ao filtrar");
 
     expect(matched[0]?.id).toBe("slow-filter-large-collection");
-    expect(matched[0]?.apis).toContain("JIT.query");
-    expect(matched[0]?.apis).toContain("indexBy");
+    expect(matched[0]?.apis).toContain("JIT.cqrs.query");
+    expect(matched[0]?.apis).toContain("where");
   });
 
   it("matches the same symptom in English", () => {
@@ -107,7 +107,7 @@ describe("resolveSolutions", () => {
     const block = solutionBlock(resolveSolutions("lista grande, filtrar está lento"));
 
     expect(block).toContain("PROVEN SOLUTION");
-    expect(block).toContain("JIT.query");
+    expect(block).toContain("JIT.cqrs.query");
     expect(block).toContain("Why it works");
   });
 

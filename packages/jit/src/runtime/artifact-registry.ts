@@ -39,6 +39,13 @@ interface CqrsInputArtifact {
   readonly source: string;
 }
 
+interface CqrsParserArtifact {
+  readonly kind: "cqrs-parser";
+  readonly definition: unknown;
+  /** Import-free function-body source that returns the specialized parser. */
+  readonly source: string;
+}
+
 interface ValidatorArtifact {
   readonly kind: "validator";
   readonly schema: ATS.AnyTypeSchema;
@@ -99,6 +106,7 @@ export type CompiledArtifact =
   | SourceArtifact
   | QueryPlanArtifact
   | CqrsInputArtifact
+  | CqrsParserArtifact
   | ValidatorArtifact
   | OperationArtifact
   | ExecutionArtifact

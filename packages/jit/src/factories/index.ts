@@ -45,6 +45,10 @@ export {
   type CqrsQuery,
   cqrs,
   type StandardQuery,
+  type StandardQueryCondition,
+  type StandardQueryDefinition,
+  type StandardQueryStep,
+  type StandardQueryValue,
 } from "./cqrs.js";
 export { dto } from "./dto.js";
 export { type IsoFactories, iso } from "./iso.js";

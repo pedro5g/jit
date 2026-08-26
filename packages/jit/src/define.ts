@@ -24,9 +24,10 @@ import type { SchemaInput } from "./core/builder/index.js";
 import { unwrapSchema } from "./core/builder/index.js";
 import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/host.js";
 import { JITError } from "./errors/index.js";
+import type { CqrsInput, CqrsQuery, ParsedCqrsInput } from "./factories/cqrs.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
 import * as RuntimeJIT from "./factories/index.js";
-import { registerArtifact } from "./runtime/artifact-registry.js";
+import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
 
 type DefineFunction<TFunction extends (...args: never[]) => unknown> = AOTArtifact<TFunction> &
   Pick<CallableArtifact<TFunction>, "compile" | "explain" | "plan">;
@@ -282,6 +283,131 @@ function sanitize<TSchema extends ATS.AnyTypeSchema>(
 ): DefineFunction<Sanitize<ATS.TypeofSchema<TSchema>>> {
   return operationStub<TSchema, Sanitize<ATS.TypeofSchema<TSchema>>>(schema, "sanitize", "value");
 }
+
+function defineCqrsQuery<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<ATS.ArraySchema<TSchema>>
+): CqrsQuery<TSchema>;
+function defineCqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQuery<TSchema>;
+function defineCqrsQuery(schema: SchemaInput): CqrsQuery<ATS.AnyTypeSchema> {
+  return wrapDefineCqrsQuery(RuntimeJIT.cqrs.query(schema));
+}
+
+function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(builder: TQuery): TQuery {
+  const artifact = getArtifact(builder);
+  if (artifact?.kind !== "query-plan") {
+    throw new JITError("INVALID_QUERY", "CQRS definition query is missing its reconstructive QueryProgram");
+  }
+  const terminal = (mode: "array" | "iterator" | "async-iterator" | "visitor") => {
+    const stub = function aotQueryArtifact(): never {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    } as (...args: unknown[]) => unknown;
+
+    Object.defineProperty(stub, AOT_ARTIFACT, {
+      value: {
+        artifactId: `query:${mode}`,
+        schemaId: artifact.schema.type,
+        operation: {
+          kind: "query",
+          ...(artifact.program.params === undefined ? {} : { params: artifact.program.params }),
+        },
+      } satisfies ArtifactDescriptor,
+    });
+    registerArtifact(stub, { ...artifact, mode });
+    return stub;
+  };
+  const stub = terminal("array") as unknown as Record<string, unknown>;
+  const source = builder as unknown as Record<string, unknown>;
+  const chainMethods = [
+    "params",
+    "filter",
+    "where",
+    "select",
+    "unique",
+    "keyed",
+    "groupBy",
+    "orderBy",
+    "flatMap",
+    "take",
+    "limit",
+    "drop",
+    "takeWhile",
+    "dropWhile",
+    "chunk",
+    "window",
+    "pairwise",
+    "scan",
+    "groupAdjacentBy",
+    "delete",
+    "update",
+    "sum",
+    "count",
+    "avg",
+    "min",
+    "max",
+  ] as const;
+
+  for (const key of chainMethods) {
+    const method = source[key] as (...args: unknown[]) => (...args: never[]) => unknown;
+    Object.defineProperty(stub, key, { value: (...args: unknown[]) => wrapDefineCqrsQuery(method(...args)) });
+  }
+  Object.defineProperties(stub, {
+    "~query": { get: () => source["~query"] },
+    explain: { value: (...args: unknown[]) => (source.explain as (...values: unknown[]) => unknown)(...args) },
+    to: {
+      value: Object.freeze({
+        iterator: () => terminal("iterator"),
+        asyncIterator: () => terminal("async-iterator"),
+        visitor: () => terminal("visitor"),
+      }),
+    },
+    lazy: {
+      value: () => {
+        const lazy = terminal("iterator") as unknown as Record<string, unknown>;
+        Object.defineProperties(lazy, {
+          explain: { value: (...args: unknown[]) => (source.explain as (...values: unknown[]) => unknown)(...args) },
+          to: {
+            value: Object.freeze({
+              asyncIterator: () => terminal("async-iterator"),
+              visitor: () => terminal("visitor"),
+            }),
+          },
+        });
+        return lazy;
+      },
+    },
+  });
+  registerArtifact(stub as object, artifact);
+  return stub as unknown as TQuery;
+}
+
+const cqrs = Object.freeze({
+  ...RuntimeJIT.cqrs,
+  parse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {
+    const artifact = getArtifact(definition);
+    if (artifact?.kind !== "cqrs-input") {
+      throw new JITError("INVALID_QUERY", "CQRS input is missing reconstructive parser metadata");
+    }
+    const stub = function aotCqrsParser(): never {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    } as (input: unknown) => ParsedCqrsInput;
+    Object.defineProperty(stub, AOT_ARTIFACT, {
+      value: {
+        artifactId: "cqrs:parse",
+        schemaId: definition.schema.type,
+        operation: { kind: "query" },
+      } satisfies ArtifactDescriptor,
+    });
+    registerArtifact(stub, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+    return stub;
+  },
+  query: defineCqrsQuery,
+});
 
 function operationStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...args: never[]) => unknown>(
   schema: SchemaInput<TSchema>,
@@ -580,6 +706,7 @@ export const JIT = {
   format,
   jsonSchema,
   mock,
+  cqrs,
   compare: Object.freeze({ equal, diff, hash }),
   security: Object.freeze({ mask, sanitize }),
 } as Omit<
@@ -596,6 +723,7 @@ export const JIT = {
   | "format"
   | "jsonSchema"
   | "mock"
+  | "cqrs"
   | "compare"
   | "security"
 > & {
@@ -611,6 +739,7 @@ export const JIT = {
   readonly format: typeof format;
   readonly jsonSchema: typeof jsonSchema;
   readonly mock: typeof mock;
+  readonly cqrs: typeof cqrs;
   readonly compare: {
     readonly equal: typeof equal;
     readonly diff: typeof diff;

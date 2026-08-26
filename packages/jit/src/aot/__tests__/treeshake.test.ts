@@ -111,6 +111,26 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("function map(source)");
   });
 
+  it("should keep a CQRS filter artifact independent from unrelated operation families", async () => {
+    const User = JIT.object({ id: JIT.number(), active: JIT.boolean(), score: JIT.number() });
+    const activeIds = JIT.cqrs
+      .query(User)
+      .where((query) => query.eq("active", true))
+      .select("id");
+
+    AOT.generate({ artifacts: { activeIds }, outDir });
+    const bundled = await bundle(
+      `import { activeIds } from "./index.js";\nconsole.log(activeIds([{ id: 1, active: true, score: 10 }]));\n`
+    );
+
+    expect(bundled).toContain("const query = (function query");
+    expect(bundled).toContain("value[i]");
+    expect(bundled).not.toContain("function stringify");
+    expect(bundled).not.toContain("encodeInto");
+    expect(bundled).not.toContain("function clone");
+    expect(bundled).not.toContain("rules.filter");
+  });
+
   it("should retain only the co-emitted class required by a construction pipeline", async () => {
     const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() }));
     const parseUser = JIT.json.parse(User).validate();

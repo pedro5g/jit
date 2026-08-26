@@ -13447,6 +13447,8 @@ function emitModule(plan, options, layout) {
       return emitExecutionArtifact(binding, declaration, artifact.plan, reportName, type);
     if (artifact.kind === "query-plan") return emitQueryPlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "cqrs-parser")
+      return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
@@ -13471,6 +13473,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
+    if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -13861,7 +13864,7 @@ function emitModule(plan, options, layout) {
       reportName,
       "query",
       skipped,
-      () => artifact.mode === "iterator" ? emitQueryIteratorSource(artifact.schema, program) : artifact.mode === "async-iterator" ? emitQueryAsyncIteratorSource(artifact.schema, program) : artifact.mode === "visitor" ? emitQueryVisitorSource(artifact.schema, program) : hasIncrementalQueryNodes2(program) ? emitQueryArraySource(artifact.schema, program) : emitQuerySource(artifact.schema, program)
+      () => artifact.mode === "iterator" ? emitQueryIteratorSource(artifact.schema, program) : artifact.mode === "async-iterator" ? emitQueryAsyncIteratorSource(artifact.schema, program) : artifact.mode === "visitor" ? emitQueryVisitorSource(artifact.schema, program) : hasIncrementalQueryNodes(program) ? emitQueryArraySource(artifact.schema, program) : emitQuerySource(artifact.schema, program)
     );
     if (!source2) return void 0;
     const inlined = inlineBindings(
@@ -13887,7 +13890,7 @@ function emitModule(plan, options, layout) {
     js.push("})();");
     return { binding, type };
   }
-  function hasIncrementalQueryNodes2(program) {
+  function hasIncrementalQueryNodes(program) {
     return program.nodes.some(
       (node) => [
         "flatMap",
@@ -13913,6 +13916,16 @@ function emitModule(plan, options, layout) {
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push(...indentBlock(parserSource));
     js.push(`  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse });`);
+    js.push("})();");
+    return { binding, type };
+  }
+  function emitCqrsParserArtifact(binding, declaration, artifact, reportName, type) {
+    if (JSON.stringify(artifact.definition) === void 0) {
+      skipped.push({ schema: reportName, operation: "cqrs-parser", reason: "CQRS definition cannot be serialized" });
+      return void 0;
+    }
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...indentBlock(artifact.source));
     js.push("})();");
     return { binding, type };
   }
@@ -17169,11 +17182,12 @@ function isQueryConstRef(value) {
 
 // ../../packages/jit/src/factories/cqrs.ts
 function cqrsQuery(schema) {
-  const row = unwrapSchema(schema);
+  const target = unwrapSchema(schema);
+  const row = target.type === "array" ? target.def.element : target;
   if (row.type !== "object" && row.type !== "runtimeType") {
-    throw new JITError("INVALID_QUERY", "JIT.cqrs.query() requires an object or Runtime Type schema");
+    throw new JITError("INVALID_QUERY", "JIT.cqrs.query() requires an object or Runtime Type, or an array of either");
   }
-  const collection = array(row).schema;
+  const collection = target.type === "array" ? target : array(row).schema;
   return wrap(
     row,
     collection,
@@ -17181,29 +17195,48 @@ function cqrsQuery(schema) {
   );
 }
 function wrap(schema, collection, builder) {
-  const rawProgram = getQueryProgram(builder);
-  const program = rawProgram ? normalizeCqrsProgram(rawProgram) : void 0;
-  let compiled;
-  const callable = ((value, params) => {
-    if (!program) return builder(value, params);
-    compiled ??= hasIncrementalQueryNodes(program) ? compileQueryArray(collection, program) : compileQuery(collection, program);
-    return compiled(value, params);
-  });
-  Object.defineProperties(callable, {
-    params: {
-      value: (shape) => wrap(schema, collection, builder.params(shape))
-    },
+  const program = getQueryProgram(builder);
+  const record2 = builder;
+  const filterMethod = record2.filter;
+  const takeMethod = record2.take;
+  const chainMethods = [
+    "params",
+    "filter",
+    "select",
+    "unique",
+    "keyed",
+    "groupBy",
+    "orderBy",
+    "flatMap",
+    "take",
+    "drop",
+    "takeWhile",
+    "dropWhile",
+    "chunk",
+    "window",
+    "pairwise",
+    "scan",
+    "groupAdjacentBy",
+    "delete",
+    "update",
+    "sum",
+    "count",
+    "avg",
+    "min",
+    "max"
+  ];
+  for (const key of chainMethods) {
+    const method = record2[key];
+    Object.defineProperty(builder, key, {
+      value: (...args) => wrap(schema, collection, method(...args))
+    });
+  }
+  Object.defineProperties(builder, {
     where: {
-      value: (predicate) => wrap(schema, collection, builder.filter(predicate))
-    },
-    select: {
-      value: (...fields) => wrap(schema, collection, builder.select(...fields))
-    },
-    orderBy: {
-      value: (key, direction = "asc") => wrap(schema, collection, builder.orderBy(key, direction))
+      value: (...args) => wrap(schema, collection, filterMethod(...args))
     },
     limit: {
-      value: (count) => wrap(schema, collection, builder.take(count))
+      value: (count) => wrap(schema, collection, takeMethod(count))
     },
     "~query": {
       get: () => Object.freeze({
@@ -17213,52 +17246,14 @@ function wrap(schema, collection, builder) {
     }
   });
   if (program)
-    registerArtifact(callable, {
+    registerArtifact(builder, {
       kind: "query-plan",
       schema: collection,
       program,
       mode: "array",
-      standard: callable["~query"]
+      standard: builder["~query"]
     });
-  return callable;
-}
-function normalizeCqrsProgram(program) {
-  const source = program.nodes;
-  const filters = source.filter((node) => node.kind === "filter");
-  let select;
-  let orderBy;
-  let take;
-  for (const node of source) {
-    if (node.kind === "select:fields") select = node;
-    else if (node.kind === "orderBy") orderBy = node;
-    else if (node.kind === "take" && (take === void 0 || node.count < take.count)) take = node;
-  }
-  return {
-    nodes: [
-      ...filters,
-      ...orderBy ? [orderBy] : [],
-      ...select ? [select] : [],
-      ...take ? [take] : []
-    ],
-    bindings: program.bindings,
-    ...program.params === void 0 ? {} : { params: program.params }
-  };
-}
-function hasIncrementalQueryNodes(program) {
-  return program.nodes.some(
-    (node) => [
-      "flatMap",
-      "take",
-      "drop",
-      "takeWhile",
-      "dropWhile",
-      "chunk",
-      "window",
-      "pairwise",
-      "scan",
-      "groupAdjacentBy"
-    ].includes(node.kind)
-  );
+  return builder;
 }
 function toStandardQuery(schema, program) {
   const nodes = program?.nodes ?? [];
@@ -17272,21 +17267,65 @@ function toStandardQuery(schema, program) {
       filter = filter ? Object.freeze({ kind: "logical", operator: "and", left: filter, right: condition }) : condition;
     } else if (node.kind === "select:fields") projection = Object.freeze([...node.fields]);
     else if (node.kind === "orderBy") {
-      const previous = order ?? [];
-      order = Object.freeze([
-        ...previous,
-        Object.freeze({ path: Object.freeze([node.key]), direction: node.direction })
-      ]);
+      order = Object.freeze([Object.freeze({ path: Object.freeze([node.key]), direction: node.direction })]);
     } else if (node.kind === "take") limit = limit === void 0 ? node.count : Math.min(limit, node.count);
   }
   return Object.freeze({
     source: Object.freeze({ kind: "object", fields: Object.freeze(objectFields(schema)) }),
+    pipeline: Object.freeze(nodes.map((node) => toStandardStep(node, program?.bindings ?? []))),
     ...filter ? { filter } : {},
     ...projection ? { projection } : {},
     ...order ? { order } : {},
     ...limit === void 0 ? {} : { limit },
     params: Object.freeze([...program?.params ?? []])
   });
+}
+function toStandardStep(node, bindings) {
+  switch (node.kind) {
+    case "filter":
+      return Object.freeze({ kind: "where", condition: toStandardCondition(node.condition, bindings) });
+    case "select:fields":
+      return Object.freeze({ kind: "select", fields: Object.freeze([...node.fields]) });
+    case "orderBy":
+      return Object.freeze({ kind: "orderBy", key: node.key, direction: node.direction });
+    case "unique":
+    case "keyed":
+    case "groupBy":
+    case "flatMap":
+    case "groupAdjacentBy":
+      return Object.freeze({ kind: node.kind, key: node.key });
+    case "take":
+    case "drop":
+      return Object.freeze({ kind: node.kind, count: node.count });
+    case "takeWhile":
+    case "dropWhile":
+      return Object.freeze({ kind: node.kind, condition: toStandardCondition(node.condition, bindings) });
+    case "chunk":
+    case "window":
+      return Object.freeze({ kind: node.kind, size: node.size });
+    case "pairwise":
+    case "delete":
+      return Object.freeze({ kind: node.kind });
+    case "scan":
+      return Object.freeze({
+        kind: "scan",
+        initial: toStandardValue({ kind: "binding", name: node.initialBinding }, bindings),
+        update: Object.freeze({ kind: "binding", name: node.updateBinding })
+      });
+    case "update":
+      return Object.freeze({
+        kind: "update",
+        patch: Object.freeze(
+          Object.fromEntries(Object.entries(node.patch).map(([key, value]) => [key, toStandardValue(value, bindings)]))
+        )
+      });
+    case "aggregate":
+      return Object.freeze({
+        kind: "aggregate",
+        operation: node.op,
+        ...node.key === void 0 ? {} : { key: node.key }
+      });
+  }
 }
 function objectFields(schema) {
   const object2 = schema.type === "runtimeType" ? schema.def.innerType : schema;
@@ -17327,12 +17366,21 @@ function toStandardValue(value, bindings) {
   if (value.kind === "literal") return Object.freeze({ kind: "literal", value: value.value });
   if (value.kind === "binding") {
     const index = Number.parseInt(value.name.slice(3), 10);
-    if (Number.isSafeInteger(index) && index >= 0 && index < bindings.length) {
+    if (Number.isSafeInteger(index) && index >= 0 && index < bindings.length && isStandardData(bindings[index])) {
       return Object.freeze({ kind: "literal", value: bindings[index] });
     }
     return Object.freeze({ kind: "binding", name: value.name });
   }
   return Object.freeze({ kind: "param", name: value.name });
+}
+function isStandardData(value, seen = /* @__PURE__ */ new Set()) {
+  if (value === null) return true;
+  if (["string", "number", "bigint", "boolean", "undefined"].includes(typeof value)) return true;
+  if (typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) return value.every((item) => isStandardData(item, seen));
+  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return false;
+  return Object.values(value).every((item) => isStandardData(item, seen));
 }
 function cqrsInput(schema, options) {
   const unwrapped = unwrapSchema(schema);
@@ -17484,7 +17532,12 @@ function cqrsParse(definition) {
     definition.options.select ? objectFields(definition.schema) : [],
     definition.options.limits?.maxSelectFields ?? 30
   );
-  return globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor);
+  const parser = globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor);
+  const artifact = getArtifact(definition);
+  if (artifact?.kind === "cqrs-input") {
+    registerArtifact(parser, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+  }
+  return parser;
 }
 function cqrsParseReference(definition) {
   return (input) => {
@@ -19971,6 +20024,122 @@ function mask2(schema) {
 function sanitize2(schema) {
   return operationStub(schema, "sanitize", "value");
 }
+function defineCqrsQuery(schema) {
+  return wrapDefineCqrsQuery(cqrs.query(schema));
+}
+function wrapDefineCqrsQuery(builder) {
+  const artifact = getArtifact(builder);
+  if (artifact?.kind !== "query-plan") {
+    throw new JITError("INVALID_QUERY", "CQRS definition query is missing its reconstructive QueryProgram");
+  }
+  const terminal = (mode) => {
+    const stub2 = function aotQueryArtifact() {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    };
+    Object.defineProperty(stub2, AOT_ARTIFACT, {
+      value: {
+        artifactId: `query:${mode}`,
+        schemaId: artifact.schema.type,
+        operation: {
+          kind: "query",
+          ...artifact.program.params === void 0 ? {} : { params: artifact.program.params }
+        }
+      }
+    });
+    registerArtifact(stub2, { ...artifact, mode });
+    return stub2;
+  };
+  const stub = terminal("array");
+  const source = builder;
+  const chainMethods = [
+    "params",
+    "filter",
+    "where",
+    "select",
+    "unique",
+    "keyed",
+    "groupBy",
+    "orderBy",
+    "flatMap",
+    "take",
+    "limit",
+    "drop",
+    "takeWhile",
+    "dropWhile",
+    "chunk",
+    "window",
+    "pairwise",
+    "scan",
+    "groupAdjacentBy",
+    "delete",
+    "update",
+    "sum",
+    "count",
+    "avg",
+    "min",
+    "max"
+  ];
+  for (const key of chainMethods) {
+    const method = source[key];
+    Object.defineProperty(stub, key, { value: (...args) => wrapDefineCqrsQuery(method(...args)) });
+  }
+  Object.defineProperties(stub, {
+    "~query": { get: () => source["~query"] },
+    explain: { value: (...args) => source.explain(...args) },
+    to: {
+      value: Object.freeze({
+        iterator: () => terminal("iterator"),
+        asyncIterator: () => terminal("async-iterator"),
+        visitor: () => terminal("visitor")
+      })
+    },
+    lazy: {
+      value: () => {
+        const lazy2 = terminal("iterator");
+        Object.defineProperties(lazy2, {
+          explain: { value: (...args) => source.explain(...args) },
+          to: {
+            value: Object.freeze({
+              asyncIterator: () => terminal("async-iterator"),
+              visitor: () => terminal("visitor")
+            })
+          }
+        });
+        return lazy2;
+      }
+    }
+  });
+  registerArtifact(stub, artifact);
+  return stub;
+}
+var cqrs2 = Object.freeze({
+  ...cqrs,
+  parse(definition) {
+    const artifact = getArtifact(definition);
+    if (artifact?.kind !== "cqrs-input") {
+      throw new JITError("INVALID_QUERY", "CQRS input is missing reconstructive parser metadata");
+    }
+    const stub = function aotCqrsParser() {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    };
+    Object.defineProperty(stub, AOT_ARTIFACT, {
+      value: {
+        artifactId: "cqrs:parse",
+        schemaId: definition.schema.type,
+        operation: { kind: "query" }
+      }
+    });
+    registerArtifact(stub, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+    return stub;
+  },
+  query: defineCqrsQuery
+});
 function operationStub(schema, operation, output) {
   return executionStub(schema, [
     stage("value", "value", "value"),
@@ -20209,6 +20378,7 @@ var JIT = {
   format: format2,
   jsonSchema: jsonSchema2,
   mock: mock2,
+  cqrs: cqrs2,
   compare: Object.freeze({ equal: equal2, diff: diff2, hash: hash3 }),
   security: Object.freeze({ mask: mask2, sanitize: sanitize2 })
 };
