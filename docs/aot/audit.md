@@ -95,9 +95,16 @@ Currently implemented:
 - an object of artifacts emits one frozen object with exactly those members;
 - a schema emits a named exported type and no runtime function;
 - `diff`, `stringify`, `fromJSON`, validators, equal, clone, hash, specialized
-  string formatters, mask, sanitize, codec, queries, mappers, and
-  built-in transforms are re-emitted from registered artifacts when
+  string formatters, mask, sanitize, codec, queries, mappers, sort plans, index
+  plans, and built-in transforms are re-emitted from registered artifacts when
   serializable;
+- a query carries its chosen access path into the generated module and nothing
+  that chose it: an index lookup emits the builder and the shared
+  `__cachedIndex` helper, a binary search emits neither, and no fact resolution
+  or planner reaches the output;
+- an eager query's generated signature follows its reducing node, so a
+  terminal, a scalar aggregate and a composite aggregate are typed as what they
+  return rather than as an array;
 - generated JS has no `import "jit"` and is ready-to-run ESM;
 - generated TypeScript contains the executable optimized functions plus their
   public types in one `.ts` source;
@@ -112,7 +119,10 @@ Still structural/future work from the plan:
 - source maps and atomic directory swaps;
 - generation worker isolation and incremental cache;
 - complete artifact type metadata independent of source-file type imports;
-- `jit check` and deeper stage inspection for logical/physical IR.
+- `jit check` and deeper stage inspection for logical/physical IR. `explain()`
+  now reports the selected physical strategy, its reason, its expected
+  complexity and the facts behind it, which closes the reviewability half of
+  this gap; surfacing it through the CLI is what remains.
 
 ## Known Architectural Gap
 

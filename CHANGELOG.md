@@ -6,6 +6,50 @@ npm and JSR.
 
 ## [Unreleased]
 
+### Added
+
+- Add `JIT.sort`, a schema-specialized comparator with `by`/`thenBy`, a
+  non-mutating call, an explicit `inPlace` and a reusable `compare`. One
+  `OrderingDescriptor` now backs standalone sort, query `orderBy`, `compileSortBy`
+  and the lazy pipeline's ordering, which previously had three different
+  comparators that disagreed about `Date` keys and about absent values. A union
+  of scalars — the usual shape of a hand-written enum — is accepted as a key.
+- Add `JIT.index`, which materializes an index from the key a collection already
+  declares through `.keyed()`, `.indexBy()`, `.uniqueBy()` or an entity hint, with
+  `by()` for explicit and compound keys and `grouped()` for every row per key. A
+  `Date` key is indexed by its timestamp, because a `Map` matches keys by
+  identity. `cached` reuses one index per array; the plain call always builds.
+- Add four CQRS terminals — `first`, `findIndex`, `some` and `every` — that
+  answer from inside the loop. Nothing is collected: no result array, no cursor,
+  and no per-row object unless `first` is preceded by a `select`.
+- Add a physical query planner. `where(eq(key, value)).first()` compiles to a
+  cached index lookup on a `.keyed()` collection, a binary search on an
+  `.ordered()` unique one, and an early-exit scan otherwise, without the
+  declaration changing. `explain().physical` reports the strategy, the reason,
+  the expected complexity and the facts behind it.
+- Add `aggregate({...})` to the CQRS surface, answering several reductions in one
+  pass with one accumulator local per field, built from the same five operators
+  the scalar aggregates expose.
+- Add grouped aggregation: `groupBy(...).aggregate({...})` gives every group its
+  own accumulator and never builds a group array.
+- Extend the `~query` V1 pipeline with `terminal` and `aggregate:composite`
+  steps, so an adapter reads "the first matching row" or "these five reductions"
+  instead of inferring them from a limit or issuing five requests.
+- Generalize the per-array index cache so distinct plans over the same array
+  coexist instead of evicting each other. Compiled equality keeps its
+  allocation-free single-key slot.
+
+### Fixed
+
+- Ordering was not a total order across absent values: two absent values fell
+  through into the value comparison, where `null` and `undefined` compare
+  unequal, so `compare(a, b)` and `compare(b, a)` both returned `1` and later
+  criteria were never reached. Absent values now sort first ascending, last
+  descending, and never against each other.
+- Generated TypeScript claimed `unknown[]` for every eager query, including the
+  ones that reduce. `count()` had been typed as an array since it shipped; the
+  signature now follows the reducing node.
+
 ## [2.0.0] - 2026-08-16
 
 ### Added

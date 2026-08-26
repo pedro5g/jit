@@ -30,7 +30,7 @@ in the compilation path. The emitted function interprets nothing.
 | `core/hints`   | manual strategy hints (`entity`, `indexBy`, `hash`, `ordered`, ...)                                                                                                             |
 | `transforms`   | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers)                                                                                                    |
 | `compiler`     | one emitter per operation; shared IR (`ir/ir.ts`) + optimizer passes for equal and query; string emitters (validate/serialize/codec/scrub/stream) follow the same codegen rules |
-| `runtime`      | compile cache, keyed-index cache, hash primitives, boundary scanner (stream), artifact registry                                                                                 |
+| `runtime`      | compile cache, per-array index cache (legacy single-key slot plus plan entries), hash primitives, boundary scanner (stream), artifact registry                                                                                 |
 | `factories`    | the public `JIT.*` namespace: schema factories, callable capability artifacts, composition chains, and explicit `compile` aggregations                                          |
 | `aot`          | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary                                                                              |
 | `mcp.ts`       | MCP stdio protocol, tools/resources/prompts/completion dispatch; `mcp-project.ts` owns workspace-safe docs and AOT operations                                                   |
@@ -292,6 +292,41 @@ then reuses the same path confinement, preview, staging and transaction
 machinery as offline `jit1_` artifacts. A `jlr1_` reference cannot contain
 commands, dependencies or hooks. Offline `jit1_` tokens remain deterministic
 unsigned envelopes that carry their complete files.
+
+## Semantic and physical query planning
+
+A query is lowered in two steps that must stay separate.
+
+The **semantic plan** is what the caller asked for: `QueryProgram` nodes,
+reachable through `~query` in portable form. It never names an algorithm.
+
+The **physical plan** (`compiler/physical-query.ts`) is how the rows are
+reached. It reads collection facts — `.keyed`, `.uniqueBy`, `.indexBy`,
+`.ordered`, entity identity — and picks `Scan`, `EarlyExitScan`,
+`CachedIndexLookup` or `BinarySearch`. It is private: `explain()` exposes the
+strategy, the reason, the complexity and the facts, and nothing else. `~query`
+carries no physical node at all, so an external adapter chooses its own path.
+
+Rules that hold for every strategy added here:
+
+- a strategy must never change the answer, and needs a differential test
+  against the scan it replaces covering present, absent and boundary keys;
+- a strategy that can lose to a scan documents the regime where it does, with
+  the measured number;
+- no public API asks the caller to name an algorithm.
+
+Three descriptors are shared rather than re-derived per operation:
+
+| Descriptor           | Module                 | Read by                                            |
+| -------------------- | ---------------------- | -------------------------------------------------- |
+| `OrderingDescriptor` | `compiler/ordering.ts` | `JIT.sort`, query `orderBy`, `compileSortBy`, lazy  |
+| `IndexDescriptor`    | `compiler/indexing.ts` | `JIT.index`, `CachedIndexLookup`                    |
+| scalar key kinds     | `compiler/row-keys.ts` | both of the above                                   |
+
+`row-keys.ts` is why a key means the same thing to a comparator and to an
+index. Where they differ it is deliberate: ordering has a `numeric` fast path
+for subtraction, while a `Map` matches keys with SameValueZero, so indexing
+folds `numeric` into `direct`.
 
 ## Optimizer boundaries
 

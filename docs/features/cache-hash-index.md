@@ -214,9 +214,15 @@ functions do not carry index helpers.
 
 Generated equality uses an adaptive threshold. Collections shorter than 64
 items stay on a direct scan and do not allocate a `Map`; collections with 64
-items or more build or reuse the keyed index. The cache stores one index key
-per array reference, so alternating different keys for the same array rebuilds
-the cached map.
+items or more build or reuse the keyed index. Compiled equality keeps one
+single-key slot per array reference, matched without allocating, so alternating
+different keys for the same array rebuilds that slot.
+
+Index plans do not share that slot. `JIT.index(...).cached(rows)` and a query's
+`CachedIndexLookup` store one entry per plan under the same array, keyed by the
+plan's descriptor, so an index built for a lookup is not thrown away by an index
+built for something else. See [indexing](./indexing.md) and
+[physical query planning](./physical-query-planning.md).
 
 An indexed array is subject to the same immutable-reference contract as a
 hashed object. `push`, `splice`, reordering, and mutating a key field can make

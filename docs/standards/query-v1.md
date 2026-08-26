@@ -28,10 +28,55 @@ interface StandardQueryV1 {
 
 `pipeline` is the ordered portable semantic query. V1 steps cover conditions,
 projection, uniqueness, keyed/group collectors, ordering, incremental control,
-mutation and scalar aggregation. Callback-backed scan updates remain named
-bindings rather than embedded functions. The compatibility summary fields
-`filter`, `projection`, `order`, and `limit` describe the effective common
-read-query subset for simple adapters.
+mutation, scalar aggregation, composite aggregation and terminals. Callback-backed
+scan updates remain named bindings rather than embedded functions. The
+compatibility summary fields `filter`, `projection`, `order`, and `limit`
+describe the effective common read-query subset for simple adapters.
+
+### Terminals
+
+A terminal states that the request wants one answer rather than a collection:
+
+```json
+{ "kind": "terminal", "operation": "first" }
+```
+
+`operation` is `first`, `findIndex`, `some` or `every`. An adapter lowers
+`first` to its own single-row form (`LIMIT 1`) and `some` to an existence check
+(`EXISTS`), rather than inferring either from a limit of one. `findIndex` asks
+for a position in the source order and an adapter that cannot express that must
+reject the request instead of approximating it.
+
+### Composite aggregation
+
+A composite states every reduction the request needs, so an adapter issues one
+query instead of one per number:
+
+```json
+{
+  "kind": "aggregate:composite",
+  "fields": [
+    { "name": "count", "operation": "count" },
+    { "name": "revenue", "operation": "sum", "key": "total" }
+  ]
+}
+```
+
+`name` is the caller's result key and `operation` is one of the five scalar
+operators. Field order is the declared order and is stable. A composite that
+follows a `groupBy` step reduces within each group.
+
+### Evolving V1
+
+New steps are added to version 1 rather than starting a version 2. The protocol
+has no published external compatibility boundary yet: there are no third-party
+adapters pinned to a frozen step list, so a v2 would cost every reader a
+migration and buy nothing. An adapter is expected to reject a step it does not
+recognize, which is what makes adding one safe.
+
+Version 2 becomes the right answer only when V1 has been published and used
+externally, adapters exist that would break, and a change cannot be expressed
+additively.
 
 `FilterExpression` is a small recursive tree of `compare`, `logical`, and
 `not` nodes. Values identify fields by path and can be literals, declared
