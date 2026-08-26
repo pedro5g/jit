@@ -131,6 +131,26 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("rules.filter");
   });
 
+  it("should keep a composite aggregate down to accumulators", async () => {
+    const Order = JIT.object({ id: JIT.number(), total: JIT.number() });
+    const summary = JIT.cqrs
+      .query(JIT.array(Order))
+      .where((query) => query.gt("total", 10))
+      .aggregate({ count: JIT.cqrs.count(), revenue: JIT.cqrs.sum("total"), average: JIT.cqrs.avg("total") });
+
+    AOT.generate({ artifacts: { summary }, outDir });
+    const bundled = await bundle(
+      `import { summary } from "./index.js";\nconsole.log(summary([{ id: 1, total: 50 }]));\n`
+    );
+
+    // Three answers, one loop, no group arrays and no second reduce pass.
+    expect(bundled.match(/for \(/g)).toHaveLength(1);
+    expect(bundled).not.toContain(".reduce(");
+    expect(bundled).not.toContain("new Array");
+    expect(bundled).not.toContain("Object.keys");
+    expect(bundled).not.toContain("function clone");
+  });
+
   it("should compile an access path in, and no planner with it", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const byKey = JIT.cqrs

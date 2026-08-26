@@ -1,5 +1,6 @@
 import type {
   QueryAggregateNode,
+  QueryCompositeAggregateNode,
   QueryConditionNode,
   QueryMutationNode,
   QuerySelectFieldsNode,
@@ -72,13 +73,15 @@ export function buildQueryIR(
 ): IRProgram {
   const body = plan.mutation
     ? buildMutationQuery(target, plan)
-    : plan.terminal
-      ? buildTerminalQuery(target, plan, plan.terminal)
-      : plan.aggregate
-        ? buildAggregateQuery(target, plan, plan.aggregate)
-        : plan.collector
-          ? buildCollectedQuery(target, plan)
-          : buildArrayQuery(target, plan);
+    : plan.composite
+      ? buildCompositeAggregateQuery(target, plan, plan.composite)
+      : plan.terminal
+        ? buildTerminalQuery(target, plan, plan.terminal)
+        : plan.aggregate
+          ? buildAggregateQuery(target, plan, plan.aggregate)
+          : plan.collector
+            ? buildCollectedQuery(target, plan)
+            : buildArrayQuery(target, plan);
 
   return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
 }
@@ -170,6 +173,87 @@ function buildCollectedQuery(target: QueryTarget, plan: OptimizedQueryPlan): rea
 
 const ACC = irVar("acc");
 const ACC_COUNT = irVar("n");
+
+/**
+ * Emits every requested reduction into one pass. Each field owns its own
+ * accumulator local, so nothing is collected and nothing is read twice.
+ */
+function buildCompositeAggregateQuery(
+  target: QueryTarget,
+  plan: OptimizedQueryPlan,
+  composite: QueryCompositeAggregateNode
+): readonly IRNode[] {
+  const body: IRNode[] = [];
+
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+
+  const slots = composite.fields.map((field, index) => ({
+    field,
+    // `avg` needs its own row count; the others need one accumulator each.
+    accumulator: irVar(`a${index}`),
+    counter: irVar(`n${index}`),
+  }));
+  const step: IRNode[] = [];
+
+  for (const { field, accumulator, counter } of slots) {
+    const read = field.key === undefined ? ITEM : loadProp(ITEM, field.key);
+
+    switch (field.op) {
+      case "count":
+        body.push(letDecl(accumulator, literal(0)));
+        step.push(store(accumulator, binary("add", accumulator, literal(1))));
+        break;
+      case "sum":
+        body.push(letDecl(accumulator, literal(0)));
+        step.push(store(accumulator, binary("add", accumulator, read)));
+        break;
+      case "avg":
+        body.push(letDecl(accumulator, literal(0)), letDecl(counter, literal(0)));
+        step.push(
+          store(accumulator, binary("add", accumulator, read)),
+          store(counter, binary("add", counter, literal(1)))
+        );
+        break;
+      case "min":
+      case "max":
+        body.push(letDecl(accumulator));
+        step.push({
+          kind: "if",
+          test: {
+            kind: "nary",
+            op: "or",
+            operands: [
+              strictEqual(accumulator, literal(undefined)),
+              binary(field.op === "min" ? "lessThan" : "greaterThan", read, accumulator),
+            ],
+          },
+          then: [store(accumulator, read)],
+        });
+        break;
+    }
+  }
+  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
+
+  // An empty average is undefined rather than a division by zero, so it is
+  // resolved once after the pass instead of inside it.
+  for (const { field, accumulator, counter } of slots) {
+    if (field.op !== "avg") continue;
+    body.push({
+      kind: "if",
+      test: strictEqual(counter, literal(0)),
+      then: [store(accumulator, literal(undefined))],
+      otherwise: [store(accumulator, binary("divide", accumulator, counter))],
+    });
+  }
+  body.push({
+    kind: "return",
+    value: objectLiteral(slots.map(({ field, accumulator }) => ({ key: field.name, value: accumulator }))),
+  });
+  return body;
+}
 
 /**
  * Emits a reduction that returns from inside the loop. Nothing is collected:

@@ -62,6 +62,12 @@ describe("runtime and define entrypoints", () => {
       .query(DefineJIT.array(DefineUser))
       .where((query) => query.eq("id", 2))
       .first();
+    const runtimeAggregate = RuntimeJIT.cqrs
+      .query(RuntimeJIT.array(RuntimeUser))
+      .aggregate({ count: RuntimeJIT.cqrs.count(), total: RuntimeJIT.cqrs.sum("id") });
+    const defineAggregate = DefineJIT.cqrs
+      .query(DefineJIT.array(DefineUser))
+      .aggregate({ count: DefineJIT.cqrs.count(), total: DefineJIT.cqrs.sum("id") });
     const runtimeSome = RuntimeJIT.cqrs
       .query(RuntimeJIT.array(RuntimeUser))
       .where((query) => query.gt("id", 1))
@@ -130,6 +136,12 @@ describe("runtime and define entrypoints", () => {
         name: "firstUser",
         runtime: runtimeFirst as UnknownArtifact,
         define: defineFirst as UnknownArtifact,
+        args: [[value, { id: 2, name: "Grace" }]],
+      },
+      {
+        name: "userTotals",
+        runtime: runtimeAggregate as UnknownArtifact,
+        define: defineAggregate as UnknownArtifact,
         args: [[value, { id: 2, name: "Grace" }]],
       },
       {

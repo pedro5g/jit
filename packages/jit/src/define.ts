@@ -446,6 +446,7 @@ function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(build
     "avg",
     "min",
     "max",
+    "aggregate",
     "first",
     "findIndex",
     "some",

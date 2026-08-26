@@ -32,7 +32,12 @@ import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitSortSource } from "../compiler/sort.js";
 import { emitUpdateSource } from "../compiler/update.js";
 import { canUseFastParse, emitValidator } from "../compiler/validate/emit-validate.js";
-import type { QueryAggregateNode, QueryNode, QueryTerminalNode } from "../core/ast/index.js";
+import type {
+  QueryAggregateNode,
+  QueryCompositeAggregateNode,
+  QueryNode,
+  QueryTerminalNode,
+} from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
@@ -1908,12 +1913,23 @@ function eagerQueryResultType(
 ): string {
   let terminal: QueryTerminalNode | undefined;
   let aggregate: QueryAggregateNode | undefined;
+  let composite: QueryCompositeAggregateNode | undefined;
   let select: readonly string[] | undefined;
 
   for (const node of artifact.program.nodes as readonly QueryNode[]) {
     if (node.kind === "terminal") terminal = node;
     else if (node.kind === "aggregate") aggregate = node;
+    else if (node.kind === "aggregate:composite") composite = node;
     else if (node.kind === "select:fields") select = node.fields;
+  }
+
+  if (composite) {
+    const fields = composite.fields.map(
+      (field) =>
+        `readonly ${JSON.stringify(field.name)}: ${field.op === "sum" || field.op === "count" ? "number" : "number | undefined"}`
+    );
+
+    return `{ ${fields.join("; ")} }`;
   }
 
   if (terminal) {

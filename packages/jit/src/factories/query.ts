@@ -24,6 +24,7 @@ import {
   type QueryProgram,
 } from "../compiler/query.js";
 import type {
+  QueryAggregateOperator,
   QueryCompareNode,
   QueryCompareOperator,
   QueryConditionNode,
@@ -220,6 +221,13 @@ export interface QueryBuilderOps<
   max<TKey extends NumericQueryKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number | undefined, TParams>;
+  /**
+   * Several reductions over one pass, each with its own accumulator. Asking
+   * for four answers still reads the collection once.
+   */
+  aggregate(
+    spec: Readonly<Record<string, { readonly op: QueryAggregateOperator; readonly key?: string }>>
+  ): QueryBuilder<TSchema, TOutput, Readonly<Record<string, number | undefined>>, TParams>;
   /**
    * Returns the first matching item, or `undefined`. Returns from inside the
    * loop: nothing is collected and the rest of the collection is not read.
@@ -632,6 +640,23 @@ function createQueryBuilder<
 
     max(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
+    },
+
+    aggregate(spec) {
+      // Declaration order is the emission order and the result key order, so
+      // the same declaration always produces the same source.
+      const fields = Object.entries(spec).map(([name, field]) => ({
+        name,
+        op: field.op,
+        ...(field.key === undefined ? {} : { key: field.key }),
+      }));
+
+      return createQueryBuilder(
+        schema,
+        [...nodes, { kind: "aggregate:composite", fields }],
+        bindings,
+        paramNames
+      ) as never;
     },
 
     first() {

@@ -1,4 +1,9 @@
-import type { QueryConditionNode, QueryPipelineNode, QueryValueNode } from "../core/ast/index.js";
+import type {
+  QueryAggregateOperator,
+  QueryConditionNode,
+  QueryPipelineNode,
+  QueryValueNode,
+} from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
@@ -51,7 +56,15 @@ export type StandardQueryStep =
     }
   | { readonly kind: "update"; readonly patch: Readonly<Record<string, StandardQueryValue>> }
   | { readonly kind: "aggregate"; readonly operation: "sum" | "count" | "avg" | "min" | "max"; readonly key?: string }
-  | { readonly kind: "terminal"; readonly operation: "first" | "findIndex" | "some" | "every" };
+  | { readonly kind: "terminal"; readonly operation: "first" | "findIndex" | "some" | "every" }
+  | {
+      readonly kind: "aggregate:composite";
+      readonly fields: readonly {
+        readonly name: string;
+        readonly operation: "sum" | "count" | "avg" | "min" | "max";
+        readonly key?: string;
+      }[];
+    };
 
 export type StandardQueryValue =
   | { readonly kind: "field"; readonly path: readonly string[] }
@@ -162,6 +175,9 @@ export interface ParsedCqrsInput {
 }
 
 type Row<TSchema extends ATS.AnyTypeSchema> = ATS.TypeofSchema<TSchema>;
+type CqrsAggregateResult<TSpec> = {
+  readonly [TKey in keyof TSpec]: TSpec[TKey] extends CqrsAggregateSpec<infer TResult> ? TResult : never;
+};
 type CqrsKey<TSchema extends ATS.AnyTypeSchema> = Extract<keyof Row<TSchema>, string>;
 type CqrsNumericKey<TSchema extends ATS.AnyTypeSchema> = {
   [TKey in CqrsKey<TSchema>]: Row<TSchema>[TKey] extends number ? TKey : never;
@@ -233,6 +249,13 @@ interface CqrsQueryOps<
   avg<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
   min<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
   max<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
+  /**
+   * Several reductions over one pass. Each field keeps its own accumulator, so
+   * asking for four answers still reads the collection once.
+   */
+  aggregate<const TSpec extends Readonly<Record<string, CqrsAggregateSpec<unknown>>>>(
+    spec: TSpec
+  ): CqrsQuery<TSchema, TOutput, CqrsAggregateResult<TSpec>, TParams>;
   /**
    * Returns the first matching row, or `undefined`. The answer comes from
    * inside the loop, so nothing is collected and the scan stops there.
@@ -318,6 +341,7 @@ function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams exten
     "avg",
     "min",
     "max",
+    "aggregate",
     "first",
     "findIndex",
     "some",
@@ -436,6 +460,19 @@ function toStandardStep(node: QueryPipelineNode, bindings: readonly unknown[]): 
       });
     case "terminal":
       return Object.freeze({ kind: "terminal", operation: node.op });
+    case "aggregate:composite":
+      return Object.freeze({
+        kind: "aggregate:composite",
+        fields: Object.freeze(
+          node.fields.map((field) =>
+            Object.freeze({
+              name: field.name,
+              operation: field.op,
+              ...(field.key === undefined ? {} : { key: field.key }),
+            })
+          )
+        ),
+      });
   }
 }
 
@@ -933,8 +970,31 @@ export function emitCqrsAotParserSource(...args: Parameters<typeof emitCqrsInput
   return `function decodeCursor(value, size) { if (typeof value !== "string") throw new Error("Malformed cursor"); try { const bytes = atob(value); let escaped = ""; for (let i = 0; i < bytes.length; i++) escaped += "%" + bytes.charCodeAt(i).toString(16).padStart(2, "0"); const decoded = JSON.parse(decodeURIComponent(escaped)); if (!Array.isArray(decoded) || decoded.length !== size) throw new Error("Malformed cursor"); return decoded; } catch { throw new Error("Malformed cursor"); } } ${parser}`;
 }
 
+/**
+ * One reduction inside a composite aggregate. The phantom `_result` carries
+ * the field's result type; it is `null` at runtime, like every other phantom
+ * in the schema AST.
+ */
+export interface CqrsAggregateSpec<TResult = number> {
+  readonly op: QueryAggregateOperator;
+  readonly key?: string;
+  readonly _result: TResult;
+}
+
+function aggregateSpec<TResult>(op: QueryAggregateOperator, key?: string): CqrsAggregateSpec<TResult> {
+  return Object.freeze({ op, ...(key === undefined ? {} : { key }), _result: null as TResult });
+}
+
 export const cqrs = Object.freeze({
   input: cqrsInput,
   parse: cqrsParse,
   query: cqrsQuery,
+  /** Counts the rows that reach the aggregate; `0` when none do. */
+  count: () => aggregateSpec<number>("count"),
+  /** Sums a numeric field; `0` when no row reaches the aggregate. */
+  sum: (key: string) => aggregateSpec<number>("sum", key),
+  /** Averages a numeric field; `undefined` when no row reaches the aggregate. */
+  avg: (key: string) => aggregateSpec<number | undefined>("avg", key),
+  min: (key: string) => aggregateSpec<number | undefined>("min", key),
+  max: (key: string) => aggregateSpec<number | undefined>("max", key),
 });

@@ -10028,7 +10028,7 @@ var COMPARE_OPERATORS = {
   lte: "lessThanOrEqual"
 };
 function buildQueryIR(target, plan, options = {}) {
-  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.terminal ? buildTerminalQuery(target, plan, plan.terminal) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
+  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.composite ? buildCompositeAggregateQuery(target, plan, plan.composite) : plan.terminal ? buildTerminalQuery(target, plan, plan.terminal) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
   return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
 }
 function buildArrayQuery(target, plan) {
@@ -10104,6 +10104,71 @@ function buildCollectedQuery(target, plan) {
 }
 var ACC = irVar("acc");
 var ACC_COUNT = irVar("n");
+function buildCompositeAggregateQuery(target, plan, composite) {
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  const slots = composite.fields.map((field, index2) => ({
+    field,
+    // `avg` needs its own row count; the others need one accumulator each.
+    accumulator: irVar(`a${index2}`),
+    counter: irVar(`n${index2}`)
+  }));
+  const step = [];
+  for (const { field, accumulator, counter } of slots) {
+    const read = field.key === void 0 ? ITEM : loadProp(ITEM, field.key);
+    switch (field.op) {
+      case "count":
+        body.push(letDecl(accumulator, literal(0)));
+        step.push(store(accumulator, binary("add", accumulator, literal(1))));
+        break;
+      case "sum":
+        body.push(letDecl(accumulator, literal(0)));
+        step.push(store(accumulator, binary("add", accumulator, read)));
+        break;
+      case "avg":
+        body.push(letDecl(accumulator, literal(0)), letDecl(counter, literal(0)));
+        step.push(
+          store(accumulator, binary("add", accumulator, read)),
+          store(counter, binary("add", counter, literal(1)))
+        );
+        break;
+      case "min":
+      case "max":
+        body.push(letDecl(accumulator));
+        step.push({
+          kind: "if",
+          test: {
+            kind: "nary",
+            op: "or",
+            operands: [
+              strictEqual(accumulator, literal(void 0)),
+              binary(field.op === "min" ? "lessThan" : "greaterThan", read, accumulator)
+            ]
+          },
+          then: [store(accumulator, read)]
+        });
+        break;
+    }
+  }
+  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
+  for (const { field, accumulator, counter } of slots) {
+    if (field.op !== "avg") continue;
+    body.push({
+      kind: "if",
+      test: strictEqual(counter, literal(0)),
+      then: [store(accumulator, literal(void 0))],
+      otherwise: [store(accumulator, binary("divide", accumulator, counter))]
+    });
+  }
+  body.push({
+    kind: "return",
+    value: objectLiteral(slots.map(({ field, accumulator }) => ({ key: field.name, value: accumulator })))
+  });
+  return body;
+}
 function buildTerminalQuery(target, plan, terminal) {
   const body = [];
   if (target.kind === "array") {
@@ -10365,7 +10430,7 @@ function keyedAccess(schema, equality, direction, terminal) {
   });
 }
 function singleEquality(condition) {
-  if (!condition || condition.kind !== "compare" || condition.op !== "eq") return void 0;
+  if (condition?.kind !== "compare" || condition.op !== "eq") return void 0;
   const { left, right } = condition;
   if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
   if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
@@ -10497,6 +10562,8 @@ function serializeQueryNode(node) {
       return `o(${node.key},${node.direction})`;
     case "aggregate":
       return `a(${node.op},${node.key ?? ""})`;
+    case "aggregate:composite":
+      return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
     case "terminal":
       return `t(${node.op})`;
     case "delete":
@@ -10534,6 +10601,7 @@ function createQueryPlan(nodes) {
   const collectors = [];
   const orderBys = [];
   const aggregates = [];
+  const composites = [];
   const terminals = [];
   const mutations = [];
   for (const node of nodes) {
@@ -10557,6 +10625,9 @@ function createQueryPlan(nodes) {
       case "aggregate":
         aggregates[aggregates.length] = node;
         break;
+      case "aggregate:composite":
+        composites[composites.length] = node;
+        break;
       case "terminal":
         terminals[terminals.length] = node;
         break;
@@ -10573,6 +10644,7 @@ function createQueryPlan(nodes) {
     collectors,
     orderBys,
     aggregates,
+    composites,
     terminals,
     mutations
   };
@@ -10585,6 +10657,7 @@ function optimizeQueryPlan(plan) {
     collector: last(plan.collectors),
     orderBy: last(plan.orderBys),
     aggregate: last(plan.aggregates),
+    composite: last(plan.composites),
     terminal: last(plan.terminals),
     mutation: last(plan.mutations)
   };
@@ -10612,6 +10685,32 @@ function validateQueryPlan(schema, plan) {
         throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
       }
       validateObjectKeys2(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
+  }
+  if (plan.composite) {
+    if (plan.aggregate || plan.terminal || plan.orderBy || plan.mutation || plan.select) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query aggregate({...}) cannot be combined with select/orderBy/scalar aggregates/terminals/delete/update in v1"
+      );
+    }
+    if (plan.collector) {
+      throw new JITError("INVALID_QUERY", "grouped aggregate({...}) is not supported in v1");
+    }
+    if (plan.composite.fields.length === 0) {
+      throw new JITError("INVALID_QUERY", "query aggregate({...}) requires at least one field");
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const field of plan.composite.fields) {
+      if (seen.has(field.name)) {
+        throw new JITError("INVALID_QUERY", `query aggregate repeats field ${JSON.stringify(field.name)}`);
+      }
+      seen.add(field.name);
+      if (field.op === "count") continue;
+      if (field.key === void 0) {
+        throw new JITError("INVALID_QUERY", `query aggregate ${field.op} requires a field key`);
+      }
+      validateObjectKeys2(schema, [field.key], `query aggregate ${field.op}`);
     }
   }
   if (plan.terminal) {
@@ -12568,6 +12667,8 @@ function serializeQueryNode2(node) {
       return `a(${node.op},${node.key ?? ""})`;
     case "terminal":
       return `t(${node.op})`;
+    case "aggregate:composite":
+      return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
     case "unique":
       return `u(${node.key})`;
     case "keyed":
@@ -15176,11 +15277,19 @@ function queryPlanType(artifact, typeNames) {
 function eagerQueryResultType(artifact, typeNames) {
   let terminal;
   let aggregate;
+  let composite;
   let select;
   for (const node of artifact.program.nodes) {
     if (node.kind === "terminal") terminal = node;
     else if (node.kind === "aggregate") aggregate = node;
+    else if (node.kind === "aggregate:composite") composite = node;
     else if (node.kind === "select:fields") select = node.fields;
+  }
+  if (composite) {
+    const fields = composite.fields.map(
+      (field) => `readonly ${JSON.stringify(field.name)}: ${field.op === "sum" || field.op === "count" ? "number" : "number | undefined"}`
+    );
+    return `{ ${fields.join("; ")} }`;
   }
   if (terminal) {
     if (terminal.op === "some" || terminal.op === "every") return "boolean";
@@ -17652,6 +17761,19 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
     max(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
     },
+    aggregate(spec) {
+      const fields = Object.entries(spec).map(([name, field]) => ({
+        name,
+        op: field.op,
+        ...field.key === void 0 ? {} : { key: field.key }
+      }));
+      return createQueryBuilder(
+        schema,
+        [...nodes, { kind: "aggregate:composite", fields }],
+        bindings,
+        paramNames
+      );
+    },
     first() {
       return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "first" }], bindings, paramNames);
     },
@@ -17839,6 +17961,7 @@ function wrap(schema, collection, builder) {
     "avg",
     "min",
     "max",
+    "aggregate",
     "first",
     "findIndex",
     "some",
@@ -17946,6 +18069,15 @@ function toStandardStep(node, bindings) {
       });
     case "terminal":
       return Object.freeze({ kind: "terminal", operation: node.op });
+    case "aggregate:composite":
+      return Object.freeze({
+        kind: "aggregate:composite",
+        fields: Object.freeze(
+          node.fields.map(
+            (field) => Object.freeze({ name: field.name, operation: field.op, ...field.key === void 0 ? {} : { key: field.key } })
+          )
+        )
+      });
   }
 }
 function objectFields(schema) {
@@ -18356,10 +18488,21 @@ function emitCqrsAotParserSource(...args) {
   const parser = emitCqrsInputParser(...args).split("return __reference(input);").join('throw new Error("Invalid CQRS input");').split("__decodeCursor").join("decodeCursor");
   return `function decodeCursor(value, size) { if (typeof value !== "string") throw new Error("Malformed cursor"); try { const bytes = atob(value); let escaped = ""; for (let i = 0; i < bytes.length; i++) escaped += "%" + bytes.charCodeAt(i).toString(16).padStart(2, "0"); const decoded = JSON.parse(decodeURIComponent(escaped)); if (!Array.isArray(decoded) || decoded.length !== size) throw new Error("Malformed cursor"); return decoded; } catch { throw new Error("Malformed cursor"); } } ${parser}`;
 }
+function aggregateSpec(op, key) {
+  return Object.freeze({ op, ...key === void 0 ? {} : { key }, _result: null });
+}
 var cqrs = Object.freeze({
   input: cqrsInput,
   parse: cqrsParse,
-  query: cqrsQuery
+  query: cqrsQuery,
+  /** Counts the rows that reach the aggregate; `0` when none do. */
+  count: () => aggregateSpec("count"),
+  /** Sums a numeric field; `0` when no row reaches the aggregate. */
+  sum: (key) => aggregateSpec("sum", key),
+  /** Averages a numeric field; `undefined` when no row reaches the aggregate. */
+  avg: (key) => aggregateSpec("avg", key),
+  min: (key) => aggregateSpec("min", key),
+  max: (key) => aggregateSpec("max", key)
 });
 
 // ../../packages/jit/src/factories/dto.ts
@@ -20826,6 +20969,7 @@ function wrapDefineCqrsQuery(builder) {
     "avg",
     "min",
     "max",
+    "aggregate",
     "first",
     "findIndex",
     "some",

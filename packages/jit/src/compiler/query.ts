@@ -1,6 +1,7 @@
 import type {
   QueryAggregateNode,
   QueryCollectorNode,
+  QueryCompositeAggregateNode,
   QueryConditionNode,
   QueryFilterNode,
   QueryMutationNode,
@@ -82,6 +83,7 @@ interface QueryPlan {
   readonly collectors: readonly QueryCollectorNode[];
   readonly orderBys: readonly QueryOrderByNode[];
   readonly aggregates: readonly QueryAggregateNode[];
+  readonly composites: readonly QueryCompositeAggregateNode[];
   readonly terminals: readonly QueryTerminalNode[];
   readonly mutations: readonly QueryMutationNode[];
 }
@@ -94,6 +96,7 @@ export interface OptimizedQueryPlan {
   readonly collector: QueryCollectorNode | undefined;
   readonly orderBy: QueryOrderByNode | undefined;
   readonly aggregate: QueryAggregateNode | undefined;
+  readonly composite: QueryCompositeAggregateNode | undefined;
   readonly terminal: QueryTerminalNode | undefined;
   readonly mutation: QueryMutationNode | undefined;
 }
@@ -213,6 +216,8 @@ function serializeQueryNode(node: QueryNode): string {
       return `o(${node.key},${node.direction})`;
     case "aggregate":
       return `a(${node.op},${node.key ?? ""})`;
+    case "aggregate:composite":
+      return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
     case "terminal":
       return `t(${node.op})`;
     case "delete":
@@ -255,6 +260,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
   const collectors: QueryCollectorNode[] = [];
   const orderBys: QueryOrderByNode[] = [];
   const aggregates: QueryAggregateNode[] = [];
+  const composites: QueryCompositeAggregateNode[] = [];
   const terminals: QueryTerminalNode[] = [];
   const mutations: QueryMutationNode[] = [];
 
@@ -279,6 +285,9 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
       case "aggregate":
         aggregates[aggregates.length] = node;
         break;
+      case "aggregate:composite":
+        composites[composites.length] = node;
+        break;
       case "terminal":
         terminals[terminals.length] = node;
         break;
@@ -296,6 +305,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
     collectors,
     orderBys,
     aggregates,
+    composites,
     terminals,
     mutations,
   };
@@ -309,6 +319,7 @@ function optimizeQueryPlan(plan: QueryPlan): OptimizedQueryPlan {
     collector: last(plan.collectors),
     orderBy: last(plan.orderBys),
     aggregate: last(plan.aggregates),
+    composite: last(plan.composites),
     terminal: last(plan.terminals),
     mutation: last(plan.mutations),
   };
@@ -342,6 +353,37 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
       }
 
       validateObjectKeys(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
+  }
+
+  if (plan.composite) {
+    // A composite reduces the whole pass to one answer, so anything that
+    // reshapes or reorders rows first has nothing left to hand it.
+    if (plan.aggregate || plan.terminal || plan.orderBy || plan.mutation || plan.select) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query aggregate({...}) cannot be combined with select/orderBy/scalar aggregates/terminals/delete/update in v1"
+      );
+    }
+    if (plan.collector) {
+      throw new JITError("INVALID_QUERY", "grouped aggregate({...}) is not supported in v1");
+    }
+    if (plan.composite.fields.length === 0) {
+      throw new JITError("INVALID_QUERY", "query aggregate({...}) requires at least one field");
+    }
+
+    const seen = new Set<string>();
+
+    for (const field of plan.composite.fields) {
+      if (seen.has(field.name)) {
+        throw new JITError("INVALID_QUERY", `query aggregate repeats field ${JSON.stringify(field.name)}`);
+      }
+      seen.add(field.name);
+      if (field.op === "count") continue;
+      if (field.key === undefined) {
+        throw new JITError("INVALID_QUERY", `query aggregate ${field.op} requires a field key`);
+      }
+      validateObjectKeys(schema, [field.key], `query aggregate ${field.op}`);
     }
   }
 

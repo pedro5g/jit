@@ -78,6 +78,37 @@ const visit = JIT.query(Users)
 visit(users, (user) => consume(user));
 ```
 
+## Composite aggregate
+
+`aggregate({...})` answers several reductions from one pass, with one
+accumulator per field and no intermediate array.
+
+```ts
+const Order = JIT.object({ id: JIT.number(), total: JIT.number() });
+const Orders = JIT.array(Order);
+
+const summary = JIT.cqrs
+  .query(Orders)
+  .where((q) => q.gt("total", 10))
+  .aggregate({
+    count: JIT.cqrs.count(),
+    revenue: JIT.cqrs.sum("total"),
+    average: JIT.cqrs.avg("total"),
+  });
+
+console.log(summary([{ id: 1, total: 50 }, { id: 2, total: 5 }]));
+```
+
+The reductions are `JIT.cqrs.count()`, `.sum(key)`, `.avg(key)`, `.min(key)`
+and `.max(key)`. `count` and `sum` are `number`; `avg`, `min` and `max` are
+`number | undefined`, because an empty pass has no answer for them — never
+`NaN` and never `Infinity`.
+
+Declaration order is the result key order and the emission order, so the same
+declaration always produces the same source. A composite reduces the whole pass
+to one answer, so it cannot be combined with `select`, `orderBy`, scalar
+aggregates, terminals or mutations. Grouped aggregation is not supported yet.
+
 ## Terminal sinks
 
 Four terminals answer from inside the loop instead of collecting a result.

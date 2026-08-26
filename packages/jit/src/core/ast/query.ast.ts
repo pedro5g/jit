@@ -85,6 +85,23 @@ export interface QueryAggregateNode {
   readonly key?: string;
 }
 
+/** One named reduction inside a composite aggregate. */
+export interface QueryAggregateField {
+  readonly name: string;
+  readonly op: QueryAggregateOperator;
+  /** Field accumulated by the reduction; absent for `count`. */
+  readonly key?: string;
+}
+
+/**
+ * Several reductions over one pass. Each field keeps its own accumulator, so
+ * the collection is read once no matter how many answers are asked for.
+ */
+export interface QueryCompositeAggregateNode {
+  readonly kind: "aggregate:composite";
+  readonly fields: readonly QueryAggregateField[];
+}
+
 /**
  * Reductions that answer from the loop itself and never build a result array.
  * The filters are the predicate; the terminal decides how the pass ends.
@@ -180,5 +197,6 @@ export type QueryNode =
   | QueryCollectorNode
   | QueryOrderByNode
   | QueryAggregateNode
+  | QueryCompositeAggregateNode
   | QueryTerminalNode
   | QueryMutationNode;

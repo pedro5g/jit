@@ -87,6 +87,7 @@ remain when their semantics require them.
 | sort / ordering plans     | yes     | yes    | yes            | descriptor stays off the compiled plan           |
 | index plans               | yes     | yes    | yes            | cache helper emitted only when an index is       |
 | physical query access     | yes     | yes    | yes            | strategy is compiled in; never in `~query`       |
+| composite aggregate       | yes     | yes    | yes            | one pass, one accumulator per field              |
 | Runtime Classes and DDD   | yes     | yes    | yes            | class artifact emitted in the same module        |
 
 New public operation families must add a row only when runtime behavior,
