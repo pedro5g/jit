@@ -247,7 +247,17 @@ expose private `QueryProgram` or `PhysicalQueryPlan` nodes through the standard.
 Semantic query plans describe what is requested. Schema facts and collection
 hints feed a separate physical planner that chooses how to execute it. Explain
 output must make the selected strategy, materialization barriers, expected
-complexity, and relevant facts reviewable.
+complexity, and relevant facts reviewable, and must not expose access-path
+internals or query AST nodes.
+
+A physical strategy must never change the answer. Every access path needs a
+differential test against the scan it replaces, covering present, absent and
+boundary keys. A strategy that can lose to a scan must document the regime
+where it does, with the measured number — an index that is rebuilt instead of
+reused is slower than the scan it replaced, and the documentation says so.
+
+Do not add a public operation that asks callers to name an algorithm. The
+query describes the request; facts on the collection decide the access path.
 
 ## Feature Documentation
 

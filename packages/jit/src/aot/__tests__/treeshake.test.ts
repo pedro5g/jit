@@ -131,6 +131,41 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("rules.filter");
   });
 
+  it("should compile an access path in, and no planner with it", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const byKey = JIT.cqrs
+      .query(JIT.array(User).keyed("id"))
+      .params({ id: JIT.number() })
+      .where((query, params) => query.eq("id", params.id))
+      .first();
+    const byOrder = JIT.cqrs
+      .query(JIT.array(User).ordered("id", "asc").uniqueBy("id"))
+      .params({ id: JIT.number() })
+      .where((query, params) => query.eq("id", params.id))
+      .first();
+
+    AOT.generate({ artifacts: { byKey, byOrder }, outDir });
+    const keyBundle = await bundle(
+      `import { byKey } from "./index.js";\nconsole.log(byKey([{ id: 1, name: "Ada" }], { id: 1 }));\n`
+    );
+    const orderBundle = await bundle(
+      `import { byOrder } from "./index.js";\nconsole.log(byOrder([{ id: 1, name: "Ada" }], { id: 1 }));\n`
+    );
+
+    // The chosen strategy is the code; the choosing is not shipped.
+    expect(keyBundle).toContain("__cachedIndex(value,");
+    expect(keyBundle).not.toContain("CachedIndexLookup");
+    expect(keyBundle).not.toContain("strategy");
+    expect(keyBundle).not.toContain("resolveHints");
+    expect(keyBundle).not.toContain("byOrder");
+
+    // A binary search needs no cache helper at all.
+    expect(orderBundle).toContain(">>> 1");
+    expect(orderBundle).not.toContain("__cachedIndex");
+    expect(orderBundle).not.toContain("new Map()");
+    expect(orderBundle).not.toContain("BinarySearch");
+  });
+
   it("should keep a terminal query free of any result collection", async () => {
     const User = JIT.object({ id: JIT.number(), active: JIT.boolean() });
     const firstActive = JIT.cqrs

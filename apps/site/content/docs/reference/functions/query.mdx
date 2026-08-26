@@ -139,6 +139,48 @@ const plan = JIT.query(Users)
 `explain()` reports fused stages and materialization barriers. Check it when a
 pipeline expected to stream starts retaining the complete input.
 
+### Access paths
+
+For the eager backend it also reports the access path chosen from the
+collection's facts. The declaration never changes; the facts do.
+
+```ts
+const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+
+const keyed = JIT.cqrs
+  .query(JIT.array(User).keyed("id"))
+  .where((q) => q.eq("id", 1))
+  .first();
+const ordered = JIT.cqrs
+  .query(JIT.array(User).ordered("id", "asc").uniqueBy("id"))
+  .where((q) => q.eq("id", 1))
+  .first();
+const plain = JIT.cqrs
+  .query(JIT.array(User))
+  .where((q) => q.eq("id", 1))
+  .first();
+
+console.log(keyed.explain().physical?.strategy);
+console.log(ordered.explain().physical?.strategy);
+console.log(plain.explain().physical?.strategy);
+```
+
+| Facts on the collection             | Strategy            | Cost       |
+| ----------------------------------- | ------------------- | ---------- |
+| `.keyed(key)`                       | `CachedIndexLookup` | `O(1)`     |
+| `.ordered(key, dir)` + unique       | `BinarySearch`      | `O(log n)` |
+| none of the above                   | `EarlyExitScan`     | `O(k)`     |
+
+Only a single `eq` filter ending in `first()` or `some()` is lifted off a scan.
+An index maps a key to a row rather than a position, so `findIndex()` stays a
+scan, and `every()` has to see every row by definition.
+
+A cached index is built once per array and reused. It repays across repeated
+lookups on the same array and loses badly when the array is rebuilt per call —
+declare `.ordered()` instead in that case, since a binary search allocates
+nothing. Measured numbers are in
+[physical query planning](https://github.com/pedro5g/jit/blob/main/docs/features/physical-query-planning.md).
+
 ## Binary target
 
 Passing a binary rowset or binary array compiles byte/column scans instead of

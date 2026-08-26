@@ -86,6 +86,7 @@ remain when their semantics require them.
 | CQRS input/parser         | yes     | yes    | yes            | structural `~query` remains V1                   |
 | sort / ordering plans     | yes     | yes    | yes            | descriptor stays off the compiled plan           |
 | index plans               | yes     | yes    | yes            | cache helper emitted only when an index is       |
+| physical query access     | yes     | yes    | yes            | strategy is compiled in; never in `~query`       |
 | Runtime Classes and DDD   | yes     | yes    | yes            | class artifact emitted in the same module        |
 
 New public operation families must add a row only when runtime behavior,

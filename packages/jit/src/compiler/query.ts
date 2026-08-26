@@ -16,10 +16,20 @@ import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
+import { getCachedIndex } from "../runtime/index/index-cache.js";
 import { emitQuery } from "./emitter/emit-query.js";
 import { buildQueryIR } from "./ir/builders/build-query-ir.js";
 import { optimizeQueryIR } from "./ir/optimizer/optimize-ir.js";
+import {
+  describePhysicalQueryPlan,
+  emitPhysicalQuerySource,
+  type PhysicalQueryExplain,
+  resolvePhysicalQueryPlan,
+} from "./physical-query.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
+
+/** Name the emitted source uses for the shared per-array index cache. */
+const RUNTIME_INDEX_BINDING = "__cachedIndex";
 
 type ArraySchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
 type SetSchema = ATS.AnyTypeSchema & { readonly def: ATS.ElementDef };
@@ -104,13 +114,26 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
 
   validateQueryPlan(target.objectSchema, plan);
 
-  return emitQuery(
-    optimizeQueryIR(
-      buildQueryIR(target, plan, {
-        hasParams: Boolean(program.params?.length),
-      })
-    )
-  );
+  const hasParams = Boolean(program.params?.length);
+  // A keyed access path replaces the loop rather than shaping it, so it is
+  // emitted directly instead of being lowered through the loop IR.
+  const keyed = emitPhysicalQuerySource(resolvePhysicalQueryPlan(schema, target, plan), hasParams);
+
+  if (keyed) return keyed;
+
+  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
+}
+
+/**
+ * The access path chosen for a query, for `explain()` and for tests that need
+ * to assert a decision rather than a source shape.
+ */
+export function explainPhysicalQuery(schema: ATS.AnyTypeSchema, program: QueryProgram): PhysicalQueryExplain {
+  const target = expectCollectionObjectSchema(schema, "explainPhysicalQuery");
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+
+  validateQueryPlan(target.objectSchema, plan);
+  return describePhysicalQueryPlan(resolvePhysicalQueryPlan(schema, target, plan));
 }
 
 /**
@@ -146,12 +169,15 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
 
       return {
         source,
-        create: globalThis.Function(...bindingNames, `return ${source};`),
+        create: globalThis.Function(RUNTIME_INDEX_BINDING, ...bindingNames, `return ${source};`),
       };
     },
     options
   );
-  const compiled = template.create(...program.bindings) as QueryCompiled<ATS.TypeofSchema<TSchema>, TOutput>;
+  const compiled = template.create(getCachedIndex, ...program.bindings) as QueryCompiled<
+    ATS.TypeofSchema<TSchema>,
+    TOutput
+  >;
 
   // Lets AOT re-emit this exact query when aggregated via JIT.compile extras.
   registerArtifact(compiled as object, {

@@ -5,6 +5,7 @@ import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { emitOrderingComparatorBodySource, resolveOrderingDescriptor } from "./ordering.js";
+import type { PhysicalQueryExplain } from "./physical-query.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
@@ -25,6 +26,11 @@ export interface QueryExecutionPlan {
   readonly retainedState: readonly string[];
   readonly estimatedAllocationsPerResult: number;
   readonly barriers: readonly string[];
+  /**
+   * The access path chosen for the eager backend. Present only where the
+   * schema was available to read collection facts from.
+   */
+  readonly physical?: PhysicalQueryExplain;
 }
 
 export type QueryIteratorCompiled<

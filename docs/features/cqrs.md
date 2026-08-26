@@ -76,16 +76,22 @@ no per-row object. `first` with a `select` allocates the one projected row;
 ## 8. Complexity
 
 Terminals are `O(n)` worst case and `O(k)` in practice, where `k` is the
-position of the answer: the loop returns as soon as it is known. Choosing an
-access path from collection facts — turning `where(eq(key)).first()` into an
-index lookup or a binary search — is the physical-planner milestone and is not
-claimed here.
+position of the answer: the loop returns as soon as it is known. An equality terminal over a
+collection that declares its key is not a scan at all — see
+[physical query planning](./physical-query-planning.md) for the measured access
+paths.
 
-Current scans are `O(n)` before sorting or keyed collectors. Sorting is `O(n log n)`; hash-backed uniqueness/grouping is expected `O(n)`. Physical index selection is a later milestone and is not claimed here.
+Current scans are `O(n)` before sorting or keyed collectors. Sorting is `O(n log n)`; hash-backed uniqueness/grouping is expected `O(n)`.
 
 ## 9. Physical strategies
 
 The engine selects eager-array, generator, async-generator or visitor output and reports materialization barriers through `explain()`.
+
+An equality terminal is also given an access path from the collection's facts:
+`where(eq("id", x)).first()` compiles to a cached index lookup on a `.keyed()`
+collection, a binary search on an `.ordered()` unique one, and an early-exit
+scan otherwise. `explain().physical` names the choice. See
+[physical query planning](./physical-query-planning.md).
 
 ## 10. AOT
 
@@ -146,9 +152,5 @@ Very small one-off arrays may not repay compile cost. Iterator protocol overhead
 Compile once, use declared params, select only required fields, prefer visitors for push-based hot paths and inspect barriers before optimizing.
 
 ## 15. Non-goals
-
-Terminals do not pick an access path yet: `where(eq("id", x)).first()` is an
-early-exit scan even when the collection declares `.keyed("id")`. That selection
-is the physical planner's job.
 
 CQRS does not provide a database adapter, expose private IR, silently fetch data for unsupported external operations or require callers to select an algorithm.

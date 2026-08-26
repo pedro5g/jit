@@ -942,6 +942,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     );
 
     if (!source) return undefined;
+    // A keyed access path reaches rows through the shared per-array cache.
+    if (source.includes("__cachedIndex")) needsRuntimeCachedIndex = true;
 
     const inlined = inlineBindings(
       program.bindings.map((_, index) => `__q${index}`),

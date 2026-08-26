@@ -10121,13 +10121,10 @@ function buildTerminalQuery(target, plan, terminal) {
     return body;
   }
   const found = terminal.op === "some" ? { kind: "return", value: literal(true) } : terminal.op === "findIndex" ? { kind: "return", value: INDEX2 } : { kind: "return", value: buildProjection(plan.select) };
-  body.push(
-    buildInputLoop(target, buildGuardedBody(plan, [found])),
-    {
-      kind: "return",
-      value: terminal.op === "some" ? literal(false) : terminal.op === "findIndex" ? literal(-1) : literal(void 0)
-    }
-  );
+  body.push(buildInputLoop(target, buildGuardedBody(plan, [found])), {
+    kind: "return",
+    value: terminal.op === "some" ? literal(false) : terminal.op === "findIndex" ? literal(-1) : literal(void 0)
+  });
   return body;
 }
 function buildAggregateQuery(target, plan, aggregate) {
@@ -10302,18 +10299,161 @@ function shouldProjectAfterOrder(plan) {
   return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
 }
 
+// ../../packages/jit/src/compiler/physical-query.ts
+function describePhysicalQueryPlan(plan) {
+  return Object.freeze({
+    strategy: plan.strategy,
+    reason: plan.reason,
+    complexity: plan.complexity,
+    facts: plan.facts
+  });
+}
+function resolvePhysicalQueryPlan(schema, target, plan) {
+  const terminal = plan.terminal;
+  if (!terminal) {
+    return Object.freeze({
+      strategy: "Scan",
+      reason: "the result is a collection, so every row has to be visited",
+      complexity: "O(n)",
+      facts: Object.freeze([])
+    });
+  }
+  const scan = Object.freeze({
+    strategy: "EarlyExitScan",
+    reason: `${terminal.op} returns as soon as the answer is known`,
+    complexity: "O(k)",
+    facts: Object.freeze([])
+  });
+  if (terminal.op !== "first" && terminal.op !== "some") return scan;
+  if (target.kind !== "array") return scan;
+  if (plan.filters.length !== 1) return scan;
+  const equality = singleEquality(plan.filters[0]?.condition);
+  if (!equality) return scan;
+  const hints = resolveHints(schema);
+  const ordered = hints.order ?? hints.collection?.ordered;
+  const orderedKey = resolveHintKey(ordered?.key);
+  const cacheIndex = hints.entity?.cacheIndex === true;
+  const identityKey = resolveHintKey(hints.index?.key) ?? resolveHintKey(hints.entity?.key);
+  const unique = hints.collection?.unique === true || hints.entity?.key !== void 0;
+  if (ordered && orderedKey === equality.key && unique) {
+    return Object.freeze({
+      strategy: "BinarySearch",
+      reason: "the collection declares this key ordered and unique",
+      complexity: "O(log n)",
+      facts: Object.freeze([`ordered: ${orderedKey} ${ordered.direction ?? "asc"}`, `unique key: ${orderedKey}`]),
+      access: keyedAccess(schema, equality, ordered.direction === "desc" ? "desc" : "asc", terminal.op)
+    });
+  }
+  if (cacheIndex && identityKey === equality.key) {
+    return Object.freeze({
+      strategy: "CachedIndexLookup",
+      reason: "the collection is keyed, so the index is built once per array and reused",
+      complexity: "O(1)",
+      facts: Object.freeze([`keyed: ${identityKey}`, "index cache: enabled"]),
+      access: keyedAccess(schema, equality, "asc", terminal.op)
+    });
+  }
+  return scan;
+}
+function keyedAccess(schema, equality, direction, terminal) {
+  return Object.freeze({
+    key: equality.key,
+    direction,
+    descriptor: resolveIndexDescriptor(schema, [equality.key], "unique"),
+    probe: equality.probe,
+    terminal
+  });
+}
+function singleEquality(condition) {
+  if (!condition || condition.kind !== "compare" || condition.op !== "eq") return void 0;
+  const { left, right } = condition;
+  if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
+  if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
+  return void 0;
+}
+function emitPhysicalQuerySource(physical, hasParams) {
+  const access = physical.access;
+  if (!access) return void 0;
+  if (physical.strategy === "CachedIndexLookup") return emitCachedIndexLookup(access, hasParams);
+  if (physical.strategy === "BinarySearch") return emitBinarySearch(access, hasParams);
+  return void 0;
+}
+function emitCachedIndexLookup(access, hasParams) {
+  const writer = new CodeWriter();
+  const probe = emitProbe(access);
+  writer.line("(() => {");
+  writer.indent(() => {
+    emitIndexBuilder(writer, access.descriptor, "const build = (value) => {", "};");
+    writer.line(`function query(value${hasParams ? ", params" : ""}) {`);
+    writer.indent(() => {
+      writer.line(
+        `const row = __cachedIndex(value, ${JSON.stringify(indexCacheKey(access.descriptor))}, build).get(${probe});`
+      );
+      writer.line(access.terminal === "some" ? "return row !== undefined;" : "return row;");
+    });
+    writer.line("}");
+    writer.line("return query;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitBinarySearch(access, hasParams) {
+  const writer = new CodeWriter();
+  const probe = emitProbe(access);
+  const read = (row) => {
+    const value = emitPropertyAccess(row, access.key);
+    return access.descriptor.keys[0]?.valueKind === "date" ? `${value}.getTime()` : value;
+  };
+  const goRight = access.direction === "desc" ? "probe > target" : "probe < target";
+  writer.line("(() => {");
+  writer.indent(() => {
+    writer.line(`function query(value${hasParams ? ", params" : ""}) {`);
+    writer.indent(() => {
+      writer.line(`const target = ${probe};`);
+      writer.line("let low = 0;");
+      writer.line("let high = value.length - 1;");
+      writer.line("while (low <= high) {");
+      writer.indent(() => {
+        writer.line("const mid = (low + high) >>> 1;");
+        writer.line("const row = value[mid];");
+        writer.line(`const probe = ${read("row")};`);
+        writer.line("if (probe === target) {");
+        writer.indent(() => writer.line(access.terminal === "some" ? "return true;" : "return row;"));
+        writer.line("}");
+        writer.line(`if (${goRight}) low = mid + 1;`);
+        writer.line("else high = mid - 1;");
+      });
+      writer.line("}");
+      writer.line(access.terminal === "some" ? "return false;" : "return undefined;");
+    });
+    writer.line("}");
+    writer.line("return query;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitProbe(access) {
+  const probe = access.probe;
+  const value = probe.kind === "literal" ? emitLiteral(probe.value) : probe.kind === "param" ? emitPropertyAccess("params", probe.name) : probe.kind === "binding" ? probe.name : emitPropertyAccess("row", probe.key);
+  return access.descriptor.keys[0]?.valueKind === "date" && probe.kind !== "literal" ? `(${value} == null ? ${value} : ${value}.getTime())` : value;
+}
+
 // ../../packages/jit/src/compiler/query.ts
+var RUNTIME_INDEX_BINDING = "__cachedIndex";
 function emitQuerySource(schema, program) {
   const target = expectCollectionObjectSchema(schema, "emitQuerySource");
   const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
   validateQueryPlan(target.objectSchema, plan);
-  return emitQuery(
-    optimizeQueryIR(
-      buildQueryIR(target, plan, {
-        hasParams: Boolean(program.params?.length)
-      })
-    )
-  );
+  const hasParams = Boolean(program.params?.length);
+  const keyed = emitPhysicalQuerySource(resolvePhysicalQueryPlan(schema, target, plan), hasParams);
+  if (keyed) return keyed;
+  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
+}
+function explainPhysicalQuery(schema, program) {
+  const target = expectCollectionObjectSchema(schema, "explainPhysicalQuery");
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+  validateQueryPlan(target.objectSchema, plan);
+  return describePhysicalQueryPlan(resolvePhysicalQueryPlan(schema, target, plan));
 }
 function compileQuery(schema, program, options) {
   const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
@@ -10324,12 +10464,12 @@ function compileQuery(schema, program, options) {
       const source = emitQuerySource(schema, program);
       return {
         source,
-        create: globalThis.Function(...bindingNames, `return ${source};`)
+        create: globalThis.Function(RUNTIME_INDEX_BINDING, ...bindingNames, `return ${source};`)
       };
     },
     options
   );
-  const compiled = template.create(...program.bindings);
+  const compiled = template.create(getCachedIndex, ...program.bindings);
   registerArtifact(compiled, {
     kind: "query",
     source: template.source,
@@ -14267,6 +14407,7 @@ function emitModule(plan, options, layout) {
       () => artifact.mode === "iterator" ? emitQueryIteratorSource(artifact.schema, program) : artifact.mode === "async-iterator" ? emitQueryAsyncIteratorSource(artifact.schema, program) : artifact.mode === "visitor" ? emitQueryVisitorSource(artifact.schema, program) : hasIncrementalQueryNodes(program) ? emitQueryArraySource(artifact.schema, program) : emitQuerySource(artifact.schema, program)
     );
     if (!source2) return void 0;
+    if (source2.includes("__cachedIndex")) needsRuntimeCachedIndex = true;
     const inlined = inlineBindings(
       program.bindings.map((_, index2) => `__q${index2}`),
       program.bindings
@@ -17532,7 +17673,12 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
       return createLazyQueryBuilder(schema, nodes, bindings, paramNames);
     },
     explain(outputMode = "eager-array") {
-      return explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
+      const plan = explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
+      if (outputMode !== "eager-array") return plan;
+      return Object.freeze({
+        ...plan,
+        physical: explainPhysicalQuery(schema, { nodes, bindings, params: paramNames })
+      });
     }
   });
   const program = { nodes, bindings, params: paramNames };

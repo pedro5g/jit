@@ -22,6 +22,7 @@ work and for production performance. Each page explains:
 - [Canonical CQRS queries](./cqrs.md)
 - [Sort and ordering plans](./sort.md)
 - [Indexing](./indexing.md)
+- [Physical query planning](./physical-query-planning.md)
 - [Lazy queries, iterators, and visitors](./lazy-execution.md)
 - [Serialization and binary codec](./serialization-codec.md)
 - [Binary rowsets](./binary-rowsets.md)
@@ -40,6 +41,7 @@ work and for production performance. Each page explains:
 | Filter/project application arrays | Queries and mappers     | eager result vs iterator/visitor            |
 | Order a collection by fields      | Sort and ordering       | callable copy vs `inPlace` vs `compare`     |
 | Look rows up by a key             | Indexing                | fresh build vs `cached` vs a scan           |
+| Find one row in a collection      | Physical query planning | declare facts; the planner picks the path   |
 | Process unbounded/cursor input    | Lazy execution          | sync iterator vs async iterator             |
 | Scan million-row flat batches     | Binary rowsets          | packed/aligned/columnar and memory strategy |
 | Send JSON or binary data          | Serialization and codec | full string, chunks, or versioned bytes     |

@@ -33,6 +33,7 @@ export * from "./mock.js";
 export * from "./mutation-plan.js";
 export * from "./object-ops.js";
 export * from "./ordering.js";
+export * from "./physical-query.js";
 export * from "./pipeline.js";
 export * from "./query.js";
 export * from "./resolvers/resolve-hints.js";

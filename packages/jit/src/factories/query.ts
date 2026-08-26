@@ -17,7 +17,12 @@ import {
   type QueryIteratorCompiled,
   type QueryVisitorCompiled,
 } from "../compiler/lazy-query.js";
-import { compileQuery, expectCollectionObjectSchema, type QueryProgram } from "../compiler/query.js";
+import {
+  compileQuery,
+  expectCollectionObjectSchema,
+  explainPhysicalQuery,
+  type QueryProgram,
+} from "../compiler/query.js";
 import type {
   QueryCompareNode,
   QueryCompareOperator,
@@ -659,7 +664,15 @@ function createQueryBuilder<
     },
 
     explain(outputMode = "eager-array") {
-      return explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
+      const plan = explainQueryExecution({ nodes, bindings, params: paramNames }, outputMode);
+
+      // The access path is only meaningful for the eager backend; the
+      // incremental ones stream and never reach a row by key.
+      if (outputMode !== "eager-array") return plan;
+      return Object.freeze({
+        ...plan,
+        physical: explainPhysicalQuery(schema, { nodes: nodes as readonly QueryNode[], bindings, params: paramNames }),
+      });
     },
   } satisfies QueryBuilderOps<TSchema, TOutput, TResult, TParams>);
 
