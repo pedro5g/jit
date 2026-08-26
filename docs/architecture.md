@@ -205,6 +205,14 @@ types that future package splits will reuse.
 
 ## AOT generator
 
+Runtime/define/AOT parity is a public invariant. Every supported runtime
+operation uses the same API through the define host, registers reconstructive
+metadata and lowers to a standalone semantic equivalent. This does not require
+byte-identical runtime and AOT source; it requires identical observable
+behavior and public typing. Unsupported bindings produce explicit skip reasons
+instead of a generic fallback or silent miscompilation. The full contract and
+contributor matrix live in [AOT API parity](./aot/api-parity.md).
+
 `aot/generate.ts` writes one executable source representation selected by
 format. Output location never changes the code format:
 

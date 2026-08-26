@@ -5,9 +5,115 @@ import { pathToFileURL } from "node:url";
 import { AOT_ARTIFACT } from "../core/host.js";
 import { JIT as DefineJIT } from "../define.js";
 import { AOT } from "../index.js";
+import { getArtifact } from "../runtime/artifact-registry.js";
 import { JIT as RuntimeJIT } from "../runtime.js";
 
+type UnknownArtifact = (...args: unknown[]) => unknown;
+
+interface ApiParityCase {
+  readonly name: string;
+  readonly runtime: UnknownArtifact;
+  readonly define: UnknownArtifact;
+  readonly args: readonly unknown[];
+}
+
+function normalizeArtifactResult(value: unknown): unknown {
+  return value !== null && typeof value === "object" && Symbol.iterator in value
+    ? [...(value as Iterable<unknown>)]
+    : value;
+}
+
 describe("runtime and define entrypoints", () => {
+  it("should keep the public namespace shape one-to-one", () => {
+    expect(Object.keys(DefineJIT).sort()).toEqual(Object.keys(RuntimeJIT).sort());
+
+    for (const namespace of ["binary", "compare", "cqrs", "json", "security", "validate"] as const) {
+      expect(Object.keys(DefineJIT[namespace]).sort(), namespace).toEqual(Object.keys(RuntimeJIT[namespace]).sort());
+    }
+  });
+
+  it("should verify registered runtime/define/AOT operations through one parity matrix", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "jit-api-parity-"));
+    const RuntimeUser = RuntimeJIT.object({ id: RuntimeJIT.number(), name: RuntimeJIT.string() });
+    const DefineUser = DefineJIT.object({ id: DefineJIT.number(), name: DefineJIT.string() });
+    const RuntimeUsers = RuntimeJIT.array(RuntimeUser);
+    const DefineUsers = DefineJIT.array(DefineUser);
+    const value = { id: 1, name: "Ada" };
+    const equalValue = { id: 1, name: "Ada" };
+
+    const cases: readonly ApiParityCase[] = [
+      {
+        name: "isUser",
+        runtime: RuntimeJIT.validate.is(RuntimeUser) as UnknownArtifact,
+        define: DefineJIT.validate.is(DefineUser) as UnknownArtifact,
+        args: [value],
+      },
+      {
+        name: "equalUser",
+        runtime: RuntimeJIT.compare.equal(RuntimeUser) as UnknownArtifact,
+        define: DefineJIT.compare.equal(DefineUser) as UnknownArtifact,
+        args: [value, equalValue],
+      },
+      {
+        name: "cloneUser",
+        runtime: RuntimeJIT.clone(RuntimeUser) as UnknownArtifact,
+        define: DefineJIT.clone(DefineUser) as UnknownArtifact,
+        args: [value],
+      },
+      {
+        name: "stringifyUser",
+        runtime: RuntimeJIT.json.stringify(RuntimeUser) as UnknownArtifact,
+        define: DefineJIT.json.stringify(DefineUser) as UnknownArtifact,
+        args: [value],
+      },
+      {
+        name: "stringifyUserChunks",
+        runtime: RuntimeJIT.json.stringifyChunks(RuntimeUsers, { chunkBytes: 8 }) as UnknownArtifact,
+        define: DefineJIT.json.stringifyChunks(DefineUsers, { chunkBytes: 8 }) as UnknownArtifact,
+        args: [[value, equalValue]],
+      },
+    ];
+
+    try {
+      for (const parityCase of cases) {
+        expect(getArtifact(parityCase.runtime), `${parityCase.name} runtime metadata`).toBeDefined();
+        expect(getArtifact(parityCase.define), `${parityCase.name} define metadata`).toBeDefined();
+        expect(AOT_ARTIFACT in parityCase.define, `${parityCase.name} define stub`).toBe(true);
+        expect(() => parityCase.define(...parityCase.args), `${parityCase.name} define execution`).toThrow(
+          /AOT artifacts cannot be executed/
+        );
+      }
+
+      AOT.generate({
+        artifacts: Object.fromEntries(cases.map((parityCase) => [parityCase.name, parityCase.define])),
+        outDir,
+      });
+
+      const source = readFileSync(join(outDir, "index.js"), "utf8");
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as Readonly<
+        Record<string, UnknownArtifact>
+      >;
+
+      expect(source).toContain("function* stringifyChunks(value)");
+      expect(source).toContain("chunk.length + part.length > 8");
+      expect(source).not.toContain('from "@jit-compiler/jit"');
+
+      for (const parityCase of cases) {
+        expect(
+          normalizeArtifactResult(generated[parityCase.name](...parityCase.args)),
+          `${parityCase.name} AOT result`
+        ).toEqual(normalizeArtifactResult(parityCase.runtime(...parityCase.args)));
+      }
+
+      const chunksCase = cases.find((parityCase) => parityCase.name === "stringifyUserChunks");
+      expect(chunksCase).toBeDefined();
+      AOT.generate({ artifacts: { stringifyUserChunks: chunksCase?.define }, outDir, format: "ts" });
+      expect(readFileSync(join(outDir, "index.ts"), "utf8")).toContain("=> IterableIterator<string>");
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
   it("should expose the runtime JIT namespace", () => {
     const User = RuntimeJIT.object({ id: RuntimeJIT.number() });
     const isUser = RuntimeJIT.validate.is(User);

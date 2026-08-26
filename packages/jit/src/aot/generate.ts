@@ -8,6 +8,7 @@ import { optimizeExecutionPlan } from "../compiler/execution-optimize.js";
 import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.js";
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
+import { emitStringifyChunksSource } from "../compiler/json-chunks.js";
 import { compileJsonSchema } from "../compiler/json-schema/index.js";
 import {
   emitQueryArraySource,
@@ -990,6 +991,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const operationStage = stages.find((stage) => stage.kind === "operation");
     const mapStage = stages.find((stage) => stage.kind === "map");
     const constructStage = stages.find((stage) => stage.kind === "construct");
+    const chunksStage = stages.find((stage) => stage.kind === "json.encode" && stage.mode === "chunks");
 
     const constructBinding = constructStage ? classBindings.get(constructStage.target) : undefined;
     const constructArtifact = constructStage ? classArtifacts.get(constructStage.target) : undefined;
@@ -1003,6 +1005,18 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         reason: "AOT class construction requires exporting the Runtime Class artifact alongside the execution pipeline",
       });
       return undefined;
+    }
+
+    if (chunksStage?.kind === "json.encode") {
+      const source = tryEmit(reportName, "json.stringifyChunks", skipped, () =>
+        emitStringifyChunksSource(chunksStage.schema ?? plan.schema, {
+          ...(chunksStage.chunkBytes === undefined ? {} : { chunkBytes: chunksStage.chunkBytes }),
+        })
+      );
+
+      if (!source) return undefined;
+      js.push(`${declaration} /*#__PURE__*/ (${source});`);
+      return emitted;
     }
 
     if (stages.some((stage) => isComposedExecutionStage(stage))) {
@@ -1957,7 +1971,11 @@ function executionPlanType(plan: ExecutionPlan, typeNames: TypeNames): string {
             ? namedType(query.source, typeNames)
             : valueType;
 
-  if (last?.kind === "json.encode") return `(value: ${inputType}) => string`;
+  if (last?.kind === "json.encode") {
+    return last.mode === "chunks"
+      ? `(value: ${inputType}) => IterableIterator<string>`
+      : `(value: ${inputType}) => string`;
+  }
   if (last?.kind === "binary.encode") return `(value: ${inputType}) => Uint8Array`;
   if (aggregate?.kind === "aggregate") {
     const output = aggregate.operation === "count" || aggregate.operation === "sum" ? "number" : "number | undefined";

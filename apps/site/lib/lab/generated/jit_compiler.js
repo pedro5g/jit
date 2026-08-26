@@ -7218,6 +7218,432 @@ function compileFormat(schema, options) {
   );
 }
 
+// ../../packages/jit/src/compiler/serialize/emit-serialize.ts
+function emitSerialize(schema) {
+  const writer = new CodeWriter();
+  const context = {
+    writer,
+    varCounter: 0,
+    recursive: findRecursiveSchemas(schema),
+    helperIds: /* @__PURE__ */ new Map(),
+    emitted: /* @__PURE__ */ new Set(),
+    pending: []
+  };
+  const needsStringHelper = hasStringLeaf2(schema, /* @__PURE__ */ new Set());
+  writer.line("(function () {");
+  writer.indent(() => {
+    if (needsStringHelper) emitStringHelper(writer);
+    emitSerializeHelpers(context);
+    writer.line("function stringify(value) {");
+    writer.indent(() => {
+      writer.line('let s = "";');
+      emitAppend(context, schema, "value");
+      writer.line("return s;");
+    });
+    writer.line("}");
+    writer.line("return stringify;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitSerializeHelpers(context) {
+  for (const target of context.recursive) queueHelper(context, target);
+  while (context.pending.length > 0) {
+    const target = context.pending.shift();
+    const writer = context.writer;
+    writer.line(`function ${context.helperIds.get(target)}(value) {`);
+    writer.indent(() => {
+      writer.line('let s = "";');
+      emitBaseAppend(context, resolveSerializeWrappers(target).base, "value");
+      writer.line("return s;");
+    });
+    writer.line("}");
+  }
+}
+function queueHelper(context, target) {
+  const existing = context.helperIds.get(target);
+  if (existing) return existing;
+  const id = `stringify_r${context.helperIds.size + 1}`;
+  context.helperIds.set(target, id);
+  context.emitted.add(target);
+  context.pending.push(target);
+  return id;
+}
+function emitStringHelper(writer) {
+  writer.line("const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;");
+  writer.line("function str(value) {");
+  writer.indent(() => {
+    writer.line("const len = value.length;");
+    writer.line("if (len < 42) {");
+    writer.indent(() => {
+      writer.line("for (let i = 0; i < len; i++) {");
+      writer.indent(() => {
+        writer.line("const code = value.charCodeAt(i);");
+        writer.line("if (code < 32 || code === 34 || code === 92 || (code > 55295 && code < 57344)) {");
+        writer.indent(() => {
+          writer.line("return JSON.stringify(value);");
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+      writer.line(`return '"' + value + '"';`);
+    });
+    writer.line("}");
+    writer.line("if (__se.test(value)) return JSON.stringify(value);");
+    writer.line(`return '"' + value + '"';`);
+  });
+  writer.line("}");
+}
+function hasStringLeaf2(schema, seen) {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  const current = schema;
+  switch (current.type) {
+    case TypeName.string:
+      return true;
+    case TypeName.enum:
+      return Object.values(current.def.values).some(
+        (value) => typeof value === "string"
+      );
+    case TypeName.record:
+      return true;
+    case TypeName.object: {
+      const props = current.def.props;
+      return Object.keys(props).some((key) => hasStringLeaf2(props[key], seen));
+    }
+    case TypeName.array:
+      return hasStringLeaf2(current.def.element, seen);
+    case TypeName.intersection: {
+      const options = current.def.options ?? [];
+      return options.some((option) => hasStringLeaf2(option, seen));
+    }
+    case TypeName.tuple: {
+      const items = current.def.items ?? [];
+      return items.some((item) => hasStringLeaf2(item, seen));
+    }
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.runtimeType:
+      return hasStringLeaf2(current.def.innerType, seen);
+    case TypeName.lazy:
+      return hasStringLeaf2(current.def.getter(), seen);
+    default:
+      return false;
+  }
+}
+function nextVar3(context, prefix) {
+  return `${prefix}${++context.varCounter}`;
+}
+function emitAppend(context, schema, valueExpr) {
+  const resolved = resolveSerializeWrappers(schema);
+  const writer = context.writer;
+  if (context.recursive.has(resolved.base)) {
+    const call2 = `${queueHelper(context, resolved.base)}(${valueExpr})`;
+    if (resolved.nullable || resolved.optional) {
+      writer.line(`s += ${valueExpr} == null ? "null" : ${call2};`);
+    } else {
+      writer.line(`s += ${call2};`);
+    }
+    return;
+  }
+  if (resolved.nullable || resolved.optional) {
+    writer.line(`if (${valueExpr} == null) {`);
+    writer.indent(() => {
+      writer.line('s += "null";');
+    });
+    writer.line("} else {");
+    writer.indent(() => {
+      emitBaseAppend(context, resolved.base, valueExpr);
+    });
+    writer.line("}");
+    return;
+  }
+  emitBaseAppend(context, resolved.base, valueExpr);
+}
+function emitBaseAppend(context, schema, valueExpr) {
+  const writer = context.writer;
+  switch (schema.type) {
+    case TypeName.string:
+      writer.line(`s += str(${valueExpr});`);
+      return;
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.nan:
+      writer.line(`s += Number.isFinite(${valueExpr}) ? "" + ${valueExpr} : "null";`);
+      return;
+    case TypeName.boolean:
+      writer.line(`s += ${valueExpr} ? "true" : "false";`);
+      return;
+    case TypeName.null:
+      writer.line('s += "null";');
+      return;
+    case TypeName.date:
+      writer.line(`s += '"' + ${valueExpr}.toISOString() + '"';`);
+      return;
+    case TypeName.literal: {
+      const literalValue = schema.def.value;
+      writer.line(`s += ${JSON.stringify(JSON.stringify(literalValue) ?? "null")};`);
+      return;
+    }
+    case TypeName.enum: {
+      const values = Object.values(schema.def.values);
+      if (values.every((entry) => typeof entry === "string")) {
+        writer.line(`s += str(${valueExpr});`);
+      } else {
+        writer.line(`s += JSON.stringify(${valueExpr});`);
+      }
+      return;
+    }
+    case TypeName.object:
+      emitObjectAppend(context, schema, valueExpr);
+      return;
+    case TypeName.intersection: {
+      const flattened = flattenObjectIntersection(schema);
+      if (flattened === void 0) break;
+      emitObjectAppend(context, flattened, valueExpr);
+      return;
+    }
+    case TypeName.array: {
+      const element = schema.def.element;
+      const holder = hoist3(context, valueExpr);
+      const index = nextVar3(context, "i");
+      const item = nextVar3(context, "e");
+      writer.line(`s += "[";`);
+      writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
+      writer.indent(() => {
+        writer.line(`if (${index} !== 0) s += ",";`);
+        writer.line(`const ${item} = ${holder}[${index}];`);
+        emitAppend(context, element, item);
+      });
+      writer.line("}");
+      writer.line(`s += "]";`);
+      return;
+    }
+    case TypeName.tuple: {
+      const items = schema.def.items ?? [];
+      const holder = hoist3(context, valueExpr);
+      writer.line(`s += "[";`);
+      items.forEach((item, position) => {
+        if (position > 0) writer.line(`s += ",";`);
+        emitAppend(context, item, `${holder}[${position}]`);
+      });
+      writer.line(`s += "]";`);
+      return;
+    }
+    case TypeName.record: {
+      const valueSchema = schema.def.value;
+      const holder = hoist3(context, valueExpr);
+      const keys = nextVar3(context, "k");
+      const index = nextVar3(context, "i");
+      const item = nextVar3(context, "e");
+      writer.line(`s += "{";`);
+      writer.line(`const ${keys} = Object.keys(${holder});`);
+      writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
+      writer.indent(() => {
+        writer.line(`if (${index} !== 0) s += ",";`);
+        writer.line(`s += str(${keys}[${index}]) + ":";`);
+        writer.line(`const ${item} = ${holder}[${keys}[${index}]];`);
+        emitAppend(context, valueSchema, item);
+      });
+      writer.line("}");
+      writer.line(`s += "}";`);
+      return;
+    }
+    case TypeName.union:
+    case TypeName.discriminatedUnion:
+    case TypeName.any:
+    case TypeName.unknown:
+      writer.line(`s += JSON.stringify(${valueExpr}) ?? "null";`);
+      return;
+  }
+  throw new JITError(
+    "UNSUPPORTED_SCHEMA",
+    `serialize does not support ${schema.type} schemas (not representable in JSON)`
+  );
+}
+function emitObjectAppend(context, schema, valueExpr) {
+  const writer = context.writer;
+  const props = schema.def.props;
+  const keys = Object.keys(props);
+  const holder = hoist3(context, valueExpr);
+  const optionality = keys.map(
+    (key) => resolveSerializeWrappers(props[key]).optional && emitStaticDefaultSource(props[key]) === void 0
+  );
+  const firstRequired = optionality.indexOf(false);
+  const needsRuntimeComma = optionality.some((optional3, position) => optional3 && position < firstRequired) || firstRequired === -1;
+  writer.line(`s += "{";`);
+  if (keys.length === 0) {
+    writer.line(`s += "}";`);
+    return;
+  }
+  if (needsRuntimeComma) {
+    const flag = nextVar3(context, "f");
+    writer.line(`let ${flag} = false;`);
+    keys.forEach((key, position) => {
+      const rawPropExpr = emitPropertyAccess(holder, key);
+      const propExpr = emitDefaultedValue(props[key], rawPropExpr);
+      const keyPrefix = JSON.stringify(`${JSON.stringify(key)}:`);
+      const emitProp = () => {
+        writer.line(`if (${flag}) s += ",";`);
+        writer.line(`${flag} = true;`);
+        writer.line(`s += ${keyPrefix};`);
+        emitAppend(context, props[key], propExpr);
+      };
+      if (optionality[position]) {
+        writer.line(`if (${rawPropExpr} !== undefined) {`);
+        writer.indent(emitProp);
+        writer.line("}");
+      } else {
+        emitProp();
+      }
+    });
+    writer.line(`s += "}";`);
+    return;
+  }
+  let hasPrevious = false;
+  keys.forEach((key, position) => {
+    const rawPropExpr = emitPropertyAccess(holder, key);
+    const propExpr = emitDefaultedValue(props[key], rawPropExpr);
+    const keyToken = `${JSON.stringify(key)}:`;
+    const prefix = hasPrevious ? `,${keyToken}` : keyToken;
+    if (optionality[position]) {
+      writer.line(`if (${rawPropExpr} !== undefined) {`);
+      writer.indent(() => {
+        writer.line(`s += ${JSON.stringify(`,${keyToken}`)};`);
+        emitAppend(context, props[key], propExpr);
+      });
+      writer.line("}");
+      return;
+    }
+    writer.line(`s += ${JSON.stringify(prefix)};`);
+    emitAppend(context, props[key], propExpr);
+    hasPrevious = true;
+  });
+  writer.line(`s += "}";`);
+}
+function hoist3(context, expr) {
+  if (parse_exports.isValidIdentifier(expr)) return expr;
+  const holder = nextVar3(context, "v");
+  context.writer.line(`const ${holder} = ${expr};`);
+  return holder;
+}
+function resolveSerializeWrappers(schema) {
+  let current = schema;
+  let optional3 = false;
+  let nullable3 = false;
+  while (true) {
+    switch (current.type) {
+      case TypeName.optional:
+        optional3 = true;
+        current = current.def.innerType;
+        continue;
+      case TypeName.nullable:
+        nullable3 = true;
+        current = current.def.innerType;
+        continue;
+      case TypeName.nullish:
+        optional3 = true;
+        nullable3 = true;
+        current = current.def.innerType;
+        continue;
+      case TypeName.default:
+      case TypeName.brand:
+      case TypeName.readonly:
+      case TypeName.refine:
+      case TypeName.coerce:
+      case TypeName.pipe:
+      case TypeName.transform:
+      case TypeName.runtimeType:
+        current = current.def.innerType;
+        continue;
+      case TypeName.lazy:
+        current = current.def.getter();
+        continue;
+      default:
+        return { base: current, optional: optional3, nullable: nullable3 };
+    }
+  }
+}
+
+// ../../packages/jit/src/compiler/serialize.ts
+function emitSerializeSource(schema) {
+  return emitSerialize(schema);
+}
+function compileSerialize(schema, options) {
+  return getCompileCached(
+    schema,
+    "serialize",
+    () => {
+      const compiled = globalThis.Function(`return ${emitSerialize(schema)};`)();
+      registerArtifact(compiled, {
+        kind: "operation",
+        schema,
+        op: "stringify"
+      });
+      return compiled;
+    },
+    options
+  );
+}
+
+// ../../packages/jit/src/compiler/json-chunks.ts
+function emitStringifyChunksSource(schema, options = {}) {
+  const array2 = resolveWrappers(schema).base;
+  if (array2.type !== TypeName.array) {
+    throw new JITError("UNSUPPORTED_SCHEMA", "json.stringifyChunks currently expects an array schema");
+  }
+  const chunkBytes = options.chunkBytes ?? 16 * 1024;
+  if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
+    throw new JITError("INVALID_OPERATION", "json.stringifyChunks chunkBytes must be a positive integer");
+  }
+  const stringifyElement = emitSerializeSource(array2.def.element);
+  return `(function () {
+const stringifyElement = ${stringifyElement};
+function* stringifyChunks(value) {
+  let chunk = "[";
+  for (let i = 0, len = value.length; i < len; i++) {
+    const part = (i === 0 ? "" : ",") + stringifyElement(value[i]);
+    if (chunk.length !== 0 && chunk.length + part.length > ${chunkBytes}) {
+      yield chunk;
+      chunk = part;
+    } else {
+      chunk += part;
+    }
+  }
+  chunk += "]";
+  yield chunk;
+}
+return stringifyChunks;
+})()`;
+}
+function compileStringifyChunks(schema, chunks = {}, cache) {
+  const chunkBytes = chunks.chunkBytes ?? 16 * 1024;
+  return getCompileCached(
+    schema,
+    `stringifyChunks:${chunkBytes}`,
+    () => {
+      const source = emitStringifyChunksSource(schema, chunks);
+      const compiled = globalThis.Function(`return ${source};`)();
+      registerArtifact(compiled, {
+        kind: "query",
+        source,
+        bindingNames: [],
+        bindingValues: []
+      });
+      return compiled;
+    },
+    cache
+  );
+}
+
 // ../../packages/jit/src/compiler/json-schema/dialects.ts
 var DIALECTS = {
   "draft-2020-12": {
@@ -9781,361 +10207,6 @@ function validateValue(schema, value) {
 }
 function last(values) {
   return values[values.length - 1];
-}
-
-// ../../packages/jit/src/compiler/serialize/emit-serialize.ts
-function emitSerialize(schema) {
-  const writer = new CodeWriter();
-  const context = {
-    writer,
-    varCounter: 0,
-    recursive: findRecursiveSchemas(schema),
-    helperIds: /* @__PURE__ */ new Map(),
-    emitted: /* @__PURE__ */ new Set(),
-    pending: []
-  };
-  const needsStringHelper = hasStringLeaf2(schema, /* @__PURE__ */ new Set());
-  writer.line("(function () {");
-  writer.indent(() => {
-    if (needsStringHelper) emitStringHelper(writer);
-    emitSerializeHelpers(context);
-    writer.line("function stringify(value) {");
-    writer.indent(() => {
-      writer.line('let s = "";');
-      emitAppend(context, schema, "value");
-      writer.line("return s;");
-    });
-    writer.line("}");
-    writer.line("return stringify;");
-  });
-  writer.line("})()");
-  return writer.toString();
-}
-function emitSerializeHelpers(context) {
-  for (const target of context.recursive) queueHelper(context, target);
-  while (context.pending.length > 0) {
-    const target = context.pending.shift();
-    const writer = context.writer;
-    writer.line(`function ${context.helperIds.get(target)}(value) {`);
-    writer.indent(() => {
-      writer.line('let s = "";');
-      emitBaseAppend(context, resolveSerializeWrappers(target).base, "value");
-      writer.line("return s;");
-    });
-    writer.line("}");
-  }
-}
-function queueHelper(context, target) {
-  const existing = context.helperIds.get(target);
-  if (existing) return existing;
-  const id = `stringify_r${context.helperIds.size + 1}`;
-  context.helperIds.set(target, id);
-  context.emitted.add(target);
-  context.pending.push(target);
-  return id;
-}
-function emitStringHelper(writer) {
-  writer.line("const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;");
-  writer.line("function str(value) {");
-  writer.indent(() => {
-    writer.line("const len = value.length;");
-    writer.line("if (len < 42) {");
-    writer.indent(() => {
-      writer.line("for (let i = 0; i < len; i++) {");
-      writer.indent(() => {
-        writer.line("const code = value.charCodeAt(i);");
-        writer.line("if (code < 32 || code === 34 || code === 92 || (code > 55295 && code < 57344)) {");
-        writer.indent(() => {
-          writer.line("return JSON.stringify(value);");
-        });
-        writer.line("}");
-      });
-      writer.line("}");
-      writer.line(`return '"' + value + '"';`);
-    });
-    writer.line("}");
-    writer.line("if (__se.test(value)) return JSON.stringify(value);");
-    writer.line(`return '"' + value + '"';`);
-  });
-  writer.line("}");
-}
-function hasStringLeaf2(schema, seen) {
-  if (seen.has(schema)) return false;
-  seen.add(schema);
-  const current = schema;
-  switch (current.type) {
-    case TypeName.string:
-      return true;
-    case TypeName.enum:
-      return Object.values(current.def.values).some(
-        (value) => typeof value === "string"
-      );
-    case TypeName.record:
-      return true;
-    case TypeName.object: {
-      const props = current.def.props;
-      return Object.keys(props).some((key) => hasStringLeaf2(props[key], seen));
-    }
-    case TypeName.array:
-      return hasStringLeaf2(current.def.element, seen);
-    case TypeName.intersection: {
-      const options = current.def.options ?? [];
-      return options.some((option) => hasStringLeaf2(option, seen));
-    }
-    case TypeName.tuple: {
-      const items = current.def.items ?? [];
-      return items.some((item) => hasStringLeaf2(item, seen));
-    }
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.readonly:
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-    case TypeName.runtimeType:
-      return hasStringLeaf2(current.def.innerType, seen);
-    case TypeName.lazy:
-      return hasStringLeaf2(current.def.getter(), seen);
-    default:
-      return false;
-  }
-}
-function nextVar3(context, prefix) {
-  return `${prefix}${++context.varCounter}`;
-}
-function emitAppend(context, schema, valueExpr) {
-  const resolved = resolveSerializeWrappers(schema);
-  const writer = context.writer;
-  if (context.recursive.has(resolved.base)) {
-    const call2 = `${queueHelper(context, resolved.base)}(${valueExpr})`;
-    if (resolved.nullable || resolved.optional) {
-      writer.line(`s += ${valueExpr} == null ? "null" : ${call2};`);
-    } else {
-      writer.line(`s += ${call2};`);
-    }
-    return;
-  }
-  if (resolved.nullable || resolved.optional) {
-    writer.line(`if (${valueExpr} == null) {`);
-    writer.indent(() => {
-      writer.line('s += "null";');
-    });
-    writer.line("} else {");
-    writer.indent(() => {
-      emitBaseAppend(context, resolved.base, valueExpr);
-    });
-    writer.line("}");
-    return;
-  }
-  emitBaseAppend(context, resolved.base, valueExpr);
-}
-function emitBaseAppend(context, schema, valueExpr) {
-  const writer = context.writer;
-  switch (schema.type) {
-    case TypeName.string:
-      writer.line(`s += str(${valueExpr});`);
-      return;
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.nan:
-      writer.line(`s += Number.isFinite(${valueExpr}) ? "" + ${valueExpr} : "null";`);
-      return;
-    case TypeName.boolean:
-      writer.line(`s += ${valueExpr} ? "true" : "false";`);
-      return;
-    case TypeName.null:
-      writer.line('s += "null";');
-      return;
-    case TypeName.date:
-      writer.line(`s += '"' + ${valueExpr}.toISOString() + '"';`);
-      return;
-    case TypeName.literal: {
-      const literalValue = schema.def.value;
-      writer.line(`s += ${JSON.stringify(JSON.stringify(literalValue) ?? "null")};`);
-      return;
-    }
-    case TypeName.enum: {
-      const values = Object.values(schema.def.values);
-      if (values.every((entry) => typeof entry === "string")) {
-        writer.line(`s += str(${valueExpr});`);
-      } else {
-        writer.line(`s += JSON.stringify(${valueExpr});`);
-      }
-      return;
-    }
-    case TypeName.object:
-      emitObjectAppend(context, schema, valueExpr);
-      return;
-    case TypeName.intersection: {
-      const flattened = flattenObjectIntersection(schema);
-      if (flattened === void 0) break;
-      emitObjectAppend(context, flattened, valueExpr);
-      return;
-    }
-    case TypeName.array: {
-      const element = schema.def.element;
-      const holder = hoist3(context, valueExpr);
-      const index = nextVar3(context, "i");
-      const item = nextVar3(context, "e");
-      writer.line(`s += "[";`);
-      writer.line(`for (let ${index} = 0; ${index} < ${holder}.length; ${index}++) {`);
-      writer.indent(() => {
-        writer.line(`if (${index} !== 0) s += ",";`);
-        writer.line(`const ${item} = ${holder}[${index}];`);
-        emitAppend(context, element, item);
-      });
-      writer.line("}");
-      writer.line(`s += "]";`);
-      return;
-    }
-    case TypeName.tuple: {
-      const items = schema.def.items ?? [];
-      const holder = hoist3(context, valueExpr);
-      writer.line(`s += "[";`);
-      items.forEach((item, position) => {
-        if (position > 0) writer.line(`s += ",";`);
-        emitAppend(context, item, `${holder}[${position}]`);
-      });
-      writer.line(`s += "]";`);
-      return;
-    }
-    case TypeName.record: {
-      const valueSchema = schema.def.value;
-      const holder = hoist3(context, valueExpr);
-      const keys = nextVar3(context, "k");
-      const index = nextVar3(context, "i");
-      const item = nextVar3(context, "e");
-      writer.line(`s += "{";`);
-      writer.line(`const ${keys} = Object.keys(${holder});`);
-      writer.line(`for (let ${index} = 0; ${index} < ${keys}.length; ${index}++) {`);
-      writer.indent(() => {
-        writer.line(`if (${index} !== 0) s += ",";`);
-        writer.line(`s += str(${keys}[${index}]) + ":";`);
-        writer.line(`const ${item} = ${holder}[${keys}[${index}]];`);
-        emitAppend(context, valueSchema, item);
-      });
-      writer.line("}");
-      writer.line(`s += "}";`);
-      return;
-    }
-    case TypeName.union:
-    case TypeName.discriminatedUnion:
-    case TypeName.any:
-    case TypeName.unknown:
-      writer.line(`s += JSON.stringify(${valueExpr}) ?? "null";`);
-      return;
-  }
-  throw new JITError(
-    "UNSUPPORTED_SCHEMA",
-    `serialize does not support ${schema.type} schemas (not representable in JSON)`
-  );
-}
-function emitObjectAppend(context, schema, valueExpr) {
-  const writer = context.writer;
-  const props = schema.def.props;
-  const keys = Object.keys(props);
-  const holder = hoist3(context, valueExpr);
-  const optionality = keys.map(
-    (key) => resolveSerializeWrappers(props[key]).optional && emitStaticDefaultSource(props[key]) === void 0
-  );
-  const firstRequired = optionality.indexOf(false);
-  const needsRuntimeComma = optionality.some((optional3, position) => optional3 && position < firstRequired) || firstRequired === -1;
-  writer.line(`s += "{";`);
-  if (keys.length === 0) {
-    writer.line(`s += "}";`);
-    return;
-  }
-  if (needsRuntimeComma) {
-    const flag = nextVar3(context, "f");
-    writer.line(`let ${flag} = false;`);
-    keys.forEach((key, position) => {
-      const rawPropExpr = emitPropertyAccess(holder, key);
-      const propExpr = emitDefaultedValue(props[key], rawPropExpr);
-      const keyPrefix = JSON.stringify(`${JSON.stringify(key)}:`);
-      const emitProp = () => {
-        writer.line(`if (${flag}) s += ",";`);
-        writer.line(`${flag} = true;`);
-        writer.line(`s += ${keyPrefix};`);
-        emitAppend(context, props[key], propExpr);
-      };
-      if (optionality[position]) {
-        writer.line(`if (${rawPropExpr} !== undefined) {`);
-        writer.indent(emitProp);
-        writer.line("}");
-      } else {
-        emitProp();
-      }
-    });
-    writer.line(`s += "}";`);
-    return;
-  }
-  let hasPrevious = false;
-  keys.forEach((key, position) => {
-    const rawPropExpr = emitPropertyAccess(holder, key);
-    const propExpr = emitDefaultedValue(props[key], rawPropExpr);
-    const keyToken = `${JSON.stringify(key)}:`;
-    const prefix = hasPrevious ? `,${keyToken}` : keyToken;
-    if (optionality[position]) {
-      writer.line(`if (${rawPropExpr} !== undefined) {`);
-      writer.indent(() => {
-        writer.line(`s += ${JSON.stringify(`,${keyToken}`)};`);
-        emitAppend(context, props[key], propExpr);
-      });
-      writer.line("}");
-      return;
-    }
-    writer.line(`s += ${JSON.stringify(prefix)};`);
-    emitAppend(context, props[key], propExpr);
-    hasPrevious = true;
-  });
-  writer.line(`s += "}";`);
-}
-function hoist3(context, expr) {
-  if (parse_exports.isValidIdentifier(expr)) return expr;
-  const holder = nextVar3(context, "v");
-  context.writer.line(`const ${holder} = ${expr};`);
-  return holder;
-}
-function resolveSerializeWrappers(schema) {
-  let current = schema;
-  let optional3 = false;
-  let nullable3 = false;
-  while (true) {
-    switch (current.type) {
-      case TypeName.optional:
-        optional3 = true;
-        current = current.def.innerType;
-        continue;
-      case TypeName.nullable:
-        nullable3 = true;
-        current = current.def.innerType;
-        continue;
-      case TypeName.nullish:
-        optional3 = true;
-        nullable3 = true;
-        current = current.def.innerType;
-        continue;
-      case TypeName.default:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-      case TypeName.runtimeType:
-        current = current.def.innerType;
-        continue;
-      case TypeName.lazy:
-        current = current.def.getter();
-        continue;
-      default:
-        return { base: current, optional: optional3, nullable: nullable3 };
-    }
-  }
 }
 
 // ../../packages/jit/src/compiler/update/build-update-ir.ts
@@ -13856,6 +13927,7 @@ function emitModule(plan, options, layout) {
     const operationStage = stages.find((stage2) => stage2.kind === "operation");
     const mapStage3 = stages.find((stage2) => stage2.kind === "map");
     const constructStage = stages.find((stage2) => stage2.kind === "construct");
+    const chunksStage = stages.find((stage2) => stage2.kind === "json.encode" && stage2.mode === "chunks");
     const constructBinding = constructStage ? classBindings.get(constructStage.target) : void 0;
     const constructArtifact = constructStage ? classArtifacts.get(constructStage.target) : void 0;
     if (constructStage && !constructBinding) {
@@ -13865,6 +13937,19 @@ function emitModule(plan, options, layout) {
         reason: "AOT class construction requires exporting the Runtime Class artifact alongside the execution pipeline"
       });
       return void 0;
+    }
+    if (chunksStage?.kind === "json.encode") {
+      const source2 = tryEmit(
+        reportName,
+        "json.stringifyChunks",
+        skipped,
+        () => emitStringifyChunksSource(chunksStage.schema ?? plan2.schema, {
+          ...chunksStage.chunkBytes === void 0 ? {} : { chunkBytes: chunksStage.chunkBytes }
+        })
+      );
+      if (!source2) return void 0;
+      js.push(`${declaration} /*#__PURE__*/ (${source2});`);
+      return emitted;
     }
     if (stages.some((stage2) => isComposedExecutionStage(stage2))) {
       return emitComposedExecutionArtifact(binding, declaration, plan2, reportName, type);
@@ -14614,7 +14699,9 @@ function executionPlanType(plan, typeNames) {
     return validatorType(last2.operation === "issues" ? "safeParse" : last2.operation, valueType);
   }
   const inputType = hasJsonDecode ? "string" : hasBinaryDecode ? "Uint8Array | ArrayBuffer" : valueSource?.kind === "value" && valueSource.schema ? namedType(valueSource.schema, typeNames) : map4?.kind === "map" ? map4.many ? `readonly ${namedType(map4.source, typeNames)}[]` : namedType(map4.source, typeNames) : query2?.kind === "query" ? namedType(query2.source, typeNames) : valueType;
-  if (last2?.kind === "json.encode") return `(value: ${inputType}) => string`;
+  if (last2?.kind === "json.encode") {
+    return last2.mode === "chunks" ? `(value: ${inputType}) => IterableIterator<string>` : `(value: ${inputType}) => string`;
+  }
   if (last2?.kind === "binary.encode") return `(value: ${inputType}) => Uint8Array`;
   if (aggregate?.kind === "aggregate") {
     const output = aggregate.operation === "count" || aggregate.operation === "sum" ? "number" : "number | undefined";
@@ -15607,6 +15694,16 @@ function emitExecutionPlan(plan) {
         break;
       }
       case "json.encode": {
+        if (stage2.mode === "chunks") {
+          const chunksName = helper("stringifyChunks");
+          setup.push(
+            `const ${chunksName} = ${emitStringifyChunksSource(stage2.schema ?? optimized.schema, {
+              ...stage2.chunkBytes === void 0 ? {} : { chunkBytes: stage2.chunkBytes }
+            })};`
+          );
+          body.push(`value = ${chunksName}(value);`);
+          break;
+        }
         const stringifyName = helper("stringify");
         setup.push(`const ${stringifyName} = ${emitSerialize(stage2.schema ?? optimized.schema)};`);
         body.push(`value = ${stringifyName}(value);`);
@@ -15660,77 +15757,6 @@ function emitMappedJsonArray(mapper, stringify, body, index) {
   body.push("}");
   body.push(`${json3} += "]";`);
   body.push(`value = ${json3};`);
-}
-
-// ../../packages/jit/src/compiler/serialize.ts
-function emitSerializeSource(schema) {
-  return emitSerialize(schema);
-}
-function compileSerialize(schema, options) {
-  return getCompileCached(
-    schema,
-    "serialize",
-    () => {
-      const compiled = globalThis.Function(`return ${emitSerialize(schema)};`)();
-      registerArtifact(compiled, {
-        kind: "operation",
-        schema,
-        op: "stringify"
-      });
-      return compiled;
-    },
-    options
-  );
-}
-
-// ../../packages/jit/src/compiler/json-chunks.ts
-function emitStringifyChunksSource(schema, options = {}) {
-  const array2 = resolveWrappers(schema).base;
-  if (array2.type !== TypeName.array) {
-    throw new JITError("UNSUPPORTED_SCHEMA", "json.stringifyChunks currently expects an array schema");
-  }
-  const chunkBytes = options.chunkBytes ?? 16 * 1024;
-  if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
-    throw new JITError("INVALID_OPERATION", "json.stringifyChunks chunkBytes must be a positive integer");
-  }
-  const stringifyElement = emitSerializeSource(array2.def.element);
-  return `(function () {
-const stringifyElement = ${stringifyElement};
-function* stringifyChunks(value) {
-  let chunk = "[";
-  for (let i = 0, len = value.length; i < len; i++) {
-    const part = (i === 0 ? "" : ",") + stringifyElement(value[i]);
-    if (chunk.length !== 0 && chunk.length + part.length > ${chunkBytes}) {
-      yield chunk;
-      chunk = part;
-    } else {
-      chunk += part;
-    }
-  }
-  chunk += "]";
-  yield chunk;
-}
-return stringifyChunks;
-})()`;
-}
-function compileStringifyChunks(schema, chunks = {}, cache) {
-  const chunkBytes = chunks.chunkBytes ?? 16 * 1024;
-  return getCompileCached(
-    schema,
-    `stringifyChunks:${chunkBytes}`,
-    () => {
-      const source = emitStringifyChunksSource(schema, chunks);
-      const compiled = globalThis.Function(`return ${source};`)();
-      registerArtifact(compiled, {
-        kind: "query",
-        source,
-        bindingNames: [],
-        bindingValues: []
-      });
-      return compiled;
-    },
-    cache
-  );
 }
 
 // ../../packages/jit/src/runtime/stream/boundary-scanner.ts
@@ -18885,7 +18911,19 @@ var json = Object.freeze({
   stringifyChunks(schema, options) {
     const unwrapped = unwrapSchema(schema);
     const base = jsonStringify(unwrapped);
-    return createExecutionArtifact(base.plan, () => compileStringifyChunks(unwrapped, options));
+    const last2 = base.plan.stages[base.plan.stages.length - 1];
+    const plan = Object.freeze({
+      ...base.plan,
+      stages: Object.freeze([
+        ...base.plan.stages.slice(0, -1),
+        Object.freeze({
+          ...last2,
+          mode: "chunks",
+          ...options?.chunkBytes === void 0 ? {} : { chunkBytes: options.chunkBytes }
+        })
+      ])
+    });
+    return createExecutionArtifact(plan, () => compileStringifyChunks(unwrapped, options));
   }
 });
 var binary2 = Object.freeze({
@@ -19810,6 +19848,21 @@ var json2 = Object.freeze({
     return executionStub(schema, [
       stage("value", "value", "value"),
       stage("json.encode", "value", "json-text")
+    ]);
+  },
+  stringifyChunks(schema, options) {
+    const unwrapped = unwrapSchema(schema);
+    return executionStub(unwrapped, [
+      {
+        ...stage("value", "value", "value"),
+        schema: unwrapped
+      },
+      {
+        ...stage("json.encode", "value", "json-text"),
+        schema: unwrapped,
+        mode: "chunks",
+        ...options?.chunkBytes === void 0 ? {} : { chunkBytes: options.chunkBytes }
+      }
     ]);
   }
 });

@@ -87,6 +87,9 @@ export interface JsonEncodeStage extends StageDescriptor {
   readonly input: "value";
   readonly output: "json-text";
   readonly schema?: ATS.AnyTypeSchema;
+  /** Full string by default; chunked mode emits an incremental string iterator. */
+  readonly mode?: "string" | "chunks";
+  readonly chunkBytes?: number;
 }
 
 export interface BinaryEncodeStage extends StageDescriptor {

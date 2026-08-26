@@ -10,6 +10,7 @@ import type { Equal } from "./compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
 import type { Format } from "./compiler/format.js";
 import type { Hash } from "./compiler/hash.js";
+import type { JsonChunksOptions } from "./compiler/json-chunks.js";
 import type { ToJsonSchemaOptions } from "./compiler/json-schema/index.js";
 import type { Mask } from "./compiler/mask.js";
 import type { Mock } from "./compiler/mock.js";
@@ -108,6 +109,22 @@ const json = Object.freeze({
     return executionStub<TSchema, Serialize<ATS.TypeofSchema<TSchema>>>(schema, [
       stage("value", "value", "value"),
       stage("json.encode", "value", "json-text"),
+    ]);
+  },
+  stringifyChunks<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: JsonChunksOptions) {
+    const unwrapped = unwrapSchema(schema);
+
+    return executionStub<TSchema, (value: ATS.TypeofSchema<TSchema>) => IterableIterator<string>>(unwrapped, [
+      {
+        ...stage("value", "value", "value"),
+        schema: unwrapped,
+      } as ExecutionStage,
+      {
+        ...stage("json.encode", "value", "json-text"),
+        schema: unwrapped,
+        mode: "chunks",
+        ...(options?.chunkBytes === undefined ? {} : { chunkBytes: options.chunkBytes }),
+      } as ExecutionStage,
     ]);
   },
 });

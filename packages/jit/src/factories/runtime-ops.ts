@@ -154,8 +154,20 @@ export const json: JsonNamespace = Object.freeze({
   stringifyChunks<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: JsonChunksOptions) {
     const unwrapped = unwrapSchema(schema);
     const base = jsonStringify(unwrapped);
+    const last = base.plan.stages[base.plan.stages.length - 1];
+    const plan = Object.freeze({
+      ...base.plan,
+      stages: Object.freeze([
+        ...base.plan.stages.slice(0, -1),
+        Object.freeze({
+          ...last,
+          mode: "chunks" as const,
+          ...(options?.chunkBytes === undefined ? {} : { chunkBytes: options.chunkBytes }),
+        }),
+      ]),
+    });
 
-    return createExecutionArtifact(base.plan, () => compileStringifyChunks(unwrapped, options));
+    return createExecutionArtifact(plan, () => compileStringifyChunks(unwrapped, options));
   },
 });
 

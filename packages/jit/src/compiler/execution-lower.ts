@@ -3,6 +3,7 @@ import { getArtifact } from "../runtime/artifact-registry.js";
 import { emitCodec } from "./codec/emit-codec.js";
 import { optimizeExecutionPlan } from "./execution-optimize.js";
 import type { ExecutionPlan, ExecutionStage } from "./execution-plan.js";
+import { emitStringifyChunksSource } from "./json-chunks.js";
 import { warmJsonParseShape } from "./json-parse.js";
 import { buildMapperPlan, type MapperOverridesInput } from "./mapper/build-mapper-plan.js";
 import { emitMapperSource } from "./mapper.js";
@@ -290,6 +291,17 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
         break;
       }
       case "json.encode": {
+        if (stage.mode === "chunks") {
+          const chunksName = helper("stringifyChunks");
+
+          setup.push(
+            `const ${chunksName} = ${emitStringifyChunksSource(stage.schema ?? optimized.schema, {
+              ...(stage.chunkBytes === undefined ? {} : { chunkBytes: stage.chunkBytes }),
+            })};`
+          );
+          body.push(`value = ${chunksName}(value);`);
+          break;
+        }
         const stringifyName = helper("stringify");
 
         setup.push(`const ${stringifyName} = ${emitSerialize(stage.schema ?? optimized.schema)};`);

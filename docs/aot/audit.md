@@ -1,6 +1,13 @@
 # Dual JIT + AOT API Audit
 
-Updated: 2026-08-14
+Updated: 2026-08-26
+
+The continuous public guarantee is specified in
+[Runtime / Define / AOT API Parity](./api-parity.md). This document remains the
+implementation audit: it records what backs that contract and the known
+migration gaps. The entrypoint parity matrix now checks namespace shape,
+reconstructive metadata, non-executable define artifacts and runtime/AOT
+semantic results through one reusable table.
 
 This audit compares the master dual JIT + AOT plan with the current
 single-package implementation. npm publishes it as `@jit-compiler/jit`, while

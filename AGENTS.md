@@ -199,28 +199,79 @@ Rules the assistant and workspace are held to:
 - Benchmark before accepting complexity.
 - Distinguish compile-time cost from execution-time cost.
 
-## Current Initial Goal
+## Feature Acceptance
 
-The initial migration goal is the typed operator-chain foundation:
+Every new public operation must solve a measured problem.
 
-```ts
-const User = JIT.object({
-  id: JIT.number(),
-})
-  .partial()
-  .required()
-  .readonly();
-```
+Before implementation:
 
-Definition of done:
+1. audit existing operations and IR;
+2. document what can be reused;
+3. define the expected complexity or allocation improvement;
+4. build a handwritten optimized ceiling benchmark when possible.
 
-- `JIT` exposes the minimum required factories.
-- `User.schema` exposes the AST.
-- Runtime schemas preserve `type`, `_type`, `def`, `annotations`.
-- `_type` is `null` at runtime and typed at compile time.
-- `partial()`, `required()`, and `readonly()` have runtime and type tests.
-- `nullish()` represents `T | null | undefined` and belongs with the core wrapper operators.
-- Invalid operators are rejected by TypeScript.
-- Original schemas are not mutated.
-- Legacy directories remain until migration conditions are satisfied.
-- `pnpm format:check`, `pnpm lint:check`, `pnpm test`, and `pnpm build` pass.
+Do not add a public operation only for API convenience if specialization cannot
+avoid work, allocations, materialization, indirection, or improve algorithmic
+complexity. Start by asking whether the operation, allocation, intermediate
+value, callback dispatch, or full scan can be avoided entirely.
+
+## Runtime / AOT Parity
+
+The public API is one-to-one between runtime and define/AOT hosts.
+
+Every new runtime artifact must:
+
+- be expressible through `@jit-compiler/jit/define` with the same API;
+- register reconstructive metadata;
+- generate a standalone AOT equivalent in JavaScript and typed TypeScript when applicable;
+- preserve public typing and runtime semantics;
+- have runtime/AOT semantic parity tests;
+- have deterministic generated-source coverage;
+- have a focused tree-shaking fixture.
+
+Composed operations must lower as one optimized AOT program where fusion is
+safe. API parity does not require byte-identical source, but both hosts must
+preserve the same observable contract. Unsupported runtime bindings must be
+reported as explicit AOT skip reasons and must never be silently miscompiled.
+
+## Query
+
+`JIT.cqrs` is the canonical public query namespace. Keep `JIT.query` only as a
+compatibility path and do not introduce new operations exclusively on it. Reuse
+the existing query AST and `QueryProgram`; do not create a second query engine.
+
+Keep the structural `~query` protocol at version 1 until a published external
+compatibility boundary exists. Evolve V1 deliberately when needed, and never
+expose private `QueryProgram` or `PhysicalQueryPlan` nodes through the standard.
+
+Semantic query plans describe what is requested. Schema facts and collection
+hints feed a separate physical planner that chooses how to execute it. Explain
+output must make the selected strategy, materialization barriers, expected
+complexity, and relevant facts reviewable.
+
+## Feature Documentation
+
+Every public feature must add or update its `docs/features/*` document in the
+same change. A complete feature document covers:
+
+- problem and why schema specialization belongs in JIT;
+- canonical API and exact semantics;
+- compiler, generated-code and physical-strategy design;
+- allocations, materialization and algorithmic complexity;
+- runtime, define and AOT behavior;
+- reproducible benchmark methodology and measured results;
+- tradeoffs, best practices and explicit non-goals.
+
+Do not publish a performance claim without a reproducible benchmark. Hot
+operation benchmarks compare idiomatic JavaScript, a handwritten optimized
+ceiling, runtime JIT and AOT, and include allocation or memory measurements
+where relevant.
+
+## Current Evolution Goal
+
+JIT is a compiler of specialized data operations. The current evolution work
+consolidates query under `JIT.cqrs`, introduces semantic-to-physical planning,
+and builds reusable ordering, indexing, projection, reconciliation,
+authorization and transport plans. High-level abstractions must disappear from
+AOT output: no schema walker, query interpreter, permission rule walker,
+runtime compiler, or unrelated high-level dependency may remain.
