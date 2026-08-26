@@ -49,6 +49,16 @@ describe("generated source snapshots", () => {
     expect(sourceOf(compiled)).toMatchSnapshot();
   });
 
+  it("query: filtered terminal returns from inside the loop", () => {
+    const compiled = JIT.cqrs
+      .query(Users)
+      .where((query) => query.and(query.eq("role", "admin"), query.gt("id", 10)))
+      .select("id", "name")
+      .first();
+
+    expect(sourceOf(compiled)).toMatchSnapshot();
+  });
+
   it("index: compound keys nest one map per level", () => {
     const compiled = JIT.index(Users).by("role", "id");
 

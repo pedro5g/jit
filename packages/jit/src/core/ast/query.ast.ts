@@ -85,6 +85,17 @@ export interface QueryAggregateNode {
   readonly key?: string;
 }
 
+/**
+ * Reductions that answer from the loop itself and never build a result array.
+ * The filters are the predicate; the terminal decides how the pass ends.
+ */
+export type QueryTerminalOperator = "first" | "findIndex" | "some" | "every";
+
+export interface QueryTerminalNode {
+  readonly kind: "terminal";
+  readonly op: QueryTerminalOperator;
+}
+
 export interface QueryDeleteNode {
   readonly kind: "delete";
 }
@@ -169,4 +180,5 @@ export type QueryNode =
   | QueryCollectorNode
   | QueryOrderByNode
   | QueryAggregateNode
+  | QueryTerminalNode
   | QueryMutationNode;

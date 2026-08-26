@@ -131,6 +131,26 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("rules.filter");
   });
 
+  it("should keep a terminal query free of any result collection", async () => {
+    const User = JIT.object({ id: JIT.number(), active: JIT.boolean() });
+    const firstActive = JIT.cqrs
+      .query(JIT.array(User))
+      .where((query) => query.eq("active", true))
+      .first();
+
+    AOT.generate({ artifacts: { firstActive }, outDir });
+    const bundled = await bundle(
+      `import { firstActive } from "./index.js";\nconsole.log(firstActive([{ id: 1, active: true }]));\n`
+    );
+
+    // The answer leaves the loop; nothing is allocated to hold it.
+    expect(bundled).toContain("return item;");
+    expect(bundled).not.toContain("new Array");
+    expect(bundled).not.toContain("out.length");
+    expect(bundled).not.toContain("function stringify");
+    expect(bundled).not.toContain("function clone");
+  });
+
   it("should keep a sort plan free of every unrelated compiler and of a generic comparator", async () => {
     const User = JIT.object({ id: JIT.number(), lastName: JIT.string(), createdAt: JIT.date() });
     const sortUsers = JIT.sort(User).by("lastName").thenBy("createdAt", "desc");

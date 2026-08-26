@@ -2038,6 +2038,8 @@ function serializeQueryNode(node: QueryNode): string {
       return `s(${node.fields.join(",")})`;
     case "aggregate":
       return `a(${node.op},${node.key ?? ""})`;
+    case "terminal":
+      return `t(${node.op})`;
     case "unique":
       return `u(${node.key})`;
     case "keyed":

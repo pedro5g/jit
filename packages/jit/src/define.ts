@@ -446,6 +446,10 @@ function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(build
     "avg",
     "min",
     "max",
+    "first",
+    "findIndex",
+    "some",
+    "every",
   ] as const;
 
   for (const key of chainMethods) {

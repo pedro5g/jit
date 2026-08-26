@@ -7364,6 +7364,121 @@ function compileFormat(schema, options) {
   );
 }
 
+// ../../packages/jit/src/compiler/indexing.ts
+function resolveIndexKeysFromFacts(schema) {
+  const hints = resolveHints(schema);
+  const key = resolveHintKey(hints.index?.key) ?? resolveHintKey(hints.collection?.identify) ?? resolveHintKey(hints.collection?.uniqueBy) ?? resolveHintKey(hints.entity?.key);
+  return key ? [key] : void 0;
+}
+function resolveIndexDescriptor(schema, keys, shape) {
+  const object2 = resolveRowObjectSchema(schema, "index");
+  const resolvedKeys = keys ?? resolveIndexKeysFromFacts(schema);
+  if (!resolvedKeys || resolvedKeys.length === 0) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      "index requires a key: declare one with .keyed(), .indexBy() or .uniqueBy(), or pass it to .by()"
+    );
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const indexKeys = resolvedKeys.map((key) => {
+    const field = resolveRowField(object2, key, "index");
+    if (seen.has(key)) {
+      throw new JITError("INVALID_OPERATION", `index repeats key ${JSON.stringify(key)}`, { path: [key] });
+    }
+    seen.add(key);
+    return Object.freeze({
+      key,
+      valueKind: resolveIndexKeyKind(field, key),
+      nullish: isNullishField(field)
+    });
+  });
+  const hints = resolveHints(schema);
+  return Object.freeze({
+    keys: Object.freeze(indexKeys),
+    shape,
+    uniqueByFact: hints.collection?.unique === true || hints.entity?.key !== void 0
+  });
+}
+function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}") {
+  const depth = descriptor.keys.length;
+  writer.line(open);
+  writer.indent(() => {
+    writer.line("const index = new Map();");
+    writer.line("const len = value.length;");
+    writer.line("for (let i = 0; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const row = value[i];");
+      descriptor.keys.forEach((key, level) => {
+        writer.line(`const key${level} = ${emitIndexKeyRead("row", key)};`);
+      });
+      for (let level = 0; level < depth - 1; level++) {
+        const parent = level === 0 ? "index" : `level${level}`;
+        writer.line(`let level${level + 1} = ${parent}.get(key${level});`);
+        writer.line(`if (level${level + 1} === undefined) {`);
+        writer.indent(() => {
+          writer.line(`level${level + 1} = new Map();`);
+          writer.line(`${parent}.set(key${level}, level${level + 1});`);
+        });
+        writer.line("}");
+      }
+      const bucket = depth === 1 ? "index" : `level${depth - 1}`;
+      const lastKey = `key${depth - 1}`;
+      if (descriptor.shape === "grouped") {
+        writer.line(`const group = ${bucket}.get(${lastKey});`);
+        writer.line("if (group === undefined) {");
+        writer.indent(() => writer.line(`${bucket}.set(${lastKey}, [row]);`));
+        writer.line("} else {");
+        writer.indent(() => writer.line("group[group.length] = row;"));
+        writer.line("}");
+      } else {
+        writer.line(`${bucket}.set(${lastKey}, row);`);
+      }
+    });
+    writer.line("}");
+    writer.line("return index;");
+  });
+  writer.line(close);
+}
+function emitIndexPlanSource(descriptor, cacheKey) {
+  const writer = new CodeWriter();
+  writer.line("((__cache) => {");
+  writer.indent(() => {
+    emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
+    writer.line(`const cached = (value) => __cache(value, ${JSON.stringify(cacheKey)}, build);`);
+    writer.line('Object.defineProperty(build, "cached", { value: cached });');
+    writer.line("return build;");
+  });
+  writer.line("})");
+  return writer.toString();
+}
+function emitIndexKeyRead(row, key) {
+  const access = emitPropertyAccess(row, key.key);
+  if (key.valueKind !== "date") return access;
+  return key.nullish ? `(${access} == null ? ${access} : ${access}.getTime())` : `${access}.getTime()`;
+}
+function indexCacheKey(descriptor) {
+  return `index:${descriptor.shape}:${descriptor.keys.map(({ key, valueKind, nullish: nullish3 }) => `${key}:${valueKind}:${nullish3}`).join(",")}`;
+}
+function compileIndex(schema, descriptor, runtimeIndexCache, options) {
+  const cacheKey = indexCacheKey(descriptor);
+  const template = getCompileCached(
+    schema,
+    cacheKey,
+    () => {
+      const source = emitIndexPlanSource(descriptor, cacheKey);
+      return { source, create: globalThis.Function(`return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create()(runtimeIndexCache);
+  registerArtifact(compiled, { kind: "index-plan", schema, descriptor });
+  return compiled;
+}
+function resolveIndexKeyKind(schema, key) {
+  const kind = resolveScalarKeyKind(schema, key, "index");
+  return kind === "numeric" ? "direct" : kind;
+}
+
 // ../../packages/jit/src/compiler/serialize/emit-serialize.ts
 function emitSerialize(schema) {
   const writer = new CodeWriter();
@@ -8659,11 +8774,19 @@ function explainQueryExecution(program, outputMode) {
     outputMode,
     materializes: barriers.length > 0,
     materializationReason: barriers.length > 0 ? "global ordering requires complete input" : void 0,
-    earlyTermination: program.nodes.some((node) => node.kind === "take" || node.kind === "takeWhile"),
+    // A terminal returns from inside the loop, which is early termination by
+    // construction rather than by a count.
+    earlyTermination: program.nodes.some(
+      (node) => node.kind === "take" || node.kind === "takeWhile" || node.kind === "terminal"
+    ),
     retainedState,
-    estimatedAllocationsPerResult: program.nodes.some(
-      (node) => node.kind === "select:fields" || node.kind === "chunk" || node.kind === "window" || node.kind === "pairwise"
-    ) ? 1 : 0,
+    estimatedAllocationsPerResult: (
+      // `some`, `every` and `findIndex` answer with a scalar: no row is built,
+      // even when the chain named fields earlier.
+      program.nodes.some((node) => node.kind === "terminal" && node.op !== "first") ? 0 : program.nodes.some(
+        (node) => node.kind === "select:fields" || node.kind === "chunk" || node.kind === "window" || node.kind === "pairwise"
+      ) ? 1 : 0
+    ),
     barriers
   };
 }
@@ -9166,6 +9289,12 @@ function resolveCollection(schema) {
 }
 function validatePipeline(nodes, props) {
   for (const node of nodes) {
+    if (node.kind === "terminal") {
+      throw new JITError(
+        "INVALID_QUERY",
+        `query ${node.op} produces a single answer and cannot feed an iterator, visitor or lazy pipeline`
+      );
+    }
     if (node.kind === "filter" || node.kind === "takeWhile" || node.kind === "dropWhile") {
       validateConditionFields(node.condition, props);
     }
@@ -9899,7 +10028,7 @@ var COMPARE_OPERATORS = {
   lte: "lessThanOrEqual"
 };
 function buildQueryIR(target, plan, options = {}) {
-  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
+  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.terminal ? buildTerminalQuery(target, plan, plan.terminal) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
   return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
 }
 function buildArrayQuery(target, plan) {
@@ -9975,6 +10104,32 @@ function buildCollectedQuery(target, plan) {
 }
 var ACC = irVar("acc");
 var ACC_COUNT = irVar("n");
+function buildTerminalQuery(target, plan, terminal) {
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
+  }
+  if (terminal.op === "every") {
+    const condition = buildFilterTest(plan);
+    body.push(
+      buildInputLoop(
+        target,
+        condition ? [{ kind: "if", test: not(condition), then: [{ kind: "return", value: literal(false) }] }] : []
+      ),
+      { kind: "return", value: literal(true) }
+    );
+    return body;
+  }
+  const found = terminal.op === "some" ? { kind: "return", value: literal(true) } : terminal.op === "findIndex" ? { kind: "return", value: INDEX2 } : { kind: "return", value: buildProjection(plan.select) };
+  body.push(
+    buildInputLoop(target, buildGuardedBody(plan, [found])),
+    {
+      kind: "return",
+      value: terminal.op === "some" ? literal(false) : terminal.op === "findIndex" ? literal(-1) : literal(void 0)
+    }
+  );
+  return body;
+}
 function buildAggregateQuery(target, plan, aggregate) {
   const body = [];
   if (target.kind === "array") {
@@ -10202,6 +10357,8 @@ function serializeQueryNode(node) {
       return `o(${node.key},${node.direction})`;
     case "aggregate":
       return `a(${node.op},${node.key ?? ""})`;
+    case "terminal":
+      return `t(${node.op})`;
     case "delete":
       return "d()";
     case "update":
@@ -10237,6 +10394,7 @@ function createQueryPlan(nodes) {
   const collectors = [];
   const orderBys = [];
   const aggregates = [];
+  const terminals = [];
   const mutations = [];
   for (const node of nodes) {
     switch (node.kind) {
@@ -10259,6 +10417,9 @@ function createQueryPlan(nodes) {
       case "aggregate":
         aggregates[aggregates.length] = node;
         break;
+      case "terminal":
+        terminals[terminals.length] = node;
+        break;
       case "delete":
       case "update":
         mutations[mutations.length] = node;
@@ -10272,6 +10433,7 @@ function createQueryPlan(nodes) {
     collectors,
     orderBys,
     aggregates,
+    terminals,
     mutations
   };
 }
@@ -10283,6 +10445,7 @@ function optimizeQueryPlan(plan) {
     collector: last(plan.collectors),
     orderBy: last(plan.orderBys),
     aggregate: last(plan.aggregates),
+    terminal: last(plan.terminals),
     mutation: last(plan.mutations)
   };
 }
@@ -10309,6 +10472,17 @@ function validateQueryPlan(schema, plan) {
         throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
       }
       validateObjectKeys2(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
+  }
+  if (plan.terminal) {
+    if (plan.collector || plan.orderBy || plan.aggregate || plan.mutation || plan.unique) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `query ${plan.terminal.op} cannot be combined with unique/keyed/groupBy/orderBy/aggregates/delete/update in v1`
+      );
+    }
+    if (plan.select && plan.terminal.op !== "first") {
+      throw new JITError("INVALID_QUERY", `query ${plan.terminal.op} does not produce rows, so select has no effect`);
     }
   }
   if (plan.mutation) {
@@ -10372,121 +10546,6 @@ function validateValue(schema, value) {
 }
 function last(values) {
   return values[values.length - 1];
-}
-
-// ../../packages/jit/src/compiler/indexing.ts
-function resolveIndexKeysFromFacts(schema) {
-  const hints = resolveHints(schema);
-  const key = resolveHintKey(hints.index?.key) ?? resolveHintKey(hints.collection?.identify) ?? resolveHintKey(hints.collection?.uniqueBy) ?? resolveHintKey(hints.entity?.key);
-  return key ? [key] : void 0;
-}
-function resolveIndexDescriptor(schema, keys, shape) {
-  const object2 = resolveRowObjectSchema(schema, "index");
-  const resolvedKeys = keys ?? resolveIndexKeysFromFacts(schema);
-  if (!resolvedKeys || resolvedKeys.length === 0) {
-    throw new JITError(
-      "INVALID_OPERATION",
-      "index requires a key: declare one with .keyed(), .indexBy() or .uniqueBy(), or pass it to .by()"
-    );
-  }
-  const seen = /* @__PURE__ */ new Set();
-  const indexKeys = resolvedKeys.map((key) => {
-    const field = resolveRowField(object2, key, "index");
-    if (seen.has(key)) {
-      throw new JITError("INVALID_OPERATION", `index repeats key ${JSON.stringify(key)}`, { path: [key] });
-    }
-    seen.add(key);
-    return Object.freeze({
-      key,
-      valueKind: resolveIndexKeyKind(field, key),
-      nullish: isNullishField(field)
-    });
-  });
-  const hints = resolveHints(schema);
-  return Object.freeze({
-    keys: Object.freeze(indexKeys),
-    shape,
-    uniqueByFact: hints.collection?.unique === true || hints.entity?.key !== void 0
-  });
-}
-function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}") {
-  const depth = descriptor.keys.length;
-  writer.line(open);
-  writer.indent(() => {
-    writer.line("const index = new Map();");
-    writer.line("const len = value.length;");
-    writer.line("for (let i = 0; i < len; i++) {");
-    writer.indent(() => {
-      writer.line("const row = value[i];");
-      descriptor.keys.forEach((key, level) => {
-        writer.line(`const key${level} = ${emitIndexKeyRead("row", key)};`);
-      });
-      for (let level = 0; level < depth - 1; level++) {
-        const parent = level === 0 ? "index" : `level${level}`;
-        writer.line(`let level${level + 1} = ${parent}.get(key${level});`);
-        writer.line(`if (level${level + 1} === undefined) {`);
-        writer.indent(() => {
-          writer.line(`level${level + 1} = new Map();`);
-          writer.line(`${parent}.set(key${level}, level${level + 1});`);
-        });
-        writer.line("}");
-      }
-      const bucket = depth === 1 ? "index" : `level${depth - 1}`;
-      const lastKey = `key${depth - 1}`;
-      if (descriptor.shape === "grouped") {
-        writer.line(`const group = ${bucket}.get(${lastKey});`);
-        writer.line("if (group === undefined) {");
-        writer.indent(() => writer.line(`${bucket}.set(${lastKey}, [row]);`));
-        writer.line("} else {");
-        writer.indent(() => writer.line("group[group.length] = row;"));
-        writer.line("}");
-      } else {
-        writer.line(`${bucket}.set(${lastKey}, row);`);
-      }
-    });
-    writer.line("}");
-    writer.line("return index;");
-  });
-  writer.line(close);
-}
-function emitIndexPlanSource(descriptor, cacheKey) {
-  const writer = new CodeWriter();
-  writer.line("((__cache) => {");
-  writer.indent(() => {
-    emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
-    writer.line(`const cached = (value) => __cache(value, ${JSON.stringify(cacheKey)}, build);`);
-    writer.line('Object.defineProperty(build, "cached", { value: cached });');
-    writer.line("return build;");
-  });
-  writer.line("})");
-  return writer.toString();
-}
-function emitIndexKeyRead(row, key) {
-  const access = emitPropertyAccess(row, key.key);
-  if (key.valueKind !== "date") return access;
-  return key.nullish ? `(${access} == null ? ${access} : ${access}.getTime())` : `${access}.getTime()`;
-}
-function indexCacheKey(descriptor) {
-  return `index:${descriptor.shape}:${descriptor.keys.map(({ key, valueKind, nullish: nullish3 }) => `${key}:${valueKind}:${nullish3}`).join(",")}`;
-}
-function compileIndex(schema, descriptor, runtimeIndexCache, options) {
-  const cacheKey = indexCacheKey(descriptor);
-  const template = getCompileCached(
-    schema,
-    cacheKey,
-    () => {
-      const source = emitIndexPlanSource(descriptor, cacheKey);
-      return { source, create: globalThis.Function(`return ${source};`) };
-    },
-    options
-  );
-  const compiled = template.create()(runtimeIndexCache);
-  registerArtifact(compiled, { kind: "index-plan", schema, descriptor });
-  return compiled;
-}
-function resolveIndexKeyKind(schema, key) {
-  const kind = resolveScalarKeyKind(schema, key, "index");
-  return kind === "numeric" ? "direct" : kind;
 }
 
 // ../../packages/jit/src/compiler/sort.ts
@@ -12367,6 +12426,8 @@ function serializeQueryNode2(node) {
       return `s(${node.fields.join(",")})`;
     case "aggregate":
       return `a(${node.op},${node.key ?? ""})`;
+    case "terminal":
+      return `t(${node.op})`;
     case "unique":
       return `u(${node.key})`;
     case "keyed":
@@ -14968,8 +15029,32 @@ function queryPlanType(artifact, typeNames) {
     case "visitor":
       return `(value: ${input}, consume: (item: unknown) => void) => number`;
     default:
-      return `(value: ${input}) => unknown[]`;
+      return `(value: ${input}) => ${eagerQueryResultType(artifact, typeNames)}`;
   }
+}
+function eagerQueryResultType(artifact, typeNames) {
+  let terminal;
+  let aggregate;
+  let select;
+  for (const node of artifact.program.nodes) {
+    if (node.kind === "terminal") terminal = node;
+    else if (node.kind === "aggregate") aggregate = node;
+    else if (node.kind === "select:fields") select = node.fields;
+  }
+  if (terminal) {
+    if (terminal.op === "some" || terminal.op === "every") return "boolean";
+    if (terminal.op === "findIndex") return "number";
+    const row = queryRowType(artifact, typeNames);
+    const projected = select ? `Pick<${row}, ${select.map((field) => JSON.stringify(field)).join(" | ")}>` : row;
+    return `${projected} | undefined`;
+  }
+  if (aggregate) return aggregate.op === "sum" || aggregate.op === "count" ? "number" : "number | undefined";
+  return "unknown[]";
+}
+function queryRowType(artifact, typeNames) {
+  const schema = resolveWrappers(artifact.schema).base;
+  const row = schema.type === TypeName.array ? schema.def.element : schema.type === TypeName.runtimeType ? schema.def.innerType : schema;
+  return namedType(row, typeNames);
 }
 function sortPlanType(artifact, typeNames) {
   const schema = resolveWrappers(artifact.schema).base;
@@ -17426,6 +17511,18 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
     max(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
     },
+    first() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "first" }], bindings, paramNames);
+    },
+    findIndex() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "findIndex" }], bindings, paramNames);
+    },
+    some() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "some" }], bindings, paramNames);
+    },
+    every() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "every" }], bindings, paramNames);
+    },
     to: Object.freeze({
       iterator: () => compileQueryIterator(schema, { nodes, bindings, params: paramNames }),
       asyncIterator: () => compileQueryAsyncIterator(schema, { nodes, bindings, params: paramNames }),
@@ -17595,7 +17692,11 @@ function wrap(schema, collection, builder) {
     "count",
     "avg",
     "min",
-    "max"
+    "max",
+    "first",
+    "findIndex",
+    "some",
+    "every"
   ];
   for (const key of chainMethods) {
     const method = record2[key];
@@ -17697,6 +17798,8 @@ function toStandardStep(node, bindings) {
         operation: node.op,
         ...node.key === void 0 ? {} : { key: node.key }
       });
+    case "terminal":
+      return Object.freeze({ kind: "terminal", operation: node.op });
   }
 }
 function objectFields(schema) {
@@ -18126,6 +18229,30 @@ function dto(schema) {
       }
     })
   );
+}
+
+// ../../packages/jit/src/factories/indexing.ts
+function index(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const inferred = resolveIndexKeysFromFacts(unwrapped);
+  const plan = createIndexPlan(unwrapped, inferred, "unique");
+  Object.defineProperty(plan, "by", {
+    value: (...keys) => createIndexPlan(unwrapped, keys, "unique")
+  });
+  return plan;
+}
+function createIndexPlan(schema, keys, shape) {
+  const plan = keys || resolveIndexKeysFromFacts(schema) ? compileIndex(schema, resolveIndexDescriptor(schema, keys, shape), getCachedIndex) : unresolvedIndexPlan(schema, shape);
+  Object.defineProperty(plan, "grouped", {
+    value: () => createIndexPlan(schema, keys, "grouped")
+  });
+  return plan;
+}
+function unresolvedIndexPlan(schema, shape) {
+  const fail = () => resolveIndexDescriptor(schema, void 0, shape);
+  const plan = ((_value) => fail());
+  Object.defineProperty(plan, "cached", { value: fail });
+  return plan;
 }
 
 // ../../packages/jit/src/factories/primitive/empty-def.ts
@@ -19425,30 +19552,6 @@ function codec(input, output, options) {
   );
 }
 
-// ../../packages/jit/src/factories/indexing.ts
-function index(schema) {
-  const unwrapped = unwrapSchema(schema);
-  const inferred = resolveIndexKeysFromFacts(unwrapped);
-  const plan = createIndexPlan(unwrapped, inferred, "unique");
-  Object.defineProperty(plan, "by", {
-    value: (...keys) => createIndexPlan(unwrapped, keys, "unique")
-  });
-  return plan;
-}
-function createIndexPlan(schema, keys, shape) {
-  const plan = keys || resolveIndexKeysFromFacts(schema) ? compileIndex(schema, resolveIndexDescriptor(schema, keys, shape), getCachedIndex) : unresolvedIndexPlan(schema, shape);
-  Object.defineProperty(plan, "grouped", {
-    value: () => createIndexPlan(schema, keys, "grouped")
-  });
-  return plan;
-}
-function unresolvedIndexPlan(schema, shape) {
-  const fail = () => resolveIndexDescriptor(schema, void 0, shape);
-  const plan = ((_value) => fail());
-  Object.defineProperty(plan, "cached", { value: fail });
-  return plan;
-}
-
 // ../../packages/jit/src/factories/sort.ts
 function sort(schema) {
   const unwrapped = unwrapSchema(schema);
@@ -20487,7 +20590,11 @@ function createDefineSortPlan(schema, criteria) {
 }
 function defineIndex(schema) {
   const unwrapped = unwrapSchema(schema);
-  const plan = createDefineIndexPlan(unwrapped, resolveIndexKeysFromFacts(unwrapped), "unique");
+  const plan = createDefineIndexPlan(
+    unwrapped,
+    resolveIndexKeysFromFacts(unwrapped),
+    "unique"
+  );
   Object.defineProperty(plan, "by", {
     value: (...keys) => createDefineIndexPlan(unwrapped, keys, "unique")
   });
@@ -20572,7 +20679,11 @@ function wrapDefineCqrsQuery(builder) {
     "count",
     "avg",
     "min",
-    "max"
+    "max",
+    "first",
+    "findIndex",
+    "some",
+    "every"
   ];
   for (const key of chainMethods) {
     const method = source[key];

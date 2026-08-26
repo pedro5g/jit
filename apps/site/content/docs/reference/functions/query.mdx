@@ -78,6 +78,55 @@ const visit = JIT.query(Users)
 visit(users, (user) => consume(user));
 ```
 
+## Terminal sinks
+
+Four terminals answer from inside the loop instead of collecting a result.
+
+| Terminal      | Result                | Stops at                     |
+| ------------- | --------------------- | ---------------------------- |
+| `first()`     | the row, or undefined | the first matching row       |
+| `findIndex()` | its index, or `-1`    | the first matching row       |
+| `some()`      | boolean               | the first matching row       |
+| `every()`     | boolean               | the first row that does not  |
+
+```ts
+const Users = JIT.array(JIT.object({ id: JIT.number(), active: JIT.boolean() }));
+const users = [
+  { id: 1, active: false },
+  { id: 2, active: true },
+];
+
+const firstActive = JIT.cqrs
+  .query(Users)
+  .where((q) => q.eq("active", true))
+  .first();
+const anyActive = JIT.cqrs
+  .query(Users)
+  .where((q) => q.eq("active", true))
+  .some();
+
+console.log(firstActive(users), anyActive(users));
+```
+
+The filters are the predicate; the terminal decides how the pass ends. There is
+no separate `find` or `firstOrUndefined` — the predicate already lives in
+`where`, and `first()` already returns `undefined` when nothing matches.
+
+A terminal has to answer in one pass, so it cannot be combined with `unique`,
+`keyed`, `groupBy`, `orderBy`, aggregates or mutations, and it cannot feed
+`to.iterator()`, `to.visitor()` or `lazy()`. `select` is allowed before `first`
+and rejected before the scalar terminals, where no row is built.
+
+```ts
+const Users = JIT.array(JIT.object({ id: JIT.number(), active: JIT.boolean() }));
+
+try {
+  JIT.cqrs.query(Users).orderBy("id").first()([]);
+} catch (error) {
+  console.log((error as Error).message);
+}
+```
+
 ## Explain
 
 ```ts

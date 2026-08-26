@@ -75,14 +75,26 @@ export function explainQueryExecution(program: LazyQueryProgram, outputMode: Que
     outputMode,
     materializes: barriers.length > 0,
     materializationReason: barriers.length > 0 ? "global ordering requires complete input" : undefined,
-    earlyTermination: program.nodes.some((node) => node.kind === "take" || node.kind === "takeWhile"),
+    // A terminal returns from inside the loop, which is early termination by
+    // construction rather than by a count.
+    earlyTermination: program.nodes.some(
+      (node) => node.kind === "take" || node.kind === "takeWhile" || node.kind === "terminal"
+    ),
     retainedState,
-    estimatedAllocationsPerResult: program.nodes.some(
-      (node) =>
-        node.kind === "select:fields" || node.kind === "chunk" || node.kind === "window" || node.kind === "pairwise"
-    )
-      ? 1
-      : 0,
+    estimatedAllocationsPerResult:
+      // `some`, `every` and `findIndex` answer with a scalar: no row is built,
+      // even when the chain named fields earlier.
+      program.nodes.some((node) => node.kind === "terminal" && node.op !== "first")
+        ? 0
+        : program.nodes.some(
+              (node) =>
+                node.kind === "select:fields" ||
+                node.kind === "chunk" ||
+                node.kind === "window" ||
+                node.kind === "pairwise"
+            )
+          ? 1
+          : 0,
     barriers,
   };
 }
@@ -685,6 +697,13 @@ function resolveCollection(schema: ATS.AnyTypeSchema): {
 
 function validatePipeline(nodes: readonly QueryPipelineNode[], props: ATS.SchemaShape): void {
   for (const node of nodes) {
+    // A terminal answers with a scalar, so there is no stream left to yield.
+    if (node.kind === "terminal") {
+      throw new JITError(
+        "INVALID_QUERY",
+        `query ${node.op} produces a single answer and cannot feed an iterator, visitor or lazy pipeline`
+      );
+    }
     if (node.kind === "filter" || node.kind === "takeWhile" || node.kind === "dropWhile") {
       validateConditionFields(node.condition, props);
     }

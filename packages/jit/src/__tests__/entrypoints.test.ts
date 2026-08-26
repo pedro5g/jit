@@ -54,6 +54,22 @@ describe("runtime and define entrypoints", () => {
     const defineSorted = DefineJIT.sort(DefineUser).by("name", "desc").thenBy("id");
     const runtimeIndexed = RuntimeJIT.index(RuntimeJIT.array(RuntimeUser)).by("id");
     const defineIndexed = DefineJIT.index(DefineJIT.array(DefineUser)).by("id");
+    const runtimeFirst = RuntimeJIT.cqrs
+      .query(RuntimeJIT.array(RuntimeUser))
+      .where((query) => query.eq("id", 2))
+      .first();
+    const defineFirst = DefineJIT.cqrs
+      .query(DefineJIT.array(DefineUser))
+      .where((query) => query.eq("id", 2))
+      .first();
+    const runtimeSome = RuntimeJIT.cqrs
+      .query(RuntimeJIT.array(RuntimeUser))
+      .where((query) => query.gt("id", 1))
+      .some();
+    const defineSome = DefineJIT.cqrs
+      .query(DefineJIT.array(DefineUser))
+      .where((query) => query.gt("id", 1))
+      .some();
 
     const cases: readonly ApiParityCase[] = [
       {
@@ -108,6 +124,18 @@ describe("runtime and define entrypoints", () => {
         name: "usersById",
         runtime: runtimeIndexed as UnknownArtifact,
         define: defineIndexed as UnknownArtifact,
+        args: [[value, { id: 2, name: "Grace" }]],
+      },
+      {
+        name: "firstUser",
+        runtime: runtimeFirst as UnknownArtifact,
+        define: defineFirst as UnknownArtifact,
+        args: [[value, { id: 2, name: "Grace" }]],
+      },
+      {
+        name: "anyUser",
+        runtime: runtimeSome as UnknownArtifact,
+        define: defineSome as UnknownArtifact,
         args: [[value, { id: 2, name: "Grace" }]],
       },
     ];

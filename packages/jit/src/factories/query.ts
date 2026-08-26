@@ -215,6 +215,17 @@ export interface QueryBuilderOps<
   max<TKey extends NumericQueryKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, number | undefined, TParams>;
+  /**
+   * Returns the first matching item, or `undefined`. Returns from inside the
+   * loop: nothing is collected and the rest of the collection is not read.
+   */
+  first(): QueryBuilder<TSchema, TOutput, TOutput | undefined, TParams>;
+  /** Index of the first matching item in the input, or `-1`. */
+  findIndex(): QueryBuilder<TSchema, TOutput, number, TParams>;
+  /** True as soon as one item matches; stops there. */
+  some(): QueryBuilder<TSchema, TOutput, boolean, TParams>;
+  /** True when every item matches; stops at the first that does not. */
+  every(): QueryBuilder<TSchema, TOutput, boolean, TParams>;
   /** Alternative result shapes for the same query program. */
   readonly to: QuerySinks<TSchema, TOutput, TParams>;
   lazy(): LazyQueryBuilder<TSchema, TOutput, TParams>;
@@ -616,6 +627,22 @@ function createQueryBuilder<
 
     max(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
+    },
+
+    first() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "first" }], bindings, paramNames);
+    },
+
+    findIndex() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "findIndex" }], bindings, paramNames);
+    },
+
+    some() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "some" }], bindings, paramNames);
+    },
+
+    every() {
+      return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "every" }], bindings, paramNames);
     },
 
     to: Object.freeze({

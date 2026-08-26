@@ -50,7 +50,8 @@ export type StandardQueryStep =
       readonly update: { readonly kind: "binding"; readonly name: string };
     }
   | { readonly kind: "update"; readonly patch: Readonly<Record<string, StandardQueryValue>> }
-  | { readonly kind: "aggregate"; readonly operation: "sum" | "count" | "avg" | "min" | "max"; readonly key?: string };
+  | { readonly kind: "aggregate"; readonly operation: "sum" | "count" | "avg" | "min" | "max"; readonly key?: string }
+  | { readonly kind: "terminal"; readonly operation: "first" | "findIndex" | "some" | "every" };
 
 export type StandardQueryValue =
   | { readonly kind: "field"; readonly path: readonly string[] }
@@ -232,6 +233,17 @@ interface CqrsQueryOps<
   avg<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
   min<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
   max<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
+  /**
+   * Returns the first matching row, or `undefined`. The answer comes from
+   * inside the loop, so nothing is collected and the scan stops there.
+   */
+  first(): CqrsQuery<TSchema, TOutput, TOutput | undefined, TParams>;
+  /** Index of the first matching row in the input, or `-1`. */
+  findIndex(): CqrsQuery<TSchema, TOutput, number, TParams>;
+  /** True as soon as one row matches; stops there. */
+  some(): CqrsQuery<TSchema, TOutput, boolean, TParams>;
+  /** True when every row matches; stops at the first that does not. */
+  every(): CqrsQuery<TSchema, TOutput, boolean, TParams>;
   readonly to: QuerySinks<ATS.ArraySchema<TSchema>, TOutput, TParams>;
   lazy(): LazyQueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TParams>;
   explain(
@@ -306,6 +318,10 @@ function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams exten
     "avg",
     "min",
     "max",
+    "first",
+    "findIndex",
+    "some",
+    "every",
   ] as const;
 
   for (const key of chainMethods) {
@@ -418,6 +434,8 @@ function toStandardStep(node: QueryPipelineNode, bindings: readonly unknown[]): 
         operation: node.op,
         ...(node.key === undefined ? {} : { key: node.key }),
       });
+    case "terminal":
+      return Object.freeze({ kind: "terminal", operation: node.op });
   }
 }
 

@@ -3,6 +3,7 @@ import type {
   QueryConditionNode,
   QueryMutationNode,
   QuerySelectFieldsNode,
+  QueryTerminalNode,
   QueryValueNode,
 } from "../../../core/ast/index.js";
 import { JITError } from "../../../errors/index.js";
@@ -71,11 +72,13 @@ export function buildQueryIR(
 ): IRProgram {
   const body = plan.mutation
     ? buildMutationQuery(target, plan)
-    : plan.aggregate
-      ? buildAggregateQuery(target, plan, plan.aggregate)
-      : plan.collector
-        ? buildCollectedQuery(target, plan)
-        : buildArrayQuery(target, plan);
+    : plan.terminal
+      ? buildTerminalQuery(target, plan, plan.terminal)
+      : plan.aggregate
+        ? buildAggregateQuery(target, plan, plan.aggregate)
+        : plan.collector
+          ? buildCollectedQuery(target, plan)
+          : buildArrayQuery(target, plan);
 
   return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
 }
@@ -167,6 +170,51 @@ function buildCollectedQuery(target: QueryTarget, plan: OptimizedQueryPlan): rea
 
 const ACC = irVar("acc");
 const ACC_COUNT = irVar("n");
+
+/**
+ * Emits a reduction that returns from inside the loop. Nothing is collected:
+ * the answer is the first row, its index, or a boolean, and the pass stops as
+ * soon as that answer is known.
+ */
+function buildTerminalQuery(
+  target: QueryTarget,
+  plan: OptimizedQueryPlan,
+  terminal: QueryTerminalNode
+): readonly IRNode[] {
+  const body: IRNode[] = [];
+
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
+  }
+
+  // `every` asks the opposite question, so it exits on the first row the
+  // filters reject rather than on the first they accept.
+  if (terminal.op === "every") {
+    const condition = buildFilterTest(plan);
+
+    body.push(
+      buildInputLoop(
+        target,
+        condition ? [{ kind: "if", test: not(condition), then: [{ kind: "return", value: literal(false) }] }] : []
+      ),
+      { kind: "return", value: literal(true) }
+    );
+    return body;
+  }
+
+  const found: IRNode =
+    terminal.op === "some"
+      ? { kind: "return", value: literal(true) }
+      : terminal.op === "findIndex"
+        ? { kind: "return", value: INDEX }
+        : { kind: "return", value: buildProjection(plan.select) };
+
+  body.push(buildInputLoop(target, buildGuardedBody(plan, [found])), {
+    kind: "return",
+    value: terminal.op === "some" ? literal(false) : terminal.op === "findIndex" ? literal(-1) : literal(undefined),
+  });
+  return body;
+}
 
 function buildAggregateQuery(
   target: QueryTarget,

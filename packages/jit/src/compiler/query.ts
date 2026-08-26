@@ -7,6 +7,7 @@ import type {
   QueryNode,
   QueryOrderByNode,
   QuerySelectFieldsNode,
+  QueryTerminalNode,
   QueryUniqueNode,
   QueryValueNode,
 } from "../core/ast/index.js";
@@ -71,6 +72,7 @@ interface QueryPlan {
   readonly collectors: readonly QueryCollectorNode[];
   readonly orderBys: readonly QueryOrderByNode[];
   readonly aggregates: readonly QueryAggregateNode[];
+  readonly terminals: readonly QueryTerminalNode[];
   readonly mutations: readonly QueryMutationNode[];
 }
 
@@ -82,6 +84,7 @@ export interface OptimizedQueryPlan {
   readonly collector: QueryCollectorNode | undefined;
   readonly orderBy: QueryOrderByNode | undefined;
   readonly aggregate: QueryAggregateNode | undefined;
+  readonly terminal: QueryTerminalNode | undefined;
   readonly mutation: QueryMutationNode | undefined;
 }
 
@@ -184,6 +187,8 @@ function serializeQueryNode(node: QueryNode): string {
       return `o(${node.key},${node.direction})`;
     case "aggregate":
       return `a(${node.op},${node.key ?? ""})`;
+    case "terminal":
+      return `t(${node.op})`;
     case "delete":
       return "d()";
     case "update":
@@ -224,6 +229,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
   const collectors: QueryCollectorNode[] = [];
   const orderBys: QueryOrderByNode[] = [];
   const aggregates: QueryAggregateNode[] = [];
+  const terminals: QueryTerminalNode[] = [];
   const mutations: QueryMutationNode[] = [];
 
   for (const node of nodes) {
@@ -247,6 +253,9 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
       case "aggregate":
         aggregates[aggregates.length] = node;
         break;
+      case "terminal":
+        terminals[terminals.length] = node;
+        break;
       case "delete":
       case "update":
         mutations[mutations.length] = node;
@@ -261,6 +270,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
     collectors,
     orderBys,
     aggregates,
+    terminals,
     mutations,
   };
 }
@@ -273,6 +283,7 @@ function optimizeQueryPlan(plan: QueryPlan): OptimizedQueryPlan {
     collector: last(plan.collectors),
     orderBy: last(plan.orderBys),
     aggregate: last(plan.aggregates),
+    terminal: last(plan.terminals),
     mutation: last(plan.mutations),
   };
 }
@@ -305,6 +316,22 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
       }
 
       validateObjectKeys(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
+  }
+
+  if (plan.terminal) {
+    // A terminal answers from the loop. Anything that has to see the whole
+    // result first — ordering, grouping, aggregating, mutating — would defeat
+    // the early exit that is the entire reason these exist.
+    if (plan.collector || plan.orderBy || plan.aggregate || plan.mutation || plan.unique) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `query ${plan.terminal.op} cannot be combined with unique/keyed/groupBy/orderBy/aggregates/delete/update in v1`
+      );
+    }
+
+    if (plan.select && plan.terminal.op !== "first") {
+      throw new JITError("INVALID_QUERY", `query ${plan.terminal.op} does not produce rows, so select has no effect`);
     }
   }
 

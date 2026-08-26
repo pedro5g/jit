@@ -989,6 +989,19 @@ exports[`generated source snapshots > query: filtered aggregation 1`] = `
 }"
 `;
 
+exports[`generated source snapshots > query: filtered terminal returns from inside the loop 1`] = `
+"function query(value) {
+  const len = value.length;
+  for (let i = 0; i < len; i++) {
+    const item = value[i];
+    if ((item.role === __q0) && (item.id > __q1)) {
+      return { "id": item.id, "name": item.name };
+    }
+  }
+  return undefined;
+}"
+`;
+
 exports[`generated source snapshots > query: groupBy after filter 1`] = `
 "function query(value) {
   const len = value.length;
