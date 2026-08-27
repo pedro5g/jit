@@ -4,7 +4,7 @@ describe("composable capability API", () => {
   const User = JIT.object({
     id: JIT.number().int().positive(),
     name: JIT.string().trim().min(2),
-    role: JIT.enum(["admin", "member"] as const),
+    role: JIT.enum(["admin", "member"]),
   });
   const ada = { id: 1, name: "Ada", role: "admin" as const };
 
@@ -132,14 +132,14 @@ describe("composable capability API", () => {
   it("fuses transforms, updates, security rewrites, queries, and sinks in one runtime program", () => {
     const Input = JIT.object({
       id: JIT.number().int(),
-      role: JIT.enum(["admin", "member"] as const),
+      role: JIT.enum(["admin", "member"]),
       name: JIT.string(),
       email: JIT.string().pii("mask"),
       note: JIT.string().sanitize(),
     });
     const Output = JIT.object({
       id: JIT.number().int(),
-      role: JIT.enum(["admin", "member"] as const),
+      role: JIT.enum(["admin", "member"]),
       name: JIT.string(),
       email: JIT.string().pii("mask"),
       note: JIT.string().sanitize(),

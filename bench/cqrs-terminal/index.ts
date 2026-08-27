@@ -1,4 +1,5 @@
 import { JIT } from "../../packages/jit/src/index.js";
+import { loadAotArtifacts } from "../shared/aot.js";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -33,6 +34,7 @@ for (const [position, target] of [
     .query(Rows)
     .where((query) => query.eq("id", target))
     .first();
+  const aot = await loadAotArtifacts<{ readonly first: typeof first }>({ first });
   const collectThenTake = JIT.cqrs.query(Rows).where((query) => query.eq("id", target));
 
   registerScenario({
@@ -41,6 +43,7 @@ for (const [position, target] of [
     args: [rows],
     jit: first,
     competitors: [
+      { name: "JIT AOT", fn: aot.first },
       { name: "idiomatic find", fn: (value: readonly Row[]) => value.find((row) => row.id === target) },
       {
         name: "handwritten loop",
@@ -70,6 +73,10 @@ const countInactive = JIT.cqrs
   .query(Rows)
   .where((query) => query.eq("active", false))
   .count();
+const aot = await loadAotArtifacts<{
+  readonly anyInactive: typeof anyInactive;
+  readonly allPositive: typeof allPositive;
+}>({ anyInactive, allPositive });
 
 registerScenario({
   op: "cqrs-terminal",
@@ -77,6 +84,7 @@ registerScenario({
   args: [rows],
   jit: anyInactive,
   competitors: [
+    { name: "JIT AOT", fn: aot.anyInactive },
     { name: "idiomatic some", fn: (value: readonly Row[]) => value.some((row) => !row.active) },
     {
       name: "JIT count() > 0",
@@ -91,7 +99,10 @@ registerScenario({
   name: "every / all match",
   args: [rows],
   jit: allPositive,
-  competitors: [{ name: "idiomatic every", fn: (value: readonly Row[]) => value.every((row) => row.id >= 0) }],
+  competitors: [
+    { name: "JIT AOT", fn: aot.allPositive },
+    { name: "idiomatic every", fn: (value: readonly Row[]) => value.every((row) => row.id >= 0) },
+  ],
 });
 
 await runSuite("cqrs-terminal");

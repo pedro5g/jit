@@ -1,0 +1,62 @@
+---
+title: csv
+description: Parse and stringify RFC 4180 rows with schema-directed conversion and validation.
+---
+
+## Parse and stringify
+
+```ts
+const User = JIT.object({
+  id: JIT.number().int(),
+  name: JIT.string(),
+  active: JIT.boolean(),
+});
+
+const parseUsers = JIT.csv.parse(User);
+const users = parseUsers('id,name,active\r\n1,"Ada, Lovelace",true');
+const text = JIT.csv.stringify(User)(users);
+
+console.log(text);
+```
+
+The parser handles doubled quotes, embedded delimiter/newline characters,
+CRLF/LF and UTF-8 sequences split across chunks. It converts known scalar
+columns and then runs the specialized validator.
+
+## Options
+
+```ts
+const User = JIT.object({ id: JIT.number().int(), name: JIT.string(), active: JIT.boolean() });
+
+JIT.csv.parse(User, {
+  delimiter: ";",
+  header: true,
+  columns: { id: "identifier", name: "full name" },
+});
+```
+
+Nested values are rejected; encode them explicitly before crossing a CSV
+boundary.
+
+## Incremental sinks
+
+```ts
+const User = JIT.object({ id: JIT.number().int(), name: JIT.string(), active: JIT.boolean() });
+const chunks = ["id,name,active\n", "1,Ada,true\n"];
+const consumed: unknown[] = [];
+const consume = (value: unknown) => consumed.push(value);
+const iterate = JIT.csv.parse(User).to.iterator();
+const visit = JIT.csv.parse(User).to.visitor();
+
+for (const user of iterate(chunks)) consume(user);
+visit(chunks, (user, index) => consume({ index, user }));
+```
+
+Iterator and visitor retain only scanner state and the current record instead
+of a complete result array. Stringify has a line iterator too.
+
+## See also
+
+- [NDJSON](./ndjson)
+- [Stream](./stream)
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/csv.md)

@@ -1,7 +1,7 @@
 import { Compiler, JIT } from "../../packages/jit/src/index.js";
 import { getArtifact } from "../../packages/jit/src/runtime/artifact-registry.js";
 import { runSuite } from "../shared/persist.js";
-import { registerScenario } from "../shared/scenario.js";
+import { type Competitor, registerScenario } from "../shared/scenario.js";
 
 const Row = JIT.object({
   id: JIT.number(),
@@ -90,7 +90,7 @@ for (const size of [100, 1_000, 10_000, 100_000] as const) {
 
   for (const ratio of [0, 0.01, 0.1, 0.5, 1] as const) {
     const current = next(previous, ratio);
-    const competitors: Parameters<typeof registerScenario>[0]["competitors"] = [
+    const competitors: Competitor[] = [
       { name: "JIT AOT", fn: (left: readonly Row[]) => aot(left, current) },
       { name: "handwritten optimized", fn: (left: readonly Row[]) => handwritten(left, current) },
     ];

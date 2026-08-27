@@ -144,7 +144,12 @@ function compileMapperPlanSelection<TSource, TTarget, const TOps extends readonl
     const compiledOperation = compiledOperations[operation];
 
     if (compiledOperation) {
-      registerMapperArtifact(compiledOperation as object, plan, [operation], emitMapperFunction(plan, operation));
+      registerMapperArtifact(
+        compiledOperation as object,
+        plan,
+        [operation],
+        emitMapperPlanFunctionSource(plan, operation)
+      );
     }
   }
   return compiled;
@@ -165,11 +170,15 @@ function emitMapper(plan: MapperPlan, operations: readonly MapperOp[]): string {
   return writer.toString();
 }
 
-function emitMapperFunction(plan: MapperPlan, operation: MapperOp): string {
+export function emitMapperPlanFunctionSource(
+  plan: MapperPlan,
+  operation: MapperOp = "map",
+  name: string = operation
+): string {
   const programs = buildMapperIR(plan.fields);
   const writer = new CodeWriter();
 
-  emitMapperFunctionBody(writer, programs, operation, "", false);
+  emitMapperFunctionBody(writer, programs, operation, "", false, name);
   return writer.toString();
 }
 
@@ -178,12 +187,13 @@ function emitMapperFunctionBody(
   programs: ReturnType<typeof buildMapperIR>,
   operation: MapperOp,
   suffix: string,
-  property = true
+  property = true,
+  name: string = operation
 ): void {
   const parameter = operation === "map" ? "source" : "list";
   const prefix = property ? `${operation}: ` : "";
 
-  writer.line(`${prefix}function ${operation}(${parameter}) {`);
+  writer.line(`${prefix}function ${name}(${parameter}) {`);
   writer.indent(() => {
     for (const node of programs[operation].body) emitNode(writer, node);
   });

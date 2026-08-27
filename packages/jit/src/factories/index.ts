@@ -58,6 +58,14 @@ export {
   type StandardQueryStep,
   type StandardQueryValue,
 } from "./cqrs.js";
+export {
+  type CsvChunk,
+  type CsvInput,
+  type CsvParsePlan,
+  type CsvSchemaOptions,
+  type CsvStringifyPlan,
+  csv,
+} from "./csv.js";
 export { ddd } from "./ddd.js";
 export { dto } from "./dto.js";
 export { type IndexBuilder, type IndexPlan, index, type KeyedIndexPlan } from "./indexing.js";
@@ -65,6 +73,14 @@ export { type IsoFactories, iso } from "./iso.js";
 export { type LookupBuilder, type LookupPlan, lookup } from "./lookup.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
 export { type MatchBuilder, match } from "./match.js";
+export { type MigrationPlan, migrate } from "./migration.js";
+export {
+  type NdjsonChunk,
+  type NdjsonInput,
+  type NdjsonParsePlan,
+  type NdjsonStringifyPlan,
+  ndjson,
+} from "./ndjson.js";
 export * from "./object/index.js";
 export {
   type AnyOpChain,

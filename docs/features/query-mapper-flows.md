@@ -11,7 +11,7 @@ pipeline instead of creating intermediate arrays at each step.
 const User = JIT.object({
   id: JIT.number(),
   name: JIT.string(),
-  role: JIT.enum(["admin", "member", "blocked"] as const),
+  role: JIT.enum(["admin", "member", "blocked"]),
   active: JIT.boolean(),
   score: JIT.number(),
 });

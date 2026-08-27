@@ -1,4 +1,5 @@
 import { JIT } from "../../packages/jit/src/index.js";
+import { loadAotArtifacts } from "../shared/aot.js";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -31,6 +32,7 @@ const rows: Row[] = Array.from({ length: 10_000 }, (_, index) => ({
 // ------------------------------------------------------------------ project
 
 const project = JIT.project(Row).select("id", "status");
+const projectAot = await loadAotArtifacts<{ readonly project: typeof project }>({ project });
 
 /**
  * The results are collected, which is what a projection is normally for.
@@ -52,6 +54,7 @@ registerScenario({
   args: [rows],
   jit: sweepProject(project),
   competitors: [
+    { name: "JIT AOT", fn: sweepProject(projectAot.project) },
     { name: "handwritten optimized", fn: sweepProject((row) => ({ id: row.id, status: row.status })) },
     {
       name: "idiomatic destructure",
@@ -75,6 +78,7 @@ registerScenario({
 
 const equalAll = JIT.compare.equal(Row);
 const equalSelected = JIT.compare.equal(Row).select("id", "status");
+const equalAot = await loadAotArtifacts<{ readonly equalSelected: typeof equalSelected }>({ equalSelected });
 
 /** Pairs that agree on the selection but differ elsewhere: the worst case for a full compare. */
 const pairs = rows.map((row) => [row, { ...row, notes: `${row.notes}!`, secret: `${row.secret}!` }] as const);
@@ -94,6 +98,7 @@ registerScenario({
   args: [],
   jit: sweepEqual(equalSelected),
   competitors: [
+    { name: "JIT AOT", fn: sweepEqual(equalAot.equalSelected) },
     { name: "full equal", fn: sweepEqual(equalAll) },
     {
       name: "handwritten optimized",

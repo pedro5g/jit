@@ -79,13 +79,11 @@ One shape. What the compiler decides is whether a default is a fallback call or 
 
 ## 10. AOT
 
-**Not generated.** A match binds user handler functions, and there is nothing to serialize — the same reason a query whose binding holds a callback is skipped. `jit generate` reports it in `skipped` with that reason rather than emitting something that would not work.
-
-This is the honest position: the dispatch would compile fine, but the handlers are the substance of the operation and they are arbitrary code. If you need the dispatch ahead of time, write the `switch` — it is the same code this emits.
+Runtime and define use the same `match-plan` artifact. Reconstructible handlers are emitted as module-local bindings beside the same standalone `switch`; the output imports neither JIT nor a runtime matcher. Native, bound, or closure-dependent handlers remain an explicit AOT barrier and are reported in `skipped` rather than being miscompiled.
 
 ## 11. Runtime/AOT parity
 
-`JIT.match` exists on the runtime host. Because it cannot be generated, it is not part of the AOT parity matrix; the generator names it in `skipped` rather than failing silently.
+`JIT.match` exists with the same builder on runtime and define. Reconstructible handlers have runtime/AOT semantic parity; callbacks that capture inaccessible state produce an explicit skip reason.
 
 ## 12. Benchmarks
 
@@ -97,7 +95,7 @@ The reasons to use this are the exhaustiveness check at declaration and the narr
 
 The discriminator is inferred from the shape at the type level: a property whose type is a single literal rather than the whole primitive. That is correct for an ordinary discriminated union, and it would misread a union where a *non*-discriminating field also happens to be literal-typed in every member.
 
-Because handlers are values, a match cannot be generated ahead of time — if AOT coverage matters for a hot path, that is a reason to write the switch by hand.
+Prefer self-contained handler functions in definition files when AOT output is required. A closure over application state is still useful at runtime, but it deliberately blocks standalone generation.
 
 ## 14. Best practices
 

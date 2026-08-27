@@ -1,5 +1,4 @@
 import { emitSortSource } from "../../packages/jit/src/compiler/sort.js";
-import type { SortPlan } from "../../packages/jit/src/factories/sort.js";
 import { JIT } from "../../packages/jit/src/index.js";
 import { getArtifact } from "../../packages/jit/src/runtime/artifact-registry.js";
 import { runSuite } from "../shared/persist.js";
@@ -47,12 +46,7 @@ register(
 
 await runSuite("sort");
 
-function register(
-  name: string,
-  input: readonly Row[],
-  runtime: SortPlan<typeof Row>,
-  compare: (a: Row, b: Row) => number
-) {
+function register(name: string, input: readonly Row[], runtime: SortRows, compare: (a: Row, b: Row) => number) {
   // The ordering descriptor stays on the artifact record: a compiled plan must
   // not carry it, or AOT output would have to embed a descriptor to match.
   const artifact = getArtifact(runtime);

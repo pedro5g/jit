@@ -1,6 +1,6 @@
 # Runtime / Define / AOT API Parity
 
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Contract
 
@@ -89,6 +89,15 @@ remain when their semantics require them.
 | physical query access     | yes     | yes    | yes            | strategy is compiled in; never in `~query`       |
 | composite aggregate       | yes     | yes    | yes            | one pass, one accumulator per field              |
 | Runtime Classes and DDD   | yes     | yes    | yes            | class artifact emitted in the same module        |
+| joins and distinct        | yes     | yes    | yes            | semantic plan; physical strategy stays private   |
+| lookup and reconcile      | yes     | yes    | yes            | keyed physical plans and selective sinks         |
+| project and changed       | yes     | yes    | yes            | shared ProjectionTree                            |
+| patch / canonical / key   | yes     | yes    | yes            | immutable reconstructive descriptors             |
+| access control            | yes     | yes    | yes            | compiled action/rule dispatch                    |
+| match                     | yes     | yes    | yes            | reconstructible handlers; closures are barriers  |
+| migration                 | yes     | yes    | yes            | one version switch plus MapperPlan edges         |
+| CSV                       | yes     | yes    | yes            | RFC scanner, validation and incremental sinks    |
+| NDJSON                    | yes     | yes    | yes            | fused validation/filter/projection/serialization |
 
 New public operation families must add a row only when runtime behavior,
 define stubs, generated JavaScript/TypeScript, parity tests and tree-shaking

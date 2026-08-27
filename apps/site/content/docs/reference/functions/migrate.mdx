@@ -1,0 +1,38 @@
+---
+title: migrate
+description: Compile a chain of versioned MapperPlan edges into one version switch.
+---
+
+## Signature
+
+```ts
+const UserV1 = JIT.object({ version: JIT.literal(1), name: JIT.string() });
+const UserV2 = JIT.object({ version: JIT.literal(2), fullName: JIT.string() });
+const UserV3 = JIT.object({ version: JIT.literal(3), displayName: JIT.string() });
+
+const migrateUser = JIT.migrate(UserV1)
+  .to(UserV2, { fullName: { from: "name" } })
+  .to(UserV3, { displayName: { from: "fullName" } });
+
+console.log(migrateUser({ version: 1, name: "Ada" }));
+```
+
+Every schema needs a string or number literal field named `version`. The input
+type is the union of the declared versions; the result is the last schema.
+
+## Execution
+
+The generated function switches once on `value.version` and falls through only
+the remaining MapperPlan edges. A value already at the current version is
+returned by reference. Unknown and repeated versions fail loudly.
+
+## AOT
+
+Runtime and define share `migration-plan`. Self-contained mapper callbacks are
+emitted beside the switch; callbacks that capture inaccessible state are an
+explicit generation barrier.
+
+## See also
+
+- [Mapper](./mapper)
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/migration.md)

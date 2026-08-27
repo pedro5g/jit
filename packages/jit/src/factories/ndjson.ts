@@ -1,0 +1,91 @@
+import {
+  appendNdjsonFilter,
+  compileNdjsonParse,
+  compileNdjsonStringify,
+  createNdjsonDescriptor,
+  type NdjsonDescriptor,
+  type NdjsonInput,
+  selectNdjson,
+  withNdjsonSink,
+} from "../compiler/ndjson.js";
+import type { QueryConditionNode } from "../core/ast/index.js";
+import type * as ATS from "../core/ats/index.js";
+import type { SchemaInput } from "../core/builder/index.js";
+import { unwrapSchema } from "../core/builder/index.js";
+import { createConditionBuilder, type QueryConditionBuilder } from "./query.js";
+
+type NdjsonPick<TValue, TKeys extends keyof TValue> = { readonly [TKey in TKeys]: TValue[TKey] };
+
+export interface NdjsonParsePlan<TRow, TOutput = TRow> {
+  (input: NdjsonInput): TOutput[];
+  validate(): NdjsonParsePlan<TRow, TOutput>;
+  where(predicate: (query: QueryConditionBuilder<TRow>) => QueryConditionNode): NdjsonParsePlan<TRow, TOutput>;
+  select<const TKeys extends readonly Extract<keyof TRow, string>[]>(
+    ...fields: TKeys
+  ): NdjsonParsePlan<TRow, NdjsonPick<TRow, TKeys[number]>>;
+  readonly to: {
+    iterator(): (input: NdjsonInput) => IterableIterator<TOutput>;
+    visitor(): (input: NdjsonInput, consume: (row: TOutput, index: number) => void) => number;
+    ndjson(): (input: NdjsonInput) => string;
+  };
+}
+
+export interface NdjsonStringifyPlan<TRow> {
+  (value: readonly TRow[]): string;
+  readonly to: {
+    iterator(): (value: readonly TRow[]) => IterableIterator<string>;
+  };
+}
+
+function parse<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): NdjsonParsePlan<ATS.TypeofSchema<TSchema>> {
+  return createParsePlan(createNdjsonDescriptor(unwrapSchema(schema), "parse")) as never;
+}
+
+export function createParsePlan(descriptor: NdjsonDescriptor): NdjsonParsePlan<unknown> {
+  const result = compileNdjsonParse(descriptor) as unknown as NdjsonParsePlan<unknown>;
+
+  Object.defineProperties(result, {
+    validate: { value: () => result },
+    where: {
+      value: (predicate: (query: QueryConditionBuilder<unknown>) => QueryConditionNode) => {
+        const state = createConditionBuilder(descriptor.bindingValues.length);
+        const condition = predicate(state.builder);
+        return createParsePlan(appendNdjsonFilter(descriptor, condition, state.bindings));
+      },
+    },
+    select: { value: (...fields: string[]) => createParsePlan(selectNdjson(descriptor, fields)) },
+    to: {
+      value: Object.freeze({
+        iterator: () => compileNdjsonParse(withNdjsonSink(descriptor, "iterator")),
+        visitor: () => compileNdjsonParse(withNdjsonSink(descriptor, "visitor")),
+        ndjson: () => compileNdjsonParse(withNdjsonSink(descriptor, "ndjson")),
+      }),
+    },
+  });
+  return result;
+}
+
+function stringify<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): NdjsonStringifyPlan<ATS.TypeofSchema<TSchema>> {
+  const descriptor = createNdjsonDescriptor(unwrapSchema(schema), "stringify");
+  const result = compileNdjsonStringify(descriptor) as unknown as NdjsonStringifyPlan<ATS.TypeofSchema<TSchema>>;
+
+  Object.defineProperty(result, "to", {
+    value: Object.freeze({
+      iterator: () => compileNdjsonStringify(withNdjsonSink(descriptor, "iterator")),
+    }),
+  });
+  return result;
+}
+
+export interface NdjsonNamespace {
+  readonly parse: typeof parse;
+  readonly stringify: typeof stringify;
+}
+
+export const ndjson: NdjsonNamespace = Object.freeze({ parse, stringify });
+
+export type { NdjsonChunk, NdjsonInput } from "../compiler/ndjson.js";

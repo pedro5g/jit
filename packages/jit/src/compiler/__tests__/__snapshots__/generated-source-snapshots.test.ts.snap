@@ -1,5 +1,208 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`generated source snapshots > CSV: incremental scanner and static row conversion 1`] = `
+"(() => {
+  function csvHeader(header) {
+    let p0 = -1;
+    let p1 = -1;
+    let p2 = -1;
+    for (let h = 0; h < header.length; h++) {
+      switch (header[h]) {
+        case "id":
+          if (p0 !== -1) throw new SyntaxError("duplicate CSV column id");
+          p0 = h; break;
+        case "name":
+          if (p1 !== -1) throw new SyntaxError("duplicate CSV column name");
+          p1 = h; break;
+        case "active":
+          if (p2 !== -1) throw new SyntaxError("duplicate CSV column active");
+          p2 = h; break;
+      }
+    }
+    if (p0 === -1) throw new SyntaxError("missing CSV column id");
+    if (p1 === -1) throw new SyntaxError("missing CSV column name");
+    if (p2 === -1) throw new SyntaxError("missing CSV column active");
+    return [p0, p1, p2];
+  }
+  function csvRow(record, row, p0, p1, p2) {
+    const c0 = record[p0];
+    const c1 = record[p1];
+    const c2 = record[p2];
+    const result = __csvValidator.safeParse({
+      "id": c0 === "" || c0 === undefined ? NaN : Number(c0),
+      "name": c1,
+      "active": c2 === "true" ? true : c2 === "false" ? false : c2,
+    });
+    if (result.success) return result.data;
+    throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: "[" + row + "]" + (issue.path ? "." + issue.path : "") })));
+  }
+  function csvParse(input) {
+    const out = [];
+    const single = typeof input === "string" || input instanceof Uint8Array; const iterator = single ? undefined : input[Symbol.iterator]();
+    const decoder = new TextDecoder();
+    let field = "", record = [], quoted = false, afterQuote = false, skipLf = false, dirty = false, singleDone = false;
+    let p0 = -1;
+    let p1 = -1;
+    let p2 = -1;
+    let headerPending = true;
+    let row = 0;
+    while (true) {
+      let chunk, done;
+      if (single) { done = singleDone; chunk = singleDone ? undefined : input; singleDone = true; } else { const next = iterator.next(); done = next.done; chunk = next.value; }
+      const text = done ? decoder.decode() : (typeof chunk === "string" ? decoder.decode() + chunk : decoder.decode(chunk, { stream: true }));
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (skipLf) { skipLf = false; if (ch === "\\n") continue; }
+        if (quoted) {
+          if (ch === '"') { quoted = false; afterQuote = true; } else { field += ch; dirty = true; }
+          continue;
+        }
+        if (afterQuote) {
+          if (ch === '"') { field += '"'; quoted = true; afterQuote = false; dirty = true; continue; }
+          if (ch === ",") { record[record.length] = field; field = ""; afterQuote = false; dirty = true; continue; }
+          if (ch === "\\r" || ch === "\\n") {
+            record[record.length] = field;
+            if (headerPending) {
+              const positions = csvHeader(record);
+              p0 = positions[0];
+              p1 = positions[1];
+              p2 = positions[2];
+              headerPending = false;
+            } else {
+              const value = csvRow(record, row, p0, p1, p2);
+              out[row] = value;
+              row += 1;
+            }
+            record = []; field = ""; afterQuote = false; dirty = false; skipLf = ch === "\\r"; continue;
+          }
+          throw new SyntaxError("unexpected character after closing CSV quote");
+        }
+        if (ch === ",") { record[record.length] = field; field = ""; dirty = true; continue; }
+        if (ch === '"') { if (field.length !== 0) throw new SyntaxError("quote inside unquoted CSV field"); quoted = true; dirty = true; continue; }
+        if (ch === "\\r" || ch === "\\n") {
+          record[record.length] = field;
+          if (headerPending) {
+            const positions = csvHeader(record);
+            p0 = positions[0];
+            p1 = positions[1];
+            p2 = positions[2];
+            headerPending = false;
+          } else {
+            const value = csvRow(record, row, p0, p1, p2);
+            out[row] = value;
+            row += 1;
+          }
+          record = []; field = ""; dirty = false; skipLf = ch === "\\r"; continue;
+        }
+        field += ch; dirty = true;
+      }
+      if (!done) continue;
+      if (quoted) throw new SyntaxError("unterminated quoted CSV field");
+      if (dirty || field.length !== 0 || record.length !== 0) {
+        record[record.length] = field;
+        if (headerPending) {
+          const positions = csvHeader(record);
+          p0 = positions[0];
+          p1 = positions[1];
+          p2 = positions[2];
+          headerPending = false;
+        } else {
+          const value = csvRow(record, row, p0, p1, p2);
+          out[row] = value;
+          row += 1;
+        }
+      }
+      if (headerPending) throw new SyntaxError("CSV header is missing");
+      return out;
+    }
+  }
+  return csvParse;
+})()"
+`;
+
+exports[`generated source snapshots > NDJSON: fused filter, projection and serializer 1`] = `
+"(() => {
+  function ndjsonRow(line, row) {
+    let parsed;
+    try { parsed = JSON.parse(line); } catch { throw new SyntaxError("malformed NDJSON on line " + (row + 1)); }
+    const result = __ndjsonValidator.safeParse(parsed);
+    if (result.success) return result.data;
+    throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: "line " + (row + 1) + (issue.path ? "." + issue.path : "") })));
+  }
+  const ndjsonStringifyRow = (function () {
+  const __se = /[\\u0000-\\u001f\\u0022\\u005c\\ud800-\\udfff]/;
+  function str(value) {
+    const len = value.length;
+    if (len < 42) {
+      for (let i = 0; i < len; i++) {
+        const code = value.charCodeAt(i);
+        if (code < 32 || code === 34 || code === 92 || (code > 55295 && code < 57344)) {
+          return JSON.stringify(value);
+        }
+      }
+      return '"' + value + '"';
+    }
+    if (__se.test(value)) return JSON.stringify(value);
+    return '"' + value + '"';
+  }
+  function stringify(value) {
+    let s = "";
+    s += "{";
+    s += "\\"id\\":";
+    s += Number.isFinite(value.id) ? "" + value.id : "null";
+    s += ",\\"name\\":";
+    s += str(value.name);
+    s += "}";
+    return s;
+  }
+  return stringify;
+})();
+  function ndjsonParse(input) {
+    let out = "";
+    const single = typeof input === "string" || input instanceof Uint8Array;
+    const iterator = single ? undefined : input[Symbol.iterator]();
+    const decoder = new TextDecoder();
+    let buffer = "", singleDone = false, lineNumber = 0, emitted = 0;
+    while (true) {
+      let chunk, done;
+      if (single) { done = singleDone; chunk = singleDone ? undefined : input; singleDone = true; } else { const next = iterator.next(); done = next.done; chunk = next.value; }
+      buffer += done ? decoder.decode() : (typeof chunk === "string" ? decoder.decode() + chunk : decoder.decode(chunk, { stream: true }));
+      let start = 0, cut = buffer.indexOf("\\n");
+      while (cut !== -1) {
+        let line = buffer.slice(start, cut);
+        if (line.endsWith("\\r")) line = line.slice(0, -1);
+        if (line.trim() !== "") {
+          const item = ndjsonRow(line, lineNumber);
+          if ((item.active === __q0)) {
+            if (out.length !== 0) out += "\\n";
+            out += ndjsonStringifyRow(item);
+            emitted += 1;
+          }
+        }
+        lineNumber += 1;
+        start = cut + 1;
+        cut = buffer.indexOf("\\n", start);
+      }
+      if (start !== 0) buffer = buffer.slice(start);
+      if (!done) continue;
+      if (buffer.trim() !== "") {
+        const line = buffer;
+        if (line.trim() !== "") {
+          const item = ndjsonRow(line, lineNumber);
+          if ((item.active === __q0)) {
+            if (out.length !== 0) out += "\\n";
+            out += ndjsonStringifyRow(item);
+            emitted += 1;
+          }
+        }
+      }
+      return out;
+    }
+  }
+  return ndjsonParse;
+})()"
+`;
+
 exports[`generated source snapshots > binary rowset: loader, hydrator, and byte query 1`] = `
 {
   "adaptiveQuery": "function query(rowset) {
@@ -939,6 +1142,31 @@ exports[`generated source snapshots > mapper: renames, nested objects, and fused
     return out;
   }
 }"
+`;
+
+exports[`generated source snapshots > migration: version switch with two mapper edges 1`] = `
+"(() => {
+  function migrateEdge0(source) {
+    return { "version": __migration0_0, "fullName": source.name };
+  }
+  function migrateEdge1(source) {
+    return { "version": __migration1_0, "displayName": source.fullName, "active": __migration1_1 };
+  }
+  function migrate(value) {
+    if (value === null || typeof value !== "object") throw new TypeError("migration input must be an object");
+    switch (value.version) {
+      case 1:
+        value = migrateEdge0(value);
+      case 2:
+        value = migrateEdge1(value);
+      case 3:
+        return value;
+      default:
+        throw new RangeError("unsupported migration version: " + String(value.version) + "; expected one of 1, 2, 3");
+    }
+  }
+  return migrate;
+})()"
 `;
 
 exports[`generated source snapshots > query: filter with nested and/or/not + select + unique + orderBy 1`] = `

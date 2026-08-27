@@ -70,7 +70,7 @@ describe("JIT.cqrs", () => {
   it("lowers static queries through the existing QueryProgram", () => {
     const Order = JIT.object({
       id: JIT.string(),
-      status: JIT.enum(["draft", "confirmed"] as const),
+      status: JIT.enum(["draft", "confirmed"]),
       total: JIT.number(),
     });
     const recent = JIT.cqrs

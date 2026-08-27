@@ -184,6 +184,20 @@ scalar key table, allocation-free adjacent comparison for matching ordering,
 a compound-key trie, or structural hash with compiled-equality confirmation.
 No physical strategy name is serialized through `~query`.
 
+Versioned schema evolution uses an immutable `MigrationDescriptor`. Every edge
+is the existing MapperPlan; one generated version switch falls through only
+the remaining edges. Current-version values return by reference. Runtime and
+AOT therefore share the dispatch without a migration registry or runtime
+schema inspection.
+
+CSV and NDJSON are transport plans rather than generic text helpers. CSV emits
+an RFC 4180 state machine, resolves headers once, converts known scalar columns
+and validates each row. NDJSON reuses incremental UTF-8/line boundaries and can
+fuse semantic `where` plus ProjectionTree selection into its serializer. Its
+fused sink parses, validates, filters and serializes each row without a result
+array or projected object. Both formats expose explicit iterator/visitor sinks
+and standalone AOT artifacts.
+
 The package exposes transitional host entrypoints while the monorepo is still
 single-package: `@jit-compiler/jit/runtime` exports the runtime `JIT` namespace, and
 `@jit-compiler/jit/define` exports the same schema DSL with AOT stubs for compiled
@@ -215,7 +229,9 @@ types that future package splits will reuse.
   v2 because it is not persisted across processes.
 - **Streaming** (`compiler/stream.ts` + `runtime/stream/boundary-scanner.ts`):
   the boundary FSM must survive tokens cut across chunks, including inside
-  UTF-8 sequences.
+  UTF-8 sequences. `JIT.csv` and `JIT.ndjson` add reconstructive transport
+  plans over the same boundary principle; `JIT.stream.ndjson` remains the
+  stateful `write/end/items` compatibility surface.
 
 ## AOT generator
 

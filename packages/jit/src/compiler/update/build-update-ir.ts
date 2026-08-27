@@ -57,6 +57,9 @@ export function buildUpdateIR(schema: ATS.AnyTypeSchema): UpdateIRProgram {
 }
 
 function buildUpdateNode(schema: ATS.AnyTypeSchema, recurse: (child: ATS.AnyTypeSchema) => UpdateIRNode): UpdateIRNode {
+  // Runtime Classes are atomic values at an update boundary. Recursing into
+  // their inner state would produce a plain object and lose its prototype.
+  if (schema.type === ATS.TypeName.runtimeType) return { kind: "reuse" };
   if (schema.type === ATS.TypeName.date) return { kind: "date" };
   if (schema.type === ATS.TypeName.union) return buildUnionNode(schema as ATS.UnionSchema, recurse);
   if (schema.type === ATS.TypeName.discriminatedUnion)

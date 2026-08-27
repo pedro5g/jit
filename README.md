@@ -15,7 +15,7 @@ import { JIT } from "@jit-compiler/jit/runtime";
 const User = JIT.object({
   id: JIT.int().positive(),
   email: JIT.string().email(),
-  role: JIT.enum(["admin", "user"] as const),
+  role: JIT.enum(["admin", "user"]),
 });
 
 const parseUser = JIT.validate.safeParse(User);
@@ -102,15 +102,15 @@ aggregate roots add compiled controlled updates and an ordered pending-event
 buffer. Domain events are immutable, versioned schema-backed values.
 
 ```ts
-const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
   version: 1,
   payload: JIT.object({ orderId: JIT.string() }),
 });
 
-const OrderBase = JIT.aggregateRoot(
+const OrderBase = JIT.ddd.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
-    status: JIT.enum(["draft", "confirmed"] as const),
+    status: JIT.enum(["draft", "confirmed"]),
   }),
   { id: "id" },
 );

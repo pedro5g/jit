@@ -203,7 +203,7 @@ export const GOLD: GoldQuestion[] = [
     best: ["/docs/reference/functions/json-schema"],
     concepts: ["jsonschema"],
   },
-  { question: "stream ndjson while it downloads", best: ["/docs/reference/functions/stream"], concepts: ["lazy"] },
+  { question: "stream ndjson while it downloads", best: ["/docs/reference/functions/ndjson"], concepts: ["lazy"] },
   {
     question: "binary wire format version",
     ok: ["/docs/reference/functions/codec", "/docs/runtime/serialization"],

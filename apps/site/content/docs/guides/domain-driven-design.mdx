@@ -20,7 +20,7 @@ Aggregate roots add a controlled state transition and an ordered event buffer.
 const Money = JIT.ddd.valueObject(
   JIT.object({
     amount: JIT.number().positive(),
-    currency: JIT.enum(["BRL", "USD"] as const),
+    currency: JIT.enum(["BRL", "USD"]),
   }),
 );
 
@@ -35,7 +35,7 @@ const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
 const OrderBase = JIT.ddd.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
-    status: JIT.enum(["draft", "confirmed"] as const),
+    status: JIT.enum(["draft", "confirmed"]),
     total: Money,
   }),
   { id: "id" },

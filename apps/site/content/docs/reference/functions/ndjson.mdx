@@ -1,0 +1,50 @@
+---
+title: ndjson
+description: Parse, validate, filter, project and serialize line-delimited JSON incrementally.
+---
+
+## Parse and stringify
+
+```ts
+const Event = JIT.object({ id: JIT.number(), name: JIT.string(), active: JIT.boolean() });
+const parseEvents = JIT.ndjson.parse(Event);
+
+const events = parseEvents('{"id":1,"name":"Ada","active":true}\n');
+const text = JIT.ndjson.stringify(Event)(events);
+
+console.log(text);
+```
+
+Each non-blank LF/CRLF-delimited line is parsed and validated. Chunks may split
+UTF-8 sequences and the final line does not need a trailing newline.
+
+## Fused transport pipeline
+
+```ts
+const Event = JIT.object({ id: JIT.number(), name: JIT.string(), active: JIT.boolean() });
+
+const activeIds = JIT.ndjson
+  .parse(Event)
+  .validate()
+  .where((query) => query.eq("active", true))
+  .select("id")
+  .to.ndjson();
+
+console.log(activeIds('{"id":1,"name":"Ada","active":true}\n'));
+```
+
+The generated function scans once and emits no result array or projected
+object. `where` conditions are semantic; selected fields drive the specialized
+serializer directly.
+
+## Incremental sinks
+
+Use `.to.iterator()` or `.to.visitor()` to consume validated rows without a
+result array. `JIT.stream.ndjson` remains the stateful `write/end/items`
+interface for socket-style ownership.
+
+## See also
+
+- [CSV](./csv)
+- [Stream](./stream)
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/ndjson.md)

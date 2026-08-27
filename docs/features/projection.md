@@ -126,28 +126,30 @@ No schema, no tree, no projection engine. The selective comparison in particular
 
 ## 12. Benchmarks
 
-Environment: Node 22.17.1, Linux x64, AMD Ryzen 7 5800H, 10,000 rows of a 9-field schema, results retained. Reproduce with `pnpm bench:projection`.
+Environment: Node 22.22.3, Apple M1, darwin-arm64, 10,000 rows of a 9-field schema, results retained. Reproduce with `pnpm bench:projection`.
 
 Projecting 2 of 9 fields:
 
 | Approach                | Time per 10k rows | Heap per call |
 | ----------------------- | ----------------: | ------------: |
-| dynamic pick loop       |         461.60 µs |        629 KB |
-| idiomatic destructure   |          89.80 µs |        503 KB |
-| handwritten literal     |          91.27 µs |        503 KB |
-| **JIT project**         |      **58.14 µs** |    **503 KB** |
+| dynamic pick loop       |         453.88 µs |        629 KB |
+| idiomatic destructure   |          98.58 µs |        503 KB |
+| handwritten literal     |         130.51 µs |        503 KB |
+| **JIT project runtime** |      **44.50 µs** |    **503 KB** |
+| **JIT project AOT**     |     **102.54 µs** |    **503 KB** |
 
 Comparing by 2 of 9 fields, on pairs that agree on the selection and differ elsewhere:
 
 | Approach                     | Time per 10k pairs |
 | ---------------------------- | -----------------: |
-| full `equal` (all 9 fields)  |          144.94 µs |
-| handwritten 2-field compare  |           96.55 µs |
-| **JIT `equal().select()`**   |       **56.83 µs** |
+| full `equal` (all 9 fields)  |          200.60 µs |
+| handwritten 2-field compare  |           96.51 µs |
+| **JIT runtime `equal().select()`** |       **59.33 µs** |
+| **JIT AOT `equal().select()`** |        **112.82 µs** |
 
-Two readings, and only one of them is a claim. The explainable result is the comparison row: selecting two fields out of nine is 2.5× faster than comparing the whole row, because seven fields are never read — and against the dynamic pick loop, static keys are 7.9× faster, because a key loop and a dictionary-mode object are replaced by one literal.
+Two readings, and only one of them is a claim. The explainable result is the comparison row: selecting two fields out of nine is 3.4× faster at runtime (1.8× AOT) than comparing the whole row, because seven fields are never read — and against the dynamic pick loop, static keys replace a key loop and a dictionary-mode object with one literal.
 
-The margin over the *handwritten* versions is not a claim. Both sit in the range where V8's inlining decisions dominate, and an earlier draft of this benchmark produced a 2.7× result in the opposite direction purely by letting escape analysis remove the allocation in one competitor and not another. The honest statement is that compiled projection reaches the handwritten ceiling; do not read the extra 30% as a property of the code.
+The margin over the *handwritten* versions and the runtime/AOT spread are not claims. The emitted bodies are equivalent, but module boundary, inlining and escape-analysis decisions move this microbenchmark substantially; earlier runs have reversed the ranking. The stable claim is the avoided dynamic field loop and the avoided seven comparisons, not a runtime-versus-AOT ratio.
 
 ## 13. Tradeoffs
 

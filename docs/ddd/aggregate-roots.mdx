@@ -6,7 +6,7 @@ An aggregate root is an entity that owns a consistency boundary and an ordered p
 const OrderBase = JIT.ddd.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
-    status: JIT.enum(["draft", "confirmed"] as const),
+    status: JIT.enum(["draft", "confirmed"]),
   }),
   { id: "id" },
 );

@@ -134,6 +134,37 @@ describe("runtime and define entrypoints", () => {
     const defineMergePatch = DefineJIT.patch.merge(DefineUser);
     const runtimeJsonPatch = RuntimeJIT.patch.json(RuntimeUser);
     const defineJsonPatch = DefineJIT.patch.json(DefineUser);
+    const RuntimeEvent = RuntimeJIT.discriminatedUnion("type", [
+      RuntimeJIT.object({ type: RuntimeJIT.literal("created"), id: RuntimeJIT.number() }),
+      RuntimeJIT.object({ type: RuntimeJIT.literal("deleted"), id: RuntimeJIT.number() }),
+    ]);
+    const DefineEvent = DefineJIT.discriminatedUnion("type", [
+      DefineJIT.object({ type: DefineJIT.literal("created"), id: DefineJIT.number() }),
+      DefineJIT.object({ type: DefineJIT.literal("deleted"), id: DefineJIT.number() }),
+    ]);
+    const runtimeMatch = RuntimeJIT.match(RuntimeEvent)
+      .case("created", (event) => `created:${event.id}`)
+      .case("deleted", (event) => `deleted:${event.id}`)
+      .exhaustive();
+    const defineMatch = DefineJIT.match(DefineEvent)
+      .case("created", (event) => `created:${event.id}`)
+      .case("deleted", (event) => `deleted:${event.id}`)
+      .exhaustive();
+    const RuntimeUserV2 = RuntimeJIT.object({
+      version: RuntimeJIT.literal(2),
+      fullName: RuntimeJIT.string(),
+    });
+    const DefineUserV2 = DefineJIT.object({ version: DefineJIT.literal(2), fullName: DefineJIT.string() });
+    const runtimeMigration = RuntimeJIT.migrate(
+      RuntimeJIT.object({ version: RuntimeJIT.literal(1), name: RuntimeJIT.string() })
+    ).to(RuntimeUserV2, { fullName: { from: "name" } });
+    const defineMigration = DefineJIT.migrate(
+      DefineJIT.object({ version: DefineJIT.literal(1), name: DefineJIT.string() })
+    ).to(DefineUserV2, { fullName: { from: "name" } });
+    const runtimeCsv = RuntimeJIT.csv.parse(RuntimeUser);
+    const defineCsv = DefineJIT.csv.parse(DefineUser);
+    const runtimeNdjson = RuntimeJIT.ndjson.parse(RuntimeUser).select("id").to.ndjson();
+    const defineNdjson = DefineJIT.ndjson.parse(DefineUser).select("id").to.ndjson();
 
     const cases: readonly ApiParityCase[] = [
       {
@@ -285,6 +316,30 @@ describe("runtime and define entrypoints", () => {
         args: [value, [{ op: "replace", path: "/name", value: "Patched" }]],
       },
       {
+        name: "matchEvent",
+        runtime: runtimeMatch as UnknownArtifact,
+        define: defineMatch as UnknownArtifact,
+        args: [{ type: "created", id: 1 }],
+      },
+      {
+        name: "migrateUser",
+        runtime: runtimeMigration as UnknownArtifact,
+        define: defineMigration as UnknownArtifact,
+        args: [{ version: 1, name: "Ada" }],
+      },
+      {
+        name: "parseUsersCsv",
+        runtime: runtimeCsv as UnknownArtifact,
+        define: defineCsv as UnknownArtifact,
+        args: ["id,name\n1,Ada"],
+      },
+      {
+        name: "filterUsersNdjson",
+        runtime: runtimeNdjson as UnknownArtifact,
+        define: defineNdjson as UnknownArtifact,
+        args: ['{"id":1,"name":"Ada"}\n'],
+      },
+      {
         name: "reconcileUsers",
         runtime: runtimeReconcile as UnknownArtifact,
         define: defineReconcile as UnknownArtifact,
@@ -418,7 +473,7 @@ describe("runtime and define entrypoints", () => {
     try {
       const User = DefineJIT.object({
         id: DefineJIT.number(),
-        role: DefineJIT.enum(["admin", "member"] as const),
+        role: DefineJIT.enum(["admin", "member"]),
         name: DefineJIT.string(),
         email: DefineJIT.string().pii("mask"),
         note: DefineJIT.string().sanitize(),

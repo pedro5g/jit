@@ -9,6 +9,7 @@ import { resolveCacheKeyDescriptor } from "./compiler/cache-key.js";
 import { allFieldPaths, resolveChangedDescriptor } from "./compiler/changed.js";
 import type { Clone } from "./compiler/clone.js";
 import type { CompiledCodec } from "./compiler/codec.js";
+import { type CsvDescriptor, type CsvOptions, resolveCsvDescriptor } from "./compiler/csv.js";
 import type { Diff } from "./compiler/diff.js";
 import type { Equal } from "./compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
@@ -19,7 +20,16 @@ import type { JsonChunksOptions } from "./compiler/json-chunks.js";
 import type { ToJsonSchemaOptions } from "./compiler/json-schema/index.js";
 import { resolveLookupDescriptor } from "./compiler/lookup.js";
 import type { Mask } from "./compiler/mask.js";
+import { resolveMatchDescriptor } from "./compiler/match.js";
+import { appendMigrationEdge, createMigrationDescriptor, type MigrationDescriptor } from "./compiler/migration.js";
 import type { Mock } from "./compiler/mock.js";
+import {
+  appendNdjsonFilter,
+  createNdjsonDescriptor,
+  type NdjsonDescriptor,
+  selectNdjson,
+  withNdjsonSink,
+} from "./compiler/ndjson.js";
 import { type OrderDirection, resolveOrderingDescriptor } from "./compiler/ordering.js";
 import { buildProjectionTree } from "./compiler/projection.js";
 import {
@@ -34,6 +44,7 @@ import type { Sanitize } from "./compiler/sanitize.js";
 import type { Serialize } from "./compiler/serialize.js";
 import type { UpdatePatch } from "./compiler/update.js";
 import type { SafeParseResult } from "./compiler/validate.js";
+import type { QueryConditionNode } from "./core/ast/index.js";
 import type * as ATS from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
 import { unwrapSchema } from "./core/builder/index.js";
@@ -41,11 +52,16 @@ import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/
 import { JITError } from "./errors/index.js";
 import type { AccessBuilder } from "./factories/access.js";
 import type { CqrsInput, CqrsQuery, ParsedCqrsInput } from "./factories/cqrs.js";
+import type { CsvNamespace, CsvParsePlan, CsvSchemaOptions, CsvStringifyPlan } from "./factories/csv.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
 import * as RuntimeJIT from "./factories/index.js";
 import type { IndexBuilder, KeyedIndexPlan } from "./factories/indexing.js";
 import type { LookupBuilder, LookupPlan } from "./factories/lookup.js";
+import type { MatchBuilder } from "./factories/match.js";
+import type { MigrationPlan } from "./factories/migration.js";
+import type { NdjsonNamespace, NdjsonParsePlan, NdjsonStringifyPlan } from "./factories/ndjson.js";
 import type { ProjectBuilder } from "./factories/project.js";
+import { createConditionBuilder, type QueryConditionBuilder } from "./factories/query.js";
 import type { ReconcileChange, ReconcilePlan, ResolvedChannels } from "./factories/reconcile.js";
 import type { SortBuilder, SortPlan } from "./factories/sort.js";
 import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
@@ -517,6 +533,214 @@ function createDefineLookupPlan(schema: ATS.AnyTypeSchema, key: string | undefin
   registerArtifact(stub, { kind: "lookup-plan", schema, lookup });
   return stub;
 }
+
+function defineMatch<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): MatchBuilder<ATS.TypeofSchema<TSchema>, never, never> {
+  return createDefineMatch(unwrapSchema(schema), [], []) as never;
+}
+
+function createDefineMatch(
+  schema: ATS.AnyTypeSchema,
+  tags: readonly (string | number | boolean)[],
+  handlers: readonly ((value: never) => unknown)[]
+): MatchBuilder<unknown, unknown, never> {
+  const finish = (fallback: ((value: never) => unknown) | undefined, exhaustive: boolean) => {
+    const descriptor = resolveMatchDescriptor(schema, tags, fallback !== undefined, exhaustive);
+    const stub = function aotMatchArtifact(): never {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    };
+    const names = tags.map((_, index) => `__case${index}`);
+
+    Object.defineProperty(stub, AOT_ARTIFACT, {
+      value: {
+        artifactId: "operation:match",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "match" },
+      } satisfies ArtifactDescriptor,
+    });
+    registerArtifact(stub, {
+      kind: "match-plan",
+      schema,
+      descriptor,
+      bindingNames: names.concat(fallback === undefined ? [] : ["__fallback"]),
+      bindingValues: handlers.concat(fallback === undefined ? [] : [fallback]),
+    });
+    return stub;
+  };
+
+  return Object.freeze({
+    case: (tag: string | number | boolean, handler: (value: never) => unknown) =>
+      createDefineMatch(schema, [...tags, tag], [...handlers, handler]),
+    otherwise: (handler: (value: never) => unknown) => finish(handler, false),
+    exhaustive: () => finish(undefined, true),
+  }) as unknown as MatchBuilder<unknown, unknown, never>;
+}
+
+function defineMigrate<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): MigrationPlan<ATS.TypeofSchema<TSchema>, TSchema> {
+  return createDefineMigration(createMigrationDescriptor(unwrapSchema(schema)), schema) as never;
+}
+
+function createDefineMigration<TSchema extends ATS.AnyTypeSchema>(
+  descriptor: MigrationDescriptor,
+  current: SchemaInput<TSchema>
+): MigrationPlan<unknown, TSchema> {
+  const stub = function aotMigrationArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as MigrationPlan<unknown, TSchema>;
+
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:migrate",
+        schemaId: descriptor.schemas[0]?.type ?? "unknown",
+        operation: { kind: "operation", op: "migrate" },
+      } satisfies ArtifactDescriptor,
+    },
+    to: {
+      value: (target: SchemaInput<ATS.AnyTypeSchema>, overrides?: Readonly<Record<string, unknown>>) =>
+        createDefineMigration(appendMigrationEdge(descriptor, unwrapSchema(target), overrides), target),
+    },
+    versions: { value: descriptor.versions },
+    current: { value: current },
+    explain: {
+      value: () =>
+        Object.freeze({
+          strategy: "VersionSwitch" as const,
+          versions: descriptor.versions,
+          passes: descriptor.edges.length,
+          complexity: "O(remaining edges)" as const,
+        }),
+    },
+  });
+  registerArtifact(stub, { kind: "migration-plan", descriptor });
+  return stub;
+}
+
+function defineCsvStub(descriptor: CsvDescriptor): (...args: never[]) => never {
+  const stub = function aotCsvArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: `operation:csv.${descriptor.operation}.${descriptor.sink}`,
+      schemaId: descriptor.schema.type,
+      operation: { kind: "operation", op: "csv" },
+    } satisfies ArtifactDescriptor,
+  });
+  registerArtifact(stub, { kind: "csv-plan", descriptor });
+  return stub;
+}
+
+function defineCsvParse<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  options?: CsvSchemaOptions<ATS.TypeofSchema<TSchema>>
+): CsvParsePlan<ATS.TypeofSchema<TSchema>> {
+  const unwrapped = unwrapSchema(schema);
+  const result = defineCsvStub(
+    resolveCsvDescriptor(unwrapped, "parse", "result", options as CsvOptions)
+  ) as unknown as CsvParsePlan<ATS.TypeofSchema<TSchema>>;
+
+  Object.defineProperty(result, "to", {
+    value: Object.freeze({
+      iterator: () => defineCsvStub(resolveCsvDescriptor(unwrapped, "parse", "iterator", options as CsvOptions)),
+      visitor: () => defineCsvStub(resolveCsvDescriptor(unwrapped, "parse", "visitor", options as CsvOptions)),
+    }),
+  });
+  return result;
+}
+
+function defineCsvStringify<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  options?: CsvSchemaOptions<ATS.TypeofSchema<TSchema>>
+): CsvStringifyPlan<ATS.TypeofSchema<TSchema>> {
+  const unwrapped = unwrapSchema(schema);
+  const result = defineCsvStub(
+    resolveCsvDescriptor(unwrapped, "stringify", "string", options as CsvOptions)
+  ) as unknown as CsvStringifyPlan<ATS.TypeofSchema<TSchema>>;
+
+  Object.defineProperty(result, "to", {
+    value: Object.freeze({
+      iterator: () => defineCsvStub(resolveCsvDescriptor(unwrapped, "stringify", "iterator", options as CsvOptions)),
+    }),
+  });
+  return result;
+}
+
+const csv: CsvNamespace = Object.freeze({ parse: defineCsvParse, stringify: defineCsvStringify });
+
+function defineNdjsonStub(descriptor: NdjsonDescriptor): (...args: never[]) => never {
+  const stub = function aotNdjsonArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: `operation:ndjson.${descriptor.operation}.${descriptor.sink}`,
+      schemaId: descriptor.schema.type,
+      operation: { kind: "operation", op: "ndjson" },
+    } satisfies ArtifactDescriptor,
+  });
+  registerArtifact(stub, { kind: "ndjson-plan", descriptor });
+  return stub;
+}
+
+function createDefineNdjsonParse(descriptor: NdjsonDescriptor): NdjsonParsePlan<unknown> {
+  const result = defineNdjsonStub(descriptor) as unknown as NdjsonParsePlan<unknown>;
+
+  Object.defineProperties(result, {
+    validate: { value: () => result },
+    where: {
+      value: (predicate: (query: QueryConditionBuilder<unknown>) => QueryConditionNode) => {
+        const state = createConditionBuilder(descriptor.bindingValues.length);
+        return createDefineNdjsonParse(appendNdjsonFilter(descriptor, predicate(state.builder), state.bindings));
+      },
+    },
+    select: { value: (...fields: string[]) => createDefineNdjsonParse(selectNdjson(descriptor, fields)) },
+    to: {
+      value: Object.freeze({
+        iterator: () => defineNdjsonStub(withNdjsonSink(descriptor, "iterator")),
+        visitor: () => defineNdjsonStub(withNdjsonSink(descriptor, "visitor")),
+        ndjson: () => defineNdjsonStub(withNdjsonSink(descriptor, "ndjson")),
+      }),
+    },
+  });
+  return result;
+}
+
+function defineNdjsonParse<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): NdjsonParsePlan<ATS.TypeofSchema<TSchema>> {
+  return createDefineNdjsonParse(createNdjsonDescriptor(unwrapSchema(schema), "parse")) as never;
+}
+
+function defineNdjsonStringify<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): NdjsonStringifyPlan<ATS.TypeofSchema<TSchema>> {
+  const descriptor = createNdjsonDescriptor(unwrapSchema(schema), "stringify");
+  const result = defineNdjsonStub(descriptor) as unknown as NdjsonStringifyPlan<ATS.TypeofSchema<TSchema>>;
+
+  Object.defineProperty(result, "to", {
+    value: Object.freeze({ iterator: () => defineNdjsonStub(withNdjsonSink(descriptor, "iterator")) }),
+  });
+  return result;
+}
+
+const ndjson: NdjsonNamespace = Object.freeze({ parse: defineNdjsonParse, stringify: defineNdjsonStringify });
 
 /**
  * A reconciliation resolves its identity, channels and sink at declaration
@@ -1249,6 +1473,10 @@ export const JIT = {
   cacheKey,
   canonical: defineCanonical,
   access: defineAccess,
+  match: defineMatch,
+  migrate: defineMigrate,
+  csv,
+  ndjson,
   cqrs,
   compare: Object.freeze({ equal, diff, hash, changed }),
   security: Object.freeze({ mask, sanitize }),
@@ -1276,6 +1504,10 @@ export const JIT = {
   | "cacheKey"
   | "canonical"
   | "access"
+  | "match"
+  | "migrate"
+  | "csv"
+  | "ndjson"
   | "cqrs"
   | "compare"
   | "security"
@@ -1301,6 +1533,10 @@ export const JIT = {
   readonly cacheKey: typeof cacheKey;
   readonly canonical: typeof defineCanonical;
   readonly access: typeof defineAccess;
+  readonly match: typeof defineMatch;
+  readonly migrate: typeof defineMigrate;
+  readonly csv: CsvNamespace;
+  readonly ndjson: NdjsonNamespace;
   readonly cqrs: typeof cqrs;
   readonly compare: {
     readonly equal: typeof equal;

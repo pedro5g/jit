@@ -20,6 +20,9 @@ function sourceOf(compiled: object): string {
   // An index plan carries its descriptor; the builder is emitted from it.
   if (artifact.kind === "index-plan")
     return Compiler.emitIndexPlanSource(artifact.descriptor, Compiler.indexCacheKey(artifact.descriptor));
+  if (artifact.kind === "migration-plan") return Compiler.emitMigrationSource(artifact.descriptor);
+  if (artifact.kind === "csv-plan") return Compiler.emitCsvSource(artifact.descriptor);
+  if (artifact.kind === "ndjson-plan") return Compiler.emitNdjsonSource(artifact.descriptor);
   if (!("source" in artifact)) throw new Error("compiled source artifact not registered");
   return artifact.source;
 }
@@ -69,6 +72,34 @@ describe("generated source snapshots", () => {
 
   it("index: grouped shape collects rows per key", () => {
     const compiled = JIT.index(Users).by("role").grouped();
+
+    expect(sourceOf(compiled)).toMatchSnapshot();
+  });
+
+  it("migration: version switch with two mapper edges", () => {
+    const V1 = JIT.object({ version: JIT.literal(1), name: JIT.string() });
+    const V2 = JIT.object({ version: JIT.literal(2), fullName: JIT.string() });
+    const V3 = JIT.object({ version: JIT.literal(3), displayName: JIT.string(), active: JIT.boolean() });
+    const compiled = JIT.migrate(V1)
+      .to(V2, { fullName: { from: "name" } })
+      .to(V3, { displayName: { from: "fullName" }, active: { default: true } });
+
+    expect(sourceOf(compiled)).toMatchSnapshot();
+  });
+
+  it("CSV: incremental scanner and static row conversion", () => {
+    const Row = JIT.object({ id: JIT.number().int(), name: JIT.string(), active: JIT.boolean() });
+
+    expect(sourceOf(JIT.csv.parse(Row))).toMatchSnapshot();
+  });
+
+  it("NDJSON: fused filter, projection and serializer", () => {
+    const Row = JIT.object({ id: JIT.number(), name: JIT.string(), active: JIT.boolean() });
+    const compiled = JIT.ndjson
+      .parse(Row)
+      .where((query) => query.eq("active", true))
+      .select("id", "name")
+      .to.ndjson();
 
     expect(sourceOf(compiled)).toMatchSnapshot();
   });

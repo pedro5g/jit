@@ -6,7 +6,7 @@ describe("native JSON parse execution", () => {
     id: JIT.number().int32().positive(),
     name: JIT.string().trim().min(2),
     active: JIT.boolean(),
-    role: JIT.enum(["admin", "member"] as const),
+    role: JIT.enum(["admin", "member"]),
     tags: JIT.array(JIT.string().lowercase()).max(3),
     note: JIT.string().optional(),
     plan: JIT.string().default("free"),
@@ -79,7 +79,7 @@ describe("native JSON parse execution", () => {
     const Payload = JIT.object({
       id: JIT.number().int32().positive(),
       name: JIT.string().min(2).max(40),
-      role: JIT.enum(["admin", "member"] as const),
+      role: JIT.enum(["admin", "member"]),
       scores: JIT.array(JIT.number().int()).max(8),
       profile: JIT.object({ active: JIT.boolean(), note: JIT.string().optional() }),
     });

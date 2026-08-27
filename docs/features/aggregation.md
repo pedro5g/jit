@@ -213,7 +213,16 @@ hash aggregate:             O(n), plus O(g) only when an average is asked for
 The per-row work still grows with `k`; what disappears is re-reading the
 collection and re-testing the filter for each reduction.
 
-## 9. AOT
+## 9. Physical strategies
+
+Ungrouped composites lower to `SinglePassAggregate`: one loop with one scalar
+accumulator per requested answer. Grouped composites lower to `HashAggregate`:
+one `Map` entry per distinct key and a stable accumulator object per group.
+Ordering facts do not currently replace hashing because doing so would make
+the answer depend on contiguous input; a future adjacent-group strategy must
+first prove the same semantics with differential tests and a measured win.
+
+## 10. AOT
 
 `aggregate` exists with the same signature on `@jit-compiler/jit/define`, and
 the generated module carries the loop and its accumulators with no JIT import.
@@ -221,7 +230,7 @@ The generated TypeScript names each field's type, so a generated `summary` is
 `{ readonly count: number; readonly average: number | undefined; ... }` rather
 than an opaque record.
 
-## 10. Runtime/AOT parity
+## 11. Runtime/AOT parity
 
 - one API on both hosts, covered by the parity matrix in
   `src/__tests__/entrypoints.test.ts`;
@@ -229,22 +238,23 @@ than an opaque record.
   five reductions into one external query instead of five;
 - a tree-shaking fixture asserts one loop, no `reduce`, and no result array.
 
-## 11. Benchmarks
+## 12. Benchmarks
 
 ```text
 Command      pnpm bench:cqrs-aggregate
 Source       bench/cqrs-aggregate/index.ts
 Environment  Node 22.22.3, Apple M1, darwin-arm64
 Dataset      10 000 rows, filter keeps ~90%
-Captured     2026-08-26
+Captured     2026-08-27
 ```
 
 | Approach                        | Five reductions | Heap/call | Two reductions |
 | ------------------------------- | --------------: | --------: | -------------: |
-| idiomatic `filter` + `reduce`   |       325.08 µs |  251.4 kB |              — |
-| separate JIT scalar aggregates  |        69.40 µs |     428 B |       24.50 µs |
-| **`aggregate({...})`**          |    **25.22 µs** | **427 B** |   **13.65 µs** |
-| handwritten one-pass loop       |        25.17 µs |     291 B |       13.78 µs |
+| idiomatic `filter` + `reduce`   |       347.16 µs |  251.4 kB |              — |
+| separate JIT scalar aggregates  |        69.00 µs |     709 B |       24.24 µs |
+| **runtime `aggregate({...})`**  |    **25.79 µs** | **432 B** |   **13.62 µs** |
+| **AOT `aggregate({...})`**      |    **26.15 µs** | **331 B** |   **13.52 µs** |
+| handwritten one-pass loop       |        27.22 µs |     341 B |       13.60 µs |
 
 Against the scalar aggregates it replaces, the composite is 2.8x faster at five
 reductions and 1.8x at two — close to the pass count it removes. Against the
@@ -258,16 +268,17 @@ composite emits that loop.
 
 | Approach                     |      Time | Heap/call |
 | ---------------------------- | --------: | --------: |
-| `groupBy` then reduce        | 216.07 µs |  298.7 kB |
-| **grouped `aggregate`**      |  **99.27 µs** | **36.8 kB** |
-| handwritten accumulator map  | 102.63 µs |   36.7 kB |
+| `groupBy` then reduce        | 221.63 µs |  298.6 kB |
+| **runtime grouped `aggregate`** | **102.23 µs** | **36.7 kB** |
+| **AOT grouped `aggregate`**  | **101.27 µs** | **36.7 kB** |
+| handwritten accumulator map  | 99.37 µs |   36.7 kB |
 
 2.2x faster and 8.1x less heap than grouping into arrays first, and level with
 the accumulator map written by hand. With an average the same query is
-148.51 µs and 83.5 kB against 201.63 µs and 301.6 kB — the `Map` and the
+148.85 µs runtime / 151.63 µs AOT and about 83.6 kB against 216.09 µs and 301.6 kB — the `Map` and the
 finalization pass are what that costs.
 
-## 12. Tradeoffs
+## 13. Tradeoffs
 
 - Two reductions save less than five. One reduction should stay a scalar
   aggregate — there is no pass to remove.
@@ -280,14 +291,14 @@ finalization pass are what that costs.
 - The result object is allocated per call. For a reduction called in a hot loop
   over many collections, that is one object each time.
 
-## 13. Best practices
+## 14. Best practices
 
 - Ask for every number you need in one `aggregate` rather than chaining
   separate queries over the same rows.
 - Put the filter in `where`; it runs once for all reductions.
 - Read `count` from the composite instead of a second `count()` query.
 
-## 14. Non-goals
+## 15. Non-goals
 
 - No grouping by more than one key, and no `keyed` collector — one row per key
   leaves nothing to reduce.

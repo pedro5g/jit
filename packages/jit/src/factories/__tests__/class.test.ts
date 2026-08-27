@@ -157,7 +157,7 @@ describe("JIT.class", () => {
 
   it("preserves value-object capabilities through an abstract subclass", () => {
     const MoneyBase = JIT.ddd.valueObject.abstract(
-      JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) })
+      JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) })
     );
     class Money extends MoneyBase {}
 
@@ -336,7 +336,7 @@ describe("JIT.class", () => {
     const Money = JIT.ddd.valueObject(
       JIT.object({
         amount: JIT.number(),
-        currency: JIT.enum(["BRL", "USD"] as const),
+        currency: JIT.enum(["BRL", "USD"]),
       })
     );
     const money = Money.create({ amount: 10, currency: "BRL" });
@@ -363,7 +363,7 @@ describe("JIT.class", () => {
     const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({
         id: JIT.string().readonly(),
-        status: JIT.enum(["draft", "confirmed"] as const),
+        status: JIT.enum(["draft", "confirmed"]),
       }),
       { id: "id" }
     );
@@ -477,6 +477,27 @@ describe("JIT.class", () => {
     expect(events[2]).toBeInstanceOf(OrderConfirmed);
     expect(order.pullEvents()).toEqual(events);
     expect(order.peekEvents()).toEqual([]);
+  });
+
+  it("keeps nested Runtime Classes atomic while updating an aggregate", () => {
+    const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) }));
+    const OrderBase = JIT.ddd.aggregateRoot(
+      JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"]), total: Money }),
+      { id: "id" }
+    );
+    class Order extends OrderBase {
+      confirm() {
+        this.update({ status: "confirmed" });
+      }
+    }
+    const order = Order.create({ id: "o_1", status: "draft", total: { amount: 120, currency: "BRL" } });
+    const originalMoney = order.total;
+
+    order.confirm();
+
+    expect(order.status).toBe("confirmed");
+    expect(order.total).toBe(originalMoney);
+    expect(order.total).toBeInstanceOf(Money);
   });
 
   it("creates immutable, versioned domain events from payload input", () => {

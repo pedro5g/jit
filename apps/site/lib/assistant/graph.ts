@@ -923,6 +923,82 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { self: 0.4, aot: 0.3 },
   },
   {
+    id: "schema-migration",
+    aliases: [
+      "schema migration",
+      "event migration",
+      "version chain",
+      "jit migrate",
+      "migrar evento",
+      "versão do evento",
+    ],
+    terms: ["migrate", "version", "mapper", "event", "switch"],
+    apis: ["migrate"],
+    fact: "JIT.migrate compiles versioned object schemas into one switch; each .to() edge reuses MapperPlan, old inputs run only the remaining edges, and current-version input returns by reference.",
+    factPt:
+      "JIT.migrate compila schemas de objeto versionados em um switch; cada edge .to() reutiliza MapperPlan, entradas antigas rodam só os edges restantes e a versão atual volta por referência.",
+    mechanisms: [
+      "Every schema declares a string or number literal field named version, so dispatch is known before execution.",
+      "The input type is the union of every declared version and the output type is always the current schema.",
+      "Runtime and AOT emit the same switch and mapper bodies; there is no runtime edge registry.",
+    ],
+    mechanismsPt: [
+      "Todo schema declara um campo literal version string ou number, então o dispatch é conhecido antes da execução.",
+      "O tipo de entrada é a união de todas as versões declaradas e o tipo de saída é sempre o schema atual.",
+      "Runtime e AOT emitem o mesmo switch e os mesmos mappers; não existe registry de edges em runtime.",
+    ],
+    example:
+      'const V1 = JIT.object({ version: JIT.literal(1), name: JIT.string() });\nconst V2 = JIT.object({ version: JIT.literal(2), fullName: JIT.string() });\n\nconst migrate = JIT.migrate(V1).to(V2, { fullName: { from: "name" } });\n\nmigrate({ version: 1, name: "Ada" });',
+    page: "/docs/reference/functions/migrate",
+    edges: { compilation: 0.5, aot: 0.4 },
+  },
+  {
+    id: "csv",
+    aliases: ["csv", "comma separated", "arquivo csv", "planilha csv", "rfc 4180"],
+    terms: ["csv", "rfc4180", "column", "delimiter", "quote", "visitor"],
+    apis: ["csv"],
+    fact: "JIT.csv parses RFC 4180 incrementally, converts known scalar columns, validates each row, and exposes result, iterator and visitor sinks plus schema-ordered stringify.",
+    factPt:
+      "JIT.csv faz parse incremental de RFC 4180, converte colunas escalares conhecidas, valida cada linha e expõe sinks result, iterator e visitor, além de stringify na ordem do schema.",
+    mechanisms: [
+      "A quote/CRLF/UTF-8 state machine survives arbitrary chunk boundaries; split(',') is never used.",
+      "Headers resolve once, then generated code reads record positions and constructs the known row shape directly.",
+      "Iterator and visitor do not retain a result array; AOT emits the scanner and validator without importing JIT.",
+    ],
+    mechanismsPt: [
+      "Uma máquina de estados de quote/CRLF/UTF-8 sobrevive a cortes arbitrários de chunk; split(',') nunca é usado.",
+      "O header é resolvido uma vez, depois o código gerado lê posições e constrói o formato conhecido diretamente.",
+      "Iterator e visitor não retêm array de resultado; o AOT emite scanner e validator sem importar a JIT.",
+    ],
+    example:
+      'const User = JIT.object({ id: JIT.number().int(), name: JIT.string() });\nconst parse = JIT.csv.parse(User);\n\nparse("id,name\\r\\n1,\\"Ada, Lovelace\\"");',
+    page: "/docs/reference/functions/csv",
+    edges: { lazy: 0.5, boundary: 0.4 },
+  },
+  {
+    id: "ndjson",
+    aliases: ["ndjson", "json lines", "jsonl", "line delimited json", "json por linha"],
+    terms: ["ndjson", "jsonl", "line", "stream", "filter", "projection"],
+    apis: ["ndjson"],
+    fact: "JIT.ndjson validates one document per line and can fuse where, select and the NDJSON sink into one incremental pass without result or projection arrays.",
+    factPt:
+      "JIT.ndjson valida um documento por linha e pode fundir where, select e o sink NDJSON em uma passada incremental sem arrays de resultado ou projeção.",
+    mechanisms: [
+      "The UTF-8 line scanner retains only the current line, and iterator/visitor expose validated rows as they finish.",
+      "Fused where conditions become direct field comparisons and ProjectionTree drives the serializer from the original row, avoiding a projected object.",
+      "JIT.stream.ndjson remains the stateful write/end/items interface; JIT.ndjson is the callable reconstructive transport plan.",
+    ],
+    mechanismsPt: [
+      "O scanner UTF-8 retém só a linha atual, e iterator/visitor expõem linhas validadas assim que terminam.",
+      "Condições where fundidas viram comparações diretas e ProjectionTree dirige o serializer a partir da linha original, evitando objeto projetado.",
+      "JIT.stream.ndjson continua sendo a interface stateful write/end/items; JIT.ndjson é o plano de transporte chamável e reconstruível.",
+    ],
+    example:
+      'const Event = JIT.object({ id: JIT.number(), active: JIT.boolean() });\nconst activeIds = JIT.ndjson.parse(Event)\n  .where((q) => q.eq("active", true))\n  .select("id")\n  .to.ndjson();\n\nactiveIds("{\\"id\\":1,\\"active\\":true}\\n");',
+    page: "/docs/reference/functions/ndjson",
+    edges: { json: 0.6, lazy: 0.5, query: 0.4 },
+  },
+  {
     id: "mcp",
     aliases: ["mcp", "agent", "agente", "tool", "ferramenta", "claude", "cursor"],
     terms: ["mcp", "stdio", "tools", "resources", "prompts"],

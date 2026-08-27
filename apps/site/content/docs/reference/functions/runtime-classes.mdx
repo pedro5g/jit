@@ -120,7 +120,7 @@ equality and hash code enabled by default.
 const Money = JIT.ddd.valueObject(
   JIT.object({
     amount: JIT.number(),
-    currency: JIT.enum(["BRL", "USD"] as const),
+    currency: JIT.enum(["BRL", "USD"]),
   }),
 );
 
@@ -178,7 +178,7 @@ describes it. Readonly schema fields remain unavailable to `update()`.
 const OrderBase = JIT.ddd.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
-    status: JIT.enum(["draft", "confirmed"] as const),
+    status: JIT.enum(["draft", "confirmed"]),
   }),
   { id: "id" },
 );

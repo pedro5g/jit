@@ -110,15 +110,25 @@ registerScenario({
 // --------------------------------------------------------- many actions, many rules
 
 const actions = ["read", "create", "update", "delete", "publish", "archive", "share", "comment"] as const;
-let wide = JIT.access(Post).actor(User).can("read");
+const wide = JIT.access(Post)
+  .actor(User)
+  .can("read")
+  .can("create", (query, self) => query.eq("authorId", self.field("id")))
+  .can("update", (query, self) => query.eq("authorId", self.field("id")))
+  .can("delete", (query, self) => query.eq("authorId", self.field("id")))
+  .can("publish", (query, self) => query.eq("authorId", self.field("id")))
+  .can("archive", (query, self) => query.eq("authorId", self.field("id")))
+  .can("share", (query, self) => query.eq("authorId", self.field("id")))
+  .can("comment", (query, self) => query.eq("authorId", self.field("id")))
+  .cannot("create", (query) => query.eq("locked", true))
+  .cannot("update", (query) => query.eq("locked", true))
+  .cannot("delete", (query) => query.eq("locked", true));
 const wideRules: GenericRule[] = [{ effect: "can", action: "read" }];
 
 for (const action of actions.slice(1)) {
-  wide = wide.can(action, (query, self) => query.eq("authorId", self.field("id"))) as never;
   wideRules.push({ effect: "can", action, conditions: { authorId: "$actor.id" } });
 }
 for (const action of actions.slice(1, 4)) {
-  wide = wide.cannot(action, (query) => query.eq("locked", true)) as never;
   wideRules.push({ effect: "cannot", action, conditions: { locked: true } });
 }
 const wideAbility = wide(actor);

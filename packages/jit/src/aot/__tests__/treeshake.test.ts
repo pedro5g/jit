@@ -530,4 +530,96 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
     expect(bundled).toContain("Object.freeze");
   });
+
+  it("should keep match as one switch without a handler registry or unrelated plans", async () => {
+    const Event = JIT.discriminatedUnion("type", [
+      JIT.object({ type: JIT.literal("created"), id: JIT.number() }),
+      JIT.object({ type: JIT.literal("deleted"), id: JIT.number() }),
+    ]);
+    const handle = JIT.match(Event)
+      .case("created", (event) => event.id)
+      .case("deleted", (event) => -event.id)
+      .exhaustive();
+
+    AOT.generate({ artifacts: { handle }, outDir });
+    const bundled = await bundle(
+      'import { handle } from "./index.js";\nconsole.log(handle({ type: "created", id: 1 }));\n'
+    );
+
+    expect(bundled).toContain("switch (value.type)");
+    expect(bundled).not.toContain("handlers[");
+    expect(bundled).not.toContain("new Map");
+    expect(bundled).not.toContain("csvHeader");
+    expect(bundled).not.toContain("QueryProgram");
+  });
+
+  it("should keep JSON Patch down to pointer helpers without other patch contracts", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const patchUser = JIT.patch.json(User);
+
+    AOT.generate({ artifacts: { patchUser }, outDir });
+    const bundled = await bundle(
+      'import { patchUser } from "./index.js";\nconsole.log(patchUser({ id: 1, name: "Ada" }, [{ op: "replace", path: "/name", value: "Grace" }]));\n'
+    );
+
+    expect(bundled).toContain("function __parsePointer");
+    expect(bundled).not.toContain("mergePatch");
+    expect(bundled).not.toContain("csvHeader");
+    expect(bundled).not.toContain("ndjsonRow");
+    expect(bundled).not.toContain("ProjectionTree");
+  });
+
+  it("should keep a migration down to its version switch and mapper edges", async () => {
+    const V1 = JIT.object({ version: JIT.literal(1), name: JIT.string() });
+    const V2 = JIT.object({ version: JIT.literal(2), fullName: JIT.string() });
+    const migrate = JIT.migrate(V1).to(V2, { fullName: { from: "name" } });
+
+    AOT.generate({ artifacts: { migrate }, outDir });
+    const bundled = await bundle(
+      'import { migrate } from "./index.js";\nconsole.log(migrate({ version: 1, name: "Ada" }));\n'
+    );
+
+    expect(bundled).toContain("switch (value.version)");
+    expect(bundled).toContain("function migrateEdge0");
+    expect(bundled).not.toContain("csvRecords");
+    expect(bundled).not.toContain("ndjsonLines");
+    expect(bundled).not.toContain("JITValidationError");
+  });
+
+  it("should keep CSV parsing independent from other transport plans", async () => {
+    const Row = JIT.object({ id: JIT.number().int(), name: JIT.string() });
+    const parseCsv = JIT.csv.parse(Row);
+
+    AOT.generate({ artifacts: { parseCsv }, outDir });
+    const bundled = await bundle('import { parseCsv } from "./index.js";\nconsole.log(parseCsv("id,name\\n1,Ada"));\n');
+
+    expect(bundled).toContain("const decoder = new TextDecoder()");
+    expect(bundled).toContain("function csvRow");
+    expect(bundled).not.toContain("ndjsonLines");
+    expect(bundled).not.toContain("migrateEdge");
+    expect(bundled).not.toContain("function clone");
+    expect(bundled).not.toContain("function* csvRecords");
+  });
+
+  it("should keep a fused NDJSON sink free of CSV, query and projection runtimes", async () => {
+    const Row = JIT.object({ id: JIT.number(), active: JIT.boolean() });
+    const activeIds = JIT.ndjson
+      .parse(Row)
+      .where((query) => query.eq("active", true))
+      .select("id")
+      .to.ndjson();
+
+    AOT.generate({ artifacts: { activeIds }, outDir });
+    const bundled = await bundle(
+      'import { activeIds } from "./index.js";\nconsole.log(activeIds("{\\"id\\":1,\\"active\\":true}\\n"));\n'
+    );
+
+    expect(bundled).toContain("const decoder = new TextDecoder()");
+    expect(bundled).toContain("item.active === __q0");
+    expect(bundled).not.toContain("const out = []");
+    expect(bundled).not.toContain("csvRecords");
+    expect(bundled).not.toContain("QueryProgram");
+    expect(bundled).not.toContain("ProjectionTree");
+    expect(bundled).not.toContain("function* ndjsonLines");
+  });
 });

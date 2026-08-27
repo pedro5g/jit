@@ -7,11 +7,14 @@
 import type { AccessDescriptor } from "../compiler/access.js";
 import type { CacheKeyDescriptor } from "../compiler/cache-key.js";
 import type { ChangedDescriptor } from "../compiler/changed.js";
+import type { CsvDescriptor } from "../compiler/csv.js";
 import type { ExecutionPlan } from "../compiler/execution-plan.js";
 import type { IndexDescriptor } from "../compiler/indexing.js";
 import type { JoinPlan } from "../compiler/join.js";
 import type { LookupDescriptor } from "../compiler/lookup.js";
 import type { MatchDescriptor } from "../compiler/match.js";
+import type { MigrationDescriptor } from "../compiler/migration.js";
+import type { NdjsonDescriptor } from "../compiler/ndjson.js";
 import type { OrderingDescriptor } from "../compiler/ordering.js";
 import type { ProjectionTree } from "../compiler/projection.js";
 import type { ReconcileDescriptor } from "../compiler/reconcile.js";
@@ -105,6 +108,23 @@ interface MatchPlanArtifact {
   readonly kind: "match-plan";
   readonly schema: ATS.AnyTypeSchema;
   readonly descriptor: MatchDescriptor;
+  readonly bindingNames: readonly string[];
+  readonly bindingValues: readonly unknown[];
+}
+
+interface MigrationPlanArtifact {
+  readonly kind: "migration-plan";
+  readonly descriptor: MigrationDescriptor;
+}
+
+interface CsvPlanArtifact {
+  readonly kind: "csv-plan";
+  readonly descriptor: CsvDescriptor;
+}
+
+interface NdjsonPlanArtifact {
+  readonly kind: "ndjson-plan";
+  readonly descriptor: NdjsonDescriptor;
 }
 
 interface CqrsInputArtifact {
@@ -212,6 +232,9 @@ export type CompiledArtifact =
   | CanonicalPlanArtifact
   | AccessPlanArtifact
   | MatchPlanArtifact
+  | MigrationPlanArtifact
+  | CsvPlanArtifact
+  | NdjsonPlanArtifact
   | ValidatorArtifact
   | OperationArtifact
   | ExecutionArtifact

@@ -211,7 +211,7 @@ describe("JIT AST builders", () => {
     });
 
     it("should construct and infer enum schemas from readonly arrays", () => {
-      const fish_schema = JIT.enum(["Salmon", "Tuna", "Trout"] as const).schema;
+      const fish_schema = JIT.enum(["Salmon", "Tuna", "Trout"]).schema;
 
       expect(fish_schema.type).toBe(AST.TypeName.enum);
       expect(fish_schema.def.values).toEqual(["Salmon", "Tuna", "Trout"]);

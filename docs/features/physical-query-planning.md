@@ -228,19 +228,20 @@ Command      pnpm bench:cqrs-physical
 Source       bench/cqrs-physical/index.ts
 Environment  Node 22.22.3, Apple M1, darwin-arm64
 Query        where(eq("id", params.id)).first(), target in the middle row
-Captured     2026-08-26
+Captured     2026-08-27
 ```
 
 The same declaration, three access paths. Only the collection's facts differ.
 
-| Rows    | `EarlyExitScan` | idiomatic `find` | `CachedIndexLookup` | `BinarySearch` | prebuilt `Map` |
-| ------- | --------------: | ---------------: | ------------------: | -------------: | -------------: |
-| 1 000   |        572.4 ns |         410.5 ns |             72.3 ns |        15.8 ns |         5.0 ns |
-| 10 000  |         5.16 µs |          4.47 µs |             98.8 ns |        21.1 ns |        11.1 ns |
-| 100 000 |        49.22 µs |         40.28 µs |             60.1 ns |        26.9 ns |         3.3 ns |
+| Rows    | scan runtime / AOT | index runtime / AOT | binary runtime / AOT | idiomatic `find` | prebuilt `Map` |
+| ------- | -----------------: | ------------------: | -------------------: | ---------------: | -------------: |
+| 1 000   | 606.6 / 522.3 ns | 84.2 / 16.4 ns | 17.4 / 13.2 ns | 426.7 ns | 5.3 ns |
+| 10 000  | 5.32 / 5.32 µs | 116.1 / 58.0 ns | 22.9 / 17.9 ns | 4.76 µs | 3.5 ns |
+| 100 000 | 51.40 / 55.36 µs | 64.7 / 62.4 ns | 26.7 / 23.4 ns | 44.86 µs | 3.4 ns |
 
-At 100 000 rows the planner turns a 49 µs scan into a 60 ns lookup — about
-670x — without a line of the query changing. The prebuilt `Map` column is
+At 100 000 rows the planner turns a 51 µs scan into a 62 ns lookup — about
+820x — without a line of the query changing. Runtime and standalone AOT select
+the same strategy and remain in the same performance regime. The prebuilt `Map` column is
 marked not comparable in the harness: it is built outside the measurement and
 is the ceiling a cached index aims at, which it lands within a small multiple
 of once warm.
@@ -252,15 +253,15 @@ array on every call and the cache never hits:
 
 | 10 000 rows, a fresh array each call |    Time |
 | ------------------------------------ | ------: |
-| `EarlyExitScan`                      | 8.13 µs |
-| `BinarySearch`                       | 1.59 µs |
-| `CachedIndexLookup`                  |  531 µs |
+| `EarlyExitScan` runtime / AOT        | 10.79 / 9.56 µs |
+| `BinarySearch` runtime / AOT         | 2.04 / 1.88 µs |
+| `CachedIndexLookup` runtime / AOT    | 549.7 / 539.2 µs |
 
-**`CachedIndexLookup` is 65x slower than a scan here**, because it pays the full
+**`CachedIndexLookup` is about 51x slower than a scan here**, because it pays the full
 `O(n)` build for a single `O(1)` lookup and then throws it away. This is the
 cost of declaring `.keyed()` on a collection that is re-created per call.
 
-`BinarySearch` wins in both regimes — 26.9 ns warm and 1.59 µs cold — because
+`BinarySearch` wins in both regimes — 23–27 ns warm and 1.88–2.04 µs cold — because
 it allocates nothing. If your arrays are rebuilt per request and are already
 sorted, declare `.ordered()` rather than `.keyed()`.
 

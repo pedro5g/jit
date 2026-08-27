@@ -295,7 +295,7 @@ and raw schemas.
 // primitives
 JIT.string()  JIT.number()  JIT.int()  JIT.boolean()  JIT.bigint()
 JIT.date()    JIT.literal("click")
-JIT.enum({ A: "a", B: "b" })  JIT.enum(["admin", "user"] as const)
+JIT.enum({ A: "a", B: "b" })  JIT.enum(["admin", "user"])
 JIT.null()    JIT.undefined()  JIT.any()  JIT.unknown()  JIT.never()
 
 // collections

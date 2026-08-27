@@ -85,8 +85,8 @@ function tagOf(option: ATS.AnyTypeSchema, discriminator: string): string | numbe
  *
  * The tags are literals declared by the schema, so this is a `switch` the
  * engine can turn into a jump — not a chain of `if`s over a handler map, and
- * not a lookup that allocates. An exhaustive match needs no default at all,
- * because the type system already proved one is unreachable.
+ * not a lookup that allocates. An exhaustive match still keeps a throwing
+ * default as a runtime boundary guard for values smuggled in from untyped code.
  */
 export function emitMatchSource(descriptor: MatchDescriptor): string {
   const writer = new CodeWriter();
@@ -149,6 +149,12 @@ export function compileMatch<TValue, TResult>(
     value: TValue
   ) => TResult;
 
-  registerArtifact(compiled as object, { kind: "match-plan", schema: descriptor.schema, descriptor });
+  registerArtifact(compiled as object, {
+    kind: "match-plan",
+    schema: descriptor.schema,
+    descriptor,
+    bindingNames: names.concat(descriptor.hasFallback ? "__fallback" : []),
+    bindingValues: handlers.concat(fallback === undefined ? [] : [fallback]),
+  });
   return compiled;
 }

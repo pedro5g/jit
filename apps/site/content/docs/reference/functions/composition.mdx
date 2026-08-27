@@ -119,7 +119,7 @@ which should be a deliberate compatibility boundary.
 const DeferredSettings = JIT.lazy(() => Settings);
 
 const Settings = JIT.object({
-  theme: JIT.enum(["light", "dark"] as const),
+  theme: JIT.enum(["light", "dark"]),
 });
 
 const User = JIT.object({ settings: DeferredSettings });

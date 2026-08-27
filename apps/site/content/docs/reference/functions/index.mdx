@@ -45,9 +45,12 @@ documentation.
 | `JIT.canonical`   | [Canonical](./canonical)             | One deterministic field arrangement            |
 | `JIT.access`      | [Access control](./access)           | Compiled can/cannot authorization checks       |
 | `JIT.match`       | [Match](./match)                     | Compiled discriminated-union dispatch          |
+| `JIT.migrate`     | [Migration](./migrate)               | Versioned schema migration compiled as one plan |
 | `JIT.cqrs`        | [Query](./query#cqrs)                | `query`, `input`, `parse`, `count`, `sum`, `avg`, `min`, `max` |
 | `JIT.process`     | [Process](./process)                 | Fused load-and-query binary pipeline          |
 | `JIT.stream`      | [Stream](./stream)                   | Incremental JSON and NDJSON validation        |
+| `JIT.csv`         | [CSV](./csv)                         | Schema-specialized incremental CSV parsing and serialization |
+| `JIT.ndjson`      | [NDJSON](./ndjson)                   | Fused incremental NDJSON validation, filtering and projection |
 | `JIT.watch`       | [Watch](./watch)                     | Stateless keyed collection changes            |
 | `JIT.watchedList` | [Watch](./watch#watchedlist)         | Stateful aggregate collection                 |
 | `JIT.dto`         | [DTO](./dto)                         | Application-boundary schema annotation        |

@@ -832,7 +832,7 @@ function createPatchBindings(
   return { patch: boundPatch, bindings };
 }
 
-function createConditionBuilder(startIndex: number): {
+export function createConditionBuilder(startIndex: number): {
   readonly builder: QueryConditionBuilder<unknown>;
   readonly bindings: readonly unknown[];
 } {

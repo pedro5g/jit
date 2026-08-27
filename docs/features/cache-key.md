@@ -98,21 +98,23 @@ Both forms lower to the expression plus, when a structural field is selected, th
 
 ## 12. Benchmarks
 
-Environment: Node 22.17.1, Linux x64, AMD Ryzen 7 5800H, 10,000 rows of a 6-field schema, keys retained. Reproduce with `pnpm bench:cache-key`.
+Environment: Node 22.22.3, Apple M1, darwin-arm64, 10,000 rows of a 6-field schema, keys retained. Reproduce with `pnpm bench:cache-key`.
 
 Three fields of six:
 
 | Approach                             |      Time | Heap per call |
 | ------------------------------------ | --------: | ------------: |
-| `JSON.stringify` of a picked object  |   1.79 ms |       1.18 MB |
-| `JSON.stringify` of an array         |   1.26 ms |       1.18 MB |
-| handwritten template literal         | 326.10 µs |       1.34 MB |
-| **`JIT.cacheKey.string`**            | **270.28 µs** |   **1.34 MB** |
-| **`JIT.cacheKey.hash`**              | **218.34 µs** |  **83.7 KB** |
+| `JSON.stringify` of a picked object  |   1.32 ms |       1.18 MB |
+| `JSON.stringify` of an array         | 937.30 µs |       1.18 MB |
+| handwritten template literal         | 364.51 µs |       1.34 MB |
+| **`JIT.cacheKey.string` runtime**    | **321.37 µs** |   **1.34 MB** |
+| **`JIT.cacheKey.string` AOT**        | **331.87 µs** |   **1.34 MB** |
+| **`JIT.cacheKey.hash` runtime**      | **194.93 µs** |  **83.7 KB** |
+| **`JIT.cacheKey.hash` AOT**          | **193.68 µs** |  **83.7 KB** |
 
-The string form is **6.6× faster** than the `JSON.stringify` line it replaces, and sits at the handwritten template-literal ceiling. That gap is explainable rather than incidental: the serializer walks an object it did not need, quotes and escapes strings that did not need quoting, and the picked object is allocated only to be discarded.
+The string form is about **4.0× faster** than the `JSON.stringify` line it replaces, and sits in the handwritten template-literal band. That gap is explainable rather than incidental: the serializer walks an object it did not need, quotes and escapes strings that did not need quoting, and the picked object is allocated only to be discarded.
 
-The hash form is **8.2× faster** and allocates **16× less**, because no key string is ever built. If your cache is a `Map` and the key never has to be read by a human or crossed between processes, that is the form to use.
+The hash form is about **6.8× faster** and allocates **14× less**, because no key string is ever built. Runtime and standalone AOT are within measurement noise. If your cache is a `Map` and the key never has to be read by a human or crossed between processes, that is the form to use.
 
 ## 13. Tradeoffs
 

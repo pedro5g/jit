@@ -3,13 +3,13 @@ import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
 const UserState = JIT.object({ id: JIT.string(), name: JIT.string(), active: JIT.boolean() });
-const Money = JIT.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
-const UserBase = JIT.entity(UserState, { id: "id" });
-const OrderBase = JIT.aggregateRoot(
-  JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"] as const) }),
+const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
+const UserBase = JIT.ddd.entity(UserState, { id: "id" });
+const OrderBase = JIT.ddd.aggregateRoot(
+  JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"]) }),
   { id: "id" }
 );
-const OrderConfirmed = JIT.domainEvent("order.confirmed", {
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
   payload: JIT.object({ orderId: JIT.string() }),
   version: 1,
 });

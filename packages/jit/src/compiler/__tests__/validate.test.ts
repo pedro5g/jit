@@ -817,7 +817,7 @@ describe("JIT compiler validator", () => {
 
   it("should validate template literal schemas with compiled regex bindings", () => {
     const Greeting = JIT.templateLiteral(["hello, ", JIT.string(), "!"] as const);
-    const Status = JIT.templateLiteral(["status:", JIT.enum(["ok", "failed"] as const), ":", JIT.int()] as const);
+    const Status = JIT.templateLiteral(["status:", JIT.enum(["ok", "failed"]), ":", JIT.int()]);
     const greeting = validation(Greeting);
     const status = validation(Status);
     const source = Compiler.emitValidatorSource(Status.schema);

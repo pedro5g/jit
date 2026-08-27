@@ -53,7 +53,7 @@ const goldenQuestions: { question: string; pages: string[] }[] = [
     pages: ["/docs/runtime/queries", "/docs/runtime/binary-rowsets", "/docs/guides/choosing-an-execution-mode"],
   },
   { question: "deep clone an object fast", pages: ["/docs/reference/functions/clone"] },
-  { question: "stream ndjson while it downloads", pages: ["/docs/reference/functions/stream"] },
+  { question: "stream ndjson while it downloads", pages: ["/docs/reference/functions/ndjson"] },
   { question: "binary wire format version", pages: ["/docs/reference/functions/codec", "/docs/runtime/serialization"] },
   {
     question: "immutable update without proxy",

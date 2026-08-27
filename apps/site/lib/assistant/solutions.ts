@@ -337,6 +337,84 @@ const revenue = JIT.query(Events)
     page: "/docs/runtime/binary-rowsets",
   },
   {
+    id: "migrate-versioned-events",
+    triggers: [
+      ["migrar", "versao"],
+      ["migrate", "version"],
+      ["evento", "antigo"],
+      ["event", "upgrade"],
+    ],
+    problem:
+      "Several historical object or event versions must reach the current shape without walking a runtime registry of migration callbacks.",
+    apis: ["JIT.migrate", "to"],
+    example: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const V1 = JIT.object({ version: JIT.literal(1), name: JIT.string() });
+const V2 = JIT.object({ version: JIT.literal(2), fullName: JIT.string() });
+
+const migrate = JIT.migrate(V1).to(V2, { fullName: { from: "name" } });
+migrate({ version: 1, name: "Ada" });`,
+    why: [
+      "Literal schema versions compile into one switch, so dispatch does not scan an edge list.",
+      "Each edge reuses MapperPlan and only edges after the input version execute.",
+      "Current-version input returns by reference, while runtime and AOT share the same switch.",
+    ],
+    page: "/docs/reference/functions/migrate",
+  },
+  {
+    id: "ingest-csv",
+    triggers: [
+      ["csv", "validar"],
+      ["csv", "parse"],
+      ["csv", "stream"],
+      ["arquivo", "csv"],
+    ],
+    problem:
+      "A CSV feed needs correct quoting, scalar conversion and row validation without splitting incorrectly or retaining the complete output.",
+    apis: ["JIT.csv.parse", "to.visitor"],
+    example: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const User = JIT.object({ id: JIT.number().int(), name: JIT.string() });
+const visit = JIT.csv.parse(User).to.visitor();
+const rows = [];
+
+visit('id,name\\r\\n1,"Ada, Lovelace"', (row) => rows.push(row));`,
+    why: [
+      "The RFC 4180 state machine survives quoted delimiters, embedded newlines and chunk boundaries.",
+      "Known columns are converted and passed to the specialized validator in one row path.",
+      "The visitor sink retains scanner state and the current row, not a result array.",
+    ],
+    page: "/docs/reference/functions/csv",
+  },
+  {
+    id: "filter-ndjson-feed",
+    triggers: [
+      ["ndjson", "filter"],
+      ["ndjson", "filtrar"],
+      ["jsonl", "transform"],
+      ["json", "linha", "projetar"],
+    ],
+    problem:
+      "An NDJSON feed is parsed, validated, filtered, projected and serialized again, and ordinary array stages materialize every boundary.",
+    apis: ["JIT.ndjson.parse", "where", "select", "to.ndjson"],
+    example: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const Event = JIT.object({ id: JIT.number(), active: JIT.boolean() });
+const activeIds = JIT.ndjson
+  .parse(Event)
+  .where((query) => query.eq("active", true))
+  .select("id")
+  .to.ndjson();
+
+activeIds('{"id":1,"active":true}\\n{"id":2,"active":false}\\n');`,
+    why: [
+      "One line scan performs JSON parsing, specialized validation, direct-field filtering and schema-specialized serialization.",
+      "The fused sink builds neither a result array nor projected objects.",
+      "Iterator and visitor remain available when the destination is a consumer rather than another NDJSON boundary.",
+    ],
+    page: "/docs/reference/functions/ndjson",
+  },
+  {
     id: "validate-while-downloading",
     triggers: [
       ["stream", "valid"],

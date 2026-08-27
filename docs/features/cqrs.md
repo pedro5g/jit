@@ -147,19 +147,21 @@ warm-up, using `pnpm bench:cqrs`:
 Measured with `pnpm bench:cqrs-terminal` on the same machine, 10 000 rows,
 `where(eq("id", target)).first()`:
 
-| Match position     | Idiomatic `find` | Handwritten loop | JIT `first()` | JIT filter then `[0]` |
-| ------------------ | ---------------: | ---------------: | ------------: | --------------------: |
-| middle row         |          7.11 µs |          5.07 µs |       5.10 µs |              16.44 µs |
-| last row           |         14.22 µs |         10.15 µs |      10.29 µs |              14.83 µs |
-| no match           |         14.18 µs |         10.12 µs |      10.18 µs |              14.55 µs |
-| `every`, all match |         11.96 µs |                — |      10.26 µs |                     — |
+| Match position     | Idiomatic `find` | Handwritten loop | JIT runtime | JIT AOT | JIT filter then `[0]` |
+| ------------------ | ---------------: | ---------------: | ----------: | ------: | --------------------: |
+| middle row         |           7.90 µs |          6.38 µs |     5.41 µs | 6.65 µs |              16.79 µs |
+| last row           |          18.29 µs |         12.23 µs |    10.95 µs | 12.19 µs |              28.84 µs |
+| no match           |          18.32 µs |         10.77 µs |    10.82 µs | 13.64 µs |              16.70 µs |
+| `every`, all match |          13.04 µs |                — |    11.35 µs | 14.97 µs |                     — |
 
-`first()` is level with a handwritten loop and ~1.4x ahead of `Array.prototype.find`,
+`first()` stays in the handwritten-loop band and avoids the callback paid by `Array.prototype.find`,
 which pays a callback per row. The larger number is the column on the right:
-collecting every match and taking the first costs 14–16 µs regardless of where
-the answer is, so `first()` is 1.4x better at the worst case and far better
+collecting every match and taking the first costs 16–29 µs regardless of where
+the answer is, so `first()` is better at the worst case and far better
 whenever the match is early. `some()` against `count() > 0` is the same story —
-82 ns versus 10.25 µs when the match is near the front.
+86 ns runtime / 2 ns AOT versus 11.45 µs when the match is near the front. Those
+sub-100 ns cases are below the harness's reliable resolution and are not used
+for a speedup claim.
 
 Scenarios where the match sits at row 0 fall below this harness's useful
 resolution (every implementation returns immediately and what is left is call
@@ -167,9 +169,9 @@ dispatch). Measured directly in a 2 000 000-iteration loop instead, an immediate
 match is 3.20 ns for `first()` against 6.56 ns for `find` — the difference being
 the callback the compiled loop does not make.
 
-The consolidation is effectively level with the handwritten scan in this
-fixture and does not claim a new speedup. It changes API ownership, typing and
-AOT parity without changing the emitter. Use `pnpm bench:query` and
+The consolidation is in the handwritten-scan regime in this fixture and does
+not claim a runtime/AOT microbenchmark winner. It changes API ownership, typing
+and AOT parity without changing the lowering. Use `pnpm bench:query` and
 `pnpm bench:lazy` for individual backends. Physical-planner milestones must add
 idiomatic, handwritten, runtime-JIT and AOT variants before publishing access
 path speedups.

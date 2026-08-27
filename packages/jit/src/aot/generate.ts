@@ -1,11 +1,12 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join } from "node:path";
 import { emitAccessSource } from "../compiler/access.js";
 import { cacheKeyHashBindings, emitCacheKeySource } from "../compiler/cache-key.js";
 import { emitCanonicalSource } from "../compiler/canonical.js";
 import { changedEqualBindings, emitChangedSource } from "../compiler/changed.js";
 import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
+import { emitCsvSource } from "../compiler/csv.js";
 import { emitDiffSource } from "../compiler/diff.js";
 import { emitEqualMethodBody, emitEqualSource } from "../compiler/equal.js";
 import { optimizeExecutionPlan } from "../compiler/execution-optimize.js";
@@ -21,8 +22,11 @@ import { emitLookupSource } from "../compiler/lookup.js";
 import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { emitMapperSource } from "../compiler/mapper.js";
 import { emitMaskSource } from "../compiler/mask.js";
+import { emitMatchSource } from "../compiler/match.js";
+import { emitMigrationSource } from "../compiler/migration.js";
 import { emitMockSource, MOCK_HELPERS } from "../compiler/mock.js";
 import { buildMutationPlan, emitMutationPlanBody } from "../compiler/mutation-plan.js";
+import { emitNdjsonSource } from "../compiler/ndjson.js";
 import { emitTransformSource } from "../compiler/object-ops.js";
 import {
   emitJsonPatchSource,
@@ -41,19 +45,34 @@ import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
 import { emitSortSource } from "../compiler/sort.js";
 import { emitUpdateSource } from "../compiler/update.js";
 import { canUseFastParse, emitValidator } from "../compiler/validate/emit-validate.js";
-import type {
-  QueryAggregateNode,
-  QueryCompositeAggregateNode,
-  QueryNode,
-  QueryTerminalNode,
-} from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { type CompiledArtifact, getArtifact } from "../runtime/artifact-registry.js";
 import { isValidIdentifier } from "../shared/parse.js";
+import {
+  accessPlanType,
+  changedPlanType,
+  csvPlanType,
+  declarationImportType,
+  executionPlanType,
+  indexPlanType,
+  joinPlanType,
+  lookupPlanType,
+  memberImportType,
+  migrationPlanType,
+  namedType,
+  ndjsonPlanType,
+  operationType,
+  patchPlanType,
+  projectPlanType,
+  queryPlanType,
+  sortPlanType,
+  standaloneType,
+} from "./artifact-types.js";
 import { emitTypeScriptType } from "./emit-type.js";
+import { serializeCallback } from "./serialize-callback.js";
 
 /** One declaration the generator could not build, and why. */
 export interface SkippedOperation {
@@ -408,14 +427,89 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "patch-plan") return emitPatchPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "cache-key-plan") return emitCacheKeyPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "match-plan") {
-      // The tags compile, but the handlers are user functions: there is nothing
-      // to serialize, the way a query binding holding a callback has nothing.
-      skipped.push({
-        schema: reportName,
-        operation: "match",
-        reason: "match handlers are callbacks that cannot be serialized ahead of time",
+      const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
+
+      if (inlined === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "match",
+          reason: "match handlers contain native, bound, or closure-dependent callbacks",
+        });
+        return undefined;
+      }
+
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(`  return ${asExpression(emitMatchSource(artifact.descriptor), "match")};`);
+      js.push("})();");
+      return { binding, type };
+    }
+    if (artifact.kind === "migration-plan") {
+      const inlined = inlineBindings(artifact.descriptor.bindingNames, artifact.descriptor.bindingValues);
+
+      if (inlined === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "migrate",
+          reason: "migration mappings contain native, bound, or closure-dependent callbacks",
+        });
+        return undefined;
+      }
+
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(`  return ${emitMigrationSource(artifact.descriptor)};`);
+      js.push("})();");
+      return { binding, type };
+    }
+    if (artifact.kind === "csv-plan") {
+      if (artifact.descriptor.operation === "stringify") {
+        js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitCsvSource(artifact.descriptor), "csvStringify")};`);
+        return { binding, type };
+      }
+
+      const validator = emitValidatorBinding(binding, artifact.descriptor.schema, reportName, "csv.parse", {
+        is: false,
+        safeParse: true,
+        resolveDefaults: true,
+        materializeRuntimeTypes: true,
       });
-      return undefined;
+
+      if (!validator) return undefined;
+      needsValidationError = true;
+      js.push(
+        `${declaration} /*#__PURE__*/ ${asExpression(emitCsvSource(artifact.descriptor, validator), "csvParse")};`
+      );
+      return { binding, type };
+    }
+    if (artifact.kind === "ndjson-plan") {
+      if (artifact.descriptor.operation === "stringify") {
+        js.push(`${declaration} /*#__PURE__*/ ${emitNdjsonSource(artifact.descriptor)};`);
+        return { binding, type };
+      }
+
+      const inlined = inlineBindings(artifact.descriptor.bindingNames, artifact.descriptor.bindingValues);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "ndjson.parse",
+          reason: "NDJSON filters contain native, bound, or closure-dependent values",
+        });
+        return undefined;
+      }
+      const validator = emitValidatorBinding(binding, artifact.descriptor.schema, reportName, "ndjson.parse", {
+        is: false,
+        safeParse: true,
+        resolveDefaults: true,
+        materializeRuntimeTypes: true,
+      });
+      if (!validator) return undefined;
+      needsValidationError = true;
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(`  return ${emitNdjsonSource(artifact.descriptor, validator)};`);
+      js.push("})();");
+      return { binding, type };
     }
     if (artifact.kind === "access-plan") {
       js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitAccessSource(artifact.descriptor), "access")};`);
@@ -465,6 +559,10 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "patch-plan") return patchPlanType(artifact, typeNames);
     if (artifact.kind === "cache-key-plan")
       return `(value: ${namedType(artifact.schema, typeNames)}) => ${artifact.descriptor.form === "hash" ? "number" : "string"}`;
+    if (artifact.kind === "match-plan") return `(value: ${namedType(artifact.schema, typeNames)}) => unknown`;
+    if (artifact.kind === "migration-plan") return migrationPlanType(artifact, typeNames);
+    if (artifact.kind === "csv-plan") return csvPlanType(artifact, typeNames);
+    if (artifact.kind === "ndjson-plan") return ndjsonPlanType(artifact, typeNames);
     if (artifact.kind === "access-plan") return accessPlanType(artifact, typeNames);
     if (artifact.kind === "canonical-plan") {
       const canonicalValue = namedType(artifact.schema, typeNames);
@@ -2160,260 +2258,6 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
  * signature, so the generated module reads it back from the declaration
  * that produced it. That reference is type-only and disappears at build.
  */
-function declarationImportType(
-  outDir: string,
-  sourceFile: string,
-  name: string,
-  artifact: CompiledArtifact
-): string | undefined {
-  const reference = readBackType(outDir, sourceFile, artifact);
-
-  return reference?.(name);
-}
-
-function memberImportType(
-  outDir: string,
-  sourceFile: string,
-  group: string,
-  prop: string,
-  artifact: CompiledArtifact
-): string | undefined {
-  const reference = readBackType(outDir, sourceFile, artifact);
-
-  return reference?.(`${group}[${JSON.stringify(prop)}]`);
-}
-
-function readBackType(
-  outDir: string,
-  sourceFile: string,
-  artifact: CompiledArtifact
-): ((path: string) => string) | undefined {
-  if (
-    artifact.kind !== "query-plan" &&
-    artifact.kind !== "join-plan" &&
-    artifact.kind !== "query" &&
-    artifact.kind !== "mapper" &&
-    artifact.kind !== "watch"
-  ) {
-    return undefined;
-  }
-
-  const specifier = JSON.stringify(typeImportSpecifier(outDir, sourceFile));
-
-  // A query builder also carries its chain operators; only the call
-  // signature survives into the generated function.
-  return (path) =>
-    artifact.kind === "query-plan" || artifact.kind === "join-plan"
-      ? `__JitCall<typeof import(${specifier}).${path}>`
-      : `typeof import(${specifier}).${path}`;
-}
-
-function joinPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "join-plan" }>,
-  typeNames: TypeNames
-): string {
-  const left = namedType(artifact.plan.leftSchema, typeNames);
-  const right = namedType(artifact.plan.rightSchema, typeNames);
-  const leftRow = queryArtifactRowType(artifact.plan.leftSchema, typeNames);
-  const rightRow = queryArtifactRowType(artifact.plan.rightSchema, typeNames);
-  const result =
-    artifact.plan.kind === "semi" || artifact.plan.kind === "anti"
-      ? `${leftRow}[]`
-      : artifact.plan.kind === "left"
-        ? `{ readonly left: ${leftRow}; readonly right: ${rightRow} | undefined }[]`
-        : `{ readonly left: ${leftRow}; readonly right: ${rightRow} }[]`;
-  return `(left: ${left}, right: ${right}) => ${result}`;
-}
-
-function queryArtifactRowType(schema: ATS.AnyTypeSchema, typeNames: TypeNames): string {
-  const base = resolveWrappers(schema).base;
-  const row = base.type === TypeName.array ? (base.def as ATS.ElementDef).element : base;
-  return namedType(row, typeNames);
-}
-
-function queryPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "query-plan" }>,
-  typeNames: TypeNames
-): string {
-  const input = namedType(artifact.schema, typeNames);
-
-  switch (artifact.mode) {
-    case "iterator":
-      return `(value: ${input}) => IterableIterator<unknown>`;
-    case "async-iterator":
-      return `(value: ${input}) => AsyncIterableIterator<unknown>`;
-    case "visitor":
-      return `(value: ${input}, consume: (item: unknown) => void) => number`;
-    default:
-      return `(value: ${input}) => ${eagerQueryResultType(artifact, typeNames)}`;
-  }
-}
-
-/**
- * The eager result is an array only until a node reduces it. A terminal or an
- * aggregate answers with a scalar, and the generated signature has to say so —
- * it is the public boundary of an otherwise `@ts-nocheck` module.
- */
-function eagerQueryResultType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "query-plan" }>,
-  typeNames: TypeNames
-): string {
-  let terminal: QueryTerminalNode | undefined;
-  let aggregate: QueryAggregateNode | undefined;
-  let composite: QueryCompositeAggregateNode | undefined;
-  let select: readonly string[] | undefined;
-
-  for (const node of artifact.program.nodes as readonly QueryNode[]) {
-    if (node.kind === "terminal") terminal = node;
-    else if (node.kind === "aggregate") aggregate = node;
-    else if (node.kind === "aggregate:composite") composite = node;
-    else if (node.kind === "select:fields") select = node.fields;
-  }
-
-  if (composite) {
-    const fields = composite.fields.map(
-      (field) =>
-        `readonly ${JSON.stringify(field.name)}: ${field.op === "sum" || field.op === "count" ? "number" : "number | undefined"}`
-    );
-    const aggregates = `{ ${fields.join("; ")} }`;
-    // A grouped composite keeps the record shape and reduces the rows under it.
-    const grouped = (artifact.program.nodes as readonly QueryNode[]).some((node) => node.kind === "groupBy");
-
-    return grouped ? `Record<PropertyKey, ${aggregates}>` : aggregates;
-  }
-
-  if (terminal) {
-    if (terminal.op === "some" || terminal.op === "every") return "boolean";
-    if (terminal.op === "findIndex") return "number";
-
-    const row = queryRowType(artifact, typeNames);
-    const projected = select ? `Pick<${row}, ${select.map((field) => JSON.stringify(field)).join(" | ")}>` : row;
-
-    return `${projected} | undefined`;
-  }
-  if (aggregate) return aggregate.op === "sum" || aggregate.op === "count" ? "number" : "number | undefined";
-  return "unknown[]";
-}
-
-function queryRowType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "query-plan" }>,
-  typeNames: TypeNames
-): string {
-  const schema = resolveWrappers(artifact.schema).base;
-  const row =
-    schema.type === TypeName.array
-      ? (schema.def as ATS.ElementDef).element
-      : schema.type === TypeName.runtimeType
-        ? (schema.def as ATS.RuntimeTypeDef).innerType
-        : schema;
-
-  return namedType(row, typeNames);
-}
-
-function sortPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "sort-plan" }>,
-  typeNames: TypeNames
-): string {
-  const schema = resolveWrappers(artifact.schema).base;
-  const row =
-    schema.type === TypeName.array
-      ? (schema.def as ATS.ElementDef).element
-      : schema.type === TypeName.runtimeType
-        ? (schema.def as ATS.RuntimeTypeDef).innerType
-        : schema;
-  const value = namedType(row, typeNames);
-
-  return `((value: readonly ${value}[]) => ${value}[]) & { readonly compare: (left: ${value}, right: ${value}) => number; readonly inPlace: (value: ${value}[]) => ${value}[] }`;
-}
-
-function indexPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "index-plan" }>,
-  typeNames: TypeNames
-): string {
-  const schema = resolveWrappers(artifact.schema).base;
-  const row =
-    schema.type === TypeName.array
-      ? (schema.def as ATS.ElementDef).element
-      : schema.type === TypeName.runtimeType
-        ? (schema.def as ATS.RuntimeTypeDef).innerType
-        : schema;
-  const value = namedType(row, typeNames);
-  const leaf = artifact.descriptor.shape === "grouped" ? `${value}[]` : value;
-  // Compound keys nest one Map per level; key types stay `unknown` because the
-  // generated module is read back through the declaration, not the schema.
-  let index = `Map<unknown, ${leaf}>`;
-
-  for (let level = artifact.descriptor.keys.length - 1; level > 0; level--) {
-    index = `Map<unknown, ${index}>`;
-  }
-  return `((value: readonly ${value}[]) => ${index}) & { readonly cached: (value: readonly ${value}[]) => ${index} }`;
-}
-
-/**
- * A lookup answers one row or nothing. The key type comes from the row's own
- * declared field, so the generated declaration is as precise as the schema.
- */
-function lookupPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "lookup-plan" }>,
-  typeNames: TypeNames
-): string {
-  const schema = resolveWrappers(artifact.schema).base;
-  const row =
-    schema.type === TypeName.array
-      ? (schema.def as ATS.ElementDef).element
-      : schema.type === TypeName.runtimeType
-        ? (schema.def as ATS.RuntimeTypeDef).innerType
-        : schema;
-  const value = namedType(row, typeNames);
-  const key = `${value}[${JSON.stringify(artifact.lookup.key)}]`;
-
-  return `(value: readonly ${value}[], key: ${key}) => ${value} | undefined`;
-}
-
-/** The projection's own schema already describes the result, so it types itself. */
-function projectPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "project-plan" }>,
-  typeNames: TypeNames
-): string {
-  return `(value: ${namedType(artifact.schema, typeNames)}) => ${emitTypeScriptType(artifact.tree.schema, typeNames)}`;
-}
-
-/** The mask's width follows its representation, and `has` accepts only watched paths. */
-function changedPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "changed-plan" }>,
-  typeNames: TypeNames
-): string {
-  const value = namedType(artifact.schema, typeNames);
-  const mask = artifact.descriptor.representation === "bigint" ? "bigint" : "number";
-  const paths = artifact.descriptor.fields.map((field) => JSON.stringify(field.path)).join(" | ");
-
-  return `((left: ${value}, right: ${value}) => ${mask}) & { has(mask: ${mask}, path: ${paths}): boolean; readonly fields: readonly (${paths})[] }`;
-}
-
-function patchPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "patch-plan" }>,
-  typeNames: TypeNames
-): string {
-  const value = namedType(artifact.schema, typeNames);
-
-  return artifact.mode === "merge"
-    ? `(value: ${value}, patch: unknown) => ${value}`
-    : `(value: ${value}, operations: readonly { readonly op: string; readonly path: string; readonly value?: unknown; readonly from?: string }[]) => ${value}`;
-}
-
-/** Actions are literals, so the generated ability only admits ones a rule declared. */
-function accessPlanType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "access-plan" }>,
-  typeNames: TypeNames
-): string {
-  const subject = namedType(artifact.schema, typeNames);
-  const actor = artifact.descriptor.actor === undefined ? "unknown" : namedType(artifact.descriptor.actor, typeNames);
-  const actions = artifact.descriptor.actions.map((action) => JSON.stringify(action)).join(" | ") || "never";
-  const check = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => boolean`;
-
-  return `(actor: ${actor}) => { can: ${check}; cannot: ${check} }`;
-}
-
 function moduleNameFromSource(sourceFile: string): string {
   const rawName = basename(sourceFile)
     .replace(/\.jit\.(ts|mts|cts|js|mjs|cjs)$/, "")
@@ -2448,131 +2292,6 @@ function tryEmit<TValue>(
     });
     return undefined;
   }
-}
-
-type TypeNames = ReadonlyMap<ATS.AnyTypeSchema, string> | undefined;
-
-/** A declared schema keeps its name; anything else is inlined structurally. */
-function namedType(schema: ATS.AnyTypeSchema | undefined, typeNames: TypeNames, fallback = "unknown"): string {
-  if (!schema) return fallback;
-  return typeNames?.get(schema) ?? emitTypeScriptType(schema, typeNames);
-}
-
-function standaloneType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "validator" }>,
-  typeNames: TypeNames
-): string {
-  return validatorType(artifact.op, namedType(artifact.schema, typeNames));
-}
-
-function validatorType(op: Extract<CompiledArtifact, { readonly kind: "validator" }>["op"], valueType: string): string {
-  switch (op) {
-    case "is":
-      return `(value: unknown) => value is ${valueType}`;
-    case "parse":
-      return `(value: unknown) => ${valueType}`;
-    case "safeParse":
-      return `(value: unknown) => { readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`;
-    case "parseAsync":
-      return `(value: unknown) => Promise<${valueType}>`;
-    case "safeParseAsync":
-      return `(value: unknown) => Promise<{ readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }>`;
-  }
-}
-
-function operationType(
-  artifact: Extract<CompiledArtifact, { readonly kind: "operation" }>,
-  typeNames: TypeNames
-): string {
-  return operationSignature(artifact.op, namedType(artifact.schema, typeNames));
-}
-
-function operationSignature(
-  op: Extract<CompiledArtifact, { readonly kind: "operation" }>["op"],
-  valueType: string
-): string {
-  switch (op) {
-    case "hash":
-      return `(value: ${valueType}) => number`;
-    case "equal":
-      return `(left: ${valueType}, right: ${valueType}) => boolean`;
-    case "clone":
-      return `(value: ${valueType}) => ${valueType}`;
-    case "diff":
-      return `(left: ${valueType}, right: ${valueType}) => readonly { readonly type: "add" | "remove" | "update"; readonly path: readonly PropertyKey[]; readonly value?: unknown }[]`;
-    case "mask":
-    case "sanitize":
-      return `(value: ${valueType}) => ${valueType}`;
-    case "stringify":
-      return `(value: ${valueType}) => string`;
-    case "fromJSON":
-      return `(json: string) => ${valueType}`;
-    case "format":
-      return `(value: string) => string`;
-    case "codec":
-      return `{ readonly encode: (value: ${valueType}) => Uint8Array; readonly encodeInto: (value: ${valueType}, target: Uint8Array) => number; readonly decode: (bytes: Uint8Array | ArrayBuffer) => ${valueType} }`;
-    case "jsonSchema":
-      return "{ readonly [key: string]: unknown }";
-    case "mock":
-      return `(options?: { readonly seed?: number }) => ${valueType}`;
-    case "update":
-      // The patch is a deep-partial applied at run time, so it stays loose
-      // here rather than restating the whole shape a second time.
-      return `(value: ${valueType}, patch: unknown) => ${valueType}`;
-  }
-}
-
-function executionPlanType(plan: ExecutionPlan, typeNames: TypeNames): string {
-  const valueType = namedType(plan.schema, typeNames);
-  const last = plan.stages[plan.stages.length - 1];
-  const operation = plan.stages.find((stage) => stage.kind === "operation");
-  const map = plan.stages.find((stage) => stage.kind === "map");
-  const query = plan.stages.find((stage) => stage.kind === "query");
-  const aggregate = plan.stages.find((stage) => stage.kind === "aggregate");
-  const hasJsonDecode = plan.stages.some((stage) => stage.kind === "json.decode");
-  const hasBinaryDecode = plan.stages.some((stage) => stage.kind === "binary.decode");
-  const valueSource = plan.stages.find((stage) => stage.kind === "value");
-
-  if (operation?.kind === "operation") return operationSignature(operation.operation, valueType);
-
-  if (last?.kind === "validate") {
-    if (last.operation === "parse" && hasJsonDecode) return `(json: string) => ${valueType}`;
-    if (last.operation === "parse" && hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
-    return validatorType(last.operation === "issues" ? "safeParse" : last.operation, valueType);
-  }
-
-  const inputType = hasJsonDecode
-    ? "string"
-    : hasBinaryDecode
-      ? "Uint8Array | ArrayBuffer"
-      : valueSource?.kind === "value" && valueSource.schema
-        ? namedType(valueSource.schema, typeNames)
-        : map?.kind === "map"
-          ? map.many
-            ? `readonly ${namedType(map.source, typeNames)}[]`
-            : namedType(map.source, typeNames)
-          : query?.kind === "query"
-            ? namedType(query.source, typeNames)
-            : valueType;
-
-  if (last?.kind === "json.encode") {
-    return last.mode === "chunks"
-      ? `(value: ${inputType}) => IterableIterator<string>`
-      : `(value: ${inputType}) => string`;
-  }
-  if (last?.kind === "binary.encode") return `(value: ${inputType}) => Uint8Array`;
-  if (aggregate?.kind === "aggregate") {
-    const output = aggregate.operation === "count" || aggregate.operation === "sum" ? "number" : "number | undefined";
-    return `(value: ${inputType}) => ${output}`;
-  }
-  if (hasJsonDecode) return `(json: string) => ${valueType}`;
-  if (hasBinaryDecode) return `(bytes: Uint8Array | ArrayBuffer) => ${valueType}`;
-  if (map?.kind === "map") return `(value: ${inputType}) => ${valueType}`;
-  if (query?.kind === "query") return `(value: ${inputType}) => ${valueType}`;
-  if (plan.stages.some((stage) => stage.kind === "transform" || stage.kind === "update" || stage.kind === "security")) {
-    return `(value: ${inputType}) => ${valueType}`;
-  }
-  return "unknown";
 }
 
 /**
@@ -2624,7 +2343,7 @@ function inlineCodecBindings(names: readonly string[], values: readonly unknown[
 
 function serializeBindingValue(value: unknown): string | undefined {
   if (value instanceof RegExp) return String(value);
-  if (typeof value === "function") return serializeBindingFunction(value);
+  if (typeof value === "function") return serializeCallback(value);
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
@@ -2742,351 +2461,6 @@ function asExpression(source: string, entry: string): string {
   if (declarations <= 1) return `(${source})`;
 
   return `/*#__PURE__*/ (() => {\n${source}\nreturn ${entry};\n})()`;
-}
-
-function serializeBindingFunction(value: Function): string | undefined {
-  let source = Function.prototype.toString.call(value).trim();
-
-  // Native and bound functions do not expose reconstructible source.
-  if (source.includes("[native code]") || source.startsWith("function bound ")) return undefined;
-
-  // Function#toString represents object methods without the `function`
-  // keyword. Normalize those forms into standalone function expressions.
-  if (!isFunctionExpressionSource(source) && !isArrowFunctionSource(source)) {
-    source = normalizeMethodSource(source);
-  }
-
-  if (source === "") return undefined;
-
-  try {
-    // Syntax validation happens only in the build-time compilation path.
-    Function(`return (${source});`);
-  } catch {
-    return undefined;
-  }
-
-  if (hasUnsupportedClosureReferences(source)) return undefined;
-
-  return `(${source})`;
-}
-
-const CALLBACK_KEYWORDS = new Set([
-  "as",
-  "async",
-  "await",
-  "break",
-  "case",
-  "catch",
-  "class",
-  "const",
-  "continue",
-  "debugger",
-  "default",
-  "delete",
-  "do",
-  "else",
-  "export",
-  "extends",
-  "false",
-  "finally",
-  "for",
-  "from",
-  "function",
-  "get",
-  "if",
-  "import",
-  "in",
-  "instanceof",
-  "let",
-  "new",
-  "null",
-  "of",
-  "return",
-  "set",
-  "static",
-  "switch",
-  "throw",
-  "true",
-  "try",
-  "typeof",
-  "undefined",
-  "var",
-  "void",
-  "while",
-  "with",
-  "yield",
-]);
-
-const CALLBACK_GLOBALS = new Set([
-  "AggregateError",
-  "Array",
-  "ArrayBuffer",
-  "atob",
-  "Atomics",
-  "BigInt",
-  "BigInt64Array",
-  "BigUint64Array",
-  "Boolean",
-  "btoa",
-  "clearInterval",
-  "clearTimeout",
-  "console",
-  "crypto",
-  "DataView",
-  "Date",
-  "decodeURI",
-  "decodeURIComponent",
-  "encodeURI",
-  "encodeURIComponent",
-  "Error",
-  "EvalError",
-  "FinalizationRegistry",
-  "Float32Array",
-  "Float64Array",
-  "Infinity",
-  "Int8Array",
-  "Int16Array",
-  "Int32Array",
-  "Intl",
-  "JSON",
-  "Map",
-  "Math",
-  "NaN",
-  "Number",
-  "Object",
-  "parseFloat",
-  "parseInt",
-  "performance",
-  "Promise",
-  "queueMicrotask",
-  "RangeError",
-  "ReferenceError",
-  "Reflect",
-  "RegExp",
-  "Set",
-  "setInterval",
-  "setTimeout",
-  "SharedArrayBuffer",
-  "String",
-  "structuredClone",
-  "Symbol",
-  "SyntaxError",
-  "TextDecoder",
-  "TextEncoder",
-  "TypeError",
-  "Uint8Array",
-  "Uint8ClampedArray",
-  "Uint16Array",
-  "Uint32Array",
-  "URIError",
-  "URL",
-  "URLSearchParams",
-  "WeakMap",
-  "WeakRef",
-  "WeakSet",
-]);
-
-/**
- * Conservative free-identifier check for serialized callbacks. AOT cannot
- * reconstruct a JavaScript closure, so any non-local identifier must be a
- * stable ECMAScript/Web global. Rejecting an unusual callback is preferable
- * to emitting a module that fails later with a hidden ReferenceError.
- */
-function hasUnsupportedClosureReferences(source: string): boolean {
-  if (/\b(?:this|super)\b/.test(source)) return true;
-
-  const code = maskCallbackLiterals(source);
-  const locals = new Set<string>(["arguments"]);
-
-  for (const match of code.matchAll(/\bfunction(?:\s*\*)?\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^()]*)\)/g)) {
-    if ((match[2] ?? "").includes("=")) return true;
-    if (match[1]) locals.add(match[1]);
-    collectBindingIdentifiers(match[2] ?? "", locals);
-  }
-  for (const match of code.matchAll(/(?:\(([^()]*)\)|([A-Za-z_$][A-Za-z0-9_$]*))\s*=>/g)) {
-    if ((match[1] ?? "").includes("=")) return true;
-    collectBindingIdentifiers(match[1] ?? match[2] ?? "", locals);
-  }
-  for (const match of code.matchAll(/\b(?:const|let|var|class|function)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
-    locals.add(match[1]);
-  }
-  for (const match of code.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
-    locals.add(match[1]);
-  }
-
-  for (const match of code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
-    const identifier = match[0];
-    const start = match.index;
-    const previous = previousNonWhitespace(code, start - 1);
-    const next = nextNonWhitespace(code, start + identifier.length);
-
-    if (previous === "." || next === ":") continue;
-    if (CALLBACK_KEYWORDS.has(identifier) || CALLBACK_GLOBALS.has(identifier) || locals.has(identifier)) continue;
-    return true;
-  }
-
-  return false;
-}
-
-function collectBindingIdentifiers(source: string, target: Set<string>): void {
-  for (const match of source.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) target.add(match[0]);
-}
-
-function previousNonWhitespace(source: string, index: number): string | undefined {
-  while (index >= 0 && /\s/.test(source[index] ?? "")) index--;
-  return source[index];
-}
-
-function nextNonWhitespace(source: string, index: number): string | undefined {
-  while (index < source.length && /\s/.test(source[index] ?? "")) index++;
-  return source[index];
-}
-
-/** Masks comments and literal bodies while retaining `${...}` expressions. */
-function maskCallbackLiterals(source: string): string {
-  const output = source.split("");
-  const templateOuterDepths: (number | undefined)[] = [];
-  let state: "code" | "single" | "double" | "template" | "line" | "block" | "regex" = "code";
-  let expressionDepth: number | undefined;
-  let escaped = false;
-  let regexClass = false;
-
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index] ?? "";
-    const next = source[index + 1] ?? "";
-
-    if (state === "line") {
-      if (char === "\n") state = "code";
-      else output[index] = " ";
-      continue;
-    }
-    if (state === "block") {
-      output[index] = " ";
-      if (char === "*" && next === "/") {
-        output[++index] = " ";
-        state = "code";
-      }
-      continue;
-    }
-    if (state === "single" || state === "double") {
-      output[index] = " ";
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if ((state === "single" && char === "'") || (state === "double" && char === '"')) state = "code";
-      continue;
-    }
-    if (state === "regex") {
-      output[index] = " ";
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === "[") regexClass = true;
-      else if (char === "]") regexClass = false;
-      else if (char === "/" && !regexClass) {
-        while (/[A-Za-z]/.test(source[index + 1] ?? "")) output[++index] = " ";
-        state = "code";
-      }
-      continue;
-    }
-    if (state === "template") {
-      output[index] = " ";
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "`") {
-        expressionDepth = templateOuterDepths.pop();
-        state = "code";
-      } else if (char === "$" && next === "{") {
-        output[++index] = "{";
-        expressionDepth = 1;
-        state = "code";
-      }
-      continue;
-    }
-
-    if (expressionDepth !== undefined) {
-      if (char === "{") expressionDepth++;
-      else if (char === "}" && --expressionDepth === 0) {
-        output[index] = " ";
-        expressionDepth = undefined;
-        state = "template";
-        continue;
-      }
-    }
-    if (char === "/" && next === "/") {
-      output[index] = output[++index] = " ";
-      state = "line";
-    } else if (char === "/" && next === "*") {
-      output[index] = output[++index] = " ";
-      state = "block";
-    } else if (char === "'") {
-      output[index] = " ";
-      state = "single";
-    } else if (char === '"') {
-      output[index] = " ";
-      state = "double";
-    } else if (char === "`") {
-      output[index] = " ";
-      templateOuterDepths.push(expressionDepth);
-      expressionDepth = undefined;
-      state = "template";
-    } else if (char === "/" && startsRegexLiteral(output, index)) {
-      output[index] = " ";
-      regexClass = false;
-      state = "regex";
-    }
-  }
-
-  return output.join("");
-}
-
-function startsRegexLiteral(masked: readonly string[], index: number): boolean {
-  let cursor = index - 1;
-
-  while (cursor >= 0 && /\s/.test(masked[cursor] ?? "")) cursor--;
-  if (cursor < 0) return true;
-  const previous = masked[cursor] ?? "";
-
-  if ("([{:;,=!?&|+-*%^~<>".includes(previous)) return true;
-  const prefix = masked.slice(0, cursor + 1).join("");
-  return /\b(?:case|delete|in|instanceof|new|return|throw|typeof|void|yield)\s*$/.test(prefix);
-}
-
-function isFunctionExpressionSource(source: string): boolean {
-  return /^(?:async\s+)?function(?:\s*\*)?\b/.test(source);
-}
-
-function isArrowFunctionSource(source: string): boolean {
-  return /^(?:async\s+)?(?:[A-Za-z_$][A-Za-z0-9_$]*|\([^)]*\))\s*=>/.test(source);
-}
-
-function normalizeMethodSource(source: string): string {
-  const match = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(source);
-
-  if (!match) return "";
-
-  const asyncPrefix = match[1] ?? "";
-  const generator = match[2] ? "*" : "";
-  return `${asyncPrefix}function${generator} ${match[3]}${match[4]}`;
-}
-
-/**
- * Relative type-import path from generated TypeScript to a declaration file.
- * TypeScript resolves emitted `.js` specifiers back to source `.ts` files.
- */
-function typeImportSpecifier(outDir: string, sourceFile: string): string {
-  const relativePath = relative(
-    resolve(/* turbopackIgnore: true */ outDir),
-    resolve(/* turbopackIgnore: true */ sourceFile)
-  )
-    .split("\\")
-    .join("/");
-  const mapped = relativePath
-    .replace(/\.mts$/, ".mjs")
-    .replace(/\.cts$/, ".cjs")
-    .replace(/\.ts$/, ".js");
-
-  return mapped.startsWith(".") ? mapped : `./${mapped}`;
 }
 
 function resolveOutputLayout(format: AotOutputFormat): OutputLayout {

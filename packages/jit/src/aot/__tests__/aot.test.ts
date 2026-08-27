@@ -42,6 +42,42 @@ describe("JIT AOT generate", () => {
     expect(result.files).toEqual([join(outDir, "index.js")]);
   });
 
+  it("emits reconstructible match handlers as one standalone switch", async () => {
+    const Event = JIT.discriminatedUnion("type", [
+      JIT.object({ type: JIT.literal("created"), id: JIT.number() }),
+      JIT.object({ type: JIT.literal("deleted"), id: JIT.number() }),
+    ]);
+    const handle = JIT.match(Event)
+      .case("created", (event) => `created:${event.id}`)
+      .case("deleted", (event) => `deleted:${event.id}`)
+      .exhaustive();
+
+    const result = AOT.generate({ artifacts: { handle }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly handle: (event: { type: "created" | "deleted"; id: number }) => string;
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("switch (value.type)");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(generated.handle({ type: "created", id: 7 })).toBe("created:7");
+  });
+
+  it("reports a match handler that captures a closure instead of miscompiling it", () => {
+    const Event = JIT.discriminatedUnion("type", [JIT.object({ type: JIT.literal("created") })]);
+    const prefix = "created";
+    const handle = JIT.match(Event)
+      .case("created", () => prefix)
+      .exhaustive();
+
+    const result = AOT.generate({ artifacts: { handle }, outDir });
+
+    expect(result.skipped).toEqual([
+      expect.objectContaining({ operation: "match", reason: expect.stringContaining("closure-dependent") }),
+    ]);
+  });
+
   it("emits fromJSON as native parsing followed by specialized validation", async () => {
     const User = JIT.object({
       id: JIT.number().int32(),
@@ -398,7 +434,7 @@ describe("JIT AOT generate", () => {
     const Money = JIT.ddd.valueObject(
       JIT.object({
         amount: JIT.number(),
-        currency: JIT.enum(["BRL", "USD"] as const),
+        currency: JIT.enum(["BRL", "USD"]),
       }).hash("ordered")
     );
     const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
@@ -437,7 +473,7 @@ describe("JIT AOT generate", () => {
     const MoneyBase = JIT.ddd.valueObject.abstract(
       JIT.object({
         amount: JIT.number(),
-        currency: JIT.enum(["BRL", "USD"] as const),
+        currency: JIT.enum(["BRL", "USD"]),
       })
     );
     const result = AOT.generate({ artifacts: { MoneyBase }, outDir });
@@ -724,7 +760,7 @@ describe("JIT AOT generate", () => {
     const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({
         id: JIT.string().readonly(),
-        status: JIT.enum(["draft", "confirmed"] as const),
+        status: JIT.enum(["draft", "confirmed"]),
       }),
       { id: "id" }
     );
@@ -806,7 +842,7 @@ describe("JIT AOT generate", () => {
     const OrderBase = JIT.ddd.aggregateRoot(
       JIT.object({
         id: JIT.string().readonly().default("o_1"),
-        status: JIT.enum(["draft", "confirmed"] as const),
+        status: JIT.enum(["draft", "confirmed"]),
         shipping: JIT.object({ city: JIT.string(), country: JIT.string() }),
       }),
       { id: "id" }
@@ -1079,7 +1115,7 @@ describe("JIT AOT generate", () => {
   it("should preserve transform, update, and security stages in an import-free composed pipeline", async () => {
     const User = JIT.object({
       id: JIT.number().int32(),
-      role: JIT.enum(["admin", "member"] as const),
+      role: JIT.enum(["admin", "member"]),
       name: JIT.string(),
       email: JIT.string().pii("mask"),
       note: JIT.string().sanitize(),

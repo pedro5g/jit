@@ -1,4 +1,5 @@
 import { JIT } from "../../packages/jit/src/index.js";
+import { loadAotArtifacts } from "../shared/aot.js";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -31,6 +32,7 @@ const scalarSum = filtered().sum("total");
 const scalarAvg = filtered().avg("total");
 const scalarMin = filtered().min("total");
 const scalarMax = filtered().max("total");
+const compositeAot = await loadAotArtifacts<{ readonly composite: typeof composite }>({ composite });
 
 registerScenario({
   op: "cqrs-aggregate",
@@ -38,6 +40,7 @@ registerScenario({
   args: [rows],
   jit: composite,
   competitors: [
+    { name: "JIT AOT", fn: compositeAot.composite },
     {
       name: "five separate JIT aggregates",
       fn: (value: Order[]) => ({
@@ -98,6 +101,7 @@ const twoField = JIT.cqrs
   .query(Orders)
   .where((query) => query.gt("total", 10))
   .aggregate({ count: JIT.cqrs.count(), revenue: JIT.cqrs.sum("total") });
+const twoFieldAot = await loadAotArtifacts<{ readonly twoField: typeof twoField }>({ twoField });
 
 registerScenario({
   op: "cqrs-aggregate",
@@ -105,6 +109,7 @@ registerScenario({
   args: [rows],
   jit: twoField,
   competitors: [
+    { name: "JIT AOT", fn: twoFieldAot.twoField },
     {
       name: "two separate JIT aggregates",
       fn: (value: Order[]) => ({ count: scalarCount(value), revenue: scalarSum(value) }),
@@ -145,6 +150,10 @@ const perCustomerAvg = JIT.cqrs
     average: JIT.cqrs.avg("total"),
   });
 const grouped = JIT.cqrs.query(Orders).groupBy("customerId");
+const groupedAot = await loadAotArtifacts<{
+  readonly perCustomer: typeof perCustomer;
+  readonly perCustomerAvg: typeof perCustomerAvg;
+}>({ perCustomer, perCustomerAvg });
 
 registerScenario({
   op: "cqrs-aggregate",
@@ -152,6 +161,7 @@ registerScenario({
   args: [rows],
   jit: perCustomer,
   competitors: [
+    { name: "JIT AOT", fn: groupedAot.perCustomer },
     {
       name: "JIT groupBy then reduce",
       fn: (value: Order[]) =>
@@ -197,6 +207,7 @@ registerScenario({
   args: [rows],
   jit: perCustomerAvg,
   competitors: [
+    { name: "JIT AOT", fn: groupedAot.perCustomerAvg },
     {
       name: "JIT groupBy then reduce",
       fn: (value: Order[]) =>

@@ -53,7 +53,7 @@ Validates a real, non-invalid native `Date`. This is not an ISO string; use
 ## enum
 
 ```ts
-const Role = JIT.enum(["admin", "member"] as const);
+const Role = JIT.enum(["admin", "member"]);
 ```
 
 Accepts a readonly value tuple or enum-like object and infers the value union.

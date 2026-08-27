@@ -1,4 +1,5 @@
 import { JIT } from "../../packages/jit/src/index.js";
+import { loadAotArtifacts } from "../shared/aot.js";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -29,6 +30,11 @@ const binary = JIT.cqrs
   .params({ id: JIT.number() })
   .where((query, params) => query.eq("id", params.id))
   .first();
+const aot = await loadAotArtifacts<{
+  readonly scan: typeof scan;
+  readonly indexed: typeof indexed;
+  readonly binary: typeof binary;
+}>({ scan, indexed, binary });
 
 for (const size of [1_000, 10_000, 100_000]) {
   const rows: User[] = Array.from({ length: size }, (_, index) => ({
@@ -47,8 +53,11 @@ for (const size of [1_000, 10_000, 100_000]) {
     args: [rows, { id: target }],
     jit: indexed,
     competitors: [
+      { name: "JIT AOT CachedIndexLookup", fn: aot.indexed },
       { name: "JIT EarlyExitScan", fn: (value: User[], params: { id: number }) => scan(value, params) },
+      { name: "JIT AOT EarlyExitScan", fn: aot.scan },
       { name: "JIT BinarySearch", fn: (value: User[], params: { id: number }) => binary(value, params) },
+      { name: "JIT AOT BinarySearch", fn: aot.binary },
       {
         name: "idiomatic find",
         fn: (value: User[], params: { id: number }) => value.find((row) => row.id === params.id),
@@ -75,8 +84,11 @@ registerScenario({
   args: [coldRows],
   jit: (value: User[]) => indexed(value.slice(), { id: 5_000 }),
   competitors: [
+    { name: "JIT AOT CachedIndexLookup", fn: (value: User[]) => aot.indexed(value.slice(), { id: 5_000 }) },
     { name: "JIT EarlyExitScan", fn: (value: User[]) => scan(value.slice(), { id: 5_000 }) },
+    { name: "JIT AOT EarlyExitScan", fn: (value: User[]) => aot.scan(value.slice(), { id: 5_000 }) },
     { name: "JIT BinarySearch", fn: (value: User[]) => binary(value.slice(), { id: 5_000 }) },
+    { name: "JIT AOT BinarySearch", fn: (value: User[]) => aot.binary(value.slice(), { id: 5_000 }) },
   ],
 });
 

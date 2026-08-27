@@ -1,4 +1,5 @@
 import { JIT } from "../../packages/jit/src/index.js";
+import { loadAotArtifacts } from "../shared/aot.js";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -23,6 +24,10 @@ const rows: Row[] = Array.from({ length: 10_000 }, (_, index) => ({
 
 const keyString = JIT.cacheKey.string(Row).select("tenantId", "id", "version");
 const keyHash = JIT.cacheKey.hash(Row).select("tenantId", "id", "version");
+const aot = await loadAotArtifacts<{
+  readonly keyString: typeof keyString;
+  readonly keyHash: typeof keyHash;
+}>({ keyString, keyHash });
 
 /** Keys are retained, which is what a cache does with them. */
 const sweep =
@@ -39,6 +44,7 @@ registerScenario({
   args: [rows],
   jit: sweep(keyString),
   competitors: [
+    { name: "JIT AOT", fn: sweep(aot.keyString) },
     {
       name: "JSON.stringify of a picked object",
       fn: sweep((row) => JSON.stringify({ tenantId: row.tenantId, id: row.id, version: row.version })),
@@ -60,6 +66,7 @@ registerScenario({
   args: [rows],
   jit: sweep(keyHash),
   competitors: [
+    { name: "JIT AOT", fn: sweep(aot.keyHash) },
     {
       name: "string key",
       fn: sweep(keyString),

@@ -42,7 +42,11 @@ export type OperationDescriptor =
         | "patch"
         | "cacheKey"
         | "canonical"
-        | "access";
+        | "access"
+        | "match"
+        | "migrate"
+        | "csv"
+        | "ndjson";
     }
   | { readonly kind: "query"; readonly params?: readonly string[] }
   | { readonly kind: "transform" };

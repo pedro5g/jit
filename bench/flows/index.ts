@@ -10,7 +10,7 @@ const User = JIT.object({
   id: JIT.number().int().positive(),
   name: JIT.string().min(2),
   email: JIT.string().email(),
-  role: JIT.enum(["admin", "member", "blocked"] as const),
+  role: JIT.enum(["admin", "member", "blocked"]),
   active: JIT.boolean(),
   score: JIT.number(),
 });
