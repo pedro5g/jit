@@ -3,6 +3,7 @@ import type {
   QueryCollectorNode,
   QueryCompositeAggregateNode,
   QueryConditionNode,
+  QueryDistinctNode,
   QueryFilterNode,
   QueryMutationNode,
   QueryNode,
@@ -18,7 +19,10 @@ import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { getCachedIndex } from "../runtime/index/index-cache.js";
+import { resolveDistinctDescriptor, wrapDistinctSource } from "./distinct.js";
 import { emitQuery } from "./emitter/emit-query.js";
+import { compileEqual } from "./equal.js";
+import { compileUncachedHash } from "./hash.js";
 import { buildQueryIR } from "./ir/builders/build-query-ir.js";
 import { optimizeQueryIR } from "./ir/optimizer/optimize-ir.js";
 import {
@@ -54,6 +58,7 @@ type ElementOf<T> = T extends readonly (infer TElement)[]
 export interface QueryTarget {
   readonly kind: QueryCollectionKind;
   readonly objectSchema: QueryObjectSchema;
+  readonly schema: ATS.AnyTypeSchema;
 }
 
 /**
@@ -80,6 +85,7 @@ interface QueryPlan {
   readonly filters: readonly QueryFilterNode[];
   readonly selects: readonly QuerySelectFieldsNode[];
   readonly uniques: readonly QueryUniqueNode[];
+  readonly distincts: readonly QueryDistinctNode[];
   readonly collectors: readonly QueryCollectorNode[];
   readonly orderBys: readonly QueryOrderByNode[];
   readonly aggregates: readonly QueryAggregateNode[];
@@ -93,6 +99,7 @@ export interface OptimizedQueryPlan {
   readonly filters: readonly QueryFilterNode[];
   readonly select: QuerySelectFieldsNode | undefined;
   readonly unique: QueryUniqueNode | undefined;
+  readonly distinct: QueryDistinctNode | undefined;
   readonly collector: QueryCollectorNode | undefined;
   readonly orderBy: QueryOrderByNode | undefined;
   readonly aggregate: QueryAggregateNode | undefined;
@@ -124,7 +131,8 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
 
   if (keyed) return keyed;
 
-  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
+  const source = emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
+  return wrapDistinctSource(source, resolvePlanDistinct(schema, plan));
 }
 
 /**
@@ -162,6 +170,9 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
   options?: CompileCacheOptions
 ): QueryCompiled<ATS.TypeofSchema<TSchema>, TOutput> {
   const bindingNames = program.bindings.map((_, index) => `__q${index}`);
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+  const descriptor = resolvePlanDistinct(schema, plan);
+  const structural = descriptor?.strategy === "structural-hash";
   // Bindings are user values, so only the pure source template is cached;
   // every compile re-applies its own bindings to a fresh closure.
   const template = getCompileCached(
@@ -172,15 +183,26 @@ export function compileQuery<TSchema extends ATS.AnyTypeSchema, TOutput = Elemen
 
       return {
         source,
-        create: globalThis.Function(RUNTIME_INDEX_BINDING, ...bindingNames, `return ${source};`),
+        create: globalThis.Function(
+          RUNTIME_INDEX_BINDING,
+          ...(structural ? ["__distinctHash", "__distinctEqual"] : []),
+          ...bindingNames,
+          `return ${source};`
+        ),
       };
     },
     options
   );
-  const compiled = template.create(getCachedIndex, ...program.bindings) as QueryCompiled<
-    ATS.TypeofSchema<TSchema>,
-    TOutput
-  >;
+  const compiled = template.create(
+    getCachedIndex,
+    ...(structural
+      ? [
+          compileUncachedHash(expectCollectionObjectSchema(schema, "query distinct").objectSchema),
+          compileEqual(expectCollectionObjectSchema(schema, "query distinct").objectSchema),
+        ]
+      : []),
+    ...program.bindings
+  ) as QueryCompiled<ATS.TypeofSchema<TSchema>, TOutput>;
 
   // Lets AOT re-emit this exact query when aggregated via JIT.compile extras.
   registerArtifact(compiled as object, {
@@ -208,6 +230,8 @@ function serializeQueryNode(node: QueryNode): string {
       return `s(${node.fields.join(",")})`;
     case "unique":
       return `u(${node.key})`;
+    case "distinct":
+      return `D(${node.fields.join(",")})`;
     case "keyed":
       return `k(${node.key})`;
     case "groupBy":
@@ -257,6 +281,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
   const filters: QueryFilterNode[] = [];
   const selects: QuerySelectFieldsNode[] = [];
   const uniques: QueryUniqueNode[] = [];
+  const distincts: QueryDistinctNode[] = [];
   const collectors: QueryCollectorNode[] = [];
   const orderBys: QueryOrderByNode[] = [];
   const aggregates: QueryAggregateNode[] = [];
@@ -274,6 +299,9 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
         break;
       case "unique":
         uniques[uniques.length] = node;
+        break;
+      case "distinct":
+        distincts[distincts.length] = node;
         break;
       case "keyed":
       case "groupBy":
@@ -302,6 +330,7 @@ function createQueryPlan(nodes: readonly QueryNode[]): QueryPlan {
     filters,
     selects,
     uniques,
+    distincts,
     collectors,
     orderBys,
     aggregates,
@@ -316,6 +345,7 @@ function optimizeQueryPlan(plan: QueryPlan): OptimizedQueryPlan {
     filters: plan.filters,
     select: last(plan.selects),
     unique: last(plan.uniques),
+    distinct: last(plan.distincts),
     collector: last(plan.collectors),
     orderBy: last(plan.orderBys),
     aggregate: last(plan.aggregates),
@@ -332,6 +362,10 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
 
   if (plan.select) validateObjectKeys(schema, plan.select.fields, "query select");
   if (plan.unique) validateObjectKeys(schema, [plan.unique.key], "query unique");
+  if (plan.distinct) validateObjectKeys(schema, plan.distinct.fields, "query distinct");
+  if (plan.unique && plan.distinct) {
+    throw new JITError("INVALID_QUERY", "query unique and distinct cannot be combined in v1");
+  }
   if (plan.collector) validateObjectKeys(schema, [plan.collector.key], `query ${plan.collector.kind}`);
   if (plan.orderBy) validateObjectKeys(schema, [plan.orderBy.key], "query orderBy");
 
@@ -393,10 +427,10 @@ function validateQueryPlan(schema: QueryObjectSchema, plan: OptimizedQueryPlan):
     // A terminal answers from the loop. Anything that has to see the whole
     // result first — ordering, grouping, aggregating, mutating — would defeat
     // the early exit that is the entire reason these exist.
-    if (plan.collector || plan.orderBy || plan.aggregate || plan.mutation || plan.unique) {
+    if (plan.collector || plan.orderBy || plan.aggregate || plan.mutation || plan.unique || plan.distinct) {
       throw new JITError(
         "INVALID_QUERY",
-        `query ${plan.terminal.op} cannot be combined with unique/keyed/groupBy/orderBy/aggregates/delete/update in v1`
+        `query ${plan.terminal.op} cannot be combined with unique/distinct/keyed/groupBy/orderBy/aggregates/delete/update in v1`
       );
     }
 
@@ -442,7 +476,12 @@ export function expectCollectionObjectSchema(schema: ATS.AnyTypeSchema, compiler
   return {
     kind: resolved.type as QueryCollectionKind,
     objectSchema: element as QueryObjectSchema,
+    schema,
   };
+}
+
+function resolvePlanDistinct(schema: ATS.AnyTypeSchema, plan: OptimizedQueryPlan) {
+  return plan.distinct ? resolveDistinctDescriptor(schema, plan.distinct) : undefined;
 }
 
 function validateObjectKeys(schema: QueryObjectSchema, keys: readonly string[], compilerName: string): void {

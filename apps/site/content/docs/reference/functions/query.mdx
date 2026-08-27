@@ -46,7 +46,7 @@ builder also exposes `q.constant(value)`.
 ## Operators
 
 Incremental operators include `filter`, `select`, `flatMap`, `take`, `drop`,
-`takeWhile`, `dropWhile`, `unique`, `chunk`, `window`, `pairwise`, `scan` and
+`takeWhile`, `dropWhile`, `unique`, `distinct`, `chunk`, `window`, `pairwise`, `scan` and
 `groupAdjacentBy`. Global operators such as `orderBy`, arbitrary `groupBy` and
 some keyed outputs require materialization.
 
@@ -60,15 +60,20 @@ const deactivateAdmins = JIT.query(Users)
 
 Aggregates include `count`, `sum`, `avg`, `min` and `max`.
 
+`distinct()` keeps the first structurally equal complete row.
+`distinct("tenantId", "id")` keeps the first compound key without allocating a
+tuple or string key per item. Matching `.ordered(key)` facts select adjacent
+comparison and avoid the key table.
+
 ## Output backends
 
-| Backend                | Result               | Best use                                    |
-| ---------------------- | -------------------- | ------------------------------------------- |
-| the builder itself     | eager result         | normal arrays and aggregates                |
-| `.to.iterator()`       | generator            | early stop and pull consumption             |
-| `.to.asyncIterator()`  | async generator      | async pipelines                             |
-| `.to.visitor()`        | direct callback sink | highest throughput without iterator objects |
-| `.lazy()`              | generator            | generator-first chain                       |
+| Backend               | Result               | Best use                                    |
+| --------------------- | -------------------- | ------------------------------------------- |
+| the builder itself    | eager result         | normal arrays and aggregates                |
+| `.to.iterator()`      | generator            | early stop and pull consumption             |
+| `.to.asyncIterator()` | async generator      | async pipelines                             |
+| `.to.visitor()`       | direct callback sink | highest throughput without iterator objects |
+| `.lazy()`             | generator            | generator-first chain                       |
 
 ```ts
 const visit = JIT.query(Users)
@@ -96,7 +101,12 @@ const summary = JIT.cqrs
     average: JIT.cqrs.avg("total"),
   });
 
-console.log(summary([{ id: 1, total: 50 }, { id: 2, total: 5 }]));
+console.log(
+  summary([
+    { id: 1, total: 50 },
+    { id: 2, total: 5 },
+  ]),
+);
 ```
 
 The reductions are `JIT.cqrs.count()`, `.sum(key)`, `.avg(key)`, `.min(key)`
@@ -127,7 +137,7 @@ console.log(
     { customerId: "c1", total: 100 },
     { customerId: "c1", total: 50 },
     { customerId: "c2", total: 25 },
-  ])
+  ]),
 );
 ```
 
@@ -138,19 +148,46 @@ groups — so ask for `count` and `sum` if that pass matters.
 
 `keyed` is rejected: one row per key leaves nothing to reduce.
 
+## Joins
+
+`JIT.cqrs.query(Left).join(Right, kind).on(leftKey, rightKey)` compiles an
+`inner`, `left`, `semi` or `anti` relation. The default kind is `inner`.
+
+```ts
+const Order = JIT.object({ id: JIT.number(), customerId: JIT.string() });
+const Customer = JIT.object({ id: JIT.string(), name: JIT.string() });
+
+const joinOrders = JIT.cqrs
+  .query(Order)
+  .join(JIT.array(Customer).keyed("id"))
+  .on("customerId", "id");
+
+console.log(
+  joinOrders([{ id: 1, customerId: "c1" }], [{ id: "c1", name: "Ada" }]),
+);
+```
+
+The caller never names an algorithm. A keyed right collection selects an
+indexed join and reuses its per-array cache; otherwise the generated function
+builds one right-side hash index. Compatible ordered facts on both inputs select
+a merge join with no index allocation. `join.explain()` reports that private
+choice, while `join["~query"]` carries only portable semantic data.
+
 ## Terminal sinks
 
 Four terminals answer from inside the loop instead of collecting a result.
 
-| Terminal      | Result                | Stops at                     |
-| ------------- | --------------------- | ---------------------------- |
-| `first()`     | the row, or undefined | the first matching row       |
-| `findIndex()` | its index, or `-1`    | the first matching row       |
-| `some()`      | boolean               | the first matching row       |
-| `every()`     | boolean               | the first row that does not  |
+| Terminal      | Result                | Stops at                    |
+| ------------- | --------------------- | --------------------------- |
+| `first()`     | the row, or undefined | the first matching row      |
+| `findIndex()` | its index, or `-1`    | the first matching row      |
+| `some()`      | boolean               | the first matching row      |
+| `every()`     | boolean               | the first row that does not |
 
 ```ts
-const Users = JIT.array(JIT.object({ id: JIT.number(), active: JIT.boolean() }));
+const Users = JIT.array(
+  JIT.object({ id: JIT.number(), active: JIT.boolean() }),
+);
 const users = [
   { id: 1, active: false },
   { id: 2, active: true },
@@ -178,7 +215,9 @@ A terminal has to answer in one pass, so it cannot be combined with `unique`,
 and rejected before the scalar terminals, where no row is built.
 
 ```ts
-const Users = JIT.array(JIT.object({ id: JIT.number(), active: JIT.boolean() }));
+const Users = JIT.array(
+  JIT.object({ id: JIT.number(), active: JIT.boolean() }),
+);
 
 try {
   JIT.cqrs.query(Users).orderBy("id").first()([]);
@@ -225,11 +264,11 @@ console.log(ordered.explain().physical?.strategy);
 console.log(plain.explain().physical?.strategy);
 ```
 
-| Facts on the collection             | Strategy            | Cost       |
-| ----------------------------------- | ------------------- | ---------- |
-| `.keyed(key)`                       | `CachedIndexLookup` | `O(1)`     |
-| `.ordered(key, dir)` + unique       | `BinarySearch`      | `O(log n)` |
-| none of the above                   | `EarlyExitScan`     | `O(k)`     |
+| Facts on the collection       | Strategy            | Cost       |
+| ----------------------------- | ------------------- | ---------- |
+| `.keyed(key)`                 | `CachedIndexLookup` | `O(1)`     |
+| `.ordered(key, dir)` + unique | `BinarySearch`      | `O(log n)` |
+| none of the above             | `EarlyExitScan`     | `O(k)`     |
 
 Only a single `eq` filter ending in `first()` or `some()` is lifted off a scan.
 An index maps a key to a row rather than a position, so `findIndex()` stays a
@@ -249,6 +288,7 @@ are available on that builder.
 
 More operator examples are in [queries](/docs/runtime/queries) and [lazy
 execution](/docs/runtime/lazy-execution).
+
 ## CQRS
 
 `JIT.cqrs.query(Model)` is a semantic facade over the existing compiled query

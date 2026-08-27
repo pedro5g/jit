@@ -11,6 +11,7 @@ import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
  */
 
 export type ScalarKeyKind = "direct" | "numeric" | "date";
+export type ScalarKeyDomain = "string" | "number" | "bigint" | "boolean" | "date";
 
 export type RowObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
 
@@ -86,6 +87,42 @@ export function resolveScalarKeyKind(schema: ATS.AnyTypeSchema, key: string, ope
     `${operation} key ${JSON.stringify(key)} must resolve to a statically comparable scalar`,
     { path: [key] }
   );
+}
+
+/** Exact equality domain used to reject joins whose physical Map keys can never match. */
+export function resolveScalarKeyDomain(schema: ATS.AnyTypeSchema, key: string, operation: string): ScalarKeyDomain {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers((base.def as ATS.RuntimeTypeDef).innerType).base;
+  }
+  if (base.type === TypeName.string) return "string";
+  if (base.type === TypeName.number || base.type === TypeName.int || base.type === TypeName.nan) return "number";
+  if (base.type === TypeName.bigint) return "bigint";
+  if (base.type === TypeName.boolean) return "boolean";
+  if (base.type === TypeName.date) return "date";
+  if (base.type === TypeName.literal) {
+    const value = (base.def as ATS.LiteralDef).value;
+    if (typeof value === "string") return "string";
+    if (typeof value === "number") return "number";
+    if (typeof value === "bigint") return "bigint";
+    if (typeof value === "boolean") return "boolean";
+  }
+  if (base.type === TypeName.enum) {
+    const domains = new Set(Object.values((base.def as ATS.EnumDef).values).map((value) => typeof value));
+    if (domains.size === 1) {
+      const domain = domains.values().next().value;
+      if (domain === "string" || domain === "number") return domain;
+    }
+  }
+  if (base.type === TypeName.union) {
+    const domains = (base.def as ATS.OptionsDef).options.map((option) =>
+      resolveScalarKeyDomain(option, key, operation)
+    );
+    if (domains.length > 0 && domains.every((domain) => domain === domains[0])) return domains[0] as ScalarKeyDomain;
+  }
+  throw new JITError("INVALID_OPERATION", `${operation} key ${JSON.stringify(key)} has no scalar equality domain`, {
+    path: [key],
+  });
 }
 
 /** True when the schema admits `undefined` or `null` for this field. */

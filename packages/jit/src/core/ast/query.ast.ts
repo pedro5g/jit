@@ -60,6 +60,13 @@ export interface QueryUniqueNode {
   readonly key: string;
 }
 
+/** Full-value or projected structural deduplication. */
+export interface QueryDistinctNode {
+  readonly kind: "distinct";
+  /** Empty means the complete row; otherwise these fields form the key. */
+  readonly fields: readonly string[];
+}
+
 export interface QueryKeyedNode {
   readonly kind: "keyed";
   readonly key: string;
@@ -68,6 +75,21 @@ export interface QueryKeyedNode {
 export interface QueryGroupByNode {
   readonly kind: "groupBy";
   readonly key: string;
+}
+
+/** Semantic join kind. The physical planner chooses the access path. */
+export type QueryJoinKind = "inner" | "left" | "semi" | "anti";
+
+/**
+ * Join semantics stored independently from the private physical strategy.
+ * Schemas stay on the reconstructive artifact; the portable node names only
+ * the two keys and the requested result relation.
+ */
+export interface QueryJoinNode {
+  readonly kind: "join";
+  readonly join: QueryJoinKind;
+  readonly leftKey: string;
+  readonly rightKey: string;
 }
 
 export interface QueryOrderByNode {
@@ -194,6 +216,7 @@ export type QueryNode =
   | QueryFilterNode
   | QuerySelectNode
   | QueryUniqueNode
+  | QueryDistinctNode
   | QueryCollectorNode
   | QueryOrderByNode
   | QueryAggregateNode

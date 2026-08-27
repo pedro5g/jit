@@ -1,0 +1,78 @@
+---
+title: canonical
+description: One deterministic arrangement for values that are semantically the same.
+---
+
+## Signature
+
+```ts
+const Row = JIT.object({ id: JIT.number(), name: JIT.string() });
+const canonical = JIT.canonical(Row);
+
+const shuffled = { name: "Ada", id: 1 } as JIT.Typeof<typeof Row>;
+
+console.log(Object.keys(canonical(shuffled)).join(","));
+```
+
+Two objects with the same fields in different insertion order read the same and
+serialize differently. `canonical` puts the fields in the order the schema
+declares them.
+
+## The value comes back untouched when it is already in order
+
+```ts
+const Row = JIT.object({ id: JIT.number(), name: JIT.string() });
+const canonical = JIT.canonical(Row);
+
+const row = { id: 1, name: "Ada" };
+
+console.log(canonical(row) === row);
+```
+
+That is the point of the operation: the check is a comparison against a
+compile-time constant, so the common case allocates nothing and returns the
+input. A nested object already in order is kept by reference even when its
+parent has to be rebuilt.
+
+```ts
+const Meta = JIT.object({ a: JIT.string(), b: JIT.string() });
+const Row = JIT.object({ id: JIT.number(), meta: Meta });
+const canonical = JIT.canonical(Row);
+
+const meta = { a: "x", b: "y" };
+const shuffled = { meta, id: 1 } as JIT.Typeof<typeof Row>;
+const result = canonical(shuffled);
+
+console.log(result !== shuffled, result.meta === meta);
+```
+
+## When to reach for it
+
+Just before something sensitive to key order — a `JSON.stringify` you compare, a
+signature, a content-addressed store:
+
+```ts
+const Row = JIT.object({ id: JIT.number(), name: JIT.string() });
+const canonical = JIT.canonical(Row);
+
+const a = { id: 1, name: "Ada" };
+const b = { name: "Ada", id: 1 } as JIT.Typeof<typeof Row>;
+
+console.log(JSON.stringify(a) === JSON.stringify(b));
+console.log(JSON.stringify(canonical(a)) === JSON.stringify(canonical(b)));
+```
+
+Do **not** canonicalize before a cache key or a hash.
+[`JIT.cacheKey`](./cache-key) and [`JIT.hash`](./hash) read the declared fields
+directly and are already independent of key order, so building a canonical form
+for them is work with no result.
+
+Canonicalization is a bet that most values are already in order. When they are,
+it is faster than rebuilding and allocates nothing; when none of them are, you
+pay for the check and rebuild anyway — reach for [`JIT.clone`](./clone) there.
+
+## See also
+
+- [Clone](./clone) — rebuild unconditionally
+- [Cache keys](./cache-key) — order-independent keys without materializing anything
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/canonical.md) — generated code, both sides of the benchmark and tradeoffs

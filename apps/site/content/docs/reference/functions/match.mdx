@@ -1,0 +1,119 @@
+---
+title: match
+description: Compiled dispatch over a discriminated union, with exhaustiveness checked when the match is declared.
+---
+
+## Signature
+
+```ts
+const Event = JIT.discriminatedUnion("type", [
+  JIT.object({ type: JIT.literal("created"), id: JIT.number() }),
+  JIT.object({ type: JIT.literal("updated"), id: JIT.number(), field: JIT.string() }),
+  JIT.object({ type: JIT.literal("deleted"), id: JIT.number() }),
+]);
+
+const handle = JIT.match(Event)
+  .case("created", (event) => `created ${event.id}`)
+  .case("updated", (event) => `updated ${event.field}`)
+  .case("deleted", (event) => `deleted ${event.id}`)
+  .exhaustive();
+
+console.log(handle({ type: "updated", id: 1, field: "title" }));
+```
+
+Each case receives the value narrowed to its member, so `event.field` is
+available in the `updated` branch and nowhere else.
+
+## Exhaustiveness is checked at declaration
+
+`exhaustive()` requires a case for every tag the union declares. A missing one
+does not compile, and also throws where it is declared:
+
+```ts
+const Event = JIT.discriminatedUnion("type", [
+  JIT.object({ type: JIT.literal("created"), id: JIT.number() }),
+  JIT.object({ type: JIT.literal("deleted"), id: JIT.number() }),
+]);
+
+const incomplete = JIT.match(Event).case("created", (event) => event.id);
+
+try {
+  incomplete.exhaustive();
+} catch (error) {
+  console.log((error as Error).message);
+}
+```
+
+That is the main reason to reach for this over a hand-written `switch`: adding a
+member to the union breaks the build instead of falling through silently.
+
+## Or close it with a fallback
+
+```ts
+const Event = JIT.discriminatedUnion("type", [
+  JIT.object({ type: JIT.literal("created"), id: JIT.number() }),
+  JIT.object({ type: JIT.literal("deleted"), id: JIT.number() }),
+]);
+
+const handle = JIT.match(Event)
+  .case("created", (event) => `c${event.id}`)
+  .otherwise(() => "other");
+
+console.log(handle({ type: "created", id: 1 }), handle({ type: "deleted", id: 2 }));
+```
+
+## A tag from outside the union throws
+
+The types say it cannot happen; unvalidated data says otherwise. An exhaustive
+match names the tag rather than returning `undefined`:
+
+```ts
+const Event = JIT.discriminatedUnion("type", [
+  JIT.object({ type: JIT.literal("created"), id: JIT.number() }),
+]);
+
+const handle = JIT.match(Event)
+  .case("created", (event) => event.id)
+  .exhaustive();
+
+try {
+  handle({ type: "smuggled", id: 1 } as never);
+} catch (error) {
+  console.log((error as Error).message);
+}
+```
+
+Validate at the boundary with [`JIT.validate`](./validation) if the value came
+from outside the program.
+
+## What it compiles to
+
+```js
+function match(value) {
+  switch (value.type) {
+    case "created":
+      return __case0(value);
+    case "updated":
+      return __case1(value);
+    default:
+      throw new Error("unmatched " + "type" + ": " + String(value.type));
+  }
+}
+```
+
+A `switch` over literals — no handler object, no lookup by computed key. The
+speed is the same as the `switch` you would have written; the exhaustiveness
+check is what you gain.
+
+## Not available ahead of time
+
+A match binds your handler functions, and there is nothing for `jit generate` to
+serialize — the same reason a query whose binding holds a callback is skipped.
+It is reported in the generator's `skipped` list rather than emitted. If a hot
+path needs AOT, write the `switch`: it is the same code.
+
+## See also
+
+- [Schema factories](./schema-factories) — `discriminatedUnion`
+- [Validation](./validation) — checking a tag that came from outside
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/match.md) — semantics, generated code and tradeoffs

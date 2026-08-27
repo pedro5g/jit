@@ -28,10 +28,14 @@ interface StandardQueryV1 {
 
 `pipeline` is the ordered portable semantic query. V1 steps cover conditions,
 projection, uniqueness, keyed/group collectors, ordering, incremental control,
-mutation, scalar aggregation, composite aggregation and terminals. Callback-backed
+mutation, scalar aggregation, composite aggregation, joins and terminals. Callback-backed
 scan updates remain named bindings rather than embedded functions. The
 compatibility summary fields `filter`, `projection`, `order`, and `limit`
 describe the effective common read-query subset for simple adapters.
+
+`distinct` is represented as `{ kind: "distinct", fields: string[] }`. An empty
+field list means full-row structural distinct. Physical scalar-table, trie,
+hash or adjacent strategies remain private compiler details.
 
 ### Terminals
 
@@ -65,6 +69,26 @@ query instead of one per number:
 `name` is the caller's result key and `operation` is one of the five scalar
 operators. Field order is the declared order and is stable. A composite that
 follows a `groupBy` step reduces within each group.
+
+### Join
+
+A join step describes the relation, not its local access path:
+
+```json
+{
+  "kind": "join",
+  "join": "inner",
+  "source": { "kind": "object", "fields": ["id", "name"] },
+  "leftKey": "customerId",
+  "rightKey": "id"
+}
+```
+
+`join` is `inner`, `left`, `semi`, or `anti`. The right source shape is
+structural. `HashJoin`, `IndexedJoin`, `MergeJoin`, cache descriptors and bucket
+layout are private physical decisions and never cross this boundary. An adapter that
+cannot preserve multiplicity, left ordering or the requested missing-row
+semantics must reject the step.
 
 ### Evolving V1
 

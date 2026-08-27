@@ -70,9 +70,9 @@ function namespaceMembers(): Record<string, string[]> {
  * signatures are skipped by only accepting a name at the body's own
  * indentation followed by `(` or `<`.
  */
-function interfaceMethods(source: string, name: string): string[] {
-  const opening = new RegExp(`export interface ${name}\\b[^{]*\\{`, "m").exec(source);
-  if (!opening) throw new Error(`builder/types.ts no longer declares ${name} — the chain surface cannot be built`);
+function interfaceMethods(source: string, name: string, origin = "builder/types.ts"): string[] {
+  const opening = new RegExp(`(?:export )?interface ${name}\\b[^{]*\\{`, "m").exec(source);
+  if (!opening) throw new Error(`${origin} no longer declares ${name} — the chain surface cannot be built`);
 
   let depth = 0;
   let end = opening.index + opening[0].length;
@@ -90,6 +90,41 @@ function interfaceMethods(source: string, name: string): string[] {
   const body = source.slice(opening.index + opening[0].length, end);
   const methods = new Set<string>();
   for (const match of body.matchAll(/^ {2}([A-Za-z_$][A-Za-z0-9_$]*)\s*[<(]/gm)) methods.add(match[1]);
+
+  return [...methods].sort();
+}
+
+/**
+ * The methods declared on the inline half of an intersection type alias, e.g.
+ * the `& { where(); limit() }` in `CqrsQuery`. Those names are as public as the
+ * interface's: `where` lives there, and a ghost that cannot see it reaches for
+ * `filter` — the internal spelling — instead.
+ */
+function aliasIntersectionMethods(source: string, name: string, origin: string): string[] {
+  const opening = new RegExp(`(?:export )?type ${name}\\b[^=]*=`, "m").exec(source);
+  if (!opening) throw new Error(`${origin} no longer declares ${name} — the chain surface cannot be built`);
+
+  const brace = source.indexOf("& {", opening.index + opening[0].length);
+  if (brace === -1) return [];
+
+  const start = source.indexOf("{", brace);
+  let depth = 0;
+  let end = start;
+  for (let i = start; i < source.length; i++) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+
+  const methods = new Set<string>();
+  for (const match of source.slice(start + 1, end).matchAll(/^ {4}([A-Za-z_$][A-Za-z0-9_$]*)\s*[<(]/gm)) {
+    methods.add(match[1]);
+  }
 
   return [...methods].sort();
 }
@@ -132,6 +167,26 @@ function chainMethods(source: string): Record<string, string[]> {
     codec: merge(byInterface.codec),
     /** Everything else gets the core alone. */
     default: merge([]),
+  };
+}
+
+/**
+ * The CQRS query chain, which no schema kind gates and reflection cannot see:
+ * a query builder is a function with methods hung off it, so every name looks
+ * available on every builder. `JIT.cqrs.query()` is the canonical query surface,
+ * and its chain — `where`, `distinct`, `join`, `first`, `aggregate` — was the
+ * one level the audit could not check at all.
+ */
+function queryChain(cqrsSource: string, querySource: string): Record<string, string[]> {
+  const ops = interfaceMethods(cqrsSource, "CqrsQueryOps", "factories/cqrs.ts");
+  const alias = aliasIntersectionMethods(cqrsSource, "CqrsQuery", "factories/cqrs.ts");
+
+  return {
+    "cqrs.query": [...new Set([...ops, ...alias])].sort(),
+    // `.join(Right)` returns a builder whose only method is the key pairing.
+    "cqrs.join": interfaceMethods(cqrsSource, "CqrsJoinOnBuilder", "factories/cqrs.ts"),
+    // `.to.*` reshapes the same program into a non-materializing backend.
+    "cqrs.to": interfaceMethods(querySource, "QuerySinks", "factories/query.ts"),
   };
 }
 
@@ -198,11 +253,13 @@ function mismatches(documented: DocumentedMember[], namespaces: Record<string, s
 // ----------------------------------------------------------------------- main
 
 const builderTypes = await fs.readFile(path.join(packageSrc, "core/builder/types.ts"), "utf8");
+const cqrsSource = await fs.readFile(path.join(packageSrc, "factories/cqrs.ts"), "utf8");
+const querySource = await fs.readFile(path.join(packageSrc, "factories/query.ts"), "utf8");
 const apiIndex = await fs.readFile(path.join(siteDir, "content/docs/reference/functions/index.mdx"), "utf8");
 
 const documented = documentedMembers(apiIndex);
 const namespaces = namespaceMembers();
-const chain = chainMethods(builderTypes);
+const chain = { ...chainMethods(builderTypes), ...queryChain(cqrsSource, querySource) };
 const problems = mismatches(documented, namespaces);
 
 const byName = new Map(documented.map((member) => [member.name, member]));

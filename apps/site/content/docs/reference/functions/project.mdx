@@ -1,0 +1,82 @@
+---
+title: project
+description: Narrow a value to the fields a caller actually needs, as one object literal.
+---
+
+## Signature
+
+```ts
+const User = JIT.object({
+  id: JIT.number(),
+  email: JIT.string(),
+  passwordHash: JIT.string(),
+});
+
+const publicUser = JIT.project(User).select("id", "email");
+
+console.log(JSON.stringify(publicUser({ id: 1, email: "ada@x.com", passwordHash: "x" })));
+```
+
+A projection is a subset of the same shape. The result is built as a single
+object literal over static keys — no key loop, no `Object.keys`, no deletion of
+fields that were copied and then thrown away.
+
+## Nested paths
+
+A dotted path narrows the nested object rather than pulling it whole:
+
+```ts
+const Profile = JIT.object({ name: JIT.string(), bio: JIT.string() });
+const User = JIT.object({ id: JIT.number(), profile: Profile });
+
+const summary = JIT.project(User).select("id", "profile.name");
+
+console.log(JSON.stringify(summary({ id: 1, profile: { name: "Ada", bio: "…" } })));
+```
+
+A nullish parent stays nullish instead of being read through:
+
+```ts
+const Profile = JIT.object({ name: JIT.string() });
+const User = JIT.object({ id: JIT.number(), profile: JIT.nullable(Profile) });
+
+const summary = JIT.project(User).select("profile.name");
+
+console.log(JSON.stringify(summary({ id: 1, profile: null })));
+console.log(JSON.stringify(summary({ id: 1, profile: { name: "Ada" } })));
+```
+
+## project versus map
+
+`project` keeps a subset of the same shape and the same field names.
+[`JIT.map`](./mapper) transforms one shape into a different target
+representation — renaming, computing, restructuring. Reach for `project` when
+the answer is "the same object, with fewer fields".
+
+## The same selection everywhere
+
+The selection resolved here is the one
+[`JIT.cqrs.query().select()`](./query) applies to rows and
+[`JIT.compare.equal().select()`](./equal) compares by, so a shape declared once
+is narrowed the same way in every operation:
+
+```ts
+const User = JIT.object({ id: JIT.number(), status: JIT.string(), notes: JIT.string() });
+
+const sameStatus = JIT.compare.equal(User).select("id", "status");
+
+const before = { id: 1, status: "active", notes: "first" };
+const after = { id: 1, status: "active", notes: "edited" };
+
+console.log(sameStatus(before, after));
+```
+
+Only `id` and `status` appear in the generated comparison at all — `notes` is
+not read and then discarded, it is absent.
+
+## See also
+
+- [Mapper](./mapper) — transform into a different shape
+- [Equal](./equal) — full and selective comparison
+- [Query](./query) — `select()` over rows
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/projection.md) — the shared projection tree and benchmarks

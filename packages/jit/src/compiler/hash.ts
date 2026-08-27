@@ -57,15 +57,7 @@ export function compileHash<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "hash",
     () => {
-      const compute = globalThis.Function(
-        "__combineHash",
-        "__hashNumber",
-        "__hashString",
-        "__hashBoolean",
-        "__hashBigInt",
-        "__hashUnknown",
-        `return function computeHash(value) {\n${emitHashBody(schema)}\n};`
-      )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Typeof<TSchema>>;
+      const compute = compileUncachedHash(schema);
 
       const compiled = ((value: ATS.Typeof<TSchema>) => {
         if (isHashCacheable(value)) {
@@ -84,6 +76,19 @@ export function compileHash<TSchema extends ATS.AnyTypeSchema>(
     },
     options
   );
+}
+
+/** Schema-specialized hash without the public cross-call reference cache. @internal */
+export function compileUncachedHash<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Hash<ATS.Typeof<TSchema>> {
+  return globalThis.Function(
+    "__combineHash",
+    "__hashNumber",
+    "__hashString",
+    "__hashBoolean",
+    "__hashBigInt",
+    "__hashUnknown",
+    `return function computeHash(value) {\n${emitHashBody(schema)}\n};`
+  )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Typeof<TSchema>>;
 }
 
 function emitHashBody(schema: ATS.AnyTypeSchema): string {

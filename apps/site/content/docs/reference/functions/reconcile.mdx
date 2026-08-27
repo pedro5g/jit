@@ -1,0 +1,129 @@
+---
+title: reconcile
+description: Compare two snapshots of a keyed collection in one pass over each side.
+---
+
+## Signature
+
+```ts
+const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const reconcileUsers = JIT.reconcile(Users);
+
+const previous = [
+  { id: 1, name: "Ada" },
+  { id: 2, name: "Grace" },
+];
+const current = [
+  { id: 1, name: "Ada" },
+  { id: 2, name: "Grace Hopper" },
+  { id: 3, name: "Alan" },
+];
+
+const result = reconcileUsers(previous, current);
+
+console.log(result.added.length, result.removed.length);
+console.log(result.changed.length, result.unchanged.length);
+```
+
+Identity comes from the collection's own facts — `.keyed()`, `.indexBy()`,
+`.uniqueBy()` or an entity hint. `by()` names one instead.
+
+## Changed means changed by value
+
+Snapshots usually arrive as new objects. A reference comparison would report
+every row as changed, so a matched pair is compared with the row's compiled
+equality:
+
+```ts
+const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const previous = [{ id: 1, name: "Ada" }];
+const rebuilt = [{ id: 1, name: "Ada" }];
+
+const result = JIT.reconcile(Users)(previous, rebuilt);
+
+console.log(result.changed.length, result.unchanged.length);
+```
+
+## Asking for less compiles to less
+
+A channel that is turned off is absent from the result, and the code that would
+have served it is never generated:
+
+```ts
+const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const additionsOnly = JIT.reconcile(Users, {
+  removed: false,
+  changed: false,
+  unchanged: false,
+});
+
+const result = additionsOnly([{ id: 1, name: "Ada" }], [
+  { id: 1, name: "Ada" },
+  { id: 2, name: "Grace" },
+]);
+
+console.log(Object.keys(result));
+console.log(result.added.length);
+```
+
+Turning both `changed` and `unchanged` off removes the comparison itself, not
+just its result.
+
+## Field-level differences
+
+`changes("diff")` attaches a structural diff to each changed pair. It runs only
+where equality already failed, so it costs nothing on unchanged rows:
+
+```ts
+const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const result = JIT.reconcile(Users).changes("diff")(
+  [{ id: 1, name: "Ada" }],
+  [{ id: 1, name: "Ada Lovelace" }]
+);
+
+console.log(JSON.stringify(result.changed[0]?.diff));
+```
+
+## Streaming the results
+
+Both sinks answer the same question while materializing nothing:
+
+```ts
+const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const previous = [{ id: 1, name: "Ada" }];
+const current = [{ id: 2, name: "Grace" }];
+
+const events = [...JIT.reconcile(Users).to.iterator()(previous, current)];
+console.log(events.map((event) => event.type).join(","));
+
+const seen: string[] = [];
+JIT.reconcile(Users).to.visitor()(previous, current, {
+  added: (value) => seen.push(`+${value.id}`),
+  removed: (value) => seen.push(`-${value.id}`),
+});
+console.log(seen.join(","));
+```
+
+## Relationship to watch
+
+`JIT.reconcile` compares two snapshots you already hold and decides by value.
+[`JIT.watch`](./watch) is the stateless keyed-change surface that reports
+updates by reference, and `JIT.watchedList` holds the state for you. Reach for
+reconcile when both snapshots are in hand and value equality is what "changed"
+should mean.
+
+## See also
+
+- [Watch](./watch) — keyed changes and stateful collections
+- [Diff](./diff) — the structural difference between two values
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/reconcile.md) — algorithm, allocation model and benchmarks

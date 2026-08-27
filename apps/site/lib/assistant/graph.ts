@@ -429,7 +429,7 @@ export const CONCEPTS: ConceptNode[] = [
   {
     id: "query",
     aliases: ["query", "consulta", "filter", "filtro", "search", "buscar", "where", "sort", "ordenar", "aggregate"],
-    terms: ["query", "filter", "projection", "orderby", "groupby", "iterator", "visitor", "fused"],
+    terms: ["query", "filter", "projection", "orderby", "groupby", "iterator", "visitor", "fused", "physical plan"],
     apis: ["cqrs", "from", "param", "const"],
     fact: "A query builder compiles to one fused loop over the collection: filters and projections are lowered into a single pass with no intermediate arrays.",
     factPt:
@@ -451,7 +451,65 @@ export const CONCEPTS: ConceptNode[] = [
     example:
       'const Users = JIT.array(\n  JIT.object({ id: JIT.string(), role: JIT.string(), score: JIT.number() })\n);\n\nconst topAdmins = JIT.cqrs.query(Users)\n  .params({ minimumScore: JIT.number() })\n  .where((q, params) => q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)))\n  .select("id", "score");',
     page: "/docs/runtime/queries",
-    edges: { binary: 0.4, lazy: 0.5 },
+    edges: { binary: 0.4, lazy: 0.5, join: 0.5 },
+  },
+  {
+    id: "join",
+    aliases: [
+      "join",
+      "juncao",
+      "junção",
+      "relacionar",
+      "combinar tabelas",
+      "inner join",
+      "left join",
+      "semi join",
+      "anti join",
+    ],
+    terms: ["join", "hash join", "indexed join", "left key", "right key", "multiplicity"],
+    apis: ["cqrs"],
+    fact: "A CQRS join states inner, left, semi or anti semantics while schema facts select a hash build or a reusable keyed index; generated code never performs a nested linear search.",
+    factPt:
+      "Um join CQRS declara a semântica inner, left, semi ou anti, enquanto os fatos do schema escolhem um hash build ou um índice keyed reutilizável; o código gerado nunca faz busca linear aninhada.",
+    mechanisms: [
+      "HashJoin builds the right Map once and scans the left once, giving expected O(n + m + k) instead of O(n*m).",
+      "A right collection declared with .keyed(key) reuses its WeakMap-cached index, reducing repeated joins to expected O(n + k) after the first build.",
+      "Compatible .ordered(key, direction) facts on both inputs select a two-cursor MergeJoin and allocate no access index.",
+      "Inner and left emit stable { left, right } pairs; semi and anti return left rows directly and allocate no pair objects.",
+    ],
+    mechanismsPt: [
+      "HashJoin monta o Map da direita uma vez e percorre a esquerda uma vez, chegando a O(n + m + k) esperado em vez de O(n*m).",
+      "Uma coleção direita declarada com .keyed(key) reutiliza seu índice em WeakMap, reduzindo joins repetidos para O(n + k) esperado depois da primeira construção.",
+      "Fatos .ordered(key, direction) compatíveis nas duas entradas selecionam MergeJoin com dois cursores e sem alocar índice de acesso.",
+      "Inner e left emitem pares estáveis { left, right }; semi e anti devolvem as linhas da esquerda diretamente e não alocam objetos de par.",
+    ],
+    example:
+      'const Order = JIT.object({ id: JIT.number(), customerId: JIT.string() });\nconst Customer = JIT.object({ id: JIT.string(), name: JIT.string() });\n\nconst joinOrders = JIT.cqrs.query(Order)\n  .join(JIT.array(Customer).keyed("id"))\n  .on("customerId", "id");\n\njoinOrders(\n  [{ id: 1, customerId: "c1" }],\n  [{ id: "c1", name: "Ada" }],\n);',
+    page: "/docs/reference/functions/query#joins",
+    edges: { query: 0.8, cqrs: 0.6, compilation: 0.5 },
+  },
+  {
+    id: "distinct",
+    aliases: ["distinct", "deduplicar", "dedup", "duplicados", "unique values"],
+    terms: ["distinct", "deduplicate", "structural hash", "compound key", "adjacent comparison"],
+    apis: ["cqrs"],
+    fact: "CQRS distinct preserves the first row and selects scalar lookup, compound trie, structural hash/equality or ordered adjacent comparison from schema facts.",
+    factPt:
+      "O distinct de CQRS preserva a primeira linha e seleciona lookup escalar, trie composta, hash/equality estrutural ou comparação adjacente ordenada a partir dos fatos do schema.",
+    mechanisms: [
+      "distinct() hashes the complete schema value and confirms hash collisions with compiled equality; it never uses JSON.stringify as a key.",
+      "distinct(fields...) emits direct property reads and a nested Map trie, avoiding a tuple, array or compound string allocation per row.",
+      "A matching .ordered(key) fact replaces the key table with O(1)-state adjacent comparison.",
+    ],
+    mechanismsPt: [
+      "distinct() calcula o hash do valor completo e confirma colisões com equality compilada; ele nunca usa JSON.stringify como chave.",
+      "distinct(fields...) emite acessos diretos e uma trie de Map, evitando alocar tupla, array ou string composta por linha.",
+      "Um fato .ordered(key) compatível substitui a tabela por comparação adjacente com estado O(1).",
+    ],
+    example:
+      'const User = JIT.object({ tenantId: JIT.string(), id: JIT.number(), name: JIT.string() });\n\nconst distinctUsers = JIT.cqrs.query(User).distinct("tenantId", "id");\n\ndistinctUsers([\n  { tenantId: "a", id: 1, name: "Ada" },\n  { tenantId: "a", id: 1, name: "Duplicate" },\n]);',
+    page: "/docs/reference/functions/query#operators",
+    edges: { query: 0.8, compilation: 0.5 },
   },
   {
     id: "lazy",

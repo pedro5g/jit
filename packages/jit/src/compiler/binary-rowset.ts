@@ -2044,6 +2044,8 @@ function serializeQueryNode(node: QueryNode): string {
       return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
     case "unique":
       return `u(${node.key})`;
+    case "distinct":
+      return `D(${node.fields.join(",")})`;
     case "keyed":
       return `k(${node.key})`;
     case "groupBy":

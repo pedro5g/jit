@@ -28,6 +28,7 @@ const CONCEPTS = `What jit is, always true:
 - An aggregate is a plain object of artifacts, written as an ordinary object literal.
 - If a name is not in the API list, it does not exist. Older names removed in 2.0 still appear in the migration guide as counter-examples; they are not usable code.
 - A query builder is the query: call it for the eager backend, or reach .to.iterator(), .to.asyncIterator(), .to.visitor().
+- CQRS queries describe semantics; schema and collection facts choose physical access paths such as scans, cached indexes, binary search, joins and distinct strategies. Those private strategy names never enter ~query.
 - Schemas are written with \`import { JIT } from "@jit-compiler/jit/runtime"\`. A file that AOT generation reads imports from "@jit-compiler/jit/define" instead.
 - "Run" and "Generate" are the two BUTTONS in the site's workspace. They are not methods and there is no .run() or .generate() — never write one.`;
 

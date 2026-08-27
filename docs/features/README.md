@@ -24,6 +24,17 @@ work and for production performance. Each page explains:
 - [Indexing](./indexing.md)
 - [Physical query planning](./physical-query-planning.md)
 - [Aggregation](./aggregation.md)
+- [Joins](./joins.md)
+- [Distinct query rows](./distinct.md)
+- [Lookup](./lookup.md)
+- [Reconcile](./reconcile.md)
+- [Projection](./projection.md)
+- [Change masks](./changed.md)
+- [Patch](./patch.md)
+- [Cache keys](./cache-key.md)
+- [Canonical](./canonical.md)
+- [Access control](./access-control.md)
+- [Match](./match.md)
 - [Lazy queries, iterators, and visitors](./lazy-execution.md)
 - [Serialization and binary codec](./serialization-codec.md)
 - [Binary rowsets](./binary-rowsets.md)
@@ -44,6 +55,8 @@ work and for production performance. Each page explains:
 | Look rows up by a key             | Indexing                | fresh build vs `cached` vs a scan           |
 | Find one row in a collection      | Physical query planning | declare facts; the planner picks the path   |
 | Reduce a collection to numbers    | Aggregation             | one `aggregate({...})` vs separate passes   |
+| Relate two typed collections      | Joins                   | semantic join; planner selects hash/index   |
+| Deduplicate query rows            | Distinct                | projected key vs complete structural value  |
 | Process unbounded/cursor input    | Lazy execution          | sync iterator vs async iterator             |
 | Scan million-row flat batches     | Binary rowsets          | packed/aligned/columnar and memory strategy |
 | Send JSON or binary data          | Serialization and codec | full string, chunks, or versioned bytes     |

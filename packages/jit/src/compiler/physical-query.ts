@@ -91,6 +91,33 @@ export function resolvePhysicalQueryPlan(
 
   if (!equality) return scan;
 
+  const choice = resolveKeyedAccessChoice(schema, equality.key);
+
+  if (choice.strategy === "EarlyExitScan") return scan;
+  return Object.freeze({
+    strategy: choice.strategy,
+    reason: choice.reason,
+    complexity: choice.complexity,
+    facts: choice.facts,
+    access: keyedAccess(schema, equality, choice.direction, terminal.op),
+  });
+}
+
+/** How reaching one row by a single key is answered, given the collection's facts. */
+export interface KeyedAccessChoice {
+  readonly strategy: "CachedIndexLookup" | "BinarySearch" | "EarlyExitScan";
+  readonly reason: string;
+  readonly complexity: "O(1)" | "O(log n)" | "O(k)" | "O(n)";
+  readonly facts: readonly string[];
+  readonly direction: "asc" | "desc";
+}
+
+/**
+ * Chooses the access path for one key. A standalone lookup and a keyed query
+ * terminal are the same question asked twice, so both ask it here: the caller
+ * never names an algorithm, and the two can never disagree about the facts.
+ */
+export function resolveKeyedAccessChoice(schema: ATS.AnyTypeSchema, key: string): KeyedAccessChoice {
   const hints = resolveHints(schema);
   const ordered = hints.order ?? hints.collection?.ordered;
   const orderedKey = resolveHintKey(ordered?.key);
@@ -100,29 +127,36 @@ export function resolvePhysicalQueryPlan(
 
   // An ordered key is searched without allocating anything, so it wins over an
   // index even where both are declared.
-  if (ordered && orderedKey === equality.key && unique) {
+  if (ordered && orderedKey === key && unique) {
     return Object.freeze({
       strategy: "BinarySearch" as const,
       reason: "the collection declares this key ordered and unique",
       complexity: "O(log n)" as const,
       facts: Object.freeze([`ordered: ${orderedKey} ${ordered.direction ?? "asc"}`, `unique key: ${orderedKey}`]),
-      access: keyedAccess(schema, equality, ordered.direction === "desc" ? "desc" : "asc", terminal.op),
+      direction: ordered.direction === "desc" ? ("desc" as const) : ("asc" as const),
     });
   }
 
   // Building an index for a single lookup is strictly worse than scanning —
   // `pnpm bench:index` measures 456 us against 5.13 us on 10 000 rows — so the
   // index path is taken only where the schema opted into caching it.
-  if (cacheIndex && identityKey === equality.key) {
+  if (cacheIndex && identityKey === key) {
     return Object.freeze({
       strategy: "CachedIndexLookup" as const,
       reason: "the collection is keyed, so the index is built once per array and reused",
       complexity: "O(1)" as const,
       facts: Object.freeze([`keyed: ${identityKey}`, "index cache: enabled"]),
-      access: keyedAccess(schema, equality, "asc", terminal.op),
+      direction: "asc" as const,
     });
   }
-  return scan;
+
+  return Object.freeze({
+    strategy: "EarlyExitScan" as const,
+    reason: "no declared fact reaches this key directly, so rows are scanned until one matches",
+    complexity: "O(k)" as const,
+    facts: Object.freeze([]),
+    direction: "asc" as const,
+  });
 }
 
 function keyedAccess(
@@ -161,26 +195,45 @@ export function emitPhysicalQuerySource(physical: PhysicalQueryPlan, hasParams: 
   const access = physical.access;
 
   if (!access) return undefined;
-  if (physical.strategy === "CachedIndexLookup") return emitCachedIndexLookup(access, hasParams);
-  if (physical.strategy === "BinarySearch") return emitBinarySearch(access, hasParams);
+
+  const shape: KeyedEmitShape = {
+    signature: hasParams ? "value, params" : "value",
+    probe: emitProbe(access),
+    answers: access.terminal === "some" ? "exists" : "row",
+  };
+
+  if (physical.strategy === "CachedIndexLookup") return emitCachedIndexLookup(access.descriptor, shape);
+  if (physical.strategy === "BinarySearch")
+    return emitBinarySearch(access.key, access.descriptor, access.direction, shape);
   return undefined;
 }
 
-function emitCachedIndexLookup(access: KeyedAccess, hasParams: boolean): string {
+/**
+ * What a keyed access path differs by between callers: its parameter list, how
+ * it reads the value being matched, and whether it answers the row or merely
+ * whether one exists. Everything else — the index build, the search — is the
+ * same code, so it is emitted once and shared.
+ */
+export interface KeyedEmitShape {
+  readonly signature: string;
+  readonly probe: string;
+  readonly answers: "row" | "exists";
+}
+
+export function emitCachedIndexLookup(descriptor: IndexDescriptor, shape: KeyedEmitShape): string {
   const writer = new CodeWriter();
-  const probe = emitProbe(access);
 
   // `__cachedIndex` is supplied the way `__getIndex` already is: bound by the
   // runtime compiler, emitted as a module helper by AOT.
   writer.line("(() => {");
   writer.indent(() => {
-    emitIndexBuilder(writer, access.descriptor, "const build = (value) => {", "};");
-    writer.line(`function query(value${hasParams ? ", params" : ""}) {`);
+    emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
+    writer.line(`function query(${shape.signature}) {`);
     writer.indent(() => {
       writer.line(
-        `const row = __cachedIndex(value, ${JSON.stringify(indexCacheKey(access.descriptor))}, build).get(${probe});`
+        `const row = __cachedIndex(value, ${JSON.stringify(indexCacheKey(descriptor))}, build).get(${shape.probe});`
       );
-      writer.line(access.terminal === "some" ? "return row !== undefined;" : "return row;");
+      writer.line(shape.answers === "exists" ? "return row !== undefined;" : "return row;");
     });
     writer.line("}");
     writer.line("return query;");
@@ -189,9 +242,15 @@ function emitCachedIndexLookup(access: KeyedAccess, hasParams: boolean): string 
   return writer.toString();
 }
 
-function emitBinarySearch(access: KeyedAccess, hasParams: boolean): string {
+export function emitBinarySearch(
+  key: string,
+  descriptor: IndexDescriptor,
+  direction: "asc" | "desc",
+  shape: KeyedEmitShape
+): string {
+  const access = { key, descriptor, direction };
   const writer = new CodeWriter();
-  const probe = emitProbe(access);
+  const probe = shape.probe;
   const read = (row: string) => {
     const value = emitPropertyAccess(row, access.key);
     return access.descriptor.keys[0]?.valueKind === "date" ? `${value}.getTime()` : value;
@@ -201,7 +260,7 @@ function emitBinarySearch(access: KeyedAccess, hasParams: boolean): string {
 
   writer.line("(() => {");
   writer.indent(() => {
-    writer.line(`function query(value${hasParams ? ", params" : ""}) {`);
+    writer.line(`function query(${shape.signature}) {`);
     writer.indent(() => {
       writer.line(`const target = ${probe};`);
       writer.line("let low = 0;");
@@ -212,13 +271,13 @@ function emitBinarySearch(access: KeyedAccess, hasParams: boolean): string {
         writer.line("const row = value[mid];");
         writer.line(`const probe = ${read("row")};`);
         writer.line("if (probe === target) {");
-        writer.indent(() => writer.line(access.terminal === "some" ? "return true;" : "return row;"));
+        writer.indent(() => writer.line(shape.answers === "exists" ? "return true;" : "return row;"));
         writer.line("}");
         writer.line(`if (${goRight}) low = mid + 1;`);
         writer.line("else high = mid - 1;");
       });
       writer.line("}");
-      writer.line(access.terminal === "some" ? "return false;" : "return undefined;");
+      writer.line(shape.answers === "exists" ? "return false;" : "return undefined;");
     });
     writer.line("}");
     writer.line("return query;");

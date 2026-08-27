@@ -85,7 +85,11 @@ export function buildQueryIR(
             ? buildCollectedQuery(target, plan)
             : buildArrayQuery(target, plan);
 
-  return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
+  return {
+    kind: "program",
+    params: options.hasParams ? [VALUE, PARAMS] : [VALUE],
+    body,
+  };
 }
 
 function buildArrayQuery(target: QueryTarget, plan: OptimizedQueryPlan): readonly IRNode[] {
@@ -147,7 +151,13 @@ function buildCollectedQuery(target: QueryTarget, plan: OptimizedQueryPlan): rea
   if (!collector) return [];
 
   const selected = buildProjection(plan.select);
-  const collect: IRNode[] = [{ kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, collector.key) }];
+  const collect: IRNode[] = [
+    {
+      kind: "assign",
+      target: COLLECT_KEY,
+      expr: loadProp(ITEM, collector.key),
+    },
+  ];
 
   if (collector.kind === "keyed") {
     collect.push(exprStmt(call(loadProp(OUT, "set"), [COLLECT_KEY, selected])));
@@ -200,12 +210,21 @@ function buildGroupedAggregateQuery(
   if (target.kind === "array") {
     body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
   }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  if (plan.unique || plan.distinct)
+    body.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set"),
+    });
 
   const emptyRecord = call(loadProp(irVar("Object"), "create"), [literal(null)]);
   const accumulator = hasAverage ? ACC_MAP : OUT;
 
-  body.push({ kind: "assign", target: accumulator, expr: hasAverage ? construct("Map") : emptyRecord });
+  body.push({
+    kind: "assign",
+    target: accumulator,
+    expr: hasAverage ? construct("Map") : emptyRecord,
+  });
 
   const initial = composite.fields.map((field) => ({
     key: field.name,
@@ -291,7 +310,12 @@ function buildCompositeAggregateQuery(
   if (target.kind === "array") {
     body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
   }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  if (plan.unique || plan.distinct)
+    body.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set"),
+    });
 
   const slots = composite.fields.map((field, index) => ({
     field,
@@ -353,7 +377,12 @@ function buildCompositeAggregateQuery(
   }
   body.push({
     kind: "return",
-    value: objectLiteral(slots.map(({ field, accumulator }) => ({ key: field.name, value: accumulator }))),
+    value: objectLiteral(
+      slots.map(({ field, accumulator }) => ({
+        key: field.name,
+        value: accumulator,
+      }))
+    ),
   });
   return body;
 }
@@ -382,7 +411,15 @@ function buildTerminalQuery(
     body.push(
       buildInputLoop(
         target,
-        condition ? [{ kind: "if", test: not(condition), then: [{ kind: "return", value: literal(false) }] }] : []
+        condition
+          ? [
+              {
+                kind: "if",
+                test: not(condition),
+                then: [{ kind: "return", value: literal(false) }],
+              },
+            ]
+          : []
       ),
       { kind: "return", value: literal(true) }
     );
@@ -413,7 +450,12 @@ function buildAggregateQuery(
   if (target.kind === "array") {
     body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
   }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  if (plan.unique || plan.distinct)
+    body.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set"),
+    });
 
   const field = aggregate.key === undefined ? ITEM : loadProp(ITEM, aggregate.key);
 
@@ -459,7 +501,11 @@ function buildAggregateQuery(
           buildGuardedBody(plan, [
             {
               kind: "if",
-              test: { kind: "nary", op: "or", operands: [strictEqual(ACC, literal(undefined)), wins] },
+              test: {
+                kind: "nary",
+                op: "or",
+                operands: [strictEqual(ACC, literal(undefined)), wins],
+              },
               then: [store(ACC, field)],
             },
           ])
@@ -526,10 +572,19 @@ function buildPatchObject(schema: QueryObjectSchema, mutation: QueryMutationNode
 
 function buildLoopHeader(target: QueryTarget, plan: OptimizedQueryPlan, outInitializer: IRExpr): readonly IRNode[] {
   const header: IRNode[] = [
-    { kind: "assign", target: LEN, expr: loadProp(VALUE, target.kind === "array" ? "length" : "size") },
+    {
+      kind: "assign",
+      target: LEN,
+      expr: loadProp(VALUE, target.kind === "array" ? "length" : "size"),
+    },
   ];
 
-  if (plan.unique) header.push({ kind: "assign", target: SEEN, expr: construct("Set") });
+  if (plan.unique || plan.distinct)
+    header.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set"),
+    });
   header.push({ kind: "assign", target: OUT, expr: outInitializer });
   return header;
 }
@@ -547,16 +602,28 @@ function buildInputLoop(target: QueryTarget, body: readonly IRNode[]): IRNode {
 
 function buildGuardedBody(plan: OptimizedQueryPlan, accepted: readonly IRNode[]): readonly IRNode[] {
   const unique = plan.unique;
-  const inner: readonly IRNode[] = unique
+  const inner: readonly IRNode[] = plan.distinct
     ? [
-        { kind: "assign", target: UNIQUE_KEY, expr: loadProp(ITEM, unique.key) },
         {
           kind: "if",
-          test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
-          then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted],
+          test: call(irVar("__distinctAccept"), [SEEN, ITEM]),
+          then: accepted,
         },
       ]
-    : accepted;
+    : unique
+      ? [
+          {
+            kind: "assign",
+            target: UNIQUE_KEY,
+            expr: loadProp(ITEM, unique.key),
+          },
+          {
+            kind: "if",
+            test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
+            then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted],
+          },
+        ]
+      : accepted;
   const condition = buildFilterTest(plan);
 
   return condition ? [{ kind: "if", test: condition, then: inner }] : inner;
@@ -614,7 +681,12 @@ function expectSafeLiteral(value: unknown): IRLiteralValue {
 function buildProjection(select: QuerySelectFieldsNode | undefined): IRExpr {
   if (!select) return ITEM;
 
-  return objectLiteral(select.fields.map((field) => ({ key: field, value: loadProp(ITEM, field) })));
+  return objectLiteral(
+    select.fields.map((field) => ({
+      key: field,
+      value: loadProp(ITEM, field),
+    }))
+  );
 }
 
 function shouldProjectAfterOrder(plan: OptimizedQueryPlan): boolean {

@@ -15,6 +15,18 @@ interface ApiParityCase {
   readonly runtime: UnknownArtifact;
   readonly define: UnknownArtifact;
   readonly args: readonly unknown[];
+  /**
+   * Reduces a result that holds functions to something comparable. An ability
+   * answers through its methods, so the parity worth checking is what those
+   * methods answer, not the identity of the closures.
+   */
+  readonly answer?: (result: never) => unknown;
+}
+
+function resultOf(parityCase: ApiParityCase, artifact: UnknownArtifact): unknown {
+  const result = artifact(...parityCase.args);
+
+  return normalizeArtifactResult(parityCase.answer === undefined ? result : parityCase.answer(result as never));
 }
 
 function normalizeArtifactResult(value: unknown): unknown {
@@ -34,10 +46,24 @@ describe("runtime and define entrypoints", () => {
 
   it("should verify registered runtime/define/AOT operations through one parity matrix", async () => {
     const outDir = mkdtempSync(join(tmpdir(), "jit-api-parity-"));
-    const RuntimeUser = RuntimeJIT.object({ id: RuntimeJIT.number(), name: RuntimeJIT.string() });
-    const DefineUser = DefineJIT.object({ id: DefineJIT.number(), name: DefineJIT.string() });
+    const RuntimeUser = RuntimeJIT.object({
+      id: RuntimeJIT.number(),
+      name: RuntimeJIT.string(),
+    });
+    const DefineUser = DefineJIT.object({
+      id: DefineJIT.number(),
+      name: DefineJIT.string(),
+    });
     const RuntimeUsers = RuntimeJIT.array(RuntimeUser);
     const DefineUsers = DefineJIT.array(DefineUser);
+    const RuntimeProfile = RuntimeJIT.object({
+      userId: RuntimeJIT.number(),
+      label: RuntimeJIT.string(),
+    });
+    const DefineProfile = DefineJIT.object({
+      userId: DefineJIT.number(),
+      label: DefineJIT.string(),
+    });
     const value = { id: 1, name: "Ada" };
     const equalValue = { id: 1, name: "Ada" };
     const runtimeSelected = RuntimeJIT.cqrs
@@ -62,12 +88,14 @@ describe("runtime and define entrypoints", () => {
       .query(DefineJIT.array(DefineUser))
       .where((query) => query.eq("id", 2))
       .first();
-    const runtimeAggregate = RuntimeJIT.cqrs
-      .query(RuntimeJIT.array(RuntimeUser))
-      .aggregate({ count: RuntimeJIT.cqrs.count(), total: RuntimeJIT.cqrs.sum("id") });
-    const defineAggregate = DefineJIT.cqrs
-      .query(DefineJIT.array(DefineUser))
-      .aggregate({ count: DefineJIT.cqrs.count(), total: DefineJIT.cqrs.sum("id") });
+    const runtimeAggregate = RuntimeJIT.cqrs.query(RuntimeJIT.array(RuntimeUser)).aggregate({
+      count: RuntimeJIT.cqrs.count(),
+      total: RuntimeJIT.cqrs.sum("id"),
+    });
+    const defineAggregate = DefineJIT.cqrs.query(DefineJIT.array(DefineUser)).aggregate({
+      count: DefineJIT.cqrs.count(),
+      total: DefineJIT.cqrs.sum("id"),
+    });
     const runtimeSome = RuntimeJIT.cqrs
       .query(RuntimeJIT.array(RuntimeUser))
       .where((query) => query.gt("id", 1))
@@ -76,6 +104,36 @@ describe("runtime and define entrypoints", () => {
       .query(DefineJIT.array(DefineUser))
       .where((query) => query.gt("id", 1))
       .some();
+    const runtimeJoin = RuntimeJIT.cqrs.query(RuntimeUser).join(RuntimeProfile).on("id", "userId");
+    const defineJoin = DefineJIT.cqrs.query(DefineUser).join(DefineProfile).on("id", "userId");
+    const runtimeDistinct = RuntimeJIT.cqrs.query(RuntimeUser).distinct();
+    const defineDistinct = DefineJIT.cqrs.query(DefineUser).distinct();
+    const runtimeLookup = RuntimeJIT.lookup(RuntimeJIT.array(RuntimeUser).keyed("id"));
+    const defineLookup = DefineJIT.lookup(DefineJIT.array(DefineUser).keyed("id"));
+    const runtimeReconcile = RuntimeJIT.reconcile(RuntimeJIT.array(RuntimeUser).keyed("id"));
+    const defineReconcile = DefineJIT.reconcile(DefineJIT.array(DefineUser).keyed("id"));
+    const runtimeProject = RuntimeJIT.project(RuntimeUser).select("id");
+    const defineProject = DefineJIT.project(DefineUser).select("id");
+    const runtimeSelectedEqual = RuntimeJIT.compare.equal(RuntimeUser).select("id");
+    const defineSelectedEqual = DefineJIT.compare.equal(DefineUser).select("id");
+    const runtimeChanged = RuntimeJIT.compare.changed(RuntimeUser);
+    const defineChanged = DefineJIT.compare.changed(DefineUser);
+    const runtimeCacheKey = RuntimeJIT.cacheKey.string(RuntimeUser).select("id", "name");
+    const defineCacheKey = DefineJIT.cacheKey.string(DefineUser).select("id", "name");
+    const runtimeAccess = RuntimeJIT.access(RuntimeUser)
+      .actor(RuntimeUser)
+      .can("read")
+      .can("update", (query, self) => query.eq("id", self.field("id")));
+    const defineAccess = DefineJIT.access(DefineUser)
+      .actor(DefineUser)
+      .can("read")
+      .can("update", (query, self) => query.eq("id", self.field("id")));
+    const runtimeCanonical = RuntimeJIT.canonical(RuntimeUser);
+    const defineCanonical = DefineJIT.canonical(DefineUser);
+    const runtimeMergePatch = RuntimeJIT.patch.merge(RuntimeUser);
+    const defineMergePatch = DefineJIT.patch.merge(DefineUser);
+    const runtimeJsonPatch = RuntimeJIT.patch.json(RuntimeUser);
+    const defineJsonPatch = DefineJIT.patch.json(DefineUser);
 
     const cases: readonly ApiParityCase[] = [
       {
@@ -104,8 +162,12 @@ describe("runtime and define entrypoints", () => {
       },
       {
         name: "stringifyUserChunks",
-        runtime: RuntimeJIT.json.stringifyChunks(RuntimeUsers, { chunkBytes: 8 }) as UnknownArtifact,
-        define: DefineJIT.json.stringifyChunks(DefineUsers, { chunkBytes: 8 }) as UnknownArtifact,
+        runtime: RuntimeJIT.json.stringifyChunks(RuntimeUsers, {
+          chunkBytes: 8,
+        }) as UnknownArtifact,
+        define: DefineJIT.json.stringifyChunks(DefineUsers, {
+          chunkBytes: 8,
+        }) as UnknownArtifact,
         args: [[value, equalValue]],
       },
       {
@@ -150,6 +212,90 @@ describe("runtime and define entrypoints", () => {
         define: defineSome as UnknownArtifact,
         args: [[value, { id: 2, name: "Grace" }]],
       },
+      {
+        name: "usersWithProfiles",
+        runtime: runtimeJoin as UnknownArtifact,
+        define: defineJoin as UnknownArtifact,
+        args: [[value, { id: 2, name: "Grace" }], [{ userId: 1, label: "math" }]],
+      },
+      {
+        name: "distinctUsers",
+        runtime: runtimeDistinct as UnknownArtifact,
+        define: defineDistinct as UnknownArtifact,
+        args: [[value, equalValue, { id: 2, name: "Grace" }]],
+      },
+      {
+        name: "lookupUserById",
+        runtime: runtimeLookup as UnknownArtifact,
+        define: defineLookup as UnknownArtifact,
+        args: [[value, { id: 2, name: "Grace" }], 2],
+      },
+      {
+        name: "projectUserId",
+        runtime: runtimeProject as UnknownArtifact,
+        define: defineProject as UnknownArtifact,
+        args: [value],
+      },
+      {
+        name: "equalUserById",
+        runtime: runtimeSelectedEqual as UnknownArtifact,
+        define: defineSelectedEqual as UnknownArtifact,
+        args: [value, { ...value, name: "Different" }],
+      },
+      {
+        name: "changedUser",
+        runtime: runtimeChanged as UnknownArtifact,
+        define: defineChanged as UnknownArtifact,
+        args: [value, { ...value, name: "Different" }],
+      },
+      {
+        name: "userCacheKey",
+        runtime: runtimeCacheKey as UnknownArtifact,
+        define: defineCacheKey as UnknownArtifact,
+        args: [value],
+      },
+      {
+        name: "userAccess",
+        runtime: runtimeAccess as UnknownArtifact,
+        define: defineAccess as UnknownArtifact,
+        args: [value],
+        answer: (ability: { can(action: string, subject?: unknown): boolean }) => [
+          ability.can("read", value),
+          ability.can("update", value),
+          ability.can("update", { ...value, id: 99 }),
+          ability.can("archive" as never, value),
+        ],
+      },
+      {
+        name: "canonicalUser",
+        runtime: runtimeCanonical as UnknownArtifact,
+        define: defineCanonical as UnknownArtifact,
+        args: [value],
+      },
+      {
+        name: "mergeUser",
+        runtime: runtimeMergePatch as UnknownArtifact,
+        define: defineMergePatch as UnknownArtifact,
+        args: [value, { name: "Merged" }],
+      },
+      {
+        name: "patchUser",
+        runtime: runtimeJsonPatch as UnknownArtifact,
+        define: defineJsonPatch as UnknownArtifact,
+        args: [value, [{ op: "replace", path: "/name", value: "Patched" }]],
+      },
+      {
+        name: "reconcileUsers",
+        runtime: runtimeReconcile as UnknownArtifact,
+        define: defineReconcile as UnknownArtifact,
+        args: [
+          [value, { id: 2, name: "Grace" }],
+          [
+            { id: 2, name: "Grace Hopper" },
+            { id: 3, name: "Ada" },
+          ],
+        ],
+      },
     ];
 
     try {
@@ -175,17 +321,23 @@ describe("runtime and define entrypoints", () => {
       expect(source).toContain("function* stringifyChunks(value)");
       expect(source).toContain("chunk.length + part.length > 8");
       expect(source).not.toContain('from "@jit-compiler/jit"');
+      expect(source).not.toContain(".find(");
+      expect(source).not.toContain("rules.filter");
 
       for (const parityCase of cases) {
         expect(
-          normalizeArtifactResult(generated[parityCase.name](...parityCase.args)),
+          resultOf(parityCase, generated[parityCase.name] as UnknownArtifact),
           `${parityCase.name} AOT result`
-        ).toEqual(normalizeArtifactResult(parityCase.runtime(...parityCase.args)));
+        ).toEqual(resultOf(parityCase, parityCase.runtime));
       }
 
       const chunksCase = cases.find((parityCase) => parityCase.name === "stringifyUserChunks");
       expect(chunksCase).toBeDefined();
-      AOT.generate({ artifacts: { stringifyUserChunks: chunksCase?.define }, outDir, format: "ts" });
+      AOT.generate({
+        artifacts: { stringifyUserChunks: chunksCase?.define },
+        outDir,
+        format: "ts",
+      });
       expect(readFileSync(join(outDir, "index.ts"), "utf8")).toContain("=> IterableIterator<string>");
     } finally {
       rmSync(outDir, { recursive: true, force: true });
@@ -197,7 +349,9 @@ describe("runtime and define entrypoints", () => {
     const isUser = RuntimeJIT.validate.is(User);
 
     expect(isUser({ id: 1 })).toBe(true);
-    expectTypeOf<RuntimeJIT.Typeof<typeof User>>().toEqualTypeOf<{ id: number }>();
+    expectTypeOf<RuntimeJIT.Typeof<typeof User>>().toEqualTypeOf<{
+      id: number;
+    }>();
   });
 
   it("should create typed AOT stubs that generate standalone output", async () => {
@@ -233,7 +387,10 @@ describe("runtime and define entrypoints", () => {
     const outDir = mkdtempSync(join(tmpdir(), "jit-define-pipeline-"));
 
     try {
-      const User = DefineJIT.object({ id: DefineJIT.number(), active: DefineJIT.boolean() });
+      const User = DefineJIT.object({
+        id: DefineJIT.number(),
+        active: DefineJIT.boolean(),
+      });
       const activeUsers = DefineJIT.json
         .parse(DefineJIT.array(User))
         .validate()

@@ -70,6 +70,66 @@ compared repeatedly. Index construction has a cost; a plain ordered array is
 usually faster for one small comparison. Never mutate a cached collection
 behind the compiler's back.
 
+## Comparing a subset
+
+`select()` compares only the named fields. The others are not compared and
+discarded — they are absent from the generated comparison entirely, so a wide
+row with one meaningful status field costs one comparison rather than twenty:
+
+```ts
+const User = JIT.object({
+  id: JIT.number(),
+  status: JIT.string(),
+  notes: JIT.string(),
+});
+
+const sameStatus = JIT.compare.equal(User).select("id", "status");
+
+console.log(sameStatus({ id: 1, status: "active", notes: "a" }, { id: 1, status: "active", notes: "b" }));
+console.log(sameStatus({ id: 1, status: "active", notes: "a" }, { id: 1, status: "blocked", notes: "a" }));
+```
+
+A dotted path reaches into a nested object:
+
+```ts
+const Profile = JIT.object({ name: JIT.string(), bio: JIT.string() });
+const User = JIT.object({ id: JIT.number(), profile: Profile });
+
+const sameName = JIT.compare.equal(User).select("profile.name");
+
+console.log(sameName({ id: 1, profile: { name: "Ada", bio: "x" } }, { id: 2, profile: { name: "Ada", bio: "y" } }));
+```
+
+The selection is the same one [`JIT.project`](./project) and
+[`JIT.cqrs.query().select()`](./query) resolve, so the fields you compare by
+are the fields you project.
+
+## Which fields changed
+
+`JIT.compare.changed` answers *what* moved rather than just whether anything
+did, as a bitmask. Testing a field is one bitwise operation, and the comparison
+allocates nothing:
+
+```ts
+const User = JIT.object({
+  id: JIT.number(),
+  email: JIT.string(),
+  tags: JIT.array(JIT.string()),
+});
+
+const userChanged = JIT.compare.changed(User);
+
+const before = { id: 1, email: "ada@x.com", tags: ["a"] };
+const after = { id: 1, email: "grace@x.com", tags: ["a"] };
+const mask = userChanged(before, after);
+
+console.log(userChanged.has(mask, "email"), userChanged.has(mask, "tags"));
+console.log(userChanged.fields.join(","));
+```
+
+A structural field is compared by value, so a rebuilt array with the same
+contents is not a change. `select()` watches a subset, including dotted paths.
+
 ## AOT
 
 ```ts

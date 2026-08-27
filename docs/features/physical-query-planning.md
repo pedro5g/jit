@@ -24,12 +24,12 @@ not of the call site. Spreading it across call sites is what makes it go stale.
 The collection already declares those facts, and the equality compiler already
 reads them. The planner reads the same ones:
 
-| Declaration              | Fact                                    |
-| ------------------------ | --------------------------------------- |
-| `.keyed("id")`           | unique identity **and** an index worth caching |
-| `.uniqueBy("id")`        | unique key, no index intent             |
-| `.indexBy("id")`         | equality-access intent, no cached index |
-| `.ordered("id", "asc")`  | the collection is sorted by this key    |
+| Declaration             | Fact                                           |
+| ----------------------- | ---------------------------------------------- |
+| `.keyed("id")`          | unique identity **and** an index worth caching |
+| `.uniqueBy("id")`       | unique key, no index intent                    |
+| `.indexBy("id")`        | equality-access intent, no cached index        |
+| `.ordered("id", "asc")` | the collection is sorted by this key           |
 
 Because the facts live on the schema, changing one changes every query over
 that collection at once, and `explain()` can say what changed.
@@ -114,7 +114,9 @@ const build = (value) => {
   return index;
 };
 function query(value, params) {
-  const row = __cachedIndex(value, "index:unique:id:direct:false", build).get(params.id);
+  const row = __cachedIndex(value, "index:unique:id:direct:false", build).get(
+    params.id,
+  );
   return row;
 }
 ```
@@ -147,7 +149,7 @@ function query(value, params) {
   const len = value.length;
   for (let i = 0; i < len; i++) {
     const item = value[i];
-    if ((item.id === params.id)) {
+    if (item.id === params.id) {
       return item;
     }
   }
@@ -162,11 +164,11 @@ query is the index a `JIT.index` plan finds already built.
 
 ## 7. Allocation model
 
-| Strategy            | Allocations per call | Allocations per array |
-| ------------------- | -------------------- | --------------------- |
-| `Scan`              | the result array     | 0                     |
-| `EarlyExitScan`     | 0                    | 0                     |
-| `BinarySearch`      | 0                    | 0                     |
+| Strategy            | Allocations per call | Allocations per array    |
+| ------------------- | -------------------- | ------------------------ |
+| `Scan`              | the result array     | 0                        |
+| `EarlyExitScan`     | 0                    | 0                        |
+| `BinarySearch`      | 0                    | 0                        |
 | `CachedIndexLookup` | 0                    | one `Map` of `n` entries |
 
 `CachedIndexLookup` is the only strategy that keeps memory, and it keeps it in
@@ -248,11 +250,11 @@ of once warm.
 An index only pays across repeated lookups against the same array. Rebuild the
 array on every call and the cache never hits:
 
-| 10 000 rows, a fresh array each call | Time |
-| ------------------------------------ | ---: |
+| 10 000 rows, a fresh array each call |    Time |
+| ------------------------------------ | ------: |
 | `EarlyExitScan`                      | 8.13 µs |
 | `BinarySearch`                       | 1.59 µs |
-| `CachedIndexLookup`                  | 531 µs |
+| `CachedIndexLookup`                  |  531 µs |
 
 **`CachedIndexLookup` is 65x slower than a scan here**, because it pays the full
 `O(n)` build for a single `O(1)` lookup and then throws it away. This is the
@@ -287,8 +289,11 @@ sorted, declare `.ordered()` rather than `.keyed()`.
 ## 15. Non-goals
 
 - No runtime statistics, cardinality estimation or adaptive re-planning.
-- No range scan, merge join or top-K yet. Those are later milestones and are
-  not claimed here.
+- No range scan or top-K yet. Join planning now selects hash, indexed or merge
+  strategies and is documented separately in [joins](./joins.md).
+- Distinct planning selects scalar lookup, compound trie, structural
+  hash/equality confirmation or ordered adjacent comparison. These strategy
+  names remain outside the portable query protocol.
 - No verification of declared facts. `.ordered()` and `.keyed()` are trusted,
   in exchange for the code the planner does not have to emit.
 - No physical plan in `~query`. External adapters get the request and choose

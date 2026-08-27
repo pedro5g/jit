@@ -91,7 +91,11 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
   });
 
   it("should keep only the stages used by a composed JSON collection pipeline", async () => {
-    const User = JIT.object({ id: JIT.number(), name: JIT.string(), active: JIT.boolean() });
+    const User = JIT.object({
+      id: JIT.number(),
+      name: JIT.string(),
+      active: JIT.boolean(),
+    });
     const activeUsers = JIT.json
       .parse(JIT.array(User))
       .validate()
@@ -112,7 +116,11 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
   });
 
   it("should keep a CQRS filter artifact independent from unrelated operation families", async () => {
-    const User = JIT.object({ id: JIT.number(), active: JIT.boolean(), score: JIT.number() });
+    const User = JIT.object({
+      id: JIT.number(),
+      active: JIT.boolean(),
+      score: JIT.number(),
+    });
     const activeIds = JIT.cqrs
       .query(User)
       .where((query) => query.eq("active", true))
@@ -136,7 +144,11 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     const summary = JIT.cqrs
       .query(JIT.array(Order))
       .where((query) => query.gt("total", 10))
-      .aggregate({ count: JIT.cqrs.count(), revenue: JIT.cqrs.sum("total"), average: JIT.cqrs.avg("total") });
+      .aggregate({
+        count: JIT.cqrs.count(),
+        revenue: JIT.cqrs.sum("total"),
+        average: JIT.cqrs.avg("total"),
+      });
 
     AOT.generate({ artifacts: { summary }, outDir });
     const bundled = await bundle(
@@ -170,6 +182,181 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("group = [");
     expect(bundled).not.toContain(".push(");
     expect(bundled).not.toContain(".reduce(");
+  });
+
+  it("should keep a join independent from unrelated CQRS and operation families", async () => {
+    const Order = JIT.object({ customerId: JIT.string(), total: JIT.number() });
+    const Customer = JIT.object({ id: JIT.string(), name: JIT.string() });
+    const joinOrders = JIT.cqrs.query(Order).join(Customer).on("customerId", "id");
+
+    AOT.generate({ artifacts: { joinOrders }, outDir });
+    const bundled = await bundle(
+      `import { joinOrders } from "./index.js";\nconsole.log(joinOrders([{ customerId: "c1", total: 10 }], [{ id: "c1", name: "Ada" }]));\n`
+    );
+
+    expect(bundled).toMatch(/function join\d*\(left, right\)/);
+    expect(bundled).toContain("new Map()");
+    expect(bundled).not.toContain(".find(");
+    expect(bundled).not.toContain("function stringify");
+    expect(bundled).not.toContain("function clone");
+    expect(bundled).not.toContain("CachedIndexLookup");
+    expect(bundled).not.toContain("HashJoin");
+  });
+
+  it("should keep structural distinct independent from unrelated operation families", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const distinctUsers = JIT.cqrs.query(User).distinct();
+
+    AOT.generate({ artifacts: { distinctUsers }, outDir });
+    const bundled = await bundle(
+      `import { distinctUsers } from "./index.js";\nconsole.log(distinctUsers([{ id: 1, name: "Ada" }]));\n`
+    );
+
+    expect(bundled).toContain("function __distinctAccept");
+    expect(bundled).toContain("__distinctEqual(bucket[i], item)");
+    expect(bundled).not.toContain("JSON.stringify");
+    expect(bundled).not.toContain("function stringify");
+    expect(bundled).not.toContain("function clone");
+    expect(bundled).not.toContain("HashJoin");
+  });
+
+  /**
+   * A lookup is the smallest thing the planner produces, so it is the clearest
+   * proof that choosing an algorithm costs nothing at runtime: the binary path
+   * carries no index, and the scan path carries neither.
+   */
+  it("should ship only the access path a lookup resolved to", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const userByName = JIT.lookup(JIT.array(User)).by("name");
+
+    AOT.generate({ artifacts: { userByName }, outDir });
+    const bundled = await bundle(
+      `import { userByName } from "./index.js";\nconsole.log(userByName([{ id: 1, name: "Ada" }], "Ada"));\n`
+    );
+
+    expect(bundled).toContain("row.name === target");
+    // The scan path resolved, so no index, no search and no planner came with it.
+    expect(bundled).not.toContain("__cachedIndex");
+    expect(bundled).not.toContain("new Map");
+    expect(bundled).not.toContain(">>> 1");
+    expect(bundled).not.toContain("resolveKeyedAccessChoice");
+    expect(bundled).not.toContain("EarlyExitScan");
+    expect(bundled).not.toContain("function __distinctAccept");
+    expect(bundled).not.toContain("HashJoin");
+  });
+
+  it("should build the index once for a keyed lookup and search without one when ordered", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const ordered = JIT.lookup(JIT.array(User).ordered("id", "asc").uniqueBy("id"));
+
+    AOT.generate({ artifacts: { ordered }, outDir });
+    const bundled = await bundle(
+      `import { ordered } from "./index.js";\nconsole.log(ordered([{ id: 1, name: "Ada" }], 1));\n`
+    );
+
+    expect(bundled).toContain(">>> 1");
+    expect(bundled).not.toContain("__cachedIndex");
+    expect(bundled).not.toContain("new Map");
+  });
+
+  /**
+   * A narrowed reconciliation is the strongest tree-shaking claim in the
+   * library: turning a channel off has to remove the code that would have
+   * served it, not merely hide its result.
+   */
+  it("should ship only the channels a reconciliation asked for", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const addedOnly = JIT.reconcile(JIT.array(User).keyed("id"), {
+      removed: false,
+      changed: false,
+      unchanged: false,
+    });
+
+    AOT.generate({ artifacts: { addedOnly }, outDir });
+    const bundled = await bundle(
+      `import { addedOnly } from "./index.js";\nconsole.log(addedOnly([], [{ id: 1, name: "Ada" }]));\n`
+    );
+
+    expect(bundled).toContain("index.get(id)");
+    // Nothing depends on comparing rows, so no equality was generated at all.
+    expect(bundled).not.toContain("__reconcileEqual");
+    expect(bundled).not.toContain("index.values()");
+    expect(bundled).not.toContain("index.delete");
+    expect(bundled).not.toContain("function diff");
+    expect(bundled).not.toContain("HashJoin");
+    expect(bundled).not.toContain("function __distinctAccept");
+  });
+
+  it("should carry a diff into a reconciliation only when one was declared", async () => {
+    const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const withDiff = JIT.reconcile(JIT.array(User).keyed("id")).changes("diff");
+    const withoutDiff = JIT.reconcile(JIT.array(User).keyed("id"));
+
+    AOT.generate({ artifacts: { withDiff }, outDir });
+    const diffed = await bundle(
+      `import { withDiff } from "./index.js";\nconsole.log(withDiff([], [{ id: 1, name: "Ada" }]));\n`
+    );
+
+    AOT.generate({ artifacts: { withoutDiff }, outDir });
+    const plain = await bundle(
+      `import { withoutDiff } from "./index.js";\nconsole.log(withoutDiff([], [{ id: 1, name: "Ada" }]));\n`
+    );
+
+    expect(diffed).toContain("__reconcileDiff");
+    expect(plain).not.toContain("__reconcileDiff");
+    expect(plain.length).toBeLessThan(diffed.length);
+  });
+
+  it("should ship a projection as a literal, and a selective compare as a two-field equality", async () => {
+    const Profile = JIT.object({ name: JIT.string(), bio: JIT.string() });
+    const User = JIT.object({ id: JIT.number(), secret: JIT.string(), profile: Profile });
+    const publicUser = JIT.project(User).select("id", "profile.name");
+    const sameIdentity = JIT.compare.equal(User).select("id");
+
+    AOT.generate({ artifacts: { publicUser, sameIdentity }, outDir });
+    // The consumer builds its input elsewhere, so the bundle's only mention of
+    // an unselected field would have to come from the generated code.
+    const bundled = await bundle(
+      `import { publicUser, sameIdentity } from "./index.js";\nconsole.log(publicUser(JSON.parse(process.argv[2])), sameIdentity);\n`
+    );
+
+    expect(bundled).toContain('"id": value.id');
+    // The fields nobody selected are absent, not merely unused.
+    expect(bundled).not.toContain("secret");
+    expect(bundled).not.toContain("bio");
+    expect(bundled).not.toContain("Object.keys");
+    expect(bundled).not.toContain("ProjectionTree");
+  });
+
+  /**
+   * The plan's headline claim for authorization: declarative rules become
+   * direct checks, and nothing that resembles a rule engine survives.
+   */
+  it("should ship an ability as a switch, with no rule engine behind it", async () => {
+    const User = JIT.object({ id: JIT.number(), role: JIT.string() });
+    const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), locked: JIT.boolean() });
+    const canEditPost = JIT.access(Post)
+      .actor(User)
+      .can("read")
+      .can("update", (query, actor) => query.eq("authorId", actor.field("id")))
+      .cannot("delete", (query) => query.eq("locked", true));
+
+    AOT.generate({ artifacts: { canEditPost }, outDir });
+    const bundled = await bundle(
+      `import { canEditPost } from "./index.js";\nconsole.log(canEditPost(JSON.parse(process.argv[2])).can("update", JSON.parse(process.argv[3])));\n`
+    );
+
+    expect(bundled).toContain("subject.authorId === actor.id");
+    expect(bundled).toContain('case "read"');
+    // No rule array, no matcher, no condition interpreter.
+    expect(bundled).not.toContain("rules");
+    expect(bundled).not.toContain(".filter(");
+    expect(bundled).not.toContain("conditions");
+    expect(bundled).not.toContain("effect");
+    // And nothing from the unrelated operation families.
+    expect(bundled).not.toContain("function __distinctAccept");
+    expect(bundled).not.toContain("HashJoin");
+    expect(bundled).not.toContain("__parsePointer");
   });
 
   it("should compile an access path in, and no planner with it", async () => {
@@ -228,7 +415,11 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
   });
 
   it("should keep a sort plan free of every unrelated compiler and of a generic comparator", async () => {
-    const User = JIT.object({ id: JIT.number(), lastName: JIT.string(), createdAt: JIT.date() });
+    const User = JIT.object({
+      id: JIT.number(),
+      lastName: JIT.string(),
+      createdAt: JIT.date(),
+    });
     const sortUsers = JIT.sort(User).by("lastName").thenBy("createdAt", "desc");
     const unrelated = JIT.cqrs.query(JIT.array(User)).where((query) => query.eq("id", 1));
 
@@ -250,7 +441,11 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
   });
 
   it("should keep an index plan free of unrelated compilers and of a schema walker", async () => {
-    const User = JIT.object({ id: JIT.number(), tenantId: JIT.string(), email: JIT.string() });
+    const User = JIT.object({
+      id: JIT.number(),
+      tenantId: JIT.string(),
+      email: JIT.string(),
+    });
     const Users = JIT.array(User).keyed("id");
     const byId = JIT.index(Users);
     const unrelated = JIT.sort(User).by("email");

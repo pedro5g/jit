@@ -1,0 +1,151 @@
+---
+title: access
+description: Declarative can/cannot rules compiled into direct checks, with no rule engine at run time.
+---
+
+## Signature
+
+```ts
+const User = JIT.object({ id: JIT.number(), role: JIT.string() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), locked: JIT.boolean() });
+
+const PostAccess = JIT.access(Post)
+  .actor(User)
+  .can("read")
+  .can("update", (query, actor) => query.eq("authorId", actor.field("id")))
+  .cannot("delete", (query) => query.eq("locked", true));
+
+const ability = PostAccess({ id: 1, role: "user" });
+const post = { id: 10, authorId: 1, locked: false };
+
+console.log(ability.can("read"), ability.can("update", post));
+```
+
+Actions are known when the rules are declared, so a check is a `switch` over
+string literals — not a scan of a rule array.
+
+## Default deny
+
+An action no rule mentions is refused, and so is an action whose only rule is a
+prohibition:
+
+```ts
+const Post = JIT.object({ id: JIT.number(), locked: JIT.boolean() });
+const ability = JIT.access(Post).can("read")({});
+
+console.log(ability.can("read", { id: 1, locked: false }));
+console.log((ability.can as (action: string, subject?: unknown) => boolean)("delete", { id: 1, locked: false }));
+```
+
+## cannot wins, wherever it is written
+
+The rules for an action are folded into one boolean at compile time, so
+precedence is not positional — a prohibition overrides a permission regardless
+of declaration order:
+
+```ts
+const User = JIT.object({ id: JIT.number() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), locked: JIT.boolean() });
+
+const plan = JIT.access(Post)
+  .actor(User)
+  .cannot("delete", (query) => query.eq("locked", true))
+  .can("delete", (query, actor) => query.eq("authorId", actor.field("id")));
+
+const ability = plan({ id: 1 });
+
+console.log(ability.can("delete", { id: 1, authorId: 1, locked: false }));
+console.log(ability.can("delete", { id: 1, authorId: 1, locked: true }));
+```
+
+## Field rules
+
+A rule can speak about specific fields:
+
+```ts
+const User = JIT.object({ id: JIT.number() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), title: JIT.string(), body: JIT.string() });
+
+const plan = JIT.access(Post)
+  .actor(User)
+  .can("update", (query, actor) => query.eq("authorId", actor.field("id")))
+  .cannot("update", { fields: ["body"] });
+
+const ability = plan({ id: 1 });
+const post = { id: 10, authorId: 1, title: "t", body: "b" };
+
+console.log(ability.can("update", post, "title"));
+console.log(ability.can("update", post, "body"));
+console.log(ability.can("update", post));
+```
+
+The last line is `true` on purpose: a prohibition scoped to `body` must not
+block the whole action, because `title` is still updatable.
+
+`fields(action)` reports the allowed list when it can be settled without a
+subject, which is what you would hand to a projection:
+
+```ts
+const Post = JIT.object({ id: JIT.number(), title: JIT.string(), body: JIT.string() });
+const plan = JIT.access(Post).can("read").cannot("read", { fields: ["body"] });
+
+console.log(plan.fields("read"));
+console.log(plan.actions.join(","));
+```
+
+## Conditions are query conditions
+
+A rule's condition is the query condition builder over the subject, with
+`actor.field(...)` on the other side — the same AST, not a second expression
+language:
+
+```ts
+const User = JIT.object({ id: JIT.number(), role: JIT.string() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), locked: JIT.boolean() });
+
+const plan = JIT.access(Post)
+  .actor(User)
+  .can("read", (query, actor) =>
+    query.or(query.eq("authorId", actor.field("id")), query.not(query.eq("locked", true)))
+  );
+
+const other = plan({ id: 2, role: "user" });
+
+console.log(other.can("read", { id: 1, authorId: 1, locked: false }));
+console.log(other.can("read", { id: 1, authorId: 1, locked: true }));
+```
+
+Conditions compare a subject field against a literal or an actor field. Arbitrary
+callbacks are deliberately not accepted: they could not be compiled, generated
+ahead of time, or pushed into a query.
+
+## What AOT emits
+
+```ts
+// access.jit.ts
+export const canEditPost = JIT.access(Post)
+  .actor(User)
+  .can("update", (query, actor) => query.eq("authorId", actor.field("id")));
+```
+
+becomes a plain function with no rule engine behind it:
+
+```js
+function ability(actor) {
+  function can(action, subject, field) {
+    switch (action) {
+      case "update":
+        return subject.authorId === actor.id;
+      default:
+        return false;
+    }
+  }
+  return { can: can, cannot: (action, subject, field) => !can(action, subject, field) };
+}
+```
+
+## See also
+
+- [Query](./query) — the condition builder these rules reuse
+- [Project](./project) — narrowing a value to the fields a read permission allows
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/access-control.md) — semantics, generated code and benchmarks against a generic rule engine

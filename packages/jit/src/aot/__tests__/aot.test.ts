@@ -31,7 +31,10 @@ describe("JIT AOT generate", () => {
     expect(result.skipped).toHaveLength(0);
     expect(Object.keys(generated.User)).toEqual(["is", "clone"]);
     expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
-    expect(generated.User.clone({ id: 1, name: "Ada" })).toEqual({ id: 1, name: "Ada" });
+    expect(generated.User.clone({ id: 1, name: "Ada" })).toEqual({
+      id: 1,
+      name: "Ada",
+    });
     expect(source).toContain("function is(value)");
     expect(source).toContain("function clone(value)");
     expect(source).not.toContain("function safeParse(value)");
@@ -40,7 +43,10 @@ describe("JIT AOT generate", () => {
   });
 
   it("emits fromJSON as native parsing followed by specialized validation", async () => {
-    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      name: JIT.string().min(2),
+    });
     const Json = { fromJSON: JIT.json.parse(User).validate() };
 
     AOT.generate({ groups: { Json }, outDir });
@@ -54,7 +60,10 @@ describe("JIT AOT generate", () => {
       Json: { fromJSON: (json: string) => { id: number; name: string } };
     };
 
-    expect(generated.Json.fromJSON('{"id":1,"name":"Ada"}')).toEqual({ id: 1, name: "Ada" });
+    expect(generated.Json.fromJSON('{"id":1,"name":"Ada"}')).toEqual({
+      id: 1,
+      name: "Ada",
+    });
   });
 
   it("emits dynamic CQRS input as an import-free parser artifact", async () => {
@@ -97,7 +106,11 @@ describe("JIT AOT generate", () => {
   });
 
   it("preserves the structural query protocol on an AOT static CQRS query", async () => {
-    const User = JIT.object({ id: JIT.string(), age: JIT.number(), active: JIT.boolean() });
+    const User = JIT.object({
+      id: JIT.string(),
+      age: JIT.number(),
+      active: JIT.boolean(),
+    });
     const ActiveUsers = JIT.cqrs
       .query(User)
       .params({ minimumAge: JIT.number() })
@@ -114,7 +127,10 @@ describe("JIT AOT generate", () => {
         readonly "~query": {
           readonly version: number;
           readonly definition: {
-            readonly filter?: { readonly kind: string; readonly operator?: string };
+            readonly filter?: {
+              readonly kind: string;
+              readonly operator?: string;
+            };
             readonly params?: readonly string[];
             readonly projection?: readonly string[];
             readonly limit?: number;
@@ -148,7 +164,12 @@ describe("JIT AOT generate", () => {
   it("inlines compound cursor decoding for AOT CQRS input", async () => {
     const User = JIT.object({ id: JIT.string(), createdAt: JIT.string() });
     const ListUsers = JIT.cqrs.input(User, {
-      pagination: { type: "cursor", by: ["createdAt", "id"], defaultLimit: 20, maxLimit: 100 },
+      pagination: {
+        type: "cursor",
+        by: ["createdAt", "id"],
+        defaultLimit: 20,
+        maxLimit: 100,
+      },
     });
     AOT.generate({ artifacts: { ListUsers }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
@@ -157,7 +178,12 @@ describe("JIT AOT generate", () => {
     };
 
     expect(source).toContain("function decodeCursor(value, size)");
-    expect(generated.ListUsers.parse({ after: btoa('["2026-01-01","u_1"]'), limit: 10 })).toEqual({
+    expect(
+      generated.ListUsers.parse({
+        after: btoa('["2026-01-01","u_1"]'),
+        limit: 10,
+      })
+    ).toEqual({
       filter: [],
       sort: [
         { path: ["createdAt"], direction: "asc" },
@@ -172,7 +198,10 @@ describe("JIT AOT generate", () => {
       id: JIT.number().int32(),
       name: JIT.string(),
     });
-    const User = { is: JIT.validate.is(UserSchema), parse: JIT.validate.parse(UserSchema) };
+    const User = {
+      is: JIT.validate.is(UserSchema),
+      parse: JIT.validate.parse(UserSchema),
+    };
     const result = AOT.generate({
       groups: { User },
       schemas: { User: UserSchema },
@@ -195,7 +224,10 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(source).toMatchSnapshot("direct TypeScript AOT");
     expect(generated.User.is({ id: 1, name: "Ada" })).toBe(true);
-    expect(generated.User.parse({ id: 1, name: "Ada" })).toEqual({ id: 1, name: "Ada" });
+    expect(generated.User.parse({ id: 1, name: "Ada" })).toEqual({
+      id: 1,
+      name: "Ada",
+    });
 
     writeFileSync(
       join(outDir, "consumer.ts"),
@@ -234,7 +266,10 @@ describe("JIT AOT generate", () => {
   });
 
   it("should emit one ready-to-run JavaScript module without declaration artifacts", () => {
-    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2) });
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      name: JIT.string().min(2),
+    });
     const isUser = JIT.validate.is(User);
     const result = AOT.generate({
       groups: {},
@@ -282,7 +317,11 @@ describe("JIT AOT generate", () => {
   });
 
   it("should emit DTO-annotated schemas through validation, JSON, and map artifacts", async () => {
-    const User = JIT.object({ id: JIT.number().int32(), fullName: JIT.string(), passwordHash: JIT.string() });
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      fullName: JIT.string(),
+      passwordHash: JIT.string(),
+    });
     const Public = JIT.dto(JIT.object({ id: JIT.number().int32(), name: JIT.string() }));
     const result = AOT.generate({
       groups: {},
@@ -302,7 +341,13 @@ describe("JIT AOT generate", () => {
         id: number;
         name: string;
       };
-      readonly Public_many: (value: readonly { id: number; fullName: string; passwordHash: string }[]) => {
+      readonly Public_many: (
+        value: readonly {
+          id: number;
+          fullName: string;
+          passwordHash: string;
+        }[]
+      ) => {
         id: number;
         name: string;
       }[];
@@ -319,7 +364,11 @@ describe("JIT AOT generate", () => {
   });
 
   it("should lower JSON, validation, query, and JSON output from one execution descriptor", async () => {
-    const User = JIT.object({ id: JIT.number().int32(), name: JIT.string().min(2), active: JIT.boolean() });
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      name: JIT.string().min(2),
+      active: JIT.boolean(),
+    });
     const Users = JIT.array(User);
     const activeUsers = JIT.json
       .parse(Users)
@@ -327,7 +376,11 @@ describe("JIT AOT generate", () => {
       .filter((query) => query.eq("active", true))
       .select("id", "name")
       .to.json();
-    const result = AOT.generate({ groups: {}, artifacts: { activeUsers }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { activeUsers },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly activeUsers: (json: string) => string;
@@ -343,7 +396,10 @@ describe("JIT AOT generate", () => {
 
   it("should lower runtime value objects as import-free classes", async () => {
     const Money = JIT.ddd.valueObject(
-      JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) }).hash("ordered")
+      JIT.object({
+        amount: JIT.number(),
+        currency: JIT.enum(["BRL", "USD"] as const),
+      }).hash("ordered")
     );
     const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
@@ -379,7 +435,10 @@ describe("JIT AOT generate", () => {
 
   it("should preserve abstract value-object behavior in AOT subclasses", async () => {
     const MoneyBase = JIT.ddd.valueObject.abstract(
-      JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"] as const) })
+      JIT.object({
+        amount: JIT.number(),
+        currency: JIT.enum(["BRL", "USD"] as const),
+      })
     );
     const result = AOT.generate({ artifacts: { MoneyBase }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
@@ -397,7 +456,10 @@ describe("JIT AOT generate", () => {
     class Money extends generated.MoneyBase {}
 
     const money = Money.create({ amount: 10, currency: "BRL" }) as InstanceType<typeof Money>;
-    const restored = Money.hydrate({ amount: 10, currency: "BRL" }) as InstanceType<typeof Money>;
+    const restored = Money.hydrate({
+      amount: 10,
+      currency: "BRL",
+    }) as InstanceType<typeof Money>;
 
     expect(result.skipped).toEqual([]);
     expect(money).toBeInstanceOf(Money);
@@ -413,12 +475,18 @@ describe("JIT AOT generate", () => {
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly User: {
         create(input: { name: string }): { id: string; name: string };
-        hydrate(state: { id: string; name: string }): { id: string; name: string };
+        hydrate(state: { id: string; name: string }): {
+          id: string;
+          name: string;
+        };
       };
     };
 
     expect(result.skipped).toHaveLength(0);
-    expect(generated.User.create({ name: "Ada" })).toEqual({ id: "generated", name: "Ada" });
+    expect(generated.User.create({ name: "Ada" })).toEqual({
+      id: "generated",
+      name: "Ada",
+    });
     expect(() => generated.User.hydrate({ name: "Ada" } as never)).toThrow();
   });
 
@@ -432,7 +500,10 @@ describe("JIT AOT generate", () => {
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly User: {
         make(input: unknown): { id: string; name: string };
-        readonly "restore-state": (state: { id: string; name: string }) => { id: string; name: string };
+        readonly "restore-state": (state: { id: string; name: string }) => {
+          id: string;
+          name: string;
+        };
       };
     };
 
@@ -491,10 +562,20 @@ describe("JIT AOT generate", () => {
   it("co-emits Runtime Classes for AOT JSON construction pipelines", async () => {
     const User = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string() }));
     const parseUser = JIT.json.parse(User).validate();
-    const result = AOT.generate({ groups: {}, artifacts: { User, parseUser }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { User, parseUser },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
-      readonly User: new (state: { id: string; name: string }) => { id: string; name: string };
+      readonly User: new (state: {
+        id: string;
+        name: string;
+      }) => {
+        id: string;
+        name: string;
+      };
       readonly parseUser: (json: string) => { id: string; name: string };
     };
     const user = generated.parseUser('{"id":"u_1","name":"Ada"}');
@@ -508,7 +589,11 @@ describe("JIT AOT generate", () => {
 
   it("refuses AOT class-construction pipelines without their named class artifact", () => {
     const User = JIT.class(JIT.object({ id: JIT.string() }));
-    const result = AOT.generate({ groups: {}, artifacts: { parseUser: JIT.json.parse(User).validate() }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { parseUser: JIT.json.parse(User).validate() },
+      outDir,
+    });
 
     expect(result.files).toEqual([]);
     expect(result.skipped).toEqual([
@@ -527,7 +612,12 @@ describe("JIT AOT generate", () => {
     const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
-      readonly User: { create(input: { id: string; name: string }): { id: string; name: string } };
+      readonly User: {
+        create(input: { id: string; name: string }): {
+          id: string;
+          name: string;
+        };
+      };
     };
     const user = generated.User.create({ id: "u_1", name: "Ada" });
 
@@ -542,14 +632,22 @@ describe("JIT AOT generate", () => {
       version: 1,
       payload: JIT.object({ orderId: JIT.string() }),
     });
-    const result = AOT.generate({ groups: {}, artifacts: { OrderConfirmed }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { OrderConfirmed },
+      outDir,
+    });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderConfirmed: {
         readonly type: string;
         readonly version: number;
         create(input: { orderId: string }): {
           readonly payload: { readonly orderId: string };
-          readonly "~event": { readonly version: 1; readonly type: string; readonly schemaVersion: number };
+          readonly "~event": {
+            readonly version: 1;
+            readonly type: string;
+            readonly schemaVersion: number;
+          };
         };
       };
     };
@@ -576,7 +674,12 @@ describe("JIT AOT generate", () => {
     });
     const typedOutDir = join(outDir, "typed");
 
-    AOT.generate({ groups: {}, artifacts: { OrderConfirmed }, outDir: typedOutDir, format: "ts" });
+    AOT.generate({
+      groups: {},
+      artifacts: { OrderConfirmed },
+      outDir: typedOutDir,
+      format: "ts",
+    });
     const source = readFileSync(join(typedOutDir, "index.ts"), "utf8");
 
     expect(source).toContain("create(input: { orderId: string })");
@@ -619,12 +722,19 @@ describe("JIT AOT generate", () => {
     const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
     const UserBase = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
     const OrderBase = JIT.ddd.aggregateRoot(
-      JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"] as const) }),
+      JIT.object({
+        id: JIT.string().readonly(),
+        status: JIT.enum(["draft", "confirmed"] as const),
+      }),
       { id: "id" }
     );
     const typedOutDir = join(outDir, "typed-ddd");
 
-    AOT.generate({ artifacts: { Money, UserBase, OrderBase }, outDir: typedOutDir, format: "ts" });
+    AOT.generate({
+      artifacts: { Money, UserBase, OrderBase },
+      outDir: typedOutDir,
+      format: "ts",
+    });
     writeFileSync(
       join(typedOutDir, "consumer.ts"),
       [
@@ -675,7 +785,11 @@ describe("JIT AOT generate", () => {
       payload: JIT.object({ orderId: JIT.string() }),
     });
     const parseEvent = JIT.json.parse(OrderConfirmed).validate();
-    const result = AOT.generate({ groups: {}, artifacts: { OrderConfirmed, parseEvent }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { OrderConfirmed, parseEvent },
+      outDir,
+    });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderConfirmed: { new (state: unknown): { occurredAt: Date } };
       readonly parseEvent: (json: string) => { occurredAt: Date };
@@ -697,7 +811,11 @@ describe("JIT AOT generate", () => {
       }),
       { id: "id" }
     );
-    const result = AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { OrderBase },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     type OrderBaseConstructor = {
       new (
@@ -724,7 +842,10 @@ describe("JIT AOT generate", () => {
       }
     }
 
-    const order = Order.create({ status: "draft", shipping: { city: "Recife", country: "BR" } }) as Order;
+    const order = Order.create({
+      status: "draft",
+      shipping: { city: "Recife", country: "BR" },
+    }) as Order;
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toMatchSnapshot("AOT aggregate mutation and event buffer");
@@ -745,14 +866,26 @@ describe("JIT AOT generate", () => {
 
   it("should emit aggregate timestamp mutations without the runtime", async () => {
     const OrderBase = JIT.ddd
-      .aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), updatedAt: JIT.date() }), {
-        id: "id",
-      })
+      .aggregateRoot(
+        JIT.object({
+          id: JIT.string(),
+          status: JIT.string(),
+          updatedAt: JIT.date(),
+        }),
+        {
+          id: "id",
+        }
+      )
       .timestamps({ updatedAt: "updatedAt" });
     AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderBase: {
-        new (input: unknown): { update(patch: { status: string }): void; updatedAt: Date };
+        new (
+          input: unknown
+        ): {
+          update(patch: { status: string }): void;
+          updatedAt: Date;
+        };
         create(input: { id: string; status: string; updatedAt: Date }): {
           update(patch: { status: string }): void;
           updatedAt: Date;
@@ -761,7 +894,11 @@ describe("JIT AOT generate", () => {
     };
     class Order extends generated.OrderBase {}
     const initial = new Date(0);
-    const order = Order.create({ id: "o_1", status: "draft", updatedAt: initial });
+    const order = Order.create({
+      id: "o_1",
+      status: "draft",
+      updatedAt: initial,
+    });
 
     order.update({ status: "confirmed" });
     expect(order.updatedAt.getTime()).toBeGreaterThan(initial.getTime());
@@ -769,9 +906,16 @@ describe("JIT AOT generate", () => {
 
   it("should emit soft-delete metadata with a shared timestamp instant", async () => {
     const OrderBase = JIT.ddd
-      .aggregateRoot(JIT.object({ id: JIT.string(), updatedAt: JIT.date(), deletedAt: JIT.date().nullable() }), {
-        id: "id",
-      })
+      .aggregateRoot(
+        JIT.object({
+          id: JIT.string(),
+          updatedAt: JIT.date(),
+          deletedAt: JIT.date().nullable(),
+        }),
+        {
+          id: "id",
+        }
+      )
       .timestamps({ updatedAt: "updatedAt" })
       .softDelete({ field: "deletedAt" });
     AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
@@ -789,7 +933,11 @@ describe("JIT AOT generate", () => {
       };
     };
     class Order extends generated.OrderBase {}
-    const order = new Order({ id: "o_1", updatedAt: new Date(0), deletedAt: null });
+    const order = new Order({
+      id: "o_1",
+      updatedAt: new Date(0),
+      deletedAt: null,
+    });
 
     order.softDelete();
     expect(order.isDeleted).toBe(true);
@@ -804,7 +952,11 @@ describe("JIT AOT generate", () => {
       .query(User)
       .where((query) => query.eq("active", true))
       .select("id");
-    const result = AOT.generate({ groups: {}, artifacts: { activeUsers }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { activeUsers },
+      outDir,
+    });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly activeUsers: (users: { id: string; active: boolean }[]) => { id: string }[];
     };
@@ -816,6 +968,112 @@ describe("JIT AOT generate", () => {
         { id: "b", active: false },
       ])
     ).toEqual([{ id: "a" }]);
+  });
+
+  it("should lower structural distinct with standalone hash and equality", async () => {
+    const User = JIT.object({
+      id: JIT.number(),
+      profile: JIT.object({ active: JIT.boolean() }),
+    });
+    const distinctUsers = JIT.cqrs.query(User).distinct();
+    const distinctIterator = distinctUsers.to.iterator();
+    const result = AOT.generate({
+      artifacts: { distinctUsers, distinctIterator },
+      outDir,
+    });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly distinctUsers: (users: { id: number; profile: { active: boolean } }[]) => unknown[];
+      readonly distinctIterator: (users: { id: number; profile: { active: boolean } }[]) => IterableIterator<unknown>;
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("const hash = __distinctHash(item)");
+    expect(source).toContain("__distinctEqual(bucket[i], item)");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).not.toContain("JSON.stringify");
+    expect(source).not.toContain("__hashCache");
+    expect(
+      generated.distinctUsers([
+        { id: 1, profile: { active: true } },
+        { id: 1, profile: { active: true } },
+        { id: 2, profile: { active: false } },
+      ])
+    ).toEqual([
+      { id: 1, profile: { active: true } },
+      { id: 2, profile: { active: false } },
+    ]);
+    expect([
+      ...generated.distinctIterator([
+        { id: 1, profile: { active: true } },
+        { id: 1, profile: { active: true } },
+      ]),
+    ]).toHaveLength(1);
+  });
+
+  it("should lower a join to an import-free physical program", async () => {
+    const Order = JIT.object({ id: JIT.number(), customerId: JIT.string() });
+    const Customer = JIT.object({ id: JIT.string(), name: JIT.string() });
+    const joinOrders = JIT.cqrs.query(Order).join(JIT.array(Customer).keyed("id")).on("customerId", "id");
+    const result = AOT.generate({ artifacts: { joinOrders }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly joinOrders: (
+        orders: { id: number; customerId: string }[],
+        customers: { id: string; name: string }[]
+      ) => {
+        left: { id: number; customerId: string };
+        right: { id: string; name: string };
+      }[];
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).not.toContain(".find(");
+    expect(source).not.toContain("resolveHints");
+    expect(source).toContain("__cachedIndex(right,");
+    expect(generated.joinOrders([{ id: 1, customerId: "c1" }], [{ id: "c1", name: "Ada" }])).toEqual([
+      { left: { id: 1, customerId: "c1" }, right: { id: "c1", name: "Ada" } },
+    ]);
+  });
+
+  it("should lower compatible ordering directly to a merge join", async () => {
+    const Order = JIT.object({ customerId: JIT.number(), total: JIT.number() });
+    const Customer = JIT.object({ id: JIT.number(), name: JIT.string() });
+    const mergeOrders = JIT.cqrs
+      .query(JIT.array(Order).ordered("customerId", "asc"))
+      .join(JIT.array(Customer).ordered("id", "asc"))
+      .on("customerId", "id");
+    const mergeDir = join(outDir, "merge");
+    const result = AOT.generate({
+      artifacts: { mergeOrders },
+      outDir: mergeDir,
+    });
+    const source = readFileSync(join(mergeDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(mergeDir, "index.js")).href)) as {
+      readonly mergeOrders: (
+        orders: { customerId: number; total: number }[],
+        customers: { id: number; name: string }[]
+      ) => unknown[];
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("while (i < leftLen && j < rightLen)");
+    expect(source).not.toContain("new Map()");
+    expect(source).not.toContain("__cachedIndex");
+    expect(source).not.toContain("MergeJoin");
+    expect(
+      generated.mergeOrders(
+        [
+          { customerId: 1, total: 10 },
+          { customerId: 2, total: 20 },
+        ],
+        [
+          { id: 1, name: "Ada" },
+          { id: 2, name: "Lin" },
+        ]
+      )
+    ).toHaveLength(2);
   });
 
   it("should preserve transform, update, and security stages in an import-free composed pipeline", async () => {
@@ -836,7 +1094,11 @@ describe("JIT AOT generate", () => {
       .filter((query) => query.eq("role", "admin"))
       .select("id", "name", "email", "note")
       .to.json();
-    const result = AOT.generate({ groups: {}, artifacts: { publicUsers }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { publicUsers },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly publicUsers: (json: string) => string;
@@ -852,11 +1114,22 @@ describe("JIT AOT generate", () => {
   });
 
   it("should emit filtered terminal aggregates as one import-free AOT loop", async () => {
-    const Orders = JIT.array(JIT.object({ id: JIT.number().int32(), active: JIT.boolean(), total: JIT.number() }));
+    const Orders = JIT.array(
+      JIT.object({
+        id: JIT.number().int32(),
+        active: JIT.boolean(),
+        total: JIT.number(),
+      })
+    );
     const activeTotal = JIT.from(Orders)
       .filter((query) => query.eq("active", true))
       .sum("total");
-    const result = AOT.generate({ groups: {}, artifacts: { activeTotal }, outDir, format: "ts" });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { activeTotal },
+      outDir,
+      format: "ts",
+    });
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       readonly activeTotal: (orders: readonly { id: number; active: boolean; total: number }[]) => number;
@@ -878,16 +1151,29 @@ describe("JIT AOT generate", () => {
   it("should emit the source input and target output types for a transformed value artifact", async () => {
     const Wire = JIT.object({ id: JIT.number(), name: JIT.string() });
     const Domain = JIT.object({ id: JIT.string(), name: JIT.string() });
-    const toDomain = JIT.from(Wire).transform(Domain, { id: (id) => String(id) });
+    const toDomain = JIT.from(Wire).transform(Domain, {
+      id: (id) => String(id),
+    });
 
-    const result = AOT.generate({ groups: {}, artifacts: { toDomain }, outDir, format: "ts" });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { toDomain },
+      outDir,
+      format: "ts",
+    });
     const source = readFileSync(join(outDir, "index.ts"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
-      readonly toDomain: (value: { id: number; name: string }) => { id: string; name: string };
+      readonly toDomain: (value: { id: number; name: string }) => {
+        id: string;
+        name: string;
+      };
     };
 
     expect(result.skipped).toHaveLength(0);
-    expect(generated.toDomain({ id: 1, name: "Ada" })).toEqual({ id: "1", name: "Ada" });
+    expect(generated.toDomain({ id: 1, name: "Ada" })).toEqual({
+      id: "1",
+      name: "Ada",
+    });
     expect(source).toContain("const toDomain: (value: { id: number; name: string }) => { id: string; name: string } =");
   });
 
@@ -895,7 +1181,11 @@ describe("JIT AOT generate", () => {
     const Entity = JIT.object({ id: JIT.number(), fullName: JIT.string() });
     const Public = JIT.object({ id: JIT.number(), name: JIT.string() });
     const publicJson = JIT.map.many(Entity, Public, { name: { from: "fullName" } }).to.json();
-    const result = AOT.generate({ groups: {}, artifacts: { publicJson }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { publicJson },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly publicJson: (value: readonly { id: number; fullName: string }[]) => string;
@@ -947,7 +1237,10 @@ describe("JIT AOT generate", () => {
       Event_fromJSON: (json: string) => unknown;
       Event_mask: <T>(value: T) => T;
       Event_sanitize: <T>(value: T) => T;
-      Event_codec: { encode: (value: unknown) => Uint8Array; decode: (bytes: Uint8Array) => unknown };
+      Event_codec: {
+        encode: (value: unknown) => Uint8Array;
+        decode: (bytes: Uint8Array) => unknown;
+      };
     };
 
     const event = {
@@ -983,7 +1276,10 @@ describe("JIT AOT generate", () => {
       score: JIT.number().float32(),
     });
     const Users = JIT.array(User);
-    const binary = Users.binary({ strategy: "exact", memoryLayout: "columnar" });
+    const binary = Users.binary({
+      strategy: "exact",
+      memoryLayout: "columnar",
+    });
     const rowset = binary.load([
       { id: 1, role: "admin" as const, active: true, score: 10 },
       { id: 2, role: "user" as const, active: true, score: 7 },
@@ -1014,7 +1310,10 @@ describe("JIT AOT generate", () => {
   });
 
   it("should re-emit lazy iterators and direct visitors as import-free AOT source", async () => {
-    const User = JIT.object({ id: JIT.number().int32(), active: JIT.boolean() });
+    const User = JIT.object({
+      id: JIT.number().int32(),
+      active: JIT.boolean(),
+    });
     const Users = JIT.array(User);
     const ActiveIds = JIT.query(Users)
       .filter((q) => q.eq("active", true))
@@ -1025,7 +1324,11 @@ describe("JIT AOT generate", () => {
       .filter((q) => q.eq("active", true))
       .select("id")
       .to.visitor();
-    const result = AOT.generate({ groups: {}, artifacts: { ActiveIds, VisitActiveIds }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { ActiveIds, VisitActiveIds },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       ActiveIds: (input: readonly { id: number; active: boolean }[]) => IterableIterator<{ id: number }>;
@@ -1056,7 +1359,11 @@ describe("JIT AOT generate", () => {
     const Users = JIT.array(User);
     const UserChanges = JIT.watch(Users, { key: "id" });
     const UserCollection = { changes: UserChanges };
-    const result = AOT.generate({ groups: { UserCollection }, artifacts: { UserChanges }, outDir });
+    const result = AOT.generate({
+      groups: { UserCollection },
+      artifacts: { UserChanges },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       UserCollection: { changes: typeof UserChanges };
@@ -1097,7 +1404,11 @@ describe("JIT AOT generate", () => {
       },
     };
     const UserChanges = JIT.watch(Users, { key: "id", onAdd: hooks.onAdd });
-    const result = AOT.generate({ groups: {}, artifacts: { UserChanges }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { UserChanges },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       UserChanges: typeof UserChanges;
@@ -1145,7 +1456,11 @@ describe("JIT AOT generate", () => {
   it("should reject callbacks with inaccessible closure dependencies", () => {
     const minimum = 2;
     const Name = JIT.string().refine((value) => value.length >= minimum);
-    const result = AOT.generate({ groups: {}, artifacts: { isName: JIT.validate.is(Name) }, outDir });
+    const result = AOT.generate({
+      groups: {},
+      artifacts: { isName: JIT.validate.is(Name) },
+      outDir,
+    });
 
     expect(result.files).toEqual([]);
     expect(result.skipped).toContainEqual({
@@ -1312,7 +1627,10 @@ describe("JIT AOT generate", () => {
     const indexedGenerated = (await import(pathToFileURL(join(indexedDir, "index.js")).href)) as {
       Indexed_equal: (left: readonly unknown[], right: readonly unknown[]) => boolean;
     };
-    const left = Array.from({ length: 70 }, (_, index) => ({ id: index, name: `user-${index}` }));
+    const left = Array.from({ length: 70 }, (_, index) => ({
+      id: index,
+      name: `user-${index}`,
+    }));
     const right = [...left].reverse();
 
     expect(indexedSource.match(/const __indexCache = new WeakMap\(\);/g)).toHaveLength(1);
@@ -1328,7 +1646,10 @@ describe("JIT AOT generate", () => {
     ).toBe(false);
 
     AOT.generate({
-      artifacts: { Hashed_equal: JIT.compare.equal(Hashed), Hashed_hash: JIT.compare.hash(Hashed) },
+      artifacts: {
+        Hashed_equal: JIT.compare.equal(Hashed),
+        Hashed_hash: JIT.compare.hash(Hashed),
+      },
       outDir: hashedDir,
     });
 
@@ -1384,7 +1705,10 @@ describe("JIT AOT generate", () => {
       role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
     });
     const result = AOT.generate({
-      artifacts: { userDocument: JIT.jsonSchema.to(User), mockUser: JIT.mock(User) },
+      artifacts: {
+        userDocument: JIT.jsonSchema.to(User),
+        mockUser: JIT.mock(User),
+      },
       schemas: { User },
       outDir,
       format: "ts",
@@ -1401,7 +1725,11 @@ describe("JIT AOT generate", () => {
 
     const generated = (await import(pathToFileURL(join(outDir, "index.ts")).href)) as {
       userDocument: { type: string; required: readonly string[] };
-      mockUser: (options?: { seed?: number }) => { id: number; email: string; role: string };
+      mockUser: (options?: { seed?: number }) => {
+        id: number;
+        email: string;
+        role: string;
+      };
     };
 
     expect(generated.userDocument.type).toBe("object");
@@ -1413,11 +1741,17 @@ describe("JIT AOT generate", () => {
   it("should lower a schema built from a JSON Schema document at generation time", async () => {
     const User = JIT.jsonSchema.from({
       type: "object",
-      properties: { id: { type: "integer", minimum: 1 }, name: { type: "string", minLength: 2 } },
+      properties: {
+        id: { type: "integer", minimum: 1 },
+        name: { type: "string", minLength: 2 },
+      },
       required: ["id", "name"],
     } as const);
     const result = AOT.generate({
-      artifacts: { isUser: JIT.validate.is(User), toJson: JIT.json.stringify(User) },
+      artifacts: {
+        isUser: JIT.validate.is(User),
+        toJson: JIT.json.stringify(User),
+      },
       schemas: { User },
       outDir,
       format: "ts",
@@ -1487,9 +1821,16 @@ describe("JIT AOT generate", () => {
     });
 
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as Record<string, never>;
-    const value = { value: 1, label: "root", children: [{ value: 2, label: "a", children: [] }] };
+    const value = {
+      value: 1,
+      label: "root",
+      children: [{ value: 2, label: "a", children: [] }],
+    };
     const clone = (generated.cloneNode as (v: unknown) => typeof value)(value);
-    const changed = { ...value, children: [{ value: 9, label: "a", children: [] }] };
+    const changed = {
+      ...value,
+      children: [{ value: 9, label: "a", children: [] }],
+    };
 
     expect(clone).toEqual(value);
     expect(clone.children).not.toBe(value.children);

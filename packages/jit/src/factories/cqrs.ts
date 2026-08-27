@@ -1,6 +1,8 @@
+import { compileJoin, createJoinPlan, explainJoinPlan, type JoinPair, type LeftJoinPair } from "../compiler/join.js";
 import type {
   QueryAggregateOperator,
   QueryConditionNode,
+  QueryJoinKind,
   QueryPipelineNode,
   QueryValueNode,
 } from "../core/ast/index.js";
@@ -27,12 +29,18 @@ export interface StandardQuery {
 
 /** Portable V1 description; deliberately independent from JIT's execution IR. */
 export interface StandardQueryDefinition {
-  readonly source: { readonly kind: "object"; readonly fields: readonly string[] };
+  readonly source: {
+    readonly kind: "object";
+    readonly fields: readonly string[];
+  };
   /** Ordered portable semantics. Private query and physical-plan nodes never cross this boundary. */
   readonly pipeline: readonly StandardQueryStep[];
   readonly filter?: StandardQueryCondition;
   readonly projection?: readonly string[];
-  readonly order?: readonly { readonly path: readonly string[]; readonly direction: "asc" | "desc" }[];
+  readonly order?: readonly {
+    readonly path: readonly string[];
+    readonly direction: "asc" | "desc";
+  }[];
   readonly limit?: number;
   readonly params: readonly string[];
 }
@@ -40,13 +48,17 @@ export interface StandardQueryDefinition {
 export type StandardQueryStep =
   | { readonly kind: "where"; readonly condition: StandardQueryCondition }
   | { readonly kind: "select"; readonly fields: readonly string[] }
+  | { readonly kind: "distinct"; readonly fields: readonly string[] }
   | {
       readonly kind: "unique" | "keyed" | "groupBy" | "orderBy" | "flatMap" | "groupAdjacentBy";
       readonly key: string;
       readonly direction?: "asc" | "desc";
     }
   | { readonly kind: "take" | "drop"; readonly count: number }
-  | { readonly kind: "takeWhile" | "dropWhile"; readonly condition: StandardQueryCondition }
+  | {
+      readonly kind: "takeWhile" | "dropWhile";
+      readonly condition: StandardQueryCondition;
+    }
   | { readonly kind: "chunk" | "window"; readonly size: number }
   | { readonly kind: "pairwise" | "delete" }
   | {
@@ -54,9 +66,19 @@ export type StandardQueryStep =
       readonly initial: StandardQueryValue;
       readonly update: { readonly kind: "binding"; readonly name: string };
     }
-  | { readonly kind: "update"; readonly patch: Readonly<Record<string, StandardQueryValue>> }
-  | { readonly kind: "aggregate"; readonly operation: "sum" | "count" | "avg" | "min" | "max"; readonly key?: string }
-  | { readonly kind: "terminal"; readonly operation: "first" | "findIndex" | "some" | "every" }
+  | {
+      readonly kind: "update";
+      readonly patch: Readonly<Record<string, StandardQueryValue>>;
+    }
+  | {
+      readonly kind: "aggregate";
+      readonly operation: "sum" | "count" | "avg" | "min" | "max";
+      readonly key?: string;
+    }
+  | {
+      readonly kind: "terminal";
+      readonly operation: "first" | "findIndex" | "some" | "every";
+    }
   | {
       readonly kind: "aggregate:composite";
       readonly fields: readonly {
@@ -64,6 +86,16 @@ export type StandardQueryStep =
         readonly operation: "sum" | "count" | "avg" | "min" | "max";
         readonly key?: string;
       }[];
+    }
+  | {
+      readonly kind: "join";
+      readonly join: QueryJoinKind;
+      readonly source: {
+        readonly kind: "object";
+        readonly fields: readonly string[];
+      };
+      readonly leftKey: string;
+      readonly rightKey: string;
     };
 
 export type StandardQueryValue =
@@ -98,7 +130,11 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
   readonly select?: boolean;
   readonly sort?: readonly Extract<keyof ATS.TypeofSchema<TSchema>, string>[];
   readonly pagination?:
-    | { readonly type: "offset"; readonly defaultLimit: number; readonly maxLimit: number }
+    | {
+        readonly type: "offset";
+        readonly defaultLimit: number;
+        readonly maxLimit: number;
+      }
     | {
         readonly type: "cursor";
         readonly by: readonly Extract<keyof ATS.TypeofSchema<TSchema>, string>[];
@@ -115,7 +151,11 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
 }
 
 type CqrsPagination =
-  | { readonly type: "offset"; readonly defaultLimit: number; readonly maxLimit: number }
+  | {
+      readonly type: "offset";
+      readonly defaultLimit: number;
+      readonly maxLimit: number;
+    }
   | {
       readonly type: "cursor";
       readonly by: readonly string[];
@@ -133,12 +173,19 @@ export interface CqrsInput<TSchema extends ATS.AnyTypeSchema> {
 export interface StandardQueryInput {
   readonly version: 1;
   readonly definition: {
-    readonly source: { readonly kind: "object"; readonly fields: readonly string[] };
+    readonly source: {
+      readonly kind: "object";
+      readonly fields: readonly string[];
+    };
     readonly filters: Readonly<Record<string, true | readonly string[]>>;
     readonly projection: boolean;
     readonly sorting: readonly string[];
     readonly pagination?:
-      | { readonly type: "offset"; readonly defaultLimit: number; readonly maxLimit: number }
+      | {
+          readonly type: "offset";
+          readonly defaultLimit: number;
+          readonly maxLimit: number;
+        }
       | {
           readonly type: "cursor";
           readonly by: readonly string[];
@@ -165,7 +212,11 @@ export interface ParsedCqrsInput {
     readonly direction: "asc" | "desc";
   }[];
   readonly pagination?:
-    | { readonly kind: "offset"; readonly offset: number; readonly limit: number }
+    | {
+        readonly kind: "offset";
+        readonly offset: number;
+        readonly limit: number;
+      }
     | {
         readonly kind: "cursor";
         readonly limit: number;
@@ -175,6 +226,7 @@ export interface ParsedCqrsInput {
 }
 
 type Row<TSchema extends ATS.AnyTypeSchema> = ATS.TypeofSchema<TSchema>;
+type JoinRowSchema<TSchema extends ATS.AnyTypeSchema> = TSchema extends ATS.ArraySchema<infer TRow> ? TRow : TSchema;
 type CqrsAggregateResult<TSpec> = {
   readonly [TKey in keyof TSpec]: TSpec[TKey] extends CqrsAggregateSpec<infer TResult> ? TResult : never;
 };
@@ -196,6 +248,44 @@ type ParamShape = Readonly<Record<string, SchemaInput>>;
 type Params<TShape extends ParamShape> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema> ? ATS.TypeofSchema<TSchema> : never;
 };
+type CompatibleJoinKey<TSchema extends ATS.AnyTypeSchema, TValue> = {
+  [TKey in CqrsKey<TSchema>]: Row<TSchema>[TKey] extends TValue
+    ? TValue extends Row<TSchema>[TKey]
+      ? TKey
+      : never
+    : never;
+}[CqrsKey<TSchema>];
+type JoinResult<TLeft, TRight, TKind extends QueryJoinKind> = TKind extends "semi" | "anti"
+  ? TLeft[]
+  : TKind extends "left"
+    ? LeftJoinPair<TLeft, TRight>[]
+    : JoinPair<TLeft, TRight>[];
+
+export interface CqrsJoinOnBuilder<
+  TLeftSchema extends ATS.AnyTypeSchema,
+  TRightSchema extends ATS.AnyTypeSchema,
+  TKind extends QueryJoinKind,
+  TParams extends Readonly<Record<string, unknown>>,
+> {
+  on<
+    TLeftKey extends CqrsKey<TLeftSchema>,
+    TRightKey extends CompatibleJoinKey<TRightSchema, Row<TLeftSchema>[TLeftKey]>,
+  >(leftKey: TLeftKey, rightKey: TRightKey): CqrsJoinedQuery<TLeftSchema, TRightSchema, TKind, TParams>;
+}
+
+export type CqrsJoinedQuery<
+  TLeftSchema extends ATS.AnyTypeSchema,
+  TRightSchema extends ATS.AnyTypeSchema,
+  TKind extends QueryJoinKind,
+  TParams extends Readonly<Record<string, unknown>>,
+> = ((
+  left: readonly Row<TLeftSchema>[],
+  right: readonly Row<TRightSchema>[],
+  params?: TParams
+) => JoinResult<Row<TLeftSchema>, Row<TRightSchema>, TKind>) & {
+  explain(): ReturnType<typeof explainJoinPlan>;
+  readonly "~query": StandardQuery;
+};
 interface CqrsQueryOps<
   TSchema extends ATS.AnyTypeSchema,
   TOutput,
@@ -212,6 +302,9 @@ interface CqrsQueryOps<
     ...fields: TKeys
   ): CqrsQuery<TSchema, Pick<TOutput, TKeys[number]>, CqrsSelectResult<TResult, Pick<TOutput, TKeys[number]>>, TParams>;
   unique<TKey extends CqrsKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  distinct<const TKeys extends readonly CqrsKey<TSchema>[]>(
+    ...fields: TKeys
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
   keyed<TKey extends CqrsKey<TSchema>>(
     key: TKey
   ): CqrsQuery<TSchema, TOutput, Map<Row<TSchema>[TKey], TOutput>, TParams>;
@@ -245,7 +338,9 @@ interface CqrsQueryOps<
   ): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams>;
   delete(): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams>;
   update(
-    patch: { readonly [TKey in CqrsKey<TSchema>]?: Row<TSchema>[TKey] }
+    patch: {
+      readonly [TKey in CqrsKey<TSchema>]?: Row<TSchema>[TKey];
+    }
   ): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams>;
   sum<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number, TParams>;
   count(): CqrsQuery<TSchema, TOutput, number, TParams>;
@@ -270,6 +365,10 @@ interface CqrsQueryOps<
   some(): CqrsQuery<TSchema, TOutput, boolean, TParams>;
   /** True when every row matches; stops at the first that does not. */
   every(): CqrsQuery<TSchema, TOutput, boolean, TParams>;
+  join<TRightTarget extends ATS.AnyTypeSchema, TKind extends QueryJoinKind = "inner">(
+    schema: SchemaInput<TRightTarget>,
+    kind?: TKind
+  ): CqrsJoinOnBuilder<TSchema, JoinRowSchema<TRightTarget>, TKind, TParams>;
   readonly to: QuerySinks<ATS.ArraySchema<TSchema>, TOutput, TParams>;
   lazy(): LazyQueryBuilder<ATS.ArraySchema<TSchema>, TOutput, TParams>;
   explain(
@@ -324,6 +423,7 @@ function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams exten
     "filter",
     "select",
     "unique",
+    "distinct",
     "keyed",
     "groupBy",
     "orderBy",
@@ -360,6 +460,10 @@ function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams exten
   }
 
   Object.defineProperties(builder, {
+    join: {
+      value: (right: SchemaInput, kind: QueryJoinKind = "inner") =>
+        createJoinOnBuilder(schema, collection, program, right, kind),
+    },
     where: {
       value: (...args: unknown[]) => wrap(schema, collection, filterMethod(...args)),
     },
@@ -385,6 +489,73 @@ function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams exten
   return builder as unknown as CqrsQuery<TSchema, TOutput, TResult, TParams>;
 }
 
+function createJoinOnBuilder<
+  TLeftSchema extends ATS.AnyTypeSchema,
+  TRightSchema extends ATS.AnyTypeSchema,
+  TKind extends QueryJoinKind,
+  TParams extends Readonly<Record<string, unknown>>,
+>(
+  leftSchema: TLeftSchema,
+  leftCollection: ATS.ArraySchema<TLeftSchema>,
+  program: import("../compiler/query.js").QueryProgram | undefined,
+  rightInput: SchemaInput<TRightSchema>,
+  kind: TKind
+): CqrsJoinOnBuilder<TLeftSchema, TRightSchema, TKind, TParams> {
+  if (!program) throw new JITError("INVALID_QUERY", "join requires a reconstructive query program");
+  if (kind !== "inner" && kind !== "left" && kind !== "semi" && kind !== "anti") {
+    throw new JITError("INVALID_QUERY", `unsupported join kind ${JSON.stringify(kind)}`);
+  }
+  const target = unwrapSchema(rightInput);
+  const rightSchema = (
+    target.type === "array" ? (target as ATS.ArraySchema<TRightSchema>).def.element : target
+  ) as TRightSchema;
+  const rightCollection =
+    target.type === "array"
+      ? (target as ATS.ArraySchema<TRightSchema>)
+      : (array(rightSchema).schema as ATS.ArraySchema<TRightSchema>);
+
+  return Object.freeze({
+    on(leftKey: string, rightKey: string) {
+      const plan = createJoinPlan(leftCollection, rightCollection, program, kind, leftKey, rightKey);
+      type Result = JoinResult<Row<TLeftSchema>, Row<TRightSchema>, TKind>;
+      let compiled: ReturnType<typeof compileJoin<Row<TLeftSchema>, Row<TRightSchema>, Result, TParams>> | undefined;
+      const callable = function join(
+        left: readonly Row<TLeftSchema>[],
+        right: readonly Row<TRightSchema>[],
+        params?: TParams
+      ): Result {
+        compiled ??= compileJoin<Row<TLeftSchema>, Row<TRightSchema>, Result, TParams>(plan);
+        return compiled(left, right, params);
+      } as CqrsJoinedQuery<TLeftSchema, TRightSchema, TKind, TParams>;
+      const standard: StandardQuery = Object.freeze({
+        version: 1,
+        definition: Object.freeze({
+          ...toStandardQuery(leftSchema, program),
+          pipeline: Object.freeze([
+            ...toStandardQuery(leftSchema, program).pipeline,
+            Object.freeze({
+              kind: "join" as const,
+              join: kind,
+              source: Object.freeze({
+                kind: "object" as const,
+                fields: Object.freeze(objectFields(rightSchema)),
+              }),
+              leftKey,
+              rightKey,
+            }),
+          ]),
+        }),
+      });
+      Object.defineProperties(callable, {
+        explain: { value: () => explainJoinPlan(plan) },
+        "~query": { value: standard },
+      });
+      registerArtifact(callable, { kind: "join-plan", plan, standard });
+      return callable;
+    },
+  }) as CqrsJoinOnBuilder<TLeftSchema, TRightSchema, TKind, TParams>;
+}
+
 function toStandardQuery(
   schema: ATS.AnyTypeSchema,
   program: import("../compiler/query.js").QueryProgram | undefined
@@ -392,21 +563,39 @@ function toStandardQuery(
   const nodes = (program?.nodes ?? []) as readonly QueryPipelineNode[];
   let filter: StandardQueryCondition | undefined;
   let projection: readonly string[] | undefined;
-  let order: readonly { readonly path: readonly string[]; readonly direction: "asc" | "desc" }[] | undefined;
+  let order:
+    | readonly {
+        readonly path: readonly string[];
+        readonly direction: "asc" | "desc";
+      }[]
+    | undefined;
   let limit: number | undefined;
   for (const node of nodes) {
     if (node.kind === "filter") {
       const condition = toStandardCondition(node.condition, program?.bindings ?? []);
       filter = filter
-        ? Object.freeze({ kind: "logical" as const, operator: "and" as const, left: filter, right: condition })
+        ? Object.freeze({
+            kind: "logical" as const,
+            operator: "and" as const,
+            left: filter,
+            right: condition,
+          })
         : condition;
     } else if (node.kind === "select:fields") projection = Object.freeze([...node.fields]);
     else if (node.kind === "orderBy") {
-      order = Object.freeze([Object.freeze({ path: Object.freeze([node.key]), direction: node.direction })]);
+      order = Object.freeze([
+        Object.freeze({
+          path: Object.freeze([node.key]),
+          direction: node.direction,
+        }),
+      ]);
     } else if (node.kind === "take") limit = limit === undefined ? node.count : Math.min(limit, node.count);
   }
   return Object.freeze({
-    source: Object.freeze({ kind: "object" as const, fields: Object.freeze(objectFields(schema)) }),
+    source: Object.freeze({
+      kind: "object" as const,
+      fields: Object.freeze(objectFields(schema)),
+    }),
     pipeline: Object.freeze(nodes.map((node) => toStandardStep(node, program?.bindings ?? []))),
     ...(filter ? { filter } : {}),
     ...(projection ? { projection } : {}),
@@ -419,11 +608,26 @@ function toStandardQuery(
 function toStandardStep(node: QueryPipelineNode, bindings: readonly unknown[]): StandardQueryStep {
   switch (node.kind) {
     case "filter":
-      return Object.freeze({ kind: "where", condition: toStandardCondition(node.condition, bindings) });
+      return Object.freeze({
+        kind: "where",
+        condition: toStandardCondition(node.condition, bindings),
+      });
     case "select:fields":
-      return Object.freeze({ kind: "select", fields: Object.freeze([...node.fields]) });
+      return Object.freeze({
+        kind: "select",
+        fields: Object.freeze([...node.fields]),
+      });
+    case "distinct":
+      return Object.freeze({
+        kind: "distinct",
+        fields: Object.freeze([...node.fields]),
+      });
     case "orderBy":
-      return Object.freeze({ kind: "orderBy", key: node.key, direction: node.direction });
+      return Object.freeze({
+        kind: "orderBy",
+        key: node.key,
+        direction: node.direction,
+      });
     case "unique":
     case "keyed":
     case "groupBy":
@@ -435,7 +639,10 @@ function toStandardStep(node: QueryPipelineNode, bindings: readonly unknown[]): 
       return Object.freeze({ kind: node.kind, count: node.count });
     case "takeWhile":
     case "dropWhile":
-      return Object.freeze({ kind: node.kind, condition: toStandardCondition(node.condition, bindings) });
+      return Object.freeze({
+        kind: node.kind,
+        condition: toStandardCondition(node.condition, bindings),
+      });
     case "chunk":
     case "window":
       return Object.freeze({ kind: node.kind, size: node.size });
@@ -446,7 +653,10 @@ function toStandardStep(node: QueryPipelineNode, bindings: readonly unknown[]): 
       return Object.freeze({
         kind: "scan",
         initial: toStandardValue({ kind: "binding", name: node.initialBinding }, bindings),
-        update: Object.freeze({ kind: "binding" as const, name: node.updateBinding }),
+        update: Object.freeze({
+          kind: "binding" as const,
+          name: node.updateBinding,
+        }),
       });
     case "update":
       return Object.freeze({
@@ -513,16 +723,26 @@ function toStandardCondition(condition: QueryConditionNode, bindings: readonly u
       right: toStandardCondition(condition.right, bindings),
     });
   }
-  return Object.freeze({ kind: "not" as const, inner: toStandardCondition(condition.inner, bindings) });
+  return Object.freeze({
+    kind: "not" as const,
+    inner: toStandardCondition(condition.inner, bindings),
+  });
 }
 
 function toStandardValue(value: QueryValueNode, bindings: readonly unknown[]): StandardQueryValue {
-  if (value.kind === "field") return Object.freeze({ kind: "field" as const, path: Object.freeze([value.key]) });
+  if (value.kind === "field")
+    return Object.freeze({
+      kind: "field" as const,
+      path: Object.freeze([value.key]),
+    });
   if (value.kind === "literal") return Object.freeze({ kind: "literal" as const, value: value.value });
   if (value.kind === "binding") {
     const index = Number.parseInt(value.name.slice(3), 10);
     if (Number.isSafeInteger(index) && index >= 0 && index < bindings.length && isStandardData(bindings[index])) {
-      return Object.freeze({ kind: "literal" as const, value: bindings[index] });
+      return Object.freeze({
+        kind: "literal" as const,
+        value: bindings[index],
+      });
     }
     return Object.freeze({ kind: "binding" as const, name: value.name });
   }
@@ -641,7 +861,10 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   const frozenPagination = options.pagination
     ? Object.freeze(
         options.pagination.type === "cursor"
-          ? { ...options.pagination, by: Object.freeze([...options.pagination.by]) }
+          ? {
+              ...options.pagination,
+              by: Object.freeze([...options.pagination.by]),
+            }
           : { ...options.pagination }
       )
     : undefined;
@@ -654,7 +877,10 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
     ...(frozenLimits === undefined ? {} : { limits: frozenLimits }),
   }) as CqrsInputOptions<TSchema>;
   const definition: StandardQueryInput["definition"] = Object.freeze({
-    source: Object.freeze({ kind: "object" as const, fields: Object.freeze(objectFields(unwrapped)) }),
+    source: Object.freeze({
+      kind: "object" as const,
+      fields: Object.freeze(objectFields(unwrapped)),
+    }),
     filters: frozenFilter as Readonly<Record<string, true | readonly string[]>>,
     projection: frozenOptions.select === true,
     sorting: frozenSort as readonly string[],
@@ -713,7 +939,11 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
   ) => ParsedCqrsInput;
   const artifact = getArtifact(definition);
   if (artifact?.kind === "cqrs-input") {
-    registerArtifact(parser, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+    registerArtifact(parser, {
+      kind: "cqrs-parser",
+      definition: artifact.definition,
+      source: artifact.source,
+    });
   }
   return parser;
 }
@@ -824,7 +1054,10 @@ function normalizeCqrsTail<TSchema extends ATS.AnyTypeSchema>(
     }
     return {
       filter,
-      sort: pagination.by.map((field) => ({ path: [field], direction: "asc" as const })),
+      sort: pagination.by.map((field) => ({
+        path: [field],
+        direction: "asc" as const,
+      })),
       ...(select === undefined ? {} : { select }),
       pagination: {
         kind: "cursor",
@@ -881,7 +1114,10 @@ function normalizeCqrsSelect<TSchema extends ATS.AnyTypeSchema>(
 }
 
 function sameCursorOrdering(
-  sort: readonly { readonly path: readonly string[]; readonly direction: "asc" | "desc" }[],
+  sort: readonly {
+    readonly path: readonly string[];
+    readonly direction: "asc" | "desc";
+  }[],
   fields: readonly string[]
 ): boolean {
   return (
@@ -985,7 +1221,11 @@ export interface CqrsAggregateSpec<TResult = number> {
 }
 
 function aggregateSpec<TResult>(op: QueryAggregateOperator, key?: string): CqrsAggregateSpec<TResult> {
-  return Object.freeze({ op, ...(key === undefined ? {} : { key }), _result: null as TResult });
+  return Object.freeze({
+    op,
+    ...(key === undefined ? {} : { key }),
+    _result: null as TResult,
+  });
 }
 
 export const cqrs = Object.freeze({

@@ -20,7 +20,7 @@ documentation.
 | `JIT.equal`       | [Equal](./equal)                     | Shape-specialized structural equality         |
 | `JIT.diff`        | [Diff](./diff)                       | Shape-specialized structural changes          |
 | `JIT.hash`        | [Hash](./hash)                       | Shape-specialized structural fingerprint      |
-| `JIT.compare`     | [Equal](./equal)                     | Compatibility namespace for the three leaves  |
+| `JIT.compare`     | [Equal](./equal)                     | `equal`, `diff`, `hash`, `changed`             |
 | `JIT.security`    | [Mask](./mask)                       | `mask`, `sanitize`                            |
 | `JIT.json`        | [JSON](./json)                       | `value`, `parse`, `stringify`, `stringifyChunks` |
 | `JIT.binary`      | [Codec](./codec)                     | `encode`, `decode`, `codec`                   |
@@ -37,6 +37,14 @@ documentation.
 | `JIT.query`       | [Query](./query)                     | Eager and lazy compiled collection query      |
 | `JIT.sort`        | [Sort](./sort)                       | Schema-specialized comparator and ordering plan |
 | `JIT.index`       | [Index](./index-plans)               | Materialize an index from collection key facts |
+| `JIT.lookup`      | [Lookup](./lookup)                   | Reach one row by key through a chosen access path |
+| `JIT.reconcile`   | [Reconcile](./reconcile)             | Compare two snapshots of a keyed collection    |
+| `JIT.project`     | [Project](./project)                 | Narrow a value to a subset of its own fields   |
+| `JIT.patch`       | [Patch](./patch)                     | `apply`, `merge`, `json`                       |
+| `JIT.cacheKey`    | [Cache keys](./cache-key)            | `string`, `hash` keys from selected fields     |
+| `JIT.canonical`   | [Canonical](./canonical)             | One deterministic field arrangement            |
+| `JIT.access`      | [Access control](./access)           | Compiled can/cannot authorization checks       |
+| `JIT.match`       | [Match](./match)                     | Compiled discriminated-union dispatch          |
 | `JIT.cqrs`        | [Query](./query#cqrs)                | `query`, `input`, `parse`, `count`, `sum`, `avg`, `min`, `max` |
 | `JIT.process`     | [Process](./process)                 | Fused load-and-query binary pipeline          |
 | `JIT.stream`      | [Stream](./stream)                   | Incremental JSON and NDJSON validation        |

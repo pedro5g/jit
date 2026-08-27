@@ -36,12 +36,28 @@ const summary = JIT.cqrs.query(Orders).aggregate({
 Measured 2.8x faster than five separate scalar aggregates and level with a
 handwritten one-pass loop. See [aggregation](./aggregation.md).
 
+### Distinct
+
+`distinct()` removes complete structurally equal rows. `distinct(fields...)`
+deduplicates projected scalar keys. The compiler selects a scalar lookup,
+compound trie, structural hash/equality confirmation, or adjacent comparison
+when the collection declares matching ordering. See [distinct](./distinct.md).
+
+### Joins
+
+`query.join(right, kind).on(leftKey, rightKey)` relates two typed collections.
+The request names `inner`, `left`, `semi`, or `anti`; right-side facts select a
+hash build or reusable keyed index, while compatible ordering on both inputs
+selects a merge join with no access-index allocation. See [joins](./joins.md).
+
 ### Terminal sinks
 
 Four terminals answer from inside the loop instead of collecting a result:
 
 ```ts
-const Users = JIT.array(JIT.object({ id: JIT.number(), active: JIT.boolean() }));
+const Users = JIT.array(
+  JIT.object({ id: JIT.number(), active: JIT.boolean() }),
+);
 const query = JIT.cqrs.query(Users).where((q) => q.eq("active", true));
 
 query.first(); // the first matching row, or undefined
@@ -96,7 +112,7 @@ collection that declares its key is not a scan at all — see
 [physical query planning](./physical-query-planning.md) for the measured access
 paths.
 
-Current scans are `O(n)` before sorting or keyed collectors. Sorting is `O(n log n)`; hash-backed uniqueness/grouping is expected `O(n)`.
+Current scans are `O(n)` before sorting or keyed collectors. Sorting is `O(n log n)`; hash-backed uniqueness/grouping is expected `O(n)`. A hash join is expected `O(n + m + k)`, including emitted pairs, rather than the `O(n*m)` nested-array form.
 
 ## 9. Physical strategies
 
@@ -131,12 +147,12 @@ warm-up, using `pnpm bench:cqrs`:
 Measured with `pnpm bench:cqrs-terminal` on the same machine, 10 000 rows,
 `where(eq("id", target)).first()`:
 
-| Match position | Idiomatic `find` | Handwritten loop | JIT `first()` | JIT filter then `[0]` |
-| -------------- | ---------------: | ---------------: | ------------: | --------------------: |
-| middle row     |         7.11 µs |         5.07 µs |      5.10 µs |              16.44 µs |
-| last row       |        14.22 µs |        10.15 µs |     10.29 µs |              14.83 µs |
-| no match       |        14.18 µs |        10.12 µs |     10.18 µs |              14.55 µs |
-| `every`, all match | 11.96 µs |                — |     10.26 µs |                     — |
+| Match position     | Idiomatic `find` | Handwritten loop | JIT `first()` | JIT filter then `[0]` |
+| ------------------ | ---------------: | ---------------: | ------------: | --------------------: |
+| middle row         |          7.11 µs |          5.07 µs |       5.10 µs |              16.44 µs |
+| last row           |         14.22 µs |         10.15 µs |      10.29 µs |              14.83 µs |
+| no match           |         14.18 µs |         10.12 µs |      10.18 µs |              14.55 µs |
+| `every`, all match |         11.96 µs |                — |      10.26 µs |                     — |
 
 `first()` is level with a handwritten loop and ~1.4x ahead of `Array.prototype.find`,
 which pays a callback per row. The larger number is the column on the right:

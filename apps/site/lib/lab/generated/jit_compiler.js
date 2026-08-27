@@ -130,6 +130,36 @@ function normalize2(path) {
   return `${absolute ? "/" : ""}${parts.join("/")}` || (absolute ? "/" : ".");
 }
 
+// ../../packages/jit/src/errors/jit-error.ts
+var JITError = class extends Error {
+  /**
+   * Creates a JIT error with a stable code and optional structured details.
+   *
+   * @param code - The stable machine-readable error code.
+   * @param message - The human-readable error message.
+   * @param options - Optional path and metadata details.
+   */
+  constructor(code, message, options = {}) {
+    super(message);
+    this.name = "JITError";
+    this.code = code;
+    this.path = options.path;
+    this.meta = options.meta;
+  }
+};
+
+// ../../packages/jit/src/errors/validation-error.ts
+var JITValidationError = class extends JITError {
+  constructor(issues) {
+    const first = issues[0];
+    super("VALIDATION_FAILED", first ? `${first.path ? `${first.path}: ` : ""}${first.message}` : "validation failed", {
+      meta: issues
+    });
+    this.name = "JITValidationError";
+    this.issues = issues;
+  }
+};
+
 // ../../packages/jit/src/runtime/cache/compile-cache.ts
 var cacheStore = /* @__PURE__ */ new WeakMap();
 function getCompileCached(schema, key, build, options) {
@@ -144,6 +174,23 @@ function getCompileCached(schema, key, build, options) {
   entry.set(key, built);
   return built;
 }
+
+// ../../packages/jit/src/compiler/emitter/code-writer.ts
+var CodeWriter = class {
+  #lines = [];
+  #indent = 0;
+  line(text = "") {
+    this.#lines.push(`${"  ".repeat(this.#indent)}${text}`);
+  }
+  indent(fn) {
+    this.#indent++;
+    fn();
+    this.#indent--;
+  }
+  toString() {
+    return this.#lines.join("\n");
+  }
+};
 
 // ../../packages/jit/src/core/ats/create-schema.ts
 function createSchema(type, def, annotations) {
@@ -511,35 +558,259 @@ var TypeName = {
 };
 var TypeNames = utils_exports.Object_keys(TypeName);
 
-// ../../packages/jit/src/errors/jit-error.ts
-var JITError = class extends Error {
-  /**
-   * Creates a JIT error with a stable code and optional structured details.
-   *
-   * @param code - The stable machine-readable error code.
-   * @param message - The human-readable error message.
-   * @param options - Optional path and metadata details.
-   */
-  constructor(code, message, options = {}) {
-    super(message);
-    this.name = "JITError";
-    this.code = code;
-    this.path = options.path;
-    this.meta = options.meta;
-  }
-};
+// ../../packages/jit/src/transforms/wrappers/wrappers.ts
+function optional(schema) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.optional,
+    {
+      innerType: schema
+    },
+    schema.annotations
+  );
+}
+function nullable(schema) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.nullable,
+    {
+      innerType: schema
+    },
+    schema.annotations
+  );
+}
+function nullish(schema) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.nullish,
+    {
+      innerType: schema
+    },
+    schema.annotations
+  );
+}
+function readonly(schema) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.readonly,
+    {
+      innerType: schema
+    },
+    schema.annotations
+  );
+}
+function promise(schema) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.promise,
+    {
+      innerType: schema
+    },
+    schema.annotations
+  );
+}
+function defaultTo(schema, defaultValue) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.default,
+    {
+      innerType: schema,
+      defaultValue
+    },
+    schema.annotations
+  );
+}
+function brand(schema, brandName) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.brand,
+    {
+      innerType: schema,
+      brand: brandName
+    },
+    schema.annotations
+  );
+}
+function pipe(schema, transform3) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.pipe,
+    {
+      innerType: schema,
+      transform: transform3
+    },
+    schema.annotations
+  );
+}
+function transform(schema, transforms) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.transform,
+    {
+      innerType: schema,
+      transforms
+    },
+    schema.annotations
+  );
+}
+function refine(schema, predicate, options) {
+  const normalized = typeof options === "string" ? { message: options } : options;
+  return /* @__PURE__ */ createSchema(
+    TypeName.refine,
+    {
+      innerType: schema,
+      predicate,
+      ...normalized?.message !== void 0 ? { message: normalized.message } : {},
+      ...normalized?.path !== void 0 ? { path: normalized.path } : {},
+      ...normalized?.when !== void 0 ? { when: normalized.when } : {}
+    },
+    schema.annotations
+  );
+}
+function coerce(schema, coercer) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.coerce,
+    {
+      innerType: schema,
+      coercer
+    },
+    schema.annotations
+  );
+}
 
-// ../../packages/jit/src/errors/validation-error.ts
-var JITValidationError = class extends JITError {
-  constructor(issues) {
-    const first = issues[0];
-    super("VALIDATION_FAILED", first ? `${first.path ? `${first.path}: ` : ""}${first.message}` : "validation failed", {
-      meta: issues
-    });
-    this.name = "JITValidationError";
-    this.issues = issues;
+// ../../packages/jit/src/transforms/object/object.ts
+function isOptionalSchema(schema) {
+  return schema.type === TypeName.optional;
+}
+function partial(schema, keys) {
+  const props = {};
+  const selected = keys ? new Set(keys) : void 0;
+  for (const key in schema.def.props) {
+    props[key] = selected === void 0 || selected.has(key) ? optional(schema.def.props[key]) : schema.def.props[key];
   }
-};
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
+      checks: schema.def.checks
+    },
+    schema.annotations
+  );
+}
+function pick(schema, keys) {
+  const props = {};
+  for (const key of keys) {
+    props[key] = schema.def.props[key];
+  }
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
+      checks: schema.def.checks
+    },
+    schema.annotations
+  );
+}
+function omit(schema, keys) {
+  const props = {};
+  const omitted = new Set(keys);
+  for (const key in schema.def.props) {
+    if (!omitted.has(key)) {
+      props[key] = schema.def.props[key];
+    }
+  }
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
+      checks: schema.def.checks
+    },
+    schema.annotations
+  );
+}
+function extend(schema, extension) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props: {
+        ...schema.def.props,
+        ...extension
+      },
+      unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
+      checks: schema.def.checks
+    },
+    schema.annotations
+  );
+}
+function merge(left, right) {
+  const unknownKeys = right.def.unknownKeys ?? left.def.unknownKeys;
+  const catchall2 = right.def.catchall ?? left.def.catchall;
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props: {
+        ...left.def.props,
+        ...right.def.props
+      },
+      unknownKeys,
+      catchall: catchall2,
+      checks: [...left.def.checks, ...right.def.checks]
+    },
+    right.annotations ?? left.annotations
+  );
+}
+function required(schema, keys) {
+  const props = {};
+  const selected = keys ? new Set(keys) : void 0;
+  for (const key in schema.def.props) {
+    const prop = schema.def.props[key];
+    props[key] = (selected === void 0 || selected.has(key)) && isOptionalSchema(prop) ? prop.def.innerType : prop;
+  }
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: schema.def.unknownKeys,
+      catchall: schema.def.catchall,
+      checks: schema.def.checks
+    },
+    schema.annotations
+  );
+}
+function strict(schema) {
+  return withUnknownKeys(schema, "strict");
+}
+function loose(schema) {
+  return withUnknownKeys(schema, "passthrough");
+}
+function catchall(schema, catchallSchema) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props: schema.def.props,
+      unknownKeys: "passthrough",
+      catchall: catchallSchema,
+      checks: schema.def.checks
+    },
+    schema.annotations
+  );
+}
+function keyOf(schema) {
+  const values = Object.keys(schema.def.props);
+  return /* @__PURE__ */ createSchema(TypeName.enum, {
+    values
+  });
+}
+function withUnknownKeys(schema, unknownKeys) {
+  return /* @__PURE__ */ createSchema(
+    TypeName.object,
+    {
+      props: schema.def.props,
+      unknownKeys,
+      catchall: schema.def.catchall,
+      checks: schema.def.checks
+    },
+    schema.annotations
+  );
+}
 
 // ../../packages/jit/src/compiler/resolvers/resolve-wrappers.ts
 function resolveWrappers(schema) {
@@ -592,6 +863,1650 @@ function resolveWrappers(schema) {
 }
 function innerType(schema) {
   return schema.def.innerType;
+}
+
+// ../../packages/jit/src/compiler/source/access.ts
+function emitPropertyAccess(base, key) {
+  return `${base}${parse_exports.key_access(key, false)}`;
+}
+function emitIndexAccess(base, index2) {
+  return `${base}[${index2}]`;
+}
+
+// ../../packages/jit/src/compiler/projection.ts
+function expectProjectionObject(schema, operation) {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    throw new JITError("UNSUPPORTED_SCHEMA", `${operation} requires an object schema`);
+  }
+  return base;
+}
+function buildProjectionTree(schema, paths, operation) {
+  const object2 = expectProjectionObject(schema, operation);
+  if (paths.length === 0) {
+    throw new JITError("UNSUPPORTED_SCHEMA", `${operation} requires at least one field`);
+  }
+  const groups = /* @__PURE__ */ new Map();
+  for (const path of paths) {
+    const dot = path.indexOf(".");
+    const head = dot === -1 ? path : path.slice(0, dot);
+    const rest = dot === -1 ? void 0 : path.slice(dot + 1);
+    const group = groups.get(head);
+    if (group === void 0) groups.set(head, rest === void 0 ? [] : [rest]);
+    else if (rest !== void 0) group.push(rest);
+  }
+  const nodes = [];
+  const canonical2 = [];
+  const props = {};
+  for (const [key, rest] of groups) {
+    const field = object2.def.props[key];
+    if (field === void 0) {
+      throw new JITError("UNSUPPORTED_SCHEMA", `${operation} selects "${key}", which the schema does not declare`);
+    }
+    if (rest.length === 0) {
+      nodes.push(Object.freeze({ key, schema: field }));
+      canonical2.push(key);
+      props[key] = field;
+      continue;
+    }
+    const children2 = buildProjectionTree(field, rest, operation);
+    nodes.push(Object.freeze({ key, schema: field, children: children2 }));
+    for (const path of children2.paths) canonical2.push(`${key}.${path}`);
+    props[key] = rewrap(field, children2.schema);
+  }
+  return Object.freeze({
+    paths: Object.freeze(canonical2),
+    nodes: Object.freeze(nodes),
+    // The selection as a schema of its own, so `equal`, `hash`, `clone` and
+    // every other emitter can consume it without learning what a projection is.
+    //
+    // Unknown keys and a catchall are deliberately dropped: a projection is
+    // exactly the fields it names, and inheriting either would let an emitter
+    // reach a field the caller excluded. Object-level checks go too — this
+    // describes a shape, it does not validate one.
+    schema: createSchema(
+      TypeName.object,
+      { props, unknownKeys: "strip", catchall: void 0, checks: [] },
+      object2.annotations
+    )
+  });
+}
+function rewrap(field, narrowed) {
+  const { optional: optional3, nullable: nullable3, readonly: readonly3 } = resolveWrappers(field);
+  let result = narrowed;
+  if (nullable3) result = nullable(result);
+  if (optional3) result = optional(result);
+  if (readonly3) result = readonly(result);
+  return result;
+}
+function emitProjectionLiteral(tree, source) {
+  const parts = tree.nodes.map((node) => {
+    const access2 = emitPropertyAccess(source, node.key);
+    if (node.children === void 0) return `${JSON.stringify(node.key)}: ${access2}`;
+    const { optional: optional3, nullable: nullable3 } = resolveWrappers(node.schema);
+    const nested = emitProjectionLiteral(node.children, access2);
+    if (!optional3 && !nullable3) return `${JSON.stringify(node.key)}: ${nested}`;
+    return `${JSON.stringify(node.key)}: ${access2} == null ? ${access2} : ${nested}`;
+  });
+  return `{ ${parts.join(", ")} }`;
+}
+function projectionCacheKey(tree) {
+  return tree.paths.join(",");
+}
+
+// ../../packages/jit/src/compiler/source/literal.ts
+function emitLiteral(value) {
+  switch (typeof value) {
+    case "string":
+      return parse_exports.parseKey(value, { parseAsJson: true });
+    case "bigint":
+      return `${value}n`;
+    case "undefined":
+      return "undefined";
+    default:
+      return String(value);
+  }
+}
+function emitObjectKey(key) {
+  return parse_exports.parseKey(key);
+}
+
+// ../../packages/jit/src/compiler/access.ts
+function resolveAccessDescriptor(subject, actor, rules) {
+  const object2 = expectProjectionObject(subject, "JIT.access()");
+  const actions = [];
+  for (const rule of rules) {
+    if (!actions.includes(rule.action)) actions.push(rule.action);
+    for (const field of rule.fields ?? []) {
+      if (object2.def.props[field] === void 0) {
+        throw new JITError(
+          "UNSUPPORTED_SCHEMA",
+          `JIT.access() names field "${field}", which the subject does not declare`
+        );
+      }
+    }
+  }
+  return Object.freeze({ subject, actor, rules: Object.freeze([...rules]), actions: Object.freeze(actions) });
+}
+function emitAccessSource(descriptor) {
+  const writer = new CodeWriter();
+  writer.line("function ability(actor) {");
+  writer.indent(() => {
+    writer.line("function can(action, subject, field) {");
+    writer.indent(() => {
+      writer.line("switch (action) {");
+      writer.indent(() => {
+        for (const action of descriptor.actions) {
+          writer.line(`case ${JSON.stringify(action)}:`);
+          writer.indent(() => writer.line(`return ${emitAction(descriptor, action)};`));
+        }
+        writer.line("default:");
+        writer.indent(() => writer.line("return false;"));
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+    writer.line("return { can: can, cannot: (action, subject, field) => !can(action, subject, field) };");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitAction(descriptor, action) {
+  const cans = descriptor.rules.filter((rule) => rule.effect === "can" && rule.action === action);
+  const cannots = descriptor.rules.filter((rule) => rule.effect === "cannot" && rule.action === action);
+  if (cans.length === 0) return "false";
+  const allowed = joinOr(cans.map((rule) => emitRule(rule, "can")));
+  if (cannots.length === 0) return allowed;
+  const denied = joinOr(cannots.map((rule) => emitRule(rule, "cannot")));
+  if (allowed === "true") return `!(${denied})`;
+  return `(${allowed}) && !(${denied})`;
+}
+function joinOr(parts) {
+  if (parts.includes("true")) return "true";
+  const meaningful = parts.filter((part) => part !== "false");
+  if (meaningful.length === 0) return "false";
+  return meaningful.length === 1 ? meaningful[0] : meaningful.map((part) => `(${part})`).join(" || ");
+}
+function emitRule(rule, effect) {
+  const condition = rule.condition === void 0 ? "true" : emitCondition(rule.condition);
+  if (rule.fields === void 0) return condition;
+  const names = rule.fields.map((field) => `field === ${JSON.stringify(field)}`).join(" || ");
+  const guard = effect === "can" ? `(field === undefined || ${names})` : `(field !== undefined && (${names}))`;
+  return condition === "true" ? guard : `${guard} && (${condition})`;
+}
+function emitCondition(condition) {
+  if (condition.kind === "logical") {
+    const operator = condition.op === "and" ? "&&" : "||";
+    return `(${emitCondition(condition.left)} ${operator} ${emitCondition(condition.right)})`;
+  }
+  if (condition.kind === "not") return `!(${emitCondition(condition.inner)})`;
+  const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
+  return `${emitValue(condition.left)} ${operators[condition.op]} ${emitValue(condition.right)}`;
+}
+function emitValue(value) {
+  if (value.kind === "field") return emitPropertyAccess("subject", value.key);
+  if (value.kind === "literal") return emitLiteral(value.value);
+  if (value.kind === "param") return emitPropertyAccess("actor", value.name);
+  return value.name;
+}
+function accessCacheKey(descriptor) {
+  return `access:${JSON.stringify(descriptor.rules)}`;
+}
+function compileAccess(descriptor, options) {
+  const template = getCompileCached(
+    descriptor.subject,
+    accessCacheKey(descriptor),
+    () => {
+      const source = emitAccessSource(descriptor);
+      return { source, create: globalThis.Function(`return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create();
+  registerArtifact(compiled, { kind: "access-plan", schema: descriptor.subject, descriptor });
+  return compiled;
+}
+function unconditionalFields(descriptor, action) {
+  const cans = descriptor.rules.filter(
+    (rule) => rule.effect === "can" && rule.action === action && rule.condition === void 0
+  );
+  if (cans.length === 0) return [];
+  if (cans.some((rule) => rule.fields === void 0)) {
+    const denied = descriptor.rules.filter(
+      (rule) => rule.effect === "cannot" && rule.action === action && rule.condition === void 0
+    );
+    if (denied.length === 0) return void 0;
+    const object2 = expectProjectionObject(descriptor.subject, "JIT.access()");
+    const blocked = new Set(denied.flatMap((rule) => rule.fields ?? Object.keys(object2.def.props)));
+    return Object.keys(object2.def.props).filter((field) => !blocked.has(field));
+  }
+  const allowed = new Set(cans.flatMap((rule) => rule.fields ?? []));
+  for (const rule of descriptor.rules) {
+    if (rule.effect !== "cannot" || rule.action !== action || rule.condition !== void 0) continue;
+    for (const field of rule.fields ?? allowed) allowed.delete(field);
+  }
+  return [...allowed];
+}
+
+// ../../packages/jit/src/runtime/hash/hash-cache.ts
+var HASH_CACHE = /* @__PURE__ */ new WeakMap();
+function getHash(value, compute) {
+  const cached = HASH_CACHE.get(value);
+  if (cached !== void 0) {
+    return cached;
+  }
+  const hash4 = compute(value);
+  HASH_CACHE.set(value, hash4);
+  return hash4;
+}
+function isHashCacheable(value) {
+  return typeof value === "object" && value !== null || typeof value === "function";
+}
+
+// ../../packages/jit/src/runtime/hash/hash-combine.ts
+function combineHash(left, right) {
+  return (left << 5) - left + right | 0;
+}
+
+// ../../packages/jit/src/runtime/hash/hash-primitives.ts
+function hashNumber(value) {
+  return value | 0;
+}
+function hashString(value) {
+  let hash4 = 0;
+  for (let i = 0, len = value.length; i < len; i++) {
+    hash4 = hash4 * 31 + value.charCodeAt(i) | 0;
+  }
+  return hash4;
+}
+function hashBoolean(value) {
+  return value ? 1 : 0;
+}
+function hashBigInt(value) {
+  return Number(value & 0xffffffffn) | 0;
+}
+function hashUnknown(value) {
+  switch (typeof value) {
+    case "string":
+      return hashString(value);
+    case "number":
+      return hashNumber(value);
+    case "boolean":
+      return hashBoolean(value);
+    case "bigint":
+      return hashBigInt(value);
+    case "undefined":
+      return 0;
+    case "symbol":
+      return hashString(String(value));
+    case "object":
+      return value === null ? 1 : hashString(Object.prototype.toString.call(value));
+    case "function":
+      return hashString("function");
+  }
+}
+
+// ../../packages/jit/src/compiler/ir/ir.ts
+function irVar(name) {
+  return { kind: "var", name };
+}
+function literal(value) {
+  return { kind: "literal", value };
+}
+function not(expr) {
+  return { kind: "not", expr };
+}
+function strictEqual(left, right) {
+  return { kind: "binary", op: "strictEqual", left, right };
+}
+function notStrictEqual(left, right) {
+  return { kind: "binary", op: "notStrictEqual", left, right };
+}
+function sameValue(left, right) {
+  return { kind: "sameValue", left, right };
+}
+function sameNumber(left, right) {
+  return { kind: "sameNumber", left, right };
+}
+function schemaGuard(schema, value) {
+  return { kind: "schema_guard", schema, value };
+}
+function loadProp(base, key) {
+  return { kind: "load_prop", base, key };
+}
+function loadIndex(base, index2) {
+  return { kind: "load_index", base, index: index2 };
+}
+function call(callee, args = []) {
+  return { kind: "call", callee, args };
+}
+function binary(op, left, right) {
+  return { kind: "binary", op, left, right };
+}
+function allOf(operands) {
+  return { kind: "nary", op: "and", operands };
+}
+function objectLiteral(entries) {
+  return { kind: "object_literal", entries };
+}
+function arrayLiteral(elements = []) {
+  return { kind: "array_literal", elements };
+}
+function construct(ctor, args = []) {
+  return { kind: "construct", ctor, args };
+}
+function letDecl(target, expr) {
+  return expr === void 0 ? { kind: "let", target } : { kind: "let", target, expr };
+}
+function store(target, expr) {
+  return { kind: "store", target, expr };
+}
+function exprStmt(expr) {
+  return { kind: "expr_stmt", expr };
+}
+function forRange(index2, length, body) {
+  return { kind: "for_range", index: index2, length, body };
+}
+function forOf(item, iterable, body) {
+  return { kind: "for_of", item, iterable, body };
+}
+function append(target, cursor, value) {
+  return { kind: "append", target, cursor, value };
+}
+function sortByKey(target, ordering) {
+  return { kind: "sort_by_key", target, ordering };
+}
+function mapExprChildren(expr, mapExpr) {
+  switch (expr.kind) {
+    case "var":
+    case "literal":
+      return expr;
+    case "not":
+      return { ...expr, expr: mapExpr(expr.expr) };
+    case "binary":
+    case "sameValue":
+    case "sameNumber":
+      return { ...expr, left: mapExpr(expr.left), right: mapExpr(expr.right) };
+    case "nary":
+      return { ...expr, operands: expr.operands.map(mapExpr) };
+    case "schema_guard":
+      return { ...expr, value: mapExpr(expr.value) };
+    case "load_prop":
+      return { ...expr, base: mapExpr(expr.base) };
+    case "load_index":
+      return { ...expr, base: mapExpr(expr.base), index: mapExpr(expr.index) };
+    case "call":
+      return { ...expr, callee: mapExpr(expr.callee), args: expr.args.map(mapExpr) };
+    case "object_literal":
+      return { ...expr, entries: expr.entries.map((entry) => ({ ...entry, value: mapExpr(entry.value) })) };
+    case "array_literal":
+      return { ...expr, elements: expr.elements.map(mapExpr) };
+    case "construct":
+      return { ...expr, args: expr.args.map(mapExpr) };
+  }
+}
+function mapNodeExprs(node, mapExpr) {
+  switch (node.kind) {
+    case "assign":
+      return { ...node, expr: mapExpr(node.expr) };
+    case "let":
+      return node.expr === void 0 ? node : { ...node, expr: mapExpr(node.expr) };
+    case "store":
+      return { ...node, target: mapExpr(node.target), expr: mapExpr(node.expr) };
+    case "expr_stmt":
+      return { ...node, expr: mapExpr(node.expr) };
+    case "hash_compare":
+      return { ...node, leftHash: mapExpr(node.leftHash), rightHash: mapExpr(node.rightHash) };
+    case "map_equal":
+    case "binary_search_equal":
+      return { ...node, left: mapExpr(node.left), right: mapExpr(node.right) };
+    case "if":
+      return { ...node, test: mapExpr(node.test) };
+    case "for":
+      return { ...node, from: mapExpr(node.from) };
+    case "for_range":
+      return { ...node, length: mapExpr(node.length) };
+    case "for_of":
+      return { ...node, iterable: mapExpr(node.iterable) };
+    case "append":
+      return { ...node, value: mapExpr(node.value) };
+    case "return":
+      return { ...node, value: mapExpr(node.value) };
+    case "block":
+    case "sort_by_key":
+      return node;
+  }
+}
+function mapNodeBodies(node, mapNodes) {
+  switch (node.kind) {
+    case "block":
+      return { ...node, body: mapNodes(node.body) };
+    case "if":
+      return {
+        ...node,
+        then: mapNodes(node.then),
+        ...node.otherwise ? { otherwise: mapNodes(node.otherwise) } : {}
+      };
+    case "for":
+    case "for_range":
+    case "for_of":
+    case "map_equal":
+    case "binary_search_equal":
+      return { ...node, body: mapNodes(node.body) };
+    default:
+      return node;
+  }
+}
+
+// ../../packages/jit/src/compiler/defaults.ts
+var NO_DEFAULT = /* @__PURE__ */ Symbol("jit.no-static-default");
+function emitStaticDefaultSource(schema) {
+  const value = getStaticDefaultValue(schema);
+  if (value === NO_DEFAULT) return void 0;
+  return emitStaticDefaultValueSource(value, /* @__PURE__ */ new Set());
+}
+function staticDefaultIRExpr(schema) {
+  const value = getStaticDefaultValue(schema);
+  if (value === NO_DEFAULT) return void 0;
+  return staticValueIRExpr(value, /* @__PURE__ */ new Set());
+}
+function emitDefaultedValue(schema, valueExpr) {
+  const defaultSource = emitStaticDefaultSource(schema);
+  return defaultSource === void 0 ? valueExpr : `(${valueExpr} === undefined ? ${defaultSource} : ${valueExpr})`;
+}
+function getStaticDefaultValue(schema) {
+  let current = schema;
+  while (true) {
+    switch (current.type) {
+      case TypeName.default: {
+        const value = current.def.defaultValue;
+        return typeof value === "function" ? NO_DEFAULT : value;
+      }
+      case TypeName.optional:
+      case TypeName.nullish:
+        return NO_DEFAULT;
+      case TypeName.nullable:
+      case TypeName.brand:
+      case TypeName.readonly:
+      case TypeName.refine:
+      case TypeName.coerce:
+      case TypeName.pipe:
+      case TypeName.transform:
+        current = current.def.innerType;
+        continue;
+      case TypeName.lazy:
+        current = current.def.getter?.();
+        continue;
+      default:
+        return NO_DEFAULT;
+    }
+  }
+}
+function emitStaticDefaultValueSource(value, seen) {
+  if (value instanceof Date) return `new Date(${value.getTime()})`;
+  if (value === null) return "null";
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "bigint":
+    case "boolean":
+    case "undefined":
+      return emitLiteral(value);
+    case "object":
+      return emitStaticObjectDefaultSource(value, seen);
+    default:
+      return void 0;
+  }
+}
+function staticValueIRExpr(value, seen) {
+  if (value instanceof Date) return construct("Date", [literal(value.getTime())]);
+  if (value === null) return literal(null);
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "bigint":
+    case "boolean":
+    case "undefined":
+      return literal(value);
+    case "object":
+      return staticObjectDefaultIRExpr(value, seen);
+    default:
+      return void 0;
+  }
+}
+function emitStaticObjectDefaultSource(value, seen) {
+  if (seen.has(value)) return void 0;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const elements = value.map((element) => emitStaticDefaultValueSource(element, seen));
+    seen.delete(value);
+    return elements.every((element) => element !== void 0) ? `[${elements.join(", ")}]` : void 0;
+  }
+  if (!isPlainObject(value)) {
+    seen.delete(value);
+    return void 0;
+  }
+  const entries = [];
+  for (const key of Object.keys(value)) {
+    const emitted = emitStaticDefaultValueSource(value[key], seen);
+    if (emitted === void 0) {
+      seen.delete(value);
+      return void 0;
+    }
+    entries.push(`${emitObjectKey(key)}: ${emitted}`);
+  }
+  seen.delete(value);
+  return `{ ${entries.join(", ")} }`;
+}
+function staticObjectDefaultIRExpr(value, seen) {
+  if (seen.has(value)) return void 0;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const elements = value.map((element) => staticValueIRExpr(element, seen));
+    seen.delete(value);
+    return elements.every((element) => element !== void 0) ? arrayLiteral(elements) : void 0;
+  }
+  if (!isPlainObject(value)) {
+    seen.delete(value);
+    return void 0;
+  }
+  const entries = [];
+  for (const key of Object.keys(value)) {
+    const emitted = staticValueIRExpr(value[key], seen);
+    if (emitted === void 0) {
+      seen.delete(value);
+      return void 0;
+    }
+    entries.push({ key, value: emitted });
+  }
+  seen.delete(value);
+  return objectLiteral(entries);
+}
+function isPlainObject(value) {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+// ../../packages/jit/src/compiler/hash.ts
+function emitHashSource(schema) {
+  return `function hash(value) {
+${emitHashBody(schema)}
+}`;
+}
+function compileHash(schema, options) {
+  return getCompileCached(
+    schema,
+    "hash",
+    () => {
+      const compute = compileUncachedHash(schema);
+      const compiled = ((value) => {
+        if (isHashCacheable(value)) {
+          return getHash(value, compute);
+        }
+        return compute(value);
+      });
+      registerArtifact(compiled, {
+        kind: "operation",
+        schema,
+        op: "hash"
+      });
+      return compiled;
+    },
+    options
+  );
+}
+function compileUncachedHash(schema) {
+  return globalThis.Function(
+    "__combineHash",
+    "__hashNumber",
+    "__hashString",
+    "__hashBoolean",
+    "__hashBigInt",
+    "__hashUnknown",
+    `return function computeHash(value) {
+${emitHashBody(schema)}
+};`
+  )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown);
+}
+function emitHashBody(schema) {
+  const lines = [];
+  emitHashInto(lines, schema, "value", "h", 1);
+  lines.push("  return h;");
+  return lines.join("\n");
+}
+function emitHashInto(lines, schema, value, target, depth) {
+  const pad = "  ".repeat(depth);
+  const next = `${target}_${depth}`;
+  switch (schema.type) {
+    case "number":
+    case "int":
+    case "nan":
+      lines.push(`${pad}let ${target} = __hashNumber(${value});`);
+      return;
+    case "string":
+      lines.push(`${pad}let ${target} = __hashString(${value});`);
+      return;
+    case "boolean":
+      lines.push(`${pad}let ${target} = __hashBoolean(${value});`);
+      return;
+    case "bigint":
+      lines.push(`${pad}let ${target} = __hashBigInt(${value});`);
+      return;
+    case "date":
+      lines.push(`${pad}let ${target} = __hashNumber(${value}.getTime());`);
+      return;
+    case "null":
+      lines.push(`${pad}let ${target} = 1;`);
+      return;
+    case "undefined":
+    case "void":
+      lines.push(`${pad}let ${target} = 0;`);
+      return;
+    case "literal":
+    case "enum":
+    case "any":
+    case "unknown":
+    case "never":
+    case "symbol":
+    case "file":
+    case "regex":
+      lines.push(`${pad}let ${target} = __hashUnknown(${value});`);
+      return;
+    case "optional":
+      lines.push(`${pad}let ${target};`);
+      lines.push(`${pad}if (${value} === undefined) {`);
+      lines.push(`${pad}  ${target} = 0;`);
+      lines.push(`${pad}} else {`);
+      emitHashInto(lines, schema.def.innerType, value, next, depth + 1);
+      lines.push(`${pad}  ${target} = ${next};`);
+      lines.push(`${pad}}`);
+      return;
+    case "nullable":
+      lines.push(`${pad}let ${target};`);
+      lines.push(`${pad}if (${value} === null) {`);
+      lines.push(`${pad}  ${target} = 1;`);
+      lines.push(`${pad}} else {`);
+      emitHashInto(lines, schema.def.innerType, value, next, depth + 1);
+      lines.push(`${pad}  ${target} = ${next};`);
+      lines.push(`${pad}}`);
+      return;
+    case "nullish":
+      lines.push(`${pad}let ${target};`);
+      lines.push(`${pad}if (${value} == null) {`);
+      lines.push(`${pad}  ${target} = ${value} === null ? 1 : 0;`);
+      lines.push(`${pad}} else {`);
+      emitHashInto(lines, schema.def.innerType, value, next, depth + 1);
+      lines.push(`${pad}  ${target} = ${next};`);
+      lines.push(`${pad}}`);
+      return;
+    case "readonly":
+    case "default":
+    case "brand":
+    case "transform":
+    case "pipe":
+    case "coerce":
+    case "refine":
+      emitHashInto(lines, schema.def.innerType, value, target, depth);
+      return;
+    case "array": {
+      lines.push(`${pad}let ${target} = ${schema.type === "array" ? "17" : "0"};`);
+      lines.push(`${pad}for (let i = 0, len = ${value}.length; i < len; i++) {`);
+      emitHashInto(lines, schema.def.element, `${value}[i]`, next, depth + 1);
+      lines.push(`${pad}  ${target} = __combineHash(${target}, ${next});`);
+      lines.push(`${pad}}`);
+      return;
+    }
+    case "object": {
+      lines.push(`${pad}let ${target} = 23;`);
+      const props = schema.def.props;
+      for (const key of Object.keys(props)) {
+        lines.push(`${pad}{`);
+        emitHashInto(lines, props[key], emitDefaultedValue(props[key], emitPropertyAccess(value, key)), next, depth);
+        lines.push(`${pad}  ${target} = __combineHash(${target}, ${next});`);
+        lines.push(`${pad}}`);
+      }
+      return;
+    }
+    default:
+      lines.push(`${pad}let ${target} = __hashUnknown(${value});`);
+      return;
+  }
+}
+
+// ../../packages/jit/src/compiler/cache-key.ts
+var SEPARATOR = "";
+function resolveCacheKeyDescriptor(schema, paths, form) {
+  const tree = buildProjectionTree(schema, paths, "JIT.cacheKey()");
+  const parts = tree.paths.map((path) => {
+    const leaf = leafSchema(tree, path);
+    const wrappers = resolveWrappers(leaf);
+    return Object.freeze({
+      path,
+      segments: Object.freeze(path.split(".")),
+      kind: partKind(wrappers.base),
+      schema: leaf,
+      nullish: wrappers.optional || wrappers.nullable
+    });
+  });
+  return Object.freeze({ tree, form, parts: Object.freeze(parts) });
+}
+function partKind(base) {
+  switch (base.type) {
+    case TypeName.string:
+      return "string";
+    case TypeName.number:
+      return "number";
+    case TypeName.bigint:
+      return "bigint";
+    case TypeName.boolean:
+      return "boolean";
+    case TypeName.date:
+      return "date";
+    case TypeName.literal:
+    case TypeName.enum:
+      return "string";
+    default:
+      return "structural";
+  }
+}
+function emitCacheKeySource(descriptor) {
+  return descriptor.form === "string" ? emitStringKey(descriptor) : emitHashKey(descriptor);
+}
+function emitStringKey(descriptor) {
+  const writer = new CodeWriter();
+  writer.line("function cacheKey(value) {");
+  writer.indent(() => {
+    const parts = descriptor.parts.map((part, index2) => {
+      const read = readPath("value", part);
+      const text = toText(part, read);
+      return index2 === 0 ? text : `${JSON.stringify(SEPARATOR)} + ${text}`;
+    });
+    writer.line(`return ${parts.join(" + ")};`);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function toText(part, read) {
+  const body = textExpression(part, read);
+  return part.nullish ? `(${read} == null ? "\\u0000" : ${body})` : body;
+}
+function textExpression(part, read) {
+  switch (part.kind) {
+    case "string":
+      return read;
+    case "number":
+    case "boolean":
+      return `${read}`;
+    case "bigint":
+      return `${read}`;
+    case "date":
+      return `${read}.getTime()`;
+    default:
+      return `__cacheKeyHash(${read})`;
+  }
+}
+function emitHashKey(descriptor) {
+  const writer = new CodeWriter();
+  writer.line("function cacheKey(value) {");
+  writer.indent(() => {
+    writer.line("let h = 23;");
+    descriptor.parts.forEach((part, index2) => {
+      const read = readPath("value", part);
+      const term = hashExpression(part, read, index2);
+      writer.line(`h = ((h << 5) - h + ${term}) | 0;`);
+    });
+    writer.line("return h;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function hashExpression(part, read, index2) {
+  const body = hashTerm(part, read, index2);
+  return part.nullish ? `(${read} == null ? 0 : ${body})` : body;
+}
+function hashTerm(part, read, index2) {
+  switch (part.kind) {
+    case "string":
+      return `__hashString(${read})`;
+    case "number":
+      return `(${read} | 0)`;
+    case "boolean":
+      return `(${read} ? 1 : 0)`;
+    case "bigint":
+      return `(Number(${read} & 0xffffffffn) | 0)`;
+    case "date":
+      return `(${read}.getTime() | 0)`;
+    default:
+      return `__cacheKeyHash${index2}(${read})`;
+  }
+}
+function readPath(source, part) {
+  return part.segments.reduce(
+    (carrier, segment, index2) => index2 === 0 ? emitPropertyAccess(carrier, segment) : `${carrier}?.${optionalSegment(segment)}`,
+    source
+  );
+}
+function optionalSegment(segment) {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment) ? segment : `[${JSON.stringify(segment)}]`;
+}
+function leafSchema(tree, path) {
+  const dot = path.indexOf(".");
+  const head = dot === -1 ? path : path.slice(0, dot);
+  const node = tree.nodes.find((candidate) => candidate.key === head);
+  if (dot === -1) return node.schema;
+  return leafSchema(node.children, path.slice(dot + 1));
+}
+function cacheKeyHashBindings(descriptor) {
+  const bindings = [];
+  descriptor.parts.forEach((part, index2) => {
+    if (part.kind !== "structural") return;
+    bindings.push({
+      name: descriptor.form === "string" ? "__cacheKeyHash" : `__cacheKeyHash${index2}`,
+      source: emitHashSource(part.schema)
+    });
+  });
+  return bindings;
+}
+function cacheKeyCacheKey(descriptor) {
+  return `cacheKey:${descriptor.form}:${projectionCacheKey(descriptor.tree)}`;
+}
+function compileCacheKey(schema, descriptor, hashHelpers, options) {
+  const bindings = cacheKeyHashBindings(descriptor);
+  const helperNames = Object.keys(hashHelpers);
+  if (descriptor.form === "string" && bindings.length > 1) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      "JIT.cacheKey.string() supports at most one structural field; select scalar fields, or use JIT.cacheKey.hash()"
+    );
+  }
+  const template = getCompileCached(
+    schema,
+    cacheKeyCacheKey(descriptor),
+    () => {
+      const source = emitCacheKeySource(descriptor);
+      return {
+        source,
+        create: globalThis.Function(...helperNames, ...bindings.map((binding) => binding.name), `return ${source};`)
+      };
+    },
+    options
+  );
+  const compiled = template.create(
+    ...helperNames.map((name) => hashHelpers[name]),
+    ...bindings.map(
+      (binding) => globalThis.Function(...helperNames, `return ${binding.source};`)(...helperNames.map((name) => hashHelpers[name]))
+    )
+  );
+  registerArtifact(compiled, { kind: "cache-key-plan", schema, descriptor });
+  return compiled;
+}
+
+// ../../packages/jit/src/compiler/canonical.ts
+function emitCanonicalSource(schema, name = "canonical") {
+  const object2 = expectProjectionObject(schema, "JIT.canonical()");
+  const nested = /* @__PURE__ */ new Map();
+  const root = new CodeWriter();
+  emitCanonicalFunction(root, object2, name, nested);
+  const helpers = [...nested.values()].filter((source) => source !== "");
+  return `(function () {
+${helpers.join("\n")}
+${root.toString()}
+return ${name};
+})()`;
+}
+function emitCanonicalFunction(writer, object2, name, nested) {
+  const keys = Object.keys(object2.def.props);
+  const children2 = /* @__PURE__ */ new Map();
+  for (const key of keys) {
+    const base = resolveWrappers(object2.def.props[key]).base;
+    if (base.type === TypeName.object) {
+      children2.set(key, childName(name, key, base, nested));
+    }
+  }
+  writer.line(`function ${name}(value) {`);
+  writer.indent(() => {
+    writer.line('if (value === null || typeof value !== "object") return value;');
+    writer.line("const keys = Object.keys(value);");
+    const ordered = keys.map((key, index2) => `keys[${index2}] === ${JSON.stringify(key)}`).join(" && ");
+    writer.line(`let canonical = keys.length === ${keys.length}${ordered === "" ? "" : ` && ${ordered}`};`);
+    for (const [key, child] of children2) {
+      const read = emitPropertyAccess("value", key);
+      const local = `next_${key.replace(/[^A-Za-z0-9_$]/g, "_")}`;
+      writer.line(`const ${local} = ${child}(${read});`);
+      writer.line(`if (${local} !== ${read}) canonical = false;`);
+    }
+    writer.line("if (canonical) return value;");
+    writer.line("return {");
+    writer.indent(() => {
+      for (const key of keys) {
+        const child = children2.get(key);
+        const read = emitPropertyAccess("value", key);
+        const local = `next_${key.replace(/[^A-Za-z0-9_$]/g, "_")}`;
+        writer.line(`${JSON.stringify(key)}: ${child === void 0 ? read : local},`);
+      }
+    });
+    writer.line("};");
+  });
+  writer.line("}");
+}
+function childName(parent, key, schema, nested) {
+  const name = `${parent}_${key.replace(/[^A-Za-z0-9_$]/g, "_")}`;
+  if (!nested.has(name)) {
+    const writer = new CodeWriter();
+    nested.set(name, "");
+    emitCanonicalFunction(writer, schema, name, nested);
+    nested.set(name, writer.toString());
+  }
+  return name;
+}
+function compileCanonical(schema, options) {
+  const template = getCompileCached(
+    schema,
+    "canonical",
+    () => {
+      const source = emitCanonicalSource(schema);
+      return { source, create: globalThis.Function(`return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create();
+  registerArtifact(compiled, { kind: "canonical-plan", schema });
+  return compiled;
+}
+
+// ../../packages/jit/src/runtime/index/build-index.ts
+function buildIndex(items, key) {
+  const index2 = /* @__PURE__ */ new Map();
+  for (let i = 0, len = items.length; i < len; i++) {
+    const item = items[i];
+    index2.set(item[key], item);
+  }
+  return index2;
+}
+
+// ../../packages/jit/src/runtime/index/index-cache.ts
+var INDEX_CACHE = /* @__PURE__ */ new WeakMap();
+function indexesOf(items) {
+  let entry = INDEX_CACHE.get(items);
+  if (entry === void 0) {
+    entry = { legacyKey: void 0, legacyMap: void 0, plans: void 0 };
+    INDEX_CACHE.set(items, entry);
+  }
+  return entry;
+}
+function getIndex(items, key) {
+  const entry = indexesOf(items);
+  if (entry.legacyMap !== void 0 && entry.legacyKey === key) {
+    return entry.legacyMap;
+  }
+  const map4 = buildIndex(items, key);
+  entry.legacyKey = key;
+  entry.legacyMap = map4;
+  return map4;
+}
+function getCachedIndex(items, cacheKey3, build) {
+  const entry = indexesOf(items);
+  const plans = entry.plans ?? (entry.plans = /* @__PURE__ */ new Map());
+  const cached = plans.get(cacheKey3);
+  if (cached !== void 0) return cached;
+  const built = build(items);
+  plans.set(cacheKey3, built);
+  return built;
+}
+
+// ../../packages/jit/src/compiler/row-keys.ts
+function resolveRowObjectSchema(schema, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.array || base.type === TypeName.set) {
+    base = resolveWrappers(base.def.element).base;
+  }
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${operation} expects an object or collection-of-objects schema`);
+  }
+  return base;
+}
+function resolveRowField(object2, key, operation) {
+  if (typeof key !== "string" || key.length === 0) {
+    throw new JITError("INVALID_OPERATION", `${operation} keys must be non-empty strings`);
+  }
+  const field = object2.def.props[key];
+  if (!field) {
+    throw new JITError("INVALID_OPERATION", `${operation} received unknown key ${JSON.stringify(key)}`, {
+      path: [key]
+    });
+  }
+  return field;
+}
+function resolveScalarKeyKind(schema, key, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type === TypeName.date) return "date";
+  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
+  if (base.type === TypeName.union) {
+    const options = base.def.options;
+    if (options.length > 0) {
+      const kinds = options.map((option) => resolveScalarKeyKind(option, key, operation));
+      if (kinds.every((kind) => kind === kinds[0])) return kinds[0];
+    }
+  }
+  if (base.type === TypeName.string || base.type === TypeName.bigint || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum) {
+    return "direct";
+  }
+  throw new JITError(
+    "INVALID_OPERATION",
+    `${operation} key ${JSON.stringify(key)} must resolve to a statically comparable scalar`,
+    { path: [key] }
+  );
+}
+function resolveScalarKeyDomain(schema, key, operation) {
+  let base = resolveWrappers(schema).base;
+  if (base.type === TypeName.runtimeType) {
+    base = resolveWrappers(base.def.innerType).base;
+  }
+  if (base.type === TypeName.string) return "string";
+  if (base.type === TypeName.number || base.type === TypeName.int || base.type === TypeName.nan) return "number";
+  if (base.type === TypeName.bigint) return "bigint";
+  if (base.type === TypeName.boolean) return "boolean";
+  if (base.type === TypeName.date) return "date";
+  if (base.type === TypeName.literal) {
+    const value = base.def.value;
+    if (typeof value === "string") return "string";
+    if (typeof value === "number") return "number";
+    if (typeof value === "bigint") return "bigint";
+    if (typeof value === "boolean") return "boolean";
+  }
+  if (base.type === TypeName.enum) {
+    const domains = new Set(Object.values(base.def.values).map((value) => typeof value));
+    if (domains.size === 1) {
+      const domain2 = domains.values().next().value;
+      if (domain2 === "string" || domain2 === "number") return domain2;
+    }
+  }
+  if (base.type === TypeName.union) {
+    const domains = base.def.options.map(
+      (option) => resolveScalarKeyDomain(option, key, operation)
+    );
+    if (domains.length > 0 && domains.every((domain2) => domain2 === domains[0])) return domains[0];
+  }
+  throw new JITError("INVALID_OPERATION", `${operation} key ${JSON.stringify(key)} has no scalar equality domain`, {
+    path: [key]
+  });
+}
+function isNullishField(schema) {
+  const resolved = resolveWrappers(schema);
+  return resolved.optional || resolved.nullable;
+}
+
+// ../../packages/jit/src/compiler/ordering.ts
+function resolveOrderingDescriptor(schema, criteria) {
+  const object2 = resolveRowObjectSchema(schema, "ordering");
+  if (criteria.length === 0) {
+    throw new JITError("INVALID_OPERATION", "ordering requires at least one criterion");
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const resolved = criteria.map((criterion) => {
+    if (criterion.direction !== "asc" && criterion.direction !== "desc") {
+      throw new JITError("INVALID_OPERATION", "ordering direction must be asc or desc");
+    }
+    const field = resolveRowField(object2, criterion.key, "ordering");
+    if (seen.has(criterion.key)) {
+      throw new JITError("INVALID_OPERATION", `ordering repeats key ${JSON.stringify(criterion.key)}`, {
+        path: [criterion.key]
+      });
+    }
+    seen.add(criterion.key);
+    return Object.freeze({
+      key: criterion.key,
+      direction: criterion.direction,
+      valueKind: resolveScalarKeyKind(field, criterion.key, "ordering"),
+      nullish: isNullishField(field)
+    });
+  });
+  return Object.freeze({ criteria: Object.freeze(resolved) });
+}
+function emitOrderingComparatorBody(writer, descriptor, left = "left", right = "right") {
+  const last2 = descriptor.criteria.length - 1;
+  let terminated = false;
+  descriptor.criteria.forEach((criterion, index2) => {
+    const suffix = descriptor.criteria.length === 1 ? "" : String(index2);
+    const date3 = criterion.valueKind === "date";
+    const leftRaw = `left${date3 ? "Raw" : "Value"}${suffix}`;
+    const rightRaw = `right${date3 ? "Raw" : "Value"}${suffix}`;
+    const leftValue = `leftValue${suffix}`;
+    const rightValue = `rightValue${suffix}`;
+    const leftPresentWins = criterion.direction === "desc" ? "-1" : "1";
+    const rightPresentWins = criterion.direction === "desc" ? "1" : "-1";
+    const subtract = criterion.valueKind === "numeric" && index2 === last2;
+    const emitCompare2 = () => {
+      if (date3) {
+        writer.line(`const ${leftValue} = ${leftRaw}.getTime();`);
+        writer.line(`const ${rightValue} = ${rightRaw}.getTime();`);
+      }
+      if (subtract) {
+        writer.line(
+          criterion.direction === "desc" ? `return ${rightValue} - ${leftValue};` : `return ${leftValue} - ${rightValue};`
+        );
+        return;
+      }
+      writer.line(`if (${leftValue} !== ${rightValue}) {`);
+      writer.indent(() => {
+        writer.line(
+          criterion.direction === "desc" ? `return ${leftValue} < ${rightValue} ? 1 : -1;` : `return ${leftValue} < ${rightValue} ? -1 : 1;`
+        );
+      });
+      writer.line("}");
+    };
+    writer.line(`const ${leftRaw} = ${emitPropertyAccess(left, criterion.key)};`);
+    writer.line(`const ${rightRaw} = ${emitPropertyAccess(right, criterion.key)};`);
+    if (!criterion.nullish) {
+      emitCompare2();
+      terminated = subtract;
+      return;
+    }
+    writer.line(`if (${leftRaw} == null || ${rightRaw} == null) {`);
+    writer.indent(() => {
+      writer.line(`if (${leftRaw} != null) return ${leftPresentWins};`);
+      writer.line(`if (${rightRaw} != null) return ${rightPresentWins};`);
+    });
+    writer.line("} else {");
+    writer.indent(emitCompare2);
+    writer.line("}");
+  });
+  if (!terminated) writer.line("return 0;");
+}
+function emitOrderingComparatorBodySource(descriptor) {
+  const writer = new CodeWriter();
+  emitOrderingComparatorBody(writer, descriptor);
+  return writer.toString();
+}
+
+// ../../packages/jit/src/compiler/source/guard.ts
+function emitSchemaGuard(schema, value) {
+  const resolved = resolveWrappers(schema);
+  const base = resolved.base;
+  const inner = emitBaseGuard(base, value);
+  const defaultable = emitStaticDefaultSource(schema) !== void 0;
+  if (resolved.optional && resolved.nullable) return `(${value} == null || (${inner}))`;
+  if (resolved.optional) return `(${value} === undefined || (${inner}))`;
+  if (resolved.nullable) {
+    return defaultable ? `(${value} === undefined || ${value} === null || (${inner}))` : `(${value} === null || (${inner}))`;
+  }
+  if (defaultable) return `(${value} === undefined || (${inner}))`;
+  return inner;
+}
+function emitBaseGuard(schema, value) {
+  switch (schema.type) {
+    case TypeName.any:
+    case TypeName.unknown:
+      return "true";
+    case TypeName.never:
+      return "false";
+    case TypeName.void:
+    case TypeName.undefined:
+      return `${value} === undefined`;
+    case TypeName.null:
+      return `${value} === null`;
+    case TypeName.string:
+      return `typeof ${value} === "string"`;
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.nan:
+      return `typeof ${value} === "number"`;
+    case TypeName.boolean:
+      return `typeof ${value} === "boolean"`;
+    case TypeName.bigint:
+      return `typeof ${value} === "bigint"`;
+    case TypeName.symbol:
+      return `typeof ${value} === "symbol"`;
+    case TypeName.date:
+      return `${value} instanceof Date`;
+    case TypeName.regex:
+      return `${value} instanceof RegExp`;
+    case TypeName.file:
+      return `(typeof File !== "undefined" && ${value} instanceof File)`;
+    case TypeName.json:
+      return "true";
+    case TypeName.custom:
+      return "true";
+    case TypeName.templateLiteral:
+      return `typeof ${value} === "string"`;
+    case TypeName.function:
+      return `typeof ${value} === "function"`;
+    case TypeName.temporal:
+      return emitTemporalGuard(schema, value);
+    case TypeName.codec:
+      return emitSchemaGuard(schema.def.input, value);
+    case TypeName.literal:
+      return emitLiteralGuard(schema, value);
+    case TypeName.enum:
+      return emitEnumGuard(schema, value);
+    case TypeName.array:
+      return `Array.isArray(${value})`;
+    case TypeName.set:
+      return `${value} instanceof Set`;
+    case TypeName.map:
+      return `${value} instanceof Map`;
+    case TypeName.record:
+      return `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
+    case TypeName.object:
+      return emitObjectGuard(schema, value);
+    case TypeName.tuple:
+      return `Array.isArray(${value})`;
+    case TypeName.union:
+      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" || ")})`;
+    case TypeName.xor:
+      return emitXorGuard(schema, value);
+    case TypeName.not:
+      return `!(${emitSchemaGuard(schema.def.innerType, value)})`;
+    case TypeName.when:
+      return `((${emitSchemaGuard(schema.def.thenType, value)}) || (${emitSchemaGuard(schema.def.otherwiseType, value)}))`;
+    case TypeName.discriminatedUnion:
+      return emitDiscriminatedUnionGuard(schema, value);
+    case TypeName.intersection:
+      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" && ")})`;
+    case TypeName.instanceof:
+      return emitInstanceOfGuard(schema, value);
+    default:
+      return "true";
+  }
+}
+function emitXorGuard(schema, value) {
+  const tests = schema.def.options.map((option) => emitSchemaGuard(option, value));
+  if (tests.length === 0) return "false";
+  return `(${tests.map((test) => `((${test}) ? 1 : 0)`).join(" + ")} === 1)`;
+}
+function emitObjectGuard(schema, value) {
+  const props = schema.def.props;
+  const checks = Object.entries(props).map(([key, prop]) => emitSchemaGuard(prop, emitPropertyAccess(value, key)));
+  const objectCheck = `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
+  return checks.length === 0 ? objectCheck : `(${objectCheck} && ${checks.join(" && ")})`;
+}
+function emitLiteralGuard(schema, value) {
+  const literal4 = schema.def.value;
+  if (typeof literal4 === "number") {
+    return `${value} === ${emitLiteral(literal4)} || (${value} !== ${value} && ${emitLiteral(literal4)} !== ${emitLiteral(literal4)})`;
+  }
+  return `${value} === ${emitLiteral(literal4)}`;
+}
+function emitEnumGuard(schema, value) {
+  const values = Object.values(schema.def.values);
+  if (values.length === 0) return "false";
+  return `(${values.map((enumValue) => `${value} === ${emitLiteral(enumValue)}`).join(" || ")})`;
+}
+function emitDiscriminatedUnionGuard(schema, value) {
+  const discriminator = schema.def.discriminator;
+  const tags = schema.def.options.map((option) => {
+    const tag = literalDiscriminatorValue(option, discriminator);
+    return tag === void 0 ? void 0 : `${emitPropertyAccess(value, discriminator)} === ${emitLiteral(tag)}`;
+  });
+  const filtered = tags.filter((tag) => tag !== void 0);
+  return filtered.length === 0 ? "false" : `(${filtered.join(" || ")})`;
+}
+function emitInstanceOfGuard(schema, value) {
+  const name = schema.def.ctor.name;
+  if (!name) return `${value} !== null && typeof ${value} === "object"`;
+  return `(typeof ${name} !== "undefined" && ${value} instanceof ${name})`;
+}
+function emitTemporalGuard(schema, value) {
+  const ctor = temporalConstructorName(schema.def.kind);
+  return `(globalThis.Temporal !== undefined && ${value} instanceof globalThis.Temporal.${ctor})`;
+}
+function temporalConstructorName(kind) {
+  switch (kind) {
+    case "instant":
+      return "Instant";
+    case "plainDate":
+      return "PlainDate";
+    case "plainTime":
+      return "PlainTime";
+    case "plainDateTime":
+      return "PlainDateTime";
+    case "zonedDateTime":
+      return "ZonedDateTime";
+    case "plainYearMonth":
+      return "PlainYearMonth";
+    case "plainMonthDay":
+      return "PlainMonthDay";
+    case "duration":
+      return "Duration";
+  }
+}
+function literalDiscriminatorValue(schema, discriminator) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.object) return void 0;
+  const props = resolved.def.props;
+  const prop = props[discriminator];
+  const propBase = prop ? resolveWrappers(prop).base : void 0;
+  if (propBase?.type !== TypeName.literal) return void 0;
+  const value = propBase.def.value;
+  return typeof value === "string" || typeof value === "number" ? value : void 0;
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-expr.ts
+var BINARY_OPERATORS = {
+  strictEqual: "===",
+  notStrictEqual: "!==",
+  or: "||",
+  and: "&&",
+  add: "+",
+  divide: "/",
+  greaterThan: ">",
+  greaterThanOrEqual: ">=",
+  lessThan: "<",
+  lessThanOrEqual: "<="
+};
+var COMPARISON_OPERATORS = /* @__PURE__ */ new Set([
+  "strictEqual",
+  "notStrictEqual",
+  "greaterThan",
+  "greaterThanOrEqual",
+  "lessThan",
+  "lessThanOrEqual"
+]);
+function emitExpr(expr) {
+  switch (expr.kind) {
+    case "var":
+      return expr.name;
+    case "literal":
+      return emitLiteral(expr.value);
+    case "not":
+      return `!(${emitExpr(expr.expr)})`;
+    case "binary":
+      return `(${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)})`;
+    case "nary":
+      return `(${expr.operands.map(emitConditionRaw).join(expr.op === "and" ? " && " : " || ")})`;
+    case "sameValue":
+      return `Object.is(${emitExpr(expr.left)}, ${emitExpr(expr.right)})`;
+    case "sameNumber": {
+      const left = emitExpr(expr.left);
+      const right = emitExpr(expr.right);
+      return `(${left} === ${right} || (${left} !== ${left} && ${right} !== ${right}))`;
+    }
+    case "schema_guard":
+      return emitSchemaGuard(expr.schema, emitExpr(expr.value));
+    case "load_prop":
+      return emitPropertyAccess(emitExpr(expr.base), expr.key);
+    case "load_index":
+      return emitIndexAccess(emitExpr(expr.base), emitExpr(expr.index));
+    case "call":
+      return `${emitExpr(expr.callee)}(${expr.args.map(emitExpr).join(", ")})`;
+    case "object_literal": {
+      if (expr.entries.length === 0) return "{}";
+      const entries = expr.entries.map((entry) => `${emitLiteral(entry.key)}: ${emitExpr(entry.value)}`);
+      return `{ ${entries.join(", ")} }`;
+    }
+    case "array_literal":
+      return `[${expr.elements.map(emitExpr).join(", ")}]`;
+    case "construct":
+      return `new ${expr.ctor}(${expr.args.map(emitExpr).join(", ")})`;
+  }
+}
+function emitConditionRaw(expr) {
+  if (expr.kind === "binary" && COMPARISON_OPERATORS.has(expr.op)) {
+    return `${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)}`;
+  }
+  if (expr.kind === "not") {
+    return `!(${emitConditionRaw(expr.expr)})`;
+  }
+  return emitExpr(expr);
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-node.ts
+function emitNode(writer, node) {
+  switch (node.kind) {
+    case "block":
+      for (const child of node.body) emitNode(writer, child);
+      return;
+    case "assign":
+      writer.line(`const ${node.target.name} = ${emitExpr(node.expr)};`);
+      return;
+    case "let":
+      if (node.expr === void 0) {
+        writer.line(`let ${node.target.name};`);
+      } else {
+        writer.line(`let ${node.target.name} = ${emitExpr(node.expr)};`);
+      }
+      return;
+    case "store":
+      writer.line(`${emitExpr(node.target)} = ${emitExpr(node.expr)};`);
+      return;
+    case "expr_stmt":
+      writer.line(`${emitExpr(node.expr)};`);
+      return;
+    case "hash_compare":
+      writer.line(`if (${emitExpr(node.leftHash)} !== ${emitExpr(node.rightHash)}) {`);
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
+      return;
+    case "map_equal":
+      emitMapEqual(writer, node);
+      return;
+    case "binary_search_equal":
+      emitBinarySearchEqual(writer, node);
+      return;
+    case "if":
+      writer.line(`if (${emitTestExpr(node.test)}) {`);
+      writer.indent(() => {
+        for (const child of node.then) emitNode(writer, child);
+      });
+      if (node.otherwise && node.otherwise.length > 0) {
+        writer.line("} else {");
+        writer.indent(() => {
+          for (const child of node.otherwise ?? []) emitNode(writer, child);
+        });
+      }
+      writer.line("}");
+      return;
+    case "for":
+      writer.line(`for (let ${node.index.name} = ${emitExpr(node.from)}; ${node.index.name}-- !== 0;) {`);
+      writer.indent(() => {
+        for (const child of node.body) emitNode(writer, child);
+      });
+      writer.line("}");
+      return;
+    case "for_range": {
+      const index2 = node.index.name;
+      writer.line(`for (let ${index2} = 0; ${index2} < ${emitExpr(node.length)}; ${index2}++) {`);
+      writer.indent(() => {
+        for (const child of node.body) emitNode(writer, child);
+      });
+      writer.line("}");
+      return;
+    }
+    case "for_of":
+      writer.line(`for (const ${node.item.name} of ${emitExpr(node.iterable)}) {`);
+      writer.indent(() => {
+        for (const child of node.body) emitNode(writer, child);
+      });
+      writer.line("}");
+      return;
+    case "append":
+      writer.line(`${node.target.name}[${node.cursor.name}++] = ${emitExpr(node.value)};`);
+      return;
+    case "sort_by_key":
+      writer.line(`${node.target.name}.sort((left, right) => {`);
+      writer.indent(() => emitOrderingComparatorBody(writer, node.ordering));
+      writer.line("});");
+      return;
+    case "return":
+      writer.line(`return ${emitExpr(node.value)};`);
+      return;
+  }
+}
+function emitTestExpr(expr) {
+  if (expr.kind === "binary") {
+    const left = emitExpr(expr.left);
+    const right = emitExpr(expr.right);
+    if (expr.op === "strictEqual") return `${left} === ${right}`;
+    if (expr.op === "notStrictEqual") return `${left} !== ${right}`;
+  }
+  if (expr.kind === "nary") {
+    const op = expr.op === "and" ? " && " : " || ";
+    return expr.operands.map((operand) => `(${emitConditionRaw(operand)})`).join(op);
+  }
+  if (expr.kind === "not") {
+    const inner = expr.expr;
+    if (inner.kind === "sameNumber") {
+      const left = emitExpr(inner.left);
+      const right = emitExpr(inner.right);
+      return `${left} !== ${right} && (${left} === ${left} || ${right} === ${right})`;
+    }
+    if (inner.kind === "sameValue") {
+      return `!Object.is(${emitExpr(inner.left)}, ${emitExpr(inner.right)})`;
+    }
+    if (inner.kind === "binary" && inner.op === "strictEqual") {
+      return `${emitExpr(inner.left)} !== ${emitExpr(inner.right)}`;
+    }
+    if (inner.kind === "call") {
+      return `!${emitExpr(inner)}`;
+    }
+    if (inner.kind === "nary") {
+      return `!(${emitTestExpr(inner)})`;
+    }
+  }
+  return emitExpr(expr);
+}
+function emitMapEqual(writer, node) {
+  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
+  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
+  writer.indent(() => {
+    writer.line("return false;");
+  });
+  writer.line("}");
+  writer.line(`if (${node.length.name} < 64) {`);
+  writer.indent(() => {
+    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
+    writer.indent(() => {
+      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+      writer.line("let found = false;");
+      writer.line(`for (let j = 0; j < ${node.length.name}; j++) {`);
+      writer.indent(() => {
+        writer.line(`const ${node.rightItem.name} = ${emitExpr(node.right)}[j];`);
+        writer.line(
+          `if (${emitPropertyAccess(node.rightItem.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
+        );
+        writer.indent(() => {
+          writer.line("found = true;");
+          for (const child of node.body) emitNode(writer, child);
+          writer.line("break;");
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+      writer.line("if (!found) {");
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line(`let ${node.rightIndex.name};`);
+    writer.line(`${node.rightIndex.name} = __getIndex(${emitExpr(node.right)}, ${emitLiteral(node.key)});`);
+    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
+    writer.indent(() => {
+      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+      writer.line(
+        `const ${node.rightItem.name} = ${node.rightIndex.name}.get(${emitPropertyAccess(node.leftItem.name, node.key)});`
+      );
+      writer.line(
+        `if (${node.rightItem.name} === undefined && !${node.rightIndex.name}.has(${emitPropertyAccess(node.leftItem.name, node.key)})) {`
+      );
+      writer.indent(() => {
+        writer.line("return false;");
+      });
+      writer.line("}");
+      for (const child of node.body) emitNode(writer, child);
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+}
+function emitBinarySearchEqual(writer, node) {
+  const compareLeft = node.direction === "desc" ? ">" : "<";
+  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
+  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
+  writer.indent(() => {
+    writer.line("return false;");
+  });
+  writer.line("}");
+  writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
+  writer.indent(() => {
+    writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
+    writer.line(`let ${node.searchLow.name} = 0;`);
+    writer.line(`let ${node.searchHigh.name} = ${node.length.name} - 1;`);
+    writer.line(`let ${node.rightItem.name};`);
+    writer.line(`while (${node.searchLow.name} <= ${node.searchHigh.name}) {`);
+    writer.indent(() => {
+      writer.line(`const ${node.searchMid.name} = (${node.searchLow.name} + ${node.searchHigh.name}) >> 1;`);
+      writer.line(`const ${node.found.name} = ${emitExpr(node.right)}[${node.searchMid.name}];`);
+      writer.line(
+        `if (${emitPropertyAccess(node.found.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
+      );
+      writer.indent(() => {
+        writer.line(`${node.rightItem.name} = ${node.found.name};`);
+        writer.line("break;");
+      });
+      writer.line("}");
+      writer.line(
+        `if (${emitPropertyAccess(node.found.name, node.key)} ${compareLeft} ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
+      );
+      writer.indent(() => {
+        writer.line(`${node.searchLow.name} = ${node.searchMid.name} + 1;`);
+      });
+      writer.line("} else {");
+      writer.indent(() => {
+        writer.line(`${node.searchHigh.name} = ${node.searchMid.name} - 1;`);
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+    writer.line(`if (${node.rightItem.name} === undefined) {`);
+    writer.indent(() => {
+      writer.line("return false;");
+    });
+    writer.line("}");
+    for (const child of node.body) emitNode(writer, child);
+  });
+  writer.line("}");
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-equal.ts
+function emitEqual(program) {
+  const writer = new CodeWriter();
+  const [left, right] = program.params;
+  emitHelpers(writer, program);
+  writer.line(`function equal(${left.name}, ${right.name}) {`);
+  writer.indent(() => {
+    for (const node of program.body) emitNode(writer, node);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitEqualBody(program) {
+  const writer = new CodeWriter();
+  emitHelpers(writer, program);
+  for (const node of program.body) emitNode(writer, node);
+  return writer.toString();
+}
+function emitHelpers(writer, program) {
+  for (const helper of program.helpers ?? []) {
+    const [left, right] = helper.program.params;
+    writer.line(`function ${helper.name}(${left.name}, ${right.name}) {`);
+    writer.indent(() => {
+      for (const node of helper.program.body) emitNode(writer, node);
+    });
+    writer.line("}");
+  }
 }
 
 // ../../packages/jit/src/compiler/schema-recursion.ts
@@ -784,6 +2699,1299 @@ function buildFlattenedIntersection(schema) {
   return createSchema(TypeName.object, { props, unknownKeys: void 0, catchall: void 0, checks: [] });
 }
 
+// ../../packages/jit/src/core/hints/hint-merge.ts
+function mergeHints(left, right) {
+  if (!left) return right ?? {};
+  if (!right) return left;
+  const collection = mergeCollection(left.collection, right.collection);
+  const entity2 = right.entity ?? left.entity;
+  const index2 = right.index ?? left.index;
+  const order = right.order ?? left.order;
+  const compare2 = mergeOptional(left.compare, right.compare);
+  const clone3 = mergeOptional(left.clone, right.clone);
+  const hash4 = mergeOptional(left.hash, right.hash);
+  const diff3 = mergeOptional(left.diff, right.diff);
+  const serialize = mergeOptional(left.serialize, right.serialize);
+  return {
+    ...entity2 ? { entity: entity2 } : {},
+    ...index2 ? { index: index2 } : {},
+    ...order ? { order } : {},
+    ...collection ? { collection } : {},
+    ...compare2 ? { compare: compare2 } : {},
+    ...clone3 ? { clone: clone3 } : {},
+    ...hash4 ? { hash: hash4 } : {},
+    ...diff3 ? { diff: diff3 } : {},
+    ...serialize ? { serialize } : {}
+  };
+}
+function mergeOptional(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    ...left,
+    ...right
+  };
+}
+function mergeCollection(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  const ordered = left.ordered || right.ordered ? {
+    ...left.ordered,
+    ...right.ordered
+  } : void 0;
+  return {
+    ...left,
+    ...right,
+    ...ordered ? { ordered } : {}
+  };
+}
+
+// ../../packages/jit/src/core/hints/hint-resolver.ts
+function resolveHints(schema) {
+  let current = schema;
+  let hints = {};
+  while (current) {
+    const annotations = current.annotations;
+    hints = mergeHints(annotations?.hints, hints);
+    current = innerSchema(current);
+  }
+  if (hints.order && !hints.order.key && typeof hints.collection?.identify === "string") {
+    hints = mergeHints(hints, {
+      order: {
+        ...hints.order,
+        key: hints.collection.identify
+      }
+    });
+  }
+  return hints;
+}
+function innerSchema(schema) {
+  if (schema.type === "optional" || schema.type === "nullable" || schema.type === "nullish" || schema.type === "readonly" || schema.type === "promise" || schema.type === "default" || schema.type === "brand" || schema.type === "transform" || schema.type === "pipe" || schema.type === "refine" || schema.type === "coerce") {
+    return schema.def.innerType;
+  }
+  if (schema.type === "lazy") return schema.def.getter();
+  return void 0;
+}
+
+// ../../packages/jit/src/core/hints/hint-schema.ts
+function attachHint(schema, hints) {
+  const annotations = schema.annotations ?? {};
+  return {
+    type: schema.type,
+    _type: null,
+    def: schema.def,
+    annotations: {
+      ...annotations,
+      hints: mergeHints(annotations.hints, hints)
+    }
+  };
+}
+function attachMetadata(schema, metadata) {
+  const annotations = schema.annotations ?? {};
+  return {
+    type: schema.type,
+    _type: null,
+    def: schema.def,
+    annotations: { ...annotations, metadata: { ...annotations.metadata, ...metadata } }
+  };
+}
+
+// ../../packages/jit/src/compiler/resolvers/resolve-hints.ts
+function resolveCompilerHints(schema) {
+  const resolved = resolveWrappers(schema);
+  return {
+    base: resolved.base,
+    hints: resolveHints(schema)
+  };
+}
+function resolveHintKey(key) {
+  if (typeof key === "string") return key;
+  if (Array.isArray(key) && key.length === 1 && typeof key[0] === "string") return key[0];
+  return void 0;
+}
+
+// ../../packages/jit/src/compiler/strategy/resolve-strategy.ts
+function resolveEqualStrategy(schema) {
+  const { base, hints } = resolveCompilerHints(schema);
+  const identifyKey = resolveHintKey(hints.index?.key ?? hints.collection?.identify);
+  const entityKey = resolveHintKey(hints.entity?.key);
+  const key = identifyKey ?? entityKey;
+  const ordered = hints.order ?? hints.collection?.ordered;
+  if (ordered && !key) {
+    throw new JITError("INVALID_OPERATION", "ordered() requires a string key for compiler strategies");
+  }
+  return {
+    type: "equal",
+    array: base.type === "array" && ordered && key ? { type: "binary-search", key, direction: resolveDirection(ordered.direction) } : base.type === "array" && (hints.index || hints.collection?.indexed === true) && key ? { type: "map", key } : { type: "loop" },
+    hash: hints.hash ? { type: "hash-short-circuit", strategy: hints.hash.strategy } : { type: "none" }
+  };
+}
+function resolveDirection(direction) {
+  return direction === "asc" || direction === "desc" ? direction : void 0;
+}
+
+// ../../packages/jit/src/compiler/ir/scope.ts
+var Scope = class {
+  #counts = /* @__PURE__ */ new Map();
+  #names = /* @__PURE__ */ new Set();
+  createVar(prefix) {
+    const safePrefix = prefix.replace(/[^$_a-zA-Z0-9]/g, "_").replace(/^[^$_a-zA-Z]/, "_") || "_";
+    let next = this.#counts.get(safePrefix) ?? 0;
+    let name = next === 0 ? safePrefix : `${safePrefix}${next}`;
+    while (this.#names.has(name)) {
+      next++;
+      name = `${safePrefix}${next}`;
+    }
+    this.#counts.set(safePrefix, next + 1);
+    this.#names.add(name);
+    return irVar(name);
+  }
+};
+
+// ../../packages/jit/src/compiler/ir/builders/build-equal-ir.ts
+function buildEqualIR(schema, strategy = resolveEqualStrategy(schema)) {
+  const recursion = createRecursionState(schema);
+  const program = buildEqualProgram(schema, strategy, recursion);
+  const helpers = [];
+  while (recursion.pending.length > 0) {
+    const target = recursion.pending.shift();
+    helpers.push({
+      name: recursion.names.get(target),
+      program: buildEqualProgram(target, resolveEqualStrategy(target), recursion)
+    });
+  }
+  return helpers.length > 0 ? { ...program, helpers } : program;
+}
+function createRecursionState(schema) {
+  return { recursive: findRecursiveSchemas(schema), names: /* @__PURE__ */ new Map(), pending: [], entry: void 0 };
+}
+function helperFor(recursion, target) {
+  const existing = recursion.names.get(target);
+  if (existing) return existing;
+  const name = `equal_r${recursion.names.size + 1}`;
+  recursion.names.set(target, name);
+  recursion.pending.push(target);
+  return name;
+}
+function buildEqualProgram(schema, strategy, recursion) {
+  const previousEntry = recursion.entry;
+  recursion.entry = schema;
+  const scope = new Scope();
+  const left = irVar("l");
+  const right = irVar("r");
+  const body = [
+    { kind: "if", test: strictEqual(left, right), then: [{ kind: "return", value: literal(true) }] }
+  ];
+  if (strategy.hash.type === "hash-short-circuit") {
+    body.push({
+      kind: "hash_compare",
+      leftHash: call(irVar("__hash"), [left]),
+      rightHash: call(irVar("__hash"), [right])
+    });
+  }
+  appendSchemaCompare(body, schema, left, right, scope, strategy, recursion);
+  body.push({ kind: "return", value: literal(true) });
+  recursion.entry = previousEntry;
+  return { kind: "program", params: [left, right], body };
+}
+function appendSchemaCompare(body, schema, left, right, scope, strategy, recursion) {
+  const resolved = resolveWrappers(schema);
+  if (resolved.optional || resolved.nullable) {
+    appendResolvedWrapperCompare(body, resolved, left, right, scope, strategy, recursion);
+    return;
+  }
+  const base = resolved.base;
+  if (recursion.recursive.has(base)) {
+    if (recursion.entry === base) {
+      recursion.entry = void 0;
+    } else {
+      appendCompareOrFail(body, call(irVar(helperFor(recursion, base)), [left, right]));
+      return;
+    }
+  }
+  switch (base.type) {
+    case TypeName.any:
+    case TypeName.unknown:
+    case TypeName.never:
+    case TypeName.void:
+    case TypeName.undefined:
+    case TypeName.literal:
+    case TypeName.enum:
+    case TypeName.file:
+      appendCompareOrFail(body, sameValue(left, right));
+      return;
+    case TypeName.nan:
+    case TypeName.int:
+    case TypeName.number:
+      appendCompareOrFail(body, sameNumber(left, right));
+      return;
+    case TypeName.null:
+    case TypeName.symbol:
+    case TypeName.boolean:
+    case TypeName.bigint:
+    case TypeName.string:
+      appendCompareOrFail(body, strictEqual(left, right));
+      return;
+    case TypeName.date:
+      appendCompareOrFail(body, sameValue(call(loadProp(left, "getTime")), call(loadProp(right, "getTime"))));
+      return;
+    case TypeName.array:
+      appendArrayCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    case TypeName.tuple:
+      appendTupleCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    case TypeName.object:
+      appendObjectCompare(body, base, left, right, scope, recursion);
+      return;
+    case TypeName.record:
+      appendRecordCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    case TypeName.set:
+      appendSetCompare(body, left, right, scope);
+      return;
+    case TypeName.map:
+      appendMapCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    case TypeName.union:
+      appendUnionCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    case TypeName.intersection: {
+      const flattened = flattenObjectIntersection(base);
+      if (flattened !== void 0) appendObjectCompare(body, flattened, left, right, scope, recursion);
+      else appendIntersectionCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    }
+    case TypeName.discriminatedUnion:
+      appendDiscriminatedUnionCompare(body, base, left, right, scope, strategy, recursion);
+      return;
+    default:
+      throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler equal IR for type: ${base.type}`);
+  }
+}
+function appendCompareOrFail(body, expr) {
+  body.push({ kind: "if", test: not(expr), then: [{ kind: "return", value: literal(false) }] });
+}
+function appendResolvedWrapperCompare(body, resolved, left, right, scope, strategy, recursion) {
+  const inner = [];
+  if (resolved.optional) {
+    inner.push({
+      kind: "if",
+      test: orCompare(strictEqual(left, literal(void 0)), strictEqual(right, literal(void 0))),
+      then: [{ kind: "return", value: literal(false) }]
+    });
+  }
+  if (resolved.nullable) {
+    inner.push({
+      kind: "if",
+      test: orCompare(strictEqual(left, literal(null)), strictEqual(right, literal(null))),
+      then: [{ kind: "return", value: literal(false) }]
+    });
+  }
+  appendSchemaCompare(inner, resolved.base, left, right, scope, strategy, recursion);
+  body.push({ kind: "if", test: not(sameValue(left, right)), then: inner });
+}
+function appendArrayCompare(body, schema, left, right, scope, strategy, recursion) {
+  const len = scope.createVar("len");
+  const ix = scope.createVar("i");
+  const leftItem = scope.createVar("li");
+  const rightItem = scope.createVar("ri");
+  const loopBody = [
+    { kind: "assign", target: leftItem, expr: loadIndex(left, ix) },
+    { kind: "assign", target: rightItem, expr: loadIndex(right, ix) }
+  ];
+  appendSchemaCompare(loopBody, schema.def.element, leftItem, rightItem, scope, strategy, recursion);
+  if (strategy.array.type === "map") {
+    body.push({
+      kind: "map_equal",
+      left,
+      right,
+      key: strategy.array.key,
+      length: len,
+      index: ix,
+      leftItem,
+      rightItem,
+      rightIndex: scope.createVar("rightIndex"),
+      body: loopBody.slice(2)
+    });
+    return;
+  }
+  if (strategy.array.type === "binary-search") {
+    body.push({
+      kind: "binary_search_equal",
+      left,
+      right,
+      key: strategy.array.key,
+      length: len,
+      index: ix,
+      leftItem,
+      rightItem,
+      searchLow: scope.createVar("low"),
+      searchHigh: scope.createVar("high"),
+      searchMid: scope.createVar("mid"),
+      found: scope.createVar("found"),
+      direction: strategy.array.direction,
+      body: loopBody.slice(2)
+    });
+    return;
+  }
+  body.push(
+    { kind: "assign", target: len, expr: loadProp(left, "length") },
+    {
+      kind: "if",
+      test: notStrictEqual(len, loadProp(right, "length")),
+      then: [{ kind: "return", value: literal(false) }]
+    },
+    { kind: "for", index: ix, from: len, body: loopBody }
+  );
+}
+function appendTupleCompare(body, schema, left, right, scope, strategy, recursion) {
+  const items = schema.def.items;
+  for (let index2 = 0; index2 < items.length; index2++) {
+    appendSchemaCompare(
+      body,
+      items[index2],
+      loadIndex(left, literal(index2)),
+      loadIndex(right, literal(index2)),
+      scope,
+      strategy,
+      recursion
+    );
+  }
+}
+function appendRecordCompare(body, schema, left, right, scope, strategy, recursion) {
+  const leftKeys = scope.createVar("lk");
+  const rightKeys = scope.createVar("rk");
+  const len = scope.createVar("len");
+  const ix = scope.createVar("i");
+  const key = scope.createVar("k");
+  const leftValue = scope.createVar("lv");
+  const rightValue = scope.createVar("rv");
+  const loopBody = [
+    { kind: "assign", target: key, expr: loadIndex(leftKeys, ix) },
+    { kind: "if", test: not(ownsKey(right, key)), then: [{ kind: "return", value: literal(false) }] },
+    { kind: "assign", target: leftValue, expr: loadIndex(left, key) },
+    { kind: "assign", target: rightValue, expr: loadIndex(right, key) }
+  ];
+  appendSchemaCompare(loopBody, schema.def.value, leftValue, rightValue, scope, strategy, recursion);
+  body.push(
+    { kind: "assign", target: leftKeys, expr: objectKeys(left) },
+    { kind: "assign", target: rightKeys, expr: objectKeys(right) },
+    { kind: "assign", target: len, expr: loadProp(leftKeys, "length") },
+    {
+      kind: "if",
+      test: notStrictEqual(len, loadProp(rightKeys, "length")),
+      then: [{ kind: "return", value: literal(false) }]
+    },
+    { kind: "for", index: ix, from: len, body: loopBody }
+  );
+}
+function appendSetCompare(body, left, right, scope) {
+  const item = scope.createVar("item");
+  body.push(
+    {
+      kind: "if",
+      test: notStrictEqual(loadProp(left, "size"), loadProp(right, "size")),
+      then: [{ kind: "return", value: literal(false) }]
+    },
+    {
+      kind: "for_of",
+      item,
+      iterable: left,
+      body: [
+        {
+          kind: "if",
+          test: not(call(loadProp(right, "has"), [item])),
+          then: [{ kind: "return", value: literal(false) }]
+        }
+      ]
+    }
+  );
+}
+function appendMapCompare(body, schema, left, right, scope, strategy, recursion) {
+  const entry = scope.createVar("entry");
+  const key = scope.createVar("mk");
+  const leftValue = scope.createVar("mlv");
+  const rightValue = scope.createVar("mrv");
+  const loopBody = [
+    { kind: "assign", target: key, expr: loadIndex(entry, literal(0)) },
+    {
+      kind: "if",
+      test: not(call(loadProp(right, "has"), [key])),
+      then: [{ kind: "return", value: literal(false) }]
+    },
+    { kind: "assign", target: leftValue, expr: loadIndex(entry, literal(1)) },
+    { kind: "assign", target: rightValue, expr: call(loadProp(right, "get"), [key]) }
+  ];
+  appendSchemaCompare(loopBody, schema.def.value, leftValue, rightValue, scope, strategy, recursion);
+  body.push(
+    {
+      kind: "if",
+      test: notStrictEqual(loadProp(left, "size"), loadProp(right, "size")),
+      then: [{ kind: "return", value: literal(false) }]
+    },
+    { kind: "for_of", item: entry, iterable: left, body: loopBody }
+  );
+}
+function objectKeys(value) {
+  return call(loadProp(irVar("Object"), "keys"), [value]);
+}
+function ownsKey(target, key) {
+  return call(loadProp(loadProp(loadProp(irVar("Object"), "prototype"), "hasOwnProperty"), "call"), [target, key]);
+}
+function appendObjectCompare(body, schema, left, right, scope, recursion) {
+  const props = schema.def.props;
+  for (const key of Object.keys(props)) {
+    const prop = props[key];
+    const leftProp = loadProp(left, key);
+    const rightProp = loadProp(right, key);
+    const defaultExpr = staticDefaultIRExpr(prop);
+    let leftValue = leftProp;
+    let rightValue = rightProp;
+    if (defaultExpr || shouldHoistObjectProp(prop)) {
+      const leftVar = scope.createVar(`l_${key}`);
+      const rightVar = scope.createVar(`r_${key}`);
+      body.push(
+        defaultExpr ? letDecl(leftVar, leftProp) : { kind: "assign", target: leftVar, expr: leftProp },
+        defaultExpr ? letDecl(rightVar, rightProp) : { kind: "assign", target: rightVar, expr: rightProp }
+      );
+      if (defaultExpr) {
+        body.push(
+          { kind: "if", test: strictEqual(leftVar, literal(void 0)), then: [store(leftVar, defaultExpr)] },
+          { kind: "if", test: strictEqual(rightVar, literal(void 0)), then: [store(rightVar, defaultExpr)] }
+        );
+      }
+      leftValue = leftVar;
+      rightValue = rightVar;
+    }
+    appendSchemaCompare(
+      body,
+      prop,
+      leftValue,
+      rightValue,
+      scope,
+      { type: "equal", array: { type: "loop" }, hash: { type: "none" } },
+      recursion
+    );
+  }
+}
+function shouldHoistObjectProp(schema) {
+  const resolved = resolveWrappers(schema).base;
+  return resolved.type === TypeName.object || resolved.type === TypeName.array;
+}
+function appendUnionCompare(body, schema, left, right, scope, strategy, recursion) {
+  const options = schema.def.options;
+  const branches = [];
+  if (options.every(isAtomicEqualSchema)) {
+    appendCompareOrFail(body, sameNumber(left, right));
+    return;
+  }
+  for (const option of options) {
+    const then = [
+      { kind: "if", test: not(schemaGuard(option, right)), then: [{ kind: "return", value: literal(false) }] }
+    ];
+    appendSchemaCompare(then, option, left, right, scope, strategy, recursion);
+    then.push({ kind: "return", value: literal(true) });
+    branches.push({ kind: "if", test: schemaGuard(option, left), then });
+  }
+  body.push(...branches, { kind: "return", value: literal(false) });
+}
+function isAtomicEqualSchema(schema) {
+  const base = resolveWrappers(schema).base;
+  return isPrimitiveLikeSchema(base) && base.type !== TypeName.regex && base.type !== TypeName.instanceof;
+}
+function appendIntersectionCompare(body, schema, left, right, scope, strategy, recursion) {
+  const options = schema.def.options;
+  for (const option of options) {
+    appendSchemaCompare(body, option, left, right, scope, strategy, recursion);
+  }
+}
+function appendDiscriminatedUnionCompare(body, schema, left, right, scope, strategy, recursion) {
+  const discriminator = schema.def.discriminator;
+  const leftTag = loadProp(left, discriminator);
+  const rightTag = loadProp(right, discriminator);
+  const options = schema.def.options;
+  for (const option of options) {
+    const tag = literalDiscriminatorValue(option, discriminator);
+    if (tag === void 0) continue;
+    const then = [
+      { kind: "if", test: notStrictEqual(rightTag, literal(tag)), then: [{ kind: "return", value: literal(false) }] }
+    ];
+    appendSchemaCompare(then, option, left, right, scope, strategy, recursion);
+    then.push({ kind: "return", value: literal(true) });
+    body.push({ kind: "if", test: strictEqual(leftTag, literal(tag)), then });
+  }
+  body.push({ kind: "return", value: literal(false) });
+}
+function orCompare(left, right) {
+  return { kind: "binary", op: "or", left, right };
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/cost/optimize-cost.ts
+function optimizeCost(program) {
+  return { ...program, body: optimizeNodes(program.body) };
+}
+function optimizeNodes(nodes) {
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length > 0) {
+      out.push(...run.sort((left, right) => nodeCost(left) - nodeCost(right)));
+      run = [];
+    }
+  };
+  for (const node of nodes) {
+    if (isPureFailureCheck(node)) {
+      run.push(node);
+      continue;
+    }
+    flush();
+    if (node.kind === "if") {
+      out.push({
+        ...node,
+        then: optimizeNodes(node.then),
+        ...node.otherwise ? { otherwise: optimizeNodes(node.otherwise) } : {}
+      });
+      continue;
+    }
+    if (node.kind === "for") {
+      out.push({ ...node, body: optimizeNodes(node.body) });
+      continue;
+    }
+    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
+      out.push({ ...node, body: optimizeNodes(node.body) });
+      continue;
+    }
+    out.push(node);
+  }
+  flush();
+  return out;
+}
+function isPureFailureCheck(node) {
+  return node.kind === "if" && node.then.length === 1 && node.then[0].kind === "return" && node.then[0].value.kind === "literal" && node.then[0].value.value === false && isPureExpr(node.test);
+}
+function isPureExpr(expr) {
+  switch (expr.kind) {
+    case "var":
+    case "literal":
+      return true;
+    case "not":
+      return isPureExpr(expr.expr);
+    case "binary":
+    case "sameValue":
+      return isPureExpr(expr.left) && isPureExpr(expr.right);
+    case "sameNumber":
+      return false;
+    case "nary":
+      return expr.operands.every(isPureExpr);
+    case "schema_guard":
+      return isPureExpr(expr.value);
+    case "load_prop":
+      return isPureExpr(expr.base);
+    case "load_index":
+      return isPureExpr(expr.base) && isPureExpr(expr.index);
+    case "call":
+    case "object_literal":
+    case "array_literal":
+    case "construct":
+      return false;
+  }
+}
+function nodeCost(node) {
+  return node.kind === "if" ? exprCost(node.test) : 0;
+}
+function exprCost(expr) {
+  switch (expr.kind) {
+    case "literal":
+    case "var":
+      return 1;
+    case "load_prop":
+      return 2 + exprCost(expr.base);
+    case "load_index":
+      return 4 + exprCost(expr.base) + exprCost(expr.index);
+    case "not":
+      return exprCost(expr.expr);
+    case "binary":
+    case "sameValue":
+      return 1 + exprCost(expr.left) + exprCost(expr.right);
+    case "sameNumber":
+      return 20;
+    case "nary":
+      return 1 + expr.operands.reduce((total, operand) => total + exprCost(operand), 0);
+    case "schema_guard":
+      return 10 + exprCost(expr.value);
+    case "call":
+      return 100;
+    case "object_literal":
+    case "array_literal":
+    case "construct":
+      return 50;
+  }
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/passes/flatten-blocks.ts
+function flattenBlocks(program) {
+  return { ...program, body: flattenNodes(program.body) };
+}
+function flattenNodes(nodes) {
+  const out = [];
+  for (const node of nodes) {
+    if (node.kind === "block") {
+      out.push(...flattenNodes(node.body));
+      continue;
+    }
+    out.push(mapNodeBodies(node, flattenNodes));
+  }
+  return out;
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/passes/inline-vars.ts
+function inlineVars(program) {
+  const usages = /* @__PURE__ */ new Map();
+  collectUsages(program.body, usages);
+  return { ...program, body: inlineNodes(program.body, usages, /* @__PURE__ */ new Map()) };
+}
+function inlineNodes(nodes, usages, replacements) {
+  const out = [];
+  const localReplacements = new Map(replacements);
+  for (const node of nodes) {
+    if (node.kind === "assign") {
+      const expr = replaceExpr(node.expr, localReplacements);
+      if ((usages.get(node.target.name) ?? 0) === 1 && isInlineSafe(expr)) {
+        localReplacements.set(node.target.name, expr);
+        continue;
+      }
+      out.push({ ...node, expr });
+      continue;
+    }
+    if (node.kind === "if") {
+      out.push({
+        ...node,
+        test: replaceExpr(node.test, localReplacements),
+        then: inlineNodes(node.then, usages, localReplacements),
+        ...node.otherwise ? { otherwise: inlineNodes(node.otherwise, usages, localReplacements) } : {}
+      });
+      continue;
+    }
+    if (node.kind === "for") {
+      out.push({
+        ...node,
+        from: replaceExpr(node.from, localReplacements),
+        body: inlineNodes(node.body, usages, /* @__PURE__ */ new Map())
+      });
+      continue;
+    }
+    if (node.kind === "hash_compare") {
+      out.push({
+        ...node,
+        leftHash: replaceExpr(node.leftHash, localReplacements),
+        rightHash: replaceExpr(node.rightHash, localReplacements)
+      });
+      continue;
+    }
+    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
+      out.push({
+        ...node,
+        left: replaceExpr(node.left, localReplacements),
+        right: replaceExpr(node.right, localReplacements),
+        body: inlineNodes(node.body, usages, /* @__PURE__ */ new Map())
+      });
+      continue;
+    }
+    if (node.kind === "return") {
+      out.push({ ...node, value: replaceExpr(node.value, localReplacements) });
+      continue;
+    }
+    out.push(node);
+  }
+  return out;
+}
+function collectUsages(nodes, usages) {
+  for (const node of nodes) {
+    if (node.kind === "assign") collectExprUsages(node.expr, usages);
+    if (node.kind === "if") {
+      collectExprUsages(node.test, usages);
+      collectUsages(node.then, usages);
+      if (node.otherwise) collectUsages(node.otherwise, usages);
+    }
+    if (node.kind === "for") {
+      collectExprUsages(node.from, usages);
+      collectUsages(node.body, usages);
+    }
+    if (node.kind === "hash_compare") {
+      collectExprUsages(node.leftHash, usages);
+      collectExprUsages(node.rightHash, usages);
+    }
+    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
+      collectExprUsages(node.left, usages);
+      collectExprUsages(node.right, usages);
+      collectUsages(node.body, usages);
+    }
+    if (node.kind === "return") collectExprUsages(node.value, usages);
+  }
+}
+function collectExprUsages(expr, usages) {
+  switch (expr.kind) {
+    case "var":
+      usages.set(expr.name, (usages.get(expr.name) ?? 0) + 1);
+      return;
+    case "not":
+      collectExprUsages(expr.expr, usages);
+      return;
+    case "binary":
+    case "sameValue":
+      collectExprUsages(expr.left, usages);
+      collectExprUsages(expr.right, usages);
+      return;
+    case "sameNumber":
+      collectExprUsages(expr.left, usages);
+      collectExprUsages(expr.right, usages);
+      collectExprUsages(expr.left, usages);
+      collectExprUsages(expr.right, usages);
+      return;
+    case "schema_guard":
+      collectExprUsages(expr.value, usages);
+      return;
+    case "load_prop":
+      collectExprUsages(expr.base, usages);
+      return;
+    case "load_index":
+      collectExprUsages(expr.base, usages);
+      collectExprUsages(expr.index, usages);
+      return;
+    case "call":
+      collectExprUsages(expr.callee, usages);
+      for (const arg of expr.args) collectExprUsages(arg, usages);
+      return;
+    case "nary":
+      for (const operand of expr.operands) collectExprUsages(operand, usages);
+      return;
+    case "object_literal":
+      for (const entry of expr.entries) collectExprUsages(entry.value, usages);
+      return;
+    case "array_literal":
+      for (const element of expr.elements) collectExprUsages(element, usages);
+      return;
+    case "construct":
+      for (const arg of expr.args) collectExprUsages(arg, usages);
+      return;
+    case "literal":
+      return;
+  }
+}
+function replaceExpr(expr, replacements) {
+  switch (expr.kind) {
+    case "var":
+      return replacements.get(expr.name) ?? expr;
+    case "not":
+      return { ...expr, expr: replaceExpr(expr.expr, replacements) };
+    case "binary":
+    case "sameValue":
+    case "sameNumber":
+      return { ...expr, left: replaceExpr(expr.left, replacements), right: replaceExpr(expr.right, replacements) };
+    case "schema_guard":
+      return { ...expr, value: replaceExpr(expr.value, replacements) };
+    case "load_prop":
+      return { ...expr, base: replaceExpr(expr.base, replacements) };
+    case "load_index":
+      return { ...expr, base: replaceExpr(expr.base, replacements), index: replaceExpr(expr.index, replacements) };
+    case "call":
+      return {
+        ...expr,
+        callee: replaceExpr(expr.callee, replacements),
+        args: expr.args.map((arg) => replaceExpr(arg, replacements))
+      };
+    case "nary":
+      return { ...expr, operands: expr.operands.map((operand) => replaceExpr(operand, replacements)) };
+    case "object_literal":
+      return {
+        ...expr,
+        entries: expr.entries.map((entry) => ({ ...entry, value: replaceExpr(entry.value, replacements) }))
+      };
+    case "array_literal":
+      return { ...expr, elements: expr.elements.map((element) => replaceExpr(element, replacements)) };
+    case "construct":
+      return { ...expr, args: expr.args.map((arg) => replaceExpr(arg, replacements)) };
+    case "literal":
+      return expr;
+  }
+}
+function isInlineSafe(expr) {
+  switch (expr.kind) {
+    case "var":
+    case "literal":
+      return true;
+    case "load_prop":
+      return isInlineSafe(expr.base);
+    case "load_index":
+      return isInlineSafe(expr.base) && isInlineSafe(expr.index);
+    case "not":
+      return isInlineSafe(expr.expr);
+    case "binary":
+    case "sameValue":
+    case "sameNumber":
+      return isInlineSafe(expr.left) && isInlineSafe(expr.right);
+    case "nary":
+      return expr.operands.every(isInlineSafe);
+    case "schema_guard":
+      return isInlineSafe(expr.value);
+    case "call":
+    case "object_literal":
+    case "array_literal":
+    case "construct":
+      return false;
+  }
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/passes/normalize-logic.ts
+function normalizeLogic(program) {
+  return { ...program, body: normalizeNodes(program.body) };
+}
+function normalizeNodes(nodes) {
+  return nodes.map((node) => mapNodeExprs(mapNodeBodies(node, normalizeNodes), normalizeExpr));
+}
+function normalizeExpr(expr) {
+  const next = mapExprChildren(expr, normalizeExpr);
+  if (next.kind === "not") return normalizeNot(next.expr);
+  if (next.kind === "nary") return normalizeNary(next);
+  if (next.kind === "binary" && next.left.kind === "literal" && next.right.kind === "literal") {
+    return foldComparison(next.op, next.left.value, next.right.value) ?? next;
+  }
+  return next;
+}
+function foldComparison(op, left, right) {
+  switch (op) {
+    case "strictEqual":
+      return literal(left === right);
+    case "notStrictEqual":
+      return literal(left !== right);
+    case "greaterThan":
+      return literal(left > right);
+    case "greaterThanOrEqual":
+      return literal(left >= right);
+    case "lessThan":
+      return literal(left < right);
+    case "lessThanOrEqual":
+      return literal(left <= right);
+    default:
+      return void 0;
+  }
+}
+function normalizeNot(inner) {
+  if (inner.kind === "not") return inner.expr;
+  if (inner.kind === "literal" && typeof inner.value === "boolean") return literal(!inner.value);
+  if (inner.kind === "binary" && inner.op === "strictEqual") return { ...inner, op: "notStrictEqual" };
+  if (inner.kind === "binary" && inner.op === "notStrictEqual") return { ...inner, op: "strictEqual" };
+  if (inner.kind === "nary") {
+    return normalizeNary({
+      kind: "nary",
+      op: inner.op === "and" ? "or" : "and",
+      operands: inner.operands.map((operand) => normalizeExpr(not(operand)))
+    });
+  }
+  return not(inner);
+}
+function normalizeNary(expr) {
+  const absorbing = expr.op !== "and";
+  const neutral = !absorbing;
+  const operands = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const operand of flattenOperands(expr.op, expr.operands)) {
+    if (operand.kind === "literal" && typeof operand.value === "boolean") {
+      if (operand.value === absorbing) return literal(absorbing);
+      continue;
+    }
+    const key = exprKey(operand);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    operands.push(operand);
+  }
+  if (operands.length === 0) return literal(neutral);
+  return { ...expr, operands };
+}
+function flattenOperands(op, operands) {
+  const out = [];
+  for (const operand of operands) {
+    if (operand.kind === "nary" && operand.op === op) {
+      out.push(...flattenOperands(op, operand.operands));
+      continue;
+    }
+    out.push(operand);
+  }
+  return out;
+}
+var opaqueKeys = /* @__PURE__ */ new WeakMap();
+var opaqueKeyCounter = 0;
+function opaqueKey(value) {
+  let key = opaqueKeys.get(value);
+  if (key === void 0) {
+    key = ++opaqueKeyCounter;
+    opaqueKeys.set(value, key);
+  }
+  return key;
+}
+function exprKey(expr) {
+  switch (expr.kind) {
+    case "var":
+      return `v:${expr.name}`;
+    case "literal":
+      return `l:${typeof expr.value}:${String(expr.value)}`;
+    case "not":
+      return `!(${exprKey(expr.expr)})`;
+    case "binary":
+      return `b:${expr.op}(${exprKey(expr.left)},${exprKey(expr.right)})`;
+    case "nary":
+      return `n:${expr.op}(${expr.operands.map(exprKey).join(",")})`;
+    case "sameValue":
+      return `sv(${exprKey(expr.left)},${exprKey(expr.right)})`;
+    case "sameNumber":
+      return `sn(${exprKey(expr.left)},${exprKey(expr.right)})`;
+    case "schema_guard":
+      return `g${opaqueKey(expr.schema)}(${exprKey(expr.value)})`;
+    case "load_prop":
+      return `${exprKey(expr.base)}.${expr.key}`;
+    case "load_index":
+      return `${exprKey(expr.base)}[${exprKey(expr.index)}]`;
+    case "call":
+      return `c:${exprKey(expr.callee)}(${expr.args.map(exprKey).join(",")})`;
+    case "object_literal":
+      return `o{${expr.entries.map((entry) => `${entry.key}:${exprKey(entry.value)}`).join(",")}}`;
+    case "array_literal":
+      return `a[${expr.elements.map(exprKey).join(",")}]`;
+    case "construct":
+      return `new:${expr.ctor}(${expr.args.map(exprKey).join(",")})`;
+  }
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/passes/reorder-compares.ts
+function reorderCompares(program) {
+  return { ...program, body: reorderNodes(program.body) };
+}
+function reorderNodes(nodes) {
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length > 0) {
+      out.push(...run.sort((left, right) => compareCost(left) - compareCost(right)));
+      run = [];
+    }
+  };
+  for (const node of nodes) {
+    if (isPureCompareReturn(node)) {
+      run.push(node);
+      continue;
+    }
+    flush();
+    if (node.kind === "if") {
+      out.push({
+        ...node,
+        then: reorderNodes(node.then),
+        ...node.otherwise ? { otherwise: reorderNodes(node.otherwise) } : {}
+      });
+      continue;
+    }
+    if (node.kind === "for" || node.kind === "for_of") {
+      out.push({ ...node, body: reorderNodes(node.body) });
+      continue;
+    }
+    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
+      out.push({ ...node, body: reorderNodes(node.body) });
+      continue;
+    }
+    out.push(node);
+  }
+  flush();
+  return out;
+}
+function isPureCompareReturn(node) {
+  return node.kind === "if" && node.then.length === 1 && node.then[0].kind === "return" && node.then[0].value.kind === "literal" && node.then[0].value.value === false && isPureExpr2(node.test);
+}
+function isPureExpr2(expr) {
+  switch (expr.kind) {
+    case "var":
+    case "literal":
+      return true;
+    case "not":
+      return isPureExpr2(expr.expr);
+    case "binary":
+    case "sameValue":
+    case "sameNumber":
+      return isPureExpr2(expr.left) && isPureExpr2(expr.right);
+    case "nary":
+      return expr.operands.every(isPureExpr2);
+    case "schema_guard":
+      return isPureExpr2(expr.value);
+    case "load_prop":
+      return isPureExpr2(expr.base);
+    case "load_index":
+      return isPureExpr2(expr.base) && isPureExpr2(expr.index);
+    case "call":
+    case "object_literal":
+    case "array_literal":
+    case "construct":
+      return false;
+  }
+}
+function compareCost(node) {
+  return node.kind === "if" ? exprCost2(node.test) : 0;
+}
+function exprCost2(expr) {
+  switch (expr.kind) {
+    case "literal":
+    case "var":
+      return 1;
+    case "load_prop":
+    case "load_index":
+      return 2 + exprCost2(expr.base);
+    case "not":
+      return exprCost2(expr.expr);
+    case "binary":
+    case "sameValue":
+    case "sameNumber":
+      return 1 + exprCost2(expr.left) + exprCost2(expr.right);
+    case "nary":
+      return 1 + expr.operands.reduce((total, operand) => total + exprCost2(operand), 0);
+    case "schema_guard":
+      return 10 + exprCost2(expr.value);
+    case "call":
+      return 100;
+    case "object_literal":
+    case "array_literal":
+    case "construct":
+      return 50;
+  }
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/cost/expr-cost.ts
+function exprCost3(expr) {
+  switch (expr.kind) {
+    case "literal":
+    case "var":
+      return 1;
+    case "load_prop":
+      return 2 + exprCost3(expr.base);
+    case "load_index":
+      return 4 + exprCost3(expr.base) + exprCost3(expr.index);
+    case "not":
+      return exprCost3(expr.expr);
+    case "binary":
+    case "sameValue":
+      return 1 + exprCost3(expr.left) + exprCost3(expr.right);
+    case "sameNumber":
+      return 20;
+    case "nary":
+      return 1 + expr.operands.reduce((total, operand) => total + exprCost3(operand), 0);
+    case "schema_guard":
+      return 10 + exprCost3(expr.value);
+    case "call":
+      return 100;
+    case "object_literal":
+    case "array_literal":
+    case "construct":
+      return 50;
+  }
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/passes/reorder-conditions.ts
+function reorderConditions(program) {
+  return { ...program, body: reorderNodes2(program.body) };
+}
+function reorderNodes2(nodes) {
+  return nodes.map((node) => mapNodeExprs(mapNodeBodies(node, reorderNodes2), reorderExpr));
+}
+function reorderExpr(expr) {
+  const next = mapExprChildren(expr, reorderExpr);
+  if (next.kind !== "nary" || next.operands.length < 2) return next;
+  const ranked = next.operands.map((operand, index2) => ({ operand, index: index2, cost: exprCost3(operand) }));
+  ranked.sort((left, right) => left.cost - right.cost || left.index - right.index);
+  return { ...next, operands: ranked.map((entry) => entry.operand) };
+}
+
+// ../../packages/jit/src/compiler/ir/optimizer/optimize-ir.ts
+var optimizeEqualIRPasses = [flattenBlocks, optimizeCost, inlineVars, reorderCompares];
+function optimizeIRWith(program, passes) {
+  let next = program;
+  for (const pass2 of passes) {
+    next = pass2(next);
+  }
+  if (!program.helpers || program.helpers.length === 0) return next;
+  return {
+    ...next,
+    helpers: program.helpers.map((helper) => ({
+      name: helper.name,
+      program: optimizeIRWith(helper.program, passes)
+    }))
+  };
+}
+function optimizeIR(program) {
+  return optimizeIRWith(program, optimizeEqualIRPasses);
+}
+var optimizeQueryIRPasses = [flattenBlocks, normalizeLogic, reorderConditions];
+function optimizeQueryIR(program) {
+  return optimizeIRWith(program, optimizeQueryIRPasses);
+}
+
+// ../../packages/jit/src/compiler/equal.ts
+function emitEqualSource(schema) {
+  const strategy = resolveEqualStrategy(schema);
+  return emitEqual(optimizeIR(buildEqualIR(schema, strategy)));
+}
+function emitEqualMethodBody(schema) {
+  const strategy = resolveEqualStrategy(schema);
+  const program = optimizeIR(buildEqualIR(schema, strategy));
+  return `const l = this;
+const r = other;
+${emitEqualBody(program)}`;
+}
+function compileEqual(schema, options) {
+  return getCompileCached(
+    schema,
+    "equal",
+    () => {
+      const strategy = resolveEqualStrategy(schema);
+      const program = optimizeIR(buildEqualIR(schema, strategy));
+      const body = emitEqualBody(program);
+      const hash4 = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : void 0;
+      const compiled = globalThis.Function(
+        "__hash",
+        "__getIndex",
+        `return function equal(l, r) {
+${body}
+};`
+      )(hash4, getIndex);
+      registerArtifact(compiled, {
+        kind: "operation",
+        schema,
+        op: "equal"
+      });
+      return compiled;
+    },
+    options
+  );
+}
+function compileEqualMethod(schema, options) {
+  return getCompileCached(
+    schema,
+    "equal:method",
+    () => {
+      const strategy = resolveEqualStrategy(schema);
+      const program = optimizeIR(buildEqualIR(schema, strategy));
+      const body = emitEqualBody(program);
+      const hash4 = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : void 0;
+      return globalThis.Function(
+        "__hash",
+        "__getIndex",
+        `return function equals(other) {
+const l = this;
+const r = other;
+${body}
+};`
+      )(hash4, getIndex);
+    },
+    options
+  );
+}
+
+// ../../packages/jit/src/compiler/changed.ts
+var INT32_MASK_LIMIT = 31;
+var SCALAR_TYPES = /* @__PURE__ */ new Set([
+  TypeName.string,
+  TypeName.number,
+  TypeName.bigint,
+  TypeName.boolean,
+  TypeName.literal,
+  TypeName.enum,
+  TypeName.symbol,
+  TypeName.undefined,
+  TypeName.null
+]);
+function allFieldPaths(schema, operation) {
+  return Object.keys(expectProjectionObject(schema, operation).def.props);
+}
+function resolveChangedDescriptor(schema, paths) {
+  const tree = buildProjectionTree(schema, paths, "JIT.compare.changed()");
+  const fields = tree.paths.map((path) => {
+    const leaf = leafSchema2(tree, path);
+    return Object.freeze({
+      path,
+      segments: Object.freeze(path.split(".")),
+      structural: !SCALAR_TYPES.has(resolveWrappers(leaf).base.type),
+      schema: leaf
+    });
+  });
+  return Object.freeze({
+    tree,
+    fields: Object.freeze(fields),
+    representation: fields.length > INT32_MASK_LIMIT ? "bigint" : "int32"
+  });
+}
+function emitChangedSource(descriptor) {
+  const writer = new CodeWriter();
+  const zero = descriptor.representation === "bigint" ? "0n" : "0";
+  writer.line("function changed(left, right) {");
+  writer.indent(() => {
+    writer.line(`if (left === right) return ${zero};`);
+    writer.line(`let mask = ${zero};`);
+    descriptor.fields.forEach((field, index2) => {
+      const bit = descriptor.representation === "bigint" ? `(1n << ${index2}n)` : `${1 << index2}`;
+      const left = readPath2("left", field);
+      const right = readPath2("right", field);
+      const differs = field.structural ? `!__changedEqual${index2}(${left}, ${right})` : `${left} !== ${right}`;
+      writer.line(`if (${differs}) mask |= ${bit};`);
+    });
+    writer.line("return mask;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function readPath2(source, field) {
+  return field.segments.reduce(
+    (carrier, segment, index2) => index2 === 0 ? emitPropertyAccess(carrier, segment) : `${carrier}?.${optionalSegment2(segment)}`,
+    source
+  );
+}
+function optionalSegment2(segment) {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment) ? segment : `[${JSON.stringify(segment)}]`;
+}
+function changedEqualBindings(descriptor) {
+  const bindings = [];
+  descriptor.fields.forEach((field, index2) => {
+    if (!field.structural) return;
+    bindings.push({ name: `__changedEqual${index2}`, source: emitEqualSource(field.schema) });
+  });
+  return bindings;
+}
+function leafSchema2(tree, path) {
+  const dot = path.indexOf(".");
+  const head = dot === -1 ? path : path.slice(0, dot);
+  const node = tree.nodes.find((candidate) => candidate.key === head);
+  if (dot === -1) return node.schema;
+  return leafSchema2(node.children, path.slice(dot + 1));
+}
+function changedCacheKey(descriptor) {
+  return `changed:${descriptor.representation}:${descriptor.fields.map((field) => field.path).join(",")}`;
+}
+function compileChanged(schema, descriptor, options) {
+  const bindings = changedEqualBindings(descriptor);
+  const template = getCompileCached(
+    schema,
+    changedCacheKey(descriptor),
+    () => {
+      const source = emitChangedSource(descriptor);
+      return {
+        source,
+        create: globalThis.Function(...bindings.map((binding) => binding.name), `return ${source};`)
+      };
+    },
+    options
+  );
+  const compiled = template.create(
+    ...bindings.map((binding) => globalThis.Function(`return ${binding.source};`)())
+  );
+  registerArtifact(compiled, { kind: "changed-plan", schema, descriptor });
+  return compiled;
+}
+
 // ../../packages/jit/src/compiler/clone/build-clone-ir.ts
 function buildCloneIR(schema) {
   const { body, helpers } = buildRecursiveProgram(
@@ -838,321 +4046,6 @@ function buildDiscriminatedUnionNode(schema, recurse) {
   };
 }
 
-// ../../packages/jit/src/compiler/ir/ir.ts
-function irVar(name) {
-  return { kind: "var", name };
-}
-function literal(value) {
-  return { kind: "literal", value };
-}
-function not(expr) {
-  return { kind: "not", expr };
-}
-function strictEqual(left, right) {
-  return { kind: "binary", op: "strictEqual", left, right };
-}
-function notStrictEqual(left, right) {
-  return { kind: "binary", op: "notStrictEqual", left, right };
-}
-function sameValue(left, right) {
-  return { kind: "sameValue", left, right };
-}
-function sameNumber(left, right) {
-  return { kind: "sameNumber", left, right };
-}
-function schemaGuard(schema, value) {
-  return { kind: "schema_guard", schema, value };
-}
-function loadProp(base, key) {
-  return { kind: "load_prop", base, key };
-}
-function loadIndex(base, index2) {
-  return { kind: "load_index", base, index: index2 };
-}
-function call(callee, args = []) {
-  return { kind: "call", callee, args };
-}
-function binary(op, left, right) {
-  return { kind: "binary", op, left, right };
-}
-function allOf(operands) {
-  return { kind: "nary", op: "and", operands };
-}
-function objectLiteral(entries) {
-  return { kind: "object_literal", entries };
-}
-function arrayLiteral(elements = []) {
-  return { kind: "array_literal", elements };
-}
-function construct(ctor, args = []) {
-  return { kind: "construct", ctor, args };
-}
-function letDecl(target, expr) {
-  return expr === void 0 ? { kind: "let", target } : { kind: "let", target, expr };
-}
-function store(target, expr) {
-  return { kind: "store", target, expr };
-}
-function exprStmt(expr) {
-  return { kind: "expr_stmt", expr };
-}
-function forRange(index2, length, body) {
-  return { kind: "for_range", index: index2, length, body };
-}
-function forOf(item, iterable, body) {
-  return { kind: "for_of", item, iterable, body };
-}
-function append(target, cursor, value) {
-  return { kind: "append", target, cursor, value };
-}
-function sortByKey(target, ordering) {
-  return { kind: "sort_by_key", target, ordering };
-}
-function mapExprChildren(expr, mapExpr) {
-  switch (expr.kind) {
-    case "var":
-    case "literal":
-      return expr;
-    case "not":
-      return { ...expr, expr: mapExpr(expr.expr) };
-    case "binary":
-    case "sameValue":
-    case "sameNumber":
-      return { ...expr, left: mapExpr(expr.left), right: mapExpr(expr.right) };
-    case "nary":
-      return { ...expr, operands: expr.operands.map(mapExpr) };
-    case "schema_guard":
-      return { ...expr, value: mapExpr(expr.value) };
-    case "load_prop":
-      return { ...expr, base: mapExpr(expr.base) };
-    case "load_index":
-      return { ...expr, base: mapExpr(expr.base), index: mapExpr(expr.index) };
-    case "call":
-      return { ...expr, callee: mapExpr(expr.callee), args: expr.args.map(mapExpr) };
-    case "object_literal":
-      return { ...expr, entries: expr.entries.map((entry) => ({ ...entry, value: mapExpr(entry.value) })) };
-    case "array_literal":
-      return { ...expr, elements: expr.elements.map(mapExpr) };
-    case "construct":
-      return { ...expr, args: expr.args.map(mapExpr) };
-  }
-}
-function mapNodeExprs(node, mapExpr) {
-  switch (node.kind) {
-    case "assign":
-      return { ...node, expr: mapExpr(node.expr) };
-    case "let":
-      return node.expr === void 0 ? node : { ...node, expr: mapExpr(node.expr) };
-    case "store":
-      return { ...node, target: mapExpr(node.target), expr: mapExpr(node.expr) };
-    case "expr_stmt":
-      return { ...node, expr: mapExpr(node.expr) };
-    case "hash_compare":
-      return { ...node, leftHash: mapExpr(node.leftHash), rightHash: mapExpr(node.rightHash) };
-    case "map_equal":
-    case "binary_search_equal":
-      return { ...node, left: mapExpr(node.left), right: mapExpr(node.right) };
-    case "if":
-      return { ...node, test: mapExpr(node.test) };
-    case "for":
-      return { ...node, from: mapExpr(node.from) };
-    case "for_range":
-      return { ...node, length: mapExpr(node.length) };
-    case "for_of":
-      return { ...node, iterable: mapExpr(node.iterable) };
-    case "append":
-      return { ...node, value: mapExpr(node.value) };
-    case "return":
-      return { ...node, value: mapExpr(node.value) };
-    case "block":
-    case "sort_by_key":
-      return node;
-  }
-}
-function mapNodeBodies(node, mapNodes) {
-  switch (node.kind) {
-    case "block":
-      return { ...node, body: mapNodes(node.body) };
-    case "if":
-      return {
-        ...node,
-        then: mapNodes(node.then),
-        ...node.otherwise ? { otherwise: mapNodes(node.otherwise) } : {}
-      };
-    case "for":
-    case "for_range":
-    case "for_of":
-    case "map_equal":
-    case "binary_search_equal":
-      return { ...node, body: mapNodes(node.body) };
-    default:
-      return node;
-  }
-}
-
-// ../../packages/jit/src/compiler/source/literal.ts
-function emitLiteral(value) {
-  switch (typeof value) {
-    case "string":
-      return parse_exports.parseKey(value, { parseAsJson: true });
-    case "bigint":
-      return `${value}n`;
-    case "undefined":
-      return "undefined";
-    default:
-      return String(value);
-  }
-}
-function emitObjectKey(key) {
-  return parse_exports.parseKey(key);
-}
-
-// ../../packages/jit/src/compiler/defaults.ts
-var NO_DEFAULT = /* @__PURE__ */ Symbol("jit.no-static-default");
-function emitStaticDefaultSource(schema) {
-  const value = getStaticDefaultValue(schema);
-  if (value === NO_DEFAULT) return void 0;
-  return emitStaticDefaultValueSource(value, /* @__PURE__ */ new Set());
-}
-function staticDefaultIRExpr(schema) {
-  const value = getStaticDefaultValue(schema);
-  if (value === NO_DEFAULT) return void 0;
-  return staticValueIRExpr(value, /* @__PURE__ */ new Set());
-}
-function emitDefaultedValue(schema, valueExpr) {
-  const defaultSource = emitStaticDefaultSource(schema);
-  return defaultSource === void 0 ? valueExpr : `(${valueExpr} === undefined ? ${defaultSource} : ${valueExpr})`;
-}
-function getStaticDefaultValue(schema) {
-  let current = schema;
-  while (true) {
-    switch (current.type) {
-      case TypeName.default: {
-        const value = current.def.defaultValue;
-        return typeof value === "function" ? NO_DEFAULT : value;
-      }
-      case TypeName.optional:
-      case TypeName.nullish:
-        return NO_DEFAULT;
-      case TypeName.nullable:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType;
-        continue;
-      case TypeName.lazy:
-        current = current.def.getter?.();
-        continue;
-      default:
-        return NO_DEFAULT;
-    }
-  }
-}
-function emitStaticDefaultValueSource(value, seen) {
-  if (value instanceof Date) return `new Date(${value.getTime()})`;
-  if (value === null) return "null";
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "bigint":
-    case "boolean":
-    case "undefined":
-      return emitLiteral(value);
-    case "object":
-      return emitStaticObjectDefaultSource(value, seen);
-    default:
-      return void 0;
-  }
-}
-function staticValueIRExpr(value, seen) {
-  if (value instanceof Date) return construct("Date", [literal(value.getTime())]);
-  if (value === null) return literal(null);
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "bigint":
-    case "boolean":
-    case "undefined":
-      return literal(value);
-    case "object":
-      return staticObjectDefaultIRExpr(value, seen);
-    default:
-      return void 0;
-  }
-}
-function emitStaticObjectDefaultSource(value, seen) {
-  if (seen.has(value)) return void 0;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    const elements = value.map((element) => emitStaticDefaultValueSource(element, seen));
-    seen.delete(value);
-    return elements.every((element) => element !== void 0) ? `[${elements.join(", ")}]` : void 0;
-  }
-  if (!isPlainObject(value)) {
-    seen.delete(value);
-    return void 0;
-  }
-  const entries = [];
-  for (const key of Object.keys(value)) {
-    const emitted = emitStaticDefaultValueSource(value[key], seen);
-    if (emitted === void 0) {
-      seen.delete(value);
-      return void 0;
-    }
-    entries.push(`${emitObjectKey(key)}: ${emitted}`);
-  }
-  seen.delete(value);
-  return `{ ${entries.join(", ")} }`;
-}
-function staticObjectDefaultIRExpr(value, seen) {
-  if (seen.has(value)) return void 0;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    const elements = value.map((element) => staticValueIRExpr(element, seen));
-    seen.delete(value);
-    return elements.every((element) => element !== void 0) ? arrayLiteral(elements) : void 0;
-  }
-  if (!isPlainObject(value)) {
-    seen.delete(value);
-    return void 0;
-  }
-  const entries = [];
-  for (const key of Object.keys(value)) {
-    const emitted = staticValueIRExpr(value[key], seen);
-    if (emitted === void 0) {
-      seen.delete(value);
-      return void 0;
-    }
-    entries.push({ key, value: emitted });
-  }
-  seen.delete(value);
-  return objectLiteral(entries);
-}
-function isPlainObject(value) {
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-// ../../packages/jit/src/compiler/emitter/code-writer.ts
-var CodeWriter = class {
-  #lines = [];
-  #indent = 0;
-  line(text = "") {
-    this.#lines.push(`${"  ".repeat(this.#indent)}${text}`);
-  }
-  indent(fn) {
-    this.#indent++;
-    fn();
-    this.#indent--;
-  }
-  toString() {
-    return this.#lines.join("\n");
-  }
-};
-
 // ../../packages/jit/src/compiler/emitter/emit-state.ts
 function createEmitState() {
   const counts = /* @__PURE__ */ new Map();
@@ -1166,180 +4059,10 @@ function createEmitState() {
   };
 }
 
-// ../../packages/jit/src/compiler/source/access.ts
-function emitPropertyAccess(base, key) {
-  return `${base}${parse_exports.key_access(key, false)}`;
-}
-function emitIndexAccess(base, index2) {
-  return `${base}[${index2}]`;
-}
-
-// ../../packages/jit/src/compiler/source/guard.ts
-function emitSchemaGuard(schema, value) {
-  const resolved = resolveWrappers(schema);
-  const base = resolved.base;
-  const inner = emitBaseGuard(base, value);
-  const defaultable = emitStaticDefaultSource(schema) !== void 0;
-  if (resolved.optional && resolved.nullable) return `(${value} == null || (${inner}))`;
-  if (resolved.optional) return `(${value} === undefined || (${inner}))`;
-  if (resolved.nullable) {
-    return defaultable ? `(${value} === undefined || ${value} === null || (${inner}))` : `(${value} === null || (${inner}))`;
-  }
-  if (defaultable) return `(${value} === undefined || (${inner}))`;
-  return inner;
-}
-function emitBaseGuard(schema, value) {
-  switch (schema.type) {
-    case TypeName.any:
-    case TypeName.unknown:
-      return "true";
-    case TypeName.never:
-      return "false";
-    case TypeName.void:
-    case TypeName.undefined:
-      return `${value} === undefined`;
-    case TypeName.null:
-      return `${value} === null`;
-    case TypeName.string:
-      return `typeof ${value} === "string"`;
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.nan:
-      return `typeof ${value} === "number"`;
-    case TypeName.boolean:
-      return `typeof ${value} === "boolean"`;
-    case TypeName.bigint:
-      return `typeof ${value} === "bigint"`;
-    case TypeName.symbol:
-      return `typeof ${value} === "symbol"`;
-    case TypeName.date:
-      return `${value} instanceof Date`;
-    case TypeName.regex:
-      return `${value} instanceof RegExp`;
-    case TypeName.file:
-      return `(typeof File !== "undefined" && ${value} instanceof File)`;
-    case TypeName.json:
-      return "true";
-    case TypeName.custom:
-      return "true";
-    case TypeName.templateLiteral:
-      return `typeof ${value} === "string"`;
-    case TypeName.function:
-      return `typeof ${value} === "function"`;
-    case TypeName.temporal:
-      return emitTemporalGuard(schema, value);
-    case TypeName.codec:
-      return emitSchemaGuard(schema.def.input, value);
-    case TypeName.literal:
-      return emitLiteralGuard(schema, value);
-    case TypeName.enum:
-      return emitEnumGuard(schema, value);
-    case TypeName.array:
-      return `Array.isArray(${value})`;
-    case TypeName.set:
-      return `${value} instanceof Set`;
-    case TypeName.map:
-      return `${value} instanceof Map`;
-    case TypeName.record:
-      return `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
-    case TypeName.object:
-      return emitObjectGuard(schema, value);
-    case TypeName.tuple:
-      return `Array.isArray(${value})`;
-    case TypeName.union:
-      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" || ")})`;
-    case TypeName.xor:
-      return emitXorGuard(schema, value);
-    case TypeName.not:
-      return `!(${emitSchemaGuard(schema.def.innerType, value)})`;
-    case TypeName.when:
-      return `((${emitSchemaGuard(schema.def.thenType, value)}) || (${emitSchemaGuard(schema.def.otherwiseType, value)}))`;
-    case TypeName.discriminatedUnion:
-      return emitDiscriminatedUnionGuard(schema, value);
-    case TypeName.intersection:
-      return `(${schema.def.options.map((option) => emitSchemaGuard(option, value)).join(" && ")})`;
-    case TypeName.instanceof:
-      return emitInstanceOfGuard(schema, value);
-    default:
-      return "true";
-  }
-}
-function emitXorGuard(schema, value) {
-  const tests = schema.def.options.map((option) => emitSchemaGuard(option, value));
-  if (tests.length === 0) return "false";
-  return `(${tests.map((test) => `((${test}) ? 1 : 0)`).join(" + ")} === 1)`;
-}
-function emitObjectGuard(schema, value) {
-  const props = schema.def.props;
-  const checks = Object.entries(props).map(([key, prop]) => emitSchemaGuard(prop, emitPropertyAccess(value, key)));
-  const objectCheck = `${value} !== null && typeof ${value} === "object" && !Array.isArray(${value})`;
-  return checks.length === 0 ? objectCheck : `(${objectCheck} && ${checks.join(" && ")})`;
-}
-function emitLiteralGuard(schema, value) {
-  const literal4 = schema.def.value;
-  if (typeof literal4 === "number") {
-    return `${value} === ${emitLiteral(literal4)} || (${value} !== ${value} && ${emitLiteral(literal4)} !== ${emitLiteral(literal4)})`;
-  }
-  return `${value} === ${emitLiteral(literal4)}`;
-}
-function emitEnumGuard(schema, value) {
-  const values = Object.values(schema.def.values);
-  if (values.length === 0) return "false";
-  return `(${values.map((enumValue) => `${value} === ${emitLiteral(enumValue)}`).join(" || ")})`;
-}
-function emitDiscriminatedUnionGuard(schema, value) {
-  const discriminator = schema.def.discriminator;
-  const tags = schema.def.options.map((option) => {
-    const tag = literalDiscriminatorValue(option, discriminator);
-    return tag === void 0 ? void 0 : `${emitPropertyAccess(value, discriminator)} === ${emitLiteral(tag)}`;
-  });
-  const filtered = tags.filter((tag) => tag !== void 0);
-  return filtered.length === 0 ? "false" : `(${filtered.join(" || ")})`;
-}
-function emitInstanceOfGuard(schema, value) {
-  const name = schema.def.ctor.name;
-  if (!name) return `${value} !== null && typeof ${value} === "object"`;
-  return `(typeof ${name} !== "undefined" && ${value} instanceof ${name})`;
-}
-function emitTemporalGuard(schema, value) {
-  const ctor = temporalConstructorName(schema.def.kind);
-  return `(globalThis.Temporal !== undefined && ${value} instanceof globalThis.Temporal.${ctor})`;
-}
-function temporalConstructorName(kind) {
-  switch (kind) {
-    case "instant":
-      return "Instant";
-    case "plainDate":
-      return "PlainDate";
-    case "plainTime":
-      return "PlainTime";
-    case "plainDateTime":
-      return "PlainDateTime";
-    case "zonedDateTime":
-      return "ZonedDateTime";
-    case "plainYearMonth":
-      return "PlainYearMonth";
-    case "plainMonthDay":
-      return "PlainMonthDay";
-    case "duration":
-      return "Duration";
-  }
-}
-function literalDiscriminatorValue(schema, discriminator) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.object) return void 0;
-  const props = resolved.def.props;
-  const prop = props[discriminator];
-  const propBase = prop ? resolveWrappers(prop).base : void 0;
-  if (propBase?.type !== TypeName.literal) return void 0;
-  const value = propBase.def.value;
-  return typeof value === "string" || typeof value === "number" ? value : void 0;
-}
-
 // ../../packages/jit/src/compiler/clone/emit-clone.ts
 function emitClone(program) {
   const writer = new CodeWriter();
-  emitHelpers(writer, program);
+  emitHelpers2(writer, program);
   writer.line(`function clone(${program.param}) {`);
   writer.indent(() => {
     emitCloneReturn(writer, program.body, program.param);
@@ -1349,11 +4072,11 @@ function emitClone(program) {
 }
 function emitCloneBody(program) {
   const writer = new CodeWriter();
-  emitHelpers(writer, program);
+  emitHelpers2(writer, program);
   emitCloneReturn(writer, program.body, program.param);
   return writer.toString();
 }
-function emitHelpers(writer, program) {
+function emitHelpers2(writer, program) {
   for (const helper of program.helpers) {
     writer.line(`function ${helperName(helper.id)}(${program.param}) {`);
     writer.indent(() => {
@@ -2988,1899 +5711,6 @@ ${body}
         op: "diff"
       });
       return compiled;
-    },
-    options
-  );
-}
-
-// ../../packages/jit/src/runtime/index/build-index.ts
-function buildIndex(items, key) {
-  const index2 = /* @__PURE__ */ new Map();
-  for (let i = 0, len = items.length; i < len; i++) {
-    const item = items[i];
-    index2.set(item[key], item);
-  }
-  return index2;
-}
-
-// ../../packages/jit/src/runtime/index/index-cache.ts
-var INDEX_CACHE = /* @__PURE__ */ new WeakMap();
-function indexesOf(items) {
-  let entry = INDEX_CACHE.get(items);
-  if (entry === void 0) {
-    entry = { legacyKey: void 0, legacyMap: void 0, plans: void 0 };
-    INDEX_CACHE.set(items, entry);
-  }
-  return entry;
-}
-function getIndex(items, key) {
-  const entry = indexesOf(items);
-  if (entry.legacyMap !== void 0 && entry.legacyKey === key) {
-    return entry.legacyMap;
-  }
-  const map4 = buildIndex(items, key);
-  entry.legacyKey = key;
-  entry.legacyMap = map4;
-  return map4;
-}
-function getCachedIndex(items, cacheKey, build) {
-  const entry = indexesOf(items);
-  const plans = entry.plans ?? (entry.plans = /* @__PURE__ */ new Map());
-  const cached = plans.get(cacheKey);
-  if (cached !== void 0) return cached;
-  const built = build(items);
-  plans.set(cacheKey, built);
-  return built;
-}
-
-// ../../packages/jit/src/compiler/row-keys.ts
-function resolveRowObjectSchema(schema, operation) {
-  let base = resolveWrappers(schema).base;
-  if (base.type === TypeName.array || base.type === TypeName.set) {
-    base = resolveWrappers(base.def.element).base;
-  }
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers(base.def.innerType).base;
-  }
-  if (base.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", `${operation} expects an object or collection-of-objects schema`);
-  }
-  return base;
-}
-function resolveRowField(object2, key, operation) {
-  if (typeof key !== "string" || key.length === 0) {
-    throw new JITError("INVALID_OPERATION", `${operation} keys must be non-empty strings`);
-  }
-  const field = object2.def.props[key];
-  if (!field) {
-    throw new JITError("INVALID_OPERATION", `${operation} received unknown key ${JSON.stringify(key)}`, {
-      path: [key]
-    });
-  }
-  return field;
-}
-function resolveScalarKeyKind(schema, key, operation) {
-  let base = resolveWrappers(schema).base;
-  if (base.type === TypeName.runtimeType) {
-    base = resolveWrappers(base.def.innerType).base;
-  }
-  if (base.type === TypeName.date) return "date";
-  if (base.type === TypeName.number || base.type === TypeName.int) return "numeric";
-  if (base.type === TypeName.union) {
-    const options = base.def.options;
-    if (options.length > 0) {
-      const kinds = options.map((option) => resolveScalarKeyKind(option, key, operation));
-      if (kinds.every((kind) => kind === kinds[0])) return kinds[0];
-    }
-  }
-  if (base.type === TypeName.string || base.type === TypeName.bigint || base.type === TypeName.boolean || base.type === TypeName.literal || base.type === TypeName.enum) {
-    return "direct";
-  }
-  throw new JITError(
-    "INVALID_OPERATION",
-    `${operation} key ${JSON.stringify(key)} must resolve to a statically comparable scalar`,
-    { path: [key] }
-  );
-}
-function isNullishField(schema) {
-  const resolved = resolveWrappers(schema);
-  return resolved.optional || resolved.nullable;
-}
-
-// ../../packages/jit/src/compiler/ordering.ts
-function resolveOrderingDescriptor(schema, criteria) {
-  const object2 = resolveRowObjectSchema(schema, "ordering");
-  if (criteria.length === 0) {
-    throw new JITError("INVALID_OPERATION", "ordering requires at least one criterion");
-  }
-  const seen = /* @__PURE__ */ new Set();
-  const resolved = criteria.map((criterion) => {
-    if (criterion.direction !== "asc" && criterion.direction !== "desc") {
-      throw new JITError("INVALID_OPERATION", "ordering direction must be asc or desc");
-    }
-    const field = resolveRowField(object2, criterion.key, "ordering");
-    if (seen.has(criterion.key)) {
-      throw new JITError("INVALID_OPERATION", `ordering repeats key ${JSON.stringify(criterion.key)}`, {
-        path: [criterion.key]
-      });
-    }
-    seen.add(criterion.key);
-    return Object.freeze({
-      key: criterion.key,
-      direction: criterion.direction,
-      valueKind: resolveScalarKeyKind(field, criterion.key, "ordering"),
-      nullish: isNullishField(field)
-    });
-  });
-  return Object.freeze({ criteria: Object.freeze(resolved) });
-}
-function emitOrderingComparatorBody(writer, descriptor, left = "left", right = "right") {
-  const last2 = descriptor.criteria.length - 1;
-  let terminated = false;
-  descriptor.criteria.forEach((criterion, index2) => {
-    const suffix = descriptor.criteria.length === 1 ? "" : String(index2);
-    const date3 = criterion.valueKind === "date";
-    const leftRaw = `left${date3 ? "Raw" : "Value"}${suffix}`;
-    const rightRaw = `right${date3 ? "Raw" : "Value"}${suffix}`;
-    const leftValue = `leftValue${suffix}`;
-    const rightValue = `rightValue${suffix}`;
-    const leftPresentWins = criterion.direction === "desc" ? "-1" : "1";
-    const rightPresentWins = criterion.direction === "desc" ? "1" : "-1";
-    const subtract = criterion.valueKind === "numeric" && index2 === last2;
-    const emitCompare2 = () => {
-      if (date3) {
-        writer.line(`const ${leftValue} = ${leftRaw}.getTime();`);
-        writer.line(`const ${rightValue} = ${rightRaw}.getTime();`);
-      }
-      if (subtract) {
-        writer.line(
-          criterion.direction === "desc" ? `return ${rightValue} - ${leftValue};` : `return ${leftValue} - ${rightValue};`
-        );
-        return;
-      }
-      writer.line(`if (${leftValue} !== ${rightValue}) {`);
-      writer.indent(() => {
-        writer.line(
-          criterion.direction === "desc" ? `return ${leftValue} < ${rightValue} ? 1 : -1;` : `return ${leftValue} < ${rightValue} ? -1 : 1;`
-        );
-      });
-      writer.line("}");
-    };
-    writer.line(`const ${leftRaw} = ${emitPropertyAccess(left, criterion.key)};`);
-    writer.line(`const ${rightRaw} = ${emitPropertyAccess(right, criterion.key)};`);
-    if (!criterion.nullish) {
-      emitCompare2();
-      terminated = subtract;
-      return;
-    }
-    writer.line(`if (${leftRaw} == null || ${rightRaw} == null) {`);
-    writer.indent(() => {
-      writer.line(`if (${leftRaw} != null) return ${leftPresentWins};`);
-      writer.line(`if (${rightRaw} != null) return ${rightPresentWins};`);
-    });
-    writer.line("} else {");
-    writer.indent(emitCompare2);
-    writer.line("}");
-  });
-  if (!terminated) writer.line("return 0;");
-}
-function emitOrderingComparatorBodySource(descriptor) {
-  const writer = new CodeWriter();
-  emitOrderingComparatorBody(writer, descriptor);
-  return writer.toString();
-}
-
-// ../../packages/jit/src/compiler/emitter/emit-expr.ts
-var BINARY_OPERATORS = {
-  strictEqual: "===",
-  notStrictEqual: "!==",
-  or: "||",
-  and: "&&",
-  add: "+",
-  divide: "/",
-  greaterThan: ">",
-  greaterThanOrEqual: ">=",
-  lessThan: "<",
-  lessThanOrEqual: "<="
-};
-var COMPARISON_OPERATORS = /* @__PURE__ */ new Set([
-  "strictEqual",
-  "notStrictEqual",
-  "greaterThan",
-  "greaterThanOrEqual",
-  "lessThan",
-  "lessThanOrEqual"
-]);
-function emitExpr(expr) {
-  switch (expr.kind) {
-    case "var":
-      return expr.name;
-    case "literal":
-      return emitLiteral(expr.value);
-    case "not":
-      return `!(${emitExpr(expr.expr)})`;
-    case "binary":
-      return `(${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)})`;
-    case "nary":
-      return `(${expr.operands.map(emitConditionRaw).join(expr.op === "and" ? " && " : " || ")})`;
-    case "sameValue":
-      return `Object.is(${emitExpr(expr.left)}, ${emitExpr(expr.right)})`;
-    case "sameNumber": {
-      const left = emitExpr(expr.left);
-      const right = emitExpr(expr.right);
-      return `(${left} === ${right} || (${left} !== ${left} && ${right} !== ${right}))`;
-    }
-    case "schema_guard":
-      return emitSchemaGuard(expr.schema, emitExpr(expr.value));
-    case "load_prop":
-      return emitPropertyAccess(emitExpr(expr.base), expr.key);
-    case "load_index":
-      return emitIndexAccess(emitExpr(expr.base), emitExpr(expr.index));
-    case "call":
-      return `${emitExpr(expr.callee)}(${expr.args.map(emitExpr).join(", ")})`;
-    case "object_literal": {
-      if (expr.entries.length === 0) return "{}";
-      const entries = expr.entries.map((entry) => `${emitLiteral(entry.key)}: ${emitExpr(entry.value)}`);
-      return `{ ${entries.join(", ")} }`;
-    }
-    case "array_literal":
-      return `[${expr.elements.map(emitExpr).join(", ")}]`;
-    case "construct":
-      return `new ${expr.ctor}(${expr.args.map(emitExpr).join(", ")})`;
-  }
-}
-function emitConditionRaw(expr) {
-  if (expr.kind === "binary" && COMPARISON_OPERATORS.has(expr.op)) {
-    return `${emitExpr(expr.left)} ${BINARY_OPERATORS[expr.op]} ${emitExpr(expr.right)}`;
-  }
-  if (expr.kind === "not") {
-    return `!(${emitConditionRaw(expr.expr)})`;
-  }
-  return emitExpr(expr);
-}
-
-// ../../packages/jit/src/compiler/emitter/emit-node.ts
-function emitNode(writer, node) {
-  switch (node.kind) {
-    case "block":
-      for (const child of node.body) emitNode(writer, child);
-      return;
-    case "assign":
-      writer.line(`const ${node.target.name} = ${emitExpr(node.expr)};`);
-      return;
-    case "let":
-      if (node.expr === void 0) {
-        writer.line(`let ${node.target.name};`);
-      } else {
-        writer.line(`let ${node.target.name} = ${emitExpr(node.expr)};`);
-      }
-      return;
-    case "store":
-      writer.line(`${emitExpr(node.target)} = ${emitExpr(node.expr)};`);
-      return;
-    case "expr_stmt":
-      writer.line(`${emitExpr(node.expr)};`);
-      return;
-    case "hash_compare":
-      writer.line(`if (${emitExpr(node.leftHash)} !== ${emitExpr(node.rightHash)}) {`);
-      writer.indent(() => {
-        writer.line("return false;");
-      });
-      writer.line("}");
-      return;
-    case "map_equal":
-      emitMapEqual(writer, node);
-      return;
-    case "binary_search_equal":
-      emitBinarySearchEqual(writer, node);
-      return;
-    case "if":
-      writer.line(`if (${emitTestExpr(node.test)}) {`);
-      writer.indent(() => {
-        for (const child of node.then) emitNode(writer, child);
-      });
-      if (node.otherwise && node.otherwise.length > 0) {
-        writer.line("} else {");
-        writer.indent(() => {
-          for (const child of node.otherwise ?? []) emitNode(writer, child);
-        });
-      }
-      writer.line("}");
-      return;
-    case "for":
-      writer.line(`for (let ${node.index.name} = ${emitExpr(node.from)}; ${node.index.name}-- !== 0;) {`);
-      writer.indent(() => {
-        for (const child of node.body) emitNode(writer, child);
-      });
-      writer.line("}");
-      return;
-    case "for_range": {
-      const index2 = node.index.name;
-      writer.line(`for (let ${index2} = 0; ${index2} < ${emitExpr(node.length)}; ${index2}++) {`);
-      writer.indent(() => {
-        for (const child of node.body) emitNode(writer, child);
-      });
-      writer.line("}");
-      return;
-    }
-    case "for_of":
-      writer.line(`for (const ${node.item.name} of ${emitExpr(node.iterable)}) {`);
-      writer.indent(() => {
-        for (const child of node.body) emitNode(writer, child);
-      });
-      writer.line("}");
-      return;
-    case "append":
-      writer.line(`${node.target.name}[${node.cursor.name}++] = ${emitExpr(node.value)};`);
-      return;
-    case "sort_by_key":
-      writer.line(`${node.target.name}.sort((left, right) => {`);
-      writer.indent(() => emitOrderingComparatorBody(writer, node.ordering));
-      writer.line("});");
-      return;
-    case "return":
-      writer.line(`return ${emitExpr(node.value)};`);
-      return;
-  }
-}
-function emitTestExpr(expr) {
-  if (expr.kind === "binary") {
-    const left = emitExpr(expr.left);
-    const right = emitExpr(expr.right);
-    if (expr.op === "strictEqual") return `${left} === ${right}`;
-    if (expr.op === "notStrictEqual") return `${left} !== ${right}`;
-  }
-  if (expr.kind === "nary") {
-    const op = expr.op === "and" ? " && " : " || ";
-    return expr.operands.map((operand) => `(${emitConditionRaw(operand)})`).join(op);
-  }
-  if (expr.kind === "not") {
-    const inner = expr.expr;
-    if (inner.kind === "sameNumber") {
-      const left = emitExpr(inner.left);
-      const right = emitExpr(inner.right);
-      return `${left} !== ${right} && (${left} === ${left} || ${right} === ${right})`;
-    }
-    if (inner.kind === "sameValue") {
-      return `!Object.is(${emitExpr(inner.left)}, ${emitExpr(inner.right)})`;
-    }
-    if (inner.kind === "binary" && inner.op === "strictEqual") {
-      return `${emitExpr(inner.left)} !== ${emitExpr(inner.right)}`;
-    }
-    if (inner.kind === "call") {
-      return `!${emitExpr(inner)}`;
-    }
-    if (inner.kind === "nary") {
-      return `!(${emitTestExpr(inner)})`;
-    }
-  }
-  return emitExpr(expr);
-}
-function emitMapEqual(writer, node) {
-  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
-  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
-  writer.indent(() => {
-    writer.line("return false;");
-  });
-  writer.line("}");
-  writer.line(`if (${node.length.name} < 64) {`);
-  writer.indent(() => {
-    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
-    writer.indent(() => {
-      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
-      writer.line("let found = false;");
-      writer.line(`for (let j = 0; j < ${node.length.name}; j++) {`);
-      writer.indent(() => {
-        writer.line(`const ${node.rightItem.name} = ${emitExpr(node.right)}[j];`);
-        writer.line(
-          `if (${emitPropertyAccess(node.rightItem.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
-        );
-        writer.indent(() => {
-          writer.line("found = true;");
-          for (const child of node.body) emitNode(writer, child);
-          writer.line("break;");
-        });
-        writer.line("}");
-      });
-      writer.line("}");
-      writer.line("if (!found) {");
-      writer.indent(() => {
-        writer.line("return false;");
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-  });
-  writer.line("} else {");
-  writer.indent(() => {
-    writer.line(`let ${node.rightIndex.name};`);
-    writer.line(`${node.rightIndex.name} = __getIndex(${emitExpr(node.right)}, ${emitLiteral(node.key)});`);
-    writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
-    writer.indent(() => {
-      writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
-      writer.line(
-        `const ${node.rightItem.name} = ${node.rightIndex.name}.get(${emitPropertyAccess(node.leftItem.name, node.key)});`
-      );
-      writer.line(
-        `if (${node.rightItem.name} === undefined && !${node.rightIndex.name}.has(${emitPropertyAccess(node.leftItem.name, node.key)})) {`
-      );
-      writer.indent(() => {
-        writer.line("return false;");
-      });
-      writer.line("}");
-      for (const child of node.body) emitNode(writer, child);
-    });
-    writer.line("}");
-  });
-  writer.line("}");
-}
-function emitBinarySearchEqual(writer, node) {
-  const compareLeft = node.direction === "desc" ? ">" : "<";
-  writer.line(`const ${node.length.name} = ${emitExpr(node.left)}.length;`);
-  writer.line(`if (${node.length.name} !== ${emitExpr(node.right)}.length) {`);
-  writer.indent(() => {
-    writer.line("return false;");
-  });
-  writer.line("}");
-  writer.line(`for (let ${node.index.name} = 0; ${node.index.name} < ${node.length.name}; ${node.index.name}++) {`);
-  writer.indent(() => {
-    writer.line(`const ${node.leftItem.name} = ${emitExpr(node.left)}[${node.index.name}];`);
-    writer.line(`let ${node.searchLow.name} = 0;`);
-    writer.line(`let ${node.searchHigh.name} = ${node.length.name} - 1;`);
-    writer.line(`let ${node.rightItem.name};`);
-    writer.line(`while (${node.searchLow.name} <= ${node.searchHigh.name}) {`);
-    writer.indent(() => {
-      writer.line(`const ${node.searchMid.name} = (${node.searchLow.name} + ${node.searchHigh.name}) >> 1;`);
-      writer.line(`const ${node.found.name} = ${emitExpr(node.right)}[${node.searchMid.name}];`);
-      writer.line(
-        `if (${emitPropertyAccess(node.found.name, node.key)} === ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
-      );
-      writer.indent(() => {
-        writer.line(`${node.rightItem.name} = ${node.found.name};`);
-        writer.line("break;");
-      });
-      writer.line("}");
-      writer.line(
-        `if (${emitPropertyAccess(node.found.name, node.key)} ${compareLeft} ${emitPropertyAccess(node.leftItem.name, node.key)}) {`
-      );
-      writer.indent(() => {
-        writer.line(`${node.searchLow.name} = ${node.searchMid.name} + 1;`);
-      });
-      writer.line("} else {");
-      writer.indent(() => {
-        writer.line(`${node.searchHigh.name} = ${node.searchMid.name} - 1;`);
-      });
-      writer.line("}");
-    });
-    writer.line("}");
-    writer.line(`if (${node.rightItem.name} === undefined) {`);
-    writer.indent(() => {
-      writer.line("return false;");
-    });
-    writer.line("}");
-    for (const child of node.body) emitNode(writer, child);
-  });
-  writer.line("}");
-}
-
-// ../../packages/jit/src/compiler/emitter/emit-equal.ts
-function emitEqual(program) {
-  const writer = new CodeWriter();
-  const [left, right] = program.params;
-  emitHelpers2(writer, program);
-  writer.line(`function equal(${left.name}, ${right.name}) {`);
-  writer.indent(() => {
-    for (const node of program.body) emitNode(writer, node);
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function emitEqualBody(program) {
-  const writer = new CodeWriter();
-  emitHelpers2(writer, program);
-  for (const node of program.body) emitNode(writer, node);
-  return writer.toString();
-}
-function emitHelpers2(writer, program) {
-  for (const helper of program.helpers ?? []) {
-    const [left, right] = helper.program.params;
-    writer.line(`function ${helper.name}(${left.name}, ${right.name}) {`);
-    writer.indent(() => {
-      for (const node of helper.program.body) emitNode(writer, node);
-    });
-    writer.line("}");
-  }
-}
-
-// ../../packages/jit/src/runtime/hash/hash-cache.ts
-var HASH_CACHE = /* @__PURE__ */ new WeakMap();
-function getHash(value, compute) {
-  const cached = HASH_CACHE.get(value);
-  if (cached !== void 0) {
-    return cached;
-  }
-  const hash4 = compute(value);
-  HASH_CACHE.set(value, hash4);
-  return hash4;
-}
-function isHashCacheable(value) {
-  return typeof value === "object" && value !== null || typeof value === "function";
-}
-
-// ../../packages/jit/src/runtime/hash/hash-combine.ts
-function combineHash(left, right) {
-  return (left << 5) - left + right | 0;
-}
-
-// ../../packages/jit/src/runtime/hash/hash-primitives.ts
-function hashNumber(value) {
-  return value | 0;
-}
-function hashString(value) {
-  let hash4 = 0;
-  for (let i = 0, len = value.length; i < len; i++) {
-    hash4 = hash4 * 31 + value.charCodeAt(i) | 0;
-  }
-  return hash4;
-}
-function hashBoolean(value) {
-  return value ? 1 : 0;
-}
-function hashBigInt(value) {
-  return Number(value & 0xffffffffn) | 0;
-}
-function hashUnknown(value) {
-  switch (typeof value) {
-    case "string":
-      return hashString(value);
-    case "number":
-      return hashNumber(value);
-    case "boolean":
-      return hashBoolean(value);
-    case "bigint":
-      return hashBigInt(value);
-    case "undefined":
-      return 0;
-    case "symbol":
-      return hashString(String(value));
-    case "object":
-      return value === null ? 1 : hashString(Object.prototype.toString.call(value));
-    case "function":
-      return hashString("function");
-  }
-}
-
-// ../../packages/jit/src/compiler/hash.ts
-function emitHashSource(schema) {
-  return `function hash(value) {
-${emitHashBody(schema)}
-}`;
-}
-function compileHash(schema, options) {
-  return getCompileCached(
-    schema,
-    "hash",
-    () => {
-      const compute = globalThis.Function(
-        "__combineHash",
-        "__hashNumber",
-        "__hashString",
-        "__hashBoolean",
-        "__hashBigInt",
-        "__hashUnknown",
-        `return function computeHash(value) {
-${emitHashBody(schema)}
-};`
-      )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown);
-      const compiled = ((value) => {
-        if (isHashCacheable(value)) {
-          return getHash(value, compute);
-        }
-        return compute(value);
-      });
-      registerArtifact(compiled, {
-        kind: "operation",
-        schema,
-        op: "hash"
-      });
-      return compiled;
-    },
-    options
-  );
-}
-function emitHashBody(schema) {
-  const lines = [];
-  emitHashInto(lines, schema, "value", "h", 1);
-  lines.push("  return h;");
-  return lines.join("\n");
-}
-function emitHashInto(lines, schema, value, target, depth) {
-  const pad = "  ".repeat(depth);
-  const next = `${target}_${depth}`;
-  switch (schema.type) {
-    case "number":
-    case "int":
-    case "nan":
-      lines.push(`${pad}let ${target} = __hashNumber(${value});`);
-      return;
-    case "string":
-      lines.push(`${pad}let ${target} = __hashString(${value});`);
-      return;
-    case "boolean":
-      lines.push(`${pad}let ${target} = __hashBoolean(${value});`);
-      return;
-    case "bigint":
-      lines.push(`${pad}let ${target} = __hashBigInt(${value});`);
-      return;
-    case "date":
-      lines.push(`${pad}let ${target} = __hashNumber(${value}.getTime());`);
-      return;
-    case "null":
-      lines.push(`${pad}let ${target} = 1;`);
-      return;
-    case "undefined":
-    case "void":
-      lines.push(`${pad}let ${target} = 0;`);
-      return;
-    case "literal":
-    case "enum":
-    case "any":
-    case "unknown":
-    case "never":
-    case "symbol":
-    case "file":
-    case "regex":
-      lines.push(`${pad}let ${target} = __hashUnknown(${value});`);
-      return;
-    case "optional":
-      lines.push(`${pad}let ${target};`);
-      lines.push(`${pad}if (${value} === undefined) {`);
-      lines.push(`${pad}  ${target} = 0;`);
-      lines.push(`${pad}} else {`);
-      emitHashInto(lines, schema.def.innerType, value, next, depth + 1);
-      lines.push(`${pad}  ${target} = ${next};`);
-      lines.push(`${pad}}`);
-      return;
-    case "nullable":
-      lines.push(`${pad}let ${target};`);
-      lines.push(`${pad}if (${value} === null) {`);
-      lines.push(`${pad}  ${target} = 1;`);
-      lines.push(`${pad}} else {`);
-      emitHashInto(lines, schema.def.innerType, value, next, depth + 1);
-      lines.push(`${pad}  ${target} = ${next};`);
-      lines.push(`${pad}}`);
-      return;
-    case "nullish":
-      lines.push(`${pad}let ${target};`);
-      lines.push(`${pad}if (${value} == null) {`);
-      lines.push(`${pad}  ${target} = ${value} === null ? 1 : 0;`);
-      lines.push(`${pad}} else {`);
-      emitHashInto(lines, schema.def.innerType, value, next, depth + 1);
-      lines.push(`${pad}  ${target} = ${next};`);
-      lines.push(`${pad}}`);
-      return;
-    case "readonly":
-    case "default":
-    case "brand":
-    case "transform":
-    case "pipe":
-    case "coerce":
-    case "refine":
-      emitHashInto(lines, schema.def.innerType, value, target, depth);
-      return;
-    case "array": {
-      lines.push(`${pad}let ${target} = ${schema.type === "array" ? "17" : "0"};`);
-      lines.push(`${pad}for (let i = 0, len = ${value}.length; i < len; i++) {`);
-      emitHashInto(lines, schema.def.element, `${value}[i]`, next, depth + 1);
-      lines.push(`${pad}  ${target} = __combineHash(${target}, ${next});`);
-      lines.push(`${pad}}`);
-      return;
-    }
-    case "object": {
-      lines.push(`${pad}let ${target} = 23;`);
-      const props = schema.def.props;
-      for (const key of Object.keys(props)) {
-        lines.push(`${pad}{`);
-        emitHashInto(lines, props[key], emitDefaultedValue(props[key], emitPropertyAccess(value, key)), next, depth);
-        lines.push(`${pad}  ${target} = __combineHash(${target}, ${next});`);
-        lines.push(`${pad}}`);
-      }
-      return;
-    }
-    default:
-      lines.push(`${pad}let ${target} = __hashUnknown(${value});`);
-      return;
-  }
-}
-
-// ../../packages/jit/src/core/hints/hint-merge.ts
-function mergeHints(left, right) {
-  if (!left) return right ?? {};
-  if (!right) return left;
-  const collection = mergeCollection(left.collection, right.collection);
-  const entity2 = right.entity ?? left.entity;
-  const index2 = right.index ?? left.index;
-  const order = right.order ?? left.order;
-  const compare2 = mergeOptional(left.compare, right.compare);
-  const clone3 = mergeOptional(left.clone, right.clone);
-  const hash4 = mergeOptional(left.hash, right.hash);
-  const diff3 = mergeOptional(left.diff, right.diff);
-  const serialize = mergeOptional(left.serialize, right.serialize);
-  return {
-    ...entity2 ? { entity: entity2 } : {},
-    ...index2 ? { index: index2 } : {},
-    ...order ? { order } : {},
-    ...collection ? { collection } : {},
-    ...compare2 ? { compare: compare2 } : {},
-    ...clone3 ? { clone: clone3 } : {},
-    ...hash4 ? { hash: hash4 } : {},
-    ...diff3 ? { diff: diff3 } : {},
-    ...serialize ? { serialize } : {}
-  };
-}
-function mergeOptional(left, right) {
-  if (!left) return right;
-  if (!right) return left;
-  return {
-    ...left,
-    ...right
-  };
-}
-function mergeCollection(left, right) {
-  if (!left) return right;
-  if (!right) return left;
-  const ordered = left.ordered || right.ordered ? {
-    ...left.ordered,
-    ...right.ordered
-  } : void 0;
-  return {
-    ...left,
-    ...right,
-    ...ordered ? { ordered } : {}
-  };
-}
-
-// ../../packages/jit/src/core/hints/hint-resolver.ts
-function resolveHints(schema) {
-  let current = schema;
-  let hints = {};
-  while (current) {
-    const annotations = current.annotations;
-    hints = mergeHints(annotations?.hints, hints);
-    current = innerSchema(current);
-  }
-  if (hints.order && !hints.order.key && typeof hints.collection?.identify === "string") {
-    hints = mergeHints(hints, {
-      order: {
-        ...hints.order,
-        key: hints.collection.identify
-      }
-    });
-  }
-  return hints;
-}
-function innerSchema(schema) {
-  if (schema.type === "optional" || schema.type === "nullable" || schema.type === "nullish" || schema.type === "readonly" || schema.type === "promise" || schema.type === "default" || schema.type === "brand" || schema.type === "transform" || schema.type === "pipe" || schema.type === "refine" || schema.type === "coerce") {
-    return schema.def.innerType;
-  }
-  if (schema.type === "lazy") return schema.def.getter();
-  return void 0;
-}
-
-// ../../packages/jit/src/core/hints/hint-schema.ts
-function attachHint(schema, hints) {
-  const annotations = schema.annotations ?? {};
-  return {
-    type: schema.type,
-    _type: null,
-    def: schema.def,
-    annotations: {
-      ...annotations,
-      hints: mergeHints(annotations.hints, hints)
-    }
-  };
-}
-function attachMetadata(schema, metadata) {
-  const annotations = schema.annotations ?? {};
-  return {
-    type: schema.type,
-    _type: null,
-    def: schema.def,
-    annotations: { ...annotations, metadata: { ...annotations.metadata, ...metadata } }
-  };
-}
-
-// ../../packages/jit/src/compiler/resolvers/resolve-hints.ts
-function resolveCompilerHints(schema) {
-  const resolved = resolveWrappers(schema);
-  return {
-    base: resolved.base,
-    hints: resolveHints(schema)
-  };
-}
-function resolveHintKey(key) {
-  if (typeof key === "string") return key;
-  if (Array.isArray(key) && key.length === 1 && typeof key[0] === "string") return key[0];
-  return void 0;
-}
-
-// ../../packages/jit/src/compiler/strategy/resolve-strategy.ts
-function resolveEqualStrategy(schema) {
-  const { base, hints } = resolveCompilerHints(schema);
-  const identifyKey = resolveHintKey(hints.index?.key ?? hints.collection?.identify);
-  const entityKey = resolveHintKey(hints.entity?.key);
-  const key = identifyKey ?? entityKey;
-  const ordered = hints.order ?? hints.collection?.ordered;
-  if (ordered && !key) {
-    throw new JITError("INVALID_OPERATION", "ordered() requires a string key for compiler strategies");
-  }
-  return {
-    type: "equal",
-    array: base.type === "array" && ordered && key ? { type: "binary-search", key, direction: resolveDirection(ordered.direction) } : base.type === "array" && (hints.index || hints.collection?.indexed === true) && key ? { type: "map", key } : { type: "loop" },
-    hash: hints.hash ? { type: "hash-short-circuit", strategy: hints.hash.strategy } : { type: "none" }
-  };
-}
-function resolveDirection(direction) {
-  return direction === "asc" || direction === "desc" ? direction : void 0;
-}
-
-// ../../packages/jit/src/compiler/ir/scope.ts
-var Scope = class {
-  #counts = /* @__PURE__ */ new Map();
-  #names = /* @__PURE__ */ new Set();
-  createVar(prefix) {
-    const safePrefix = prefix.replace(/[^$_a-zA-Z0-9]/g, "_").replace(/^[^$_a-zA-Z]/, "_") || "_";
-    let next = this.#counts.get(safePrefix) ?? 0;
-    let name = next === 0 ? safePrefix : `${safePrefix}${next}`;
-    while (this.#names.has(name)) {
-      next++;
-      name = `${safePrefix}${next}`;
-    }
-    this.#counts.set(safePrefix, next + 1);
-    this.#names.add(name);
-    return irVar(name);
-  }
-};
-
-// ../../packages/jit/src/compiler/ir/builders/build-equal-ir.ts
-function buildEqualIR(schema, strategy = resolveEqualStrategy(schema)) {
-  const recursion = createRecursionState(schema);
-  const program = buildEqualProgram(schema, strategy, recursion);
-  const helpers = [];
-  while (recursion.pending.length > 0) {
-    const target = recursion.pending.shift();
-    helpers.push({
-      name: recursion.names.get(target),
-      program: buildEqualProgram(target, resolveEqualStrategy(target), recursion)
-    });
-  }
-  return helpers.length > 0 ? { ...program, helpers } : program;
-}
-function createRecursionState(schema) {
-  return { recursive: findRecursiveSchemas(schema), names: /* @__PURE__ */ new Map(), pending: [], entry: void 0 };
-}
-function helperFor(recursion, target) {
-  const existing = recursion.names.get(target);
-  if (existing) return existing;
-  const name = `equal_r${recursion.names.size + 1}`;
-  recursion.names.set(target, name);
-  recursion.pending.push(target);
-  return name;
-}
-function buildEqualProgram(schema, strategy, recursion) {
-  const previousEntry = recursion.entry;
-  recursion.entry = schema;
-  const scope = new Scope();
-  const left = irVar("l");
-  const right = irVar("r");
-  const body = [
-    { kind: "if", test: strictEqual(left, right), then: [{ kind: "return", value: literal(true) }] }
-  ];
-  if (strategy.hash.type === "hash-short-circuit") {
-    body.push({
-      kind: "hash_compare",
-      leftHash: call(irVar("__hash"), [left]),
-      rightHash: call(irVar("__hash"), [right])
-    });
-  }
-  appendSchemaCompare(body, schema, left, right, scope, strategy, recursion);
-  body.push({ kind: "return", value: literal(true) });
-  recursion.entry = previousEntry;
-  return { kind: "program", params: [left, right], body };
-}
-function appendSchemaCompare(body, schema, left, right, scope, strategy, recursion) {
-  const resolved = resolveWrappers(schema);
-  if (resolved.optional || resolved.nullable) {
-    appendResolvedWrapperCompare(body, resolved, left, right, scope, strategy, recursion);
-    return;
-  }
-  const base = resolved.base;
-  if (recursion.recursive.has(base)) {
-    if (recursion.entry === base) {
-      recursion.entry = void 0;
-    } else {
-      appendCompareOrFail(body, call(irVar(helperFor(recursion, base)), [left, right]));
-      return;
-    }
-  }
-  switch (base.type) {
-    case TypeName.any:
-    case TypeName.unknown:
-    case TypeName.never:
-    case TypeName.void:
-    case TypeName.undefined:
-    case TypeName.literal:
-    case TypeName.enum:
-    case TypeName.file:
-      appendCompareOrFail(body, sameValue(left, right));
-      return;
-    case TypeName.nan:
-    case TypeName.int:
-    case TypeName.number:
-      appendCompareOrFail(body, sameNumber(left, right));
-      return;
-    case TypeName.null:
-    case TypeName.symbol:
-    case TypeName.boolean:
-    case TypeName.bigint:
-    case TypeName.string:
-      appendCompareOrFail(body, strictEqual(left, right));
-      return;
-    case TypeName.date:
-      appendCompareOrFail(body, sameValue(call(loadProp(left, "getTime")), call(loadProp(right, "getTime"))));
-      return;
-    case TypeName.array:
-      appendArrayCompare(body, base, left, right, scope, strategy, recursion);
-      return;
-    case TypeName.tuple:
-      appendTupleCompare(body, base, left, right, scope, strategy, recursion);
-      return;
-    case TypeName.object:
-      appendObjectCompare(body, base, left, right, scope, recursion);
-      return;
-    case TypeName.record:
-      appendRecordCompare(body, base, left, right, scope, strategy, recursion);
-      return;
-    case TypeName.set:
-      appendSetCompare(body, left, right, scope);
-      return;
-    case TypeName.map:
-      appendMapCompare(body, base, left, right, scope, strategy, recursion);
-      return;
-    case TypeName.union:
-      appendUnionCompare(body, base, left, right, scope, strategy, recursion);
-      return;
-    case TypeName.intersection: {
-      const flattened = flattenObjectIntersection(base);
-      if (flattened !== void 0) appendObjectCompare(body, flattened, left, right, scope, recursion);
-      else appendIntersectionCompare(body, base, left, right, scope, strategy, recursion);
-      return;
-    }
-    case TypeName.discriminatedUnion:
-      appendDiscriminatedUnionCompare(body, base, left, right, scope, strategy, recursion);
-      return;
-    default:
-      throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler equal IR for type: ${base.type}`);
-  }
-}
-function appendCompareOrFail(body, expr) {
-  body.push({ kind: "if", test: not(expr), then: [{ kind: "return", value: literal(false) }] });
-}
-function appendResolvedWrapperCompare(body, resolved, left, right, scope, strategy, recursion) {
-  const inner = [];
-  if (resolved.optional) {
-    inner.push({
-      kind: "if",
-      test: orCompare(strictEqual(left, literal(void 0)), strictEqual(right, literal(void 0))),
-      then: [{ kind: "return", value: literal(false) }]
-    });
-  }
-  if (resolved.nullable) {
-    inner.push({
-      kind: "if",
-      test: orCompare(strictEqual(left, literal(null)), strictEqual(right, literal(null))),
-      then: [{ kind: "return", value: literal(false) }]
-    });
-  }
-  appendSchemaCompare(inner, resolved.base, left, right, scope, strategy, recursion);
-  body.push({ kind: "if", test: not(sameValue(left, right)), then: inner });
-}
-function appendArrayCompare(body, schema, left, right, scope, strategy, recursion) {
-  const len = scope.createVar("len");
-  const ix = scope.createVar("i");
-  const leftItem = scope.createVar("li");
-  const rightItem = scope.createVar("ri");
-  const loopBody = [
-    { kind: "assign", target: leftItem, expr: loadIndex(left, ix) },
-    { kind: "assign", target: rightItem, expr: loadIndex(right, ix) }
-  ];
-  appendSchemaCompare(loopBody, schema.def.element, leftItem, rightItem, scope, strategy, recursion);
-  if (strategy.array.type === "map") {
-    body.push({
-      kind: "map_equal",
-      left,
-      right,
-      key: strategy.array.key,
-      length: len,
-      index: ix,
-      leftItem,
-      rightItem,
-      rightIndex: scope.createVar("rightIndex"),
-      body: loopBody.slice(2)
-    });
-    return;
-  }
-  if (strategy.array.type === "binary-search") {
-    body.push({
-      kind: "binary_search_equal",
-      left,
-      right,
-      key: strategy.array.key,
-      length: len,
-      index: ix,
-      leftItem,
-      rightItem,
-      searchLow: scope.createVar("low"),
-      searchHigh: scope.createVar("high"),
-      searchMid: scope.createVar("mid"),
-      found: scope.createVar("found"),
-      direction: strategy.array.direction,
-      body: loopBody.slice(2)
-    });
-    return;
-  }
-  body.push(
-    { kind: "assign", target: len, expr: loadProp(left, "length") },
-    {
-      kind: "if",
-      test: notStrictEqual(len, loadProp(right, "length")),
-      then: [{ kind: "return", value: literal(false) }]
-    },
-    { kind: "for", index: ix, from: len, body: loopBody }
-  );
-}
-function appendTupleCompare(body, schema, left, right, scope, strategy, recursion) {
-  const items = schema.def.items;
-  for (let index2 = 0; index2 < items.length; index2++) {
-    appendSchemaCompare(
-      body,
-      items[index2],
-      loadIndex(left, literal(index2)),
-      loadIndex(right, literal(index2)),
-      scope,
-      strategy,
-      recursion
-    );
-  }
-}
-function appendRecordCompare(body, schema, left, right, scope, strategy, recursion) {
-  const leftKeys = scope.createVar("lk");
-  const rightKeys = scope.createVar("rk");
-  const len = scope.createVar("len");
-  const ix = scope.createVar("i");
-  const key = scope.createVar("k");
-  const leftValue = scope.createVar("lv");
-  const rightValue = scope.createVar("rv");
-  const loopBody = [
-    { kind: "assign", target: key, expr: loadIndex(leftKeys, ix) },
-    { kind: "if", test: not(ownsKey(right, key)), then: [{ kind: "return", value: literal(false) }] },
-    { kind: "assign", target: leftValue, expr: loadIndex(left, key) },
-    { kind: "assign", target: rightValue, expr: loadIndex(right, key) }
-  ];
-  appendSchemaCompare(loopBody, schema.def.value, leftValue, rightValue, scope, strategy, recursion);
-  body.push(
-    { kind: "assign", target: leftKeys, expr: objectKeys(left) },
-    { kind: "assign", target: rightKeys, expr: objectKeys(right) },
-    { kind: "assign", target: len, expr: loadProp(leftKeys, "length") },
-    {
-      kind: "if",
-      test: notStrictEqual(len, loadProp(rightKeys, "length")),
-      then: [{ kind: "return", value: literal(false) }]
-    },
-    { kind: "for", index: ix, from: len, body: loopBody }
-  );
-}
-function appendSetCompare(body, left, right, scope) {
-  const item = scope.createVar("item");
-  body.push(
-    {
-      kind: "if",
-      test: notStrictEqual(loadProp(left, "size"), loadProp(right, "size")),
-      then: [{ kind: "return", value: literal(false) }]
-    },
-    {
-      kind: "for_of",
-      item,
-      iterable: left,
-      body: [
-        {
-          kind: "if",
-          test: not(call(loadProp(right, "has"), [item])),
-          then: [{ kind: "return", value: literal(false) }]
-        }
-      ]
-    }
-  );
-}
-function appendMapCompare(body, schema, left, right, scope, strategy, recursion) {
-  const entry = scope.createVar("entry");
-  const key = scope.createVar("mk");
-  const leftValue = scope.createVar("mlv");
-  const rightValue = scope.createVar("mrv");
-  const loopBody = [
-    { kind: "assign", target: key, expr: loadIndex(entry, literal(0)) },
-    {
-      kind: "if",
-      test: not(call(loadProp(right, "has"), [key])),
-      then: [{ kind: "return", value: literal(false) }]
-    },
-    { kind: "assign", target: leftValue, expr: loadIndex(entry, literal(1)) },
-    { kind: "assign", target: rightValue, expr: call(loadProp(right, "get"), [key]) }
-  ];
-  appendSchemaCompare(loopBody, schema.def.value, leftValue, rightValue, scope, strategy, recursion);
-  body.push(
-    {
-      kind: "if",
-      test: notStrictEqual(loadProp(left, "size"), loadProp(right, "size")),
-      then: [{ kind: "return", value: literal(false) }]
-    },
-    { kind: "for_of", item: entry, iterable: left, body: loopBody }
-  );
-}
-function objectKeys(value) {
-  return call(loadProp(irVar("Object"), "keys"), [value]);
-}
-function ownsKey(target, key) {
-  return call(loadProp(loadProp(loadProp(irVar("Object"), "prototype"), "hasOwnProperty"), "call"), [target, key]);
-}
-function appendObjectCompare(body, schema, left, right, scope, recursion) {
-  const props = schema.def.props;
-  for (const key of Object.keys(props)) {
-    const prop = props[key];
-    const leftProp = loadProp(left, key);
-    const rightProp = loadProp(right, key);
-    const defaultExpr = staticDefaultIRExpr(prop);
-    let leftValue = leftProp;
-    let rightValue = rightProp;
-    if (defaultExpr || shouldHoistObjectProp(prop)) {
-      const leftVar = scope.createVar(`l_${key}`);
-      const rightVar = scope.createVar(`r_${key}`);
-      body.push(
-        defaultExpr ? letDecl(leftVar, leftProp) : { kind: "assign", target: leftVar, expr: leftProp },
-        defaultExpr ? letDecl(rightVar, rightProp) : { kind: "assign", target: rightVar, expr: rightProp }
-      );
-      if (defaultExpr) {
-        body.push(
-          { kind: "if", test: strictEqual(leftVar, literal(void 0)), then: [store(leftVar, defaultExpr)] },
-          { kind: "if", test: strictEqual(rightVar, literal(void 0)), then: [store(rightVar, defaultExpr)] }
-        );
-      }
-      leftValue = leftVar;
-      rightValue = rightVar;
-    }
-    appendSchemaCompare(
-      body,
-      prop,
-      leftValue,
-      rightValue,
-      scope,
-      { type: "equal", array: { type: "loop" }, hash: { type: "none" } },
-      recursion
-    );
-  }
-}
-function shouldHoistObjectProp(schema) {
-  const resolved = resolveWrappers(schema).base;
-  return resolved.type === TypeName.object || resolved.type === TypeName.array;
-}
-function appendUnionCompare(body, schema, left, right, scope, strategy, recursion) {
-  const options = schema.def.options;
-  const branches = [];
-  if (options.every(isAtomicEqualSchema)) {
-    appendCompareOrFail(body, sameNumber(left, right));
-    return;
-  }
-  for (const option of options) {
-    const then = [
-      { kind: "if", test: not(schemaGuard(option, right)), then: [{ kind: "return", value: literal(false) }] }
-    ];
-    appendSchemaCompare(then, option, left, right, scope, strategy, recursion);
-    then.push({ kind: "return", value: literal(true) });
-    branches.push({ kind: "if", test: schemaGuard(option, left), then });
-  }
-  body.push(...branches, { kind: "return", value: literal(false) });
-}
-function isAtomicEqualSchema(schema) {
-  const base = resolveWrappers(schema).base;
-  return isPrimitiveLikeSchema(base) && base.type !== TypeName.regex && base.type !== TypeName.instanceof;
-}
-function appendIntersectionCompare(body, schema, left, right, scope, strategy, recursion) {
-  const options = schema.def.options;
-  for (const option of options) {
-    appendSchemaCompare(body, option, left, right, scope, strategy, recursion);
-  }
-}
-function appendDiscriminatedUnionCompare(body, schema, left, right, scope, strategy, recursion) {
-  const discriminator = schema.def.discriminator;
-  const leftTag = loadProp(left, discriminator);
-  const rightTag = loadProp(right, discriminator);
-  const options = schema.def.options;
-  for (const option of options) {
-    const tag = literalDiscriminatorValue(option, discriminator);
-    if (tag === void 0) continue;
-    const then = [
-      { kind: "if", test: notStrictEqual(rightTag, literal(tag)), then: [{ kind: "return", value: literal(false) }] }
-    ];
-    appendSchemaCompare(then, option, left, right, scope, strategy, recursion);
-    then.push({ kind: "return", value: literal(true) });
-    body.push({ kind: "if", test: strictEqual(leftTag, literal(tag)), then });
-  }
-  body.push({ kind: "return", value: literal(false) });
-}
-function orCompare(left, right) {
-  return { kind: "binary", op: "or", left, right };
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/cost/optimize-cost.ts
-function optimizeCost(program) {
-  return { ...program, body: optimizeNodes(program.body) };
-}
-function optimizeNodes(nodes) {
-  const out = [];
-  let run = [];
-  const flush = () => {
-    if (run.length > 0) {
-      out.push(...run.sort((left, right) => nodeCost(left) - nodeCost(right)));
-      run = [];
-    }
-  };
-  for (const node of nodes) {
-    if (isPureFailureCheck(node)) {
-      run.push(node);
-      continue;
-    }
-    flush();
-    if (node.kind === "if") {
-      out.push({
-        ...node,
-        then: optimizeNodes(node.then),
-        ...node.otherwise ? { otherwise: optimizeNodes(node.otherwise) } : {}
-      });
-      continue;
-    }
-    if (node.kind === "for") {
-      out.push({ ...node, body: optimizeNodes(node.body) });
-      continue;
-    }
-    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
-      out.push({ ...node, body: optimizeNodes(node.body) });
-      continue;
-    }
-    out.push(node);
-  }
-  flush();
-  return out;
-}
-function isPureFailureCheck(node) {
-  return node.kind === "if" && node.then.length === 1 && node.then[0].kind === "return" && node.then[0].value.kind === "literal" && node.then[0].value.value === false && isPureExpr(node.test);
-}
-function isPureExpr(expr) {
-  switch (expr.kind) {
-    case "var":
-    case "literal":
-      return true;
-    case "not":
-      return isPureExpr(expr.expr);
-    case "binary":
-    case "sameValue":
-      return isPureExpr(expr.left) && isPureExpr(expr.right);
-    case "sameNumber":
-      return false;
-    case "nary":
-      return expr.operands.every(isPureExpr);
-    case "schema_guard":
-      return isPureExpr(expr.value);
-    case "load_prop":
-      return isPureExpr(expr.base);
-    case "load_index":
-      return isPureExpr(expr.base) && isPureExpr(expr.index);
-    case "call":
-    case "object_literal":
-    case "array_literal":
-    case "construct":
-      return false;
-  }
-}
-function nodeCost(node) {
-  return node.kind === "if" ? exprCost(node.test) : 0;
-}
-function exprCost(expr) {
-  switch (expr.kind) {
-    case "literal":
-    case "var":
-      return 1;
-    case "load_prop":
-      return 2 + exprCost(expr.base);
-    case "load_index":
-      return 4 + exprCost(expr.base) + exprCost(expr.index);
-    case "not":
-      return exprCost(expr.expr);
-    case "binary":
-    case "sameValue":
-      return 1 + exprCost(expr.left) + exprCost(expr.right);
-    case "sameNumber":
-      return 20;
-    case "nary":
-      return 1 + expr.operands.reduce((total, operand) => total + exprCost(operand), 0);
-    case "schema_guard":
-      return 10 + exprCost(expr.value);
-    case "call":
-      return 100;
-    case "object_literal":
-    case "array_literal":
-    case "construct":
-      return 50;
-  }
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/passes/flatten-blocks.ts
-function flattenBlocks(program) {
-  return { ...program, body: flattenNodes(program.body) };
-}
-function flattenNodes(nodes) {
-  const out = [];
-  for (const node of nodes) {
-    if (node.kind === "block") {
-      out.push(...flattenNodes(node.body));
-      continue;
-    }
-    out.push(mapNodeBodies(node, flattenNodes));
-  }
-  return out;
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/passes/inline-vars.ts
-function inlineVars(program) {
-  const usages = /* @__PURE__ */ new Map();
-  collectUsages(program.body, usages);
-  return { ...program, body: inlineNodes(program.body, usages, /* @__PURE__ */ new Map()) };
-}
-function inlineNodes(nodes, usages, replacements) {
-  const out = [];
-  const localReplacements = new Map(replacements);
-  for (const node of nodes) {
-    if (node.kind === "assign") {
-      const expr = replaceExpr(node.expr, localReplacements);
-      if ((usages.get(node.target.name) ?? 0) === 1 && isInlineSafe(expr)) {
-        localReplacements.set(node.target.name, expr);
-        continue;
-      }
-      out.push({ ...node, expr });
-      continue;
-    }
-    if (node.kind === "if") {
-      out.push({
-        ...node,
-        test: replaceExpr(node.test, localReplacements),
-        then: inlineNodes(node.then, usages, localReplacements),
-        ...node.otherwise ? { otherwise: inlineNodes(node.otherwise, usages, localReplacements) } : {}
-      });
-      continue;
-    }
-    if (node.kind === "for") {
-      out.push({
-        ...node,
-        from: replaceExpr(node.from, localReplacements),
-        body: inlineNodes(node.body, usages, /* @__PURE__ */ new Map())
-      });
-      continue;
-    }
-    if (node.kind === "hash_compare") {
-      out.push({
-        ...node,
-        leftHash: replaceExpr(node.leftHash, localReplacements),
-        rightHash: replaceExpr(node.rightHash, localReplacements)
-      });
-      continue;
-    }
-    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
-      out.push({
-        ...node,
-        left: replaceExpr(node.left, localReplacements),
-        right: replaceExpr(node.right, localReplacements),
-        body: inlineNodes(node.body, usages, /* @__PURE__ */ new Map())
-      });
-      continue;
-    }
-    if (node.kind === "return") {
-      out.push({ ...node, value: replaceExpr(node.value, localReplacements) });
-      continue;
-    }
-    out.push(node);
-  }
-  return out;
-}
-function collectUsages(nodes, usages) {
-  for (const node of nodes) {
-    if (node.kind === "assign") collectExprUsages(node.expr, usages);
-    if (node.kind === "if") {
-      collectExprUsages(node.test, usages);
-      collectUsages(node.then, usages);
-      if (node.otherwise) collectUsages(node.otherwise, usages);
-    }
-    if (node.kind === "for") {
-      collectExprUsages(node.from, usages);
-      collectUsages(node.body, usages);
-    }
-    if (node.kind === "hash_compare") {
-      collectExprUsages(node.leftHash, usages);
-      collectExprUsages(node.rightHash, usages);
-    }
-    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
-      collectExprUsages(node.left, usages);
-      collectExprUsages(node.right, usages);
-      collectUsages(node.body, usages);
-    }
-    if (node.kind === "return") collectExprUsages(node.value, usages);
-  }
-}
-function collectExprUsages(expr, usages) {
-  switch (expr.kind) {
-    case "var":
-      usages.set(expr.name, (usages.get(expr.name) ?? 0) + 1);
-      return;
-    case "not":
-      collectExprUsages(expr.expr, usages);
-      return;
-    case "binary":
-    case "sameValue":
-      collectExprUsages(expr.left, usages);
-      collectExprUsages(expr.right, usages);
-      return;
-    case "sameNumber":
-      collectExprUsages(expr.left, usages);
-      collectExprUsages(expr.right, usages);
-      collectExprUsages(expr.left, usages);
-      collectExprUsages(expr.right, usages);
-      return;
-    case "schema_guard":
-      collectExprUsages(expr.value, usages);
-      return;
-    case "load_prop":
-      collectExprUsages(expr.base, usages);
-      return;
-    case "load_index":
-      collectExprUsages(expr.base, usages);
-      collectExprUsages(expr.index, usages);
-      return;
-    case "call":
-      collectExprUsages(expr.callee, usages);
-      for (const arg of expr.args) collectExprUsages(arg, usages);
-      return;
-    case "nary":
-      for (const operand of expr.operands) collectExprUsages(operand, usages);
-      return;
-    case "object_literal":
-      for (const entry of expr.entries) collectExprUsages(entry.value, usages);
-      return;
-    case "array_literal":
-      for (const element of expr.elements) collectExprUsages(element, usages);
-      return;
-    case "construct":
-      for (const arg of expr.args) collectExprUsages(arg, usages);
-      return;
-    case "literal":
-      return;
-  }
-}
-function replaceExpr(expr, replacements) {
-  switch (expr.kind) {
-    case "var":
-      return replacements.get(expr.name) ?? expr;
-    case "not":
-      return { ...expr, expr: replaceExpr(expr.expr, replacements) };
-    case "binary":
-    case "sameValue":
-    case "sameNumber":
-      return { ...expr, left: replaceExpr(expr.left, replacements), right: replaceExpr(expr.right, replacements) };
-    case "schema_guard":
-      return { ...expr, value: replaceExpr(expr.value, replacements) };
-    case "load_prop":
-      return { ...expr, base: replaceExpr(expr.base, replacements) };
-    case "load_index":
-      return { ...expr, base: replaceExpr(expr.base, replacements), index: replaceExpr(expr.index, replacements) };
-    case "call":
-      return {
-        ...expr,
-        callee: replaceExpr(expr.callee, replacements),
-        args: expr.args.map((arg) => replaceExpr(arg, replacements))
-      };
-    case "nary":
-      return { ...expr, operands: expr.operands.map((operand) => replaceExpr(operand, replacements)) };
-    case "object_literal":
-      return {
-        ...expr,
-        entries: expr.entries.map((entry) => ({ ...entry, value: replaceExpr(entry.value, replacements) }))
-      };
-    case "array_literal":
-      return { ...expr, elements: expr.elements.map((element) => replaceExpr(element, replacements)) };
-    case "construct":
-      return { ...expr, args: expr.args.map((arg) => replaceExpr(arg, replacements)) };
-    case "literal":
-      return expr;
-  }
-}
-function isInlineSafe(expr) {
-  switch (expr.kind) {
-    case "var":
-    case "literal":
-      return true;
-    case "load_prop":
-      return isInlineSafe(expr.base);
-    case "load_index":
-      return isInlineSafe(expr.base) && isInlineSafe(expr.index);
-    case "not":
-      return isInlineSafe(expr.expr);
-    case "binary":
-    case "sameValue":
-    case "sameNumber":
-      return isInlineSafe(expr.left) && isInlineSafe(expr.right);
-    case "nary":
-      return expr.operands.every(isInlineSafe);
-    case "schema_guard":
-      return isInlineSafe(expr.value);
-    case "call":
-    case "object_literal":
-    case "array_literal":
-    case "construct":
-      return false;
-  }
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/passes/normalize-logic.ts
-function normalizeLogic(program) {
-  return { ...program, body: normalizeNodes(program.body) };
-}
-function normalizeNodes(nodes) {
-  return nodes.map((node) => mapNodeExprs(mapNodeBodies(node, normalizeNodes), normalizeExpr));
-}
-function normalizeExpr(expr) {
-  const next = mapExprChildren(expr, normalizeExpr);
-  if (next.kind === "not") return normalizeNot(next.expr);
-  if (next.kind === "nary") return normalizeNary(next);
-  if (next.kind === "binary" && next.left.kind === "literal" && next.right.kind === "literal") {
-    return foldComparison(next.op, next.left.value, next.right.value) ?? next;
-  }
-  return next;
-}
-function foldComparison(op, left, right) {
-  switch (op) {
-    case "strictEqual":
-      return literal(left === right);
-    case "notStrictEqual":
-      return literal(left !== right);
-    case "greaterThan":
-      return literal(left > right);
-    case "greaterThanOrEqual":
-      return literal(left >= right);
-    case "lessThan":
-      return literal(left < right);
-    case "lessThanOrEqual":
-      return literal(left <= right);
-    default:
-      return void 0;
-  }
-}
-function normalizeNot(inner) {
-  if (inner.kind === "not") return inner.expr;
-  if (inner.kind === "literal" && typeof inner.value === "boolean") return literal(!inner.value);
-  if (inner.kind === "binary" && inner.op === "strictEqual") return { ...inner, op: "notStrictEqual" };
-  if (inner.kind === "binary" && inner.op === "notStrictEqual") return { ...inner, op: "strictEqual" };
-  if (inner.kind === "nary") {
-    return normalizeNary({
-      kind: "nary",
-      op: inner.op === "and" ? "or" : "and",
-      operands: inner.operands.map((operand) => normalizeExpr(not(operand)))
-    });
-  }
-  return not(inner);
-}
-function normalizeNary(expr) {
-  const absorbing = expr.op !== "and";
-  const neutral = !absorbing;
-  const operands = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const operand of flattenOperands(expr.op, expr.operands)) {
-    if (operand.kind === "literal" && typeof operand.value === "boolean") {
-      if (operand.value === absorbing) return literal(absorbing);
-      continue;
-    }
-    const key = exprKey(operand);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    operands.push(operand);
-  }
-  if (operands.length === 0) return literal(neutral);
-  return { ...expr, operands };
-}
-function flattenOperands(op, operands) {
-  const out = [];
-  for (const operand of operands) {
-    if (operand.kind === "nary" && operand.op === op) {
-      out.push(...flattenOperands(op, operand.operands));
-      continue;
-    }
-    out.push(operand);
-  }
-  return out;
-}
-var opaqueKeys = /* @__PURE__ */ new WeakMap();
-var opaqueKeyCounter = 0;
-function opaqueKey(value) {
-  let key = opaqueKeys.get(value);
-  if (key === void 0) {
-    key = ++opaqueKeyCounter;
-    opaqueKeys.set(value, key);
-  }
-  return key;
-}
-function exprKey(expr) {
-  switch (expr.kind) {
-    case "var":
-      return `v:${expr.name}`;
-    case "literal":
-      return `l:${typeof expr.value}:${String(expr.value)}`;
-    case "not":
-      return `!(${exprKey(expr.expr)})`;
-    case "binary":
-      return `b:${expr.op}(${exprKey(expr.left)},${exprKey(expr.right)})`;
-    case "nary":
-      return `n:${expr.op}(${expr.operands.map(exprKey).join(",")})`;
-    case "sameValue":
-      return `sv(${exprKey(expr.left)},${exprKey(expr.right)})`;
-    case "sameNumber":
-      return `sn(${exprKey(expr.left)},${exprKey(expr.right)})`;
-    case "schema_guard":
-      return `g${opaqueKey(expr.schema)}(${exprKey(expr.value)})`;
-    case "load_prop":
-      return `${exprKey(expr.base)}.${expr.key}`;
-    case "load_index":
-      return `${exprKey(expr.base)}[${exprKey(expr.index)}]`;
-    case "call":
-      return `c:${exprKey(expr.callee)}(${expr.args.map(exprKey).join(",")})`;
-    case "object_literal":
-      return `o{${expr.entries.map((entry) => `${entry.key}:${exprKey(entry.value)}`).join(",")}}`;
-    case "array_literal":
-      return `a[${expr.elements.map(exprKey).join(",")}]`;
-    case "construct":
-      return `new:${expr.ctor}(${expr.args.map(exprKey).join(",")})`;
-  }
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/passes/reorder-compares.ts
-function reorderCompares(program) {
-  return { ...program, body: reorderNodes(program.body) };
-}
-function reorderNodes(nodes) {
-  const out = [];
-  let run = [];
-  const flush = () => {
-    if (run.length > 0) {
-      out.push(...run.sort((left, right) => compareCost(left) - compareCost(right)));
-      run = [];
-    }
-  };
-  for (const node of nodes) {
-    if (isPureCompareReturn(node)) {
-      run.push(node);
-      continue;
-    }
-    flush();
-    if (node.kind === "if") {
-      out.push({
-        ...node,
-        then: reorderNodes(node.then),
-        ...node.otherwise ? { otherwise: reorderNodes(node.otherwise) } : {}
-      });
-      continue;
-    }
-    if (node.kind === "for" || node.kind === "for_of") {
-      out.push({ ...node, body: reorderNodes(node.body) });
-      continue;
-    }
-    if (node.kind === "map_equal" || node.kind === "binary_search_equal") {
-      out.push({ ...node, body: reorderNodes(node.body) });
-      continue;
-    }
-    out.push(node);
-  }
-  flush();
-  return out;
-}
-function isPureCompareReturn(node) {
-  return node.kind === "if" && node.then.length === 1 && node.then[0].kind === "return" && node.then[0].value.kind === "literal" && node.then[0].value.value === false && isPureExpr2(node.test);
-}
-function isPureExpr2(expr) {
-  switch (expr.kind) {
-    case "var":
-    case "literal":
-      return true;
-    case "not":
-      return isPureExpr2(expr.expr);
-    case "binary":
-    case "sameValue":
-    case "sameNumber":
-      return isPureExpr2(expr.left) && isPureExpr2(expr.right);
-    case "nary":
-      return expr.operands.every(isPureExpr2);
-    case "schema_guard":
-      return isPureExpr2(expr.value);
-    case "load_prop":
-      return isPureExpr2(expr.base);
-    case "load_index":
-      return isPureExpr2(expr.base) && isPureExpr2(expr.index);
-    case "call":
-    case "object_literal":
-    case "array_literal":
-    case "construct":
-      return false;
-  }
-}
-function compareCost(node) {
-  return node.kind === "if" ? exprCost2(node.test) : 0;
-}
-function exprCost2(expr) {
-  switch (expr.kind) {
-    case "literal":
-    case "var":
-      return 1;
-    case "load_prop":
-    case "load_index":
-      return 2 + exprCost2(expr.base);
-    case "not":
-      return exprCost2(expr.expr);
-    case "binary":
-    case "sameValue":
-    case "sameNumber":
-      return 1 + exprCost2(expr.left) + exprCost2(expr.right);
-    case "nary":
-      return 1 + expr.operands.reduce((total, operand) => total + exprCost2(operand), 0);
-    case "schema_guard":
-      return 10 + exprCost2(expr.value);
-    case "call":
-      return 100;
-    case "object_literal":
-    case "array_literal":
-    case "construct":
-      return 50;
-  }
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/cost/expr-cost.ts
-function exprCost3(expr) {
-  switch (expr.kind) {
-    case "literal":
-    case "var":
-      return 1;
-    case "load_prop":
-      return 2 + exprCost3(expr.base);
-    case "load_index":
-      return 4 + exprCost3(expr.base) + exprCost3(expr.index);
-    case "not":
-      return exprCost3(expr.expr);
-    case "binary":
-    case "sameValue":
-      return 1 + exprCost3(expr.left) + exprCost3(expr.right);
-    case "sameNumber":
-      return 20;
-    case "nary":
-      return 1 + expr.operands.reduce((total, operand) => total + exprCost3(operand), 0);
-    case "schema_guard":
-      return 10 + exprCost3(expr.value);
-    case "call":
-      return 100;
-    case "object_literal":
-    case "array_literal":
-    case "construct":
-      return 50;
-  }
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/passes/reorder-conditions.ts
-function reorderConditions(program) {
-  return { ...program, body: reorderNodes2(program.body) };
-}
-function reorderNodes2(nodes) {
-  return nodes.map((node) => mapNodeExprs(mapNodeBodies(node, reorderNodes2), reorderExpr));
-}
-function reorderExpr(expr) {
-  const next = mapExprChildren(expr, reorderExpr);
-  if (next.kind !== "nary" || next.operands.length < 2) return next;
-  const ranked = next.operands.map((operand, index2) => ({ operand, index: index2, cost: exprCost3(operand) }));
-  ranked.sort((left, right) => left.cost - right.cost || left.index - right.index);
-  return { ...next, operands: ranked.map((entry) => entry.operand) };
-}
-
-// ../../packages/jit/src/compiler/ir/optimizer/optimize-ir.ts
-var optimizeEqualIRPasses = [flattenBlocks, optimizeCost, inlineVars, reorderCompares];
-function optimizeIRWith(program, passes) {
-  let next = program;
-  for (const pass2 of passes) {
-    next = pass2(next);
-  }
-  if (!program.helpers || program.helpers.length === 0) return next;
-  return {
-    ...next,
-    helpers: program.helpers.map((helper) => ({
-      name: helper.name,
-      program: optimizeIRWith(helper.program, passes)
-    }))
-  };
-}
-function optimizeIR(program) {
-  return optimizeIRWith(program, optimizeEqualIRPasses);
-}
-var optimizeQueryIRPasses = [flattenBlocks, normalizeLogic, reorderConditions];
-function optimizeQueryIR(program) {
-  return optimizeIRWith(program, optimizeQueryIRPasses);
-}
-
-// ../../packages/jit/src/compiler/equal.ts
-function emitEqualSource(schema) {
-  const strategy = resolveEqualStrategy(schema);
-  return emitEqual(optimizeIR(buildEqualIR(schema, strategy)));
-}
-function emitEqualMethodBody(schema) {
-  const strategy = resolveEqualStrategy(schema);
-  const program = optimizeIR(buildEqualIR(schema, strategy));
-  return `const l = this;
-const r = other;
-${emitEqualBody(program)}`;
-}
-function compileEqual(schema, options) {
-  return getCompileCached(
-    schema,
-    "equal",
-    () => {
-      const strategy = resolveEqualStrategy(schema);
-      const program = optimizeIR(buildEqualIR(schema, strategy));
-      const body = emitEqualBody(program);
-      const hash4 = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : void 0;
-      const compiled = globalThis.Function(
-        "__hash",
-        "__getIndex",
-        `return function equal(l, r) {
-${body}
-};`
-      )(hash4, getIndex);
-      registerArtifact(compiled, {
-        kind: "operation",
-        schema,
-        op: "equal"
-      });
-      return compiled;
-    },
-    options
-  );
-}
-function compileEqualMethod(schema, options) {
-  return getCompileCached(
-    schema,
-    "equal:method",
-    () => {
-      const strategy = resolveEqualStrategy(schema);
-      const program = optimizeIR(buildEqualIR(schema, strategy));
-      const body = emitEqualBody(program);
-      const hash4 = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : void 0;
-      return globalThis.Function(
-        "__hash",
-        "__getIndex",
-        `return function equals(other) {
-const l = this;
-const r = other;
-${body}
-};`
-      )(hash4, getIndex);
     },
     options
   );
@@ -6910,7 +7740,7 @@ function unwrapPassthrough(schema) {
     }
   }
 }
-function unwrapValidation(schema, emitter) {
+function unwrapValidation(schema, emitter2) {
   let current = schema;
   let optional3 = false;
   let nullable3 = false;
@@ -6938,24 +7768,24 @@ function unwrapValidation(schema, emitter) {
       continue;
     }
     if (current.type === TypeName.default) {
-      if (emitter.resolveDefaults && !defaultValue) {
+      if (emitter2.resolveDefaults && !defaultValue) {
         const raw = current.def.defaultValue;
-        defaultValue = { binding: emitter.bind(raw), isFactory: typeof raw === "function" };
+        defaultValue = { binding: emitter2.bind(raw), isFactory: typeof raw === "function" };
       }
       current = current.def.innerType;
       continue;
     }
     if (current.type === TypeName.coerce) {
-      coerce3 = coerce3 ?? emitter.bind(current.def.coercer);
+      coerce3 = coerce3 ?? emitter2.bind(current.def.coercer);
       current = current.def.innerType;
       continue;
     }
     if (current.type === TypeName.refine) {
       refines.unshift({
-        binding: emitter.bind(current.def.predicate),
+        binding: emitter2.bind(current.def.predicate),
         ...typeof current.def.message === "string" ? { message: current.def.message } : {},
         ...Array.isArray(current.def.path) ? { path: current.def.path } : {},
-        ...typeof current.def.when === "function" ? { when: emitter.bind(current.def.when) } : {}
+        ...typeof current.def.when === "function" ? { when: emitter2.bind(current.def.when) } : {}
       });
       current = current.def.innerType;
       continue;
@@ -6963,13 +7793,13 @@ function unwrapValidation(schema, emitter) {
     if (current.type === TypeName.pipe) {
       const transform3 = current.def.transform;
       pipes.unshift(
-        isOpChain(transform3) ? { kind: "inline", chain: transform3 } : { kind: "call", binding: emitter.bind(transform3) }
+        isOpChain(transform3) ? { kind: "inline", chain: transform3 } : { kind: "call", binding: emitter2.bind(transform3) }
       );
       current = current.def.innerType;
       continue;
     }
     if (current.type === TypeName.transform) {
-      fieldTransforms = fieldTransforms ?? bindFieldTransforms(current.def.transforms, emitter);
+      fieldTransforms = fieldTransforms ?? bindFieldTransforms(current.def.transforms, emitter2);
       current = current.def.innerType;
       continue;
     }
@@ -6982,7 +7812,7 @@ function unwrapValidation(schema, emitter) {
       continue;
     }
     if (current.type === TypeName.runtimeType) {
-      if (emitter.materializeRuntimeTypes) materialize = emitter.bind(current.def.materialize);
+      if (emitter2.materializeRuntimeTypes) materialize = emitter2.bind(current.def.materialize);
       current = current.def.innerType;
       continue;
     }
@@ -7001,10 +7831,10 @@ function unwrapValidation(schema, emitter) {
     materialize
   };
 }
-function bindFieldTransforms(spec, emitter) {
+function bindFieldTransforms(spec, emitter2) {
   const bindings = {};
   for (const [key, fn] of Object.entries(spec)) {
-    if (typeof fn === "function") bindings[key] = emitter.bind(fn);
+    if (typeof fn === "function") bindings[key] = emitter2.bind(fn);
   }
   return bindings;
 }
@@ -7198,64 +8028,64 @@ function emitValidator(schema, options = {}) {
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter;
   if (emitSafeParse) {
-    const emitter = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes);
-    emitter.markRecursive(recursive);
-    parseEmitter = emitter;
-    emitter.writer.line("function safeParse(value) {");
-    emitter.writer.indent(() => {
-      emitter.writer.line("const issues = [];");
-      const output = emitter.emitNode(schema, "value", { kind: "static", source: "" });
-      emitter.writer.line("if (issues.length !== 0) {");
-      emitter.writer.indent(() => {
-        emitter.writer.line("return { success: false, issues: issues };");
+    const emitter2 = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes);
+    emitter2.markRecursive(recursive);
+    parseEmitter = emitter2;
+    emitter2.writer.line("function safeParse(value) {");
+    emitter2.writer.indent(() => {
+      emitter2.writer.line("const issues = [];");
+      const output = emitter2.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter2.writer.line("if (issues.length !== 0) {");
+      emitter2.writer.indent(() => {
+        emitter2.writer.line("return { success: false, issues: issues };");
       });
-      emitter.writer.line("}");
-      if (freezesOutput) emitFreezeOutput(emitter.writer, output);
-      emitter.writer.line(`return { success: true, data: ${output} };`);
+      emitter2.writer.line("}");
+      if (freezesOutput) emitFreezeOutput(emitter2.writer, output);
+      emitter2.writer.line(`return { success: true, data: ${output} };`);
     });
-    emitter.writer.line("}");
+    emitter2.writer.line("}");
   }
   let asyncEmitter;
   if (emitSafeParseAsync && containsPromise(schema)) {
-    const emitter = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes);
-    emitter.markRecursive(recursive);
-    asyncEmitter = emitter;
-    for (const value of parseEmitter?.bindings().values ?? []) emitter.bind(value);
-    emitter.writer.line("async function safeParseAsync(value) {");
-    emitter.writer.indent(() => {
-      emitter.writer.line("const issues = [];");
-      const output = emitter.emitNode(schema, "value", { kind: "static", source: "" });
-      emitter.writer.line("if (issues.length !== 0) {");
-      emitter.writer.indent(() => {
-        emitter.writer.line("return { success: false, issues: issues };");
+    const emitter2 = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes);
+    emitter2.markRecursive(recursive);
+    asyncEmitter = emitter2;
+    for (const value of parseEmitter?.bindings().values ?? []) emitter2.bind(value);
+    emitter2.writer.line("async function safeParseAsync(value) {");
+    emitter2.writer.indent(() => {
+      emitter2.writer.line("const issues = [];");
+      const output = emitter2.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter2.writer.line("if (issues.length !== 0) {");
+      emitter2.writer.indent(() => {
+        emitter2.writer.line("return { success: false, issues: issues };");
       });
-      emitter.writer.line("}");
-      if (freezesOutput) emitFreezeOutput(emitter.writer, output);
-      emitter.writer.line(`return { success: true, data: ${output} };`);
+      emitter2.writer.line("}");
+      if (freezesOutput) emitFreezeOutput(emitter2.writer, output);
+      emitter2.writer.line(`return { success: true, data: ${output} };`);
     });
-    emitter.writer.line("}");
+    emitter2.writer.line("}");
   }
   let isEmitter;
   if (emitIs) {
-    const emitter = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes);
-    emitter.markRecursive(recursive);
-    isEmitter = emitter;
-    for (const value of (asyncEmitter ?? parseEmitter)?.bindings().values ?? []) emitter.bind(value);
-    emitter.writer.line("function is(value) {");
-    emitter.writer.indent(() => {
-      emitter.emitNode(schema, "value", { kind: "static", source: "" });
-      emitter.writer.line("return true;");
+    const emitter2 = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes);
+    emitter2.markRecursive(recursive);
+    isEmitter = emitter2;
+    for (const value of (asyncEmitter ?? parseEmitter)?.bindings().values ?? []) emitter2.bind(value);
+    emitter2.writer.line("function is(value) {");
+    emitter2.writer.indent(() => {
+      emitter2.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter2.writer.line("return true;");
     });
-    emitter.writer.line("}");
+    emitter2.writer.line("}");
   }
   const emitters = [isEmitter, parseEmitter, asyncEmitter].filter(
-    (emitter) => Boolean(emitter)
+    (emitter2) => Boolean(emitter2)
   );
   const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? { names: [], values: [] };
-  const helperBlocks = emitters.flatMap((emitter) => emitter.helpers());
+  const helperBlocks = emitters.flatMap((emitter2) => emitter2.helpers());
   const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}
 ` : "";
-  const functionSource = emitters.map((emitter) => emitter.writer.toString()).join("\n");
+  const functionSource = emitters.map((emitter2) => emitter2.writer.toString()).join("\n");
   const returnedEntries = [
     ...isEmitter ? ["is: is"] : [],
     ...parseEmitter ? ["safeParse: safeParse"] : [],
@@ -7439,12 +8269,12 @@ function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}"
   });
   writer.line(close);
 }
-function emitIndexPlanSource(descriptor, cacheKey) {
+function emitIndexPlanSource(descriptor, cacheKey3) {
   const writer = new CodeWriter();
   writer.line("((__cache) => {");
   writer.indent(() => {
     emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
-    writer.line(`const cached = (value) => __cache(value, ${JSON.stringify(cacheKey)}, build);`);
+    writer.line(`const cached = (value) => __cache(value, ${JSON.stringify(cacheKey3)}, build);`);
     writer.line('Object.defineProperty(build, "cached", { value: cached });');
     writer.line("return build;");
   });
@@ -7452,20 +8282,20 @@ function emitIndexPlanSource(descriptor, cacheKey) {
   return writer.toString();
 }
 function emitIndexKeyRead(row, key) {
-  const access = emitPropertyAccess(row, key.key);
-  if (key.valueKind !== "date") return access;
-  return key.nullish ? `(${access} == null ? ${access} : ${access}.getTime())` : `${access}.getTime()`;
+  const access2 = emitPropertyAccess(row, key.key);
+  if (key.valueKind !== "date") return access2;
+  return key.nullish ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : `${access2}.getTime()`;
 }
 function indexCacheKey(descriptor) {
   return `index:${descriptor.shape}:${descriptor.keys.map(({ key, valueKind, nullish: nullish3 }) => `${key}:${valueKind}:${nullish3}`).join(",")}`;
 }
 function compileIndex(schema, descriptor, runtimeIndexCache, options) {
-  const cacheKey = indexCacheKey(descriptor);
+  const cacheKey3 = indexCacheKey(descriptor);
   const template = getCompileCached(
     schema,
-    cacheKey,
+    cacheKey3,
     () => {
-      const source = emitIndexPlanSource(descriptor, cacheKey);
+      const source = emitIndexPlanSource(descriptor, cacheKey3);
       return { source, create: globalThis.Function(`return ${source};`) };
     },
     options
@@ -7477,6 +8307,266 @@ function compileIndex(schema, descriptor, runtimeIndexCache, options) {
 function resolveIndexKeyKind(schema, key) {
   const kind = resolveScalarKeyKind(schema, key, "index");
   return kind === "numeric" ? "direct" : kind;
+}
+
+// ../../packages/jit/src/compiler/join.ts
+function createJoinPlan(leftSchema, rightSchema, leftProgram, kind, leftKey, rightKey) {
+  assertJoinPrefix(leftProgram);
+  const leftIndex = resolveIndexDescriptor(leftSchema, [leftKey], "unique");
+  const hints = resolveHints(rightSchema);
+  const leftHints = resolveHints(leftSchema);
+  const leftOrdered = leftHints.order ?? leftHints.collection?.ordered;
+  const rightOrdered = hints.order ?? hints.collection?.ordered;
+  const leftOrderedKey = resolveHintKey(leftOrdered?.key);
+  const rightOrderedKey = resolveHintKey(rightOrdered?.key);
+  const leftDirection = leftOrdered?.direction === "desc" ? "desc" : "asc";
+  const rightDirection = rightOrdered?.direction === "desc" ? "desc" : "asc";
+  const keyed = hints.entity?.cacheIndex === true;
+  const declaredKey = resolveHintKey(hints.index?.key) ?? resolveHintKey(hints.entity?.key);
+  const merge2 = leftOrderedKey === leftKey && rightOrderedKey === rightKey && leftDirection === rightDirection;
+  const strategy = merge2 ? "MergeJoin" : keyed && declaredKey === rightKey ? "IndexedJoin" : "HashJoin";
+  const rightUnique = hints.collection?.unique === true || hints.entity?.key !== void 0;
+  const rightIndex = resolveIndexDescriptor(
+    rightSchema,
+    [rightKey],
+    kind === "semi" || kind === "anti" || rightUnique ? "unique" : "grouped"
+  );
+  const leftDomain = resolveScalarKeyDomain(
+    resolveRowField(resolveRowObjectSchema(leftSchema, "join"), leftKey, "join"),
+    leftKey,
+    "join"
+  );
+  const rightDomain = resolveScalarKeyDomain(
+    resolveRowField(resolveRowObjectSchema(rightSchema, "join"), rightKey, "join"),
+    rightKey,
+    "join"
+  );
+  if (leftDomain !== rightDomain) {
+    throw new JITError("INVALID_QUERY", "join keys must have compatible scalar representations", {
+      path: [leftKey, rightKey]
+    });
+  }
+  return Object.freeze({
+    kind,
+    leftSchema,
+    rightSchema,
+    leftKey,
+    rightKey,
+    leftIndex,
+    rightIndex,
+    direction: merge2 ? leftDirection : "asc",
+    strategy,
+    reason: strategy === "MergeJoin" ? "both collections declare compatible ordering on the join keys" : strategy === "IndexedJoin" ? "the right collection declares a reusable keyed index" : "the right side is hashed once before scanning the left side",
+    complexity: strategy === "IndexedJoin" ? "O(n + k) expected after cached build" : "O(n + m + k)",
+    leftProgram
+  });
+}
+function explainJoinPlan(plan) {
+  return Object.freeze({
+    strategy: plan.strategy,
+    reason: plan.reason,
+    complexity: plan.complexity,
+    facts: Object.freeze([
+      `join: ${plan.kind}`,
+      `keys: ${plan.leftKey} = ${plan.rightKey}`,
+      ...plan.strategy === "IndexedJoin" ? ["right index cache: enabled"] : [],
+      ...plan.strategy === "MergeJoin" ? [`ordered: ${plan.direction}`] : []
+    ])
+  });
+}
+function emitJoinSource(plan) {
+  const writer = new CodeWriter();
+  const hasParams = Boolean(plan.leftProgram.params?.length);
+  const grouped = plan.rightIndex.shape === "grouped";
+  writer.line("(() => {");
+  writer.indent(() => {
+    if (plan.strategy === "IndexedJoin") {
+      emitIndexBuilder(writer, plan.rightIndex, "const build = (value) => {", "};");
+    }
+    writer.line(`function join(left, right${hasParams ? ", params" : ""}) {`);
+    writer.indent(() => {
+      if (plan.strategy === "MergeJoin") {
+        emitMergeJoin(writer, plan);
+        return;
+      }
+      if (plan.strategy === "IndexedJoin") {
+        writer.line(`const index = __cachedIndex(right, ${JSON.stringify(indexCacheKey(plan.rightIndex))}, build);`);
+      } else {
+        emitIndexBuilder(writer, plan.rightIndex, "const index = ((value) => {", "})(right);");
+      }
+      writer.line("const len = left.length;");
+      writer.line("const out = new Array(len);");
+      writer.line("let k = 0;");
+      writer.line("for (let i = 0; i < len; i++) {");
+      writer.indent(() => {
+        writer.line("const leftRow = left[i];");
+        const guard = emitLeftGuard(plan.leftProgram, "leftRow");
+        if (guard) {
+          writer.line(`if (!(${guard})) continue;`);
+        }
+        const key = plan.rightIndex.keys[0];
+        const leftKey = plan.leftIndex.keys[0];
+        if (!key || !leftKey) throw new JITError("INVALID_QUERY", "join requires scalar keys");
+        const leftRead = emitPropertyAccess("leftRow", plan.leftKey);
+        const probe = leftKey.valueKind === "date" ? leftKey.nullish ? `(${leftRead} == null ? ${leftRead} : ${leftRead}.getTime())` : `${leftRead}.getTime()` : leftRead;
+        writer.line(`const match = index.get(${probe});`);
+        emitJoinResult(writer, plan.kind, grouped);
+      });
+      writer.line("}");
+      writer.line("out.length = k;");
+      writer.line("return out;");
+    });
+    writer.line("}");
+    writer.line("return join;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitMergeJoin(writer, plan) {
+  const rightKey = plan.rightIndex.keys[0];
+  const leftKeyDescriptor = plan.leftIndex.keys[0];
+  if (!rightKey || !leftKeyDescriptor) throw new JITError("INVALID_QUERY", "merge join requires scalar keys");
+  const readKey2 = (row, key, descriptor) => {
+    const access2 = emitPropertyAccess(row, key);
+    if (descriptor.valueKind !== "date") return access2;
+    return descriptor.nullish ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : `${access2}.getTime()`;
+  };
+  const leftBefore = plan.direction === "asc" ? "leftKey < rightKey" : "leftKey > rightKey";
+  const leftAfter = plan.direction === "asc" ? "leftKey > rightKey" : "leftKey < rightKey";
+  const guard = emitLeftGuard(plan.leftProgram, "leftRow");
+  const emitUnmatched = () => {
+    if (plan.kind === "left") writer.line("out[k++] = { left: leftRow, right: undefined };");
+    else if (plan.kind === "anti") writer.line("out[k++] = leftRow;");
+  };
+  writer.line("const leftLen = left.length;");
+  writer.line("const rightLen = right.length;");
+  writer.line("const out = new Array(leftLen);");
+  writer.line("let i = 0;");
+  writer.line("let j = 0;");
+  writer.line("let k = 0;");
+  writer.line("while (i < leftLen && j < rightLen) {");
+  writer.indent(() => {
+    writer.line("const leftRow = left[i];");
+    writer.line(`const leftKey = ${readKey2("leftRow", plan.leftKey, leftKeyDescriptor)};`);
+    writer.line(`const rightKey = ${readKey2("right[j]", plan.rightKey, rightKey)};`);
+    writer.line(`if (${leftBefore}) {`);
+    writer.indent(() => {
+      if (guard) writer.line(`if (${guard}) {`);
+      if (guard) writer.indent(emitUnmatched);
+      else emitUnmatched();
+      if (guard) writer.line("}");
+      writer.line("i++;");
+      writer.line("continue;");
+    });
+    writer.line("}");
+    writer.line(`if (${leftAfter}) { j++; continue; }`);
+    writer.line("let rightEnd = j + 1;");
+    writer.line(
+      `while (rightEnd < rightLen && ${readKey2("right[rightEnd]", plan.rightKey, rightKey)} === rightKey) rightEnd++;`
+    );
+    writer.line("do {");
+    writer.indent(() => {
+      writer.line("const leftRow = left[i];");
+      if (guard) writer.line(`if (${guard}) {`);
+      if (guard) writer.indent(() => emitMergeMatch(writer, plan.kind));
+      else emitMergeMatch(writer, plan.kind);
+      if (guard) writer.line("}");
+      writer.line("i++;");
+    });
+    writer.line(`} while (i < leftLen && ${readKey2("left[i]", plan.leftKey, leftKeyDescriptor)} === leftKey);`);
+    writer.line("j = rightEnd;");
+  });
+  writer.line("}");
+  if (plan.kind === "left" || plan.kind === "anti") {
+    writer.line("while (i < leftLen) {");
+    writer.indent(() => {
+      writer.line("const leftRow = left[i++];");
+      if (guard) writer.line(`if (!(${guard})) continue;`);
+      emitUnmatched();
+    });
+    writer.line("}");
+  }
+  writer.line("out.length = k;");
+  writer.line("return out;");
+}
+function emitMergeMatch(writer, kind) {
+  if (kind === "semi") {
+    writer.line("out[k++] = leftRow;");
+    return;
+  }
+  if (kind === "anti") return;
+  writer.line("for (let q = j; q < rightEnd; q++) out[k++] = { left: leftRow, right: right[q] };");
+}
+function emitJoinResult(writer, kind, grouped) {
+  if (kind === "semi") {
+    writer.line("if (match !== undefined) out[k++] = leftRow;");
+    return;
+  }
+  if (kind === "anti") {
+    writer.line("if (match === undefined) out[k++] = leftRow;");
+    return;
+  }
+  if (!grouped) {
+    if (kind === "inner") writer.line("if (match !== undefined) out[k++] = { left: leftRow, right: match };");
+    else writer.line("out[k++] = { left: leftRow, right: match };");
+    return;
+  }
+  writer.line("if (match === undefined) {");
+  writer.indent(() => {
+    if (kind === "left") writer.line("out[k++] = { left: leftRow, right: undefined };");
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line("const matchLen = match.length;");
+    writer.line("for (let j = 0; j < matchLen; j++) out[k++] = { left: leftRow, right: match[j] };");
+  });
+  writer.line("}");
+}
+function assertJoinPrefix(program) {
+  for (const node of program.nodes) {
+    if (node.kind !== "filter") {
+      throw new JITError(
+        "INVALID_QUERY",
+        "join v1 accepts params and where/filter before join; shape, ordering, terminal and mutation stages must follow a future fused plan"
+      );
+    }
+  }
+}
+function emitLeftGuard(program, row) {
+  const filters = program.nodes.filter((node) => node.kind === "filter");
+  if (filters.length === 0) return void 0;
+  return filters.map((filter) => `(${emitCondition2(filter.condition, row)})`).join(" && ");
+}
+function emitCondition2(condition, row) {
+  if (condition.kind === "logical") {
+    const operator = condition.op === "and" ? "&&" : "||";
+    return `(${emitCondition2(condition.left, row)} ${operator} ${emitCondition2(condition.right, row)})`;
+  }
+  if (condition.kind === "not") return `!(${emitCondition2(condition.inner, row)})`;
+  const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
+  return `${emitValue2(condition.left, row)} ${operators[condition.op]} ${emitValue2(condition.right, row)}`;
+}
+function emitValue2(value, row) {
+  if (value.kind === "field") return emitPropertyAccess(row, value.key);
+  if (value.kind === "literal") return emitLiteral(value.value);
+  if (value.kind === "param") return emitPropertyAccess("params", value.name);
+  return value.name;
+}
+function compileJoin(plan, options) {
+  const names = plan.leftProgram.bindings.map((_, index2) => `__q${index2}`);
+  const key = `join:${plan.kind}:${plan.leftKey}:${plan.rightKey}:${plan.strategy}:${plan.direction}:${indexCacheKey(plan.leftIndex)}:${indexCacheKey(plan.rightIndex)}:${JSON.stringify(plan.leftProgram.nodes)}:${plan.leftProgram.params?.join(",") ?? ""}`;
+  const template = getCompileCached(
+    plan.leftSchema,
+    key,
+    () => {
+      const source = emitJoinSource(plan);
+      return { source, create: globalThis.Function("__cachedIndex", ...names, `return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create(getCachedIndex, ...plan.leftProgram.bindings);
+  registerArtifact(compiled, { kind: "join-plan", plan });
+  return compiled;
 }
 
 // ../../packages/jit/src/compiler/serialize/emit-serialize.ts
@@ -7973,8 +9063,8 @@ var ALIASES = {
   "openapi-3.1": "draft-2020-12"
 };
 function resolveDialect(target = "draft-2020-12") {
-  const canonical = ALIASES[target] ?? target;
-  const dialect = DIALECTS[canonical];
+  const canonical2 = ALIASES[target] ?? target;
+  const dialect = DIALECTS[canonical2];
   if (!dialect) {
     throw new JITError(
       "INVALID_OPERATION",
@@ -8083,15 +9173,15 @@ var SchemaBuilder = class {
     const reference = node.$ref;
     if (typeof reference !== "string") return node;
     if (reference === "#") return this.root;
-    const match = /^#\/(\$defs|definitions)\/(.+)$/.exec(reference);
-    if (!match) {
+    const match2 = /^#\/(\$defs|definitions)\/(.+)$/.exec(reference);
+    if (!match2) {
       throw new JITError(
         "INVALID_OPERATION",
         `cannot resolve external $ref "${reference}" at /${path.join("/")}; inline the definition or pass it through refine`
       );
     }
-    const defs = this.root[match[1]];
-    const target = defs?.[match[2]];
+    const defs = this.root[match2[1]];
+    const target = defs?.[match2[2]];
     if (!target) {
       throw new JITError(
         "INVALID_OPERATION",
@@ -8268,14 +9358,14 @@ var UNSUPPORTED_TYPES = {
 };
 function compileJsonSchema(schema, options = {}) {
   const cacheable = options.override === void 0 && typeof options.unsupported !== "function";
-  const cacheKey = cacheable ? describeOptions(options) : void 0;
-  const cached = cacheKey === void 0 ? void 0 : DOCUMENTS.get(schema)?.get(cacheKey);
+  const cacheKey3 = cacheable ? describeOptions(options) : void 0;
+  const cached = cacheKey3 === void 0 ? void 0 : DOCUMENTS.get(schema)?.get(cacheKey3);
   if (cached) return cached;
   const document = new JsonSchemaEmitter(options).document(schema);
-  if (cacheKey !== void 0) {
+  if (cacheKey3 !== void 0) {
     const documents = DOCUMENTS.get(schema);
-    if (documents) documents.set(cacheKey, document);
-    else DOCUMENTS.set(schema, /* @__PURE__ */ new Map([[cacheKey, document]]));
+    if (documents) documents.set(cacheKey3, document);
+    else DOCUMENTS.set(schema, /* @__PURE__ */ new Map([[cacheKey3, document]]));
   }
   registerArtifact(document, { kind: "operation", schema, op: "jsonSchema" });
   return document;
@@ -8758,12 +9848,1088 @@ function escapePattern(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// ../../packages/jit/src/compiler/distinct.ts
+function resolveDistinctDescriptor(schema, node) {
+  const object2 = resolveRowObjectSchema(schema, "distinct");
+  const fields = node.kind === "unique" ? [node.key] : [...node.fields];
+  if (new Set(fields).size !== fields.length) {
+    throw new JITError("INVALID_QUERY", "query distinct repeats a field");
+  }
+  const valueKinds = fields.map(
+    (field) => resolveScalarKeyKind(resolveRowField(object2, field, "distinct"), field, "distinct")
+  );
+  if (fields.length === 0)
+    return Object.freeze({
+      fields: Object.freeze(fields),
+      valueKinds: Object.freeze(valueKinds),
+      strategy: "structural-hash"
+    });
+  const ordered = resolveHints(schema).collection?.ordered;
+  const adjacent = fields.length === 1 && ordered !== void 0 && ordered.key === fields[0];
+  return Object.freeze({
+    fields: Object.freeze(fields),
+    valueKinds: Object.freeze(valueKinds),
+    strategy: adjacent ? "adjacent" : fields.length === 1 ? "set" : "compound-trie"
+  });
+}
+function emitDistinctAcceptSource(descriptor) {
+  if (descriptor.strategy === "structural-hash") {
+    return `function __distinctAccept(seen, item) {
+  const hash = __distinctHash(item);
+  const bucket = seen.get(hash);
+  if (bucket === undefined) { seen.set(hash, [item]); return true; }
+  for (let i = 0, len = bucket.length; i < len; i++) {
+    if (__distinctEqual(bucket[i], item)) return false;
+  }
+  bucket[bucket.length] = item;
+  return true;
+}`;
+  }
+  if (descriptor.strategy === "adjacent") {
+    const access2 = emitDistinctKey(descriptor, 0);
+    return `function __distinctAccept(state, item) {
+  const key = ${access2};
+  if (state.has && (state.value === key || (state.value !== state.value && key !== key))) return false;
+  state.has = true;
+  state.value = key;
+  return true;
+}`;
+  }
+  if (descriptor.strategy === "set") {
+    const access2 = emitDistinctKey(descriptor, 0);
+    return `function __distinctAccept(seen, item) {
+  const key = ${access2};
+  if (seen.has(key)) return false;
+  seen.set(key, true);
+  return true;
+}`;
+  }
+  const lines = ["function __distinctAccept(root, item) {", "  let map = root;"];
+  descriptor.fields.forEach((_field, index2) => {
+    const key = `key${index2}`;
+    lines.push(`  const ${key} = ${emitDistinctKey(descriptor, index2)};`);
+    if (index2 === descriptor.fields.length - 1) {
+      lines.push(`  if (map.has(${key})) return false;`, `  map.set(${key}, true);`);
+    } else {
+      const next = `next${index2}`;
+      lines.push(
+        `  let ${next} = map.get(${key});`,
+        `  if (${next} === undefined) { ${next} = new Map(); map.set(${key}, ${next}); }`,
+        `  map = ${next};`
+      );
+    }
+  });
+  lines.push("  return true;", "}");
+  return lines.join("\n");
+}
+function emitDistinctKey(descriptor, index2) {
+  const access2 = emitPropertyAccess("item", descriptor.fields[index2]);
+  return descriptor.valueKinds[index2] === "date" ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : access2;
+}
+function wrapDistinctSource(source, descriptor) {
+  if (!descriptor) return source;
+  return `(function () {
+${emitDistinctAcceptSource(descriptor)}
+return (${source});
+})()`;
+}
+
+// ../../packages/jit/src/compiler/emitter/emit-query.ts
+function emitQuery(program) {
+  const writer = new CodeWriter();
+  const params = program.params.map((param2) => param2.name).join(", ");
+  writer.line(`function query(${params}) {`);
+  writer.indent(() => {
+    for (const node of program.body) emitNode(writer, node);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+
+// ../../packages/jit/src/compiler/ir/builders/build-query-ir.ts
+var VALUE = irVar("value");
+var PARAMS = irVar("params");
+var LEN = irVar("len");
+var OUT = irVar("out");
+var CURSOR = irVar("j");
+var INDEX = irVar("i");
+var ITEM = irVar("item");
+var ENTRY = irVar("entry");
+var SEEN = irVar("seen");
+var UNIQUE_KEY = irVar("uniqueKey");
+var COLLECT_KEY = irVar("collectKey");
+var GROUP = irVar("group");
+var PROJECTED = irVar("projected");
+var COMPARE_OPERATORS = {
+  eq: "strictEqual",
+  neq: "notStrictEqual",
+  gt: "greaterThan",
+  gte: "greaterThanOrEqual",
+  lt: "lessThan",
+  lte: "lessThanOrEqual"
+};
+function buildQueryIR(target, plan, options = {}) {
+  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.composite ? plan.collector ? buildGroupedAggregateQuery(target, plan, plan.composite, plan.collector.key) : buildCompositeAggregateQuery(target, plan, plan.composite) : plan.terminal ? buildTerminalQuery(target, plan, plan.terminal) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
+  return {
+    kind: "program",
+    params: options.hasParams ? [VALUE, PARAMS] : [VALUE],
+    body
+  };
+}
+function buildArrayQuery(target, plan) {
+  if (shouldProjectAfterOrder(plan)) return buildArrayQueryWithPostOrderProjection(target, plan);
+  const selected = buildProjection(plan.select);
+  const body = [
+    ...buildLoopHeader(target, plan, construct("Array", [LEN])),
+    letDecl(CURSOR, literal(0)),
+    buildInputLoop(target, buildGuardedBody(plan, [append(OUT, CURSOR, selected)])),
+    store(loadProp(OUT, "length"), CURSOR)
+  ];
+  if (plan.orderBy) {
+    body.push(
+      sortByKey(
+        OUT,
+        resolveOrderingDescriptor(target.objectSchema, [{ key: plan.orderBy.key, direction: plan.orderBy.direction }])
+      )
+    );
+  }
+  body.push({ kind: "return", value: OUT });
+  return body;
+}
+function buildArrayQueryWithPostOrderProjection(target, plan) {
+  const orderBy = plan.orderBy;
+  const body = [
+    ...buildLoopHeader(target, plan, construct("Array", [LEN])),
+    letDecl(CURSOR, literal(0)),
+    buildInputLoop(target, buildGuardedBody(plan, [append(OUT, CURSOR, ITEM)])),
+    store(loadProp(OUT, "length"), CURSOR)
+  ];
+  if (orderBy) {
+    body.push(
+      sortByKey(
+        OUT,
+        resolveOrderingDescriptor(target.objectSchema, [{ key: orderBy.key, direction: orderBy.direction }])
+      )
+    );
+  }
+  body.push(
+    { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },
+    forRange(INDEX, CURSOR, [
+      { kind: "assign", target: ITEM, expr: loadIndex(OUT, INDEX) },
+      store(loadIndex(PROJECTED, INDEX), buildProjection(plan.select))
+    ]),
+    { kind: "return", value: PROJECTED }
+  );
+  return body;
+}
+function buildCollectedQuery(target, plan) {
+  const collector = plan.collector;
+  if (!collector) return [];
+  const selected = buildProjection(plan.select);
+  const collect = [
+    {
+      kind: "assign",
+      target: COLLECT_KEY,
+      expr: loadProp(ITEM, collector.key)
+    }
+  ];
+  if (collector.kind === "keyed") {
+    collect.push(exprStmt(call(loadProp(OUT, "set"), [COLLECT_KEY, selected])));
+  } else {
+    collect.push(
+      letDecl(GROUP, loadIndex(OUT, COLLECT_KEY)),
+      {
+        kind: "if",
+        test: strictEqual(GROUP, literal(void 0)),
+        then: [store(GROUP, arrayLiteral()), store(loadIndex(OUT, COLLECT_KEY), GROUP)]
+      },
+      store(loadIndex(GROUP, loadProp(GROUP, "length")), selected)
+    );
+  }
+  const outInitializer = collector.kind === "keyed" ? construct("Map") : call(loadProp(irVar("Object"), "create"), [literal(null)]);
+  return [
+    ...buildLoopHeader(target, plan, outInitializer),
+    buildInputLoop(target, buildGuardedBody(plan, collect)),
+    { kind: "return", value: OUT }
+  ];
+}
+var ACC = irVar("acc");
+var ACC_COUNT = irVar("n");
+var ACC_MAP = irVar("acc");
+var GROUP_KEY = irVar("key");
+function buildGroupedAggregateQuery(target, plan, composite, groupKey) {
+  const hasAverage = composite.fields.some((field) => field.op === "avg");
+  const counter = "__n";
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique || plan.distinct)
+    body.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set")
+    });
+  const emptyRecord = call(loadProp(irVar("Object"), "create"), [literal(null)]);
+  const accumulator = hasAverage ? ACC_MAP : OUT;
+  body.push({
+    kind: "assign",
+    target: accumulator,
+    expr: hasAverage ? construct("Map") : emptyRecord
+  });
+  const initial = composite.fields.map((field) => ({
+    key: field.name,
+    value: field.op === "count" || field.op === "sum" || field.op === "avg" ? literal(0) : literal(void 0)
+  }));
+  const create = [
+    store(GROUP, objectLiteral(hasAverage ? [...initial, { key: counter, value: literal(0) }] : initial)),
+    hasAverage ? exprStmt(call(loadProp(ACC_MAP, "set"), [COLLECT_KEY, GROUP])) : store(loadIndex(OUT, COLLECT_KEY), GROUP)
+  ];
+  const step = [
+    { kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, groupKey) },
+    letDecl(GROUP, hasAverage ? call(loadProp(ACC_MAP, "get"), [COLLECT_KEY]) : loadIndex(OUT, COLLECT_KEY)),
+    { kind: "if", test: strictEqual(GROUP, literal(void 0)), then: create }
+  ];
+  if (hasAverage) step.push(store(loadProp(GROUP, counter), binary("add", loadProp(GROUP, counter), literal(1))));
+  for (const field of composite.fields) {
+    const slot = loadProp(GROUP, field.name);
+    const read = field.key === void 0 ? ITEM : loadProp(ITEM, field.key);
+    if (field.op === "count") step.push(store(slot, binary("add", slot, literal(1))));
+    else if (field.op === "sum" || field.op === "avg") step.push(store(slot, binary("add", slot, read)));
+    else {
+      step.push({
+        kind: "if",
+        test: {
+          kind: "nary",
+          op: "or",
+          operands: [
+            strictEqual(slot, literal(void 0)),
+            binary(field.op === "min" ? "lessThan" : "greaterThan", read, slot)
+          ]
+        },
+        then: [store(slot, read)]
+      });
+    }
+  }
+  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
+  if (!hasAverage) {
+    body.push({ kind: "return", value: OUT });
+    return body;
+  }
+  body.push(
+    { kind: "assign", target: OUT, expr: emptyRecord },
+    forOf(ENTRY, ACC_MAP, [
+      { kind: "assign", target: GROUP_KEY, expr: loadIndex(ENTRY, literal(0)) },
+      { kind: "assign", target: GROUP, expr: loadIndex(ENTRY, literal(1)) },
+      store(
+        loadIndex(OUT, GROUP_KEY),
+        objectLiteral(
+          composite.fields.map((field) => ({
+            key: field.name,
+            value: field.op === "avg" ? binary("divide", loadProp(GROUP, field.name), loadProp(GROUP, counter)) : loadProp(GROUP, field.name)
+          }))
+        )
+      )
+    ]),
+    { kind: "return", value: OUT }
+  );
+  return body;
+}
+function buildCompositeAggregateQuery(target, plan, composite) {
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique || plan.distinct)
+    body.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set")
+    });
+  const slots = composite.fields.map((field, index2) => ({
+    field,
+    // `avg` needs its own row count; the others need one accumulator each.
+    accumulator: irVar(`a${index2}`),
+    counter: irVar(`n${index2}`)
+  }));
+  const step = [];
+  for (const { field, accumulator, counter } of slots) {
+    const read = field.key === void 0 ? ITEM : loadProp(ITEM, field.key);
+    switch (field.op) {
+      case "count":
+        body.push(letDecl(accumulator, literal(0)));
+        step.push(store(accumulator, binary("add", accumulator, literal(1))));
+        break;
+      case "sum":
+        body.push(letDecl(accumulator, literal(0)));
+        step.push(store(accumulator, binary("add", accumulator, read)));
+        break;
+      case "avg":
+        body.push(letDecl(accumulator, literal(0)), letDecl(counter, literal(0)));
+        step.push(
+          store(accumulator, binary("add", accumulator, read)),
+          store(counter, binary("add", counter, literal(1)))
+        );
+        break;
+      case "min":
+      case "max":
+        body.push(letDecl(accumulator));
+        step.push({
+          kind: "if",
+          test: {
+            kind: "nary",
+            op: "or",
+            operands: [
+              strictEqual(accumulator, literal(void 0)),
+              binary(field.op === "min" ? "lessThan" : "greaterThan", read, accumulator)
+            ]
+          },
+          then: [store(accumulator, read)]
+        });
+        break;
+    }
+  }
+  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
+  for (const { field, accumulator, counter } of slots) {
+    if (field.op !== "avg") continue;
+    body.push({
+      kind: "if",
+      test: strictEqual(counter, literal(0)),
+      then: [store(accumulator, literal(void 0))],
+      otherwise: [store(accumulator, binary("divide", accumulator, counter))]
+    });
+  }
+  body.push({
+    kind: "return",
+    value: objectLiteral(
+      slots.map(({ field, accumulator }) => ({
+        key: field.name,
+        value: accumulator
+      }))
+    )
+  });
+  return body;
+}
+function buildTerminalQuery(target, plan, terminal) {
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
+  }
+  if (terminal.op === "every") {
+    const condition = buildFilterTest(plan);
+    body.push(
+      buildInputLoop(
+        target,
+        condition ? [
+          {
+            kind: "if",
+            test: not(condition),
+            then: [{ kind: "return", value: literal(false) }]
+          }
+        ] : []
+      ),
+      { kind: "return", value: literal(true) }
+    );
+    return body;
+  }
+  const found = terminal.op === "some" ? { kind: "return", value: literal(true) } : terminal.op === "findIndex" ? { kind: "return", value: INDEX } : { kind: "return", value: buildProjection(plan.select) };
+  body.push(buildInputLoop(target, buildGuardedBody(plan, [found])), {
+    kind: "return",
+    value: terminal.op === "some" ? literal(false) : terminal.op === "findIndex" ? literal(-1) : literal(void 0)
+  });
+  return body;
+}
+function buildAggregateQuery(target, plan, aggregate) {
+  const body = [];
+  if (target.kind === "array") {
+    body.push({ kind: "assign", target: LEN, expr: loadProp(VALUE, "length") });
+  }
+  if (plan.unique || plan.distinct)
+    body.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set")
+    });
+  const field = aggregate.key === void 0 ? ITEM : loadProp(ITEM, aggregate.key);
+  switch (aggregate.op) {
+    case "sum":
+    case "count": {
+      const increment = aggregate.op === "count" ? literal(1) : field;
+      body.push(
+        letDecl(ACC, literal(0)),
+        buildInputLoop(target, buildGuardedBody(plan, [store(ACC, binary("add", ACC, increment))])),
+        { kind: "return", value: ACC }
+      );
+      return body;
+    }
+    case "avg":
+      body.push(
+        letDecl(ACC, literal(0)),
+        letDecl(ACC_COUNT, literal(0)),
+        buildInputLoop(
+          target,
+          buildGuardedBody(plan, [
+            store(ACC, binary("add", ACC, field)),
+            store(ACC_COUNT, binary("add", ACC_COUNT, literal(1)))
+          ])
+        ),
+        {
+          kind: "if",
+          test: strictEqual(ACC_COUNT, literal(0)),
+          then: [{ kind: "return", value: literal(void 0) }]
+        },
+        { kind: "return", value: binary("divide", ACC, ACC_COUNT) }
+      );
+      return body;
+    case "min":
+    case "max": {
+      const wins = binary(aggregate.op === "min" ? "lessThan" : "greaterThan", field, ACC);
+      body.push(
+        letDecl(ACC),
+        buildInputLoop(
+          target,
+          buildGuardedBody(plan, [
+            {
+              kind: "if",
+              test: {
+                kind: "nary",
+                op: "or",
+                operands: [strictEqual(ACC, literal(void 0)), wins]
+              },
+              then: [store(ACC, field)]
+            }
+          ])
+        ),
+        { kind: "return", value: ACC }
+      );
+      return body;
+    }
+  }
+}
+function buildMutationQuery(target, plan) {
+  const mutation = plan.mutation;
+  if (!mutation) return [];
+  const condition = buildFilterTest(plan);
+  const test = condition ?? literal(false);
+  const loopBody = mutation.kind === "delete" ? [{ kind: "if", test: not(test), then: buildMutationKeep(target, ITEM) }] : [
+    {
+      kind: "if",
+      test,
+      then: buildMutationKeep(target, buildPatchObject(target.objectSchema, mutation)),
+      otherwise: buildMutationKeep(target, ITEM)
+    }
+  ];
+  const outInitializer = target.kind === "array" ? construct("Array", [LEN]) : target.kind === "set" ? construct("Set") : construct("Map");
+  const body = [...buildLoopHeader(target, plan, outInitializer)];
+  if (target.kind === "array") body.push(letDecl(CURSOR, literal(0)));
+  body.push(buildInputLoop(target, loopBody));
+  if (target.kind === "array") body.push(store(loadProp(OUT, "length"), CURSOR));
+  body.push({ kind: "return", value: OUT });
+  return body;
+}
+function buildMutationKeep(target, value) {
+  switch (target.kind) {
+    case "array":
+      return [append(OUT, CURSOR, value)];
+    case "set":
+      return [exprStmt(call(loadProp(OUT, "add"), [value]))];
+    case "map":
+      return [exprStmt(call(loadProp(OUT, "set"), [loadIndex(ENTRY, literal(0)), value]))];
+  }
+}
+function buildPatchObject(schema, mutation) {
+  if (mutation.kind !== "update") return ITEM;
+  const entries = Object.keys(schema.def.props).map((key) => {
+    const binding = mutation.patch[key];
+    return { key, value: binding ? irVar(binding.name) : loadProp(ITEM, key) };
+  });
+  return objectLiteral(entries);
+}
+function buildLoopHeader(target, plan, outInitializer) {
+  const header = [
+    {
+      kind: "assign",
+      target: LEN,
+      expr: loadProp(VALUE, target.kind === "array" ? "length" : "size")
+    }
+  ];
+  if (plan.unique || plan.distinct)
+    header.push({
+      kind: "assign",
+      target: SEEN,
+      expr: construct(plan.distinct ? "Map" : "Set")
+    });
+  header.push({ kind: "assign", target: OUT, expr: outInitializer });
+  return header;
+}
+function buildInputLoop(target, body) {
+  switch (target.kind) {
+    case "array":
+      return forRange(INDEX, LEN, [{ kind: "assign", target: ITEM, expr: loadIndex(VALUE, INDEX) }, ...body]);
+    case "set":
+      return forOf(ITEM, VALUE, body);
+    case "map":
+      return forOf(ENTRY, VALUE, [{ kind: "assign", target: ITEM, expr: loadIndex(ENTRY, literal(1)) }, ...body]);
+  }
+}
+function buildGuardedBody(plan, accepted) {
+  const unique = plan.unique;
+  const inner = plan.distinct ? [
+    {
+      kind: "if",
+      test: call(irVar("__distinctAccept"), [SEEN, ITEM]),
+      then: accepted
+    }
+  ] : unique ? [
+    {
+      kind: "assign",
+      target: UNIQUE_KEY,
+      expr: loadProp(ITEM, unique.key)
+    },
+    {
+      kind: "if",
+      test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
+      then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted]
+    }
+  ] : accepted;
+  const condition = buildFilterTest(plan);
+  return condition ? [{ kind: "if", test: condition, then: inner }] : inner;
+}
+function buildFilterTest(plan) {
+  if (plan.filters.length === 0) return void 0;
+  return allOf(plan.filters.map((filter) => buildCondition(filter.condition)));
+}
+function buildCondition(condition) {
+  switch (condition.kind) {
+    case "compare":
+      return binary(COMPARE_OPERATORS[condition.op], buildValue(condition.left), buildValue(condition.right));
+    case "logical":
+      return {
+        kind: "nary",
+        op: condition.op,
+        operands: [buildCondition(condition.left), buildCondition(condition.right)]
+      };
+    case "not":
+      return not(buildCondition(condition.inner));
+  }
+}
+function buildValue(value) {
+  switch (value.kind) {
+    case "field":
+      return loadProp(ITEM, value.key);
+    case "binding":
+      return irVar(value.name);
+    case "param":
+      return loadProp(PARAMS, value.name);
+    case "literal":
+      return literal(expectSafeLiteral(value.value));
+  }
+}
+function expectSafeLiteral(value) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean" || value === null || value === void 0) {
+    return value;
+  }
+  throw new JITError("INVALID_QUERY", "query literal values must be primitive compiler literals");
+}
+function buildProjection(select) {
+  if (!select) return ITEM;
+  return objectLiteral(
+    select.fields.map((field) => ({
+      key: field,
+      value: loadProp(ITEM, field)
+    }))
+  );
+}
+function shouldProjectAfterOrder(plan) {
+  return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
+}
+
+// ../../packages/jit/src/compiler/physical-query.ts
+function describePhysicalQueryPlan(plan) {
+  return Object.freeze({
+    strategy: plan.strategy,
+    reason: plan.reason,
+    complexity: plan.complexity,
+    facts: plan.facts
+  });
+}
+function resolvePhysicalQueryPlan(schema, target, plan) {
+  const terminal = plan.terminal;
+  if (!terminal) {
+    return Object.freeze({
+      strategy: "Scan",
+      reason: "the result is a collection, so every row has to be visited",
+      complexity: "O(n)",
+      facts: Object.freeze([])
+    });
+  }
+  const scan = Object.freeze({
+    strategy: "EarlyExitScan",
+    reason: `${terminal.op} returns as soon as the answer is known`,
+    complexity: "O(k)",
+    facts: Object.freeze([])
+  });
+  if (terminal.op !== "first" && terminal.op !== "some") return scan;
+  if (target.kind !== "array") return scan;
+  if (plan.filters.length !== 1) return scan;
+  const equality = singleEquality(plan.filters[0]?.condition);
+  if (!equality) return scan;
+  const choice = resolveKeyedAccessChoice(schema, equality.key);
+  if (choice.strategy === "EarlyExitScan") return scan;
+  return Object.freeze({
+    strategy: choice.strategy,
+    reason: choice.reason,
+    complexity: choice.complexity,
+    facts: choice.facts,
+    access: keyedAccess(schema, equality, choice.direction, terminal.op)
+  });
+}
+function resolveKeyedAccessChoice(schema, key) {
+  const hints = resolveHints(schema);
+  const ordered = hints.order ?? hints.collection?.ordered;
+  const orderedKey = resolveHintKey(ordered?.key);
+  const cacheIndex = hints.entity?.cacheIndex === true;
+  const identityKey = resolveHintKey(hints.index?.key) ?? resolveHintKey(hints.entity?.key);
+  const unique = hints.collection?.unique === true || hints.entity?.key !== void 0;
+  if (ordered && orderedKey === key && unique) {
+    return Object.freeze({
+      strategy: "BinarySearch",
+      reason: "the collection declares this key ordered and unique",
+      complexity: "O(log n)",
+      facts: Object.freeze([`ordered: ${orderedKey} ${ordered.direction ?? "asc"}`, `unique key: ${orderedKey}`]),
+      direction: ordered.direction === "desc" ? "desc" : "asc"
+    });
+  }
+  if (cacheIndex && identityKey === key) {
+    return Object.freeze({
+      strategy: "CachedIndexLookup",
+      reason: "the collection is keyed, so the index is built once per array and reused",
+      complexity: "O(1)",
+      facts: Object.freeze([`keyed: ${identityKey}`, "index cache: enabled"]),
+      direction: "asc"
+    });
+  }
+  return Object.freeze({
+    strategy: "EarlyExitScan",
+    reason: "no declared fact reaches this key directly, so rows are scanned until one matches",
+    complexity: "O(k)",
+    facts: Object.freeze([]),
+    direction: "asc"
+  });
+}
+function keyedAccess(schema, equality, direction, terminal) {
+  return Object.freeze({
+    key: equality.key,
+    direction,
+    descriptor: resolveIndexDescriptor(schema, [equality.key], "unique"),
+    probe: equality.probe,
+    terminal
+  });
+}
+function singleEquality(condition) {
+  if (condition?.kind !== "compare" || condition.op !== "eq") return void 0;
+  const { left, right } = condition;
+  if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
+  if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
+  return void 0;
+}
+function emitPhysicalQuerySource(physical, hasParams) {
+  const access2 = physical.access;
+  if (!access2) return void 0;
+  const shape = {
+    signature: hasParams ? "value, params" : "value",
+    probe: emitProbe(access2),
+    answers: access2.terminal === "some" ? "exists" : "row"
+  };
+  if (physical.strategy === "CachedIndexLookup") return emitCachedIndexLookup(access2.descriptor, shape);
+  if (physical.strategy === "BinarySearch")
+    return emitBinarySearch(access2.key, access2.descriptor, access2.direction, shape);
+  return void 0;
+}
+function emitCachedIndexLookup(descriptor, shape) {
+  const writer = new CodeWriter();
+  writer.line("(() => {");
+  writer.indent(() => {
+    emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
+    writer.line(`function query(${shape.signature}) {`);
+    writer.indent(() => {
+      writer.line(
+        `const row = __cachedIndex(value, ${JSON.stringify(indexCacheKey(descriptor))}, build).get(${shape.probe});`
+      );
+      writer.line(shape.answers === "exists" ? "return row !== undefined;" : "return row;");
+    });
+    writer.line("}");
+    writer.line("return query;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitBinarySearch(key, descriptor, direction, shape) {
+  const access2 = { key, descriptor, direction };
+  const writer = new CodeWriter();
+  const probe = shape.probe;
+  const read = (row) => {
+    const value = emitPropertyAccess(row, access2.key);
+    return access2.descriptor.keys[0]?.valueKind === "date" ? `${value}.getTime()` : value;
+  };
+  const goRight = access2.direction === "desc" ? "probe > target" : "probe < target";
+  writer.line("(() => {");
+  writer.indent(() => {
+    writer.line(`function query(${shape.signature}) {`);
+    writer.indent(() => {
+      writer.line(`const target = ${probe};`);
+      writer.line("let low = 0;");
+      writer.line("let high = value.length - 1;");
+      writer.line("while (low <= high) {");
+      writer.indent(() => {
+        writer.line("const mid = (low + high) >>> 1;");
+        writer.line("const row = value[mid];");
+        writer.line(`const probe = ${read("row")};`);
+        writer.line("if (probe === target) {");
+        writer.indent(() => writer.line(shape.answers === "exists" ? "return true;" : "return row;"));
+        writer.line("}");
+        writer.line(`if (${goRight}) low = mid + 1;`);
+        writer.line("else high = mid - 1;");
+      });
+      writer.line("}");
+      writer.line(shape.answers === "exists" ? "return false;" : "return undefined;");
+    });
+    writer.line("}");
+    writer.line("return query;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitProbe(access2) {
+  const probe = access2.probe;
+  const value = probe.kind === "literal" ? emitLiteral(probe.value) : probe.kind === "param" ? emitPropertyAccess("params", probe.name) : probe.kind === "binding" ? probe.name : emitPropertyAccess("row", probe.key);
+  return access2.descriptor.keys[0]?.valueKind === "date" && probe.kind !== "literal" ? `(${value} == null ? ${value} : ${value}.getTime())` : value;
+}
+
+// ../../packages/jit/src/compiler/query.ts
+var RUNTIME_INDEX_BINDING = "__cachedIndex";
+function emitQuerySource(schema, program) {
+  const target = expectCollectionObjectSchema(schema, "emitQuerySource");
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+  validateQueryPlan(target.objectSchema, plan);
+  const hasParams = Boolean(program.params?.length);
+  const keyed = emitPhysicalQuerySource(resolvePhysicalQueryPlan(schema, target, plan), hasParams);
+  if (keyed) return keyed;
+  const source = emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
+  return wrapDistinctSource(source, resolvePlanDistinct(schema, plan));
+}
+function explainPhysicalQuery(schema, program) {
+  const target = expectCollectionObjectSchema(schema, "explainPhysicalQuery");
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+  validateQueryPlan(target.objectSchema, plan);
+  return describePhysicalQueryPlan(resolvePhysicalQueryPlan(schema, target, plan));
+}
+function compileQuery(schema, program, options) {
+  const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
+  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
+  const descriptor = resolvePlanDistinct(schema, plan);
+  const structural = descriptor?.strategy === "structural-hash";
+  const template = getCompileCached(
+    schema,
+    `query:${serializeQueryNodes(program.nodes)}`,
+    () => {
+      const source = emitQuerySource(schema, program);
+      return {
+        source,
+        create: globalThis.Function(
+          RUNTIME_INDEX_BINDING,
+          ...structural ? ["__distinctHash", "__distinctEqual"] : [],
+          ...bindingNames,
+          `return ${source};`
+        )
+      };
+    },
+    options
+  );
+  const compiled = template.create(
+    getCachedIndex,
+    ...structural ? [
+      compileUncachedHash(expectCollectionObjectSchema(schema, "query distinct").objectSchema),
+      compileEqual(expectCollectionObjectSchema(schema, "query distinct").objectSchema)
+    ] : [],
+    ...program.bindings
+  );
+  registerArtifact(compiled, {
+    kind: "query",
+    source: template.source,
+    bindingNames,
+    bindingValues: program.bindings
+  });
+  return compiled;
+}
+function serializeQueryNodes(nodes) {
+  return nodes.map(serializeQueryNode).join(";");
+}
+function serializeQueryNode(node) {
+  switch (node.kind) {
+    case "filter":
+      return `f(${serializeCondition(node.condition)})`;
+    case "select:fields":
+      return `s(${node.fields.join(",")})`;
+    case "unique":
+      return `u(${node.key})`;
+    case "distinct":
+      return `D(${node.fields.join(",")})`;
+    case "keyed":
+      return `k(${node.key})`;
+    case "groupBy":
+      return `g(${node.key})`;
+    case "orderBy":
+      return `o(${node.key},${node.direction})`;
+    case "aggregate":
+      return `a(${node.op},${node.key ?? ""})`;
+    case "aggregate:composite":
+      return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
+    case "terminal":
+      return `t(${node.op})`;
+    case "delete":
+      return "d()";
+    case "update":
+      return `m(${Object.keys(node.patch).map((key) => `${key}=${node.patch[key]?.name}`).join(",")})`;
+  }
+}
+function serializeCondition(condition) {
+  switch (condition.kind) {
+    case "compare":
+      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
+    case "logical":
+      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
+    case "not":
+      return `not(${serializeCondition(condition.inner)})`;
+  }
+}
+function serializeValue(value) {
+  switch (value.kind) {
+    case "field":
+      return `.${value.key}`;
+    case "binding":
+      return `$${value.name}`;
+    case "param":
+      return `p:${value.name}`;
+    case "literal":
+      return `#${typeof value.value}:${String(value.value)}`;
+  }
+}
+function createQueryPlan(nodes) {
+  const filters = [];
+  const selects = [];
+  const uniques = [];
+  const distincts = [];
+  const collectors = [];
+  const orderBys = [];
+  const aggregates = [];
+  const composites = [];
+  const terminals = [];
+  const mutations = [];
+  for (const node of nodes) {
+    switch (node.kind) {
+      case "filter":
+        filters[filters.length] = node;
+        break;
+      case "select:fields":
+        selects[selects.length] = node;
+        break;
+      case "unique":
+        uniques[uniques.length] = node;
+        break;
+      case "distinct":
+        distincts[distincts.length] = node;
+        break;
+      case "keyed":
+      case "groupBy":
+        collectors[collectors.length] = node;
+        break;
+      case "orderBy":
+        orderBys[orderBys.length] = node;
+        break;
+      case "aggregate":
+        aggregates[aggregates.length] = node;
+        break;
+      case "aggregate:composite":
+        composites[composites.length] = node;
+        break;
+      case "terminal":
+        terminals[terminals.length] = node;
+        break;
+      case "delete":
+      case "update":
+        mutations[mutations.length] = node;
+        break;
+    }
+  }
+  return {
+    filters,
+    selects,
+    uniques,
+    distincts,
+    collectors,
+    orderBys,
+    aggregates,
+    composites,
+    terminals,
+    mutations
+  };
+}
+function optimizeQueryPlan(plan) {
+  return {
+    filters: plan.filters,
+    select: last(plan.selects),
+    unique: last(plan.uniques),
+    distinct: last(plan.distincts),
+    collector: last(plan.collectors),
+    orderBy: last(plan.orderBys),
+    aggregate: last(plan.aggregates),
+    composite: last(plan.composites),
+    terminal: last(plan.terminals),
+    mutation: last(plan.mutations)
+  };
+}
+function validateQueryPlan(schema, plan) {
+  for (const filter of plan.filters) {
+    validateCondition(schema, filter.condition);
+  }
+  if (plan.select) validateObjectKeys(schema, plan.select.fields, "query select");
+  if (plan.unique) validateObjectKeys(schema, [plan.unique.key], "query unique");
+  if (plan.distinct) validateObjectKeys(schema, plan.distinct.fields, "query distinct");
+  if (plan.unique && plan.distinct) {
+    throw new JITError("INVALID_QUERY", "query unique and distinct cannot be combined in v1");
+  }
+  if (plan.collector) validateObjectKeys(schema, [plan.collector.key], `query ${plan.collector.kind}`);
+  if (plan.orderBy) validateObjectKeys(schema, [plan.orderBy.key], "query orderBy");
+  if (plan.collector && plan.orderBy) {
+    throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
+  }
+  if (plan.aggregate) {
+    if (plan.collector || plan.orderBy || plan.mutation) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query aggregate cannot be combined with keyed/groupBy/orderBy/delete/update in v1"
+      );
+    }
+    if (plan.aggregate.op !== "count") {
+      if (plan.aggregate.key === void 0) {
+        throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
+      }
+      validateObjectKeys(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
+    }
+  }
+  if (plan.composite) {
+    if (plan.aggregate || plan.terminal || plan.orderBy || plan.mutation || plan.select) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query aggregate({...}) cannot be combined with select/orderBy/scalar aggregates/terminals/delete/update in v1"
+      );
+    }
+    if (plan.collector && plan.collector.kind !== "groupBy") {
+      throw new JITError("INVALID_QUERY", "query aggregate({...}) cannot be combined with keyed in v1");
+    }
+    if (plan.composite.fields.length === 0) {
+      throw new JITError("INVALID_QUERY", "query aggregate({...}) requires at least one field");
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const field of plan.composite.fields) {
+      if (seen.has(field.name)) {
+        throw new JITError("INVALID_QUERY", `query aggregate repeats field ${JSON.stringify(field.name)}`);
+      }
+      seen.add(field.name);
+      if (field.op === "count") continue;
+      if (field.key === void 0) {
+        throw new JITError("INVALID_QUERY", `query aggregate ${field.op} requires a field key`);
+      }
+      validateObjectKeys(schema, [field.key], `query aggregate ${field.op}`);
+    }
+  }
+  if (plan.terminal) {
+    if (plan.collector || plan.orderBy || plan.aggregate || plan.mutation || plan.unique || plan.distinct) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `query ${plan.terminal.op} cannot be combined with unique/distinct/keyed/groupBy/orderBy/aggregates/delete/update in v1`
+      );
+    }
+    if (plan.select && plan.terminal.op !== "first") {
+      throw new JITError("INVALID_QUERY", `query ${plan.terminal.op} does not produce rows, so select has no effect`);
+    }
+  }
+  if (plan.mutation) {
+    if (plan.filters.length === 0) {
+      throw new JITError("INVALID_QUERY", "query delete/update requires at least one filter in v1");
+    }
+    if (plan.select || plan.collector || plan.orderBy) {
+      throw new JITError(
+        "INVALID_QUERY",
+        "query delete/update cannot be combined with select/keyed/groupBy/orderBy in v1"
+      );
+    }
+    if (plan.mutation.kind === "update") {
+      validateObjectKeys(schema, Object.keys(plan.mutation.patch), "query update");
+    }
+  }
+}
+function expectCollectionObjectSchema(schema, compilerName) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
+    throw new JITError("INVALID_QUERY", `${compilerName} expects an array, set, or map schema`);
+  }
+  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
+  }
+  return {
+    kind: resolved.type,
+    objectSchema: element,
+    schema
+  };
+}
+function resolvePlanDistinct(schema, plan) {
+  return plan.distinct ? resolveDistinctDescriptor(schema, plan.distinct) : void 0;
+}
+function validateObjectKeys(schema, keys, compilerName) {
+  const props = schema.def.props;
+  for (const key of keys) {
+    if (!(key in props)) {
+      throw new JITError("INVALID_QUERY", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+}
+function validateCondition(schema, condition) {
+  switch (condition.kind) {
+    case "compare":
+      validateValue(schema, condition.left);
+      validateValue(schema, condition.right);
+      return;
+    case "logical":
+      validateCondition(schema, condition.left);
+      validateCondition(schema, condition.right);
+      return;
+    case "not":
+      validateCondition(schema, condition.inner);
+      return;
+  }
+}
+function validateValue(schema, value) {
+  if (value.kind === "field") {
+    validateObjectKeys(schema, [value.key], "query");
+  }
+}
+function last(values) {
+  return values[values.length - 1];
+}
+
 // ../../packages/jit/src/compiler/lazy-query.ts
 function explainQueryExecution(program, outputMode) {
   const barriers = program.nodes.filter((node) => node.kind === "orderBy").map(() => "orderBy");
   const retainedState = [];
   for (const node of program.nodes) {
     if (node.kind === "unique") retainedState[retainedState.length] = `Set(${node.key})`;
+    else if (node.kind === "distinct")
+      retainedState[retainedState.length] = node.fields.length === 0 ? "structural-hash" : `distinct(${node.fields.join(",")})`;
     else if (node.kind === "chunk") retainedState[retainedState.length] = `chunk(${node.size})`;
     else if (node.kind === "window") retainedState[retainedState.length] = `window(${node.size})`;
     else if (node.kind === "pairwise") retainedState[retainedState.length] = "previous-item";
@@ -8791,10 +10957,12 @@ function explainQueryExecution(program, outputMode) {
   };
 }
 function emitQueryIteratorSource(schema, program) {
-  return emitPipelineSource(schema, program, false);
+  return wrapDistinctSource(emitPipelineSource(schema, program, false), resolveLazyDistinct(schema, program));
 }
 function emitQueryArraySource(schema, program) {
-  if (program.nodes.every(isFusibleNode)) return emitDirectArraySource(schema, program);
+  if (program.nodes.every(isFusibleNode)) {
+    return wrapDistinctSource(emitDirectArraySource(schema, program), resolveLazyDistinct(schema, program));
+  }
   const iterator = emitQueryIteratorSource(schema, program);
   const hasParams = Boolean(program.params?.length);
   return `(function() {
@@ -8812,21 +10980,32 @@ function compileQueryArray(schema, program, options) {
     `query:eager-array:${serializePipeline(program.nodes)}`,
     () => {
       const source = emitQueryArraySource(schema, program);
-      return { source, create: globalThis.Function(...bindingNames, `return ${source};`) };
+      const structural = resolveLazyDistinct(schema, program)?.strategy === "structural-hash";
+      return {
+        source,
+        create: globalThis.Function(
+          ...structural ? ["__distinctHash", "__distinctEqual"] : [],
+          ...bindingNames,
+          `return ${source};`
+        )
+      };
     },
     options
   );
-  const compiled = template.create(...program.bindings);
+  const compiled = template.create(
+    ...distinctRuntimeBindings(schema, program),
+    ...program.bindings
+  );
   registerArtifact(compiled, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "array"
   });
   return compiled;
 }
 function emitQueryAsyncIteratorSource(schema, program) {
-  return emitPipelineSource(schema, program, true);
+  return wrapDistinctSource(emitPipelineSource(schema, program, true), resolveLazyDistinct(schema, program));
 }
 function compileQueryIterator(schema, program, options) {
   return compileLazy(schema, program, "generator", options);
@@ -8868,16 +11047,27 @@ function compileQueryVisitor(schema, program, options) {
     `query:visitor:${serializePipeline(program.nodes)}`,
     () => {
       const source = emitQueryVisitorSource(schema, program);
-      return { source, create: globalThis.Function(...bindingNames, `return ${source};`) };
+      const structural = resolveLazyDistinct(schema, program)?.strategy === "structural-hash";
+      return {
+        source,
+        create: globalThis.Function(
+          ...structural ? ["__distinctHash", "__distinctEqual"] : [],
+          ...bindingNames,
+          `return ${source};`
+        )
+      };
     },
     options
   );
-  const visitor = template.create(...program.bindings);
+  const visitor = template.create(
+    ...distinctRuntimeBindings(schema, program),
+    ...program.bindings
+  );
   registerArtifact(visitor, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "visitor"
   });
   return visitor;
 }
@@ -8895,6 +11085,7 @@ function emitQueryVisitorSource(schema, program) {
       lines.push(`  let count${index2} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index2} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index2} = new Set();`);
+    else if (node.kind === "distinct") lines.push(`  const seen${index2} = new Map();`);
   });
   lines.push("  let emitted = 0;");
   const body = emitVisitorBody(program.nodes);
@@ -8913,7 +11104,7 @@ function emitQueryVisitorSource(schema, program) {
   lines.push("  }");
   lines.push("  return emitted;");
   lines.push("}", "return visit;", "})()");
-  return lines.join("\n");
+  return wrapDistinctSource(lines.join("\n"), resolveLazyDistinct(schema, program));
 }
 function emitVisitorBody(nodes) {
   const body = ["let output = item;"];
@@ -8921,7 +11112,7 @@ function emitVisitorBody(nodes) {
   nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
-        body.push(`if (!(${emitCondition(node.condition)})) continue;`);
+        body.push(`if (!(${emitCondition3(node.condition)})) continue;`);
         break;
       case "select:fields":
         body.push(`output = ${emitProjection(node.fields)};`);
@@ -8933,16 +11124,19 @@ function emitVisitorBody(nodes) {
         body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
-        body.push(`if (!(${emitCondition(node.condition)})) return emitted;`);
+        body.push(`if (!(${emitCondition3(node.condition)})) return emitted;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index2} && (${emitCondition(node.condition)})) continue;`);
+        body.push(`if (dropping${index2} && (${emitCondition3(node.condition)})) continue;`);
         body.push(`dropping${index2} = false;`);
         break;
       case "unique":
         body.push(`const key${index2} = item${emitPropertyAccess("", node.key)};`);
         body.push(`if (seen${index2}.has(key${index2})) continue;`);
         body.push(`seen${index2}.add(key${index2});`);
+        break;
+      case "distinct":
+        body.push(`if (!__distinctAccept(seen${index2}, item)) continue;`);
         break;
       default:
         break;
@@ -8963,16 +11157,27 @@ function compileLazy(schema, program, mode, options) {
     key,
     () => {
       const source = mode === "generator" ? emitQueryIteratorSource(schema, program) : emitQueryAsyncIteratorSource(schema, program);
-      return { source, create: globalThis.Function(...bindingNames, `return ${source};`) };
+      const structural = resolveLazyDistinct(schema, program)?.strategy === "structural-hash";
+      return {
+        source,
+        create: globalThis.Function(
+          ...structural ? ["__distinctHash", "__distinctEqual"] : [],
+          ...bindingNames,
+          `return ${source};`
+        )
+      };
     },
     options
   );
-  const compiled = template.create(...program.bindings);
+  const compiled = template.create(
+    ...distinctRuntimeBindings(schema, program),
+    ...program.bindings
+  );
   registerArtifact(compiled, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings
+    kind: "query-plan",
+    schema,
+    program,
+    mode: mode === "generator" ? "iterator" : "async-iterator"
   });
   return compiled;
 }
@@ -9027,12 +11232,13 @@ function emitDirectArraySource(schema, program) {
       lines.push(`  let count${index2} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index2} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index2} = new Set();`);
+    else if (node.kind === "distinct") lines.push(`  const seen${index2} = new Map();`);
   });
   const body = ["let output = item;"];
   program.nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
-        body.push(`if (!(${emitCondition(node.condition)})) continue;`);
+        body.push(`if (!(${emitCondition3(node.condition)})) continue;`);
         break;
       case "select:fields":
         body.push(`output = ${emitProjection(node.fields)};`);
@@ -9044,16 +11250,19 @@ function emitDirectArraySource(schema, program) {
         body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
-        body.push(`if (!(${emitCondition(node.condition)})) return out;`);
+        body.push(`if (!(${emitCondition3(node.condition)})) return out;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index2} && (${emitCondition(node.condition)})) continue;`);
+        body.push(`if (dropping${index2} && (${emitCondition3(node.condition)})) continue;`);
         body.push(`dropping${index2} = false;`);
         break;
       case "unique":
         body.push(`const key${index2} = item${emitPropertyAccess("", node.key)};`);
         body.push(`if (seen${index2}.has(key${index2})) continue;`);
         body.push(`seen${index2}.add(key${index2});`);
+        break;
+      case "distinct":
+        body.push(`if (!__distinctAccept(seen${index2}, item)) continue;`);
         break;
       default:
         break;
@@ -9078,7 +11287,7 @@ ${lines.join("\n")}
 })()`;
 }
 function isFusibleNode(node) {
-  return node.kind === "filter" || node.kind === "select:fields" || node.kind === "take" || node.kind === "drop" || node.kind === "takeWhile" || node.kind === "dropWhile" || node.kind === "unique";
+  return node.kind === "filter" || node.kind === "select:fields" || node.kind === "take" || node.kind === "drop" || node.kind === "takeWhile" || node.kind === "dropWhile" || node.kind === "unique" || node.kind === "distinct";
 }
 function emitFusedStage(lines, nodes, forAwait, directArray) {
   const terminalTakeIndex = terminalTake(nodes);
@@ -9086,12 +11295,13 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
     if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index2} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index2} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index2} = new Set();`);
+    else if (node.kind === "distinct") lines.push(`  const seen${index2} = new Map();`);
   });
   const body = ["let output = item;"];
   nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
-        body.push(`if (!(${emitCondition(node.condition)})) continue;`);
+        body.push(`if (!(${emitCondition3(node.condition)})) continue;`);
         break;
       case "select:fields":
         body.push(`output = ${emitProjection(node.fields)};`);
@@ -9103,16 +11313,19 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
         body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
-        body.push(`if (!(${emitCondition(node.condition)})) return;`);
+        body.push(`if (!(${emitCondition3(node.condition)})) return;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index2} && (${emitCondition(node.condition)})) continue;`);
+        body.push(`if (dropping${index2} && (${emitCondition3(node.condition)})) continue;`);
         body.push(`dropping${index2} = false;`);
         break;
       case "unique":
         body.push(`const key${index2} = item${emitPropertyAccess("", node.key)};`);
         body.push(`if (seen${index2}.has(key${index2})) continue;`);
         body.push(`seen${index2}.add(key${index2});`);
+        break;
+      case "distinct":
+        body.push(`if (!__distinctAccept(seen${index2}, item)) continue;`);
         break;
       default:
         break;
@@ -9148,7 +11361,7 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSc
   };
   switch (node.kind) {
     case "filter":
-      loop([`if (${emitCondition(node.condition)}) yield item;`]);
+      loop([`if (${emitCondition3(node.condition)}) yield item;`]);
       return;
     case "select:fields":
       loop([`yield ${emitProjection(node.fields)};`]);
@@ -9171,11 +11384,11 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSc
       loop([`if (count++ >= ${node.count}) yield item;`]);
       return;
     case "takeWhile":
-      loop([`if (!(${emitCondition(node.condition)})) return;`, "yield item;"]);
+      loop([`if (!(${emitCondition3(node.condition)})) return;`, "yield item;"]);
       return;
     case "dropWhile":
       lines.push("  let dropping = true;");
-      loop([`if (dropping && (${emitCondition(node.condition)})) continue;`, "dropping = false;", "yield item;"]);
+      loop([`if (dropping && (${emitCondition3(node.condition)})) continue;`, "dropping = false;", "yield item;"]);
       return;
     case "unique":
       lines.push("  const seen = new Set();");
@@ -9185,6 +11398,10 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSc
         "seen.add(key);",
         "yield item;"
       ]);
+      return;
+    case "distinct":
+      lines.push("  const seen = new Map();");
+      loop(["if (!__distinctAccept(seen, item)) continue;", "yield item;"]);
       return;
     case "chunk":
       lines.push(`  let chunk = new Array(${node.size});`);
@@ -9250,19 +11467,26 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSc
       throw new JITError("INVALID_QUERY", `${node.kind} is not an incremental output operation`);
   }
 }
-function emitCondition(condition) {
+function emitCondition3(condition) {
   switch (condition.kind) {
     case "compare": {
-      const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
-      return `${emitValue(condition.left)} ${operators[condition.op]} ${emitValue(condition.right)}`;
+      const operators = {
+        eq: "===",
+        neq: "!==",
+        gt: ">",
+        gte: ">=",
+        lt: "<",
+        lte: "<="
+      };
+      return `${emitValue3(condition.left)} ${operators[condition.op]} ${emitValue3(condition.right)}`;
     }
     case "logical":
-      return `(${emitCondition(condition.left)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition(condition.right)})`;
+      return `(${emitCondition3(condition.left)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition3(condition.right)})`;
     case "not":
-      return `!(${emitCondition(condition.inner)})`;
+      return `!(${emitCondition3(condition.inner)})`;
   }
 }
-function emitValue(value) {
+function emitValue3(value) {
   switch (value.kind) {
     case "field":
       return `item${emitPropertyAccess("", value.key)}`;
@@ -9298,8 +11522,8 @@ function validatePipeline(nodes, props) {
     if (node.kind === "filter" || node.kind === "takeWhile" || node.kind === "dropWhile") {
       validateConditionFields(node.condition, props);
     }
-    if (node.kind === "select:fields" || node.kind === "flatMap" || node.kind === "unique" || node.kind === "orderBy" || node.kind === "groupAdjacentBy") {
-      const keys = node.kind === "select:fields" ? node.fields : [node.key];
+    if (node.kind === "select:fields" || node.kind === "flatMap" || node.kind === "unique" || node.kind === "distinct" || node.kind === "orderBy" || node.kind === "groupAdjacentBy") {
+      const keys = node.kind === "select:fields" || node.kind === "distinct" ? node.fields : [node.key];
       for (const key of keys)
         if (!(key in props)) throw new JITError("INVALID_QUERY", `lazy query received unknown key ${key}`);
     }
@@ -9321,6 +11545,127 @@ function validateConditionFields(condition, props) {
 }
 function serializePipeline(nodes) {
   return JSON.stringify(nodes, (_key, value) => typeof value === "bigint" ? `${value}n` : value);
+}
+function resolveLazyDistinct(schema, program) {
+  const nodes = program.nodes.filter((node) => node.kind === "distinct");
+  if (nodes.length === 0) return void 0;
+  if (nodes.length > 1 || program.nodes.some((node) => node.kind === "unique")) {
+    throw new JITError("INVALID_QUERY", "query distinct cannot be repeated or combined with unique in v1");
+  }
+  return resolveDistinctDescriptor(schema, nodes[0]);
+}
+function distinctRuntimeBindings(schema, program) {
+  if (resolveLazyDistinct(schema, program)?.strategy !== "structural-hash") return [];
+  const objectSchema = resolveCollection(schema).objectSchema;
+  return [compileUncachedHash(objectSchema), compileEqual(objectSchema)];
+}
+function hasIncrementalNodes(program) {
+  for (let i = 0, len = program.nodes.length; i < len; i++) {
+    switch (program.nodes[i]?.kind) {
+      case "flatMap":
+      case "take":
+      case "drop":
+      case "takeWhile":
+      case "dropWhile":
+      case "chunk":
+      case "window":
+      case "pairwise":
+      case "scan":
+      case "groupAdjacentBy":
+        return true;
+    }
+  }
+  return false;
+}
+function emitQueryPlanSource(schema, program, mode) {
+  switch (mode) {
+    case "iterator":
+      return emitQueryIteratorSource(schema, program);
+    case "async-iterator":
+      return emitQueryAsyncIteratorSource(schema, program);
+    case "visitor":
+      return emitQueryVisitorSource(schema, program);
+    default:
+      return hasIncrementalNodes(program) ? emitQueryArraySource(schema, program) : emitQuerySource(schema, program);
+  }
+}
+
+// ../../packages/jit/src/compiler/lookup.ts
+function resolveLookupDescriptor(schema, key) {
+  const object2 = resolveRowObjectSchema(schema, "lookup");
+  const resolved = key ?? resolveIndexKeysFromFacts(schema)?.[0];
+  if (!resolved) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      "JIT.lookup() needs a key: declare one with .keyed()/.indexBy()/.uniqueBy(), or name it with .by()"
+    );
+  }
+  const field = resolveRowField(object2, resolved, "lookup");
+  return Object.freeze({
+    key: resolved,
+    descriptor: resolveIndexDescriptor(schema, [resolved], "unique"),
+    choice: resolveKeyedAccessChoice(schema, resolved),
+    date: resolveScalarKeyKind(field, resolved, "lookup") === "date"
+  });
+}
+function emitLookupSource(lookup2) {
+  const shape = {
+    signature: "value, key",
+    probe: lookup2.date ? "(key == null ? key : key.getTime())" : "key",
+    answers: "row"
+  };
+  if (lookup2.choice.strategy === "CachedIndexLookup") return emitCachedIndexLookup(lookup2.descriptor, shape);
+  if (lookup2.choice.strategy === "BinarySearch") {
+    return emitBinarySearch(lookup2.key, lookup2.descriptor, lookup2.choice.direction, shape);
+  }
+  return emitLookupScan(lookup2, shape);
+}
+function emitLookupScan(lookup2, shape) {
+  const writer = new CodeWriter();
+  const read = lookup2.date ? `${emitPropertyAccess("row", lookup2.key)}.getTime()` : emitPropertyAccess("row", lookup2.key);
+  writer.line("(() => {");
+  writer.indent(() => {
+    writer.line(`function lookup(${shape.signature}) {`);
+    writer.indent(() => {
+      writer.line(`const target = ${shape.probe};`);
+      writer.line("for (let i = 0, len = value.length; i < len; i++) {");
+      writer.indent(() => {
+        writer.line("const row = value[i];");
+        writer.line(`if (${read} === target) return row;`);
+      });
+      writer.line("}");
+      writer.line("return undefined;");
+    });
+    writer.line("}");
+    writer.line("return lookup;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function lookupCacheKey(lookup2) {
+  return `lookup:${lookup2.choice.strategy}:${lookup2.key}:${lookup2.date}:${lookup2.choice.direction}`;
+}
+function compileLookup(schema, lookup2, runtimeIndexCache, options) {
+  const template = getCompileCached(
+    schema,
+    lookupCacheKey(lookup2),
+    () => {
+      const source = emitLookupSource(lookup2);
+      return { source, create: globalThis.Function("__cachedIndex", `return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create(runtimeIndexCache);
+  Object.defineProperty(compiled, "explain", {
+    value: () => Object.freeze({
+      strategy: lookup2.choice.strategy,
+      reason: lookup2.choice.reason,
+      complexity: lookup2.choice.complexity,
+      facts: lookup2.choice.facts
+    })
+  });
+  registerArtifact(compiled, { kind: "lookup-plan", schema, lookup: lookup2 });
+  return compiled;
 }
 
 // ../../packages/jit/src/compiler/mapper/build-mapper-plan.ts
@@ -9472,9 +11817,9 @@ function expectObjectSchema(schema, label) {
 // ../../packages/jit/src/compiler/mapper/build-mapper-ir.ts
 var SOURCE = irVar("source");
 var LIST = irVar("list");
-var LEN = irVar("len");
-var OUT = irVar("out");
-var INDEX = irVar("i");
+var LEN2 = irVar("len");
+var OUT2 = irVar("out");
+var INDEX2 = irVar("i");
 function buildMapperIR(fields) {
   const prelude = [];
   const output = objectLiteral(buildEntries(fields, SOURCE, "f", prelude));
@@ -9487,14 +11832,14 @@ function buildMapperIR(fields) {
     kind: "program",
     params: [LIST],
     body: [
-      { kind: "assign", target: LEN, expr: loadProp(LIST, "length") },
-      { kind: "assign", target: OUT, expr: construct("Array", [LEN]) },
-      forRange(INDEX, LEN, [
-        { kind: "assign", target: SOURCE, expr: loadIndex(LIST, INDEX) },
+      { kind: "assign", target: LEN2, expr: loadProp(LIST, "length") },
+      { kind: "assign", target: OUT2, expr: construct("Array", [LEN2]) },
+      forRange(INDEX2, LEN2, [
+        { kind: "assign", target: SOURCE, expr: loadIndex(LIST, INDEX2) },
         ...prelude,
-        store(loadIndex(OUT, INDEX), output)
+        store(loadIndex(OUT2, INDEX2), output)
       ]),
-      { kind: "return", value: OUT }
+      { kind: "return", value: OUT2 }
     ]
   };
   return { map: map4, many };
@@ -9698,13 +12043,13 @@ return ${source};`) };
   return compiled;
 }
 function emitMockSource(schema) {
-  const body = emitValue2(schema, 0);
+  const body = emitValue4(schema, 0);
   return `function mock(options) {
   __srand(options && options.seed !== undefined ? options.seed : (Math.random() * 2147483647) | 0);
   return ${body};
 }`;
 }
-function emitValue2(schema, depth) {
+function emitValue4(schema, depth) {
   if (depth > 6) return emitTerminal(schema);
   const current = schema;
   const checks = current.def.checks ?? [];
@@ -9739,7 +12084,7 @@ function emitValue2(schema, depth) {
     }
     case TypeName.object: {
       const props = current.def.props ?? {};
-      const entries = Object.keys(props).map((key) => `${propertyKey(key)}: ${emitValue2(props[key], depth + 1)}`);
+      const entries = Object.keys(props).map((key) => `${propertyKey(key)}: ${emitValue4(props[key], depth + 1)}`);
       return entries.length === 0 ? "{}" : `{ ${entries.join(", ")} }`;
     }
     case TypeName.array:
@@ -9747,47 +12092,47 @@ function emitValue2(schema, depth) {
     case TypeName.set:
       return `new Set(${emitArray(current.def.element, checks, depth)})`;
     case TypeName.map: {
-      const key = emitValue2(current.def.key, depth + 1);
-      const value = emitValue2(current.def.value, depth + 1);
+      const key = emitValue4(current.def.key, depth + 1);
+      const value = emitValue4(current.def.value, depth + 1);
       return `new Map([[${key}, ${value}]])`;
     }
     case TypeName.record:
-      return `{ [${emitString([])}]: ${emitValue2(current.def.value, depth + 1)} }`;
+      return `{ [${emitString([])}]: ${emitValue4(current.def.value, depth + 1)} }`;
     case TypeName.tuple: {
       const items = current.def.items ?? [];
-      return `[${items.map((item) => emitValue2(item, depth + 1)).join(", ")}]`;
+      return `[${items.map((item) => emitValue4(item, depth + 1)).join(", ")}]`;
     }
     case TypeName.union:
     case TypeName.xor:
     case TypeName.discriminatedUnion: {
       const options = current.def.options ?? [];
       if (options.length === 0) return "undefined";
-      if (options.length === 1) return emitValue2(options[0], depth + 1);
-      return `(() => { switch (__int(0, ${options.length - 1})) { ${options.map((option, index2) => `case ${index2}: return ${emitValue2(option, depth + 1)};`).join(" ")} } })()`;
+      if (options.length === 1) return emitValue4(options[0], depth + 1);
+      return `(() => { switch (__int(0, ${options.length - 1})) { ${options.map((option, index2) => `case ${index2}: return ${emitValue4(option, depth + 1)};`).join(" ")} } })()`;
     }
     case TypeName.intersection: {
       const options = current.def.options ?? [];
-      return `Object.assign({}, ${options.map((option) => emitValue2(option, depth + 1)).join(", ")})`;
+      return `Object.assign({}, ${options.map((option) => emitValue4(option, depth + 1)).join(", ")})`;
     }
     case TypeName.optional:
-      return `(__rand() < 0.5 ? undefined : ${emitValue2(current.def.innerType, depth + 1)})`;
+      return `(__rand() < 0.5 ? undefined : ${emitValue4(current.def.innerType, depth + 1)})`;
     case TypeName.nullable:
-      return `(__rand() < 0.25 ? null : ${emitValue2(current.def.innerType, depth + 1)})`;
+      return `(__rand() < 0.25 ? null : ${emitValue4(current.def.innerType, depth + 1)})`;
     case TypeName.nullish:
-      return `(__rand() < 0.5 ? null : ${emitValue2(current.def.innerType, depth + 1)})`;
+      return `(__rand() < 0.5 ? null : ${emitValue4(current.def.innerType, depth + 1)})`;
     case TypeName.readonly:
     case TypeName.brand:
     case TypeName.coerce:
     case TypeName.default:
-      return emitValue2(current.def.innerType, depth + 1);
+      return emitValue4(current.def.innerType, depth + 1);
     case TypeName.refine:
     case TypeName.pipe:
     case TypeName.transform:
-      return emitValue2(current.def.innerType, depth + 1);
+      return emitValue4(current.def.innerType, depth + 1);
     case TypeName.lazy:
-      return emitValue2(current.def.getter(), depth + 1);
+      return emitValue4(current.def.getter(), depth + 1);
     case TypeName.promise:
-      return `Promise.resolve(${emitValue2(current.def.innerType, depth + 1)})`;
+      return `Promise.resolve(${emitValue4(current.def.innerType, depth + 1)})`;
     case TypeName.json:
     case TypeName.any:
     case TypeName.unknown:
@@ -9906,7 +12251,7 @@ function emitArray(element, checks, depth) {
   const length = numeric(checks, "length");
   const min = length ?? numeric(checks, "min") ?? (hasCheck(checks, "nonEmpty") ? 1 : 1);
   const max = depth >= 5 ? min : length ?? numeric(checks, "max") ?? Math.max(min, 3);
-  const item = emitValue2(element, depth + 1);
+  const item = emitValue4(element, depth + 1);
   return `Array.from({ length: __int(${min}, ${Math.max(min, max)}) }, () => (${item}))`;
 }
 function numeric(checks, kind) {
@@ -9960,7 +12305,7 @@ function emitMutationPlanBody(plan, updates) {
 // ../../packages/jit/src/compiler/object-ops.ts
 function emitTransformSource(schema, transforms) {
   const objectSchema = expectObjectSchema2(schema, "compileTransform");
-  const transformKeys = validateObjectKeys(objectSchema, Object.keys(transforms), "compileTransform");
+  const transformKeys = validateObjectKeys2(objectSchema, Object.keys(transforms), "compileTransform");
   const transformNames = new Map(transformKeys.map((key, index2) => [key, `__t${index2}`]));
   const entries = Object.keys(objectSchema.def.props).map((key) => {
     const source = emitPropertyAccess("value", key);
@@ -9981,7 +12326,7 @@ function expectObjectSchema2(schema, compilerName) {
   }
   return resolved;
 }
-function validateObjectKeys(schema, keys, compilerName) {
+function validateObjectKeys2(schema, keys, compilerName) {
   const props = schema.def.props;
   for (const key of keys) {
     if (!(key in props)) {
@@ -9993,869 +12338,426 @@ function validateObjectKeys(schema, keys, compilerName) {
   return [...keys];
 }
 
-// ../../packages/jit/src/compiler/emitter/emit-query.ts
-function emitQuery(program) {
-  const writer = new CodeWriter();
-  const params = program.params.map((param2) => param2.name).join(", ");
-  writer.line(`function query(${params}) {`);
+// ../../packages/jit/src/compiler/patch.ts
+function emitMergeFunction(writer, object2, name, nested) {
+  const props = object2.def.props;
+  writer.line(`function ${name}(value, patch) {`);
   writer.indent(() => {
-    for (const node of program.body) emitNode(writer, node);
+    writer.line('if (patch === null || typeof patch !== "object" || Array.isArray(patch)) return patch;');
+    writer.line("let changed = false;");
+    writer.line("const out = {};");
+    for (const key of Object.keys(props)) {
+      const field = props[key];
+      const read = emitPropertyAccess("value", key);
+      const patched = emitPropertyAccess("patch", key);
+      const inPatch = `${JSON.stringify(key)} in patch`;
+      const base = resolveWrappers(field).base;
+      const child = base.type === TypeName.object ? childName2(name, key, base, nested) : void 0;
+      writer.line(`if (${inPatch}) {`);
+      writer.indent(() => {
+        writer.line(`if (${patched} === null) {`);
+        writer.indent(() => writer.line("changed = true;"));
+        writer.line("} else {");
+        writer.indent(() => {
+          if (child === void 0) {
+            writer.line(`out[${JSON.stringify(key)}] = ${patched};`);
+            writer.line(`if (!Object.is(${read}, ${patched})) changed = true;`);
+          } else {
+            writer.line(`const merged = ${child}(${read}, ${patched});`);
+            writer.line(`out[${JSON.stringify(key)}] = merged;`);
+            writer.line(`if (!Object.is(${read}, merged)) changed = true;`);
+          }
+        });
+        writer.line("}");
+      });
+      writer.line(`} else if (${JSON.stringify(key)} in value) {`);
+      writer.indent(() => writer.line(`out[${JSON.stringify(key)}] = ${read};`));
+      writer.line("}");
+    }
+    writer.line("return changed ? out : value;");
+  });
+  writer.line("}");
+}
+function childName2(parent, key, schema, nested) {
+  const name = `${parent}_${key.replace(/[^A-Za-z0-9_$]/g, "_")}`;
+  if (!nested.has(name)) {
+    const writer = new CodeWriter();
+    nested.set(name, "");
+    emitMergeFunction(writer, schema, name, nested);
+    nested.set(name, writer.toString());
+  }
+  return name;
+}
+function emitMergePatchProgram(schema) {
+  const object2 = expectProjectionObject(schema, "JIT.patch.merge()");
+  const nested = /* @__PURE__ */ new Map();
+  const root = new CodeWriter();
+  emitMergeFunction(root, object2, "mergePatch", nested);
+  const helpers = [...nested.values()].filter((source) => source !== "");
+  return `(function () {
+${helpers.join("\n")}
+${root.toString()}
+return mergePatch;
+})()`;
+}
+function compileMergePatch(schema, options) {
+  const template = getCompileCached(
+    schema,
+    "patch:merge",
+    () => {
+      const source = emitMergePatchProgram(schema);
+      return { source, create: globalThis.Function(`return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create();
+  registerArtifact(compiled, { kind: "patch-plan", schema, mode: "merge" });
+  return compiled;
+}
+function emitJsonPatchSource(schema) {
+  expectProjectionObject(schema, "JIT.patch.json()");
+  const writer = new CodeWriter();
+  writer.line("function applyPatch(value, operations) {");
+  writer.indent(() => {
+    writer.line("let out = value;");
+    writer.line("for (let i = 0, len = operations.length; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const operation = operations[i];");
+      writer.line("const path = __parsePointer(operation.path);");
+      writer.line("switch (operation.op) {");
+      writer.indent(() => {
+        writer.line('case "add": out = __set(out, path, operation.value, true); break;');
+        writer.line('case "replace": out = __set(out, path, operation.value, false); break;');
+        writer.line('case "remove": out = __remove(out, path); break;');
+        writer.line('case "move": {');
+        writer.indent(() => {
+          writer.line("const from = __parsePointer(operation.from);");
+          writer.line("const moved = __get(out, from);");
+          writer.line("out = __set(__remove(out, from), path, moved, true);");
+          writer.line("break;");
+        });
+        writer.line("}");
+        writer.line('case "copy": {');
+        writer.indent(() => {
+          writer.line("const from = __parsePointer(operation.from);");
+          writer.line("out = __set(out, path, __get(out, from), true);");
+          writer.line("break;");
+        });
+        writer.line("}");
+        writer.line('case "test": {');
+        writer.indent(() => {
+          writer.line("if (!__patchEqual(__get(out, path), operation.value)) {");
+          writer.indent(() => writer.line('throw new Error("json patch test failed at " + operation.path);'));
+          writer.line("}");
+          writer.line("break;");
+        });
+        writer.line("}");
+        writer.line('default: throw new Error("unsupported json patch op: " + operation.op);');
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+    writer.line("return out;");
   });
   writer.line("}");
   return writer.toString();
 }
-
-// ../../packages/jit/src/compiler/ir/builders/build-query-ir.ts
-var VALUE = irVar("value");
-var PARAMS = irVar("params");
-var LEN2 = irVar("len");
-var OUT2 = irVar("out");
-var CURSOR = irVar("j");
-var INDEX2 = irVar("i");
-var ITEM = irVar("item");
-var ENTRY = irVar("entry");
-var SEEN = irVar("seen");
-var UNIQUE_KEY = irVar("uniqueKey");
-var COLLECT_KEY = irVar("collectKey");
-var GROUP = irVar("group");
-var PROJECTED = irVar("projected");
-var COMPARE_OPERATORS = {
-  eq: "strictEqual",
-  neq: "notStrictEqual",
-  gt: "greaterThan",
-  gte: "greaterThanOrEqual",
-  lt: "lessThan",
-  lte: "lessThanOrEqual"
-};
-function buildQueryIR(target, plan, options = {}) {
-  const body = plan.mutation ? buildMutationQuery(target, plan) : plan.composite ? plan.collector ? buildGroupedAggregateQuery(target, plan, plan.composite, plan.collector.key) : buildCompositeAggregateQuery(target, plan, plan.composite) : plan.terminal ? buildTerminalQuery(target, plan, plan.terminal) : plan.aggregate ? buildAggregateQuery(target, plan, plan.aggregate) : plan.collector ? buildCollectedQuery(target, plan) : buildArrayQuery(target, plan);
-  return { kind: "program", params: options.hasParams ? [VALUE, PARAMS] : [VALUE], body };
-}
-function buildArrayQuery(target, plan) {
-  if (shouldProjectAfterOrder(plan)) return buildArrayQueryWithPostOrderProjection(target, plan);
-  const selected = buildProjection(plan.select);
-  const body = [
-    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
-    letDecl(CURSOR, literal(0)),
-    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, selected)])),
-    store(loadProp(OUT2, "length"), CURSOR)
-  ];
-  if (plan.orderBy) {
-    body.push(
-      sortByKey(
-        OUT2,
-        resolveOrderingDescriptor(target.objectSchema, [{ key: plan.orderBy.key, direction: plan.orderBy.direction }])
-      )
-    );
+var JSON_PATCH_HELPERS = `function __parsePointer(pointer) {
+  if (pointer === "") return [];
+  if (pointer.charCodeAt(0) !== 47) throw new Error("json pointer must start with /: " + pointer);
+  const raw = pointer.slice(1).split("/");
+  const out = new Array(raw.length);
+  for (let i = 0, len = raw.length; i < len; i++) {
+    const segment = raw[i];
+    out[i] = segment.indexOf("~") === -1 ? segment : segment.replace(/~1/g, "/").replace(/~0/g, "~");
   }
-  body.push({ kind: "return", value: OUT2 });
-  return body;
+  return out;
 }
-function buildArrayQueryWithPostOrderProjection(target, plan) {
-  const orderBy = plan.orderBy;
-  const body = [
-    ...buildLoopHeader(target, plan, construct("Array", [LEN2])),
-    letDecl(CURSOR, literal(0)),
-    buildInputLoop(target, buildGuardedBody(plan, [append(OUT2, CURSOR, ITEM)])),
-    store(loadProp(OUT2, "length"), CURSOR)
-  ];
-  if (orderBy) {
-    body.push(
-      sortByKey(
-        OUT2,
-        resolveOrderingDescriptor(target.objectSchema, [{ key: orderBy.key, direction: orderBy.direction }])
-      )
-    );
+function __get(value, path) {
+  let current = value;
+  for (let i = 0, len = path.length; i < len; i++) {
+    if (current === null || current === undefined) throw new Error("json pointer does not resolve");
+    current = current[path[i]];
   }
-  body.push(
-    { kind: "assign", target: PROJECTED, expr: construct("Array", [CURSOR]) },
-    forRange(INDEX2, CURSOR, [
-      { kind: "assign", target: ITEM, expr: loadIndex(OUT2, INDEX2) },
-      store(loadIndex(PROJECTED, INDEX2), buildProjection(plan.select))
-    ]),
-    { kind: "return", value: PROJECTED }
-  );
-  return body;
+  return current;
 }
-function buildCollectedQuery(target, plan) {
-  const collector = plan.collector;
-  if (!collector) return [];
-  const selected = buildProjection(plan.select);
-  const collect = [{ kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, collector.key) }];
-  if (collector.kind === "keyed") {
-    collect.push(exprStmt(call(loadProp(OUT2, "set"), [COLLECT_KEY, selected])));
-  } else {
-    collect.push(
-      letDecl(GROUP, loadIndex(OUT2, COLLECT_KEY)),
-      {
-        kind: "if",
-        test: strictEqual(GROUP, literal(void 0)),
-        then: [store(GROUP, arrayLiteral()), store(loadIndex(OUT2, COLLECT_KEY), GROUP)]
-      },
-      store(loadIndex(GROUP, loadProp(GROUP, "length")), selected)
-    );
-  }
-  const outInitializer = collector.kind === "keyed" ? construct("Map") : call(loadProp(irVar("Object"), "create"), [literal(null)]);
-  return [
-    ...buildLoopHeader(target, plan, outInitializer),
-    buildInputLoop(target, buildGuardedBody(plan, collect)),
-    { kind: "return", value: OUT2 }
-  ];
+function __copy(value, segment) {
+  if (Array.isArray(value)) return value.slice();
+  return { ...value };
 }
-var ACC = irVar("acc");
-var ACC_COUNT = irVar("n");
-var ACC_MAP = irVar("acc");
-var GROUP_KEY = irVar("key");
-function buildGroupedAggregateQuery(target, plan, composite, groupKey) {
-  const hasAverage = composite.fields.some((field) => field.op === "avg");
-  const counter = "__n";
-  const body = [];
-  if (target.kind === "array") {
-    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
-  }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  const emptyRecord = call(loadProp(irVar("Object"), "create"), [literal(null)]);
-  const accumulator = hasAverage ? ACC_MAP : OUT2;
-  body.push({ kind: "assign", target: accumulator, expr: hasAverage ? construct("Map") : emptyRecord });
-  const initial = composite.fields.map((field) => ({
-    key: field.name,
-    value: field.op === "count" || field.op === "sum" || field.op === "avg" ? literal(0) : literal(void 0)
-  }));
-  const create = [
-    store(GROUP, objectLiteral(hasAverage ? [...initial, { key: counter, value: literal(0) }] : initial)),
-    hasAverage ? exprStmt(call(loadProp(ACC_MAP, "set"), [COLLECT_KEY, GROUP])) : store(loadIndex(OUT2, COLLECT_KEY), GROUP)
-  ];
-  const step = [
-    { kind: "assign", target: COLLECT_KEY, expr: loadProp(ITEM, groupKey) },
-    letDecl(GROUP, hasAverage ? call(loadProp(ACC_MAP, "get"), [COLLECT_KEY]) : loadIndex(OUT2, COLLECT_KEY)),
-    { kind: "if", test: strictEqual(GROUP, literal(void 0)), then: create }
-  ];
-  if (hasAverage) step.push(store(loadProp(GROUP, counter), binary("add", loadProp(GROUP, counter), literal(1))));
-  for (const field of composite.fields) {
-    const slot = loadProp(GROUP, field.name);
-    const read = field.key === void 0 ? ITEM : loadProp(ITEM, field.key);
-    if (field.op === "count") step.push(store(slot, binary("add", slot, literal(1))));
-    else if (field.op === "sum" || field.op === "avg") step.push(store(slot, binary("add", slot, read)));
-    else {
-      step.push({
-        kind: "if",
-        test: {
-          kind: "nary",
-          op: "or",
-          operands: [
-            strictEqual(slot, literal(void 0)),
-            binary(field.op === "min" ? "lessThan" : "greaterThan", read, slot)
-          ]
-        },
-        then: [store(slot, read)]
-      });
+function __set(value, path, next, isAdd) {
+  if (path.length === 0) return next;
+  const key = path[0];
+  const out = __copy(value, key);
+  if (path.length === 1) {
+    if (Array.isArray(out)) {
+      const index = key === "-" ? out.length : Number(key);
+      if (isAdd) out.splice(index, 0, next);
+      else out[index] = next;
+    } else {
+      out[key] = next;
     }
+    return out;
   }
-  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
-  if (!hasAverage) {
-    body.push({ kind: "return", value: OUT2 });
-    return body;
+  out[key] = __set(value[key], path.slice(1), next, isAdd);
+  return out;
+}
+function __remove(value, path) {
+  if (path.length === 0) return undefined;
+  const key = path[0];
+  const out = __copy(value, key);
+  if (path.length === 1) {
+    if (Array.isArray(out)) out.splice(Number(key), 1);
+    else delete out[key];
+    return out;
   }
-  body.push(
-    { kind: "assign", target: OUT2, expr: emptyRecord },
-    forOf(ENTRY, ACC_MAP, [
-      { kind: "assign", target: GROUP_KEY, expr: loadIndex(ENTRY, literal(0)) },
-      { kind: "assign", target: GROUP, expr: loadIndex(ENTRY, literal(1)) },
-      store(
-        loadIndex(OUT2, GROUP_KEY),
-        objectLiteral(
-          composite.fields.map((field) => ({
-            key: field.name,
-            value: field.op === "avg" ? binary("divide", loadProp(GROUP, field.name), loadProp(GROUP, counter)) : loadProp(GROUP, field.name)
-          }))
-        )
-      )
-    ]),
-    { kind: "return", value: OUT2 }
-  );
-  return body;
-}
-function buildCompositeAggregateQuery(target, plan, composite) {
-  const body = [];
-  if (target.kind === "array") {
-    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
+  out[key] = __remove(value[key], path.slice(1));
+  return out;
+}`;
+var PATCH_EQUAL_HELPER = `function __patchEqual(left, right) {
+  if (Object.is(left, right)) return true;
+  if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) return false;
+  const leftIsArray = Array.isArray(left);
+  if (leftIsArray !== Array.isArray(right)) return false;
+  if (leftIsArray) {
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i++) if (!__patchEqual(left[i], right[i])) return false;
+    return true;
   }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  const slots = composite.fields.map((field, index2) => ({
-    field,
-    // `avg` needs its own row count; the others need one accumulator each.
-    accumulator: irVar(`a${index2}`),
-    counter: irVar(`n${index2}`)
-  }));
-  const step = [];
-  for (const { field, accumulator, counter } of slots) {
-    const read = field.key === void 0 ? ITEM : loadProp(ITEM, field.key);
-    switch (field.op) {
-      case "count":
-        body.push(letDecl(accumulator, literal(0)));
-        step.push(store(accumulator, binary("add", accumulator, literal(1))));
-        break;
-      case "sum":
-        body.push(letDecl(accumulator, literal(0)));
-        step.push(store(accumulator, binary("add", accumulator, read)));
-        break;
-      case "avg":
-        body.push(letDecl(accumulator, literal(0)), letDecl(counter, literal(0)));
-        step.push(
-          store(accumulator, binary("add", accumulator, read)),
-          store(counter, binary("add", counter, literal(1)))
-        );
-        break;
-      case "min":
-      case "max":
-        body.push(letDecl(accumulator));
-        step.push({
-          kind: "if",
-          test: {
-            kind: "nary",
-            op: "or",
-            operands: [
-              strictEqual(accumulator, literal(void 0)),
-              binary(field.op === "min" ? "lessThan" : "greaterThan", read, accumulator)
-            ]
-          },
-          then: [store(accumulator, read)]
-        });
-        break;
-    }
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  for (let i = 0; i < keys.length; i++) {
+    if (!__patchEqual(left[keys[i]], right[keys[i]])) return false;
   }
-  body.push(buildInputLoop(target, buildGuardedBody(plan, step)));
-  for (const { field, accumulator, counter } of slots) {
-    if (field.op !== "avg") continue;
-    body.push({
-      kind: "if",
-      test: strictEqual(counter, literal(0)),
-      then: [store(accumulator, literal(void 0))],
-      otherwise: [store(accumulator, binary("divide", accumulator, counter))]
-    });
-  }
-  body.push({
-    kind: "return",
-    value: objectLiteral(slots.map(({ field, accumulator }) => ({ key: field.name, value: accumulator })))
-  });
-  return body;
-}
-function buildTerminalQuery(target, plan, terminal) {
-  const body = [];
-  if (target.kind === "array") {
-    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
-  }
-  if (terminal.op === "every") {
-    const condition = buildFilterTest(plan);
-    body.push(
-      buildInputLoop(
-        target,
-        condition ? [{ kind: "if", test: not(condition), then: [{ kind: "return", value: literal(false) }] }] : []
-      ),
-      { kind: "return", value: literal(true) }
-    );
-    return body;
-  }
-  const found = terminal.op === "some" ? { kind: "return", value: literal(true) } : terminal.op === "findIndex" ? { kind: "return", value: INDEX2 } : { kind: "return", value: buildProjection(plan.select) };
-  body.push(buildInputLoop(target, buildGuardedBody(plan, [found])), {
-    kind: "return",
-    value: terminal.op === "some" ? literal(false) : terminal.op === "findIndex" ? literal(-1) : literal(void 0)
-  });
-  return body;
-}
-function buildAggregateQuery(target, plan, aggregate) {
-  const body = [];
-  if (target.kind === "array") {
-    body.push({ kind: "assign", target: LEN2, expr: loadProp(VALUE, "length") });
-  }
-  if (plan.unique) body.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  const field = aggregate.key === void 0 ? ITEM : loadProp(ITEM, aggregate.key);
-  switch (aggregate.op) {
-    case "sum":
-    case "count": {
-      const increment = aggregate.op === "count" ? literal(1) : field;
-      body.push(
-        letDecl(ACC, literal(0)),
-        buildInputLoop(target, buildGuardedBody(plan, [store(ACC, binary("add", ACC, increment))])),
-        { kind: "return", value: ACC }
-      );
-      return body;
-    }
-    case "avg":
-      body.push(
-        letDecl(ACC, literal(0)),
-        letDecl(ACC_COUNT, literal(0)),
-        buildInputLoop(
-          target,
-          buildGuardedBody(plan, [
-            store(ACC, binary("add", ACC, field)),
-            store(ACC_COUNT, binary("add", ACC_COUNT, literal(1)))
-          ])
-        ),
-        {
-          kind: "if",
-          test: strictEqual(ACC_COUNT, literal(0)),
-          then: [{ kind: "return", value: literal(void 0) }]
-        },
-        { kind: "return", value: binary("divide", ACC, ACC_COUNT) }
-      );
-      return body;
-    case "min":
-    case "max": {
-      const wins = binary(aggregate.op === "min" ? "lessThan" : "greaterThan", field, ACC);
-      body.push(
-        letDecl(ACC),
-        buildInputLoop(
-          target,
-          buildGuardedBody(plan, [
-            {
-              kind: "if",
-              test: { kind: "nary", op: "or", operands: [strictEqual(ACC, literal(void 0)), wins] },
-              then: [store(ACC, field)]
-            }
-          ])
-        ),
-        { kind: "return", value: ACC }
-      );
-      return body;
-    }
-  }
-}
-function buildMutationQuery(target, plan) {
-  const mutation = plan.mutation;
-  if (!mutation) return [];
-  const condition = buildFilterTest(plan);
-  const test = condition ?? literal(false);
-  const loopBody = mutation.kind === "delete" ? [{ kind: "if", test: not(test), then: buildMutationKeep(target, ITEM) }] : [
-    {
-      kind: "if",
-      test,
-      then: buildMutationKeep(target, buildPatchObject(target.objectSchema, mutation)),
-      otherwise: buildMutationKeep(target, ITEM)
-    }
-  ];
-  const outInitializer = target.kind === "array" ? construct("Array", [LEN2]) : target.kind === "set" ? construct("Set") : construct("Map");
-  const body = [...buildLoopHeader(target, plan, outInitializer)];
-  if (target.kind === "array") body.push(letDecl(CURSOR, literal(0)));
-  body.push(buildInputLoop(target, loopBody));
-  if (target.kind === "array") body.push(store(loadProp(OUT2, "length"), CURSOR));
-  body.push({ kind: "return", value: OUT2 });
-  return body;
-}
-function buildMutationKeep(target, value) {
-  switch (target.kind) {
-    case "array":
-      return [append(OUT2, CURSOR, value)];
-    case "set":
-      return [exprStmt(call(loadProp(OUT2, "add"), [value]))];
-    case "map":
-      return [exprStmt(call(loadProp(OUT2, "set"), [loadIndex(ENTRY, literal(0)), value]))];
-  }
-}
-function buildPatchObject(schema, mutation) {
-  if (mutation.kind !== "update") return ITEM;
-  const entries = Object.keys(schema.def.props).map((key) => {
-    const binding = mutation.patch[key];
-    return { key, value: binding ? irVar(binding.name) : loadProp(ITEM, key) };
-  });
-  return objectLiteral(entries);
-}
-function buildLoopHeader(target, plan, outInitializer) {
-  const header = [
-    { kind: "assign", target: LEN2, expr: loadProp(VALUE, target.kind === "array" ? "length" : "size") }
-  ];
-  if (plan.unique) header.push({ kind: "assign", target: SEEN, expr: construct("Set") });
-  header.push({ kind: "assign", target: OUT2, expr: outInitializer });
-  return header;
-}
-function buildInputLoop(target, body) {
-  switch (target.kind) {
-    case "array":
-      return forRange(INDEX2, LEN2, [{ kind: "assign", target: ITEM, expr: loadIndex(VALUE, INDEX2) }, ...body]);
-    case "set":
-      return forOf(ITEM, VALUE, body);
-    case "map":
-      return forOf(ENTRY, VALUE, [{ kind: "assign", target: ITEM, expr: loadIndex(ENTRY, literal(1)) }, ...body]);
-  }
-}
-function buildGuardedBody(plan, accepted) {
-  const unique = plan.unique;
-  const inner = unique ? [
-    { kind: "assign", target: UNIQUE_KEY, expr: loadProp(ITEM, unique.key) },
-    {
-      kind: "if",
-      test: not(call(loadProp(SEEN, "has"), [UNIQUE_KEY])),
-      then: [exprStmt(call(loadProp(SEEN, "add"), [UNIQUE_KEY])), ...accepted]
-    }
-  ] : accepted;
-  const condition = buildFilterTest(plan);
-  return condition ? [{ kind: "if", test: condition, then: inner }] : inner;
-}
-function buildFilterTest(plan) {
-  if (plan.filters.length === 0) return void 0;
-  return allOf(plan.filters.map((filter) => buildCondition(filter.condition)));
-}
-function buildCondition(condition) {
-  switch (condition.kind) {
-    case "compare":
-      return binary(COMPARE_OPERATORS[condition.op], buildValue(condition.left), buildValue(condition.right));
-    case "logical":
-      return {
-        kind: "nary",
-        op: condition.op,
-        operands: [buildCondition(condition.left), buildCondition(condition.right)]
-      };
-    case "not":
-      return not(buildCondition(condition.inner));
-  }
-}
-function buildValue(value) {
-  switch (value.kind) {
-    case "field":
-      return loadProp(ITEM, value.key);
-    case "binding":
-      return irVar(value.name);
-    case "param":
-      return loadProp(PARAMS, value.name);
-    case "literal":
-      return literal(expectSafeLiteral(value.value));
-  }
-}
-function expectSafeLiteral(value) {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean" || value === null || value === void 0) {
-    return value;
-  }
-  throw new JITError("INVALID_QUERY", "query literal values must be primitive compiler literals");
-}
-function buildProjection(select) {
-  if (!select) return ITEM;
-  return objectLiteral(select.fields.map((field) => ({ key: field, value: loadProp(ITEM, field) })));
-}
-function shouldProjectAfterOrder(plan) {
-  return Boolean(plan.select && plan.orderBy && !plan.select.fields.includes(plan.orderBy.key));
-}
-
-// ../../packages/jit/src/compiler/physical-query.ts
-function describePhysicalQueryPlan(plan) {
-  return Object.freeze({
-    strategy: plan.strategy,
-    reason: plan.reason,
-    complexity: plan.complexity,
-    facts: plan.facts
-  });
-}
-function resolvePhysicalQueryPlan(schema, target, plan) {
-  const terminal = plan.terminal;
-  if (!terminal) {
-    return Object.freeze({
-      strategy: "Scan",
-      reason: "the result is a collection, so every row has to be visited",
-      complexity: "O(n)",
-      facts: Object.freeze([])
-    });
-  }
-  const scan = Object.freeze({
-    strategy: "EarlyExitScan",
-    reason: `${terminal.op} returns as soon as the answer is known`,
-    complexity: "O(k)",
-    facts: Object.freeze([])
-  });
-  if (terminal.op !== "first" && terminal.op !== "some") return scan;
-  if (target.kind !== "array") return scan;
-  if (plan.filters.length !== 1) return scan;
-  const equality = singleEquality(plan.filters[0]?.condition);
-  if (!equality) return scan;
-  const hints = resolveHints(schema);
-  const ordered = hints.order ?? hints.collection?.ordered;
-  const orderedKey = resolveHintKey(ordered?.key);
-  const cacheIndex = hints.entity?.cacheIndex === true;
-  const identityKey = resolveHintKey(hints.index?.key) ?? resolveHintKey(hints.entity?.key);
-  const unique = hints.collection?.unique === true || hints.entity?.key !== void 0;
-  if (ordered && orderedKey === equality.key && unique) {
-    return Object.freeze({
-      strategy: "BinarySearch",
-      reason: "the collection declares this key ordered and unique",
-      complexity: "O(log n)",
-      facts: Object.freeze([`ordered: ${orderedKey} ${ordered.direction ?? "asc"}`, `unique key: ${orderedKey}`]),
-      access: keyedAccess(schema, equality, ordered.direction === "desc" ? "desc" : "asc", terminal.op)
-    });
-  }
-  if (cacheIndex && identityKey === equality.key) {
-    return Object.freeze({
-      strategy: "CachedIndexLookup",
-      reason: "the collection is keyed, so the index is built once per array and reused",
-      complexity: "O(1)",
-      facts: Object.freeze([`keyed: ${identityKey}`, "index cache: enabled"]),
-      access: keyedAccess(schema, equality, "asc", terminal.op)
-    });
-  }
-  return scan;
-}
-function keyedAccess(schema, equality, direction, terminal) {
-  return Object.freeze({
-    key: equality.key,
-    direction,
-    descriptor: resolveIndexDescriptor(schema, [equality.key], "unique"),
-    probe: equality.probe,
-    terminal
-  });
-}
-function singleEquality(condition) {
-  if (condition?.kind !== "compare" || condition.op !== "eq") return void 0;
-  const { left, right } = condition;
-  if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
-  if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
-  return void 0;
-}
-function emitPhysicalQuerySource(physical, hasParams) {
-  const access = physical.access;
-  if (!access) return void 0;
-  if (physical.strategy === "CachedIndexLookup") return emitCachedIndexLookup(access, hasParams);
-  if (physical.strategy === "BinarySearch") return emitBinarySearch(access, hasParams);
-  return void 0;
-}
-function emitCachedIndexLookup(access, hasParams) {
-  const writer = new CodeWriter();
-  const probe = emitProbe(access);
-  writer.line("(() => {");
-  writer.indent(() => {
-    emitIndexBuilder(writer, access.descriptor, "const build = (value) => {", "};");
-    writer.line(`function query(value${hasParams ? ", params" : ""}) {`);
-    writer.indent(() => {
-      writer.line(
-        `const row = __cachedIndex(value, ${JSON.stringify(indexCacheKey(access.descriptor))}, build).get(${probe});`
-      );
-      writer.line(access.terminal === "some" ? "return row !== undefined;" : "return row;");
-    });
-    writer.line("}");
-    writer.line("return query;");
-  });
-  writer.line("})()");
-  return writer.toString();
-}
-function emitBinarySearch(access, hasParams) {
-  const writer = new CodeWriter();
-  const probe = emitProbe(access);
-  const read = (row) => {
-    const value = emitPropertyAccess(row, access.key);
-    return access.descriptor.keys[0]?.valueKind === "date" ? `${value}.getTime()` : value;
-  };
-  const goRight = access.direction === "desc" ? "probe > target" : "probe < target";
-  writer.line("(() => {");
-  writer.indent(() => {
-    writer.line(`function query(value${hasParams ? ", params" : ""}) {`);
-    writer.indent(() => {
-      writer.line(`const target = ${probe};`);
-      writer.line("let low = 0;");
-      writer.line("let high = value.length - 1;");
-      writer.line("while (low <= high) {");
-      writer.indent(() => {
-        writer.line("const mid = (low + high) >>> 1;");
-        writer.line("const row = value[mid];");
-        writer.line(`const probe = ${read("row")};`);
-        writer.line("if (probe === target) {");
-        writer.indent(() => writer.line(access.terminal === "some" ? "return true;" : "return row;"));
-        writer.line("}");
-        writer.line(`if (${goRight}) low = mid + 1;`);
-        writer.line("else high = mid - 1;");
-      });
-      writer.line("}");
-      writer.line(access.terminal === "some" ? "return false;" : "return undefined;");
-    });
-    writer.line("}");
-    writer.line("return query;");
-  });
-  writer.line("})()");
-  return writer.toString();
-}
-function emitProbe(access) {
-  const probe = access.probe;
-  const value = probe.kind === "literal" ? emitLiteral(probe.value) : probe.kind === "param" ? emitPropertyAccess("params", probe.name) : probe.kind === "binding" ? probe.name : emitPropertyAccess("row", probe.key);
-  return access.descriptor.keys[0]?.valueKind === "date" && probe.kind !== "literal" ? `(${value} == null ? ${value} : ${value}.getTime())` : value;
-}
-
-// ../../packages/jit/src/compiler/query.ts
-var RUNTIME_INDEX_BINDING = "__cachedIndex";
-function emitQuerySource(schema, program) {
-  const target = expectCollectionObjectSchema(schema, "emitQuerySource");
-  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
-  validateQueryPlan(target.objectSchema, plan);
-  const hasParams = Boolean(program.params?.length);
-  const keyed = emitPhysicalQuerySource(resolvePhysicalQueryPlan(schema, target, plan), hasParams);
-  if (keyed) return keyed;
-  return emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
-}
-function explainPhysicalQuery(schema, program) {
-  const target = expectCollectionObjectSchema(schema, "explainPhysicalQuery");
-  const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
-  validateQueryPlan(target.objectSchema, plan);
-  return describePhysicalQueryPlan(resolvePhysicalQueryPlan(schema, target, plan));
-}
-function compileQuery(schema, program, options) {
-  const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
+  return true;
+}`;
+function compileJsonPatch(schema, options) {
   const template = getCompileCached(
     schema,
-    `query:${serializeQueryNodes(program.nodes)}`,
+    "patch:json",
     () => {
-      const source = emitQuerySource(schema, program);
+      const source = emitJsonPatchSource(schema);
       return {
         source,
-        create: globalThis.Function(RUNTIME_INDEX_BINDING, ...bindingNames, `return ${source};`)
+        create: globalThis.Function("__patchEqual", `${JSON_PATCH_HELPERS}
+return ${source};`)
       };
     },
     options
   );
-  const compiled = template.create(getCachedIndex, ...program.bindings);
-  registerArtifact(compiled, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings
-  });
+  const compiled = template.create(deepEqual);
+  registerArtifact(compiled, { kind: "patch-plan", schema, mode: "json" });
   return compiled;
 }
-function serializeQueryNodes(nodes) {
-  return nodes.map(serializeQueryNode).join(";");
-}
-function serializeQueryNode(node) {
-  switch (node.kind) {
-    case "filter":
-      return `f(${serializeCondition(node.condition)})`;
-    case "select:fields":
-      return `s(${node.fields.join(",")})`;
-    case "unique":
-      return `u(${node.key})`;
-    case "keyed":
-      return `k(${node.key})`;
-    case "groupBy":
-      return `g(${node.key})`;
-    case "orderBy":
-      return `o(${node.key},${node.direction})`;
-    case "aggregate":
-      return `a(${node.op},${node.key ?? ""})`;
-    case "aggregate:composite":
-      return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
-    case "terminal":
-      return `t(${node.op})`;
-    case "delete":
-      return "d()";
-    case "update":
-      return `m(${Object.keys(node.patch).map((key) => `${key}=${node.patch[key]?.name}`).join(",")})`;
+function deepEqual(left, right) {
+  if (Object.is(left, right)) return true;
+  if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i++) if (!deepEqual(left[i], right[i])) return false;
+    return true;
   }
-}
-function serializeCondition(condition) {
-  switch (condition.kind) {
-    case "compare":
-      return `${condition.op}(${serializeValue(condition.left)},${serializeValue(condition.right)})`;
-    case "logical":
-      return `${condition.op}(${serializeCondition(condition.left)},${serializeCondition(condition.right)})`;
-    case "not":
-      return `not(${serializeCondition(condition.inner)})`;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  for (const key of leftKeys) {
+    if (!deepEqual(left[key], right[key])) return false;
   }
+  return true;
 }
-function serializeValue(value) {
-  switch (value.kind) {
-    case "field":
-      return `.${value.key}`;
-    case "binding":
-      return `$${value.name}`;
-    case "param":
-      return `p:${value.name}`;
-    case "literal":
-      return `#${typeof value.value}:${String(value.value)}`;
+
+// ../../packages/jit/src/compiler/project.ts
+function emitProjectSource(tree) {
+  return `function project(value) {
+  return ${emitProjectionLiteral(tree, "value")};
+}`;
+}
+function compileProject(schema, paths, options) {
+  const tree = buildProjectionTree(schema, paths, "JIT.project()");
+  const template = getCompileCached(
+    schema,
+    `project:${projectionCacheKey(tree)}`,
+    () => {
+      const source = emitProjectSource(tree);
+      return { source, create: globalThis.Function(`return ${source};`) };
+    },
+    options
+  );
+  const compiled = template.create();
+  registerArtifact(compiled, { kind: "project-plan", schema, tree });
+  return compiled;
+}
+
+// ../../packages/jit/src/compiler/reconcile.ts
+var ALL_CHANNELS = Object.freeze({
+  added: true,
+  removed: true,
+  changed: true,
+  unchanged: true
+});
+function resolveReconcileDescriptor(schema, key, channels, changes, sink) {
+  const object2 = resolveRowObjectSchema(schema, "reconcile");
+  const resolved = key ?? resolveIndexKeysFromFacts(schema)?.[0];
+  if (!resolved) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      "JIT.reconcile() needs an identity: declare one with .keyed()/.indexBy()/.uniqueBy()/.entity(), or name it with .by()"
+    );
   }
+  const field = resolveRowField(object2, resolved, "reconcile");
+  return Object.freeze({
+    key: resolved,
+    date: resolveScalarKeyKind(field, resolved, "reconcile") === "date",
+    channels: Object.freeze({ ...channels }),
+    changes,
+    sink
+  });
 }
-function createQueryPlan(nodes) {
-  const filters = [];
-  const selects = [];
-  const uniques = [];
-  const collectors = [];
-  const orderBys = [];
-  const aggregates = [];
-  const composites = [];
-  const terminals = [];
-  const mutations = [];
-  for (const node of nodes) {
-    switch (node.kind) {
-      case "filter":
-        filters[filters.length] = node;
-        break;
-      case "select:fields":
-        selects[selects.length] = node;
-        break;
-      case "unique":
-        uniques[uniques.length] = node;
-        break;
-      case "keyed":
-      case "groupBy":
-        collectors[collectors.length] = node;
-        break;
-      case "orderBy":
-        orderBys[orderBys.length] = node;
-        break;
-      case "aggregate":
-        aggregates[aggregates.length] = node;
-        break;
-      case "aggregate:composite":
-        composites[composites.length] = node;
-        break;
-      case "terminal":
-        terminals[terminals.length] = node;
-        break;
-      case "delete":
-      case "update":
-        mutations[mutations.length] = node;
-        break;
+function emitReconcileSource(descriptor) {
+  const writer = new CodeWriter();
+  const { channels, sink } = descriptor;
+  const previousKey = readKey(descriptor, "previousItem");
+  const currentKey = readKey(descriptor, "item");
+  const consumes = channels.removed;
+  const emit = emitter(sink);
+  writer.line(`${sink === "iterator" ? "function*" : "function"} reconcile(previous, current${sinkParam(sink)}) {`);
+  writer.indent(() => {
+    writer.line("const index = new Map();");
+    writer.line("for (let i = 0, len = previous.length; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const previousItem = previous[i];");
+      writer.line(`index.set(${previousKey}, previousItem);`);
+    });
+    writer.line("}");
+    if (sink === "result") {
+      if (channels.added) writer.line("const added = [];");
+      if (channels.removed) writer.line("const removed = [];");
+      if (channels.changed) writer.line("const changed = [];");
+      if (channels.unchanged) writer.line("const unchanged = [];");
     }
+    writer.line("for (let i = 0, len = current.length; i < len; i++) {");
+    writer.indent(() => {
+      writer.line("const item = current[i];");
+      const comparesRows = channels.changed || channels.unchanged;
+      const needsPrevious = channels.added || comparesRows;
+      if (!needsPrevious) {
+        if (consumes) writer.line(`index.delete(${currentKey});`);
+        return;
+      }
+      writer.line(`const id = ${currentKey};`);
+      writer.line("const previousItem = index.get(id);");
+      const writeMatched = () => {
+        if (consumes) writer.line("index.delete(id);");
+        emitMatched(writer, descriptor, emit);
+      };
+      if (channels.added) {
+        writer.line("if (previousItem === undefined) {");
+        writer.indent(() => emit(writer, "added", "item"));
+        if (consumes || comparesRows) {
+          writer.line("} else {");
+          writer.indent(writeMatched);
+        }
+        writer.line("}");
+      } else {
+        writer.line("if (previousItem !== undefined) {");
+        writer.indent(writeMatched);
+        writer.line("}");
+      }
+    });
+    writer.line("}");
+    if (channels.removed) {
+      writer.line("for (const previousItem of index.values()) {");
+      writer.indent(() => emit(writer, "removed", "previousItem"));
+      writer.line("}");
+    }
+    if (sink === "result") writer.line(`return ${resultLiteral(channels)};`);
+    if (sink === "visitor") writer.line("return undefined;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitMatched(writer, descriptor, emit) {
+  const { changed: changed3, unchanged } = descriptor.channels;
+  if (!changed3 && !unchanged) return;
+  if (changed3 && !unchanged) {
+    writer.line("if (previousItem !== item && !__reconcileEqual(previousItem, item)) {");
+    writer.indent(() => emitChanged(writer, descriptor, emit));
+    writer.line("}");
+    return;
   }
-  return {
-    filters,
-    selects,
-    uniques,
-    collectors,
-    orderBys,
-    aggregates,
-    composites,
-    terminals,
-    mutations
+  if (unchanged && !changed3) {
+    writer.line("if (previousItem === item || __reconcileEqual(previousItem, item)) {");
+    writer.indent(() => emit(writer, "unchanged", "item"));
+    writer.line("}");
+    return;
+  }
+  writer.line("if (previousItem === item || __reconcileEqual(previousItem, item)) {");
+  writer.indent(() => emit(writer, "unchanged", "item"));
+  writer.line("} else {");
+  writer.indent(() => emitChanged(writer, descriptor, emit));
+  writer.line("}");
+}
+function emitChanged(writer, descriptor, emit) {
+  if (descriptor.changes === "diff") {
+    writer.line("const delta = __reconcileDiff(previousItem, item);");
+    emit(writer, "changed", "{ before: previousItem, after: item, diff: delta }", "previousItem, item, delta");
+    return;
+  }
+  emit(writer, "changed", "{ before: previousItem, after: item }", "previousItem, item");
+}
+function emitter(sink) {
+  return (writer, channel, value, visitorArgs = value) => {
+    if (sink === "visitor") {
+      writer.line(`if (visitor.${channel} !== undefined) visitor.${channel}(${visitorArgs});`);
+      return;
+    }
+    if (sink === "iterator") {
+      writer.line(`yield { type: ${JSON.stringify(channel)}, value: ${value} };`);
+      return;
+    }
+    writer.line(`${channel}[${channel}.length] = ${value};`);
   };
 }
-function optimizeQueryPlan(plan) {
-  return {
-    filters: plan.filters,
-    select: last(plan.selects),
-    unique: last(plan.uniques),
-    collector: last(plan.collectors),
-    orderBy: last(plan.orderBys),
-    aggregate: last(plan.aggregates),
-    composite: last(plan.composites),
-    terminal: last(plan.terminals),
-    mutation: last(plan.mutations)
-  };
+function sinkParam(sink) {
+  return sink === "visitor" ? ", visitor" : "";
 }
-function validateQueryPlan(schema, plan) {
-  for (const filter of plan.filters) {
-    validateCondition(schema, filter.condition);
-  }
-  if (plan.select) validateObjectKeys2(schema, plan.select.fields, "query select");
-  if (plan.unique) validateObjectKeys2(schema, [plan.unique.key], "query unique");
-  if (plan.collector) validateObjectKeys2(schema, [plan.collector.key], `query ${plan.collector.kind}`);
-  if (plan.orderBy) validateObjectKeys2(schema, [plan.orderBy.key], "query orderBy");
-  if (plan.collector && plan.orderBy) {
-    throw new JITError("INVALID_QUERY", "query orderBy cannot be combined with keyed/groupBy in v1");
-  }
-  if (plan.aggregate) {
-    if (plan.collector || plan.orderBy || plan.mutation) {
-      throw new JITError(
-        "INVALID_QUERY",
-        "query aggregate cannot be combined with keyed/groupBy/orderBy/delete/update in v1"
-      );
-    }
-    if (plan.aggregate.op !== "count") {
-      if (plan.aggregate.key === void 0) {
-        throw new JITError("INVALID_QUERY", `query ${plan.aggregate.op} requires a field key`);
-      }
-      validateObjectKeys2(schema, [plan.aggregate.key], `query ${plan.aggregate.op}`);
-    }
-  }
-  if (plan.composite) {
-    if (plan.aggregate || plan.terminal || plan.orderBy || plan.mutation || plan.select) {
-      throw new JITError(
-        "INVALID_QUERY",
-        "query aggregate({...}) cannot be combined with select/orderBy/scalar aggregates/terminals/delete/update in v1"
-      );
-    }
-    if (plan.collector && plan.collector.kind !== "groupBy") {
-      throw new JITError("INVALID_QUERY", "query aggregate({...}) cannot be combined with keyed in v1");
-    }
-    if (plan.composite.fields.length === 0) {
-      throw new JITError("INVALID_QUERY", "query aggregate({...}) requires at least one field");
-    }
-    const seen = /* @__PURE__ */ new Set();
-    for (const field of plan.composite.fields) {
-      if (seen.has(field.name)) {
-        throw new JITError("INVALID_QUERY", `query aggregate repeats field ${JSON.stringify(field.name)}`);
-      }
-      seen.add(field.name);
-      if (field.op === "count") continue;
-      if (field.key === void 0) {
-        throw new JITError("INVALID_QUERY", `query aggregate ${field.op} requires a field key`);
-      }
-      validateObjectKeys2(schema, [field.key], `query aggregate ${field.op}`);
-    }
-  }
-  if (plan.terminal) {
-    if (plan.collector || plan.orderBy || plan.aggregate || plan.mutation || plan.unique) {
-      throw new JITError(
-        "INVALID_QUERY",
-        `query ${plan.terminal.op} cannot be combined with unique/keyed/groupBy/orderBy/aggregates/delete/update in v1`
-      );
-    }
-    if (plan.select && plan.terminal.op !== "first") {
-      throw new JITError("INVALID_QUERY", `query ${plan.terminal.op} does not produce rows, so select has no effect`);
-    }
-  }
-  if (plan.mutation) {
-    if (plan.filters.length === 0) {
-      throw new JITError("INVALID_QUERY", "query delete/update requires at least one filter in v1");
-    }
-    if (plan.select || plan.collector || plan.orderBy) {
-      throw new JITError(
-        "INVALID_QUERY",
-        "query delete/update cannot be combined with select/keyed/groupBy/orderBy in v1"
-      );
-    }
-    if (plan.mutation.kind === "update") {
-      validateObjectKeys2(schema, Object.keys(plan.mutation.patch), "query update");
-    }
-  }
+function resultLiteral(channels) {
+  const parts = [];
+  if (channels.added) parts.push("added");
+  if (channels.removed) parts.push("removed");
+  if (channels.changed) parts.push("changed");
+  if (channels.unchanged) parts.push("unchanged");
+  return `{ ${parts.join(", ")} }`;
 }
-function expectCollectionObjectSchema(schema, compilerName) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects an array, set, or map schema`);
-  }
-  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
-  if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_QUERY", `${compilerName} expects a collection of object schema`);
-  }
-  return {
-    kind: resolved.type,
-    objectSchema: element
-  };
+function readKey(descriptor, row) {
+  const access2 = emitPropertyAccess(row, descriptor.key);
+  return descriptor.date ? `${access2}.getTime()` : access2;
 }
-function validateObjectKeys2(schema, keys, compilerName) {
-  const props = schema.def.props;
-  for (const key of keys) {
-    if (!(key in props)) {
-      throw new JITError("INVALID_QUERY", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
+function reconcileCacheKey(descriptor) {
+  const { channels } = descriptor;
+  const on = [channels.added && "a", channels.removed && "r", channels.changed && "c", channels.unchanged && "u"].filter(Boolean).join("");
+  return `reconcile:${descriptor.sink}:${descriptor.key}:${descriptor.date}:${descriptor.changes}:${on}`;
 }
-function validateCondition(schema, condition) {
-  switch (condition.kind) {
-    case "compare":
-      validateValue(schema, condition.left);
-      validateValue(schema, condition.right);
-      return;
-    case "logical":
-      validateCondition(schema, condition.left);
-      validateCondition(schema, condition.right);
-      return;
-    case "not":
-      validateCondition(schema, condition.inner);
-      return;
-  }
-}
-function validateValue(schema, value) {
-  if (value.kind === "field") {
-    validateObjectKeys2(schema, [value.key], "query");
-  }
-}
-function last(values) {
-  return values[values.length - 1];
+function compileReconcile(schema, descriptor, options) {
+  const object2 = resolveRowObjectSchema(schema, "reconcile");
+  const template = getCompileCached(
+    schema,
+    reconcileCacheKey(descriptor),
+    () => {
+      const source = emitReconcileSource(descriptor);
+      return {
+        source,
+        create: globalThis.Function("__reconcileEqual", "__reconcileDiff", `return ${source};`)
+      };
+    },
+    options
+  );
+  const compiled = template.create(
+    compileEqual(object2),
+    descriptor.changes === "diff" ? compileDiff(object2) : void 0
+  );
+  registerArtifact(compiled, { kind: "reconcile-plan", schema, descriptor });
+  return compiled;
 }
 
 // ../../packages/jit/src/compiler/sort.ts
@@ -10886,10 +12788,10 @@ function emitSortSource(descriptor) {
 }
 function compileSort(schema, descriptor, options) {
   const ordering = resolveOrderingDescriptor(schema, descriptor.criteria);
-  const cacheKey = `sort:${ordering.criteria.map(({ key, direction, valueKind, nullish: nullish3 }) => `${key}:${direction}:${valueKind}:${nullish3}`).join(",")}`;
+  const cacheKey3 = `sort:${ordering.criteria.map(({ key, direction, valueKind, nullish: nullish3 }) => `${key}:${direction}:${valueKind}:${nullish3}`).join(",")}`;
   const template = getCompileCached(
     schema,
-    cacheKey,
+    cacheKey3,
     () => {
       const source = emitSortSource(ordering);
       return { source, create: globalThis.Function(`return ${source};`) };
@@ -10977,79 +12879,79 @@ function emitHelpers3(writer, program) {
 function helperName3(id) {
   return `update_${id}`;
 }
-function emitUpdateBodyLines(writer, state, node, value, patch) {
-  emitUpdateTo(writer, state, node, value, patch, "out");
+function emitUpdateBodyLines(writer, state, node, value, patch3) {
+  emitUpdateTo(writer, state, node, value, patch3, "out");
   writer.line("return out;");
 }
-function emitUpdateTo(writer, state, node, value, patch, target) {
+function emitUpdateTo(writer, state, node, value, patch3, target) {
   switch (node.kind) {
     case "recursive":
-      writer.line(`const ${target} = ${helperName3(node.id)}(${value}, ${patch});`);
+      writer.line(`const ${target} = ${helperName3(node.id)}(${value}, ${patch3});`);
       return;
     case "reuse":
       writer.line(`let ${target} = ${value};`);
-      writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
-      writer.indent(() => writer.line(`${target} = ${patch};`));
+      writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
+      writer.indent(() => writer.line(`${target} = ${patch3};`));
       writer.line("}");
       return;
     case "date":
       writer.line(`let ${target} = ${value};`);
       writer.line(
-        `if (${patch} !== undefined && !Object.is(${value}, ${patch}) && ${value}.getTime() !== ${patch}.getTime()) {`
+        `if (${patch3} !== undefined && !Object.is(${value}, ${patch3}) && ${value}.getTime() !== ${patch3}.getTime()) {`
       );
-      writer.indent(() => writer.line(`${target} = new Date(${patch}.getTime());`));
+      writer.indent(() => writer.line(`${target} = new Date(${patch3}.getTime());`));
       writer.line("}");
       return;
     case "union":
-      emitUnionUpdateTo(writer, state, node, value, patch, target);
+      emitUnionUpdateTo(writer, state, node, value, patch3, target);
       return;
     case "discriminatedUnion":
-      emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, target);
+      emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch3, target);
       return;
     case "guard":
-      emitGuardUpdateTo(writer, state, node, value, patch, target);
+      emitGuardUpdateTo(writer, state, node, value, patch3, target);
       return;
     case "object":
-      emitObjectUpdateTo(writer, state, node, value, patch, target);
+      emitObjectUpdateTo(writer, state, node, value, patch3, target);
       return;
     case "array":
-      emitArrayUpdateTo(writer, state, node, value, patch, target);
+      emitArrayUpdateTo(writer, state, node, value, patch3, target);
       return;
     case "tuple":
-      emitTupleUpdateTo(writer, state, node, value, patch, target);
+      emitTupleUpdateTo(writer, state, node, value, patch3, target);
       return;
     case "record":
-      emitRecordUpdateTo(writer, state, node, value, patch, target);
+      emitRecordUpdateTo(writer, state, node, value, patch3, target);
       return;
     case "set":
-      emitSetUpdateTo(writer, value, patch, target);
+      emitSetUpdateTo(writer, value, patch3, target);
       return;
     case "map":
-      emitMapUpdateTo(writer, value, patch, target);
+      emitMapUpdateTo(writer, value, patch3, target);
       return;
   }
 }
-function emitGuardUpdateTo(writer, state, node, value, patch, target) {
+function emitGuardUpdateTo(writer, state, node, value, patch3, target) {
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
   writer.indent(() => {
-    writer.line(`if (!(${emitGuardTest(node.optional, node.nullable, patch)})) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line(`if (!(${emitGuardTest(node.optional, node.nullable, patch3)})) {`);
+    writer.indent(() => writer.line(`${target} = ${patch3};`));
     writer.line(`} else if (!(${emitGuardTest(node.optional, node.nullable, value)})) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.indent(() => writer.line(`${target} = ${patch3};`));
     writer.line("} else {");
     writer.indent(() => {
       const inner = state.nextVar(`${target}_inner`);
-      emitUpdateTo(writer, state, node.inner, value, patch, inner);
+      emitUpdateTo(writer, state, node.inner, value, patch3, inner);
       writer.line(`${target} = ${inner};`);
     });
     writer.line("}");
   });
   writer.line("}");
 }
-function emitObjectUpdateTo(writer, state, node, value, patch, target) {
+function emitObjectUpdateTo(writer, state, node, value, patch3, target) {
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined) {`);
+  writer.line(`if (${patch3} !== undefined) {`);
   writer.indent(() => {
     const entries = [];
     const changedVars = [];
@@ -11057,7 +12959,7 @@ function emitObjectUpdateTo(writer, state, node, value, patch, target) {
       const rawPropValue = emitPropertyAccess(value, prop.key);
       const defaultedPropValue = emitDefaultedValue(prop.schema, rawPropValue);
       const propValue = defaultedPropValue === rawPropValue ? rawPropValue : state.nextVar(`value_${prop.key}`);
-      const propPatch = emitPropertyAccess(patch, prop.key);
+      const propPatch = emitPropertyAccess(patch3, prop.key);
       const propNext = state.nextVar(`next_${prop.key}`);
       if (propValue !== rawPropValue) {
         writer.line(`const ${propValue} = ${defaultedPropValue};`);
@@ -11076,12 +12978,12 @@ function emitObjectUpdateTo(writer, state, node, value, patch, target) {
   });
   writer.line("}");
 }
-function emitUnionUpdateTo(writer, state, node, value, patch, target) {
+function emitUnionUpdateTo(writer, state, node, value, patch3, target) {
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
   writer.indent(() => {
     if (node.options.length === 0) {
-      writer.line(`${target} = ${patch};`);
+      writer.line(`${target} = ${patch3};`);
       return;
     }
     let prefix = "if";
@@ -11089,23 +12991,23 @@ function emitUnionUpdateTo(writer, state, node, value, patch, target) {
       writer.line(`${prefix} (${emitSchemaGuard(option.schema, value)}) {`);
       writer.indent(() => {
         const next = state.nextVar(`${target}_branch`);
-        emitUpdateTo(writer, state, option.node, value, patch, next);
+        emitUpdateTo(writer, state, option.node, value, patch3, next);
         writer.line(`${target} = ${next};`);
       });
       prefix = "} else if";
     }
     writer.line("} else {");
-    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.indent(() => writer.line(`${target} = ${patch3};`));
     writer.line("}");
   });
   writer.line("}");
 }
-function emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, target) {
+function emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch3, target) {
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
   writer.indent(() => {
     if (node.options.length === 0) {
-      writer.line(`${target} = ${patch};`);
+      writer.line(`${target} = ${patch3};`);
       return;
     }
     let prefix = "if";
@@ -11115,37 +13017,37 @@ function emitDiscriminatedUnionUpdateTo(writer, state, node, value, patch, targe
         const tag = literalDiscriminatorValue(option.schema, node.discriminator);
         const next = state.nextVar(`${target}_branch`);
         if (tag !== void 0) {
-          const patchTag = emitPropertyAccess(patch, node.discriminator);
+          const patchTag = emitPropertyAccess(patch3, node.discriminator);
           writer.line(`if (${patchTag} !== undefined && ${patchTag} !== ${emitLiteral(tag)}) {`);
-          writer.indent(() => writer.line(`${target} = ${patch};`));
+          writer.indent(() => writer.line(`${target} = ${patch3};`));
           writer.line("} else {");
           writer.indent(() => {
-            emitUpdateTo(writer, state, option.node, value, patch, next);
+            emitUpdateTo(writer, state, option.node, value, patch3, next);
             writer.line(`${target} = ${next};`);
           });
           writer.line("}");
           return;
         }
-        emitUpdateTo(writer, state, option.node, value, patch, next);
+        emitUpdateTo(writer, state, option.node, value, patch3, next);
         writer.line(`${target} = ${next};`);
       });
       prefix = "} else if";
     }
     writer.line("} else {");
-    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.indent(() => writer.line(`${target} = ${patch3};`));
     writer.line("}");
   });
   writer.line("}");
 }
-function emitTupleUpdateTo(writer, state, node, value, patch, target) {
+function emitTupleUpdateTo(writer, state, node, value, patch3, target) {
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined) {`);
+  writer.line(`if (${patch3} !== undefined) {`);
   writer.indent(() => {
     const entries = [];
     const changedVars = [];
     for (let index2 = 0; index2 < node.items.length; index2++) {
       const itemNext = state.nextVar(`next_${index2}`);
-      emitUpdateTo(writer, state, node.items[index2], `${value}[${index2}]`, `${patch}[${index2}]`, itemNext);
+      emitUpdateTo(writer, state, node.items[index2], `${value}[${index2}]`, `${patch3}[${index2}]`, itemNext);
       changedVars.push(`${itemNext} !== ${value}[${index2}]`);
       entries.push(itemNext);
     }
@@ -11155,7 +13057,7 @@ function emitTupleUpdateTo(writer, state, node, value, patch, target) {
   });
   writer.line("}");
 }
-function emitArrayUpdateTo(writer, state, node, value, patch, target) {
+function emitArrayUpdateTo(writer, state, node, value, patch3, target) {
   const len = state.nextVar("len");
   const patchLen = state.nextVar("patchLen");
   const index2 = state.nextVar("i");
@@ -11163,13 +13065,13 @@ function emitArrayUpdateTo(writer, state, node, value, patch, target) {
   const patchItem = state.nextVar("patchItem");
   const next = state.nextVar("next");
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined) {`);
+  writer.line(`if (${patch3} !== undefined) {`);
   writer.indent(() => {
     writer.line(`const ${len} = ${value}.length;`);
-    writer.line(`const ${patchLen} = ${patch}.length;`);
+    writer.line(`const ${patchLen} = ${patch3}.length;`);
     writer.line(`for (let ${index2} = 0; ${index2} < ${patchLen}; ${index2}++) {`);
     writer.indent(() => {
-      writer.line(`const ${patchItem} = ${patch}[${index2}];`);
+      writer.line(`const ${patchItem} = ${patch3}[${index2}];`);
       writer.line(`if (${patchItem} !== undefined) {`);
       writer.indent(() => {
         writer.line(`if (${index2} >= ${len}) {`);
@@ -11200,7 +13102,7 @@ function emitArrayUpdateTo(writer, state, node, value, patch, target) {
   });
   writer.line("}");
 }
-function emitRecordUpdateTo(writer, state, node, value, patch, target) {
+function emitRecordUpdateTo(writer, state, node, value, patch3, target) {
   const keys = state.nextVar("keys");
   const patchKeys = state.nextVar("patchKeys");
   const len = state.nextVar("len");
@@ -11209,18 +13111,18 @@ function emitRecordUpdateTo(writer, state, node, value, patch, target) {
   const next = state.nextVar("next");
   const recordOut = state.nextVar("recordOut");
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
   writer.indent(() => {
     writer.line(`let changed = false;`);
     writer.line(`const ${keys} = Object.keys(${value});`);
-    writer.line(`const ${patchKeys} = Object.keys(${patch});`);
+    writer.line(`const ${patchKeys} = Object.keys(${patch3});`);
     writer.line(`if (${keys}.length !== ${patchKeys}.length) {`);
     writer.indent(() => writer.line("changed = true;"));
     writer.line("}");
     writer.line(`for (let ${index2} = 0, ${len} = ${patchKeys}.length; ${index2} < ${len}; ${index2}++) {`);
     writer.indent(() => {
       writer.line(`const ${key} = ${patchKeys}[${index2}];`);
-      emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
+      emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch3}[${key}]`, next);
       writer.line(`if (${next} !== ${value}[${key}]) {`);
       writer.indent(() => {
         writer.line("changed = true;");
@@ -11235,7 +13137,7 @@ function emitRecordUpdateTo(writer, state, node, value, patch, target) {
       writer.line(`for (let ${index2} = 0, ${len} = ${patchKeys}.length; ${index2} < ${len}; ${index2}++) {`);
       writer.indent(() => {
         writer.line(`const ${key} = ${patchKeys}[${index2}];`);
-        emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch}[${key}]`, next);
+        emitUpdateTo(writer, state, node.value, `${value}[${key}]`, `${patch3}[${key}]`, next);
         writer.line(`${recordOut}[${key}] = ${next};`);
       });
       writer.line("}");
@@ -11245,22 +13147,22 @@ function emitRecordUpdateTo(writer, state, node, value, patch, target) {
   });
   writer.line("}");
 }
-function emitSetUpdateTo(writer, value, patch, target) {
+function emitSetUpdateTo(writer, value, patch3, target) {
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
   writer.indent(() => {
-    writer.line(`if (${value}.size !== ${patch}.size) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line(`if (${value}.size !== ${patch3}.size) {`);
+    writer.indent(() => writer.line(`${target} = ${patch3};`));
     writer.line("} else {");
     writer.indent(() => {
-      writer.line(`const iter = ${patch}.values();`);
+      writer.line(`const iter = ${patch3}.values();`);
       writer.line("let step = iter.next();");
       writer.line("while (!step.done) {");
       writer.indent(() => {
         writer.line("const item = step.value;");
         writer.line(`if (!${value}.has(item)) {`);
         writer.indent(() => {
-          writer.line(`${target} = ${patch};`);
+          writer.line(`${target} = ${patch3};`);
           writer.line("break;");
         });
         writer.line("}");
@@ -11272,15 +13174,15 @@ function emitSetUpdateTo(writer, value, patch, target) {
   });
   writer.line("}");
 }
-function emitMapUpdateTo(writer, value, patch, target) {
+function emitMapUpdateTo(writer, value, patch3, target) {
   writer.line(`let ${target} = ${value};`);
-  writer.line(`if (${patch} !== undefined && !Object.is(${value}, ${patch})) {`);
+  writer.line(`if (${patch3} !== undefined && !Object.is(${value}, ${patch3})) {`);
   writer.indent(() => {
-    writer.line(`if (${value}.size !== ${patch}.size) {`);
-    writer.indent(() => writer.line(`${target} = ${patch};`));
+    writer.line(`if (${value}.size !== ${patch3}.size) {`);
+    writer.indent(() => writer.line(`${target} = ${patch3};`));
     writer.line("} else {");
     writer.indent(() => {
-      writer.line(`const iter = ${patch}.entries();`);
+      writer.line(`const iter = ${patch3}.entries();`);
       writer.line("let step = iter.next();");
       writer.line("while (!step.done) {");
       writer.indent(() => {
@@ -11289,7 +13191,7 @@ function emitMapUpdateTo(writer, value, patch, target) {
         writer.line("const nextValue = entry[1];");
         writer.line(`if (!${value}.has(key) || !Object.is(${value}.get(key), nextValue)) {`);
         writer.indent(() => {
-          writer.line(`${target} = ${patch};`);
+          writer.line(`${target} = ${patch3};`);
           writer.line("break;");
         });
         writer.line("}");
@@ -11450,9 +13352,9 @@ function emitBinaryHydrateSource(layout) {
 }
 function emitBinaryQuerySource(layout, program) {
   const plan = createBinaryQueryPlan(program.nodes);
-  const lookup = createFieldLookup(layout);
-  validateBinaryQueryPlan(lookup, plan);
-  const accessedFields = collectQueryAccessFields(layout, lookup, plan);
+  const lookup2 = createFieldLookup(layout);
+  validateBinaryQueryPlan(lookup2, plan);
+  const accessedFields = collectQueryAccessFields(layout, lookup2, plan);
   const writer = new CodeWriter();
   const hasParams = Boolean(program.params?.length);
   writer.line(`function query(rowset${hasParams ? ", params" : ""}) {`);
@@ -11465,9 +13367,9 @@ function emitBinaryQuerySource(layout, program) {
     const aggregateKey = plan.aggregate?.key;
     const cacheAggregateValue = aggregateKey !== void 0 && filtersReadField(plan.filters, aggregateKey);
     const comparableOverrides = cacheAggregateValue ? /* @__PURE__ */ new Map([[aggregateKey, "v"]]) : void 0;
-    const condition = emitBinaryFilter(plan, lookup, prepared, comparableOverrides);
+    const condition = emitBinaryFilter(plan, lookup2, prepared, comparableOverrides);
     if (plan.aggregate) {
-      emitBinaryAggregateQuery(writer, layout, lookup, plan, condition, accessedFields, cacheAggregateValue);
+      emitBinaryAggregateQuery(writer, layout, lookup2, plan, condition, accessedFields, cacheAggregateValue);
     } else {
       emitBinaryArrayQuery(writer, layout, plan, condition, accessedFields);
     }
@@ -11479,10 +13381,10 @@ function compileBinaryQuery(target, program, options) {
   const layout = target.layout;
   const schema = target.schema;
   const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
-  const cacheKey = `binary-query:${serializeBinaryLayout(layout)}:${serializeQueryNodes2(program.nodes)}`;
+  const cacheKey3 = `binary-query:${serializeBinaryLayout(layout)}:${serializeQueryNodes2(program.nodes)}`;
   const template = getCompileCached(
     schema,
-    cacheKey,
+    cacheKey3,
     () => {
       const source = emitBinaryQuerySource(layout, program);
       return {
@@ -12409,35 +14311,35 @@ function createBinaryQueryPlan(nodes) {
 function createFieldLookup(layout) {
   return { fields: new Map(layout.fields.map((field) => [field.key, field])) };
 }
-function validateBinaryQueryPlan(lookup, plan) {
-  for (const filter of plan.filters) validateCondition2(lookup, filter.condition);
-  if (plan.select) validateKeys(lookup, plan.select.fields, "binary query select");
-  if (plan.aggregate?.key) validateKeys(lookup, [plan.aggregate.key], `binary query ${plan.aggregate.op}`);
+function validateBinaryQueryPlan(lookup2, plan) {
+  for (const filter of plan.filters) validateCondition2(lookup2, filter.condition);
+  if (plan.select) validateKeys(lookup2, plan.select.fields, "binary query select");
+  if (plan.aggregate?.key) validateKeys(lookup2, [plan.aggregate.key], `binary query ${plan.aggregate.op}`);
 }
-function validateCondition2(lookup, condition) {
+function validateCondition2(lookup2, condition) {
   switch (condition.kind) {
     case "compare":
-      validateValue2(lookup, condition.left);
-      validateValue2(lookup, condition.right);
+      validateValue2(lookup2, condition.left);
+      validateValue2(lookup2, condition.right);
       return;
     case "logical":
-      validateCondition2(lookup, condition.left);
-      validateCondition2(lookup, condition.right);
+      validateCondition2(lookup2, condition.left);
+      validateCondition2(lookup2, condition.right);
       return;
     case "not":
-      validateCondition2(lookup, condition.inner);
+      validateCondition2(lookup2, condition.inner);
       return;
   }
 }
-function validateValue2(lookup, value) {
-  if (value.kind === "field") validateKeys(lookup, [value.key], "binary query filter");
+function validateValue2(lookup2, value) {
+  if (value.kind === "field") validateKeys(lookup2, [value.key], "binary query filter");
 }
-function validateKeys(lookup, keys, label) {
+function validateKeys(lookup2, keys, label) {
   for (const key of keys) {
-    if (!lookup.fields.has(key)) throw new JITError("INVALID_QUERY", `${label} received unknown key ${key}`);
+    if (!lookup2.fields.has(key)) throw new JITError("INVALID_QUERY", `${label} received unknown key ${key}`);
   }
 }
-function collectQueryAccessFields(layout, lookup, plan) {
+function collectQueryAccessFields(layout, lookup2, plan) {
   const keys = /* @__PURE__ */ new Set();
   for (const filter of plan.filters) collectConditionFieldKeys(filter.condition, keys);
   if (plan.aggregate?.key) {
@@ -12449,7 +14351,7 @@ function collectQueryAccessFields(layout, lookup, plan) {
       for (const field of layout.fields) keys.add(field.key);
     }
   }
-  return layout.fields.filter((field) => keys.has(field.key) && lookup.fields.has(field.key));
+  return layout.fields.filter((field) => keys.has(field.key) && lookup2.fields.has(field.key));
 }
 function collectConditionFieldKeys(condition, keys) {
   switch (condition.kind) {
@@ -12471,9 +14373,9 @@ function filtersReadField(filters, key) {
   for (const filter of filters) collectConditionFieldKeys(filter.condition, keys);
   return keys.has(key);
 }
-function emitBinaryFilter(plan, lookup, prepared, comparableOverrides) {
+function emitBinaryFilter(plan, lookup2, prepared, comparableOverrides) {
   if (plan.filters.length === 0) return void 0;
-  return plan.filters.map((filter) => emitCondition2(filter.condition, lookup, prepared, comparableOverrides)).join(" && ");
+  return plan.filters.map((filter) => emitCondition4(filter.condition, lookup2, prepared, comparableOverrides)).join(" && ");
 }
 function emitBinaryArrayQuery(writer, layout, plan, condition, accessedFields) {
   writer.line("const out = new Array(len);");
@@ -12501,10 +14403,10 @@ function emitBinaryArrayQuery(writer, layout, plan, condition, accessedFields) {
   writer.line("out.length = j;");
   writer.line("return out;");
 }
-function emitBinaryAggregateQuery(writer, layout, lookup, plan, condition, accessedFields, cacheAggregateValue) {
+function emitBinaryAggregateQuery(writer, layout, lookup2, plan, condition, accessedFields, cacheAggregateValue) {
   const aggregate = plan.aggregate;
   if (!aggregate) return;
-  const field = aggregate.key ? lookup.fields.get(aggregate.key) : void 0;
+  const field = aggregate.key ? lookup2.fields.get(aggregate.key) : void 0;
   const accepted = (body) => {
     if (condition) {
       writer.line(`if (${condition}) {`);
@@ -12592,28 +14494,28 @@ function emitBinaryAggregateQuery(writer, layout, lookup, plan, condition, acces
     }
   }
 }
-function emitCondition2(condition, lookup, prepared, comparableOverrides) {
+function emitCondition4(condition, lookup2, prepared, comparableOverrides) {
   switch (condition.kind) {
     case "compare":
-      return emitCompare(condition.left, condition.op, condition.right, lookup, prepared, comparableOverrides);
+      return emitCompare(condition.left, condition.op, condition.right, lookup2, prepared, comparableOverrides);
     case "logical":
-      return `(${emitCondition2(condition.left, lookup, prepared, comparableOverrides)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition2(
+      return `(${emitCondition4(condition.left, lookup2, prepared, comparableOverrides)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition4(
         condition.right,
-        lookup,
+        lookup2,
         prepared,
         comparableOverrides
       )})`;
     case "not":
-      return `!(${emitCondition2(condition.inner, lookup, prepared, comparableOverrides)})`;
+      return `!(${emitCondition4(condition.inner, lookup2, prepared, comparableOverrides)})`;
   }
 }
-function emitCompare(left, op, right, lookup, prepared, comparableOverrides) {
+function emitCompare(left, op, right, lookup2, prepared, comparableOverrides) {
   if (left.kind === "field") {
-    const field = expectField(lookup, left.key);
+    const field = expectField(lookup2, left.key);
     return emitFieldCompare(field, op, right, prepared, comparableOverrides?.get(left.key));
   }
   if (right.kind === "field") {
-    const field = expectField(lookup, right.key);
+    const field = expectField(lookup2, right.key);
     return emitFieldCompare(field, reverseCompare(op), left, prepared, comparableOverrides?.get(right.key));
   }
   throw new JITError("INVALID_QUERY", "binary rowset comparisons require at least one field operand");
@@ -12636,8 +14538,8 @@ function emitFieldCompare(field, op, value, prepared, comparableOverride) {
   const operator = op === "gt" ? ">" : op === "gte" ? ">=" : op === "lt" ? "<" : "<=";
   return `(${present}${comparable} ${operator} ${valueExpr})`;
 }
-function expectField(lookup, key) {
-  const field = lookup.fields.get(key);
+function expectField(lookup2, key) {
+  const field = lookup2.fields.get(key);
   if (!field) throw new JITError("INVALID_QUERY", `binary rowset query received unknown key ${key}`);
   return field;
 }
@@ -12742,6 +14644,8 @@ function serializeQueryNode2(node) {
       return `A(${node.fields.map((field) => `${field.name}:${field.op}:${field.key ?? ""}`).join(",")})`;
     case "unique":
       return `u(${node.key})`;
+    case "distinct":
+      return `D(${node.fields.join(",")})`;
     case "keyed":
       return `k(${node.key})`;
     case "groupBy":
@@ -12806,10 +14710,10 @@ function compileHydrator(schema, options) {
 function compileValidatorSelection(schema, ops2, options) {
   const normalizedOps = normalizeValidatorOps(ops2);
   const fastParse = canUseFastParse(schema) && (normalizedOps.includes("parse") || normalizedOps.includes("safeParse"));
-  const cacheKey = `validator:${normalizedOps.join(",")}`;
+  const cacheKey3 = `validator:${normalizedOps.join(",")}`;
   return getCompileCached(
     schema,
-    cacheKey,
+    cacheKey3,
     () => {
       const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps, fastParse));
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values);
@@ -12872,260 +14776,6 @@ function emitOptionsForValidatorOps(ops2, fastParse = false) {
     safeParse: ops2.includes("safeParse") || ops2.includes("parse") || ops2.includes("safeParseAsync") || ops2.includes("parseAsync"),
     safeParseAsync: ops2.includes("safeParseAsync") || ops2.includes("parseAsync")
   };
-}
-
-// ../../packages/jit/src/transforms/wrappers/wrappers.ts
-function optional(schema) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.optional,
-    {
-      innerType: schema
-    },
-    schema.annotations
-  );
-}
-function nullable(schema) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.nullable,
-    {
-      innerType: schema
-    },
-    schema.annotations
-  );
-}
-function nullish(schema) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.nullish,
-    {
-      innerType: schema
-    },
-    schema.annotations
-  );
-}
-function readonly(schema) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.readonly,
-    {
-      innerType: schema
-    },
-    schema.annotations
-  );
-}
-function promise(schema) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.promise,
-    {
-      innerType: schema
-    },
-    schema.annotations
-  );
-}
-function defaultTo(schema, defaultValue) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.default,
-    {
-      innerType: schema,
-      defaultValue
-    },
-    schema.annotations
-  );
-}
-function brand(schema, brandName) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.brand,
-    {
-      innerType: schema,
-      brand: brandName
-    },
-    schema.annotations
-  );
-}
-function pipe(schema, transform3) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.pipe,
-    {
-      innerType: schema,
-      transform: transform3
-    },
-    schema.annotations
-  );
-}
-function transform(schema, transforms) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.transform,
-    {
-      innerType: schema,
-      transforms
-    },
-    schema.annotations
-  );
-}
-function refine(schema, predicate, options) {
-  const normalized = typeof options === "string" ? { message: options } : options;
-  return /* @__PURE__ */ createSchema(
-    TypeName.refine,
-    {
-      innerType: schema,
-      predicate,
-      ...normalized?.message !== void 0 ? { message: normalized.message } : {},
-      ...normalized?.path !== void 0 ? { path: normalized.path } : {},
-      ...normalized?.when !== void 0 ? { when: normalized.when } : {}
-    },
-    schema.annotations
-  );
-}
-function coerce(schema, coercer) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.coerce,
-    {
-      innerType: schema,
-      coercer
-    },
-    schema.annotations
-  );
-}
-
-// ../../packages/jit/src/transforms/object/object.ts
-function isOptionalSchema(schema) {
-  return schema.type === TypeName.optional;
-}
-function partial(schema, keys) {
-  const props = {};
-  const selected = keys ? new Set(keys) : void 0;
-  for (const key in schema.def.props) {
-    props[key] = selected === void 0 || selected.has(key) ? optional(schema.def.props[key]) : schema.def.props[key];
-  }
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props,
-      unknownKeys: schema.def.unknownKeys,
-      catchall: schema.def.catchall,
-      checks: schema.def.checks
-    },
-    schema.annotations
-  );
-}
-function pick(schema, keys) {
-  const props = {};
-  for (const key of keys) {
-    props[key] = schema.def.props[key];
-  }
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props,
-      unknownKeys: schema.def.unknownKeys,
-      catchall: schema.def.catchall,
-      checks: schema.def.checks
-    },
-    schema.annotations
-  );
-}
-function omit(schema, keys) {
-  const props = {};
-  const omitted = new Set(keys);
-  for (const key in schema.def.props) {
-    if (!omitted.has(key)) {
-      props[key] = schema.def.props[key];
-    }
-  }
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props,
-      unknownKeys: schema.def.unknownKeys,
-      catchall: schema.def.catchall,
-      checks: schema.def.checks
-    },
-    schema.annotations
-  );
-}
-function extend(schema, extension) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props: {
-        ...schema.def.props,
-        ...extension
-      },
-      unknownKeys: schema.def.unknownKeys,
-      catchall: schema.def.catchall,
-      checks: schema.def.checks
-    },
-    schema.annotations
-  );
-}
-function merge(left, right) {
-  const unknownKeys = right.def.unknownKeys ?? left.def.unknownKeys;
-  const catchall2 = right.def.catchall ?? left.def.catchall;
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props: {
-        ...left.def.props,
-        ...right.def.props
-      },
-      unknownKeys,
-      catchall: catchall2,
-      checks: [...left.def.checks, ...right.def.checks]
-    },
-    right.annotations ?? left.annotations
-  );
-}
-function required(schema, keys) {
-  const props = {};
-  const selected = keys ? new Set(keys) : void 0;
-  for (const key in schema.def.props) {
-    const prop = schema.def.props[key];
-    props[key] = (selected === void 0 || selected.has(key)) && isOptionalSchema(prop) ? prop.def.innerType : prop;
-  }
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props,
-      unknownKeys: schema.def.unknownKeys,
-      catchall: schema.def.catchall,
-      checks: schema.def.checks
-    },
-    schema.annotations
-  );
-}
-function strict(schema) {
-  return withUnknownKeys(schema, "strict");
-}
-function loose(schema) {
-  return withUnknownKeys(schema, "passthrough");
-}
-function catchall(schema, catchallSchema) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props: schema.def.props,
-      unknownKeys: "passthrough",
-      catchall: catchallSchema,
-      checks: schema.def.checks
-    },
-    schema.annotations
-  );
-}
-function keyOf(schema) {
-  const values = Object.keys(schema.def.props);
-  return /* @__PURE__ */ createSchema(TypeName.enum, {
-    values
-  });
-}
-function withUnknownKeys(schema, unknownKeys) {
-  return /* @__PURE__ */ createSchema(
-    TypeName.object,
-    {
-      props: schema.def.props,
-      unknownKeys,
-      catchall: schema.def.catchall,
-      checks: schema.def.checks
-    },
-    schema.annotations
-  );
 }
 
 // ../../packages/jit/src/core/builder/unwrap-schema.ts
@@ -13801,12 +15451,12 @@ function parseIssuePath(path) {
   if (path === "") return [];
   const segments = [];
   const regex2 = /([^.[\]]+)|\[(\d+)\]/g;
-  let match;
-  while ((match = regex2.exec(path)) !== null) {
-    if (match[1] !== void 0) {
-      segments.push(match[1]);
-    } else if (match[2] !== void 0) {
-      segments.push(Number(match[2]));
+  let match2;
+  while ((match2 = regex2.exec(path)) !== null) {
+    if (match2[1] !== void 0) {
+      segments.push(match2[1]);
+    } else if (match2[2] !== void 0) {
+      segments.push(Number(match2[2]));
     }
   }
   return segments;
@@ -13822,9 +15472,9 @@ function attachStandardSchemaGetter(prototype) {
 }
 function createBuilder(schema) {
   const prototype = schema.type === TypeName.object ? objectBuilderPrototype : schema.type === TypeName.function ? functionBuilderPrototype : schema.type === TypeName.codec ? codecBuilderPrototype : baseBuilderPrototype;
-  const builder = Object.create(prototype);
-  builder.schema = schema;
-  return builder;
+  const builder2 = Object.create(prototype);
+  builder2.schema = schema;
+  return builder2;
 }
 
 // ../../packages/jit/src/aot/emit-type.ts
@@ -14052,6 +15702,8 @@ function emitModule(plan, options, layout) {
   let needsRuntimeCachedIndex = false;
   let needsValidationError = false;
   let needsHashHelpers = false;
+  let needsHashCache = false;
+  let needsJsonPatchHelpers = false;
   let needsMockHelpers = false;
   let needsCallHelper = false;
   let needsAggregateType = false;
@@ -14086,7 +15738,11 @@ function emitModule(plan, options, layout) {
     for (const prop of Object.keys(members)) {
       const artifact = getArtifact(members[prop]);
       if (!artifact) {
-        skipped.push({ schema: name, operation: prop, reason: "member is not a compiled JIT artifact" });
+        skipped.push({
+          schema: name,
+          operation: prop,
+          reason: "member is not a compiled JIT artifact"
+        });
         continue;
       }
       const memberType = exported.has(name) && sourceFile ? memberImportType(options.outDir, sourceFile, name, prop, artifact) : void 0;
@@ -14100,7 +15756,11 @@ function emitModule(plan, options, layout) {
       if (emitted) operations.push({ prop, ...emitted });
     }
     if (operations.length === 0) {
-      skipped.push({ schema: name, operation: "group", reason: "no member of this object could be generated" });
+      skipped.push({
+        schema: name,
+        operation: "group",
+        reason: "no member of this object could be generated"
+      });
       continue;
     }
     if (ts) {
@@ -14126,7 +15786,11 @@ function emitModule(plan, options, layout) {
     }
     const artifact = getArtifact(value);
     if (!artifact) {
-      skipped.push({ schema: name, operation: "export", reason: "declaration is not a compiled JIT artifact" });
+      skipped.push({
+        schema: name,
+        operation: "export",
+        reason: "declaration is not a compiled JIT artifact"
+      });
       continue;
     }
     const sourceFile = options.sources?.get(name);
@@ -14143,11 +15807,35 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "execution")
       return emitExecutionArtifact(binding, declaration, artifact.plan, reportName, type);
     if (artifact.kind === "query-plan") return emitQueryPlanArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "join-plan") return emitJoinPlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "project-plan") return emitProjectPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "changed-plan") return emitChangedPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "patch-plan") return emitPatchPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "cache-key-plan") return emitCacheKeyPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "match-plan") {
+      skipped.push({
+        schema: reportName,
+        operation: "match",
+        reason: "match handlers are callbacks that cannot be serialized ahead of time"
+      });
+      return void 0;
+    }
+    if (artifact.kind === "access-plan") {
+      js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitAccessSource(artifact.descriptor), "access")};`);
+      return { binding, type };
+    }
+    if (artifact.kind === "canonical-plan") {
+      js.push(`${declaration} /*#__PURE__*/ ${emitCanonicalSource(artifact.schema)};`);
+      return { binding, type };
+    }
+    if (artifact.kind === "reconcile-plan")
+      return emitReconcilePlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
@@ -14170,11 +15858,23 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "operation") return operationType(artifact, typeNames);
     if (artifact.kind === "execution") return executionPlanType(artifact.plan, typeNames);
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
+    if (artifact.kind === "join-plan") return joinPlanType(artifact, typeNames);
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
+    if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
+    if (artifact.kind === "project-plan") return projectPlanType(artifact, typeNames);
+    if (artifact.kind === "changed-plan") return changedPlanType(artifact, typeNames);
+    if (artifact.kind === "patch-plan") return patchPlanType(artifact, typeNames);
+    if (artifact.kind === "cache-key-plan")
+      return `(value: ${namedType(artifact.schema, typeNames)}) => ${artifact.descriptor.form === "hash" ? "number" : "string"}`;
+    if (artifact.kind === "access-plan") return accessPlanType(artifact, typeNames);
+    if (artifact.kind === "canonical-plan") {
+      const canonicalValue = namedType(artifact.schema, typeNames);
+      return `(value: ${canonicalValue}) => ${canonicalValue}`;
+    }
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -14225,10 +15925,63 @@ function emitModule(plan, options, layout) {
     );
     return { binding, type };
   }
+  function emitLookupPlanArtifact(binding, declaration, artifact, type) {
+    if (artifact.lookup.choice.strategy === "CachedIndexLookup") needsRuntimeCachedIndex = true;
+    js.push(`${declaration} /*#__PURE__*/ ${emitLookupSource(artifact.lookup)};`);
+    return { binding, type };
+  }
+  function emitProjectPlanArtifact(binding, declaration, artifact, type) {
+    js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitProjectSource(artifact.tree), "project")};`);
+    return { binding, type };
+  }
+  function emitChangedPlanArtifact(binding, declaration, artifact, type) {
+    const paths = artifact.descriptor.fields.map((field) => field.path);
+    const bigint3 = artifact.descriptor.representation === "bigint";
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    for (const equal3 of changedEqualBindings(artifact.descriptor)) {
+      js.push(`  const ${equal3.name} = ${asExpression(equal3.source, "equal")};`);
+    }
+    js.push(...indentBlock(emitChangedSource(artifact.descriptor)));
+    js.push(`  const __bits = new Map(${JSON.stringify(paths)}.map((path, index) => [path, index]));`);
+    js.push('  Object.defineProperty(changed, "fields", { value: Object.freeze(' + JSON.stringify(paths) + ") });");
+    js.push('  Object.defineProperty(changed, "has", {');
+    js.push("    value: (mask, path) => {");
+    js.push("      const bit = __bits.get(path);");
+    js.push("      if (bit === undefined) return false;");
+    js.push(bigint3 ? "      return (mask & (1n << BigInt(bit))) !== 0n;" : "      return (mask & (1 << bit)) !== 0;");
+    js.push("    },");
+    js.push("  });");
+    js.push("  return changed;");
+    js.push("})();");
+    return { binding, type };
+  }
+  function emitPatchPlanArtifact(binding, declaration, artifact, type) {
+    if (artifact.mode === "merge") {
+      js.push(`${declaration} /*#__PURE__*/ ${emitMergePatchProgram(artifact.schema)};`);
+      return { binding, type };
+    }
+    needsJsonPatchHelpers = true;
+    js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitJsonPatchSource(artifact.schema), "patch")};`);
+    return { binding, type };
+  }
+  function emitCacheKeyPlanArtifact(binding, declaration, artifact, type) {
+    const hashes = cacheKeyHashBindings(artifact.descriptor);
+    if (hashes.length > 0 || artifact.descriptor.form === "hash") needsHashHelpers = true;
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    for (const hash4 of hashes) js.push(`  const ${hash4.name} = ${asExpression(hash4.source, "hash")};`);
+    js.push(...indentBlock(emitCacheKeySource(artifact.descriptor)));
+    js.push("  return cacheKey;");
+    js.push("})();");
+    return { binding, type };
+  }
   function emitClassArtifact(binding, declaration, artifact, reportName, type, assertedType) {
     const base = resolveObjectSchema(artifact.schema);
     if (!base) {
-      skipped.push({ schema: reportName, operation: "class", reason: "JIT classes require an object schema" });
+      skipped.push({
+        schema: reportName,
+        operation: "class",
+        reason: "JIT classes require an object schema"
+      });
       return void 0;
     }
     const validator = emitValidatorBinding(
@@ -14445,10 +16198,15 @@ function emitModule(plan, options, layout) {
     js.push("})();");
     return validatorName;
   }
-  function emitHashBinding(binding, schema, reportName) {
+  function emitHashBinding(binding, schema, reportName, cache = true) {
     const source2 = tryEmit(reportName, "hash", skipped, () => emitHashSource(schema));
     if (!source2) return void 0;
     needsHashHelpers = true;
+    if (!cache) {
+      js.push(`const ${binding} = ${asExpression(source2, "hash")};`);
+      return binding;
+    }
+    needsHashCache = true;
     js.push(`const ${binding} = /*#__PURE__*/ (() => {`);
     js.push(...indentBlock(`const compute = (${source2});`));
     js.push("  return (value) => {");
@@ -14463,6 +16221,43 @@ function emitModule(plan, options, layout) {
     js.push("  };");
     js.push("})();");
     return binding;
+  }
+  function emitEqualBinding(binding, schema, reportName) {
+    const source2 = tryEmit(reportName, "equal", skipped, () => emitEqualSource(schema));
+    if (!source2) return void 0;
+    if (source2.includes("__getIndex")) needsRuntimeGetIndex = true;
+    if (source2.includes("__hash")) {
+      const hashBinding = internalIdentifier(`${binding}_hash`);
+      if (!emitHashBinding(hashBinding, schema, reportName)) return void 0;
+      js.push(`const ${binding} = /*#__PURE__*/ ((__hash) => ${asExpression(source2, "equal")})(${hashBinding});`);
+    } else {
+      js.push(`const ${binding} = ${asExpression(source2, "equal")};`);
+    }
+    return binding;
+  }
+  function emitReconcilePlanArtifact(binding, declaration, artifact, reportName, type) {
+    const object2 = resolveRowObjectSchema(artifact.schema, "reconcile");
+    const source2 = tryEmit(reportName, "reconcile", skipped, () => emitReconcileSource(artifact.descriptor));
+    if (!source2) return void 0;
+    const prelude = [];
+    if (source2.includes("__reconcileEqual")) {
+      const equalBinding = internalIdentifier(`${binding}_equal`);
+      if (!emitEqualBinding(equalBinding, object2, reportName)) return void 0;
+      prelude.push(`  const __reconcileEqual = ${equalBinding};`);
+    }
+    if (source2.includes("__reconcileDiff")) {
+      const diffSource = tryEmit(reportName, "reconcile.diff", skipped, () => emitDiffSource(object2));
+      if (!diffSource) return void 0;
+      const diffBinding = internalIdentifier(`${binding}_diff`);
+      js.push(`const ${diffBinding} = ${asExpression(diffSource, "diff")};`);
+      prelude.push(`  const __reconcileDiff = ${diffBinding};`);
+    }
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...prelude);
+    js.push(...indentBlock(source2));
+    js.push("  return reconcile;");
+    js.push("})();");
+    return { binding, type };
   }
   function emitOperationArtifact(binding, declaration, artifact, reportName, type) {
     const schema = artifact.schema;
@@ -14560,7 +16355,11 @@ function emitModule(plan, options, layout) {
     if (!codec2) return false;
     const inlined = inlineCodecBindings(codec2.bindingNames, codec2.bindingValues);
     if (inlined === void 0) {
-      skipped.push({ schema: reportName, operation, reason: "codec bindings cannot be serialized" });
+      skipped.push({
+        schema: reportName,
+        operation,
+        reason: "codec bindings cannot be serialized"
+      });
       return false;
     }
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
@@ -14576,7 +16375,7 @@ function emitModule(plan, options, layout) {
       reportName,
       "query",
       skipped,
-      () => artifact.mode === "iterator" ? emitQueryIteratorSource(artifact.schema, program) : artifact.mode === "async-iterator" ? emitQueryAsyncIteratorSource(artifact.schema, program) : artifact.mode === "visitor" ? emitQueryVisitorSource(artifact.schema, program) : hasIncrementalQueryNodes(program) ? emitQueryArraySource(artifact.schema, program) : emitQuerySource(artifact.schema, program)
+      () => emitQueryPlanSource(artifact.schema, program, artifact.mode)
     );
     if (!source2) return void 0;
     if (source2.includes("__cachedIndex")) needsRuntimeCachedIndex = true;
@@ -14592,9 +16391,22 @@ function emitModule(plan, options, layout) {
       });
       return void 0;
     }
+    let distinctHash;
+    let distinctEqual;
+    if (source2.includes("__distinctHash")) {
+      const objectSchema = expectCollectionObjectSchema(artifact.schema, "AOT distinct").objectSchema;
+      distinctHash = internalIdentifier(`${binding}_distinct_hash`);
+      distinctEqual = internalIdentifier(`${binding}_distinct_equal`);
+      if (!emitHashBinding(distinctHash, objectSchema, reportName, false)) return void 0;
+      if (!emitEqualBinding(distinctEqual, objectSchema, reportName)) return void 0;
+    }
     const standard = artifact.standard === void 0 ? void 0 : JSON.stringify(artifact.standard);
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push(...inlined.map((line) => `  ${line}`));
+    if (distinctHash && distinctEqual) {
+      js.push(`  const __distinctHash = ${distinctHash};`);
+      js.push(`  const __distinctEqual = ${distinctEqual};`);
+    }
     js.push(
       ...indentBlock(
         standard === void 0 ? `return (${source2});` : `const query = (${source2}); Object.defineProperty(query, "~query", { value: ${standard} }); return query;`
@@ -14603,26 +16415,42 @@ function emitModule(plan, options, layout) {
     js.push("})();");
     return { binding, type };
   }
-  function hasIncrementalQueryNodes(program) {
-    return program.nodes.some(
-      (node) => [
-        "flatMap",
-        "take",
-        "drop",
-        "takeWhile",
-        "dropWhile",
-        "chunk",
-        "window",
-        "pairwise",
-        "scan",
-        "groupAdjacentBy"
-      ].includes(node.kind)
+  function emitJoinPlanArtifact(binding, declaration, artifact, reportName, type) {
+    const source2 = tryEmit(reportName, "join", skipped, () => emitJoinSource(artifact.plan));
+    if (!source2) return void 0;
+    if (source2.includes("__cachedIndex")) needsRuntimeCachedIndex = true;
+    const bindings = artifact.plan.leftProgram.bindings;
+    const inlined = inlineBindings(
+      bindings.map((_, index2) => `__q${index2}`),
+      bindings
     );
+    if (inlined === void 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "join",
+        reason: "join bindings hold callbacks that cannot be serialized ahead of time"
+      });
+      return void 0;
+    }
+    const standard = artifact.standard === void 0 ? void 0 : JSON.stringify(artifact.standard);
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...inlined.map((line) => `  ${line}`));
+    js.push(
+      ...indentBlock(
+        standard === void 0 ? `return (${source2});` : `const join = (${source2}); Object.defineProperty(join, "~query", { value: ${standard} }); return join;`
+      )
+    );
+    js.push("})();");
+    return { binding, type };
   }
   function emitCqrsInputArtifact(binding, declaration, artifact, reportName, type) {
     const definition = JSON.stringify(artifact.definition);
     if (definition === void 0) {
-      skipped.push({ schema: reportName, operation: "cqrs-input", reason: "CQRS definition cannot be serialized" });
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-input",
+        reason: "CQRS definition cannot be serialized"
+      });
       return void 0;
     }
     const parserSource = artifact.source.replace("return function parse", "const parse = function parse");
@@ -14634,7 +16462,11 @@ function emitModule(plan, options, layout) {
   }
   function emitCqrsParserArtifact(binding, declaration, artifact, reportName, type) {
     if (JSON.stringify(artifact.definition) === void 0) {
-      skipped.push({ schema: reportName, operation: "cqrs-parser", reason: "CQRS definition cannot be serialized" });
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-parser",
+        reason: "CQRS definition cannot be serialized"
+      });
       return void 0;
     }
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
@@ -14683,7 +16515,11 @@ function emitModule(plan, options, layout) {
     if (mapStage3?.kind === "map") {
       const mapping = mapStage3.bindings[0];
       if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-        skipped.push({ schema: reportName, operation: "map", reason: "mapping descriptor is malformed" });
+        skipped.push({
+          schema: reportName,
+          operation: "map",
+          reason: "mapping descriptor is malformed"
+        });
         return void 0;
       }
       const mapperPlan = tryEmit(
@@ -14748,7 +16584,11 @@ function emitModule(plan, options, layout) {
       if (!validatorName) return void 0;
       if (validateStage.operation === "is") {
         if (hasJsonDecode || hasBinaryDecode) {
-          skipped.push({ schema: reportName, operation: "is", reason: "is must receive a value source in AOT output" });
+          skipped.push({
+            schema: reportName,
+            operation: "is",
+            reason: "is must receive a value source in AOT output"
+          });
           return void 0;
         }
         js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
@@ -14818,7 +16658,11 @@ function emitModule(plan, options, layout) {
       if (!codec2) return void 0;
       const inlined = inlineCodecBindings(codec2.bindingNames, codec2.bindingValues);
       if (inlined === void 0) {
-        skipped.push({ schema: reportName, operation: "binary", reason: "codec bindings cannot be serialized" });
+        skipped.push({
+          schema: reportName,
+          operation: "binary",
+          reason: "codec bindings cannot be serialized"
+        });
         return void 0;
       }
       js.push(`${declaration} /*#__PURE__*/ ((codec) => codec.${hasBinaryDecode ? "decode" : "encode"})((() => {`);
@@ -14831,12 +16675,20 @@ function emitModule(plan, options, layout) {
       return emitOperationArtifact(
         binding,
         declaration,
-        { kind: "operation", schema: plan2.schema, op: operationStage.operation },
+        {
+          kind: "operation",
+          schema: plan2.schema,
+          op: operationStage.operation
+        },
         reportName,
         type
       );
     }
-    skipped.push({ schema: reportName, operation: "execution", reason: "no AOT backend matches this execution plan" });
+    skipped.push({
+      schema: reportName,
+      operation: "execution",
+      reason: "no AOT backend matches this execution plan"
+    });
     return void 0;
   }
   function emitComposedExecutionArtifact(binding, declaration, plan2, name, type) {
@@ -14849,7 +16701,12 @@ function emitModule(plan, options, layout) {
         name,
         "validate",
         skipped,
-        () => emitValidator(schema, { is: fastParse, safeParse: true, safeParseAsync: false, materializeRuntimeTypes })
+        () => emitValidator(schema, {
+          is: fastParse,
+          safeParse: true,
+          safeParseAsync: false,
+          materializeRuntimeTypes
+        })
       );
       if (!validator) return void 0;
       const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
@@ -14873,7 +16730,11 @@ function emitModule(plan, options, layout) {
       if (!codec2) return void 0;
       const inlined = inlineCodecBindings(codec2.bindingNames, codec2.bindingValues);
       if (inlined === void 0) {
-        skipped.push({ schema: name, operation, reason: "codec bindings cannot be serialized" });
+        skipped.push({
+          schema: name,
+          operation,
+          reason: "codec bindings cannot be serialized"
+        });
         return void 0;
       }
       const codecName = internalIdentifier(`${binding}_codec`);
@@ -14908,7 +16769,11 @@ function emitModule(plan, options, layout) {
     const emitComposedMapper = (stage2, operation = stage2.many ? "many" : "map") => {
       const mapping = stage2.bindings[0];
       if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping descriptor is malformed"
+        });
         return void 0;
       }
       const mapperPlan = tryEmit(
@@ -14970,8 +16835,8 @@ function emitModule(plan, options, layout) {
       return transformName;
     };
     const emitComposedUpdate = (stage2) => {
-      const patch = serializeStaticData(stage2.patch);
-      if (patch === void 0) {
+      const patch3 = serializeStaticData(stage2.patch);
+      if (patch3 === void 0) {
         skipped.push({
           schema: name,
           operation: "update",
@@ -14984,7 +16849,7 @@ function emitModule(plan, options, layout) {
       const update2 = internalIdentifier(`${binding}_update`);
       const patchName = internalIdentifier(`${binding}_patch`);
       setup.push(`const ${update2} = ${asExpression(source2, "update")};`);
-      setup.push(`const ${patchName} = ${patch};`);
+      setup.push(`const ${patchName} = ${patch3};`);
       return { update: update2, patch: patchName };
     };
     const emitComposedSecurity = (stage2) => {
@@ -15011,7 +16876,7 @@ function emitModule(plan, options, layout) {
       return securityName;
     };
     let manyIndex = 0;
-    const emitManyApplication = (applied, patch) => {
+    const emitManyApplication = (applied, patch3) => {
       const list = `list${manyIndex}`;
       const length = `len${manyIndex}`;
       const out = `out${manyIndex}`;
@@ -15020,7 +16885,7 @@ function emitModule(plan, options, layout) {
       body.push(`const ${length} = ${list}.length;`);
       body.push(`const ${out} = new Array(${length});`);
       body.push(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
-      body.push(`  ${out}[${index2}] = ${applied}(${list}[${index2}]${patch ? `, ${patch}` : ""});`);
+      body.push(`  ${out}[${index2}] = ${applied}(${list}[${index2}]${patch3 ? `, ${patch3}` : ""});`);
       body.push("}");
       body.push(`value = ${out};`);
     };
@@ -15239,7 +17104,6 @@ function emitModule(plan, options, layout) {
   }
   if (needsHashHelpers) {
     helpers.push(
-      "const __hashCache = new WeakMap();",
       "function __hashNumber(value) { return value | 0; }",
       "function __hashBoolean(value) { return value ? 1 : 0; }",
       "function __hashBigInt(value) { return Number(value & 0xffffffffn) | 0; }",
@@ -15264,7 +17128,9 @@ function emitModule(plan, options, layout) {
       "}",
       "function __combineHash(left, right) { return ((left << 5) - left + right) | 0; }"
     );
+    if (needsHashCache) helpers.unshift("const __hashCache = new WeakMap();");
   }
+  if (needsJsonPatchHelpers) helpers.push(...JSON_PATCH_HELPERS.split("\n"), ...PATCH_EQUAL_HELPER.split("\n"));
   if (needsMockHelpers) helpers.push(...MOCK_HELPERS.split("\n"));
   if (needsRuntimeGetIndex) {
     helpers.push(
@@ -15315,7 +17181,13 @@ export { ${exportNames.join(", ")} };
 ` : `${js.join("\n")}
 export {};
 `;
-  return { name: plan.name, source, exports: exportNames, types: ts ? typeExports : [], skipped };
+  return {
+    name: plan.name,
+    source,
+    exports: exportNames,
+    types: ts ? typeExports : [],
+    skipped
+  };
 }
 function declarationImportType(outDir, sourceFile, name, artifact) {
   const reference = readBackType(outDir, sourceFile, artifact);
@@ -15326,11 +17198,24 @@ function memberImportType(outDir, sourceFile, group, prop, artifact) {
   return reference?.(`${group}[${JSON.stringify(prop)}]`);
 }
 function readBackType(outDir, sourceFile, artifact) {
-  if (artifact.kind !== "query-plan" && artifact.kind !== "query" && artifact.kind !== "mapper" && artifact.kind !== "watch") {
+  if (artifact.kind !== "query-plan" && artifact.kind !== "join-plan" && artifact.kind !== "query" && artifact.kind !== "mapper" && artifact.kind !== "watch") {
     return void 0;
   }
   const specifier = JSON.stringify(typeImportSpecifier(outDir, sourceFile));
-  return (path) => artifact.kind === "query-plan" ? `__JitCall<typeof import(${specifier}).${path}>` : `typeof import(${specifier}).${path}`;
+  return (path) => artifact.kind === "query-plan" || artifact.kind === "join-plan" ? `__JitCall<typeof import(${specifier}).${path}>` : `typeof import(${specifier}).${path}`;
+}
+function joinPlanType(artifact, typeNames) {
+  const left = namedType(artifact.plan.leftSchema, typeNames);
+  const right = namedType(artifact.plan.rightSchema, typeNames);
+  const leftRow = queryArtifactRowType(artifact.plan.leftSchema, typeNames);
+  const rightRow = queryArtifactRowType(artifact.plan.rightSchema, typeNames);
+  const result = artifact.plan.kind === "semi" || artifact.plan.kind === "anti" ? `${leftRow}[]` : artifact.plan.kind === "left" ? `{ readonly left: ${leftRow}; readonly right: ${rightRow} | undefined }[]` : `{ readonly left: ${leftRow}; readonly right: ${rightRow} }[]`;
+  return `(left: ${left}, right: ${right}) => ${result}`;
+}
+function queryArtifactRowType(schema, typeNames) {
+  const base = resolveWrappers(schema).base;
+  const row = base.type === TypeName.array ? base.def.element : base;
+  return namedType(row, typeNames);
 }
 function queryPlanType(artifact, typeNames) {
   const input = namedType(artifact.schema, typeNames);
@@ -15395,6 +17280,33 @@ function indexPlanType(artifact, typeNames) {
     index2 = `Map<unknown, ${index2}>`;
   }
   return `((value: readonly ${value}[]) => ${index2}) & { readonly cached: (value: readonly ${value}[]) => ${index2} }`;
+}
+function lookupPlanType(artifact, typeNames) {
+  const schema = resolveWrappers(artifact.schema).base;
+  const row = schema.type === TypeName.array ? schema.def.element : schema.type === TypeName.runtimeType ? schema.def.innerType : schema;
+  const value = namedType(row, typeNames);
+  const key = `${value}[${JSON.stringify(artifact.lookup.key)}]`;
+  return `(value: readonly ${value}[], key: ${key}) => ${value} | undefined`;
+}
+function projectPlanType(artifact, typeNames) {
+  return `(value: ${namedType(artifact.schema, typeNames)}) => ${emitTypeScriptType(artifact.tree.schema, typeNames)}`;
+}
+function changedPlanType(artifact, typeNames) {
+  const value = namedType(artifact.schema, typeNames);
+  const mask3 = artifact.descriptor.representation === "bigint" ? "bigint" : "number";
+  const paths = artifact.descriptor.fields.map((field) => JSON.stringify(field.path)).join(" | ");
+  return `((left: ${value}, right: ${value}) => ${mask3}) & { has(mask: ${mask3}, path: ${paths}): boolean; readonly fields: readonly (${paths})[] }`;
+}
+function patchPlanType(artifact, typeNames) {
+  const value = namedType(artifact.schema, typeNames);
+  return artifact.mode === "merge" ? `(value: ${value}, patch: unknown) => ${value}` : `(value: ${value}, operations: readonly { readonly op: string; readonly path: string; readonly value?: unknown; readonly from?: string }[]) => ${value}`;
+}
+function accessPlanType(artifact, typeNames) {
+  const subject = namedType(artifact.schema, typeNames);
+  const actor = artifact.descriptor.actor === void 0 ? "unknown" : namedType(artifact.descriptor.actor, typeNames);
+  const actions = artifact.descriptor.actions.map((action) => JSON.stringify(action)).join(" | ") || "never";
+  const check = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => boolean`;
+  return `(actor: ${actor}) => { can: ${check}; cannot: ${check} }`;
 }
 function moduleNameFromSource(sourceFile) {
   const rawName = basename(sourceFile).replace(/\.jit\.(ts|mts|cts|js|mjs|cjs)$/, "").replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "");
@@ -15754,24 +17666,24 @@ function hasUnsupportedClosureReferences(source) {
   if (/\b(?:this|super)\b/.test(source)) return true;
   const code = maskCallbackLiterals(source);
   const locals = /* @__PURE__ */ new Set(["arguments"]);
-  for (const match of code.matchAll(/\bfunction(?:\s*\*)?\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^()]*)\)/g)) {
-    if ((match[2] ?? "").includes("=")) return true;
-    if (match[1]) locals.add(match[1]);
-    collectBindingIdentifiers(match[2] ?? "", locals);
+  for (const match2 of code.matchAll(/\bfunction(?:\s*\*)?\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^()]*)\)/g)) {
+    if ((match2[2] ?? "").includes("=")) return true;
+    if (match2[1]) locals.add(match2[1]);
+    collectBindingIdentifiers(match2[2] ?? "", locals);
   }
-  for (const match of code.matchAll(/(?:\(([^()]*)\)|([A-Za-z_$][A-Za-z0-9_$]*))\s*=>/g)) {
-    if ((match[1] ?? "").includes("=")) return true;
-    collectBindingIdentifiers(match[1] ?? match[2] ?? "", locals);
+  for (const match2 of code.matchAll(/(?:\(([^()]*)\)|([A-Za-z_$][A-Za-z0-9_$]*))\s*=>/g)) {
+    if ((match2[1] ?? "").includes("=")) return true;
+    collectBindingIdentifiers(match2[1] ?? match2[2] ?? "", locals);
   }
-  for (const match of code.matchAll(/\b(?:const|let|var|class|function)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
-    locals.add(match[1]);
+  for (const match2 of code.matchAll(/\b(?:const|let|var|class|function)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+    locals.add(match2[1]);
   }
-  for (const match of code.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
-    locals.add(match[1]);
+  for (const match2 of code.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+    locals.add(match2[1]);
   }
-  for (const match of code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
-    const identifier2 = match[0];
-    const start = match.index;
+  for (const match2 of code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+    const identifier2 = match2[0];
+    const start = match2.index;
     const previous = previousNonWhitespace(code, start - 1);
     const next = nextNonWhitespace(code, start + identifier2.length);
     if (previous === "." || next === ":") continue;
@@ -15781,7 +17693,7 @@ function hasUnsupportedClosureReferences(source) {
   return false;
 }
 function collectBindingIdentifiers(source, target) {
-  for (const match of source.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) target.add(match[0]);
+  for (const match2 of source.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) target.add(match2[0]);
 }
 function previousNonWhitespace(source, index2) {
   while (index2 >= 0 && /\s/.test(source[index2] ?? "")) index2--;
@@ -15899,11 +17811,11 @@ function isArrowFunctionSource(source) {
   return /^(?:async\s+)?(?:[A-Za-z_$][A-Za-z0-9_$]*|\([^)]*\))\s*=>/.test(source);
 }
 function normalizeMethodSource(source) {
-  const match = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(source);
-  if (!match) return "";
-  const asyncPrefix = match[1] ?? "";
-  const generator = match[2] ? "*" : "";
-  return `${asyncPrefix}function${generator} ${match[3]}${match[4]}`;
+  const match2 = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(source);
+  if (!match2) return "";
+  const asyncPrefix = match2[1] ?? "";
+  const generator = match2[2] ? "*" : "";
+  return `${asyncPrefix}function${generator} ${match2[3]}${match2[4]}`;
 }
 function typeImportSpecifier(outDir, sourceFile) {
   const relativePath = relative(
@@ -15990,12 +17902,15 @@ var factories_exports = {};
 __export(factories_exports, {
   KeyedWatchedList: () => KeyedWatchedList,
   WatchedList: () => WatchedList,
+  access: () => access,
   any: () => any,
   array: () => array,
   bigint: () => bigint2,
   binary: () => binary2,
   boolean: () => boolean2,
   brand: () => brand2,
+  cacheKey: () => cacheKey,
+  canonical: () => canonical,
   class: () => classType,
   clone: () => clone,
   codec: () => codec,
@@ -16028,8 +17943,10 @@ __export(factories_exports, {
   jsonValue: () => jsonValue,
   lazy: () => lazy,
   literal: () => literal3,
+  lookup: () => lookup,
   map: () => map2,
   mapSchema: () => map,
+  match: () => match,
   mock: () => mock,
   nan: () => nan,
   never: () => never,
@@ -16043,11 +17960,14 @@ __export(factories_exports, {
   optional: () => optional2,
   param: () => param,
   parse: () => parse,
+  patch: () => patch,
   pipe: () => pipe2,
   process: () => process,
+  project: () => project,
   promise: () => promise2,
   query: () => query,
   readonly: () => readonly2,
+  reconcile: () => reconcile,
   record: () => record,
   refine: () => refine2,
   regex: () => regex,
@@ -16084,6 +18004,94 @@ var jsonSchema = Object.freeze({
     return createBuilder(compileSchemaFromJson(document, options));
   }
 });
+
+// ../../packages/jit/src/factories/access.ts
+function access(schema) {
+  return createPlan(unwrapSchema(schema), void 0, []);
+}
+function createPlan(subject, actor, rules) {
+  const descriptor = resolveAccessDescriptor(subject, actor, rules);
+  const plan = compileAccess(descriptor);
+  const add = (effect) => (action, rule) => createPlan(subject, actor, [...rules, toRule(effect, action, rule)]);
+  Object.defineProperties(plan, {
+    actor: { value: (next) => createPlan(subject, unwrapSchema(next), rules) },
+    can: { value: add("can") },
+    cannot: { value: add("cannot") },
+    actions: { value: descriptor.actions },
+    fields: { value: (action) => unconditionalFields(descriptor, action) }
+  });
+  return plan;
+}
+function toRule(effect, action, rule) {
+  if (rule === void 0) return { effect, action };
+  if (typeof rule === "function") {
+    return {
+      effect,
+      action,
+      condition: rule(CONDITION, ACTOR)
+    };
+  }
+  const options = rule;
+  return {
+    effect,
+    action,
+    fields: options.fields,
+    condition: options.when === void 0 ? void 0 : options.when(CONDITION, ACTOR)
+  };
+}
+var CONDITION = Object.freeze({
+  ...Object.fromEntries(
+    ["eq", "neq", "gt", "gte", "lt", "lte"].map((op) => [
+      op,
+      (key, value) => ({
+        kind: "compare",
+        op,
+        left: { kind: "field", key },
+        right: isActorRef(value) ? value : { kind: "literal", value }
+      })
+    ])
+  ),
+  and: (...nodes) => fold("and", nodes),
+  or: (...nodes) => fold("or", nodes),
+  not: (inner) => ({ kind: "not", inner })
+});
+var ACTOR = Object.freeze({
+  field: (key) => ({ kind: "param", name: key })
+});
+function isActorRef(value) {
+  return typeof value === "object" && value !== null && value.kind === "param";
+}
+function fold(op, nodes) {
+  return nodes.reduce((left, right) => ({ kind: "logical", op, left, right }));
+}
+
+// ../../packages/jit/src/factories/cache-key.ts
+var HASH_HELPERS = Object.freeze({
+  __combineHash: combineHash,
+  __hashNumber: hashNumber,
+  __hashString: hashString,
+  __hashBoolean: hashBoolean,
+  __hashBigInt: hashBigInt,
+  __hashUnknown: hashUnknown
+});
+var cacheKey = Object.assign(
+  (schema) => builder(schema, "string"),
+  {
+    string: (schema) => builder(schema, "string"),
+    hash: (schema) => builder(schema, "hash")
+  }
+);
+function builder(schema, form) {
+  const unwrapped = unwrapSchema(schema);
+  return Object.freeze({
+    select: (...paths) => compileCacheKey(unwrapped, resolveCacheKeyDescriptor(unwrapped, paths, form), HASH_HELPERS)
+  });
+}
+
+// ../../packages/jit/src/factories/canonical.ts
+function canonical(schema) {
+  return compileCanonical(unwrapSchema(schema));
+}
 
 // ../../packages/jit/src/compiler/codec.ts
 function compileCodec(schema, options) {
@@ -16549,6 +18557,103 @@ function emitMappedJsonArray(mapper, stringify, body, index2) {
   body.push(`value = ${json3};`);
 }
 
+// ../../packages/jit/src/compiler/match.ts
+function resolveMatchDescriptor(schema, handled, hasFallback, exhaustive) {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.discriminatedUnion) {
+    throw new JITError("UNSUPPORTED_SCHEMA", "JIT.match() requires a discriminated union");
+  }
+  const union3 = base;
+  const discriminator = union3.def.discriminator;
+  const tags = union3.def.options.map((option) => tagOf(option, discriminator));
+  for (const tag of handled) {
+    if (!tags.includes(tag)) {
+      throw new JITError(
+        "UNSUPPORTED_SCHEMA",
+        `JIT.match() has a case for ${JSON.stringify(tag)}, which the union does not declare`
+      );
+    }
+  }
+  if (exhaustive && !hasFallback) {
+    const missing = tags.filter((tag) => !handled.includes(tag));
+    if (missing.length > 0) {
+      throw new JITError(
+        "UNSUPPORTED_SCHEMA",
+        `JIT.match().exhaustive() is missing a case for ${missing.map((tag) => JSON.stringify(tag)).join(", ")}`
+      );
+    }
+  }
+  return Object.freeze({
+    schema: base,
+    discriminator,
+    tags: Object.freeze(tags),
+    handled: Object.freeze([...handled]),
+    hasFallback,
+    exhaustive
+  });
+}
+function tagOf(option, discriminator) {
+  const base = resolveWrappers(option).base;
+  const field = base.def?.props?.[discriminator];
+  const literal4 = field === void 0 ? void 0 : resolveWrappers(field).base;
+  if (literal4?.type !== TypeName.literal) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      `JIT.match() requires every option to declare ${JSON.stringify(discriminator)} as a literal`
+    );
+  }
+  return literal4.def.value;
+}
+function emitMatchSource(descriptor) {
+  const writer = new CodeWriter();
+  const read = emitPropertyAccess("value", descriptor.discriminator);
+  writer.line("function match(value) {");
+  writer.indent(() => {
+    writer.line(`switch (${read}) {`);
+    writer.indent(() => {
+      descriptor.handled.forEach((tag, index2) => {
+        writer.line(`case ${emitLiteral(tag)}:`);
+        writer.indent(() => writer.line(`return __case${index2}(value);`));
+      });
+      if (descriptor.hasFallback) {
+        writer.line("default:");
+        writer.indent(() => writer.line("return __fallback(value);"));
+        return;
+      }
+      writer.line("default:");
+      writer.indent(
+        () => writer.line(
+          `throw new Error("unmatched " + ${JSON.stringify(descriptor.discriminator)} + ": " + String(${read}));`
+        )
+      );
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function matchCacheKey(descriptor) {
+  return `match:${descriptor.discriminator}:${JSON.stringify(descriptor.handled)}:${descriptor.hasFallback}`;
+}
+function compileMatch(descriptor, handlers, fallback, options) {
+  const names = descriptor.handled.map((_, index2) => `__case${index2}`);
+  const template = getCompileCached(
+    descriptor.schema,
+    matchCacheKey(descriptor),
+    () => {
+      const source = emitMatchSource(descriptor);
+      return {
+        source,
+        create: globalThis.Function(...names, ...descriptor.hasFallback ? ["__fallback"] : [], `return ${source};`)
+      };
+    },
+    options
+  );
+  const compiled = template.create(...handlers, ...fallback === void 0 ? [] : [fallback]);
+  registerArtifact(compiled, { kind: "match-plan", schema: descriptor.schema, descriptor });
+  return compiled;
+}
+
 // ../../packages/jit/src/runtime/stream/boundary-scanner.ts
 var ArrayBoundaryScanner = class {
   constructor(hooks) {
@@ -16977,6 +19082,10 @@ function emitWatchProgram(schema, options) {
   const key = options.key;
   validateObjectKeys3(target.objectSchema, [key], "watch");
   const bindings = [];
+  const changedBy = options.fields === void 0 || options.fields.length === 0 ? void 0 : addOptionalBinding(
+    bindings,
+    compileEqual(buildProjectionTree(target.objectSchema, options.fields, "watch").schema)
+  );
   const onAdd = addOptionalBinding(bindings, options.onAdd);
   const onRemove = addOptionalBinding(bindings, options.onRemove);
   const onUpdate = addOptionalBinding(bindings, options.onUpdate);
@@ -17007,7 +19116,9 @@ function emitWatchProgram(schema, options) {
         writer.line("newItems[newItems.length] = item;");
         if (onAdd) writer.line(`${onAdd}(item);`);
       });
-      writer.line("} else if (previousItem !== item) {");
+      writer.line(
+        changedBy === void 0 ? "} else if (previousItem !== item) {" : `} else if (previousItem !== item && !${changedBy}(previousItem, item)) {`
+      );
       writer.indent(() => {
         writer.line("updatedItems[updatedItems.length] = { previous: previousItem, current: item };");
         if (onUpdate) writer.line(`${onUpdate}(previousItem, item);`);
@@ -17282,8 +19393,8 @@ var classType = Object.assign(classFactory, {
   with: (() => {
     const base = capability("with", (prototype, schema) => {
       const update2 = compileUpdate(schema);
-      definePrototype(prototype, "with", function withPatch(patch) {
-        const next = update2(this, patch);
+      definePrototype(prototype, "with", function withPatch(patch3) {
+        const next = update2(this, patch3);
         return new this.constructor(next);
       });
     });
@@ -17533,18 +19644,6 @@ function definePrototype(prototype, key, value) {
   Object.defineProperty(prototype, key, { configurable: false, enumerable: false, value, writable: false });
 }
 
-// ../../packages/jit/src/factories/ddd.ts
-var ddd = Object.freeze({
-  /** Structural equality, hashing and immutability. `.abstract` for a base. */
-  valueObject,
-  /** Identity semantics; abstract, and meant to be subclassed. */
-  entity,
-  /** Abstract entity with controlled mutation and an ordered event buffer. */
-  aggregateRoot,
-  /** Immutable, versioned event; `create()` takes the payload. */
-  domainEvent
-});
-
 // ../../packages/jit/src/factories/collection/collection.ts
 function array(element) {
   return /* @__PURE__ */ createBuilder(
@@ -17639,8 +19738,8 @@ function query(schema) {
   expectCollectionObjectSchema(unwrapped, "query");
   return createQueryBuilder(unwrapped, [], [], []);
 }
-function getQueryProgram(builder) {
-  return QUERY_PROGRAMS.get(builder);
+function getQueryProgram(builder2) {
+  return QUERY_PROGRAMS.get(builder2);
 }
 function createBinaryQueryBuilder(target, nodes, bindings, paramNames) {
   let compiled;
@@ -17652,7 +19751,7 @@ function createBinaryQueryBuilder(target, nodes, bindings, paramNames) {
     });
     return compiled(value, params);
   };
-  const builder = Object.assign(callable, {
+  const builder2 = Object.assign(callable, {
     params(shape) {
       return createBinaryQueryBuilder(
         target,
@@ -17690,35 +19789,43 @@ function createBinaryQueryBuilder(target, nodes, bindings, paramNames) {
       return createBinaryQueryBuilder(target, [...nodes, { kind: "aggregate", op: "max", key }], bindings, paramNames);
     }
   });
-  registerArtifact(builder, {
+  registerArtifact(builder2, {
     kind: "query",
     get source() {
-      return emitBinaryQuerySource(target.layout, { nodes, bindings, params: paramNames });
+      return emitBinaryQuerySource(target.layout, {
+        nodes,
+        bindings,
+        params: paramNames
+      });
     },
     get bindingNames() {
       return bindings.map((_, index2) => `__q${index2}`);
     },
     bindingValues: bindings
   });
-  return builder;
+  return builder2;
 }
 function createQueryBuilder(schema, nodes, bindings, paramNames) {
   let compiled;
   const lowerEager = () => {
-    if (!hasIncrementalNodes(nodes)) {
+    if (!hasIncrementalNodes2(nodes)) {
       return compileQuery(schema, {
         nodes,
         bindings,
         params: paramNames
       });
     }
-    return compileQueryArray(schema, { nodes, bindings, params: paramNames });
+    return compileQueryArray(schema, {
+      nodes,
+      bindings,
+      params: paramNames
+    });
   };
   const callable = function query2(value, params) {
     compiled ??= lowerEager();
     return compiled(value, params);
   };
-  const builder = Object.assign(callable, {
+  const builder2 = Object.assign(callable, {
     params(shape) {
       return createQueryBuilder(
         schema,
@@ -17745,6 +19852,9 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
     },
     unique(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "unique", key }], bindings, paramNames);
+    },
+    distinct(...fields) {
+      return createQueryBuilder(schema, [...nodes, { kind: "distinct", fields }], bindings, paramNames);
     },
     keyed(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "keyed", key }], bindings, paramNames);
@@ -17819,8 +19929,8 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
     delete() {
       return createQueryBuilder(schema, [...nodes, { kind: "delete" }], bindings, paramNames);
     },
-    update(patch) {
-      const state = createPatchBindings(bindings.length, patch);
+    update(patch3) {
+      const state = createPatchBindings(bindings.length, patch3);
       return createQueryBuilder(
         schema,
         [...nodes, { kind: "update", patch: state.patch }],
@@ -17869,9 +19979,21 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
       return createQueryBuilder(schema, [...nodes, { kind: "terminal", op: "every" }], bindings, paramNames);
     },
     to: Object.freeze({
-      iterator: () => compileQueryIterator(schema, { nodes, bindings, params: paramNames }),
-      asyncIterator: () => compileQueryAsyncIterator(schema, { nodes, bindings, params: paramNames }),
-      visitor: () => compileQueryVisitor(schema, { nodes, bindings, params: paramNames })
+      iterator: () => compileQueryIterator(schema, {
+        nodes,
+        bindings,
+        params: paramNames
+      }),
+      asyncIterator: () => compileQueryAsyncIterator(schema, {
+        nodes,
+        bindings,
+        params: paramNames
+      }),
+      visitor: () => compileQueryVisitor(schema, {
+        nodes,
+        bindings,
+        params: paramNames
+      })
     }),
     lazy() {
       return createLazyQueryBuilder(schema, nodes, bindings, paramNames);
@@ -17881,14 +20003,27 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
       if (outputMode !== "eager-array") return plan;
       return Object.freeze({
         ...plan,
-        physical: explainPhysicalQuery(schema, { nodes, bindings, params: paramNames })
+        physical: explainPhysicalQuery(schema, {
+          nodes,
+          bindings,
+          params: paramNames
+        })
       });
     }
   });
-  const program = { nodes, bindings, params: paramNames };
-  QUERY_PROGRAMS.set(builder, program);
-  registerArtifact(builder, { kind: "query-plan", schema, program, mode: "array" });
-  return builder;
+  const program = {
+    nodes,
+    bindings,
+    params: paramNames
+  };
+  QUERY_PROGRAMS.set(builder2, program);
+  registerArtifact(builder2, {
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "array"
+  });
+  return builder2;
 }
 function createLazyQueryBuilder(schema, nodes, bindings, paramNames) {
   const program = { nodes, bindings, params: paramNames };
@@ -17897,17 +20032,22 @@ function createLazyQueryBuilder(schema, nodes, bindings, paramNames) {
     compiled ??= compileQueryIterator(schema, program);
     return compiled(input, params);
   };
-  const builder = Object.assign(callable, {
+  const builder2 = Object.assign(callable, {
     to: Object.freeze({
       asyncIterator: () => compileQueryAsyncIterator(schema, program),
       visitor: () => compileQueryVisitor(schema, program)
     }),
     explain: (outputMode = "generator") => explainQueryExecution(program, outputMode)
   });
-  registerArtifact(builder, { kind: "query-plan", schema, program, mode: "iterator" });
-  return builder;
+  registerArtifact(builder2, {
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "iterator"
+  });
+  return builder2;
 }
-function hasIncrementalNodes(nodes) {
+function hasIncrementalNodes2(nodes) {
   return nodes.some(
     (node) => [
       "flatMap",
@@ -17932,12 +20072,12 @@ function assertNonNegativeInteger(value, label) {
     throw new JITError("INVALID_QUERY", `${label} expects a non-negative integer`);
   }
 }
-function createPatchBindings(startIndex, patch) {
+function createPatchBindings(startIndex, patch3) {
   const bindings = [];
   const boundPatch = {};
-  for (const key of Object.keys(patch)) {
+  for (const key of Object.keys(patch3)) {
     const index2 = startIndex + bindings.length;
-    bindings[bindings.length] = patch[key];
+    bindings[bindings.length] = patch3[key];
     boundPatch[key] = { kind: "binding", name: `__q${index2}` };
   }
   return { patch: boundPatch, bindings };
@@ -17967,14 +20107,14 @@ function createConditionBuilder(startIndex) {
       gte: (key, value) => compare2("gte", key, value),
       lt: (key, value) => compare2("lt", key, value),
       lte: (key, value) => compare2("lte", key, value),
-      and: (left, right, ...rest) => fold("and", left, right, rest),
-      or: (left, right, ...rest) => fold("or", left, right, rest),
+      and: (left, right, ...rest) => fold2("and", left, right, rest),
+      or: (left, right, ...rest) => fold2("or", left, right, rest),
       not: (inner) => ({ kind: "not", inner })
     }
   };
 }
-function fold(op, left, right, rest) {
-  const tail = rest.length === 0 ? right : fold(op, right, rest[0], rest.slice(1));
+function fold2(op, left, right, rest) {
+  const tail = rest.length === 0 ? right : fold2(op, right, rest[0], rest.slice(1));
   return { kind: "logical", op, left, right: tail };
 }
 function mergeParamNames(current, shape) {
@@ -18013,9 +20153,9 @@ function cqrsQuery(schema) {
     query(collection)
   );
 }
-function wrap(schema, collection, builder) {
-  const program = getQueryProgram(builder);
-  const record2 = builder;
+function wrap(schema, collection, builder2) {
+  const program = getQueryProgram(builder2);
+  const record2 = builder2;
   const filterMethod = record2.filter;
   const takeMethod = record2.take;
   const chainMethods = [
@@ -18023,6 +20163,7 @@ function wrap(schema, collection, builder) {
     "filter",
     "select",
     "unique",
+    "distinct",
     "keyed",
     "groupBy",
     "orderBy",
@@ -18051,11 +20192,14 @@ function wrap(schema, collection, builder) {
   ];
   for (const key of chainMethods) {
     const method = record2[key];
-    Object.defineProperty(builder, key, {
+    Object.defineProperty(builder2, key, {
       value: (...args) => wrap(schema, collection, method(...args))
     });
   }
-  Object.defineProperties(builder, {
+  Object.defineProperties(builder2, {
+    join: {
+      value: (right, kind = "inner") => createJoinOnBuilder(schema, collection, program, right, kind)
+    },
     where: {
       value: (...args) => wrap(schema, collection, filterMethod(...args))
     },
@@ -18070,14 +20214,58 @@ function wrap(schema, collection, builder) {
     }
   });
   if (program)
-    registerArtifact(builder, {
+    registerArtifact(builder2, {
       kind: "query-plan",
       schema: collection,
       program,
       mode: "array",
-      standard: builder["~query"]
+      standard: builder2["~query"]
     });
-  return builder;
+  return builder2;
+}
+function createJoinOnBuilder(leftSchema, leftCollection, program, rightInput, kind) {
+  if (!program) throw new JITError("INVALID_QUERY", "join requires a reconstructive query program");
+  if (kind !== "inner" && kind !== "left" && kind !== "semi" && kind !== "anti") {
+    throw new JITError("INVALID_QUERY", `unsupported join kind ${JSON.stringify(kind)}`);
+  }
+  const target = unwrapSchema(rightInput);
+  const rightSchema = target.type === "array" ? target.def.element : target;
+  const rightCollection = target.type === "array" ? target : array(rightSchema).schema;
+  return Object.freeze({
+    on(leftKey, rightKey) {
+      const plan = createJoinPlan(leftCollection, rightCollection, program, kind, leftKey, rightKey);
+      let compiled;
+      const callable = function join2(left, right, params) {
+        compiled ??= compileJoin(plan);
+        return compiled(left, right, params);
+      };
+      const standard = Object.freeze({
+        version: 1,
+        definition: Object.freeze({
+          ...toStandardQuery(leftSchema, program),
+          pipeline: Object.freeze([
+            ...toStandardQuery(leftSchema, program).pipeline,
+            Object.freeze({
+              kind: "join",
+              join: kind,
+              source: Object.freeze({
+                kind: "object",
+                fields: Object.freeze(objectFields(rightSchema))
+              }),
+              leftKey,
+              rightKey
+            })
+          ])
+        })
+      });
+      Object.defineProperties(callable, {
+        explain: { value: () => explainJoinPlan(plan) },
+        "~query": { value: standard }
+      });
+      registerArtifact(callable, { kind: "join-plan", plan, standard });
+      return callable;
+    }
+  });
 }
 function toStandardQuery(schema, program) {
   const nodes = program?.nodes ?? [];
@@ -18088,14 +20276,27 @@ function toStandardQuery(schema, program) {
   for (const node of nodes) {
     if (node.kind === "filter") {
       const condition = toStandardCondition(node.condition, program?.bindings ?? []);
-      filter = filter ? Object.freeze({ kind: "logical", operator: "and", left: filter, right: condition }) : condition;
+      filter = filter ? Object.freeze({
+        kind: "logical",
+        operator: "and",
+        left: filter,
+        right: condition
+      }) : condition;
     } else if (node.kind === "select:fields") projection = Object.freeze([...node.fields]);
     else if (node.kind === "orderBy") {
-      order = Object.freeze([Object.freeze({ path: Object.freeze([node.key]), direction: node.direction })]);
+      order = Object.freeze([
+        Object.freeze({
+          path: Object.freeze([node.key]),
+          direction: node.direction
+        })
+      ]);
     } else if (node.kind === "take") limit = limit === void 0 ? node.count : Math.min(limit, node.count);
   }
   return Object.freeze({
-    source: Object.freeze({ kind: "object", fields: Object.freeze(objectFields(schema)) }),
+    source: Object.freeze({
+      kind: "object",
+      fields: Object.freeze(objectFields(schema))
+    }),
     pipeline: Object.freeze(nodes.map((node) => toStandardStep(node, program?.bindings ?? []))),
     ...filter ? { filter } : {},
     ...projection ? { projection } : {},
@@ -18107,11 +20308,26 @@ function toStandardQuery(schema, program) {
 function toStandardStep(node, bindings) {
   switch (node.kind) {
     case "filter":
-      return Object.freeze({ kind: "where", condition: toStandardCondition(node.condition, bindings) });
+      return Object.freeze({
+        kind: "where",
+        condition: toStandardCondition(node.condition, bindings)
+      });
     case "select:fields":
-      return Object.freeze({ kind: "select", fields: Object.freeze([...node.fields]) });
+      return Object.freeze({
+        kind: "select",
+        fields: Object.freeze([...node.fields])
+      });
+    case "distinct":
+      return Object.freeze({
+        kind: "distinct",
+        fields: Object.freeze([...node.fields])
+      });
     case "orderBy":
-      return Object.freeze({ kind: "orderBy", key: node.key, direction: node.direction });
+      return Object.freeze({
+        kind: "orderBy",
+        key: node.key,
+        direction: node.direction
+      });
     case "unique":
     case "keyed":
     case "groupBy":
@@ -18123,7 +20339,10 @@ function toStandardStep(node, bindings) {
       return Object.freeze({ kind: node.kind, count: node.count });
     case "takeWhile":
     case "dropWhile":
-      return Object.freeze({ kind: node.kind, condition: toStandardCondition(node.condition, bindings) });
+      return Object.freeze({
+        kind: node.kind,
+        condition: toStandardCondition(node.condition, bindings)
+      });
     case "chunk":
     case "window":
       return Object.freeze({ kind: node.kind, size: node.size });
@@ -18134,7 +20353,10 @@ function toStandardStep(node, bindings) {
       return Object.freeze({
         kind: "scan",
         initial: toStandardValue({ kind: "binding", name: node.initialBinding }, bindings),
-        update: Object.freeze({ kind: "binding", name: node.updateBinding })
+        update: Object.freeze({
+          kind: "binding",
+          name: node.updateBinding
+        })
       });
     case "update":
       return Object.freeze({
@@ -18198,15 +20420,25 @@ function toStandardCondition(condition, bindings) {
       right: toStandardCondition(condition.right, bindings)
     });
   }
-  return Object.freeze({ kind: "not", inner: toStandardCondition(condition.inner, bindings) });
+  return Object.freeze({
+    kind: "not",
+    inner: toStandardCondition(condition.inner, bindings)
+  });
 }
 function toStandardValue(value, bindings) {
-  if (value.kind === "field") return Object.freeze({ kind: "field", path: Object.freeze([value.key]) });
+  if (value.kind === "field")
+    return Object.freeze({
+      kind: "field",
+      path: Object.freeze([value.key])
+    });
   if (value.kind === "literal") return Object.freeze({ kind: "literal", value: value.value });
   if (value.kind === "binding") {
     const index2 = Number.parseInt(value.name.slice(3), 10);
     if (Number.isSafeInteger(index2) && index2 >= 0 && index2 < bindings.length && isStandardData(bindings[index2])) {
-      return Object.freeze({ kind: "literal", value: bindings[index2] });
+      return Object.freeze({
+        kind: "literal",
+        value: bindings[index2]
+      });
     }
     return Object.freeze({ kind: "binding", name: value.name });
   }
@@ -18310,7 +20542,10 @@ function cqrsInput(schema, options) {
   );
   const frozenSort = Object.freeze([...options.sort ?? []]);
   const frozenPagination = options.pagination ? Object.freeze(
-    options.pagination.type === "cursor" ? { ...options.pagination, by: Object.freeze([...options.pagination.by]) } : { ...options.pagination }
+    options.pagination.type === "cursor" ? {
+      ...options.pagination,
+      by: Object.freeze([...options.pagination.by])
+    } : { ...options.pagination }
   ) : void 0;
   const frozenLimits = options.limits ? Object.freeze({ ...options.limits }) : void 0;
   const frozenOptions = Object.freeze({
@@ -18321,7 +20556,10 @@ function cqrsInput(schema, options) {
     ...frozenLimits === void 0 ? {} : { limits: frozenLimits }
   });
   const definition = Object.freeze({
-    source: Object.freeze({ kind: "object", fields: Object.freeze(objectFields(unwrapped)) }),
+    source: Object.freeze({
+      kind: "object",
+      fields: Object.freeze(objectFields(unwrapped))
+    }),
     filters: frozenFilter,
     projection: frozenOptions.select === true,
     sorting: frozenSort,
@@ -18374,7 +20612,11 @@ function cqrsParse(definition) {
   const parser = globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor);
   const artifact = getArtifact(definition);
   if (artifact?.kind === "cqrs-input") {
-    registerArtifact(parser, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+    registerArtifact(parser, {
+      kind: "cqrs-parser",
+      definition: artifact.definition,
+      source: artifact.source
+    });
   }
   return parser;
 }
@@ -18476,7 +20718,10 @@ function normalizeCqrsTail(source, definition, filter) {
     }
     return {
       filter,
-      sort: pagination.by.map((field) => ({ path: [field], direction: "asc" })),
+      sort: pagination.by.map((field) => ({
+        path: [field],
+        direction: "asc"
+      })),
       ...select === void 0 ? {} : { select },
       pagination: {
         kind: "cursor",
@@ -18551,7 +20796,7 @@ function emitCqrsInputParser(fields, maxFilters, sortFields = [], pagination, ma
     ...fields.map(([, configured]) => configured === true ? 1 : configured.length * 2)
   );
   const fieldBodies = fields.map(([field, configured]) => {
-    const access = `[${JSON.stringify(field)}]`;
+    const access2 = `[${JSON.stringify(field)}]`;
     const operators = configured === true ? [] : configured;
     const operatorBodies = operators.flatMap((operator) => {
       const kind = JSON.stringify(operator);
@@ -18561,7 +20806,7 @@ function emitCqrsInputParser(fields, maxFilters, sortFields = [], pagination, ma
         `if (raw[${JSON.stringify(operator)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(operator)}] }; }`
       ];
     }).join(" ");
-    return `if (filter${access} !== undefined) { const raw = filter${access}; if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) { ${operatorBodies ? `let matched = 0; ${operatorBodies} if (Object.keys(raw).length !== matched) return __reference(input);` : "return __reference(input);"} } else out[j++] = { kind: "eq", path: ${JSON.stringify(field.split("."))}, value: raw }; }`;
+    return `if (filter${access2} !== undefined) { const raw = filter${access2}; if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) { ${operatorBodies ? `let matched = 0; ${operatorBodies} if (Object.keys(raw).length !== matched) return __reference(input);` : "return __reference(input);"} } else out[j++] = { kind: "eq", path: ${JSON.stringify(field.split("."))}, value: raw }; }`;
   });
   const allowedSort = sortFields.map((field) => JSON.stringify(field));
   const allowedSelect = selectFields.map((field) => JSON.stringify(field));
@@ -18575,7 +20820,11 @@ function emitCqrsAotParserSource(...args) {
   return `function decodeCursor(value, size) { if (typeof value !== "string") throw new Error("Malformed cursor"); try { const bytes = atob(value); let escaped = ""; for (let i = 0; i < bytes.length; i++) escaped += "%" + bytes.charCodeAt(i).toString(16).padStart(2, "0"); const decoded = JSON.parse(decodeURIComponent(escaped)); if (!Array.isArray(decoded) || decoded.length !== size) throw new Error("Malformed cursor"); return decoded; } catch { throw new Error("Malformed cursor"); } } ${parser}`;
 }
 function aggregateSpec(op, key) {
-  return Object.freeze({ op, ...key === void 0 ? {} : { key }, _result: null });
+  return Object.freeze({
+    op,
+    ...key === void 0 ? {} : { key },
+    _result: null
+  });
 }
 var cqrs = Object.freeze({
   input: cqrsInput,
@@ -18589,6 +20838,18 @@ var cqrs = Object.freeze({
   avg: (key) => aggregateSpec("avg", key),
   min: (key) => aggregateSpec("min", key),
   max: (key) => aggregateSpec("max", key)
+});
+
+// ../../packages/jit/src/factories/ddd.ts
+var ddd = Object.freeze({
+  /** Structural equality, hashing and immutability. `.abstract` for a base. */
+  valueObject,
+  /** Identity semantics; abstract, and meant to be subclassed. */
+  entity,
+  /** Abstract entity with controlled mutation and an ordered event buffer. */
+  aggregateRoot,
+  /** Immutable, versioned event; `create()` takes the payload. */
+  domainEvent
 });
 
 // ../../packages/jit/src/factories/dto.ts
@@ -18648,6 +20909,44 @@ var iso = {
   duration: (message) => string().duration(message)
 };
 
+// ../../packages/jit/src/factories/lookup.ts
+function lookup(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = createLookupPlan(unwrapped, void 0);
+  Object.defineProperty(plan, "by", { value: (key) => createLookupPlan(unwrapped, key) });
+  return plan;
+}
+function createLookupPlan(schema, key) {
+  if (key === void 0 && !canResolve(schema)) return unresolvedLookupPlan(schema);
+  return compileLookup(schema, resolveLookupDescriptor(schema, key), getCachedIndex);
+}
+function canResolve(schema) {
+  try {
+    resolveLookupDescriptor(schema, void 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function unresolvedLookupPlan(schema) {
+  const fail = () => resolveLookupDescriptor(schema, void 0);
+  const plan = (() => fail());
+  Object.defineProperty(plan, "explain", { value: fail });
+  return plan;
+}
+
+// ../../packages/jit/src/factories/match.ts
+function match(schema) {
+  return createMatch(unwrapSchema(schema), [], []);
+}
+function createMatch(schema, tags, handlers) {
+  return Object.freeze({
+    case: (tag, handler) => createMatch(schema, [...tags, tag], [...handlers, handler]),
+    otherwise: (handler) => compileMatch(resolveMatchDescriptor(schema, tags, true, false), handlers, handler),
+    exhaustive: () => compileMatch(resolveMatchDescriptor(schema, tags, false, true), handlers, void 0)
+  });
+}
+
 // ../../packages/jit/src/factories/object/object.ts
 function object(shape) {
   const props = {};
@@ -18663,6 +20962,405 @@ function object(shape) {
     })
   );
 }
+
+// ../../packages/jit/src/runtime/update/reactive-update.ts
+function createReactiveUpdate(initial, updater, createDiff, options = {}) {
+  let value = initial;
+  let version = 0;
+  let batchDepth = 0;
+  let batchPrevious;
+  let hasBatchPrevious = false;
+  let pendingPrevious;
+  let hasPendingPrevious = false;
+  let scheduled = false;
+  let disposed = false;
+  let diff3;
+  const listeners = /* @__PURE__ */ new Set();
+  const pathBuckets = /* @__PURE__ */ new Map();
+  const selections = /* @__PURE__ */ new Set();
+  const scheduler = options.schedule ?? "sync";
+  const report = (error) => {
+    if (options.onError) {
+      options.onError(error);
+      return;
+    }
+    throw error;
+  };
+  const invoke = (listener) => {
+    if (!options.onError) {
+      listener();
+      return;
+    }
+    try {
+      listener();
+    } catch (error) {
+      report(error);
+    }
+  };
+  const notify = (previous, current) => {
+    if (disposed || Object.is(previous, current)) return;
+    const eventVersion = version;
+    let cachedChanges;
+    const event = {
+      previous,
+      value: current,
+      version: eventVersion,
+      get changes() {
+        if (cachedChanges) return cachedChanges;
+        diff3 ??= createDiff();
+        cachedChanges = diff3(previous, current).map((change) => ({
+          type: change.type,
+          path: change.path,
+          previous: readPath3(previous, change.path),
+          value: readPath3(current, change.path)
+        }));
+        return cachedChanges;
+      }
+    };
+    for (const listener of listeners) invoke(() => listener(event));
+    for (const bucket of pathBuckets.values()) {
+      const before = readPath3(previous, bucket.path);
+      const after = readPath3(current, bucket.path);
+      for (const entry of bucket.listeners) {
+        if (entry.equals(before, after)) continue;
+        const pathEvent = {
+          path: bucket.path,
+          previous: before,
+          value: after,
+          rootPrevious: previous,
+          root: current,
+          version: eventVersion
+        };
+        invoke(() => entry.listener(pathEvent));
+      }
+    }
+    for (const entry of selections) {
+      const before = entry.selector(previous);
+      const after = entry.selector(current);
+      if (entry.equals(before, after)) continue;
+      const selectionEvent = {
+        previous: before,
+        value: after,
+        rootPrevious: previous,
+        root: current,
+        version: eventVersion
+      };
+      invoke(() => entry.listener(selectionEvent));
+    }
+  };
+  const flush = () => {
+    if (!scheduled || !hasPendingPrevious) return;
+    const previous = pendingPrevious;
+    scheduled = false;
+    pendingPrevious = void 0;
+    hasPendingPrevious = false;
+    notify(previous, value);
+  };
+  const enqueue = (previous) => {
+    if (batchDepth > 0) {
+      if (!hasBatchPrevious) {
+        batchPrevious = previous;
+        hasBatchPrevious = true;
+      }
+      return;
+    }
+    if (scheduler === "sync") {
+      notify(previous, value);
+      return;
+    }
+    if (!hasPendingPrevious) {
+      pendingPrevious = previous;
+      hasPendingPrevious = true;
+    }
+    if (scheduled) return;
+    scheduled = true;
+    if (scheduler === "microtask") queueMicrotask(flush);
+    else scheduler(flush);
+  };
+  const set2 = (next) => {
+    if (disposed || Object.is(value, next)) return value;
+    const previous = value;
+    value = next;
+    version++;
+    enqueue(previous);
+    return value;
+  };
+  const controller = {
+    get value() {
+      return value;
+    },
+    get version() {
+      return version;
+    },
+    update(input) {
+      return set2(updater(value, input));
+    },
+    set: set2,
+    subscribe(listener, subscribeOptions = {}) {
+      if (disposed) return () => void 0;
+      listeners.add(listener);
+      if (subscribeOptions.immediate) {
+        const immediate = {
+          previous: value,
+          value,
+          version,
+          changes: []
+        };
+        invoke(() => listener(immediate));
+      }
+      return () => listeners.delete(listener);
+    },
+    watch(path, listener, watchOptions = {}) {
+      if (disposed) return () => void 0;
+      const normalized = normalizePath(path);
+      const key = JSON.stringify(normalized);
+      let bucket = pathBuckets.get(key);
+      if (!bucket) {
+        bucket = { path: normalized, listeners: /* @__PURE__ */ new Set() };
+        pathBuckets.set(key, bucket);
+      }
+      const entry = {
+        listener: (event) => listener(
+          event
+        ),
+        equals: watchOptions.equals ?? Object.is
+      };
+      bucket.listeners.add(entry);
+      if (watchOptions.immediate) {
+        const selected = readPath3(value, normalized);
+        invoke(
+          () => listener({
+            path: normalized,
+            previous: selected,
+            value: selected,
+            rootPrevious: value,
+            root: value,
+            version
+          })
+        );
+      }
+      return () => {
+        bucket?.listeners.delete(entry);
+        if (bucket?.listeners.size === 0) pathBuckets.delete(key);
+      };
+    },
+    select(selector, listener, selectOptions = {}) {
+      if (disposed) return () => void 0;
+      const entry = {
+        selector,
+        listener: (event) => listener(event),
+        equals: selectOptions.equals ?? Object.is
+      };
+      selections.add(entry);
+      if (selectOptions.immediate) {
+        const selected = selector(value);
+        invoke(
+          () => listener({
+            previous: selected,
+            value: selected,
+            rootPrevious: value,
+            root: value,
+            version
+          })
+        );
+      }
+      return () => selections.delete(entry);
+    },
+    batch(run) {
+      batchDepth++;
+      try {
+        run(controller);
+      } finally {
+        batchDepth--;
+        if (batchDepth === 0 && hasBatchPrevious) {
+          const previous = batchPrevious;
+          batchPrevious = void 0;
+          hasBatchPrevious = false;
+          enqueue(previous);
+        }
+      }
+      return value;
+    },
+    flush,
+    dispose() {
+      disposed = true;
+      listeners.clear();
+      pathBuckets.clear();
+      selections.clear();
+      pendingPrevious = void 0;
+      hasPendingPrevious = false;
+      batchPrevious = void 0;
+      hasBatchPrevious = false;
+      scheduled = false;
+    }
+  };
+  return controller;
+}
+function normalizePath(path) {
+  if (typeof path !== "string") return Object.freeze([...path]);
+  if (path === "") return Object.freeze([]);
+  return Object.freeze(
+    path.split(".").map((part) => part !== "" && String(Number(part)) === part ? Number(part) : part)
+  );
+}
+function readPath3(value, path) {
+  let current = value;
+  for (let index2 = 0; index2 < path.length; index2++) {
+    if (current === null || current === void 0) return void 0;
+    current = current[path[index2]];
+  }
+  return current;
+}
+
+// ../../packages/jit/src/factories/update.ts
+function update(schema, ...args) {
+  const unwrapped = unwrapSchema(schema);
+  assertUpdateable2(unwrapped);
+  const compiled = compileUpdate(unwrapped);
+  const run = ((current, updateInput) => {
+    const patch3 = typeof updateInput === "function" ? captureDraftPatch(updateInput) : updateInput;
+    return compiled(current, patch3);
+  });
+  Object.defineProperties(run, {
+    compile: {
+      enumerable: false,
+      value: () => run
+    },
+    patch: {
+      enumerable: false,
+      value: (template) => ({
+        compile: () => (current, params) => run(current, materializeParamPatch(template, params))
+      })
+    },
+    reactive: {
+      enumerable: false,
+      value: (initial, options) => createReactiveUpdate(initial, run, () => compileDiff(unwrapped), options)
+    }
+  });
+  if (args.length === 0) {
+    registerArtifact(run, { kind: "operation", schema: unwrapped, op: "update" });
+    return run;
+  }
+  return run(args[0], args[1]);
+}
+function materializeParamPatch(template, params) {
+  if (isParamRef(template)) return params[template.name];
+  if (Array.isArray(template)) return template.map((value) => materializeParamPatch(value, params));
+  if (template !== null && typeof template === "object") {
+    const out = {};
+    for (const key of Object.keys(template)) {
+      out[key] = materializeParamPatch(template[key], params);
+    }
+    return out;
+  }
+  return template;
+}
+function isParamRef(value) {
+  return value !== null && typeof value === "object" && value.__jitQueryValue === "param";
+}
+function captureDraftPatch(recipe) {
+  const writes = [];
+  const proxies = /* @__PURE__ */ new Map();
+  const createDraft = (path) => {
+    const cacheKey3 = path.map(String).join("\0");
+    const cached = proxies.get(cacheKey3);
+    if (cached) return cached;
+    const draft = new Proxy(
+      {},
+      {
+        get(_target, key) {
+          if (typeof key === "symbol") return void 0;
+          return createDraft([...path, key]);
+        },
+        set(_target, key, value) {
+          if (typeof key === "symbol") {
+            throw new JITError("INVALID_UPDATE", "Draft updates do not support symbol keys");
+          }
+          writes[writes.length] = { path: [...path, key], value };
+          return true;
+        }
+      }
+    );
+    proxies.set(cacheKey3, draft);
+    return draft;
+  };
+  recipe(createDraft([]));
+  return materializePatch(writes);
+}
+function materializePatch(writes) {
+  const root = {};
+  for (const write of writes) {
+    let current = root;
+    for (let index2 = 0; index2 < write.path.length; index2++) {
+      const segment = write.path[index2];
+      const key = normalizeKey(segment);
+      const isLast = index2 === write.path.length - 1;
+      if (isLast) {
+        current[key] = write.value;
+        continue;
+      }
+      const nextSegment = write.path[index2 + 1];
+      const existing = current[key];
+      if (existing === void 0) {
+        const next = isArrayKey(nextSegment) ? [] : {};
+        current[key] = next;
+        current = next;
+      } else {
+        current = existing;
+      }
+    }
+  }
+  return root;
+}
+function normalizeKey(key) {
+  if (typeof key === "number") return key;
+  if (typeof key === "string" && key !== "" && String(Number(key)) === key) return Number(key);
+  return String(key);
+}
+function isArrayKey(key) {
+  return typeof key === "number" || typeof key === "string" && key !== "" && String(Number(key)) === key;
+}
+function assertUpdateable2(schema) {
+  if (schema.type === TypeName.readonly) {
+    throw new JITError("READONLY_FIELD", "Cannot compile updates for readonly schemas");
+  }
+  if (schema.type === TypeName.lazy) {
+    assertUpdateable2(schema.def.getter());
+    return;
+  }
+  if (hasInnerType2(schema)) {
+    assertUpdateable2(schema.def.innerType);
+    return;
+  }
+  if (schema.type === TypeName.object) {
+    const objectSchema = schema;
+    for (const child of Object.values(objectSchema.def.props)) {
+      assertUpdateable2(child);
+    }
+  }
+}
+function hasInnerType2(schema) {
+  return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
+}
+
+// ../../packages/jit/src/factories/patch.ts
+var patch = Object.freeze({
+  /**
+   * A deep partial patch, applied immutably. This is `JIT.update` under the
+   * patch namespace — the same plan, not a second engine.
+   */
+  apply(schema) {
+    return update(schema);
+  },
+  /** RFC 7396 JSON Merge Patch: `null` removes, objects merge, everything else replaces. */
+  merge(schema) {
+    return compileMergePatch(unwrapSchema(schema));
+  },
+  /** RFC 6902 JSON Patch: a list of operations applied in order, immutably. */
+  json(schema) {
+    return compileJsonPatch(unwrapSchema(schema));
+  }
+});
 
 // ../../packages/jit/src/factories/primitive/any.ts
 function any() {
@@ -18968,6 +21666,45 @@ function isQueryParamRef2(value) {
 }
 function isQueryConstRef2(value) {
   return value !== null && typeof value === "object" && value.__jitQueryValue === "const";
+}
+
+// ../../packages/jit/src/factories/project.ts
+function project(schema) {
+  const unwrapped = unwrapSchema(schema);
+  return Object.freeze({
+    select: (...paths) => compileProject(unwrapped, paths)
+  });
+}
+
+// ../../packages/jit/src/factories/reconcile.ts
+function reconcile(schema, channels) {
+  return createReconcilePlan(unwrapSchema(schema), void 0, { ...ALL_CHANNELS, ...channels }, "value");
+}
+function createReconcilePlan(schema, key, channels, changes) {
+  const compile = (sink) => compileReconcile(schema, resolveReconcileDescriptor(schema, key, channels, changes, sink));
+  const plan = key === void 0 && !canResolve2(schema) ? unresolved(schema) : compile("result");
+  Object.defineProperties(plan, {
+    by: { value: (next) => createReconcilePlan(schema, next, channels, changes) },
+    changes: { value: (mode) => createReconcilePlan(schema, key, channels, mode) },
+    to: {
+      value: Object.freeze({
+        iterator: () => compile("iterator"),
+        visitor: () => compile("visitor")
+      })
+    }
+  });
+  return plan;
+}
+function canResolve2(schema) {
+  try {
+    resolveReconcileDescriptor(schema, void 0, ALL_CHANNELS, "value", "result");
+    return true;
+  } catch {
+    return false;
+  }
+}
+function unresolved(schema) {
+  return (() => resolveReconcileDescriptor(schema, void 0, ALL_CHANNELS, "value", "result"));
 }
 
 // ../../packages/jit/src/compiler/execution-plan.ts
@@ -19342,16 +22079,16 @@ function transformedCollection(state, target, transforms) {
     plan
   });
 }
-function updatedValue(source, schema, patch) {
-  const plan = freezePlan2(schema, [...source.plan.stages, updateStage(schema, false, patch)]);
+function updatedValue(source, schema, patch3) {
+  const plan = freezePlan2(schema, [...source.plan.stages, updateStage(schema, false, patch3)]);
   const artifact = createExecutionArtifact(
     plan,
     () => lowerExecutionPlan(plan)
   );
   return artifactForSchema(artifact, schema);
 }
-function updatedCollection(state, patch) {
-  const plan = freezePlan2(state.schema, [...state.plan.stages, updateStage(state.schema.def.element, true, patch)]);
+function updatedCollection(state, patch3) {
+  const plan = freezePlan2(state.schema, [...state.plan.stages, updateStage(state.schema.def.element, true, patch3)]);
   const source = createExecutionArtifact(
     plan,
     () => lowerExecutionPlan(plan)
@@ -19410,10 +22147,10 @@ function createValueArtifact(artifact, schema) {
     },
     update: {
       enumerable: false,
-      value: (patch) => updatedValue(
+      value: (patch3) => updatedValue(
         artifact,
         schema,
-        patch
+        patch3
       )
     },
     mask: {
@@ -19440,13 +22177,13 @@ function createCollectionArtifact(state) {
     filter: {
       enumerable: false,
       value: (predicate) => {
-        const builder = state.builder.filter(predicate);
+        const builder2 = state.builder.filter(predicate);
         return createCollectionArtifact({
           source: state.source,
           schema: state.schema,
           querySource: state.querySource,
-          builder,
-          plan: appendQueryStage(state.plan, state.querySource, state.schema, "filter", builder)
+          builder: builder2,
+          plan: appendQueryStage(state.plan, state.querySource, state.schema, "filter", builder2)
         });
       }
     },
@@ -19454,13 +22191,13 @@ function createCollectionArtifact(state) {
       enumerable: false,
       value: (...fields) => {
         const selectedSchema = selectArraySchema(state.schema, fields);
-        const builder = state.builder.select(...fields);
+        const builder2 = state.builder.select(...fields);
         return createCollectionArtifact({
           source: state.source,
           schema: selectedSchema,
           querySource: state.querySource,
-          builder,
-          plan: appendQueryStage(state.plan, state.querySource, selectedSchema, "select", builder)
+          builder: builder2,
+          plan: appendQueryStage(state.plan, state.querySource, selectedSchema, "select", builder2)
         });
       }
     },
@@ -19482,7 +22219,7 @@ function createCollectionArtifact(state) {
     },
     update: {
       enumerable: false,
-      value: (patch) => updatedCollection(state, patch)
+      value: (patch3) => updatedCollection(state, patch3)
     },
     mask: {
       enumerable: false,
@@ -19502,8 +22239,8 @@ function createCollectionArtifact(state) {
   return Object.freeze(artifact);
 }
 function aggregateCollection(state, operation, key) {
-  const builder = operation === "count" ? state.builder.count() : state.builder[operation](key);
-  const program = getQueryProgram(builder);
+  const builder2 = operation === "count" ? state.builder.count() : state.builder[operation](key);
+  const program = getQueryProgram(builder2);
   if (!program) throw new JITError("INVALID_OPERATION", "aggregate pipeline lost its declarative program");
   const schema = aggregateResultSchema(operation);
   const plan = freezePlan2(schema, [
@@ -19589,8 +22326,8 @@ function appendBinarySink(source, schema) {
   ]);
   return createExecutionArtifact(plan, () => lowerExecutionPlan(plan));
 }
-function appendQueryStage(plan, source, schema, operation, builder) {
-  const program = getQueryProgram(builder);
+function appendQueryStage(plan, source, schema, operation, builder2) {
+  const program = getQueryProgram(builder2);
   if (!program) throw new JITError("INVALID_OPERATION", "query pipeline lost its declarative program");
   return freezePlan2(schema, [
     ...plan.stages,
@@ -19669,14 +22406,14 @@ function assertTransformTarget(source, target, transforms) {
     }
   }
 }
-function updateStage(schema, many, patch) {
+function updateStage(schema, many, patch3) {
   return {
     kind: "update",
     input: "value",
     output: "value",
     schema,
     many,
-    patch,
+    patch: patch3,
     requires: [],
     provides: ["updated"],
     effects: { ...NO_EFFECTS, mayAllocate: true, usesExternalBindings: true }
@@ -19861,7 +22598,43 @@ var binary2 = Object.freeze({
   }
 });
 function equal(schema) {
-  return operationArtifact(schema, "equal", "value", "boolean", compileEqual);
+  const artifact = operationArtifact(schema, "equal", "value", "boolean", compileEqual);
+  if ("select" in artifact) return artifact;
+  Object.defineProperty(artifact, "select", {
+    value: (...paths) => operationArtifact(
+      buildProjectionTree(unwrapSchema(schema), paths, "JIT.compare.equal().select()").schema,
+      "equal",
+      "value",
+      "boolean",
+      compileEqual
+    )
+  });
+  return artifact;
+}
+function changed(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = createChangedMask(unwrapped, allFieldPaths(unwrapped, "JIT.compare.changed()"));
+  Object.defineProperty(plan, "select", {
+    value: (...paths) => createChangedMask(unwrapped, paths)
+  });
+  return plan;
+}
+function createChangedMask(schema, paths) {
+  const descriptor = resolveChangedDescriptor(schema, paths);
+  const compiled = compileChanged(schema, descriptor);
+  const fields = descriptor.fields.map((field) => field.path);
+  const bits = new Map(fields.map((path, index2) => [path, index2]));
+  Object.defineProperties(compiled, {
+    fields: { value: Object.freeze(fields) },
+    has: {
+      value: (mask3, path) => {
+        const bit = bits.get(path);
+        if (bit === void 0) return false;
+        return typeof mask3 === "bigint" ? (mask3 & 1n << BigInt(bit)) !== 0n : (mask3 & 1 << bit) !== 0;
+      }
+    }
+  });
+  return compiled;
 }
 function clone(schema) {
   return operationArtifact(schema, "clone", "value", "value", compileClone);
@@ -19884,7 +22657,7 @@ function mask(schema) {
 function sanitize(schema) {
   return operationArtifact(schema, "sanitize", "value", "value", compileSanitize);
 }
-var compare = Object.freeze({ equal, diff, hash: hash2 });
+var compare = Object.freeze({ equal, diff, hash: hash2, changed });
 var security = Object.freeze({ mask, sanitize });
 function mapCapability(source, target, ...overrides) {
   const sourceSchema = unwrapSchema(source);
@@ -20060,386 +22833,6 @@ function collectBindings(keys, transforms) {
     namesByKey.set(key, name);
   }
   return { names, values, namesByKey };
-}
-
-// ../../packages/jit/src/runtime/update/reactive-update.ts
-function createReactiveUpdate(initial, updater, createDiff, options = {}) {
-  let value = initial;
-  let version = 0;
-  let batchDepth = 0;
-  let batchPrevious;
-  let hasBatchPrevious = false;
-  let pendingPrevious;
-  let hasPendingPrevious = false;
-  let scheduled = false;
-  let disposed = false;
-  let diff3;
-  const listeners = /* @__PURE__ */ new Set();
-  const pathBuckets = /* @__PURE__ */ new Map();
-  const selections = /* @__PURE__ */ new Set();
-  const scheduler = options.schedule ?? "sync";
-  const report = (error) => {
-    if (options.onError) {
-      options.onError(error);
-      return;
-    }
-    throw error;
-  };
-  const invoke = (listener) => {
-    if (!options.onError) {
-      listener();
-      return;
-    }
-    try {
-      listener();
-    } catch (error) {
-      report(error);
-    }
-  };
-  const notify = (previous, current) => {
-    if (disposed || Object.is(previous, current)) return;
-    const eventVersion = version;
-    let cachedChanges;
-    const event = {
-      previous,
-      value: current,
-      version: eventVersion,
-      get changes() {
-        if (cachedChanges) return cachedChanges;
-        diff3 ??= createDiff();
-        cachedChanges = diff3(previous, current).map((change) => ({
-          type: change.type,
-          path: change.path,
-          previous: readPath(previous, change.path),
-          value: readPath(current, change.path)
-        }));
-        return cachedChanges;
-      }
-    };
-    for (const listener of listeners) invoke(() => listener(event));
-    for (const bucket of pathBuckets.values()) {
-      const before = readPath(previous, bucket.path);
-      const after = readPath(current, bucket.path);
-      for (const entry of bucket.listeners) {
-        if (entry.equals(before, after)) continue;
-        const pathEvent = {
-          path: bucket.path,
-          previous: before,
-          value: after,
-          rootPrevious: previous,
-          root: current,
-          version: eventVersion
-        };
-        invoke(() => entry.listener(pathEvent));
-      }
-    }
-    for (const entry of selections) {
-      const before = entry.selector(previous);
-      const after = entry.selector(current);
-      if (entry.equals(before, after)) continue;
-      const selectionEvent = {
-        previous: before,
-        value: after,
-        rootPrevious: previous,
-        root: current,
-        version: eventVersion
-      };
-      invoke(() => entry.listener(selectionEvent));
-    }
-  };
-  const flush = () => {
-    if (!scheduled || !hasPendingPrevious) return;
-    const previous = pendingPrevious;
-    scheduled = false;
-    pendingPrevious = void 0;
-    hasPendingPrevious = false;
-    notify(previous, value);
-  };
-  const enqueue = (previous) => {
-    if (batchDepth > 0) {
-      if (!hasBatchPrevious) {
-        batchPrevious = previous;
-        hasBatchPrevious = true;
-      }
-      return;
-    }
-    if (scheduler === "sync") {
-      notify(previous, value);
-      return;
-    }
-    if (!hasPendingPrevious) {
-      pendingPrevious = previous;
-      hasPendingPrevious = true;
-    }
-    if (scheduled) return;
-    scheduled = true;
-    if (scheduler === "microtask") queueMicrotask(flush);
-    else scheduler(flush);
-  };
-  const set2 = (next) => {
-    if (disposed || Object.is(value, next)) return value;
-    const previous = value;
-    value = next;
-    version++;
-    enqueue(previous);
-    return value;
-  };
-  const controller = {
-    get value() {
-      return value;
-    },
-    get version() {
-      return version;
-    },
-    update(input) {
-      return set2(updater(value, input));
-    },
-    set: set2,
-    subscribe(listener, subscribeOptions = {}) {
-      if (disposed) return () => void 0;
-      listeners.add(listener);
-      if (subscribeOptions.immediate) {
-        const immediate = {
-          previous: value,
-          value,
-          version,
-          changes: []
-        };
-        invoke(() => listener(immediate));
-      }
-      return () => listeners.delete(listener);
-    },
-    watch(path, listener, watchOptions = {}) {
-      if (disposed) return () => void 0;
-      const normalized = normalizePath(path);
-      const key = JSON.stringify(normalized);
-      let bucket = pathBuckets.get(key);
-      if (!bucket) {
-        bucket = { path: normalized, listeners: /* @__PURE__ */ new Set() };
-        pathBuckets.set(key, bucket);
-      }
-      const entry = {
-        listener: (event) => listener(
-          event
-        ),
-        equals: watchOptions.equals ?? Object.is
-      };
-      bucket.listeners.add(entry);
-      if (watchOptions.immediate) {
-        const selected = readPath(value, normalized);
-        invoke(
-          () => listener({
-            path: normalized,
-            previous: selected,
-            value: selected,
-            rootPrevious: value,
-            root: value,
-            version
-          })
-        );
-      }
-      return () => {
-        bucket?.listeners.delete(entry);
-        if (bucket?.listeners.size === 0) pathBuckets.delete(key);
-      };
-    },
-    select(selector, listener, selectOptions = {}) {
-      if (disposed) return () => void 0;
-      const entry = {
-        selector,
-        listener: (event) => listener(event),
-        equals: selectOptions.equals ?? Object.is
-      };
-      selections.add(entry);
-      if (selectOptions.immediate) {
-        const selected = selector(value);
-        invoke(
-          () => listener({
-            previous: selected,
-            value: selected,
-            rootPrevious: value,
-            root: value,
-            version
-          })
-        );
-      }
-      return () => selections.delete(entry);
-    },
-    batch(run) {
-      batchDepth++;
-      try {
-        run(controller);
-      } finally {
-        batchDepth--;
-        if (batchDepth === 0 && hasBatchPrevious) {
-          const previous = batchPrevious;
-          batchPrevious = void 0;
-          hasBatchPrevious = false;
-          enqueue(previous);
-        }
-      }
-      return value;
-    },
-    flush,
-    dispose() {
-      disposed = true;
-      listeners.clear();
-      pathBuckets.clear();
-      selections.clear();
-      pendingPrevious = void 0;
-      hasPendingPrevious = false;
-      batchPrevious = void 0;
-      hasBatchPrevious = false;
-      scheduled = false;
-    }
-  };
-  return controller;
-}
-function normalizePath(path) {
-  if (typeof path !== "string") return Object.freeze([...path]);
-  if (path === "") return Object.freeze([]);
-  return Object.freeze(
-    path.split(".").map((part) => part !== "" && String(Number(part)) === part ? Number(part) : part)
-  );
-}
-function readPath(value, path) {
-  let current = value;
-  for (let index2 = 0; index2 < path.length; index2++) {
-    if (current === null || current === void 0) return void 0;
-    current = current[path[index2]];
-  }
-  return current;
-}
-
-// ../../packages/jit/src/factories/update.ts
-function update(schema, ...args) {
-  const unwrapped = unwrapSchema(schema);
-  assertUpdateable2(unwrapped);
-  const compiled = compileUpdate(unwrapped);
-  const run = ((current, updateInput) => {
-    const patch = typeof updateInput === "function" ? captureDraftPatch(updateInput) : updateInput;
-    return compiled(current, patch);
-  });
-  Object.defineProperties(run, {
-    compile: {
-      enumerable: false,
-      value: () => run
-    },
-    patch: {
-      enumerable: false,
-      value: (template) => ({
-        compile: () => (current, params) => run(current, materializeParamPatch(template, params))
-      })
-    },
-    reactive: {
-      enumerable: false,
-      value: (initial, options) => createReactiveUpdate(initial, run, () => compileDiff(unwrapped), options)
-    }
-  });
-  if (args.length === 0) {
-    registerArtifact(run, { kind: "operation", schema: unwrapped, op: "update" });
-    return run;
-  }
-  return run(args[0], args[1]);
-}
-function materializeParamPatch(template, params) {
-  if (isParamRef(template)) return params[template.name];
-  if (Array.isArray(template)) return template.map((value) => materializeParamPatch(value, params));
-  if (template !== null && typeof template === "object") {
-    const out = {};
-    for (const key of Object.keys(template)) {
-      out[key] = materializeParamPatch(template[key], params);
-    }
-    return out;
-  }
-  return template;
-}
-function isParamRef(value) {
-  return value !== null && typeof value === "object" && value.__jitQueryValue === "param";
-}
-function captureDraftPatch(recipe) {
-  const writes = [];
-  const proxies = /* @__PURE__ */ new Map();
-  const createDraft = (path) => {
-    const cacheKey = path.map(String).join("\0");
-    const cached = proxies.get(cacheKey);
-    if (cached) return cached;
-    const draft = new Proxy(
-      {},
-      {
-        get(_target, key) {
-          if (typeof key === "symbol") return void 0;
-          return createDraft([...path, key]);
-        },
-        set(_target, key, value) {
-          if (typeof key === "symbol") {
-            throw new JITError("INVALID_UPDATE", "Draft updates do not support symbol keys");
-          }
-          writes[writes.length] = { path: [...path, key], value };
-          return true;
-        }
-      }
-    );
-    proxies.set(cacheKey, draft);
-    return draft;
-  };
-  recipe(createDraft([]));
-  return materializePatch(writes);
-}
-function materializePatch(writes) {
-  const root = {};
-  for (const write of writes) {
-    let current = root;
-    for (let index2 = 0; index2 < write.path.length; index2++) {
-      const segment = write.path[index2];
-      const key = normalizeKey(segment);
-      const isLast = index2 === write.path.length - 1;
-      if (isLast) {
-        current[key] = write.value;
-        continue;
-      }
-      const nextSegment = write.path[index2 + 1];
-      const existing = current[key];
-      if (existing === void 0) {
-        const next = isArrayKey(nextSegment) ? [] : {};
-        current[key] = next;
-        current = next;
-      } else {
-        current = existing;
-      }
-    }
-  }
-  return root;
-}
-function normalizeKey(key) {
-  if (typeof key === "number") return key;
-  if (typeof key === "string" && key !== "" && String(Number(key)) === key) return Number(key);
-  return String(key);
-}
-function isArrayKey(key) {
-  return typeof key === "number" || typeof key === "string" && key !== "" && String(Number(key)) === key;
-}
-function assertUpdateable2(schema) {
-  if (schema.type === TypeName.readonly) {
-    throw new JITError("READONLY_FIELD", "Cannot compile updates for readonly schemas");
-  }
-  if (schema.type === TypeName.lazy) {
-    assertUpdateable2(schema.def.getter());
-    return;
-  }
-  if (hasInnerType2(schema)) {
-    assertUpdateable2(schema.def.innerType);
-    return;
-  }
-  if (schema.type === TypeName.object) {
-    const objectSchema = schema;
-    for (const child of Object.values(objectSchema.def.props)) {
-      assertUpdateable2(child);
-    }
-  }
-}
-function hasInnerType2(schema) {
-  return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
 }
 
 // ../../packages/jit/src/runtime/watch/watched-list.ts
@@ -20876,7 +23269,50 @@ function mapMany2(source, target, mapping = {}) {
   );
 }
 function equal2(schema) {
-  return operationStub(schema, "equal", "boolean");
+  const select = (...paths) => operationStub(
+    buildProjectionTree(unwrapSchema(schema), paths, "JIT.compare.equal().select()").schema,
+    "equal",
+    "boolean"
+  );
+  return operationStub(schema, "equal", "boolean", {
+    select
+  });
+}
+function changed2(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const stub = defineChangedMask(unwrapped, allFieldPaths(unwrapped, "JIT.compare.changed()"));
+  Object.defineProperty(stub, "select", { value: (...paths) => defineChangedMask(unwrapped, paths) });
+  return stub;
+}
+function defineChangedMask(schema, paths) {
+  const descriptor = resolveChangedDescriptor(schema, paths);
+  const fields = descriptor.fields.map((field) => field.path);
+  const bits = new Map(fields.map((path, index2) => [path, index2]));
+  const stub = function aotChangedArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:changed",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "changed" }
+      }
+    },
+    fields: { value: Object.freeze(fields) },
+    has: {
+      value: (mask3, path) => {
+        const bit = bits.get(path);
+        if (bit === void 0) return false;
+        return typeof mask3 === "bigint" ? (mask3 & 1n << BigInt(bit)) !== 0n : (mask3 & 1 << bit) !== 0;
+      }
+    }
+  });
+  registerArtifact(stub, { kind: "changed-plan", schema, descriptor });
+  return stub;
 }
 function clone2(schema) {
   return operationStub(schema, "clone", "value");
@@ -20994,15 +23430,220 @@ function createDefineIndexPlan(schema, keys, shape) {
     grouped: { value: () => createDefineIndexPlan(schema, keys, "grouped") }
   });
   if (keys || resolveIndexKeysFromFacts(schema)) {
-    registerArtifact(stub, { kind: "index-plan", schema, descriptor: resolveIndexDescriptor(schema, keys, shape) });
+    registerArtifact(stub, {
+      kind: "index-plan",
+      schema,
+      descriptor: resolveIndexDescriptor(schema, keys, shape)
+    });
   }
+  return stub;
+}
+function defineLookup(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const plan = createDefineLookupPlan(unwrapped, void 0);
+  Object.defineProperty(plan, "by", { value: (key) => createDefineLookupPlan(unwrapped, key) });
+  return plan;
+}
+function createDefineLookupPlan(schema, key) {
+  const stub = function aotLookupArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  const lookup2 = resolveLookupDescriptor(schema, key);
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:lookup",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "lookup" }
+      }
+    },
+    explain: {
+      value: () => Object.freeze({
+        strategy: lookup2.choice.strategy,
+        reason: lookup2.choice.reason,
+        complexity: lookup2.choice.complexity,
+        facts: lookup2.choice.facts
+      })
+    }
+  });
+  registerArtifact(stub, { kind: "lookup-plan", schema, lookup: lookup2 });
+  return stub;
+}
+function defineReconcile(schema, channels) {
+  return createDefineReconcilePlan(unwrapSchema(schema), void 0, { ...ALL_CHANNELS, ...channels }, "value");
+}
+function createDefineReconcilePlan(schema, key, channels, changes) {
+  const stub = (sink) => {
+    const artifact = function aotReconcileArtifact() {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    };
+    Object.defineProperty(artifact, AOT_ARTIFACT, {
+      value: {
+        artifactId: "operation:reconcile",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "reconcile" }
+      }
+    });
+    registerArtifact(artifact, {
+      kind: "reconcile-plan",
+      schema,
+      descriptor: resolveReconcileDescriptor(schema, key, channels, changes, sink)
+    });
+    return artifact;
+  };
+  const plan = stub("result");
+  Object.defineProperties(plan, {
+    by: { value: (next) => createDefineReconcilePlan(schema, next, channels, changes) },
+    changes: { value: (mode) => createDefineReconcilePlan(schema, key, channels, mode) },
+    to: { value: Object.freeze({ iterator: () => stub("iterator"), visitor: () => stub("visitor") }) }
+  });
+  return plan;
+}
+function defineProject(schema) {
+  const unwrapped = unwrapSchema(schema);
+  return Object.freeze({
+    select: (...paths) => {
+      const stub = function aotProjectArtifact() {
+        throw new JITError(
+          "JIT_AOT_001_ARTIFACT_EXECUTED",
+          "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+        );
+      };
+      Object.defineProperty(stub, AOT_ARTIFACT, {
+        value: {
+          artifactId: "operation:project",
+          schemaId: unwrapped.type,
+          operation: { kind: "operation", op: "project" }
+        }
+      });
+      registerArtifact(stub, {
+        kind: "project-plan",
+        schema: unwrapped,
+        tree: buildProjectionTree(unwrapped, paths, "JIT.project()")
+      });
+      return stub;
+    }
+  });
+}
+var patch2 = Object.freeze({
+  // `update` is not stubbed on this host, so `apply` is the same function the
+  // runtime namespace exposes — which is exactly the one-to-one the contract asks for.
+  apply: update,
+  merge: (schema) => definePatchStub(schema, "merge"),
+  json: (schema) => definePatchStub(schema, "json")
+});
+function definePatchStub(schema, mode) {
+  const unwrapped = unwrapSchema(schema);
+  const stub = function aotPatchArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: `operation:patch.${mode}`,
+      schemaId: unwrapped.type,
+      operation: { kind: "operation", op: "patch" }
+    }
+  });
+  registerArtifact(stub, { kind: "patch-plan", schema: unwrapped, mode });
+  return stub;
+}
+function defineCacheKeyBuilder(schema, form) {
+  const unwrapped = unwrapSchema(schema);
+  return Object.freeze({
+    select: (...paths) => {
+      const stub = function aotCacheKeyArtifact() {
+        throw new JITError(
+          "JIT_AOT_001_ARTIFACT_EXECUTED",
+          "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+        );
+      };
+      Object.defineProperty(stub, AOT_ARTIFACT, {
+        value: {
+          artifactId: `operation:cacheKey.${form}`,
+          schemaId: unwrapped.type,
+          operation: { kind: "operation", op: "cacheKey" }
+        }
+      });
+      registerArtifact(stub, {
+        kind: "cache-key-plan",
+        schema: unwrapped,
+        descriptor: resolveCacheKeyDescriptor(unwrapped, paths, form)
+      });
+      return stub;
+    }
+  });
+}
+var cacheKey2 = Object.assign((schema) => defineCacheKeyBuilder(schema, "string"), {
+  string: (schema) => defineCacheKeyBuilder(schema, "string"),
+  hash: (schema) => defineCacheKeyBuilder(schema, "hash")
+});
+function defineCanonical(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const stub = function aotCanonicalArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: "operation:canonical",
+      schemaId: unwrapped.type,
+      operation: { kind: "operation", op: "canonical" }
+    }
+  });
+  registerArtifact(stub, { kind: "canonical-plan", schema: unwrapped });
+  return stub;
+}
+function defineAccess(schema) {
+  return defineAccessPlan(unwrapSchema(schema), void 0, []);
+}
+function defineAccessPlan(subject, actor, rules) {
+  const descriptor = resolveAccessDescriptor(subject, actor, rules);
+  const stub = function aotAccessArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  const runtimePlan = access(subject);
+  const add = (effect) => (action, rule) => {
+    const next = effect === "can" ? runtimePlan.can : runtimePlan.cannot;
+    const built = getArtifact(next.call(runtimePlan, action, rule));
+    if (built?.kind !== "access-plan") throw new JITError("INVALID_OPERATION", "access rule could not be resolved");
+    return defineAccessPlan(subject, actor, [...rules, ...built.descriptor.rules.slice(-1)]);
+  };
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:access",
+        schemaId: subject.type,
+        operation: { kind: "operation", op: "access" }
+      }
+    },
+    actor: { value: (next) => defineAccessPlan(subject, unwrapSchema(next), rules) },
+    can: { value: add("can") },
+    cannot: { value: add("cannot") },
+    actions: { value: descriptor.actions },
+    fields: { value: (action) => unconditionalFields(descriptor, action) }
+  });
+  registerArtifact(stub, { kind: "access-plan", schema: subject, descriptor });
   return stub;
 }
 function defineCqrsQuery(schema) {
   return wrapDefineCqrsQuery(cqrs.query(schema));
 }
-function wrapDefineCqrsQuery(builder) {
-  const artifact = getArtifact(builder);
+function wrapDefineCqrsQuery(builder2) {
+  const artifact = getArtifact(builder2);
   if (artifact?.kind !== "query-plan") {
     throw new JITError("INVALID_QUERY", "CQRS definition query is missing its reconstructive QueryProgram");
   }
@@ -21027,13 +23668,14 @@ function wrapDefineCqrsQuery(builder) {
     return stub2;
   };
   const stub = terminal("array");
-  const source = builder;
+  const source = builder2;
   const chainMethods = [
     "params",
     "filter",
     "where",
     "select",
     "unique",
+    "distinct",
     "keyed",
     "groupBy",
     "orderBy",
@@ -21063,11 +23705,24 @@ function wrapDefineCqrsQuery(builder) {
   ];
   for (const key of chainMethods) {
     const method = source[key];
-    Object.defineProperty(stub, key, { value: (...args) => wrapDefineCqrsQuery(method(...args)) });
+    Object.defineProperty(stub, key, {
+      value: (...args) => wrapDefineCqrsQuery(method(...args))
+    });
   }
+  const joinMethod = source.join;
   Object.defineProperties(stub, {
+    join: {
+      value: (...args) => {
+        const pending = joinMethod(...args);
+        return Object.freeze({
+          on: (...keys) => wrapDefineJoin(pending.on(...keys))
+        });
+      }
+    },
     "~query": { get: () => source["~query"] },
-    explain: { value: (...args) => source.explain(...args) },
+    explain: {
+      value: (...args) => source.explain(...args)
+    },
     to: {
       value: Object.freeze({
         iterator: () => terminal("iterator"),
@@ -21079,7 +23734,9 @@ function wrapDefineCqrsQuery(builder) {
       value: () => {
         const lazy2 = terminal("iterator");
         Object.defineProperties(lazy2, {
-          explain: { value: (...args) => source.explain(...args) },
+          explain: {
+            value: (...args) => source.explain(...args)
+          },
           to: {
             value: Object.freeze({
               asyncIterator: () => terminal("async-iterator"),
@@ -21089,6 +23746,38 @@ function wrapDefineCqrsQuery(builder) {
         });
         return lazy2;
       }
+    }
+  });
+  registerArtifact(stub, artifact);
+  return stub;
+}
+function wrapDefineJoin(join2) {
+  const artifact = getArtifact(join2);
+  if (artifact?.kind !== "join-plan") {
+    throw new JITError("INVALID_QUERY", "CQRS definition join is missing its reconstructive JoinPlan");
+  }
+  const stub = function aotJoinArtifact() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: `query:join:${artifact.plan.kind}`,
+        schemaId: artifact.plan.leftSchema.type,
+        operation: {
+          kind: "query",
+          ...artifact.plan.leftProgram.params === void 0 ? {} : { params: artifact.plan.leftProgram.params }
+        }
+      }
+    },
+    explain: {
+      value: () => join2.explain()
+    },
+    "~query": {
+      value: join2["~query"]
     }
   });
   registerArtifact(stub, artifact);
@@ -21114,18 +23803,24 @@ var cqrs2 = Object.freeze({
         operation: { kind: "query" }
       }
     });
-    registerArtifact(stub, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+    registerArtifact(stub, {
+      kind: "cqrs-parser",
+      definition: artifact.definition,
+      source: artifact.source
+    });
     return stub;
   },
   query: defineCqrsQuery
 });
-function operationStub(schema, operation, output) {
-  return executionStub(schema, [
-    stage("value", "value", "value"),
-    { ...stage("operation", "value", output), operation }
-  ]);
+function operationStub(schema, operation, output, extras) {
+  return executionStub(
+    schema,
+    [stage("value", "value", "value"), { ...stage("operation", "value", output), operation }],
+    void 0,
+    extras
+  );
 }
-function executionStub(schema, stages, queryBuilder) {
+function executionStub(schema, stages, queryBuilder, extras) {
   const unwrapped = unwrapSchema(schema);
   const plan = Object.freeze({
     version: 1,
@@ -21190,10 +23885,10 @@ function executionStub(schema, stages, queryBuilder) {
     },
     update: {
       enumerable: false,
-      value: (patch) => {
+      value: (patch3) => {
         const many = unwrapped.type === "array";
         const schema2 = many ? unwrapped.def.element : unwrapped;
-        return append2(unwrapped, updateStage2(schema2, many, patch));
+        return append2(unwrapped, updateStage2(schema2, many, patch3));
       }
     },
     mask: {
@@ -21247,6 +23942,11 @@ function executionStub(schema, stages, queryBuilder) {
         }
       }
     });
+  }
+  if (extras !== void 0) {
+    for (const [name, value] of Object.entries(extras)) {
+      Object.defineProperty(artifact, name, { enumerable: false, value });
+    }
   }
   registerArtifact(stub, { kind: "execution", plan });
   return Object.freeze(stub);
@@ -21310,12 +24010,12 @@ function assertTransformTarget2(source, target, transforms) {
     }
   }
 }
-function updateStage2(schema, many, patch) {
+function updateStage2(schema, many, patch3) {
   return {
     ...stage("update", "value", "value"),
     schema,
     many,
-    patch,
+    patch: patch3,
     provides: ["updated"],
     effects: { ...NO_EFFECTS2, mayAllocate: true, usesExternalBindings: true }
   };
@@ -21359,8 +24059,15 @@ var JIT = {
   mock: mock2,
   sort: defineSort,
   index: defineIndex,
+  lookup: defineLookup,
+  reconcile: defineReconcile,
+  project: defineProject,
+  patch: patch2,
+  cacheKey: cacheKey2,
+  canonical: defineCanonical,
+  access: defineAccess,
   cqrs: cqrs2,
-  compare: Object.freeze({ equal: equal2, diff: diff2, hash: hash3 }),
+  compare: Object.freeze({ equal: equal2, diff: diff2, hash: hash3, changed: changed2 }),
   security: Object.freeze({ mask: mask2, sanitize: sanitize2 })
 };
 

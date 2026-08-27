@@ -4,8 +4,12 @@ import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
+import { resolveDistinctDescriptor, wrapDistinctSource } from "./distinct.js";
+import { compileEqual } from "./equal.js";
+import { compileUncachedHash } from "./hash.js";
 import { emitOrderingComparatorBodySource, resolveOrderingDescriptor } from "./ordering.js";
 import type { PhysicalQueryExplain } from "./physical-query.js";
+import { emitQuerySource, type QueryProgram } from "./query.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 import { emitLiteral } from "./source/literal.js";
@@ -71,6 +75,9 @@ export function explainQueryExecution(program: LazyQueryProgram, outputMode: Que
 
   for (const node of program.nodes) {
     if (node.kind === "unique") retainedState[retainedState.length] = `Set(${node.key})`;
+    else if (node.kind === "distinct")
+      retainedState[retainedState.length] =
+        node.fields.length === 0 ? "structural-hash" : `distinct(${node.fields.join(",")})`;
     else if (node.kind === "chunk") retainedState[retainedState.length] = `chunk(${node.size})`;
     else if (node.kind === "window") retainedState[retainedState.length] = `window(${node.size})`;
     else if (node.kind === "pairwise") retainedState[retainedState.length] = "previous-item";
@@ -106,12 +113,14 @@ export function explainQueryExecution(program: LazyQueryProgram, outputMode: Que
 }
 
 export function emitQueryIteratorSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
-  return emitPipelineSource(schema, program, false);
+  return wrapDistinctSource(emitPipelineSource(schema, program, false), resolveLazyDistinct(schema, program));
 }
 
 /** Materializes an incremental pipeline while preserving its exact operator order for eager/AOT exports. */
 export function emitQueryArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
-  if (program.nodes.every(isFusibleNode)) return emitDirectArraySource(schema, program);
+  if (program.nodes.every(isFusibleNode)) {
+    return wrapDistinctSource(emitDirectArraySource(schema, program), resolveLazyDistinct(schema, program));
+  }
   const iterator = emitQueryIteratorSource(schema, program);
   const hasParams = Boolean(program.params?.length);
   return `(function() {\nconst iterate = ${iterator};\nfunction query(input${hasParams ? ", params" : ""}) {\n  return Array.from(iterate(input${hasParams ? ", params" : ""}));\n}\nreturn query;\n})()`;
@@ -132,22 +141,33 @@ export function compileQueryArray<
     `query:eager-array:${serializePipeline(program.nodes)}`,
     () => {
       const source = emitQueryArraySource(schema, program);
-      return { source, create: globalThis.Function(...bindingNames, `return ${source};`) };
+      const structural = resolveLazyDistinct(schema, program)?.strategy === "structural-hash";
+      return {
+        source,
+        create: globalThis.Function(
+          ...(structural ? ["__distinctHash", "__distinctEqual"] : []),
+          ...bindingNames,
+          `return ${source};`
+        ),
+      };
     },
     options
   );
-  const compiled = template.create(...program.bindings) as QueryArrayCompiled<TElement, TOutput, TParams>;
+  const compiled = template.create(
+    ...distinctRuntimeBindings(schema, program),
+    ...program.bindings
+  ) as QueryArrayCompiled<TElement, TOutput, TParams>;
   registerArtifact(compiled as object, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings,
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "array",
   });
   return compiled;
 }
 
 export function emitQueryAsyncIteratorSource(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): string {
-  return emitPipelineSource(schema, program, true);
+  return wrapDistinctSource(emitPipelineSource(schema, program, true), resolveLazyDistinct(schema, program));
 }
 
 export function compileQueryIterator<
@@ -223,17 +243,28 @@ export function compileQueryVisitor<
     `query:visitor:${serializePipeline(program.nodes)}`,
     () => {
       const source = emitQueryVisitorSource(schema, program);
-      return { source, create: globalThis.Function(...bindingNames, `return ${source};`) };
+      const structural = resolveLazyDistinct(schema, program)?.strategy === "structural-hash";
+      return {
+        source,
+        create: globalThis.Function(
+          ...(structural ? ["__distinctHash", "__distinctEqual"] : []),
+          ...bindingNames,
+          `return ${source};`
+        ),
+      };
     },
     options
   );
-  const visitor = template.create(...program.bindings) as QueryVisitorCompiled<TElement, TOutput, TParams>;
+  const visitor = template.create(
+    ...distinctRuntimeBindings(schema, program),
+    ...program.bindings
+  ) as QueryVisitorCompiled<TElement, TOutput, TParams>;
 
   registerArtifact(visitor as object, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings,
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "visitor",
   });
   return visitor;
 }
@@ -253,6 +284,7 @@ export function emitQueryVisitorSource(schema: ATS.AnyTypeSchema, program: LazyQ
       lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
+    else if (node.kind === "distinct") lines.push(`  const seen${index} = new Map();`);
   });
   lines.push("  let emitted = 0;");
   const body = emitVisitorBody(program.nodes);
@@ -272,7 +304,7 @@ export function emitQueryVisitorSource(schema: ATS.AnyTypeSchema, program: LazyQ
   lines.push("  }");
   lines.push("  return emitted;");
   lines.push("}", "return visit;", "})()");
-  return lines.join("\n");
+  return wrapDistinctSource(lines.join("\n"), resolveLazyDistinct(schema, program));
 }
 
 function emitVisitorBody(nodes: readonly QueryPipelineNode[]): readonly string[] {
@@ -305,6 +337,9 @@ function emitVisitorBody(nodes: readonly QueryPipelineNode[]): readonly string[]
         body.push(`if (seen${index}.has(key${index})) continue;`);
         body.push(`seen${index}.add(key${index});`);
         break;
+      case "distinct":
+        body.push(`if (!__distinctAccept(seen${index}, item)) continue;`);
+        break;
       default:
         break;
     }
@@ -331,17 +366,28 @@ function compileLazy<TElement, TOutput, TParams extends Readonly<Record<string, 
     () => {
       const source =
         mode === "generator" ? emitQueryIteratorSource(schema, program) : emitQueryAsyncIteratorSource(schema, program);
-      return { source, create: globalThis.Function(...bindingNames, `return ${source};`) };
+      const structural = resolveLazyDistinct(schema, program)?.strategy === "structural-hash";
+      return {
+        source,
+        create: globalThis.Function(
+          ...(structural ? ["__distinctHash", "__distinctEqual"] : []),
+          ...bindingNames,
+          `return ${source};`
+        ),
+      };
     },
     options
   );
-  const compiled = template.create(...program.bindings) as QueryIteratorCompiled<TElement, TOutput, TParams>;
+  const compiled = template.create(
+    ...distinctRuntimeBindings(schema, program),
+    ...program.bindings
+  ) as QueryIteratorCompiled<TElement, TOutput, TParams>;
 
   registerArtifact(compiled as object, {
-    kind: "query",
-    source: template.source,
-    bindingNames,
-    bindingValues: program.bindings,
+    kind: "query-plan",
+    schema,
+    program,
+    mode: mode === "generator" ? "iterator" : "async-iterator",
   });
   return compiled;
 }
@@ -401,6 +447,7 @@ function emitDirectArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProg
       lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
+    else if (node.kind === "distinct") lines.push(`  const seen${index} = new Map();`);
   });
 
   const body = ["let output = item;"];
@@ -429,6 +476,9 @@ function emitDirectArraySource(schema: ATS.AnyTypeSchema, program: LazyQueryProg
         body.push(`const key${index} = item${emitPropertyAccess("", node.key)};`);
         body.push(`if (seen${index}.has(key${index})) continue;`);
         body.push(`seen${index}.add(key${index});`);
+        break;
+      case "distinct":
+        body.push(`if (!__distinctAccept(seen${index}, item)) continue;`);
         break;
       default:
         break;
@@ -460,7 +510,8 @@ function isFusibleNode(node: QueryPipelineNode): boolean {
     node.kind === "drop" ||
     node.kind === "takeWhile" ||
     node.kind === "dropWhile" ||
-    node.kind === "unique"
+    node.kind === "unique" ||
+    node.kind === "distinct"
   );
 }
 
@@ -475,6 +526,7 @@ function emitFusedStage(
     if (node.kind === "take" || node.kind === "drop") lines.push(`  let count${index} = 0;`);
     else if (node.kind === "dropWhile") lines.push(`  let dropping${index} = true;`);
     else if (node.kind === "unique") lines.push(`  const seen${index} = new Set();`);
+    else if (node.kind === "distinct") lines.push(`  const seen${index} = new Map();`);
   });
   const body = ["let output = item;"];
 
@@ -503,6 +555,9 @@ function emitFusedStage(
         body.push(`const key${index} = item${emitPropertyAccess("", node.key)};`);
         body.push(`if (seen${index}.has(key${index})) continue;`);
         body.push(`seen${index}.add(key${index});`);
+        break;
+      case "distinct":
+        body.push(`if (!__distinctAccept(seen${index}, item)) continue;`);
         break;
       default:
         break;
@@ -588,6 +643,10 @@ function emitStage(
         "yield item;",
       ]);
       return;
+    case "distinct":
+      lines.push("  const seen = new Map();");
+      loop(["if (!__distinctAccept(seen, item)) continue;", "yield item;"]);
+      return;
     case "chunk":
       lines.push(`  let chunk = new Array(${node.size});`);
       lines.push("  let count = 0;");
@@ -656,7 +715,14 @@ function emitStage(
 function emitCondition(condition: QueryConditionNode): string {
   switch (condition.kind) {
     case "compare": {
-      const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" } as const;
+      const operators = {
+        eq: "===",
+        neq: "!==",
+        gt: ">",
+        gte: ">=",
+        lt: "<",
+        lte: "<=",
+      } as const;
       return `${emitValue(condition.left)} ${operators[condition.op]} ${emitValue(condition.right)}`;
     }
     case "logical":
@@ -717,10 +783,11 @@ function validatePipeline(nodes: readonly QueryPipelineNode[], props: ATS.Schema
       node.kind === "select:fields" ||
       node.kind === "flatMap" ||
       node.kind === "unique" ||
+      node.kind === "distinct" ||
       node.kind === "orderBy" ||
       node.kind === "groupAdjacentBy"
     ) {
-      const keys = node.kind === "select:fields" ? node.fields : [node.key];
+      const keys = node.kind === "select:fields" || node.kind === "distinct" ? node.fields : [node.key];
       for (const key of keys)
         if (!(key in props)) throw new JITError("INVALID_QUERY", `lazy query received unknown key ${key}`);
     }
@@ -744,4 +811,68 @@ function validateConditionFields(condition: QueryConditionNode, props: ATS.Schem
 
 function serializePipeline(nodes: readonly QueryPipelineNode[]): string {
   return JSON.stringify(nodes, (_key, value) => (typeof value === "bigint" ? `${value}n` : value));
+}
+
+function resolveLazyDistinct(schema: ATS.AnyTypeSchema, program: LazyQueryProgram) {
+  const nodes = program.nodes.filter((node) => node.kind === "distinct");
+  if (nodes.length === 0) return undefined;
+  if (nodes.length > 1 || program.nodes.some((node) => node.kind === "unique")) {
+    throw new JITError("INVALID_QUERY", "query distinct cannot be repeated or combined with unique in v1");
+  }
+  return resolveDistinctDescriptor(schema, nodes[0]);
+}
+
+function distinctRuntimeBindings(schema: ATS.AnyTypeSchema, program: LazyQueryProgram): readonly unknown[] {
+  if (resolveLazyDistinct(schema, program)?.strategy !== "structural-hash") return [];
+  const objectSchema = resolveCollection(schema).objectSchema;
+  return [compileUncachedHash(objectSchema), compileEqual(objectSchema)];
+}
+
+/** The result shape a registered query plan was declared for. */
+export type QueryPlanMode = "array" | "iterator" | "async-iterator" | "visitor";
+
+/**
+ * Incremental operators cannot be answered by the eager emitter: they shape the
+ * pipeline over time rather than per row, so an array sink carrying one is
+ * materialized from the same lazy pipeline the iterator uses.
+ */
+function hasIncrementalNodes(program: LazyQueryProgram): boolean {
+  for (let i = 0, len = program.nodes.length; i < len; i++) {
+    switch (program.nodes[i]?.kind) {
+      case "flatMap":
+      case "take":
+      case "drop":
+      case "takeWhile":
+      case "dropWhile":
+      case "chunk":
+      case "window":
+      case "pairwise":
+      case "scan":
+      case "groupAdjacentBy":
+        return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Lowers one registered query plan to the source its declared mode runs. AOT
+ * and the runtime must answer a plan the same way, so both reach the emitter
+ * through here instead of repeating the dispatch.
+ */
+export function emitQueryPlanSource(
+  schema: ATS.AnyTypeSchema,
+  program: LazyQueryProgram & QueryProgram,
+  mode: QueryPlanMode
+): string {
+  switch (mode) {
+    case "iterator":
+      return emitQueryIteratorSource(schema, program);
+    case "async-iterator":
+      return emitQueryAsyncIteratorSource(schema, program);
+    case "visitor":
+      return emitQueryVisitorSource(schema, program);
+    default:
+      return hasIncrementalNodes(program) ? emitQueryArraySource(schema, program) : emitQuerySource(schema, program);
+  }
 }

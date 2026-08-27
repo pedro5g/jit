@@ -27,7 +27,7 @@ describe("the reflected surface", () => {
       "safeParse",
       "safeParseAsync",
     ]);
-    expect(surface.member("compare")?.members).toEqual(["diff", "equal", "hash"]);
+    expect(surface.member("compare")?.members).toEqual(["changed", "diff", "equal", "hash"]);
     expect(surface.member("security")?.members).toEqual(["mask", "sanitize"]);
   });
 
@@ -46,6 +46,26 @@ describe("the reflected surface", () => {
 
     expect(surface.chainFor("number")).toContain("multipleOf");
     expect(surface.chainFor("string")).not.toContain("multipleOf");
+  });
+
+  /**
+   * A query builder is a function with methods hung off it, so reflection
+   * reports every name as available on every builder and the audit could not
+   * check the query chain at all. `JIT.cqrs` is the canonical query surface;
+   * these are the names its readers actually type.
+   */
+  it("carries the CQRS query chain, which no schema kind gates", () => {
+    const query = surface.chainFor("cqrs.query");
+
+    expect(query).toContain("distinct");
+    expect(query).toContain("join");
+    expect(query).toContain("first");
+    expect(query).toContain("aggregate");
+    // `where` is the canonical spelling; `filter` is the node kind it builds.
+    expect(query).toContain("where");
+
+    expect(surface.chainFor("cqrs.join")).toEqual(["on"]);
+    expect(surface.chainFor("cqrs.to")).toEqual(["asyncIterator", "iterator", "visitor"]);
   });
 
   it("reports nothing the documentation and the library disagree about", () => {

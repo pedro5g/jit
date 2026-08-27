@@ -162,6 +162,10 @@ export interface QueryBuilderOps<
   unique<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /** Keeps the first structurally distinct row, or first distinct projected key. */
+  distinct<const TKeys extends readonly QueryCollectionKey<ATS.TypeofSchema<TSchema>>[]>(
+    ...fields: TKeys
+  ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
   keyed<TKey extends QueryCollectionKey<ATS.TypeofSchema<TSchema>>>(
     key: TKey
   ): QueryBuilder<TSchema, TOutput, Map<QueryKeyValue<ATS.TypeofSchema<TSchema>, TKey>, TOutput>, TParams>;
@@ -444,7 +448,11 @@ function createBinaryQueryBuilder<
   registerArtifact(builder, {
     kind: "query",
     get source(): string {
-      return emitBinaryQuerySource(target.layout, { nodes, bindings, params: paramNames });
+      return emitBinaryQuerySource(target.layout, {
+        nodes,
+        bindings,
+        params: paramNames,
+      });
     },
     get bindingNames(): readonly string[] {
       return bindings.map((_, index) => `__q${index}`);
@@ -478,10 +486,11 @@ function createQueryBuilder<
       }) as (value: ATS.TypeofSchema<TSchema>, params?: TParams) => TResult;
     }
 
-    return compileQueryArray<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }) as (
-      value: ATS.TypeofSchema<TSchema>,
-      params?: TParams
-    ) => TResult;
+    return compileQueryArray<QueryElement, TOutput, TParams>(schema, {
+      nodes,
+      bindings,
+      params: paramNames,
+    }) as (value: ATS.TypeofSchema<TSchema>, params?: TParams) => TResult;
   };
 
   const callable = function query(value: ATS.TypeofSchema<TSchema>, params?: TParams): TResult {
@@ -520,6 +529,10 @@ function createQueryBuilder<
 
     unique(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "unique", key }], bindings, paramNames);
+    },
+
+    distinct(...fields) {
+      return createQueryBuilder(schema, [...nodes, { kind: "distinct", fields }], bindings, paramNames);
     },
 
     keyed(key) {
@@ -677,11 +690,23 @@ function createQueryBuilder<
 
     to: Object.freeze({
       iterator: () =>
-        compileQueryIterator<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }),
+        compileQueryIterator<QueryElement, TOutput, TParams>(schema, {
+          nodes,
+          bindings,
+          params: paramNames,
+        }),
       asyncIterator: () =>
-        compileQueryAsyncIterator<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }),
+        compileQueryAsyncIterator<QueryElement, TOutput, TParams>(schema, {
+          nodes,
+          bindings,
+          params: paramNames,
+        }),
       visitor: () =>
-        compileQueryVisitor<QueryElement, TOutput, TParams>(schema, { nodes, bindings, params: paramNames }),
+        compileQueryVisitor<QueryElement, TOutput, TParams>(schema, {
+          nodes,
+          bindings,
+          params: paramNames,
+        }),
     }),
 
     lazy() {
@@ -696,17 +721,30 @@ function createQueryBuilder<
       if (outputMode !== "eager-array") return plan;
       return Object.freeze({
         ...plan,
-        physical: explainPhysicalQuery(schema, { nodes: nodes as readonly QueryNode[], bindings, params: paramNames }),
+        physical: explainPhysicalQuery(schema, {
+          nodes: nodes as readonly QueryNode[],
+          bindings,
+          params: paramNames,
+        }),
       });
     },
   } satisfies QueryBuilderOps<TSchema, TOutput, TResult, TParams>);
 
-  const program = { nodes: nodes as readonly QueryNode[], bindings, params: paramNames };
+  const program = {
+    nodes: nodes as readonly QueryNode[],
+    bindings,
+    params: paramNames,
+  };
 
   QUERY_PROGRAMS.set(builder, program);
   // The builder is what a declaration file exports, so it carries the plan
   // AOT needs; nothing is compiled unless the query is actually called.
-  registerArtifact(builder, { kind: "query-plan", schema, program, mode: "array" });
+  registerArtifact(builder, {
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "array",
+  });
   return builder;
 }
 
@@ -737,7 +775,12 @@ function createLazyQueryBuilder<
       explainQueryExecution(program, outputMode),
   });
 
-  registerArtifact(builder, { kind: "query-plan", schema, program, mode: "iterator" });
+  registerArtifact(builder, {
+    kind: "query-plan",
+    schema,
+    program,
+    mode: "iterator",
+  });
   return builder;
 }
 

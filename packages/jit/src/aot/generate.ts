@@ -1,5 +1,9 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
+import { emitAccessSource } from "../compiler/access.js";
+import { cacheKeyHashBindings, emitCacheKeySource } from "../compiler/cache-key.js";
+import { emitCanonicalSource } from "../compiler/canonical.js";
+import { changedEqualBindings, emitChangedSource } from "../compiler/changed.js";
 import { emitCloneSource } from "../compiler/clone.js";
 import { emitCodec } from "../compiler/codec/emit-codec.js";
 import { emitDiffSource } from "../compiler/diff.js";
@@ -9,23 +13,28 @@ import type { ExecutionPlan, ExecutionStage } from "../compiler/execution-plan.j
 import { emitFormatSource } from "../compiler/format.js";
 import { emitHashSource } from "../compiler/hash.js";
 import { emitIndexPlanSource, indexCacheKey } from "../compiler/indexing.js";
+import { emitJoinSource } from "../compiler/join.js";
 import { emitStringifyChunksSource } from "../compiler/json-chunks.js";
 import { compileJsonSchema } from "../compiler/json-schema/index.js";
-import {
-  emitQueryArraySource,
-  emitQueryAsyncIteratorSource,
-  emitQueryIteratorSource,
-  emitQueryVisitorSource,
-  type LazyQueryProgram,
-} from "../compiler/lazy-query.js";
+import { emitQueryPlanSource, type LazyQueryProgram } from "../compiler/lazy-query.js";
+import { emitLookupSource } from "../compiler/lookup.js";
 import { buildMapperPlan, type MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { emitMapperSource } from "../compiler/mapper.js";
 import { emitMaskSource } from "../compiler/mask.js";
 import { emitMockSource, MOCK_HELPERS } from "../compiler/mock.js";
 import { buildMutationPlan, emitMutationPlanBody } from "../compiler/mutation-plan.js";
 import { emitTransformSource } from "../compiler/object-ops.js";
-import { emitQuerySource, type QueryProgram } from "../compiler/query.js";
+import {
+  emitJsonPatchSource,
+  emitMergePatchProgram,
+  JSON_PATCH_HELPERS,
+  PATCH_EQUAL_HELPER,
+} from "../compiler/patch.js";
+import { emitProjectSource } from "../compiler/project.js";
+import { emitQuerySource, expectCollectionObjectSchema, type QueryProgram } from "../compiler/query.js";
+import { emitReconcileSource } from "../compiler/reconcile.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
+import { resolveRowObjectSchema } from "../compiler/row-keys.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
@@ -241,6 +250,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   let needsRuntimeCachedIndex = false;
   let needsValidationError = false;
   let needsHashHelpers = false;
+  let needsHashCache = false;
+  let needsJsonPatchHelpers = false;
   let needsMockHelpers = false;
   let needsCallHelper = false;
   let needsAggregateType = false;
@@ -289,7 +300,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const artifact = getArtifact(members[prop]);
 
       if (!artifact) {
-        skipped.push({ schema: name, operation: prop, reason: "member is not a compiled JIT artifact" });
+        skipped.push({
+          schema: name,
+          operation: prop,
+          reason: "member is not a compiled JIT artifact",
+        });
         continue;
       }
 
@@ -309,7 +324,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     }
 
     if (operations.length === 0) {
-      skipped.push({ schema: name, operation: "group", reason: "no member of this object could be generated" });
+      skipped.push({
+        schema: name,
+        operation: "group",
+        reason: "no member of this object could be generated",
+      });
       continue;
     }
 
@@ -339,7 +358,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const artifact = getArtifact(value);
 
     if (!artifact) {
-      skipped.push({ schema: name, operation: "export", reason: "declaration is not a compiled JIT artifact" });
+      skipped.push({
+        schema: name,
+        operation: "export",
+        reason: "declaration is not a compiled JIT artifact",
+      });
       continue;
     }
 
@@ -373,11 +396,37 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "execution")
       return emitExecutionArtifact(binding, declaration, artifact.plan, reportName, type);
     if (artifact.kind === "query-plan") return emitQueryPlanArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "join-plan") return emitJoinPlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "project-plan") return emitProjectPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "changed-plan") return emitChangedPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "patch-plan") return emitPatchPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "cache-key-plan") return emitCacheKeyPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "match-plan") {
+      // The tags compile, but the handlers are user functions: there is nothing
+      // to serialize, the way a query binding holding a callback has nothing.
+      skipped.push({
+        schema: reportName,
+        operation: "match",
+        reason: "match handlers are callbacks that cannot be serialized ahead of time",
+      });
+      return undefined;
+    }
+    if (artifact.kind === "access-plan") {
+      js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitAccessSource(artifact.descriptor), "access")};`);
+      return { binding, type };
+    }
+    if (artifact.kind === "canonical-plan") {
+      js.push(`${declaration} /*#__PURE__*/ ${emitCanonicalSource(artifact.schema)};`);
+      return { binding, type };
+    }
+    if (artifact.kind === "reconcile-plan")
+      return emitReconcilePlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
 
@@ -404,11 +453,24 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "operation") return operationType(artifact, typeNames);
     if (artifact.kind === "execution") return executionPlanType(artifact.plan, typeNames);
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
+    if (artifact.kind === "join-plan") return joinPlanType(artifact, typeNames);
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
+    if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
+    if (artifact.kind === "project-plan") return projectPlanType(artifact, typeNames);
+    if (artifact.kind === "changed-plan") return changedPlanType(artifact, typeNames);
+    if (artifact.kind === "patch-plan") return patchPlanType(artifact, typeNames);
+    if (artifact.kind === "cache-key-plan")
+      return `(value: ${namedType(artifact.schema, typeNames)}) => ${artifact.descriptor.form === "hash" ? "number" : "string"}`;
+    if (artifact.kind === "access-plan") return accessPlanType(artifact, typeNames);
+    if (artifact.kind === "canonical-plan") {
+      const canonicalValue = namedType(artifact.schema, typeNames);
+
+      return `(value: ${canonicalValue}) => ${canonicalValue}`;
+    }
     if (artifact.kind === "class") {
       const value = emitTypeScriptType(artifact.schema, typeNames);
       if (artifact.domainEvent) {
@@ -477,6 +539,109 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     return { binding, type };
   }
 
+  /**
+   * A lookup lowers to the access path its facts chose. Only the index path
+   * needs the shared per-array cache; a binary search or a scan carries
+   * nothing at all.
+   */
+  function emitLookupPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "lookup-plan" }>,
+    type: string
+  ): EmittedBinding {
+    if (artifact.lookup.choice.strategy === "CachedIndexLookup") needsRuntimeCachedIndex = true;
+    js.push(`${declaration} /*#__PURE__*/ ${emitLookupSource(artifact.lookup)};`);
+    return { binding, type };
+  }
+
+  /** A projection is one object literal; nothing else has to travel with it. */
+  function emitProjectPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "project-plan" }>,
+    type: string
+  ): EmittedBinding {
+    js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitProjectSource(artifact.tree), "project")};`);
+    return { binding, type };
+  }
+
+  /**
+   * A change mask lowers to the comparison and its bit assignments, plus a
+   * `has` that closes over the field order. No descriptor and no field-name
+   * table travel with it beyond the names `has` needs.
+   */
+  function emitChangedPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "changed-plan" }>,
+    type: string
+  ): EmittedBinding {
+    const paths = artifact.descriptor.fields.map((field) => field.path);
+    const bigint = artifact.descriptor.representation === "bigint";
+
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    for (const equal of changedEqualBindings(artifact.descriptor)) {
+      js.push(`  const ${equal.name} = ${asExpression(equal.source, "equal")};`);
+    }
+    js.push(...indentBlock(emitChangedSource(artifact.descriptor)));
+    js.push(`  const __bits = new Map(${JSON.stringify(paths)}.map((path, index) => [path, index]));`);
+    js.push('  Object.defineProperty(changed, "fields", { value: Object.freeze(' + JSON.stringify(paths) + ") });");
+    js.push('  Object.defineProperty(changed, "has", {');
+    js.push("    value: (mask, path) => {");
+    js.push("      const bit = __bits.get(path);");
+    js.push("      if (bit === undefined) return false;");
+    js.push(bigint ? "      return (mask & (1n << BigInt(bit))) !== 0n;" : "      return (mask & (1 << bit)) !== 0;");
+    js.push("    },");
+    js.push("  });");
+    js.push("  return changed;");
+    js.push("})();");
+    return { binding, type };
+  }
+
+  /**
+   * A merge patch lowers to its specialized functions. A JSON Patch carries its
+   * pointer helpers, because a pointer is data and has to be walked at run
+   * time; the helpers are emitted once per module rather than per artifact.
+   */
+  function emitPatchPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "patch-plan" }>,
+    type: string
+  ): EmittedBinding {
+    if (artifact.mode === "merge") {
+      js.push(`${declaration} /*#__PURE__*/ ${emitMergePatchProgram(artifact.schema)};`);
+      return { binding, type };
+    }
+    needsJsonPatchHelpers = true;
+    js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitJsonPatchSource(artifact.schema), "patch")};`);
+    return { binding, type };
+  }
+
+  /**
+   * A cache key lowers to the concatenation or the combination, plus the schema
+   * hashes any structural field needs. The hash helpers are module-level, so
+   * several keys in one module share them.
+   */
+  function emitCacheKeyPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "cache-key-plan" }>,
+    type: string
+  ): EmittedBinding {
+    const hashes = cacheKeyHashBindings(artifact.descriptor);
+
+    if (hashes.length > 0 || artifact.descriptor.form === "hash") needsHashHelpers = true;
+
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    for (const hash of hashes) js.push(`  const ${hash.name} = ${asExpression(hash.source, "hash")};`);
+    js.push(...indentBlock(emitCacheKeySource(artifact.descriptor)));
+    js.push("  return cacheKey;");
+    js.push("})();");
+    return { binding, type };
+  }
+
   /** Lowers a class descriptor into a plain class expression with no engine dependency. */
   function emitClassArtifact(
     binding: string,
@@ -489,7 +654,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const base = resolveObjectSchema(artifact.schema);
 
     if (!base) {
-      skipped.push({ schema: reportName, operation: "class", reason: "JIT classes require an object schema" });
+      skipped.push({
+        schema: reportName,
+        operation: "class",
+        reason: "JIT classes require an object schema",
+      });
       return undefined;
     }
     const validator = emitValidatorBinding(
@@ -760,12 +929,22 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     return validatorName;
   }
 
-  function emitHashBinding(binding: string, schema: ATS.AnyTypeSchema, reportName: string): string | undefined {
+  function emitHashBinding(
+    binding: string,
+    schema: ATS.AnyTypeSchema,
+    reportName: string,
+    cache = true
+  ): string | undefined {
     const source = tryEmit(reportName, "hash", skipped, () => emitHashSource(schema));
 
     if (!source) return undefined;
 
     needsHashHelpers = true;
+    if (!cache) {
+      js.push(`const ${binding} = ${asExpression(source, "hash")};`);
+      return binding;
+    }
+    needsHashCache = true;
     js.push(`const ${binding} = /*#__PURE__*/ (() => {`);
     js.push(...indentBlock(`const compute = (${source});`));
     js.push("  return (value) => {");
@@ -780,6 +959,70 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     js.push("  };");
     js.push("})();");
     return binding;
+  }
+
+  function emitEqualBinding(binding: string, schema: ATS.AnyTypeSchema, reportName: string): string | undefined {
+    const source = tryEmit(reportName, "equal", skipped, () => emitEqualSource(schema));
+    if (!source) return undefined;
+    if (source.includes("__getIndex")) needsRuntimeGetIndex = true;
+    if (source.includes("__hash")) {
+      const hashBinding = internalIdentifier(`${binding}_hash`);
+      if (!emitHashBinding(hashBinding, schema, reportName)) return undefined;
+      js.push(`const ${binding} = /*#__PURE__*/ ((__hash) => ${asExpression(source, "equal")})(${hashBinding});`);
+    } else {
+      js.push(`const ${binding} = ${asExpression(source, "equal")};`);
+    }
+    return binding;
+  }
+
+  /**
+   * A reconciliation lowers to the loop plus the two functions it actually
+   * calls: the specialized equality, and the diff only when the declaration
+   * asked for one. No engine, no descriptor, no channel switches — the
+   * channels were already resolved into the emitted body.
+   */
+  function emitReconcilePlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "reconcile-plan" }>,
+    reportName: string,
+    type: string
+  ): EmittedBinding | undefined {
+    // The row, not the collection: reconcile compares two rows that share an
+    // identity, so it needs `equal(User)` and never `equal(Users)`.
+    const object = resolveRowObjectSchema(artifact.schema, "reconcile");
+    const source = tryEmit(reportName, "reconcile", skipped, () => emitReconcileSource(artifact.descriptor));
+
+    if (!source) return undefined;
+
+    // The emitted body already resolved the channels, so a comparison the
+    // declaration cannot reach is not generated — not merely left uncalled.
+    const prelude: string[] = [];
+
+    if (source.includes("__reconcileEqual")) {
+      const equalBinding = internalIdentifier(`${binding}_equal`);
+
+      if (!emitEqualBinding(equalBinding, object, reportName)) return undefined;
+      prelude.push(`  const __reconcileEqual = ${equalBinding};`);
+    }
+
+    if (source.includes("__reconcileDiff")) {
+      const diffSource = tryEmit(reportName, "reconcile.diff", skipped, () => emitDiffSource(object));
+
+      if (!diffSource) return undefined;
+
+      const diffBinding = internalIdentifier(`${binding}_diff`);
+
+      js.push(`const ${diffBinding} = ${asExpression(diffSource, "diff")};`);
+      prelude.push(`  const __reconcileDiff = ${diffBinding};`);
+    }
+
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...prelude);
+    js.push(...indentBlock(source));
+    js.push("  return reconcile;");
+    js.push("})();");
+    return { binding, type };
   }
 
   function emitOperationArtifact(
@@ -913,7 +1156,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
 
     if (inlined === undefined) {
-      skipped.push({ schema: reportName, operation, reason: "codec bindings cannot be serialized" });
+      skipped.push({
+        schema: reportName,
+        operation,
+        reason: "codec bindings cannot be serialized",
+      });
       return false;
     }
 
@@ -935,15 +1182,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   ): EmittedBinding | undefined {
     const program = artifact.program as QueryProgram & LazyQueryProgram;
     const source = tryEmit(reportName, "query", skipped, () =>
-      artifact.mode === "iterator"
-        ? emitQueryIteratorSource(artifact.schema, program)
-        : artifact.mode === "async-iterator"
-          ? emitQueryAsyncIteratorSource(artifact.schema, program)
-          : artifact.mode === "visitor"
-            ? emitQueryVisitorSource(artifact.schema, program)
-            : hasIncrementalQueryNodes(program)
-              ? emitQueryArraySource(artifact.schema, program)
-              : emitQuerySource(artifact.schema, program)
+      emitQueryPlanSource(artifact.schema, program, artifact.mode)
     );
 
     if (!source) return undefined;
@@ -964,9 +1203,23 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return undefined;
     }
 
+    let distinctHash: string | undefined;
+    let distinctEqual: string | undefined;
+    if (source.includes("__distinctHash")) {
+      const objectSchema = expectCollectionObjectSchema(artifact.schema, "AOT distinct").objectSchema;
+      distinctHash = internalIdentifier(`${binding}_distinct_hash`);
+      distinctEqual = internalIdentifier(`${binding}_distinct_equal`);
+      if (!emitHashBinding(distinctHash, objectSchema, reportName, false)) return undefined;
+      if (!emitEqualBinding(distinctEqual, objectSchema, reportName)) return undefined;
+    }
+
     const standard = artifact.standard === undefined ? undefined : JSON.stringify(artifact.standard);
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push(...inlined.map((line) => `  ${line}`));
+    if (distinctHash && distinctEqual) {
+      js.push(`  const __distinctHash = ${distinctHash};`);
+      js.push(`  const __distinctEqual = ${distinctEqual};`);
+    }
     js.push(
       ...indentBlock(
         standard === undefined
@@ -978,21 +1231,43 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     return { binding, type };
   }
 
-  function hasIncrementalQueryNodes(program: LazyQueryProgram): boolean {
-    return program.nodes.some((node) =>
-      [
-        "flatMap",
-        "take",
-        "drop",
-        "takeWhile",
-        "dropWhile",
-        "chunk",
-        "window",
-        "pairwise",
-        "scan",
-        "groupAdjacentBy",
-      ].includes(node.kind)
+  function emitJoinPlanArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "join-plan" }>,
+    reportName: string,
+    type: string
+  ): EmittedBinding | undefined {
+    const source = tryEmit(reportName, "join", skipped, () => emitJoinSource(artifact.plan));
+    if (!source) return undefined;
+    if (source.includes("__cachedIndex")) needsRuntimeCachedIndex = true;
+
+    const bindings = artifact.plan.leftProgram.bindings;
+    const inlined = inlineBindings(
+      bindings.map((_, index) => `__q${index}`),
+      bindings
     );
+    if (inlined === undefined) {
+      skipped.push({
+        schema: reportName,
+        operation: "join",
+        reason: "join bindings hold callbacks that cannot be serialized ahead of time",
+      });
+      return undefined;
+    }
+
+    const standard = artifact.standard === undefined ? undefined : JSON.stringify(artifact.standard);
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...inlined.map((line) => `  ${line}`));
+    js.push(
+      ...indentBlock(
+        standard === undefined
+          ? `return (${source});`
+          : `const join = (${source}); Object.defineProperty(join, "~query", { value: ${standard} }); return join;`
+      )
+    );
+    js.push("})();");
+    return { binding, type };
   }
 
   function emitCqrsInputArtifact(
@@ -1004,7 +1279,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   ): EmittedBinding | undefined {
     const definition = JSON.stringify(artifact.definition);
     if (definition === undefined) {
-      skipped.push({ schema: reportName, operation: "cqrs-input", reason: "CQRS definition cannot be serialized" });
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-input",
+        reason: "CQRS definition cannot be serialized",
+      });
       return undefined;
     }
     const parserSource = artifact.source.replace("return function parse", "const parse = function parse");
@@ -1023,7 +1302,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     type: string
   ): EmittedBinding | undefined {
     if (JSON.stringify(artifact.definition) === undefined) {
-      skipped.push({ schema: reportName, operation: "cqrs-parser", reason: "CQRS definition cannot be serialized" });
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-parser",
+        reason: "CQRS definition cannot be serialized",
+      });
       return undefined;
     }
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
@@ -1085,7 +1368,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const mapping = mapStage.bindings[0];
 
       if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-        skipped.push({ schema: reportName, operation: "map", reason: "mapping descriptor is malformed" });
+        skipped.push({
+          schema: reportName,
+          operation: "map",
+          reason: "mapping descriptor is malformed",
+        });
         return undefined;
       }
 
@@ -1164,7 +1451,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
 
       if (validateStage.operation === "is") {
         if (hasJsonDecode || hasBinaryDecode) {
-          skipped.push({ schema: reportName, operation: "is", reason: "is must receive a value source in AOT output" });
+          skipped.push({
+            schema: reportName,
+            operation: "is",
+            reason: "is must receive a value source in AOT output",
+          });
           return undefined;
         }
         js.push(`${declaration} /*#__PURE__*/ ((v) => v.is)(${validatorName});`);
@@ -1248,7 +1539,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
 
       if (inlined === undefined) {
-        skipped.push({ schema: reportName, operation: "binary", reason: "codec bindings cannot be serialized" });
+        skipped.push({
+          schema: reportName,
+          operation: "binary",
+          reason: "codec bindings cannot be serialized",
+        });
         return undefined;
       }
 
@@ -1263,13 +1558,21 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return emitOperationArtifact(
         binding,
         declaration,
-        { kind: "operation", schema: plan.schema, op: operationStage.operation },
+        {
+          kind: "operation",
+          schema: plan.schema,
+          op: operationStage.operation,
+        },
         reportName,
         type
       );
     }
 
-    skipped.push({ schema: reportName, operation: "execution", reason: "no AOT backend matches this execution plan" });
+    skipped.push({
+      schema: reportName,
+      operation: "execution",
+      reason: "no AOT backend matches this execution plan",
+    });
     return undefined;
   }
 
@@ -1294,7 +1597,12 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const emitComposedValidator = (schema: ATS.AnyTypeSchema, materializeRuntimeTypes = true): string | undefined => {
       const fastParse = canUseFastParse(schema);
       const validator = tryEmit(name, "validate", skipped, () =>
-        emitValidator(schema, { is: fastParse, safeParse: true, safeParseAsync: false, materializeRuntimeTypes })
+        emitValidator(schema, {
+          is: fastParse,
+          safeParse: true,
+          safeParseAsync: false,
+          materializeRuntimeTypes,
+        })
       );
 
       if (!validator) return undefined;
@@ -1327,7 +1635,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const inlined = inlineCodecBindings(codec.bindingNames, codec.bindingValues);
 
       if (inlined === undefined) {
-        skipped.push({ schema: name, operation, reason: "codec bindings cannot be serialized" });
+        skipped.push({
+          schema: name,
+          operation,
+          reason: "codec bindings cannot be serialized",
+        });
         return undefined;
       }
       const codecName = internalIdentifier(`${binding}_codec`);
@@ -1372,7 +1684,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const mapping = stage.bindings[0];
 
       if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-        skipped.push({ schema: name, operation: "map", reason: "mapping descriptor is malformed" });
+        skipped.push({
+          schema: name,
+          operation: "map",
+          reason: "mapping descriptor is malformed",
+        });
         return undefined;
       }
       const mapperPlan = tryEmit(name, "map", skipped, () =>
@@ -1749,7 +2065,6 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   }
   if (needsHashHelpers) {
     helpers.push(
-      "const __hashCache = new WeakMap();",
       "function __hashNumber(value) { return value | 0; }",
       "function __hashBoolean(value) { return value ? 1 : 0; }",
       "function __hashBigInt(value) { return Number(value & 0xffffffffn) | 0; }",
@@ -1774,7 +2089,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       "}",
       "function __combineHash(left, right) { return ((left << 5) - left + right) | 0; }"
     );
+    if (needsHashCache) helpers.unshift("const __hashCache = new WeakMap();");
   }
+  if (needsJsonPatchHelpers) helpers.push(...JSON_PATCH_HELPERS.split("\n"), ...PATCH_EQUAL_HELPER.split("\n"));
   if (needsMockHelpers) helpers.push(...MOCK_HELPERS.split("\n"));
   if (needsRuntimeGetIndex) {
     helpers.push(
@@ -1828,7 +2145,13 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       ? `${js.join("\n")}\nexport { ${exportNames.join(", ")} };\n`
       : `${js.join("\n")}\nexport {};\n`;
 
-  return { name: plan.name, source, exports: exportNames, types: ts ? typeExports : [], skipped };
+  return {
+    name: plan.name,
+    source,
+    exports: exportNames,
+    types: ts ? typeExports : [],
+    skipped,
+  };
 }
 
 /**
@@ -1867,6 +2190,7 @@ function readBackType(
 ): ((path: string) => string) | undefined {
   if (
     artifact.kind !== "query-plan" &&
+    artifact.kind !== "join-plan" &&
     artifact.kind !== "query" &&
     artifact.kind !== "mapper" &&
     artifact.kind !== "watch"
@@ -1879,9 +2203,32 @@ function readBackType(
   // A query builder also carries its chain operators; only the call
   // signature survives into the generated function.
   return (path) =>
-    artifact.kind === "query-plan"
+    artifact.kind === "query-plan" || artifact.kind === "join-plan"
       ? `__JitCall<typeof import(${specifier}).${path}>`
       : `typeof import(${specifier}).${path}`;
+}
+
+function joinPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "join-plan" }>,
+  typeNames: TypeNames
+): string {
+  const left = namedType(artifact.plan.leftSchema, typeNames);
+  const right = namedType(artifact.plan.rightSchema, typeNames);
+  const leftRow = queryArtifactRowType(artifact.plan.leftSchema, typeNames);
+  const rightRow = queryArtifactRowType(artifact.plan.rightSchema, typeNames);
+  const result =
+    artifact.plan.kind === "semi" || artifact.plan.kind === "anti"
+      ? `${leftRow}[]`
+      : artifact.plan.kind === "left"
+        ? `{ readonly left: ${leftRow}; readonly right: ${rightRow} | undefined }[]`
+        : `{ readonly left: ${leftRow}; readonly right: ${rightRow} }[]`;
+  return `(left: ${left}, right: ${right}) => ${result}`;
+}
+
+function queryArtifactRowType(schema: ATS.AnyTypeSchema, typeNames: TypeNames): string {
+  const base = resolveWrappers(schema).base;
+  const row = base.type === TypeName.array ? (base.def as ATS.ElementDef).element : base;
+  return namedType(row, typeNames);
 }
 
 function queryPlanType(
@@ -2000,6 +2347,71 @@ function indexPlanType(
     index = `Map<unknown, ${index}>`;
   }
   return `((value: readonly ${value}[]) => ${index}) & { readonly cached: (value: readonly ${value}[]) => ${index} }`;
+}
+
+/**
+ * A lookup answers one row or nothing. The key type comes from the row's own
+ * declared field, so the generated declaration is as precise as the schema.
+ */
+function lookupPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "lookup-plan" }>,
+  typeNames: TypeNames
+): string {
+  const schema = resolveWrappers(artifact.schema).base;
+  const row =
+    schema.type === TypeName.array
+      ? (schema.def as ATS.ElementDef).element
+      : schema.type === TypeName.runtimeType
+        ? (schema.def as ATS.RuntimeTypeDef).innerType
+        : schema;
+  const value = namedType(row, typeNames);
+  const key = `${value}[${JSON.stringify(artifact.lookup.key)}]`;
+
+  return `(value: readonly ${value}[], key: ${key}) => ${value} | undefined`;
+}
+
+/** The projection's own schema already describes the result, so it types itself. */
+function projectPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "project-plan" }>,
+  typeNames: TypeNames
+): string {
+  return `(value: ${namedType(artifact.schema, typeNames)}) => ${emitTypeScriptType(artifact.tree.schema, typeNames)}`;
+}
+
+/** The mask's width follows its representation, and `has` accepts only watched paths. */
+function changedPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "changed-plan" }>,
+  typeNames: TypeNames
+): string {
+  const value = namedType(artifact.schema, typeNames);
+  const mask = artifact.descriptor.representation === "bigint" ? "bigint" : "number";
+  const paths = artifact.descriptor.fields.map((field) => JSON.stringify(field.path)).join(" | ");
+
+  return `((left: ${value}, right: ${value}) => ${mask}) & { has(mask: ${mask}, path: ${paths}): boolean; readonly fields: readonly (${paths})[] }`;
+}
+
+function patchPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "patch-plan" }>,
+  typeNames: TypeNames
+): string {
+  const value = namedType(artifact.schema, typeNames);
+
+  return artifact.mode === "merge"
+    ? `(value: ${value}, patch: unknown) => ${value}`
+    : `(value: ${value}, operations: readonly { readonly op: string; readonly path: string; readonly value?: unknown; readonly from?: string }[]) => ${value}`;
+}
+
+/** Actions are literals, so the generated ability only admits ones a rule declared. */
+function accessPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "access-plan" }>,
+  typeNames: TypeNames
+): string {
+  const subject = namedType(artifact.schema, typeNames);
+  const actor = artifact.descriptor.actor === undefined ? "unknown" : namedType(artifact.descriptor.actor, typeNames);
+  const actions = artifact.descriptor.actions.map((action) => JSON.stringify(action)).join(" | ") || "never";
+  const check = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => boolean`;
+
+  return `(actor: ${actor}) => { can: ${check}; cannot: ${check} }`;
 }
 
 function moduleNameFromSource(sourceFile: string): string {

@@ -11,8 +11,10 @@ function sourceOf(compiled: object): string {
   const artifact = getArtifact(compiled);
 
   if (!artifact) throw new Error("compiled source artifact not registered");
-  // A query builder carries its program; everything else carries its source.
-  if (artifact.kind === "query-plan") return Compiler.emitQuerySource(artifact.schema, artifact.program as never);
+  // A query builder carries its program and the result shape it was declared
+  // for; the plan is lowered through the same dispatch AOT uses.
+  if (artifact.kind === "query-plan")
+    return Compiler.emitQueryPlanSource(artifact.schema, artifact.program as never, artifact.mode);
   // A sort plan carries its ordering descriptor; the comparator is emitted from it.
   if (artifact.kind === "sort-plan") return Compiler.emitSortSource(artifact.descriptor);
   // An index plan carries its descriptor; the builder is emitted from it.

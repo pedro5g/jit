@@ -1,3 +1,4 @@
+import { allFieldPaths, compileChanged, resolveChangedDescriptor } from "../compiler/changed.js";
 import { type Clone, compileClone } from "../compiler/clone.js";
 import { type CodecCompileOptions, type CompiledCodec, compileCodec } from "../compiler/codec.js";
 import { compileDiff, type Diff } from "../compiler/diff.js";
@@ -8,6 +9,7 @@ import { compileStringifyChunks, type JsonChunksOptions } from "../compiler/json
 import type { MapperOverridesInput } from "../compiler/mapper/build-mapper-plan.js";
 import { compileMask, type Mask } from "../compiler/mask.js";
 import { compileMock, type Mock } from "../compiler/mock.js";
+import { buildProjectionTree } from "../compiler/projection.js";
 import { compileSanitize, type Sanitize } from "../compiler/sanitize.js";
 import type { SafeParseResult } from "../compiler/validate.js";
 import type * as ATS from "../core/ats/index.js";
@@ -194,12 +196,112 @@ export const binary: BinaryNamespace = Object.freeze({
   },
 });
 
+/** Paths a selection may name: a declared field, or a dotted path into one. */
+type SelectablePath<TValue, TDepth extends readonly unknown[] = []> = TDepth["length"] extends 4
+  ? never
+  : TValue extends readonly unknown[]
+    ? never
+    : TValue extends Date
+      ? never
+      : TValue extends object
+        ? {
+            [K in Extract<keyof TValue, string>]:
+              | K
+              | (SelectablePath<NonNullable<TValue[K]>, [...TDepth, unknown]> extends infer TNested extends string
+                  ? `${K}.${TNested}`
+                  : never);
+          }[Extract<keyof TValue, string>]
+        : never;
+
+export interface SelectableEqual<TValue> extends RuntimeCompiledFunction<Equal<TValue>> {
+  /**
+   * Compares only the named fields. The other fields are not read, not
+   * compared and not present in the generated source at all.
+   */
+  select<const TPaths extends readonly SelectablePath<TValue>[]>(
+    ...paths: TPaths
+  ): RuntimeCompiledFunction<Equal<TValue>>;
+}
+
 export function equal<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): RuntimeCompiledFunction<Equal<ATS.TypeofSchema<TSchema>>> {
-  return operationArtifact(schema, "equal", "value", "boolean", compileEqual) as RuntimeCompiledFunction<
-    Equal<ATS.TypeofSchema<TSchema>>
-  >;
+): SelectableEqual<ATS.TypeofSchema<TSchema>> {
+  const artifact = operationArtifact(schema, "equal", "value", "boolean", compileEqual);
+
+  // Operation artifacts are cached per schema, so the same object comes back on
+  // every call and `select` is installed exactly once.
+  if ("select" in artifact) return artifact as SelectableEqual<ATS.TypeofSchema<TSchema>>;
+
+  // A selection lowers to an ordinary `equal` over the projection's own schema,
+  // so it inherits the equality optimizer, the artifact registry and the AOT
+  // emitter without any of them learning what a projection is.
+  Object.defineProperty(artifact, "select", {
+    value: (...paths: string[]) =>
+      operationArtifact(
+        buildProjectionTree(unwrapSchema(schema), paths, "JIT.compare.equal().select()").schema,
+        "equal",
+        "value",
+        "boolean",
+        compileEqual
+      ),
+  });
+  return artifact as SelectableEqual<ATS.TypeofSchema<TSchema>>;
+}
+
+/**
+ * Which watched fields differ, as a bitmask.
+ *
+ * `has` is the reason the result is a number: testing one field is a single
+ * bitwise `and`, where a `{ field: boolean }` result would have allocated an
+ * object per comparison to answer it.
+ */
+export interface ChangedMask<TValue, TPath extends string, TMask> {
+  (left: TValue, right: TValue): TMask;
+  has(mask: TMask, path: TPath): boolean;
+  /** The watched fields in bit order, so a caller can report what moved. */
+  readonly fields: readonly TPath[];
+}
+
+export interface ChangedBuilder<TValue> extends ChangedMask<TValue, SelectablePath<TValue>, number> {
+  /**
+   * Watches only the named fields. Bit order follows the order given here.
+   */
+  select<const TPaths extends readonly SelectablePath<TValue>[]>(
+    ...paths: TPaths
+  ): ChangedMask<TValue, TPaths[number], number>;
+}
+
+export function changed<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): ChangedBuilder<ATS.TypeofSchema<TSchema>> {
+  const unwrapped = unwrapSchema(schema);
+  const plan = createChangedMask(unwrapped, allFieldPaths(unwrapped, "JIT.compare.changed()"));
+
+  Object.defineProperty(plan, "select", {
+    value: (...paths: string[]) => createChangedMask(unwrapped, paths),
+  });
+  return plan as ChangedBuilder<ATS.TypeofSchema<TSchema>>;
+}
+
+function createChangedMask(schema: ATS.AnyTypeSchema, paths: readonly string[]) {
+  const descriptor = resolveChangedDescriptor(schema, paths);
+  const compiled = compileChanged<unknown, number>(schema, descriptor);
+  const fields = descriptor.fields.map((field) => field.path);
+  // The bit for a path is its position, so `has` is a lookup and one `and`.
+  const bits = new Map(fields.map((path, index) => [path, index]));
+
+  Object.defineProperties(compiled, {
+    fields: { value: Object.freeze(fields) },
+    has: {
+      value: (mask: number | bigint, path: string) => {
+        const bit = bits.get(path);
+
+        if (bit === undefined) return false;
+        return typeof mask === "bigint" ? (mask & (1n << BigInt(bit))) !== 0n : (mask & (1 << bit)) !== 0;
+      },
+    },
+  });
+  return compiled as ChangedMask<unknown, string, number>;
 }
 
 export function clone<TSchema extends ATS.AnyTypeSchema>(
@@ -253,7 +355,7 @@ function sanitize<TSchema extends ATS.AnyTypeSchema>(
 }
 
 /** Structural comparison capability: one schema in, one compiled function out. */
-export const compare = Object.freeze({ equal, diff, hash });
+export const compare = Object.freeze({ equal, diff, hash, changed });
 /** Boundary hardening capability. `mask` redacts, `sanitize` rewrites. */
 export const security = Object.freeze({ mask, sanitize });
 

@@ -3,6 +3,8 @@ import { TypeName } from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { CodeWriter } from "./emitter/code-writer.js";
+import { compileEqual } from "./equal.js";
+import { buildProjectionTree } from "./projection.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
 import { emitPropertyAccess } from "./source/access.js";
 
@@ -45,6 +47,14 @@ export interface WatchResult<TItem> {
  */
 export interface WatchOptions<TItem> {
   readonly key: Extract<keyof TItem, string>;
+  /**
+   * Fields that decide whether a matched item counts as updated.
+   *
+   * Without this, identity is reference: an item rebuilt from the wire with the
+   * same values is reported as an update. Naming fields compares those fields
+   * instead, with the schema's own equality and nothing else read.
+   */
+  readonly fields?: readonly Extract<keyof TItem, string>[];
   readonly onAdd?: (item: TItem) => void;
   readonly onRemove?: (item: TItem) => void;
   readonly onUpdate?: (previous: TItem, current: TItem) => void;
@@ -131,6 +141,15 @@ function emitWatchProgram<TSchema extends ATS.AnyTypeSchema>(
   validateObjectKeys(target.objectSchema, [key], "watch");
 
   const bindings: unknown[] = [];
+  // A declared subset compiles to an equality over just those fields, so a
+  // rebuilt item is only an update when something the caller named moved.
+  const changedBy =
+    options.fields === undefined || options.fields.length === 0
+      ? undefined
+      : addOptionalBinding(
+          bindings,
+          compileEqual(buildProjectionTree(target.objectSchema, options.fields, "watch").schema)
+        );
   const onAdd = addOptionalBinding(bindings, options.onAdd);
   const onRemove = addOptionalBinding(bindings, options.onRemove);
   const onUpdate = addOptionalBinding(bindings, options.onUpdate);
@@ -162,7 +181,11 @@ function emitWatchProgram<TSchema extends ATS.AnyTypeSchema>(
         writer.line("newItems[newItems.length] = item;");
         if (onAdd) writer.line(`${onAdd}(item);`);
       });
-      writer.line("} else if (previousItem !== item) {");
+      writer.line(
+        changedBy === undefined
+          ? "} else if (previousItem !== item) {"
+          : `} else if (previousItem !== item && !${changedBy}(previousItem, item)) {`
+      );
       writer.indent(() => {
         writer.line("updatedItems[updatedItems.length] = { previous: previousItem, current: item };");
         if (onUpdate) writer.line(`${onUpdate}(previousItem, item);`);

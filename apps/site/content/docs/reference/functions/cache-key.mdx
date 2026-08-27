@@ -1,0 +1,89 @@
+---
+title: cacheKey
+description: Build a cache key from a few fields, without walking the value or building an object to throw away.
+---
+
+## Signature
+
+```ts
+const Row = JIT.object({
+  tenantId: JIT.string(),
+  id: JIT.number(),
+  version: JIT.number(),
+  notes: JIT.string(),
+});
+
+const key = JIT.cacheKey.string(Row).select("tenantId", "id", "version");
+
+console.log(JSON.stringify(key({ tenantId: "t1", id: 7, version: 3, notes: "…" })));
+```
+
+`JIT.cacheKey(Row)` is the string form. The alternative this replaces —
+`JSON.stringify({ tenantId, id, version })` — allocates an object to describe a
+selection that was already known, then walks it with a generic serializer.
+
+## Two forms
+
+```ts
+const Row = JIT.object({ tenantId: JIT.string(), id: JIT.number() });
+const row = { tenantId: "t1", id: 7 };
+
+const asString = JIT.cacheKey.string(Row).select("tenantId", "id");
+const asNumber = JIT.cacheKey.hash(Row).select("tenantId", "id");
+
+console.log(typeof asString(row), typeof asNumber(row));
+console.log(asNumber(row) === asNumber({ ...row }));
+```
+
+`hash` returns a 32-bit integer and never builds a string, so it allocates
+nothing. Use it for an in-process `Map`; use `string` when the key crosses a
+process boundary or has to be readable. A hash can collide — treat it as a
+bucket rather than an identity.
+
+## What each field becomes
+
+| Declared type           | In the key                    |
+| ----------------------- | ----------------------------- |
+| string, literal, enum   | used as-is                    |
+| number, boolean, bigint | stringified directly          |
+| `Date`                  | its timestamp                 |
+| object, array, Map, Set | the schema's own hash         |
+| optional / nullable     | a marker distinct from `""`   |
+
+```ts
+const Row = JIT.object({ at: JIT.date(), flag: JIT.boolean() });
+const key = JIT.cacheKey.string(Row).select("at", "flag");
+
+console.log(key({ at: new Date("2026-01-01T00:00:00Z"), flag: true }));
+```
+
+## Order and separators
+
+Parts are separated by a control character, so two fields cannot run together
+into the same key:
+
+```ts
+const Pair = JIT.object({ a: JIT.string(), b: JIT.string() });
+const key = JIT.cacheKey.string(Pair).select("a", "b");
+
+console.log(key({ a: "a", b: "bc" }) !== key({ a: "ab", b: "c" }));
+```
+
+The order you name the fields in is part of the key, so a stored key is only
+comparable with keys from the same declaration:
+
+```ts
+const Row = JIT.object({ tenantId: JIT.string(), id: JIT.number() });
+const row = { tenantId: "t1", id: 7 };
+
+const forward = JIT.cacheKey.string(Row).select("tenantId", "id");
+const reverse = JIT.cacheKey.string(Row).select("id", "tenantId");
+
+console.log(forward(row) !== reverse(row));
+```
+
+## See also
+
+- [Hash](./hash) — a structural hash of the whole value
+- [Project](./project) — the same selection, materialized
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/cache-key.md) — generated code, allocation model and benchmarks

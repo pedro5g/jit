@@ -39,6 +39,68 @@ export interface Solution {
 
 export const SOLUTIONS: Solution[] = [
   {
+    id: "deduplicate-object-array",
+    triggers: [
+      ["remover", "duplicados"],
+      ["deduplicar", "array"],
+      ["distinct", "object"],
+      ["unique", "compound"],
+    ],
+    problem:
+      "JSON.stringify and compound string keys allocate temporary data for every row, while repeated equality scans can become O(n²).",
+    apis: ["JIT.cqrs.query", "distinct"],
+    example: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const User = JIT.object({ tenantId: JIT.string(), id: JIT.number(), name: JIT.string() });
+const distinctUsers = JIT.cqrs.query(User).distinct("tenantId", "id");
+
+distinctUsers([
+  { tenantId: "a", id: 1, name: "Ada" },
+  { tenantId: "a", id: 1, name: "Duplicate" },
+]);`,
+    why: [
+      "The compiler emits direct tenantId/id reads and a nested Map trie, so no tuple or compound string is allocated per row.",
+      "For complete-row distinct, schema-specialized hash narrows candidates and compiled equality confirms collisions.",
+      "A matching ordered fact lets the planner use adjacent comparison with O(1) retained deduplication state.",
+    ],
+    page: "/docs/reference/functions/query#operators",
+  },
+  {
+    id: "nested-array-join",
+    triggers: [
+      ["join", "array"],
+      ["join", "lento"],
+      ["join", "slow"],
+      ["find", "dentro", "loop"],
+      ["relacionar", "lista"],
+      ["combinar", "colecao"],
+    ],
+    problem:
+      "Relating two arrays with find/filter inside the outer loop re-scans the right side for every left row, making the operation O(n*m).",
+    apis: ["JIT.cqrs.query", "join", "on", "keyed"],
+    example: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const Order = JIT.object({ id: JIT.number(), customerId: JIT.string() });
+const Customer = JIT.object({ id: JIT.string(), name: JIT.string() });
+
+const joinOrders = JIT.cqrs
+  .query(Order)
+  .join(JIT.array(Customer).keyed("id"))
+  .on("customerId", "id");
+
+joinOrders(
+  [{ id: 1, customerId: "c1" }],
+  [{ id: "c1", name: "Ada" }],
+);`,
+    why: [
+      "A hash join builds the right access path once and scans the left once, replacing O(n*m) nested search with expected O(n + m + k).",
+      "The keyed fact opts into a WeakMap-cached right index, so repeated calls over the same right array skip the build and cost expected O(n + k).",
+      "If both inputs already declare compatible ordering, the planner uses two merge cursors and allocates no access index.",
+      "The generated loop reads leftRow.customerId directly and contains no generic join dispatcher or per-left-row callback.",
+    ],
+    page: "/docs/reference/functions/query#joins",
+  },
+  {
     id: "slow-filter-large-collection",
     triggers: [
       ["lento", "filtr"],

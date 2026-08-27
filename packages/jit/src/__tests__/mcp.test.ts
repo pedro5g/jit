@@ -154,7 +154,7 @@ describe("jit MCP server", () => {
       expect(surface.content[0].text).toContain(
         "JIT.validate.{ async, is, issues, parse, parseAsync, safeParse, safeParseAsync }"
       );
-      expect(surface.content[0].text).toContain("JIT.compare.{ diff, equal, hash }");
+      expect(surface.content[0].text).toContain("JIT.compare.{ changed, diff, equal, hash }");
       expect(surface.content[0].text).toContain("A name that does not appear here does not exist");
     });
 

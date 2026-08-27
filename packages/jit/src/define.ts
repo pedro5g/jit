@@ -3,6 +3,10 @@
  * runtime package, but artifacts are descriptors that deliberately cannot
  * execute before `jit generate` has lowered them.
  */
+
+import { type AccessRule, resolveAccessDescriptor, unconditionalFields } from "./compiler/access.js";
+import { resolveCacheKeyDescriptor } from "./compiler/cache-key.js";
+import { allFieldPaths, resolveChangedDescriptor } from "./compiler/changed.js";
 import type { Clone } from "./compiler/clone.js";
 import type { CompiledCodec } from "./compiler/codec.js";
 import type { Diff } from "./compiler/diff.js";
@@ -13,9 +17,18 @@ import type { Hash } from "./compiler/hash.js";
 import { type IndexShape, resolveIndexDescriptor, resolveIndexKeysFromFacts } from "./compiler/indexing.js";
 import type { JsonChunksOptions } from "./compiler/json-chunks.js";
 import type { ToJsonSchemaOptions } from "./compiler/json-schema/index.js";
+import { resolveLookupDescriptor } from "./compiler/lookup.js";
 import type { Mask } from "./compiler/mask.js";
 import type { Mock } from "./compiler/mock.js";
 import { type OrderDirection, resolveOrderingDescriptor } from "./compiler/ordering.js";
+import { buildProjectionTree } from "./compiler/projection.js";
+import {
+  ALL_CHANNELS,
+  type ReconcileChanges,
+  type ReconcileChannels,
+  type ReconcileSink,
+  resolveReconcileDescriptor,
+} from "./compiler/reconcile.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
 import type { Sanitize } from "./compiler/sanitize.js";
 import type { Serialize } from "./compiler/serialize.js";
@@ -26,10 +39,14 @@ import type { SchemaInput } from "./core/builder/index.js";
 import { unwrapSchema } from "./core/builder/index.js";
 import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/host.js";
 import { JITError } from "./errors/index.js";
+import type { AccessBuilder } from "./factories/access.js";
 import type { CqrsInput, CqrsQuery, ParsedCqrsInput } from "./factories/cqrs.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
 import * as RuntimeJIT from "./factories/index.js";
 import type { IndexBuilder, KeyedIndexPlan } from "./factories/indexing.js";
+import type { LookupBuilder, LookupPlan } from "./factories/lookup.js";
+import type { ProjectBuilder } from "./factories/project.js";
+import type { ReconcileChange, ReconcilePlan, ResolvedChannels } from "./factories/reconcile.js";
 import type { SortBuilder, SortPlan } from "./factories/sort.js";
 import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
 
@@ -211,8 +228,75 @@ function mapMany<TSource extends ATS.AnyTypeSchema, TTarget extends ATS.AnyTypeS
 
 function equal<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): DefineFunction<Equal<ATS.TypeofSchema<TSchema>>> {
-  return operationStub<TSchema, Equal<ATS.TypeofSchema<TSchema>>>(schema, "equal", "boolean");
+): DefineSelectableEqual<ATS.TypeofSchema<TSchema>> {
+  // The runtime lowers a selection to an ordinary `equal` over the projection's
+  // schema; the definition host declares the very same artifact, so the two
+  // stay one-to-one without a parallel API.
+  const select = (...paths: string[]) =>
+    operationStub(
+      buildProjectionTree(unwrapSchema(schema), paths, "JIT.compare.equal().select()").schema,
+      "equal",
+      "boolean"
+    );
+
+  return operationStub<TSchema, Equal<ATS.TypeofSchema<TSchema>>>(schema, "equal", "boolean", {
+    select,
+  }) as DefineSelectableEqual<ATS.TypeofSchema<TSchema>>;
+}
+
+interface DefineSelectableEqual<TValue> extends DefineFunction<Equal<TValue>> {
+  select(...paths: readonly string[]): DefineFunction<Equal<TValue>>;
+}
+
+/**
+ * A change mask resolves its watched fields at declaration time, so a bad path
+ * fails here rather than at generation.
+ */
+function changed<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): DefineChanged {
+  const unwrapped = unwrapSchema(schema);
+  const stub = defineChangedMask(unwrapped, allFieldPaths(unwrapped, "JIT.compare.changed()"));
+
+  Object.defineProperty(stub, "select", { value: (...paths: string[]) => defineChangedMask(unwrapped, paths) });
+  return stub as DefineChanged;
+}
+
+interface DefineChanged extends DefineFunction<(left: unknown, right: unknown) => number> {
+  select(...paths: readonly string[]): DefineFunction<(left: unknown, right: unknown) => number>;
+  has(mask: number, path: string): boolean;
+  readonly fields: readonly string[];
+}
+
+function defineChangedMask(schema: ATS.AnyTypeSchema, paths: readonly string[]) {
+  const descriptor = resolveChangedDescriptor(schema, paths);
+  const fields = descriptor.fields.map((field) => field.path);
+  const bits = new Map(fields.map((path, index) => [path, index]));
+  const stub = function aotChangedArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as DefineChanged;
+
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:changed",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "changed" },
+      } satisfies ArtifactDescriptor,
+    },
+    fields: { value: Object.freeze(fields) },
+    has: {
+      value: (mask: number | bigint, path: string) => {
+        const bit = bits.get(path);
+
+        if (bit === undefined) return false;
+        return typeof mask === "bigint" ? (mask & (1n << BigInt(bit))) !== 0n : (mask & (1 << bit)) !== 0;
+      },
+    },
+  });
+  registerArtifact(stub, { kind: "changed-plan", schema, descriptor });
+  return stub;
 }
 
 function clone<TSchema extends ATS.AnyTypeSchema>(
@@ -300,7 +384,10 @@ function defineSort<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSche
 
 function createDefineSortPlan<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  criteria: readonly { readonly key: string; readonly direction: OrderDirection }[]
+  criteria: readonly {
+    readonly key: string;
+    readonly direction: OrderDirection;
+  }[]
 ): SortPlan<TSchema> {
   const descriptor = resolveOrderingDescriptor(schema, criteria);
   const stub = function aotSortArtifact(): never {
@@ -378,8 +465,286 @@ function createDefineIndexPlan<TRow, TIndex>(
   // Resolving here keeps a definition file honest: an index with no key fact
   // and no `.by()` fails at declaration rather than at generation.
   if (keys || resolveIndexKeysFromFacts(schema)) {
-    registerArtifact(stub, { kind: "index-plan", schema, descriptor: resolveIndexDescriptor(schema, keys, shape) });
+    registerArtifact(stub, {
+      kind: "index-plan",
+      schema,
+      descriptor: resolveIndexDescriptor(schema, keys, shape),
+    });
   }
+  return stub;
+}
+
+/**
+ * A lookup resolves its key and access path at declaration time, so a
+ * definition file that names no key over a collection with no key fact fails
+ * here rather than at generation.
+ */
+function defineLookup<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): LookupBuilder<TSchema> {
+  const unwrapped = unwrapSchema(schema);
+  const plan = createDefineLookupPlan(unwrapped, undefined) as LookupBuilder<TSchema>;
+
+  Object.defineProperty(plan, "by", { value: (key: string) => createDefineLookupPlan(unwrapped, key) });
+  return plan;
+}
+
+function createDefineLookupPlan(schema: ATS.AnyTypeSchema, key: string | undefined): LookupPlan<unknown, unknown> {
+  const stub = function aotLookupArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as LookupPlan<unknown, unknown>;
+  const lookup = resolveLookupDescriptor(schema, key);
+
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:lookup",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "lookup" },
+      } satisfies ArtifactDescriptor,
+    },
+    explain: {
+      value: () =>
+        Object.freeze({
+          strategy: lookup.choice.strategy,
+          reason: lookup.choice.reason,
+          complexity: lookup.choice.complexity,
+          facts: lookup.choice.facts,
+        }),
+    },
+  });
+  registerArtifact(stub, { kind: "lookup-plan", schema, lookup });
+  return stub;
+}
+
+/**
+ * A reconciliation resolves its identity, channels and sink at declaration
+ * time, so a definition file that names no identity over a collection with no
+ * identity fact fails here rather than at generation.
+ */
+function defineReconcile<TSchema extends ATS.AnyTypeSchema, const TChannels extends Partial<ReconcileChannels> = {}>(
+  schema: SchemaInput<TSchema>,
+  channels?: TChannels
+): ReconcilePlan<TSchema, ResolvedChannels<TChannels>, ReconcileChange<unknown>> {
+  return createDefineReconcilePlan(unwrapSchema(schema), undefined, { ...ALL_CHANNELS, ...channels }, "value") as never;
+}
+
+function createDefineReconcilePlan(
+  schema: ATS.AnyTypeSchema,
+  key: string | undefined,
+  channels: ReconcileChannels,
+  changes: ReconcileChanges
+): ReconcilePlan<ATS.AnyTypeSchema, unknown, unknown> {
+  const stub = (sink: ReconcileSink) => {
+    const artifact = function aotReconcileArtifact(): never {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    } as unknown as ReconcilePlan<ATS.AnyTypeSchema, unknown, unknown>;
+
+    Object.defineProperty(artifact, AOT_ARTIFACT, {
+      value: {
+        artifactId: "operation:reconcile",
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "reconcile" },
+      } satisfies ArtifactDescriptor,
+    });
+    registerArtifact(artifact, {
+      kind: "reconcile-plan",
+      schema,
+      descriptor: resolveReconcileDescriptor(schema, key, channels, changes, sink),
+    });
+    return artifact;
+  };
+  const plan = stub("result");
+
+  Object.defineProperties(plan, {
+    by: { value: (next: string) => createDefineReconcilePlan(schema, next, channels, changes) },
+    changes: { value: (mode: ReconcileChanges) => createDefineReconcilePlan(schema, key, channels, mode) },
+    to: { value: Object.freeze({ iterator: () => stub("iterator"), visitor: () => stub("visitor") }) },
+  });
+  return plan;
+}
+
+/** A projection resolves its selection at declaration time, so a bad path fails here. */
+function defineProject<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): ProjectBuilder<ATS.TypeofSchema<TSchema>> {
+  const unwrapped = unwrapSchema(schema);
+
+  return Object.freeze({
+    select: (...paths: string[]) => {
+      const stub = function aotProjectArtifact(): never {
+        throw new JITError(
+          "JIT_AOT_001_ARTIFACT_EXECUTED",
+          "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+        );
+      } as unknown as (value: unknown) => unknown;
+
+      Object.defineProperty(stub, AOT_ARTIFACT, {
+        value: {
+          artifactId: "operation:project",
+          schemaId: unwrapped.type,
+          operation: { kind: "operation", op: "project" },
+        } satisfies ArtifactDescriptor,
+      });
+      registerArtifact(stub, {
+        kind: "project-plan",
+        schema: unwrapped,
+        tree: buildProjectionTree(unwrapped, paths, "JIT.project()"),
+      });
+      return stub;
+    },
+  }) as ProjectBuilder<ATS.TypeofSchema<TSchema>>;
+}
+
+/**
+ * The patch namespace, declared. `apply` is the update stub, because in the
+ * runtime it is literally `JIT.update`; the two RFC contracts declare their own
+ * reconstructive artifacts.
+ */
+const patch = Object.freeze({
+  // `update` is not stubbed on this host, so `apply` is the same function the
+  // runtime namespace exposes — which is exactly the one-to-one the contract asks for.
+  apply: RuntimeJIT.update,
+  merge: <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) => definePatchStub(schema, "merge"),
+  json: <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) => definePatchStub(schema, "json"),
+});
+
+function definePatchStub<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  mode: "merge" | "json"
+): DefineFunction<(value: unknown, patch: unknown) => unknown> {
+  const unwrapped = unwrapSchema(schema);
+  const stub = function aotPatchArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as DefineFunction<(value: unknown, patch: unknown) => unknown>;
+
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: `operation:patch.${mode}`,
+      schemaId: unwrapped.type,
+      operation: { kind: "operation", op: "patch" },
+    } satisfies ArtifactDescriptor,
+  });
+  registerArtifact(stub, { kind: "patch-plan", schema: unwrapped, mode });
+  return stub;
+}
+
+/** A cache key resolves its selection at declaration time, so a bad path fails here. */
+function defineCacheKeyBuilder(schema: SchemaInput<ATS.AnyTypeSchema>, form: "string" | "hash") {
+  const unwrapped = unwrapSchema(schema);
+
+  return Object.freeze({
+    select: (...paths: string[]) => {
+      const stub = function aotCacheKeyArtifact(): never {
+        throw new JITError(
+          "JIT_AOT_001_ARTIFACT_EXECUTED",
+          "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+        );
+      } as unknown as (value: unknown) => unknown;
+
+      Object.defineProperty(stub, AOT_ARTIFACT, {
+        value: {
+          artifactId: `operation:cacheKey.${form}`,
+          schemaId: unwrapped.type,
+          operation: { kind: "operation", op: "cacheKey" },
+        } satisfies ArtifactDescriptor,
+      });
+      registerArtifact(stub, {
+        kind: "cache-key-plan",
+        schema: unwrapped,
+        descriptor: resolveCacheKeyDescriptor(unwrapped, paths, form),
+      });
+      return stub;
+    },
+  });
+}
+
+const cacheKey = Object.assign((schema: SchemaInput<ATS.AnyTypeSchema>) => defineCacheKeyBuilder(schema, "string"), {
+  string: (schema: SchemaInput<ATS.AnyTypeSchema>) => defineCacheKeyBuilder(schema, "string"),
+  hash: (schema: SchemaInput<ATS.AnyTypeSchema>) => defineCacheKeyBuilder(schema, "hash"),
+});
+
+/** Canonicalization is fully described by the schema, so the stub carries only that. */
+function defineCanonical<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): (value: ATS.TypeofSchema<TSchema>) => ATS.TypeofSchema<TSchema> {
+  const unwrapped = unwrapSchema(schema);
+  const stub = function aotCanonicalArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as (value: ATS.TypeofSchema<TSchema>) => ATS.TypeofSchema<TSchema>;
+
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: "operation:canonical",
+      schemaId: unwrapped.type,
+      operation: { kind: "operation", op: "canonical" },
+    } satisfies ArtifactDescriptor,
+  });
+  registerArtifact(stub, { kind: "canonical-plan", schema: unwrapped });
+  return stub;
+}
+
+/**
+ * An ability resolves its rules at declaration time, so a field a rule names
+ * but the subject does not declare fails here rather than at generation.
+ */
+function defineAccess<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): AccessBuilder<ATS.TypeofSchema<TSchema>> {
+  return defineAccessPlan(unwrapSchema(schema), undefined, []) as AccessBuilder<ATS.TypeofSchema<TSchema>>;
+}
+
+function defineAccessPlan(
+  subject: ATS.AnyTypeSchema,
+  actor: ATS.AnyTypeSchema | undefined,
+  rules: readonly AccessRule[]
+) {
+  const descriptor = resolveAccessDescriptor(subject, actor, rules);
+  const stub = function aotAccessArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as AccessBuilder<unknown>;
+  // The runtime builder holds the rule shapes; reusing it keeps the two hosts
+  // from drifting on how a predicate becomes a condition.
+  const runtimePlan = RuntimeJIT.access(subject as never);
+  const add = (effect: "can" | "cannot") => (action: string, rule?: unknown) => {
+    const next = (effect === "can" ? runtimePlan.can : runtimePlan.cannot) as (
+      action: string,
+      rule?: unknown
+    ) => unknown;
+    const built = getArtifact(next.call(runtimePlan, action, rule) as object);
+
+    if (built?.kind !== "access-plan") throw new JITError("INVALID_OPERATION", "access rule could not be resolved");
+    return defineAccessPlan(subject, actor, [...rules, ...built.descriptor.rules.slice(-1)]);
+  };
+
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: "operation:access",
+        schemaId: subject.type,
+        operation: { kind: "operation", op: "access" },
+      } satisfies ArtifactDescriptor,
+    },
+    actor: { value: (next: SchemaInput<ATS.AnyTypeSchema>) => defineAccessPlan(subject, unwrapSchema(next), rules) },
+    can: { value: add("can") },
+    cannot: { value: add("cannot") },
+    actions: { value: descriptor.actions },
+    fields: { value: (action: string) => unconditionalFields(descriptor, action) },
+  });
+  registerArtifact(stub, { kind: "access-plan", schema: subject, descriptor });
   return stub;
 }
 
@@ -425,6 +790,7 @@ function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(build
     "where",
     "select",
     "unique",
+    "distinct",
     "keyed",
     "groupBy",
     "orderBy",
@@ -455,11 +821,26 @@ function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(build
 
   for (const key of chainMethods) {
     const method = source[key] as (...args: unknown[]) => (...args: never[]) => unknown;
-    Object.defineProperty(stub, key, { value: (...args: unknown[]) => wrapDefineCqrsQuery(method(...args)) });
+    Object.defineProperty(stub, key, {
+      value: (...args: unknown[]) => wrapDefineCqrsQuery(method(...args)),
+    });
   }
+  const joinMethod = source.join as (...args: unknown[]) => {
+    on(...keys: unknown[]): (...args: never[]) => unknown;
+  };
   Object.defineProperties(stub, {
+    join: {
+      value: (...args: unknown[]) => {
+        const pending = joinMethod(...args);
+        return Object.freeze({
+          on: (...keys: unknown[]) => wrapDefineJoin(pending.on(...keys)),
+        });
+      },
+    },
     "~query": { get: () => source["~query"] },
-    explain: { value: (...args: unknown[]) => (source.explain as (...values: unknown[]) => unknown)(...args) },
+    explain: {
+      value: (...args: unknown[]) => (source.explain as (...values: unknown[]) => unknown)(...args),
+    },
     to: {
       value: Object.freeze({
         iterator: () => terminal("iterator"),
@@ -471,7 +852,9 @@ function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(build
       value: () => {
         const lazy = terminal("iterator") as unknown as Record<string, unknown>;
         Object.defineProperties(lazy, {
-          explain: { value: (...args: unknown[]) => (source.explain as (...values: unknown[]) => unknown)(...args) },
+          explain: {
+            value: (...args: unknown[]) => (source.explain as (...values: unknown[]) => unknown)(...args),
+          },
           to: {
             value: Object.freeze({
               asyncIterator: () => terminal("async-iterator"),
@@ -485,6 +868,39 @@ function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(build
   });
   registerArtifact(stub as object, artifact);
   return stub as unknown as TQuery;
+}
+
+function wrapDefineJoin<TJoin extends (...args: never[]) => unknown>(join: TJoin): TJoin {
+  const artifact = getArtifact(join);
+  if (artifact?.kind !== "join-plan") {
+    throw new JITError("INVALID_QUERY", "CQRS definition join is missing its reconstructive JoinPlan");
+  }
+  const stub = function aotJoinArtifact(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as TJoin;
+  Object.defineProperties(stub, {
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: `query:join:${artifact.plan.kind}`,
+        schemaId: artifact.plan.leftSchema.type,
+        operation: {
+          kind: "query",
+          ...(artifact.plan.leftProgram.params === undefined ? {} : { params: artifact.plan.leftProgram.params }),
+        },
+      } satisfies ArtifactDescriptor,
+    },
+    explain: {
+      value: () => (join as unknown as { explain(): unknown }).explain(),
+    },
+    "~query": {
+      value: (join as unknown as { readonly "~query": unknown })["~query"],
+    },
+  });
+  registerArtifact(stub, artifact);
+  return stub;
 }
 
 const cqrs = Object.freeze({
@@ -507,7 +923,11 @@ const cqrs = Object.freeze({
         operation: { kind: "query" },
       } satisfies ArtifactDescriptor,
     });
-    registerArtifact(stub, { kind: "cqrs-parser", definition: artifact.definition, source: artifact.source });
+    registerArtifact(stub, {
+      kind: "cqrs-parser",
+      definition: artifact.definition,
+      source: artifact.source,
+    });
     return stub;
   },
   query: defineCqrsQuery,
@@ -516,18 +936,23 @@ const cqrs = Object.freeze({
 function operationStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...args: never[]) => unknown>(
   schema: SchemaInput<TSchema>,
   operation: "equal" | "clone" | "diff" | "hash" | "format" | "mask" | "sanitize" | "codec" | "jsonSchema" | "mock",
-  output: "value" | "boolean"
+  output: "value" | "boolean",
+  extras?: Readonly<Record<string, unknown>>
 ): DefineFunction<TFunction> {
-  return executionStub<TSchema, TFunction>(schema, [
-    stage("value", "value", "value"),
-    { ...stage("operation", "value", output), operation } as ExecutionStage,
-  ]);
+  return executionStub<TSchema, TFunction>(
+    schema,
+    [stage("value", "value", "value"), { ...stage("operation", "value", output), operation } as ExecutionStage],
+    undefined,
+    extras
+  );
 }
 
 function executionStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...args: never[]) => unknown>(
   schema: SchemaInput<TSchema>,
   stages: readonly ExecutionStage[],
-  queryBuilder?: RuntimeCollectionDescriptor
+  queryBuilder?: RuntimeCollectionDescriptor,
+  /** Members a specific operation adds, installed before the stub is frozen. */
+  extras?: Readonly<Record<string, unknown>>
 ): DefineFunction<TFunction> {
   const unwrapped = unwrapSchema(schema);
   const plan: ExecutionPlan = Object.freeze({
@@ -669,6 +1094,11 @@ function executionStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...
         },
       },
     });
+  }
+  if (extras !== undefined) {
+    for (const [name, value] of Object.entries(extras)) {
+      Object.defineProperty(artifact, name, { enumerable: false, value });
+    }
   }
   registerArtifact(stub as object, { kind: "execution", plan });
   return Object.freeze(stub);
@@ -812,8 +1242,15 @@ export const JIT = {
   mock,
   sort: defineSort,
   index: defineIndex,
+  lookup: defineLookup,
+  reconcile: defineReconcile,
+  project: defineProject,
+  patch,
+  cacheKey,
+  canonical: defineCanonical,
+  access: defineAccess,
   cqrs,
-  compare: Object.freeze({ equal, diff, hash }),
+  compare: Object.freeze({ equal, diff, hash, changed }),
   security: Object.freeze({ mask, sanitize }),
 } as Omit<
   typeof RuntimeJIT,
@@ -831,6 +1268,14 @@ export const JIT = {
   | "mock"
   | "sort"
   | "index"
+  | "lookup"
+  | "reconcile"
+  | "project"
+  | "changed"
+  | "patch"
+  | "cacheKey"
+  | "canonical"
+  | "access"
   | "cqrs"
   | "compare"
   | "security"
@@ -849,11 +1294,19 @@ export const JIT = {
   readonly mock: typeof mock;
   readonly sort: typeof defineSort;
   readonly index: typeof defineIndex;
+  readonly lookup: typeof defineLookup;
+  readonly reconcile: typeof defineReconcile;
+  readonly project: typeof defineProject;
+  readonly patch: typeof patch;
+  readonly cacheKey: typeof cacheKey;
+  readonly canonical: typeof defineCanonical;
+  readonly access: typeof defineAccess;
   readonly cqrs: typeof cqrs;
   readonly compare: {
     readonly equal: typeof equal;
     readonly diff: typeof diff;
     readonly hash: typeof hash;
+    readonly changed: typeof changed;
   };
   readonly security: {
     readonly mask: typeof mask;

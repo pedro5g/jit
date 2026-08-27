@@ -17,6 +17,27 @@ The generated query does not allocate a filter result before mapping. It preallo
 one output array, writes by cursor and trims once. `count`, `sum`, `avg`, `min` and `max`
 avoid result arrays entirely.
 
+## Joins
+
+```ts
+const Order = JIT.object({ id: JIT.number(), customerId: JIT.string() });
+const Customer = JIT.object({ id: JIT.string(), name: JIT.string() });
+
+const joinOrders = JIT.cqrs
+  .query(Order)
+  .join(JIT.array(Customer).keyed("id"))
+  .on("customerId", "id");
+
+joinOrders([{ id: 1, customerId: "c1" }], [{ id: "c1", name: "Ada" }]);
+```
+
+The semantic kinds are `inner` (default), `left`, `semi` and `anti`. A plain
+right schema selects one hash build plus one left scan. A right collection
+declared `.keyed(key)` reuses its cached index. Inner/left return
+`{ left, right }` pairs; semi/anti return left rows directly. If both inputs
+declare compatible `.ordered(key, direction)` facts, two merge cursors avoid
+the index allocation entirely.
+
 Mappers whitelist the destination shape and compile renames, nested mapping and bulk
 `many()` loops. Callback overrides remain external bindings and are reported when they
 cannot be emitted safely by AOT.
@@ -40,8 +61,11 @@ bindings. No untrusted value is interpolated into generated source.
 
 ## Collection outputs
 
-`unique` retains first occurrences, `keyed` returns a Map, `groupBy` returns
-arrays per key and `orderBy` performs a global sort. Mutation operators rebuild
+`unique(key)` retains first occurrences for its compatibility key.
+`distinct()` uses structural hash/equality for complete rows, while
+`distinct(fields...)` selects scalar, compound-trie or ordered-adjacent
+deduplication. `keyed` returns a Map, `groupBy` returns arrays per key and
+`orderBy` performs a global sort. Mutation operators rebuild
 collections immutably and require a filter to prevent accidental full-table
 updates/deletes.
 

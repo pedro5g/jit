@@ -1,0 +1,108 @@
+---
+title: lookup
+description: Reach one row by key, through the access path the collection's facts justify.
+---
+
+## Signature
+
+```ts
+const User = JIT.object({ id: JIT.number(), email: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const userById = JIT.lookup(Users);
+const userByEmail = JIT.lookup(Users).by("email");
+```
+
+The key comes from the collection's own facts — `.keyed()`, `.indexBy()`,
+`.uniqueBy()` or an entity hint. `by()` names one instead, and is what a
+collection with no key fact needs.
+
+## Reaching a row
+
+```ts
+const User = JIT.object({ id: JIT.number(), email: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+const userById = JIT.lookup(Users);
+
+const users = [
+  { id: 1, email: "ada@x.com" },
+  { id: 2, email: "grace@x.com" },
+];
+
+console.log(userById(users, 2)?.email);
+console.log(userById(users, 9));
+```
+
+A lookup answers the first row whose key matches, or `undefined`. A `Date` key
+is passed as a `Date` and matched by its timestamp.
+
+## The access path is chosen, not named
+
+The caller never picks an algorithm. `JIT.lookup` reads what the collection
+declares and compiles the path those facts justify.
+
+| Declared facts                     | Strategy            | Cost     |
+| ---------------------------------- | ------------------- | -------- |
+| `.ordered(key)` and unique         | `BinarySearch`      | O(log n) |
+| `.keyed(key)` with a cached index   | `CachedIndexLookup` | O(1)     |
+| nothing that reaches the key       | `EarlyExitScan`     | O(k)     |
+
+An ordered key wins over an index even where both are declared: searching
+allocates nothing, and building an index for a single lookup costs more than
+the lookup saves.
+
+`explain()` reports what was chosen and why:
+
+```ts
+const User = JIT.object({ id: JIT.number(), email: JIT.string() });
+const Ordered = JIT.array(User).ordered("id", "asc").uniqueBy("id");
+
+console.log(JIT.lookup(Ordered).explain().strategy);
+console.log(JIT.lookup(JIT.array(User).keyed("id")).explain().strategy);
+console.log(JIT.lookup(JIT.array(User)).by("email").explain().strategy);
+```
+
+A collection with no key fact and no `by()` throws rather than guessing:
+
+```ts
+const User = JIT.object({ id: JIT.number(), email: JIT.string() });
+
+try {
+  JIT.lookup(JIT.array(User))([{ id: 1, email: "ada@x.com" }], 1);
+} catch (error) {
+  console.log((error as Error).message.includes("needs a key"));
+}
+```
+
+## Relationship to queries
+
+A standalone lookup and a keyed query terminal are the same question, so they
+resolve through the same planner and emit the same body:
+
+```ts
+const User = JIT.object({ id: JIT.number(), email: JIT.string() });
+const Users = JIT.array(User).keyed("id");
+
+const viaQuery = JIT.cqrs
+  .query(Users)
+  .params({ id: JIT.number() })
+  .where((query, params) => query.eq("id", params.id))
+  .first();
+
+const users = [{ id: 1, email: "ada@x.com" }];
+
+console.log(viaQuery(users, { id: 1 })?.email);
+console.log(JIT.lookup(Users)(users, 1)?.email);
+```
+
+Use `JIT.lookup` when reaching a row by key is the whole operation, and a query
+when it is one step of a larger pipeline.
+
+Both reach the same per-array index cache, so a keyed lookup and a keyed query
+over the same array build one index between them, not two.
+
+## See also
+
+- [Index](./index-plans) — materialize the index itself
+- [Query](./query) — filtering, projection and terminals
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/lookup.md) — strategies, allocation model and benchmarks

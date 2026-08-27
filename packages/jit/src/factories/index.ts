@@ -25,6 +25,18 @@ export type Wire<TSchemaLike> = import("../core/ats/representations.js").Wire<TS
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export {
+  type Ability,
+  type AccessBuilder,
+  type AccessConditionBuilder,
+  type AccessPlan,
+  type AccessPredicate,
+  type AccessRuleOptions,
+  type ActorRef,
+  access,
+} from "./access.js";
+export { type CacheKeyBuilder, cacheKey } from "./cache-key.js";
+export { canonical } from "./canonical.js";
+export {
   type AbstractRuntimeClass,
   type ClassFactory,
   class,
@@ -50,7 +62,9 @@ export { ddd } from "./ddd.js";
 export { dto } from "./dto.js";
 export { type IndexBuilder, type IndexPlan, index, type KeyedIndexPlan } from "./indexing.js";
 export { type IsoFactories, iso } from "./iso.js";
+export { type LookupBuilder, type LookupPlan, lookup } from "./lookup.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
+export { type MatchBuilder, match } from "./match.js";
 export * from "./object/index.js";
 export {
   type AnyOpChain,
@@ -60,6 +74,7 @@ export {
   ops,
   type StringOps,
 } from "./ops.js";
+export { type JsonPatchOperation, type MergePatch, patch } from "./patch.js";
 export * from "./primitive/index.js";
 export type {
   BinaryProcessBuilder,
@@ -67,6 +82,7 @@ export type {
   ProcessBuilder,
 } from "./process.js";
 export { process } from "./process.js";
+export { type ProjectablePath, type ProjectBuilder, type Projected, project } from "./project.js";
 export type {
   BinaryQueryBuilder,
   LazyQueryBuilder,
@@ -74,6 +90,17 @@ export type {
   QueryConditionBuilder,
 } from "./query.js";
 export { constant as const, param, query } from "./query.js";
+export {
+  type ReconcileChange,
+  type ReconcileChangeWithDiff,
+  type ReconcileDelta,
+  type ReconcileEvent,
+  type ReconcilePlan,
+  type ReconcileResult,
+  type ReconcileVisitor,
+  type ResolvedChannels,
+  reconcile,
+} from "./reconcile.js";
 export type { RuntimeCompiledFunction } from "./runtime-ops.js";
 export {
   binary,

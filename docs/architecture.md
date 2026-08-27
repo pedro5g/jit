@@ -30,7 +30,7 @@ in the compilation path. The emitted function interprets nothing.
 | `core/hints`   | manual strategy hints (`entity`, `indexBy`, `hash`, `ordered`, ...)                                                                                                             |
 | `transforms`   | pure schema→schema transforms (`partial`, `pick`, `omit`, `merge`, wrappers)                                                                                                    |
 | `compiler`     | one emitter per operation; shared IR (`ir/ir.ts`) + optimizer passes for equal and query; string emitters (validate/serialize/codec/scrub/stream) follow the same codegen rules |
-| `runtime`      | compile cache, per-array index cache (legacy single-key slot plus plan entries), hash primitives, boundary scanner (stream), artifact registry                                                                                 |
+| `runtime`      | compile cache, per-array index cache (legacy single-key slot plus plan entries), hash primitives, boundary scanner (stream), artifact registry                                  |
 | `factories`    | the public `JIT.*` namespace: schema factories, callable capability artifacts, composition chains, and explicit `compile` aggregations                                          |
 | `aot`          | Prisma-style generator (`generate`), schema discovery, config; `src/cli.ts` backs the `jit` binary                                                                              |
 | `mcp.ts`       | MCP stdio protocol, tools/resources/prompts/completion dispatch; `mcp-project.ts` owns workspace-safe docs and AOT operations                                                   |
@@ -171,6 +171,18 @@ fuses adjacent filter/select/control nodes, emits direct indexed array loops,
 and records materialization barriers in `explain()`. Direct visitors avoid the
 iterator protocol for fusible pipelines. Cardinality-changing operators use
 separate generator stages so their state remains local and deterministic.
+
+Join semantics extend the same CQRS program without exposing the physical plan.
+`JoinPlan` reuses scalar key resolution, `IndexDescriptor` and the per-array
+index cache. Compatible ordered inputs lower to a two-cursor `MergeJoin`; a
+keyed right collection lowers to `IndexedJoin`; otherwise one `HashJoin` build
+precedes the left scan. The generated program contains neither a nested linear
+search nor a join-strategy dispatcher.
+
+Distinct semantics also stay in `QueryProgram`. `DistinctDescriptor` selects a
+scalar key table, allocation-free adjacent comparison for matching ordering,
+a compound-key trie, or structural hash with compiled-equality confirmation.
+No physical strategy name is serialized through `~query`.
 
 The package exposes transitional host entrypoints while the monorepo is still
 single-package: `@jit-compiler/jit/runtime` exports the runtime `JIT` namespace, and
@@ -319,9 +331,9 @@ Three descriptors are shared rather than re-derived per operation:
 
 | Descriptor           | Module                 | Read by                                            |
 | -------------------- | ---------------------- | -------------------------------------------------- |
-| `OrderingDescriptor` | `compiler/ordering.ts` | `JIT.sort`, query `orderBy`, `compileSortBy`, lazy  |
-| `IndexDescriptor`    | `compiler/indexing.ts` | `JIT.index`, `CachedIndexLookup`                    |
-| scalar key kinds     | `compiler/row-keys.ts` | both of the above                                   |
+| `OrderingDescriptor` | `compiler/ordering.ts` | `JIT.sort`, query `orderBy`, `compileSortBy`, lazy |
+| `IndexDescriptor`    | `compiler/indexing.ts` | `JIT.index`, `CachedIndexLookup`                   |
+| scalar key kinds     | `compiler/row-keys.ts` | both of the above                                  |
 
 `row-keys.ts` is why a key means the same thing to a comparator and to an
 index. Where they differ it is deliberate: ordering has a `numeric` fast path
