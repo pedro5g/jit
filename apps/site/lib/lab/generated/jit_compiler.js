@@ -7693,9 +7693,9 @@ function compileHydrator(schema, options) {
         safeParseAsync: false,
         resolveDefaults: false
       });
-      const safeParse3 = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).safeParse;
+      const safeParse = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).safeParse;
       return (state) => {
-        const result = safeParse3(state);
+        const result = safeParse(state);
         if (result.success) return result.data;
         throw new JITValidationError(result.issues);
       };
@@ -7714,17 +7714,17 @@ function compileValidatorSelection(schema, ops2, options) {
       const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps, fastParse));
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values);
       const selection = {};
-      const is3 = compiled.is;
-      const safeParse3 = compiled.safeParse;
-      const fastSafeParse = fastParse && is3 && safeParse3 ? (value) => is3(value) ? { success: true, data: value } : safeParse3(value) : safeParse3;
-      const parse5 = (value) => {
-        if (fastParse && is3?.(value)) return value;
-        if (!safeParse3) throw new Error("parse requires safeParse generation");
-        const result = safeParse3(value);
+      const is = compiled.is;
+      const safeParse = compiled.safeParse;
+      const fastSafeParse = fastParse && is && safeParse ? (value) => is(value) ? { success: true, data: value } : safeParse(value) : safeParse;
+      const parse3 = (value) => {
+        if (fastParse && is?.(value)) return value;
+        if (!safeParse) throw new Error("parse requires safeParse generation");
+        const result = safeParse(value);
         if (result.success) return result.data;
         throw new JITValidationError(result.issues);
       };
-      const safeParseAsync3 = compiled.safeParseAsync ?? (safeParse3 ? async (value) => safeParse3(value) : void 0);
+      const safeParseAsync3 = compiled.safeParseAsync ?? (safeParse ? async (value) => safeParse(value) : void 0);
       const parseAsync3 = async (value) => {
         if (!safeParseAsync3) throw new Error("parseAsync requires async validation generation");
         const result = await safeParseAsync3(value);
@@ -7740,8 +7740,8 @@ function compileValidatorSelection(schema, ops2, options) {
         registerValidatorArtifact(fastSafeParse, schema, "safeParse");
       }
       if (normalizedOps.includes("parse")) {
-        selection.parse = parse5;
-        registerValidatorArtifact(parse5, schema, "parse");
+        selection.parse = parse3;
+        registerValidatorArtifact(parse3, schema, "parse");
       }
       if (normalizedOps.includes("safeParseAsync") && safeParseAsync3) {
         selection.safeParseAsync = safeParseAsync3;
@@ -16257,12 +16257,12 @@ function getStandardSchema(schema) {
   return standard;
 }
 function createStandardSchema(schema) {
-  const safeParse3 = compileValidatorSelection(schema, ["safeParse"]).safeParse;
+  const safeParse = compileValidatorSelection(schema, ["safeParse"]).safeParse;
   return {
     version: 1,
     vendor: "jit",
     validate(value) {
-      const result = safeParse3(value);
+      const result = safeParse(value);
       if (result.success) return { value: result.data };
       return { issues: result.issues.map(toStandardIssue) };
     }
@@ -18845,32 +18845,26 @@ __export(factories_exports, {
   codec: () => codec,
   coerce: () => coerce2,
   compare: () => compare,
-  const: () => constant,
   cqrs: () => cqrs,
   csv: () => csv,
   custom: () => custom,
   date: () => date2,
   ddd: () => ddd,
   default: () => defaultTo2,
-  diff: () => diff,
   discriminatedUnion: () => discriminatedUnion,
   dto: () => dto,
   enum: () => nativeEnum,
-  equal: () => equal,
   file: () => file,
   format: () => format,
   from: () => from,
   function: () => functionSchema,
-  hash: () => hash2,
   index: () => index,
   instanceOf: () => instanceOf,
   int: () => int,
   intersection: () => intersection,
-  is: () => is,
   iso: () => iso,
   json: () => json,
   jsonSchema: () => jsonSchema,
-  jsonValue: () => jsonValue,
   lazy: () => lazy,
   literal: () => literal3,
   lookup: () => lookup,
@@ -18890,21 +18884,17 @@ __export(factories_exports, {
   object: () => object,
   ops: () => ops,
   optional: () => optional2,
-  param: () => param,
-  parse: () => parse3,
   patch: () => patch,
   pipe: () => pipe2,
   process: () => process,
   project: () => project,
   promise: () => promise2,
-  query: () => query,
   readonly: () => readonly2,
   reconcile: () => reconcile,
   record: () => record,
   refine: () => refine2,
   regex: () => regex,
   regexes: () => regexes_exports,
-  safeParse: () => safeParse,
   security: () => security,
   set: () => set,
   sort: () => sort,
@@ -20046,13 +20036,13 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
   }
   const objectSchema = resolved;
   const properties = Object.keys(objectSchema.def.props);
-  const parse5 = compileValidator(schema).parse;
+  const parse3 = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
   const classTarget = emitConstructor(
     properties,
     freezeInstances,
     aggregate,
-    parse5,
+    parse3,
     accessors
   );
   const installedCapabilities = [];
@@ -20174,7 +20164,7 @@ function installFactory(classTarget, previous, next, factory) {
   }
   Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
 }
-function emitConstructor(properties, freezeInstances, aggregate, parse5, accessors) {
+function emitConstructor(properties, freezeInstances, aggregate, parse3, accessors) {
   const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
   const slots = [];
   const definitions = [];
@@ -20193,7 +20183,7 @@ function emitConstructor(properties, freezeInstances, aggregate, parse5, accesso
   });
   const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
   const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, validated) { const state = validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
-  return globalThis.Function("__parse", source)(parse5);
+  return globalThis.Function("__parse", source)(parse3);
 }
 function resolveAccessors(properties, options) {
   return properties.map((key) => {
@@ -20976,11 +20966,19 @@ function isQueryConstRef(value) {
 
 // ../../packages/jit/src/factories/cqrs.ts
 function cqrsQuery(schema) {
+  if (isBinaryArray(schema) || isBinaryRowSet(schema)) return query(schema);
   const target = unwrapSchema(schema);
-  const row = target.type === "array" ? target.def.element : target;
-  if (row.type !== "object" && row.type !== "runtimeType") {
-    throw new JITError("INVALID_QUERY", "JIT.cqrs.query() requires an object or Runtime Type, or an array of either");
+  if (target.type === "set" || target.type === "map") {
+    return query(target);
   }
+  if (target.type !== "array" && target.type !== "object" && target.type !== "runtimeType") {
+    throw new JITError(
+      "INVALID_QUERY",
+      "JIT.cqrs.query() requires an object or Runtime Type, or a collection of either"
+    );
+  }
+  const row = target.type === "array" ? target.def.element : target;
+  if (row.type !== "object" && row.type !== "runtimeType") return query(target);
   const collection = target.type === "array" ? target : array(row).schema;
   return wrap(
     row,
@@ -21665,6 +21663,8 @@ var cqrs = Object.freeze({
   input: cqrsInput,
   parse: cqrsParse,
   query: cqrsQuery,
+  param,
+  const: constant,
   /** Counts the rows that reach the aggregate; `0` when none do. */
   count: () => aggregateSpec("count"),
   /** Sums a numeric field; `0` when no row reaches the aggregate. */
@@ -22776,9 +22776,9 @@ function validationArtifact(schema, operation) {
       case "safeParseAsync":
         return compileValidatorSelection(unwrapped, ["safeParseAsync"]).safeParseAsync;
       case "issues": {
-        const safeParse3 = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
+        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
         return function* issues(value) {
-          const result = safeParse3(value);
+          const result = safeParse(value);
           if (!result.success) yield* result.issues;
         };
       }
@@ -23496,9 +23496,6 @@ var validate = Object.freeze({
     safeParse: safeParseAsync
   })
 });
-var is = validate.is;
-var parse3 = validate.parse;
-var safeParse = validate.safeParse;
 var json = Object.freeze({
   value: jsonValue,
   parse: jsonParse,
@@ -24104,9 +24101,6 @@ var validate2 = Object.freeze({
     safeParse: safeParseAsync2
   })
 });
-var is2 = validate2.is;
-var parse4 = validate2.parse;
-var safeParse2 = validate2.safeParse;
 var json2 = Object.freeze({
   value: json.value,
   parse(schema) {
@@ -24734,7 +24728,11 @@ function defineAccessPlan(subject, actor, rules) {
   return stub;
 }
 function defineCqrsQuery(schema) {
-  return wrapDefineCqrsQuery(cqrs.query(schema));
+  const builder2 = cqrs.query(schema);
+  if (getArtifact(builder2)?.kind === "query" || !("~query" in builder2)) {
+    return builder2;
+  }
+  return wrapDefineCqrsQuery(builder2);
 }
 function wrapDefineCqrsQuery(builder2) {
   const artifact = getArtifact(builder2);
@@ -25136,9 +25134,6 @@ function stage(kind, input, output) {
 }
 var JIT = {
   ...factories_exports,
-  is: is2,
-  parse: parse4,
-  safeParse: safeParse2,
   validate: validate2,
   json: json2,
   binary: binary3,

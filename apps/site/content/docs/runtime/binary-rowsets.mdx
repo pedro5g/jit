@@ -10,7 +10,8 @@ const binary = JIT.array(User).binary({
 });
 const rowset = binary.load(users);
 
-const count = JIT.query(rowset)
+const count = JIT.cqrs
+  .query(rowset)
   .filter((q) => q.eq("role", "admin"))
   .count();
 ```
@@ -59,7 +60,7 @@ between compact packed and already naturally aligned layouts.
 Flat scalar object fields, optionals/nullables, literal unions, enums, Date,
 bigint and typed numbers are supported. Discriminated object unions and
 compatible intersections are normalized. Nested arbitrary objects/arrays are
-rejected: flatten a DTO or use regular `JIT.query`.
+rejected: flatten a DTO or use regular `JIT.cqrs.query`.
 
 ## Query generation
 
@@ -81,5 +82,5 @@ faster spelling of a JavaScript loop. Keep the data state equal on both sides:
 Columnar count and sum can beat a loop over hydrated objects because their lanes
 are contiguous and enum/boolean values are already encoded. That advantage is
 real for repeated scans, but it does not erase conversion cost. For small or
-one-shot object arrays, regular `JIT.query` or a manual loop can be the correct
+one-shot object arrays, regular `JIT.cqrs.query` or a manual loop can be the correct
 choice.

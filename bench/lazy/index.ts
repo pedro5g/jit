@@ -8,20 +8,24 @@ const Events = JIT.array(Event);
 type Event = JIT.Typeof<typeof Event>;
 
 const events = createEvents(COUNT);
-const lazyFirstTen = JIT.query(Events)
+const lazyFirstTen = JIT.cqrs
+  .query(Events)
   .filter((q) => q.and(q.eq("active", true), q.gt("score", 900)))
   .select("id", "score")
   .take(10)
   .to.iterator();
-const eagerFirstTen = JIT.query(Events)
+const eagerFirstTen = JIT.cqrs
+  .query(Events)
   .filter((q) => q.and(q.eq("active", true), q.gt("score", 900)))
   .select("id", "score")
   .take(10);
-const visitAll = JIT.query(Events)
+const visitAll = JIT.cqrs
+  .query(Events)
   .filter((q) => q.eq("active", true))
   .select("id")
   .to.visitor();
-const lazyAll = JIT.query(Events)
+const lazyAll = JIT.cqrs
+  .query(Events)
   .filter((q) => q.eq("active", true))
   .select("id")
   .to.iterator();

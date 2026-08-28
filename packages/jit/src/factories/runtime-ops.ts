@@ -131,11 +131,6 @@ export const validate: ValidateNamespace = Object.freeze({
   }),
 });
 
-/** Ergonomic validation leaf operations. They deliberately delegate to the namespace above. */
-export const is = validate.is;
-export const parse = validate.parse;
-export const safeParse = validate.safeParse;
-
 export interface JsonNamespace {
   value(): Builder<ATS.JsonSchema>;
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<string, TSchema>;
@@ -223,7 +218,7 @@ export interface SelectableEqual<TValue> extends RuntimeCompiledFunction<Equal<T
   ): RuntimeCompiledFunction<Equal<TValue>>;
 }
 
-export function equal<TSchema extends ATS.AnyTypeSchema>(
+function equal<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): SelectableEqual<ATS.TypeofSchema<TSchema>> {
   const artifact = operationArtifact(schema, "equal", "value", "boolean", compileEqual);
@@ -271,7 +266,7 @@ export interface ChangedBuilder<TValue> extends ChangedMask<TValue, SelectablePa
   ): ChangedMask<TValue, TPaths[number], number>;
 }
 
-export function changed<TSchema extends ATS.AnyTypeSchema>(
+function changed<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): ChangedBuilder<ATS.TypeofSchema<TSchema>> {
   const unwrapped = unwrapSchema(schema);
@@ -312,7 +307,7 @@ export function clone<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-export function diff<TSchema extends ATS.AnyTypeSchema>(
+function diff<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Diff<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "diff", "value", "value", compileDiff) as RuntimeCompiledFunction<
@@ -320,7 +315,7 @@ export function diff<TSchema extends ATS.AnyTypeSchema>(
   >;
 }
 
-export function hash<TSchema extends ATS.AnyTypeSchema>(
+function hash<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): RuntimeCompiledFunction<Hash<ATS.TypeofSchema<TSchema>>> {
   return operationArtifact(schema, "hash", "value", "value", compileHash) as RuntimeCompiledFunction<

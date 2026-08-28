@@ -141,7 +141,7 @@ describe("the deep audit", () => {
       "```ts",
       "const User = JIT.object({ email: JIT.string().email(), age: JIT.number().int().min(0) });",
       "const isUser = JIT.validate.is(User);",
-      "const same = JIT.equal(User);",
+      "const same = JIT.compare.equal(User);",
       "const safe = JIT.security.mask(User);",
       "const doc = JIT.jsonSchema.to(User);",
       "```",

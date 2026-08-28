@@ -6,7 +6,7 @@ description: Compile structural changes with schema-aware paths and values.
 ## Signature
 
 ```ts
-const diffUser = JIT.diff(User);
+const diffUser = JIT.compare.diff(User);
 const changes = diffUser(previous, current);
 ```
 
@@ -43,7 +43,7 @@ actual differences.
 Use `diff` for one complete value:
 
 ```ts
-const changes = JIT.diff(Settings)(before, after);
+const changes = JIT.compare.diff(Settings)(before, after);
 ```
 
 Use `watch` for collection snapshots where added, removed and updated items
@@ -64,5 +64,5 @@ their indexes or hashes are reused.
 
 ## AOT
 
-`JIT.diff(User)` is independently exportable. Generated output contains the
+`JIT.compare.diff(User)` is independently exportable. Generated output contains the
 specialized path writes and comparisons, not a runtime AST interpreter.

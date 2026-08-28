@@ -78,7 +78,7 @@ low under throughput.
 - preloaded byte query;
 - full `load + query` with `exact` and `dynamic` strategies.
 
-Competitors include regular `JIT.query` over JS arrays, a handwritten
+Competitors include regular `JIT.cqrs.query` over JS arrays, a handwritten
 filter/map loop marked as a biased baseline, and Zod 4 / TypeBox boundary
 comparisons that validate the full input before running the native filter/map.
 

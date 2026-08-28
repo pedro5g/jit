@@ -6,7 +6,7 @@ description: Compile a deterministic structural hash for cache keys and indexes.
 ## Signature
 
 ```ts
-const hashUser = JIT.hash(User);
+const hashUser = JIT.compare.hash(User);
 const key = hashUser(user); // number
 ```
 
@@ -20,8 +20,8 @@ A hash collision is possible. Use the hash to choose a bucket, then use the
 matching compiled equality function when correctness requires confirmation.
 
 ```ts
-const hash = JIT.hash(User);
-const equal = JIT.equal(User);
+const hash = JIT.compare.hash(User);
+const equal = JIT.compare.equal(User);
 
 const bucket = cache.get(hash(candidate));
 const match = bucket?.find((value) => equal(value, candidate));
@@ -53,7 +53,7 @@ and hash.
 ## AOT and metadata
 
 ```ts
-const hashUser = JIT.hash(User);
+const hashUser = JIT.compare.hash(User);
 
 hashUser.hash; // source fingerprint, not the value hash
 hashUser.explain(); // compiler metadata

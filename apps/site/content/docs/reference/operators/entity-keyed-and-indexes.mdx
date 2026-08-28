@@ -104,7 +104,7 @@ declare that duplicates are valid or automatically reject them.
 
 ```ts
 const IndexedUsers = JIT.array(User).indexBy("id");
-const equalUsers = JIT.equal(IndexedUsers).compile();
+const equalUsers = JIT.compare.equal(IndexedUsers).compile();
 
 const left = [
   { id: 1, email: "ada@example.com", name: "Ada" },
@@ -155,7 +155,7 @@ There is no mutation observer or per-array invalidation API:
 
 ```ts
 const IndexedUsers = JIT.array(User).indexBy("id");
-const equalUsers = JIT.equal(IndexedUsers).compile();
+const equalUsers = JIT.compare.equal(IndexedUsers).compile();
 
 equalUsers(previous, users); // `users` may now own a cached index
 
@@ -184,7 +184,7 @@ collections. It records all of the following in one operation:
 ```ts
 const Users = JIT.array(User).keyed("id");
 
-const equalUsers = JIT.equal(Users).compile();
+const equalUsers = JIT.compare.equal(Users).compile();
 const normalizeUsers = Compiler.compileNormalize(Users.schema);
 const uniqueUsers = Compiler.compileUniqueBy(Users.schema);
 ```
@@ -219,7 +219,8 @@ Query `.keyed(key)` is an output collector, not a schema hint or persistent
 cache. It fuses `Map` construction into the query loop:
 
 ```ts
-const adaById = JIT.query(JIT.array(User))
+const adaById = JIT.cqrs
+  .query(JIT.array(User))
   .filter((q) => q.eq("email", "ada@example.com"))
   .keyed("id")
   .select("name");
@@ -238,18 +239,18 @@ compile cache.
 | Annotate domain identity only                        | `JIT.array(User).entity({ key: "id" })` |
 | Optimize order-independent equality                  | `JIT.array(User).indexBy("id")`         |
 | Apply identity, uniqueness and index intent together | `JIT.array(User).keyed("id")`           |
-| Return a `Map` from one query execution              | `JIT.query(Users).keyed("id")`          |
+| Return a `Map` from one query execution              | `JIT.cqrs.query(Users).keyed("id")`     |
 
 ## Operations that consume the hints
 
-| Operation                          |        `entity` |               `indexBy` |          schema `keyed` |
-| ---------------------------------- | --------------: | ----------------------: | ----------------------: |
-| Compiled array equality            | positional loop | adaptive keyed strategy | adaptive keyed strategy |
+| Operation                               |        `entity` |               `indexBy` |          schema `keyed` |
+| --------------------------------------- | --------------: | ----------------------: | ----------------------: |
+| Compiled array equality                 | positional loop | adaptive keyed strategy | adaptive keyed strategy |
 | `Compiler.compileNormalize` default key |             yes |                     yes |                     yes |
 | `Compiler.compileUniqueBy` default key  |             yes |                     yes |                     yes |
 | `Compiler.compileSortBy` fallback key   |             yes |                     yes |                     yes |
-| Validator duplicate-key check      |              no |                      no |                      no |
-| Query result memoization           |              no |                      no |                      no |
+| Validator duplicate-key check           |              no |                      no |                      no |
+| Query result memoization                |              no |                      no |                      no |
 
 `JIT.watch()` and `JIT.watchedList()` receive their key explicitly because
 they own change-tracking state rather than compile an equality strategy:

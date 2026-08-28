@@ -6,7 +6,8 @@ description: Iterators, async generators, visitors and incremental pipeline oper
 Eager arrays remain the default. Lazy consumption is an explicit terminal contract:
 
 ```ts
-const query = JIT.query(Users)
+const query = JIT.cqrs
+  .query(Users)
   .filter((q) => q.eq("active", true))
   .select("id", "name")
   .take(10);
@@ -26,7 +27,8 @@ inputs use an indexed loop. The direct visitor backend calls the consumer withou
 iterator object or `{ value, done }` protocol.
 
 ```ts
-const visit = JIT.query(Users)
+const visit = JIT.cqrs
+  .query(Users)
   .filter((q) => q.eq("active", true))
   .select("id")
   .to.visitor();

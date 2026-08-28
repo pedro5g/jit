@@ -22,13 +22,13 @@ offers iterable consumption over the same compiled issue vector.
 
 ## Structural operations
 
-| API             | Result                  | Allocation strategy            |
-| --------------- | ----------------------- | ------------------------------ |
-| `JIT.equal(S)`  | boolean                 | early return, no result object |
-| `JIT.clone(S)`  | deep shape clone        | allocates required output only |
-| `JIT.diff(S)`   | change entries          | allocates only differences     |
-| `JIT.update(S)` | immutable updated value | shares untouched branches      |
-| `JIT.hash(S)`   | numeric structural hash | scalar accumulator             |
+| API                    | Result                  | Allocation strategy            |
+| ---------------------- | ----------------------- | ------------------------------ |
+| `JIT.compare.equal(S)` | boolean                 | early return, no result object |
+| `JIT.clone(S)`         | deep shape clone        | allocates required output only |
+| `JIT.compare.diff(S)`  | change entries          | allocates only differences     |
+| `JIT.update(S)`        | immutable updated value | shares untouched branches      |
+| `JIT.compare.hash(S)`  | numeric structural hash | scalar accumulator             |
 
 Hints such as `entity`, `keyed`, `ordered`, `indexBy` and `hash` influence
 strategies for repeated collection operations. Benchmark index construction
@@ -45,7 +45,7 @@ module exports; `{ ... }` is also the grouped AOT marker.
 const ReadUser = {
   is: JIT.validate.is(User),
   parse: JIT.validate.parse(User),
-  equal: JIT.equal(User),
+  equal: JIT.compare.equal(User),
 };
 
 ReadUser.parse(input);
@@ -133,7 +133,7 @@ responsibilities.
 export const User = {
   is: JIT.validate.is(UserSchema),
   parse: JIT.validate.parse(UserSchema),
-  equal: JIT.equal(UserSchema),
+  equal: JIT.compare.equal(UserSchema),
 };
 ```
 

@@ -25,7 +25,8 @@ const User = JIT.object({
 const Users = JIT.array(User).binary({ strategy: "exact" });
 const rowset = Users.load(bigArray);
 
-const findAdmins = JIT.query(rowset)
+const findAdmins = JIT.cqrs
+  .query(rowset)
   .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
   .select("id", "name", "score");
 
@@ -268,11 +269,12 @@ the engine scans compact memory and only allocates the projected output rows.
 dictionaries for unique strings. The GC tracks one large buffer instead of
 every intermediate filter/map array.
 
-`JIT.query(rowset)` hydrates only rows that pass the filter and only the
+`JIT.cqrs.query(rowset)` hydrates only rows that pass the filter and only the
 selected fields:
 
 ```ts
-JIT.query(rowset)
+JIT.cqrs
+  .query(rowset)
   .filter((q) => q.eq("active", true))
   .select("id", "score");
 ```
@@ -312,7 +314,8 @@ dev exports one as a standalone function or puts it inside a grouped
 scanner as plain JS.
 
 ```ts
-export const ActiveAdmins = JIT.query(Users.binary().load(seed))
+export const ActiveAdmins = JIT.cqrs
+  .query(Users.binary().load(seed))
   .filter((q) => q.eq("role", "admin"))
   .select("id", "score");
 ```
@@ -340,7 +343,7 @@ The binary suite measures:
 - packed, forced-aligned, and columnar layouts over the same data;
 - isolated layout conversion (`load`) at 100k and 1M rows;
 - full `load + query` pipelines with exact and dynamic strategies;
-- regular `JIT.query` over JS arrays;
+- regular `JIT.cqrs.query` over JS arrays;
 - handwritten JS filter/map as a marked biased baseline;
 - Zod 4 and TypeBox validation plus native filter/map as marked biased
   boundary comparisons.
@@ -371,7 +374,7 @@ Latest local run in this repo on Node 22.17.1, linux-x64, Ryzen 7 5800H:
 
 The table is intentionally split: preloaded rowsets measure the byte scanner;
 `load+query` measures conversion plus compute. If a workload runs one simple
-filter over an already materialized JS array, normal `JIT.query` may be
+filter over an already materialized JS array, normal `JIT.cqrs.query` may be
 faster. If the same batch feeds repeated filters, aggregations, or controlled
 scratch-memory stages, rowsets keep the data compact between operations.
 

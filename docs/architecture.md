@@ -162,8 +162,9 @@ requires runtime, type, generated-source, runtime-AOT, and `define`-stub AOT
 coverage. See [composable execution pipelines](features/composable-execution.md)
 for the public contract.
 
-`JIT.cqrs` is the canonical public query surface; top-level `JIT.query` is a
-compatibility path over the same `QueryProgram`. Query output is a
+`JIT.cqrs` is the only public query surface. `JIT.cqrs.query` lowers through the
+same `QueryProgram` for object collections and through the existing binary
+query compiler for rowsets. Query output is a
 physical-plan choice. `.compile()` keeps the specialized
 eager-array backend; `.to.iterator()`, `.to.asyncIterator()`, and
 `.to.visitor()` select explicit incremental backends. The lazy emitter
@@ -215,7 +216,7 @@ types that future package splits will reuse.
 - **Binary rowsets** (`compiler/binary-rowset.ts`): in-memory only, not a
   transport format. Flat object arrays compile into fixed-width rows in one
   `ArrayBuffer`; optionals/nullables use 2-bit row masks, string/literal
-  fields use per-field integer dictionaries, and `JIT.query(rowset)` emits
+  fields use per-field integer dictionaries, and `JIT.cqrs.query(rowset)` emits
   byte-offset scans. The adaptive memory layout keeps mixed rows packed, uses
   typed views when naturally aligned, and supports explicit aligned and
   columnar modes. Columnar storage keeps one buffer with a leading mask plane

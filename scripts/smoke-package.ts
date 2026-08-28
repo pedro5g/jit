@@ -50,11 +50,11 @@ try {
 
   writeFileSync(
     join(consumerDir, "esm.mjs"),
-    'import { JIT } from "@jit-compiler/jit/runtime";\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.is(schema)({ id: 1 })) process.exit(1);\n'
+    'import { JIT } from "@jit-compiler/jit/runtime";\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validate.is(schema)({ id: 1 })) process.exit(1);\n'
   );
   writeFileSync(
     join(consumerDir, "cjs.cjs"),
-    'const { JIT } = require("@jit-compiler/jit/runtime");\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.is(schema)({ id: 1 })) process.exit(1);\n'
+    'const { JIT } = require("@jit-compiler/jit/runtime");\nconst schema = JIT.object({ id: JIT.int() });\nif (!JIT.validate.is(schema)({ id: 1 })) process.exit(1);\n'
   );
   run(process.execPath, ["esm.mjs"], consumerDir);
   run(process.execPath, ["cjs.cjs"], consumerDir);

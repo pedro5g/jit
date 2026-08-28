@@ -48,18 +48,18 @@ Every capability has a primary namespace and no `.compile()` step is needed —
 a compiled artifact _is_ the function. Domain primitives are top-level JIT
 factories, matching the schema factories they compose.
 
-| Namespace      | Members                                                                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JIT.validate` | `is`, `parse`, `safeParse`, `issues`, `async.parse`, `async.safeParse`                                                                                        |
-| `JIT.compare`  | `equal`, `diff`, `hash`                                                                                                                                       |
-| `JIT.security` | `mask`, `sanitize`                                                                                                                                            |
-| `JIT.json`     | `parse`, `stringify`, `stringifyChunks`, `value`                                                                                                              |
-| `JIT.binary`   | `encode`, `decode`, `codec`                                                                                                                                   |
+| Namespace      | Members                                                                                                                                                                                                                |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JIT.validate` | `is`, `parse`, `safeParse`, `issues`, `async.parse`, `async.safeParse`                                                                                                                                                 |
+| `JIT.compare`  | `equal`, `diff`, `hash`                                                                                                                                                                                                |
+| `JIT.security` | `mask`, `sanitize`                                                                                                                                                                                                     |
+| `JIT.json`     | `parse`, `stringify`, `stringifyChunks`, `value`                                                                                                                                                                       |
+| `JIT.binary`   | `encode`, `decode`, `codec`                                                                                                                                                                                            |
 | root           | `valueObject`, `entity`, `aggregateRoot`, `domainEvent`, `clone`, `format`, `jsonSchema`, `mock`, `ops`, `from`, `map`, `query`, `transform`, `update`, `watch`, `stream`, `process`, `dto`, plus every schema factory |
 
 ```ts
 const isUser = JIT.validate.is(User);
-const equalUser = JIT.equal(User);
+const equalUser = JIT.compare.equal(User);
 const maskUser = JIT.security.mask(User);
 const toJson = JIT.json.stringify(User);
 
@@ -140,7 +140,8 @@ Queries are builders that _are_ the query, with alternative result shapes
 behind `.to`:
 
 ```ts
-const activeAdmins = JIT.query(JIT.array(User))
+const activeAdmins = JIT.cqrs
+  .query(JIT.array(User))
   .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
   .select("id", "email");
 

@@ -19,7 +19,7 @@ const activeIds = JIT.cqrs
   .limit(100);
 ```
 
-The surface also carries uniqueness, collectors, ordering, incremental control, mutation, scalar aggregates, iterator, async iterator and visitor backends. `filter` and `take` remain compatibility aliases for `where` and `limit`. Top-level `JIT.query(arraySchema)` remains a compatibility path and receives no exclusive features.
+The surface also carries uniqueness, collectors, ordering, incremental control, mutation, scalar aggregates, iterator, async iterator and visitor backends. `filter` and `take` remain compatibility aliases for `where` and `limit`. `JIT.cqrs.query` is the only public query constructor and accepts object schemas, collection schemas, and binary rowsets.
 
 ### Composite aggregate
 
@@ -147,12 +147,12 @@ warm-up, using `pnpm bench:cqrs`:
 Measured with `pnpm bench:cqrs-terminal` on the same machine, 10 000 rows,
 `where(eq("id", target)).first()`:
 
-| Match position     | Idiomatic `find` | Handwritten loop | JIT runtime | JIT AOT | JIT filter then `[0]` |
-| ------------------ | ---------------: | ---------------: | ----------: | ------: | --------------------: |
-| middle row         |           7.90 µs |          6.38 µs |     5.41 µs | 6.65 µs |              16.79 µs |
-| last row           |          18.29 µs |         12.23 µs |    10.95 µs | 12.19 µs |              28.84 µs |
-| no match           |          18.32 µs |         10.77 µs |    10.82 µs | 13.64 µs |              16.70 µs |
-| `every`, all match |          13.04 µs |                — |    11.35 µs | 14.97 µs |                     — |
+| Match position     | Idiomatic `find` | Handwritten loop | JIT runtime |  JIT AOT | JIT filter then `[0]` |
+| ------------------ | ---------------: | ---------------: | ----------: | -------: | --------------------: |
+| middle row         |          7.90 µs |          6.38 µs |     5.41 µs |  6.65 µs |              16.79 µs |
+| last row           |         18.29 µs |         12.23 µs |    10.95 µs | 12.19 µs |              28.84 µs |
+| no match           |         18.32 µs |         10.77 µs |    10.82 µs | 13.64 µs |              16.70 µs |
+| `every`, all match |         13.04 µs |                — |    11.35 µs | 14.97 µs |                     — |
 
 `first()` stays in the handwritten-loop band and avoids the callback paid by `Array.prototype.find`,
 which pays a callback per row. The larger number is the column on the right:

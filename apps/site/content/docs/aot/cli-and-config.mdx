@@ -49,7 +49,9 @@ export const UserOps = {
 };
 
 // A standalone artifact keeps its declaration name exactly.
-export const findAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin"));
+export const findAdmins = JIT.cqrs
+  .query(Users)
+  .filter((q) => q.eq("role", "admin"));
 export const watchUsers = JIT.watch(Users, { key: "id" });
 ```
 

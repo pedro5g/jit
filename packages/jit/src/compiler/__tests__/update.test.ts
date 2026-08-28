@@ -31,7 +31,7 @@ describe("JIT compiler update", () => {
       active: JIT.boolean(),
     });
     const rename = JIT.update(User)
-      .patch({ name: JIT.param("name") })
+      .patch({ name: JIT.cqrs.param("name") })
       .compile();
     const direct = JIT.update(User).compile();
     const input = { id: 1, name: "Ada", active: true };

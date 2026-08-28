@@ -273,7 +273,7 @@ export type LazyQueryBuilder<
 
 /**
  * Query builder backed by a binary rowset layout. It accepts the same filter
- * AST as regular `JIT.query`, but compiles supported filters/projections into
+ * AST as regular `JIT.cqrs.query`, but compiles supported filters/projections into
  * byte-offset scans over `ArrayBuffer` rows.
  */
 export type BinaryQueryBuilder<

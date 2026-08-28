@@ -128,7 +128,8 @@ describe("binary rowsets", () => {
   it("loads, hydrates, and queries contiguous typed columns", () => {
     const binary = Users.binary({ strategy: "exact", memoryLayout: "columnar" });
     const rowset = binary.load(rows);
-    const findAdmins = JIT.query(rowset)
+    const findAdmins = JIT.cqrs
+      .query(rowset)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
       .select("id", "name", "score");
 
@@ -227,7 +228,8 @@ describe("binary rowsets", () => {
   it("queries rowsets directly from byte offsets", () => {
     const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
     const rowset = binary.load(rows);
-    const findAdmins = JIT.query(rowset)
+    const findAdmins = JIT.cqrs
+      .query(rowset)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
       .select("id", "name", "score");
 
@@ -240,11 +242,13 @@ describe("binary rowsets", () => {
   it("handles params and numeric aggregates without hydrating rows", () => {
     const binary = Users.binary({ strategy: "exact", memoryLayout: "aligned" });
     const rowset = binary.load(rows);
-    const total = JIT.query(rowset)
+    const total = JIT.cqrs
+      .query(rowset)
       .params({ active: JIT.boolean() })
       .filter((q, params) => q.eq("active", params.active))
       .sum("score");
-    const countAdmins = JIT.query(rowset)
+    const countAdmins = JIT.cqrs
+      .query(rowset)
       .filter((q) => q.eq("role", q.constant("admin")))
       .count();
 
@@ -305,7 +309,8 @@ describe("binary rowsets", () => {
   it("exposes typed binary APIs", () => {
     const binary = Users.binary();
     const rowset = binary.load(rows);
-    const query = JIT.query(rowset)
+    const query = JIT.cqrs
+      .query(rowset)
       .filter((q) => q.eq("role", "admin"))
       .select("id", "name");
     const pipeline = JIT.process(User)
@@ -354,7 +359,7 @@ describe("binary rowsets", () => {
     ];
     const binary = Shapes.binary({ strategy: "exact", memoryLayout: "columnar" });
     const rowset = binary.load(values);
-    const circles = JIT.query(rowset).filter((q) => q.eq("kind", "circle"));
+    const circles = JIT.cqrs.query(rowset).filter((q) => q.eq("kind", "circle"));
     const kind = binary.layout.fields.find((field) => field.key === "kind");
 
     expect(binary.layout.union).toEqual({

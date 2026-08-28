@@ -14,10 +14,12 @@ type Shape = JIT.Typeof<typeof Shape>;
 const values = createShapes(COUNT);
 const binary = Shapes.binary({ strategy: "exact", memoryLayout: "columnar" });
 const rowset = binary.load(values);
-const countCircles = JIT.query(rowset)
+const countCircles = JIT.cqrs
+  .query(rowset)
   .filter((q) => q.eq("kind", "circle"))
   .count();
-const sumCircles = JIT.query(rowset)
+const sumCircles = JIT.cqrs
+  .query(rowset)
   .filter((q) => q.eq("kind", "circle"))
   .sum("area");
 

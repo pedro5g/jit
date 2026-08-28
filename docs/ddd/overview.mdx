@@ -10,6 +10,6 @@ Use the smallest semantic primitive that describes the domain:
 - `JIT.ddd.aggregateRoot(schema, { id })` adds controlled internal mutation and an ordered domain-event buffer.
 - `JIT.ddd.domainEvent(type, { version, payload })` describes an immutable versioned fact.
 
-All five are SchemaLike. They can be passed directly to `JIT.parse`, `JIT.json.parse`, `JIT.json.stringify`, mapping, and AOT generation.
+All five are SchemaLike. They can be passed directly to `JIT.validate.parse`, `JIT.json.parse`, `JIT.json.stringify`, mapping, and AOT generation.
 
 See the focused guides in this directory and [the architecture](../architecture.md).

@@ -24,13 +24,13 @@ Implemented and covered by tests:
 
 - `JIT.Typeof<typeof Schema>` is the single public helper for resolving a schema output type.
 - `JIT.validate.is/parse/safeParse(schema)` and `JIT.validate.async.parse/safeParse(schema)`.
-- `JIT.equal/diff/hash(schema)` and `JIT.clone(schema)`.
+- `JIT.compare.equal/diff/hash(schema)` and `JIT.clone(schema)`.
 - `JIT.json.stringify(schema)`.
 - `JIT.json.parse(schema).validate()` as AOT `fromJSON`.
-- `JIT.update(schema).patch({ field: JIT.param("name") }).compile()`.
+- `JIT.update(schema).patch({ field: JIT.cqrs.param("name") }).compile()`.
 - `JIT.cqrs.query(schema).params({...}).where((q, params) => ...)`, with
-  top-level `JIT.query(collection)` retained for compatibility.
-- `JIT.const(value)` and `q.constant(value)` for build-time query literals.
+  object collections and binary rowsets sharing the namespace.
+- `JIT.cqrs.const(value)` and `q.constant(value)` for build-time query literals.
 - `JIT.transform(schema).select(...).map(...)` for built-in field
   transforms such as `lowercase`, `uppercase`, and `trim`.
 - `@jit-compiler/jit/define` AOT stubs throw if executed and register artifact metadata for

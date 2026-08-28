@@ -229,7 +229,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "equal": {
-        const equal = JIT.equal(requireSchema());
+        const equal = JIT.compare.equal(requireSchema());
         source = sourceOf(equal);
         run = () => equal(requireA(), requireB("a second value"));
         break;
@@ -244,13 +244,13 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "diff": {
-        const diff = JIT.diff(requireSchema());
+        const diff = JIT.compare.diff(requireSchema());
         source = sourceOf(diff);
         run = () => diff(requireA(), requireB("a second value"));
         break;
       }
       case "hash": {
-        const hashFn = JIT.hash(requireSchema());
+        const hashFn = JIT.compare.hash(requireSchema());
         source = sourceOf(hashFn);
         run = () => hashFn(requireA());
         break;
@@ -305,7 +305,9 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
       case "query": {
         const query = bindings.query as ((rows: unknown, params?: unknown) => unknown) | undefined;
         if (typeof query !== "function") {
-          throw new Error("define a `query` binding, e.g. `const query = JIT.query(JIT.array(schema)).filter(...)`");
+          throw new Error(
+            "define a `query` binding, e.g. `const query = JIT.cqrs.query(JIT.array(schema)).filter(...)`"
+          );
         }
         source = sourceOf(query);
         run = () =>
@@ -316,7 +318,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         const lazy = bindings.lazy as ((rows: unknown, params?: unknown) => Iterable<unknown>) | undefined;
         if (typeof lazy !== "function") {
           throw new Error(
-            "define a `lazy` binding, e.g. `const lazy = JIT.query(JIT.array(schema)).take(10).to.iterator()`"
+            "define a `lazy` binding, e.g. `const lazy = JIT.cqrs.query(JIT.array(schema)).take(10).to.iterator()`"
           );
         }
         source = sourceOf(lazy);
@@ -331,7 +333,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
           | undefined;
         if (typeof visitor !== "function") {
           throw new Error(
-            "define a `visitor` binding, e.g. `const visitor = JIT.query(JIT.array(schema)).to.visitor()`"
+            "define a `visitor` binding, e.g. `const visitor = JIT.cqrs.query(JIT.array(schema)).to.visitor()`"
           );
         }
         source = sourceOf(visitor);
@@ -392,7 +394,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         const binaryQuery = bindings.binaryQuery as ((rowset: PlaygroundBinaryRowSet) => unknown) | undefined;
         if (!binary || typeof binary.load !== "function" || typeof binaryQuery !== "function") {
           throw new Error(
-            "define `binary` and `binaryQuery` bindings from an array binary layout and `JIT.query(binary)`"
+            "define `binary` and `binaryQuery` bindings from an array binary layout and `JIT.cqrs.query(binary)`"
           );
         }
         source = sourceOf(binaryQuery);

@@ -38,11 +38,11 @@ findByRole(users, { role: "admin" });
 Build-time constants can be embedded:
 
 ```ts
-JIT.cqrs.query(User).where((q) => q.eq("role", JIT.const("admin")));
+JIT.cqrs.query(User).where((q) => q.eq("role", JIT.cqrs.const("admin")));
 ```
 
-`JIT.query(JIT.array(User))` remains a compatibility path over the same engine.
-New query capabilities are introduced through `JIT.cqrs`.
+`JIT.cqrs.query(JIT.array(User))` uses the same engine as queries declared from
+the element schema. All query capabilities are exposed through `JIT.cqrs`.
 
 ## Mapper API
 
@@ -173,7 +173,7 @@ CPU. Less allocation means less GC pressure and more stable latency.
 
 - Compile queries and mappers once.
 - Prefer `.select(...)` over mapping whole objects and deleting fields.
-- Use params for runtime values and `JIT.const(...)` for build-time constants.
+- Use params for runtime values and `JIT.cqrs.const(...)` for build-time constants.
 - Prefer built-in transform expressions when you want AOT-safe mappers.
 - Use grouped AOT exports for domain modules that naturally travel together.
 - Benchmark full flows, not only single-row microbenchmarks.

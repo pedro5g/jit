@@ -30,14 +30,16 @@ the validator is not added to the mask, and the PII leaks.
 A generic validator receives a schema object and walks it: read the node, branch
 on its type, look up the next key, allocate an issue array in case something
 fails, recurse. That traversal is identical on the first call and the millionth.
-The *shape* is known long before the value arrives, but a generic library cannot
+The _shape_ is known long before the value arrives, but a generic library cannot
 use that, because it is compiled against every possible schema rather than yours.
 
 ```ts
 // what a generic library does, once per call, forever
 for (const key of Object.keys(schema.shape)) {
   const child = schema.shape[key];
-  if (child.type === "string") { /* ...branch, branch, branch... */ }
+  if (child.type === "string") {
+    /* ...branch, branch, branch... */
+  }
 }
 ```
 
@@ -56,9 +58,9 @@ const User = JIT.object({
   age: JIT.number().int().min(0),
 });
 
-const isUser = JIT.validate.is(User);       // allocates nothing, returns on first failure
-const sameUser = JIT.equal(User);   // structural equality, no generic walk
-const safeUser = JIT.security.mask(User);   // rebuilds only the paths that carry a marked field
+const isUser = JIT.validate.is(User); // allocates nothing, returns on first failure
+const sameUser = JIT.compare.equal(User); // structural equality, no generic walk
+const safeUser = JIT.security.mask(User); // rebuilds only the paths that carry a marked field
 ```
 
 Every one of those is derived from the same declaration, so they cannot disagree

@@ -118,7 +118,7 @@ were captured on the same machine as the table above.
 | Adaptive `load+query`, 1M, dynamic | **52.67 ms / 28.26 MB**     | Zod 4 parse + native filter 454.89 ms / 110.31 MB | **8.64x faster, 74% less heap** |
 | Tagged-union `count`, 1M           | **0.78 ms**                 | Native JS string discriminator 2.64 ms            | **3.40x faster**                |
 
-For one-off queries over already materialized JS arrays, regular `JIT.query`
+For one-off queries over already materialized JS arrays, regular `JIT.cqrs.query`
 can still be the right tool. Binary rowsets are for reuse, repeated filters,
 controlled scratch memory, and pipelines where rows stay compact between
 processing stages. `memoryLayout: "auto"` keeps mixed schemas packed and uses
@@ -698,7 +698,7 @@ Parameterized updates follow the same compile shape:
 
 ```ts
 const renameUser = JIT.update(User)
-  .patch({ name: JIT.param("name") })
+  .patch({ name: JIT.cqrs.param("name") })
   .compile();
 
 renameUser(user, { name: "Grace" });
@@ -742,7 +742,8 @@ runtime compiler import. Stateful watched-list instances remain runtime-owned.
 Fused single-loop pipelines over collections — no intermediate arrays:
 
 ```ts
-const admins = JIT.query(UserList)
+const admins = JIT.cqrs
+  .query(UserList)
   .params({ minimumId: JIT.int() })
   .filter((q, params) =>
     q.and(q.not(q.eq("role", "blocked")), q.gt("id", params.minimumId)),
@@ -754,20 +755,23 @@ const admins = JIT.query(UserList)
 admins(users, { minimumId: 100 }); // one pass, params read directly
 
 // build-time constants are baked into the query artifact:
-JIT.query(UserList).filter((q) => q.eq("role", JIT.const("admin")));
+JIT.cqrs.query(UserList).filter((q) => q.eq("role", JIT.cqrs.const("admin")));
 
 // terminals
-JIT.query(UserList)
+JIT.cqrs
+  .query(UserList)
   .filter((q) => q.eq("role", "user"))
   .avg("id");
 // sum / count / avg / min / max — empty: sum/count → 0, others → undefined
 
 // keyed collections, grouping, and mutations
-JIT.query(UserList).groupBy("role");
-JIT.query(UserList)
+JIT.cqrs.query(UserList).groupBy("role");
+JIT.cqrs
+  .query(UserList)
   .filter((q) => q.lt("score", 0))
   .delete();
-JIT.query(UserList)
+JIT.cqrs
+  .query(UserList)
   .filter((q) => q.eq("id", 7))
   .update({ active: false });
 ```
@@ -778,7 +782,8 @@ The eager array remains the default. Choose an explicit incremental terminal
 when the consumer should control materialization:
 
 ```ts
-const activeNames = JIT.query(UserList)
+const activeNames = JIT.cqrs
+  .query(UserList)
   .filter((q) => q.eq("active", true))
   .select("id", "name")
   .take(10);
@@ -1013,7 +1018,7 @@ const UserSchema = JIT.object({
 export const User = {
   is: JIT.validate.is(UserSchema),
   parse: JIT.validate.parse(UserSchema),
-  findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")),
+  findAdmins: JIT.cqrs.query(UserList).filter((q) => q.eq("role", "admin")),
   toDTO: JIT.map.many(UserSchema, PublicUser, {}),
 };
 
@@ -1087,7 +1092,9 @@ export const isUser = JIT.validate.is(User);
 // One frozen object: UserOps.parse, UserOps.findAdmins.
 export const UserOps = {
   parse: JIT.validate.parse(User),
-  findAdmins: JIT.query(JIT.array(User)).filter((q) => q.eq("role", "admin")),
+  findAdmins: JIT.cqrs
+    .query(JIT.array(User))
+    .filter((q) => q.eq("role", "admin")),
 };
 ```
 
@@ -1301,7 +1308,7 @@ const EntityUsers = JIT.array(User).entity({ key: "id" }); // identity only
 const IndexedUsers = JIT.array(User).indexBy("id"); // indexed equality
 const KeyedUsers = JIT.array(User).keyed("id"); // identity + index + unique contract
 
-const byId = JIT.query(KeyedUsers).keyed("id"); // fresh Map result
+const byId = JIT.cqrs.query(KeyedUsers).keyed("id"); // fresh Map result
 ```
 
 `entity` gives normalize/unique/sort compilers a default key without changing

@@ -19,7 +19,7 @@ describe("JIT compiler query", () => {
   const inputMap = new Map(input.map((item) => [item.id, item]));
 
   it("should compile typed filter queries", () => {
-    const adults = JIT.query(Users).filter((q) => q.gt("age", 18));
+    const adults = JIT.cqrs.query(Users).filter((q) => q.gt("age", 18));
     const result = adults(input);
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
@@ -48,7 +48,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should compile fused filter/select queries through explicit compile", () => {
-    const selectAdults = JIT.query(Users)
+    const selectAdults = JIT.cqrs
+      .query(Users)
       .filter((q) => q.and(q.gt("age", 18), q.neq("role", "blocked")))
       .select("name");
     const source = Compiler.emitQuerySource(Users.schema, {
@@ -86,7 +87,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should compile filter, unique, and select in one array loop", () => {
-    const uniqueAdmins = JIT.query(Users)
+    const uniqueAdmins = JIT.cqrs
+      .query(Users)
       .select("id", "name")
       .filter((q) => q.eq("role", "admin"))
       .unique("id");
@@ -133,7 +135,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should compile keyed collectors with projected values", () => {
-    const keyed = JIT.query(Users)
+    const keyed = JIT.cqrs
+      .query(Users)
       .filter((q) => q.gt("age", 18))
       .keyed("id")
       .select("name");
@@ -181,7 +184,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should compile groupBy collectors with projected values", () => {
-    const grouped = JIT.query(Users)
+    const grouped = JIT.cqrs
+      .query(Users)
       .filter((q) => q.gt("age", 18))
       .groupBy("role")
       .select("id");
@@ -230,7 +234,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should compile orderBy as a final array pass", () => {
-    const ordered = JIT.query(Users)
+    const ordered = JIT.cqrs
+      .query(Users)
       .filter((q) => q.gt("age", 18))
       .select("name", "age")
       .orderBy("age", "asc");
@@ -265,7 +270,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should sort original items before projecting when order key is not selected", () => {
-    const orderedNames = JIT.query(Users)
+    const orderedNames = JIT.cqrs
+      .query(Users)
       .filter((q) => q.gt("age", 18))
       .select("name")
       .orderBy("age", "desc");
@@ -316,7 +322,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should normalize operator priority independent from builder order", () => {
-    const query = JIT.query(Users)
+    const query = JIT.cqrs
+      .query(Users)
       .select("id", "role")
       .unique("id")
       .filter((q) => q.not(q.eq("role", "blocked")));
@@ -335,7 +342,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should optimize repeated operations with last operation winning", () => {
-    const query = JIT.query(Users)
+    const query = JIT.cqrs
+      .query(Users)
       .filter((q) => q.gt("age", 10))
       .filter((q) => q.neq("role", "blocked"))
       .select("id", "name", "role")
@@ -374,7 +382,7 @@ describe("JIT compiler query", () => {
   });
 
   it("should let the last collector win", () => {
-    const query = JIT.query(Users).keyed("id").groupBy("role").select("name");
+    const query = JIT.cqrs.query(Users).keyed("id").groupBy("role").select("name");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
         { kind: "keyed", key: "id" },
@@ -401,7 +409,8 @@ describe("JIT compiler query", () => {
 
   it("should compile Set filter/select queries without array conversion", () => {
     const User = Users.schema.def.element;
-    const query = JIT.query(JIT.set(User))
+    const query = JIT.cqrs
+      .query(JIT.set(User))
       .filter((q) => q.gt("age", 18))
       .select("name");
     const source = Compiler.emitQuerySource(JIT.set(User).schema, {
@@ -423,7 +432,8 @@ describe("JIT compiler query", () => {
 
   it("should compile Map value queries without entry destructuring or array conversion", () => {
     const User = Users.schema.def.element;
-    const query = JIT.query(JIT.mapSchema(JIT.number(), User))
+    const query = JIT.cqrs
+      .query(JIT.mapSchema(JIT.number(), User))
       .filter((q) => q.gt("age", 18))
       .unique("id")
       .groupBy("role")
@@ -450,10 +460,12 @@ describe("JIT compiler query", () => {
   });
 
   it("should compile array delete and shallow update terminals", () => {
-    const deleteBlocked = JIT.query(Users)
+    const deleteBlocked = JIT.cqrs
+      .query(Users)
       .filter((q) => q.eq("role", "blocked"))
       .delete();
-    const promoteAdults = JIT.query(Users)
+    const promoteAdults = JIT.cqrs
+      .query(Users)
       .filter((q) => q.gt("age", 18))
       .update({ role: "adult" });
     const deleteSource = Compiler.emitQuerySource(Users.schema, {
@@ -485,10 +497,12 @@ describe("JIT compiler query", () => {
 
   it("should compile Set and Map delete/update terminals preserving collection kind", () => {
     const User = Users.schema.def.element;
-    const deleteFromSet = JIT.query(JIT.set(User))
+    const deleteFromSet = JIT.cqrs
+      .query(JIT.set(User))
       .filter((q) => q.eq("role", "blocked"))
       .delete();
-    const updateMap = JIT.query(JIT.mapSchema(JIT.number(), User))
+    const updateMap = JIT.cqrs
+      .query(JIT.mapSchema(JIT.number(), User))
       .filter((q) => q.eq("role", "admin"))
       .update({ name: "Admin" });
     const deletedSet = deleteFromSet(inputSet);
@@ -513,9 +527,9 @@ describe("JIT compiler query", () => {
   });
 
   it("should infer select output from rest fields without as const", () => {
-    const oneField = JIT.query(Users).select("name")(input);
-    const twoFields = JIT.query(Users).select("id", "name")(input);
-    const chained = JIT.query(Users).select("id", "name").select("name")(input);
+    const oneField = JIT.cqrs.query(Users).select("name")(input);
+    const twoFields = JIT.cqrs.query(Users).select("id", "name")(input);
+    const chained = JIT.cqrs.query(Users).select("id", "name").select("name")(input);
 
     expectTypeOf(oneField).toEqualTypeOf<{ readonly name: string }[]>();
     expectTypeOf(twoFields).toEqualTypeOf<
@@ -528,9 +542,10 @@ describe("JIT compiler query", () => {
   });
 
   it("should compile runtime params without captured bindings", () => {
-    const adminsAboveAge = JIT.query(Users)
+    const adminsAboveAge = JIT.cqrs
+      .query(Users)
       .params({ minimumAge: JIT.number() })
-      .filter((q, params) => q.and(q.gt("age", params.minimumAge), q.eq("role", JIT.const("admin"))))
+      .filter((q, params) => q.and(q.gt("age", params.minimumAge), q.eq("role", JIT.cqrs.const("admin"))))
       .select("id", "name");
     const source = Compiler.emitQuerySource(Users.schema, {
       nodes: [
@@ -580,7 +595,8 @@ describe("JIT compiler query", () => {
   });
 
   it("should accumulate successive parameter declarations", () => {
-    const query = JIT.query(Users)
+    const query = JIT.cqrs
+      .query(Users)
       .params({ minimumAge: JIT.number() })
       .filter((q, params) => q.gte("age", params.minimumAge))
       .params({ role: JIT.string() })
@@ -597,34 +613,40 @@ describe("JIT compiler query", () => {
       ) => { readonly id: number; readonly name: string; readonly age: number; readonly role: string }[]
     >();
 
-    expect(() => JIT.query(Users).params({ role: JIT.string() }).params({ role: JIT.string() })).toThrow(/duplicated/i);
+    expect(() => JIT.cqrs.query(Users).params({ role: JIT.string() }).params({ role: JIT.string() })).toThrow(
+      /duplicated/i
+    );
   });
 
   it("should reject unknown keys and unsupported schemas", () => {
     // A query builder lowers on its first call, so key errors surface there.
-    expect(() => JIT.query(Users).filter((q) => q.gt("missing" as "age", 1))([])).toThrow(Errors.JITError);
-    expect(() => JIT.query(JIT.object({ id: JIT.number() }))).toThrow(Errors.JITError);
-    expect(() => JIT.query(Users).keyed("id").orderBy("age")([])).toThrow(Errors.JITError);
-    expect(() => JIT.query(Users).delete()([])).toThrow(Errors.JITError);
+    expect(() => JIT.cqrs.query(Users).filter((q) => q.gt("missing" as "age", 1))([])).toThrow(Errors.JITError);
+    expect(() => JIT.cqrs.query(JIT.string())).toThrow(Errors.JITError);
+    expect(() => JIT.cqrs.query(Users).keyed("id").orderBy("age")([])).toThrow(Errors.JITError);
+    expect(() => JIT.cqrs.query(Users).delete()([])).toThrow(Errors.JITError);
     expect(() =>
-      JIT.query(Users)
+      JIT.cqrs
+        .query(Users)
         .filter((q) => q.eq("role", "admin"))
         .select("name")
         .delete()([])
     ).toThrow(Errors.JITError);
     expect(() =>
-      JIT.query(Users)
+      JIT.cqrs
+        .query(Users)
         .filter((q) => q.eq("role", "admin"))
         .update({ missing: "nope" } as unknown as { role: string })([])
     ).toThrow(Errors.JITError);
 
     // @ts-expect-error invalid query keys are rejected statically.
-    JIT.query(Users).filter((q) => q.eq("missing", 1));
-    JIT.query(Users)
+    JIT.cqrs.query(Users).filter((q) => q.eq("missing", 1));
+    JIT.cqrs
+      .query(Users)
       .select("name")
       // @ts-expect-error select only accepts fields still present in the output shape.
       .select("age");
-    JIT.query(Users)
+    JIT.cqrs
+      .query(Users)
       .filter((q) => q.eq("role", "admin"))
       // @ts-expect-error update patch keys must exist on the query item.
       .update({ missing: "nope" });

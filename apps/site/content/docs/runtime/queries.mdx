@@ -5,7 +5,8 @@ related: /docs/reference/operators/entity-keyed-and-indexes, /docs/runtime/binar
 ---
 
 ```ts
-const findAdmins = JIT.query(Users)
+const findAdmins = JIT.cqrs
+  .query(Users)
   .params({ minimumScore: JIT.number() })
   .filter((q, params) =>
     q.and(q.eq("role", "admin"), q.gte("score", params.minimumScore)),
@@ -45,7 +46,8 @@ cannot be emitted safely by AOT.
 ## Aggregation
 
 ```ts
-const revenue = JIT.query(Orders)
+const revenue = JIT.cqrs
+  .query(Orders)
   .filter((q) => q.eq("status", "paid"))
   .sum("total");
 ```
@@ -55,7 +57,7 @@ const revenue = JIT.query(Orders)
 
 ## Params versus constants
 
-Use `.params(shape)` for values supplied per call. Use `JIT.const(value)` for a
+Use `.params(shape)` for values supplied per call. Use `JIT.cqrs.const(value)` for a
 primitive compiler literal. Ordinary closure values become safe external
 bindings. No untrusted value is interpolated into generated source.
 

@@ -7,17 +7,26 @@ the hot path.
 
 ## API replacements
 
-| Previous style                         | Current style                                   |
-| -------------------------------------- | ----------------------------------------------- |
-| `JIT.validate(User).parse().compile()` | `JIT.parse(User)` or `JIT.validate.parse(User)` |
-| `JIT.validate(User).is()`              | `JIT.is(User)` or `JIT.validate.is(User)`       |
-| `JIT.model(User).get("is", "parse")`   | `{ is: JIT.is(User), parse: JIT.parse(User) }`  |
-| `JIT.dto(Source, Target).get("map")`   | `JIT.map(Source, Target)`                       |
-| `JIT.dto(Source, Target).get("many")`  | `JIT.map.many(Source, Target)`                  |
-| `JIT.json(User).parse().compile()`     | `JIT.json.parse(User).validate()`               |
-| `JIT.query(Users).compile()`           | `JIT.query(Users)`                              |
-| `query.compileIterator()`              | `query.to.iterator()`                           |
-| `JIT.compileEqual(schema)`             | `Compiler.compileEqual(schema)`                 |
+| Previous style                         | Current style                                                    |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| `JIT.validate(User).parse().compile()` | `JIT.validate.parse(User)`                                       |
+| `JIT.validate(User).is()`              | `JIT.validate.is(User)`                                          |
+| `JIT.model(User).get("is", "parse")`   | `{ is: JIT.validate.is(User), parse: JIT.validate.parse(User) }` |
+| `JIT.is(User)`                         | `JIT.validate.is(User)`                                          |
+| `JIT.parse(User)`                      | `JIT.validate.parse(User)`                                       |
+| `JIT.safeParse(User)`                  | `JIT.validate.safeParse(User)`                                   |
+| `JIT.equal(User)`                      | `JIT.compare.equal(User)`                                        |
+| `JIT.diff(User)`                       | `JIT.compare.diff(User)`                                         |
+| `JIT.hash(User)`                       | `JIT.compare.hash(User)`                                         |
+| `JIT.jsonValue()`                      | `JIT.json.value()`                                               |
+| `JIT.dto(Source, Target).get("map")`   | `JIT.map(Source, Target)`                                        |
+| `JIT.dto(Source, Target).get("many")`  | `JIT.map.many(Source, Target)`                                   |
+| `JIT.json(User).parse().compile()`     | `JIT.json.parse(User).validate()`                                |
+| `JIT.query(Users).compile()`           | `JIT.cqrs.query(Users)`                                          |
+| `JIT.param("name")`                    | `JIT.cqrs.param("name")`                                         |
+| `JIT.const("admin")`                   | `JIT.cqrs.const("admin")`                                        |
+| `query.compileIterator()`              | `query.to.iterator()`                                            |
+| `JIT.compileEqual(schema)`             | `Compiler.compileEqual(schema)`                                  |
 
 `artifact.compile()` remains an optional eager warm-up hook. Calling an
 artifact directly is the normal API.

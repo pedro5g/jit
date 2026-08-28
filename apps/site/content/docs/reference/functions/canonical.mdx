@@ -63,7 +63,7 @@ console.log(JSON.stringify(canonical(a)) === JSON.stringify(canonical(b)));
 ```
 
 Do **not** canonicalize before a cache key or a hash.
-[`JIT.cacheKey`](./cache-key) and [`JIT.hash`](./hash) read the declared fields
+[`JIT.cacheKey`](./cache-key) and [`JIT.compare.hash`](./hash) read the declared fields
 directly and are already independent of key order, so building a canonical form
 for them is work with no result.
 

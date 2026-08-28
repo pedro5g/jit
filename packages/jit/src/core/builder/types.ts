@@ -510,7 +510,7 @@ export interface BuilderCore<TSchema extends AnyTypeSchema> {
   ): Builder<TSchema>;
   hash(strategy?: HashStrategy): Builder<TSchema>;
   /**
-   * Marks this field as personally identifiable information. `JIT.mask`
+   * Marks this field as personally identifiable information. `JIT.security.mask`
    * replaces marked fields: `"redact"` → `"***"` / `0`, `"mask"` → keeps the
    * last characters, `"hash"` → inline FNV-1a hash.
    */
@@ -642,7 +642,7 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   toLowerCase(): Builder<TSchema>;
   uppercase(): Builder<TSchema>;
   toUpperCase(): Builder<TSchema>;
-  /** Cleans strings through a source-emitted policy in parse and `JIT.sanitize`. */
+  /** Cleans strings through a source-emitted policy in parse and `JIT.security.sanitize`. */
   sanitize(options?: StringSanitizePreset | StringSanitizeSpec): Builder<TSchema>;
   guid(message?: string): Builder<TSchema>;
   cuid(message?: string): Builder<TSchema>;

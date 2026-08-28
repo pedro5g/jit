@@ -105,7 +105,6 @@ export type {
   QueryBuilder,
   QueryConditionBuilder,
 } from "./query.js";
-export { constant as const, param, query } from "./query.js";
 export {
   type ReconcileChange,
   type ReconcileChangeWithDiff,
@@ -122,17 +121,11 @@ export {
   binary,
   clone,
   compare,
-  diff,
-  equal,
   format,
   from,
-  hash,
-  is,
   json,
   map,
   mock,
-  parse,
-  safeParse,
   security,
   validate,
 } from "./runtime-ops.js";

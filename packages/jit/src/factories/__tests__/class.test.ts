@@ -72,12 +72,12 @@ describe("JIT.class", () => {
     const state = { id: "u_1", name: "Grace", createdAt: new Date(1) };
 
     expect(User.hydrate(state)).toBeInstanceOf(User);
-    expect(JIT.parse(User)(state)).toBeInstanceOf(User);
-    expect(JIT.safeParse(User)(state)).toMatchObject({
+    expect(JIT.validate.parse(User)(state)).toBeInstanceOf(User);
+    expect(JIT.validate.safeParse(User)(state)).toMatchObject({
       success: true,
       data: expect.any(User),
     });
-    expectTypeOf(JIT.parse(User)).toMatchTypeOf<(value: unknown) => InstanceType<typeof User>>();
+    expectTypeOf(JIT.validate.parse(User)).toMatchTypeOf<(value: unknown) => InstanceType<typeof User>>();
     expect(() => User.hydrate({ ...state, name: "x" })).toThrow(/at least 2 characters/i);
     expect(() => User.hydrate({ name: "Grace", createdAt: new Date(1) } as never)).toThrow();
   });
@@ -93,7 +93,7 @@ describe("JIT.class", () => {
       })
     );
 
-    expect(JIT.parse(User)({ name: "Ada" })).toBeInstanceOf(User);
+    expect(JIT.validate.parse(User)({ name: "Ada" })).toBeInstanceOf(User);
     expect(parses).toBe(1);
   });
 
@@ -519,7 +519,7 @@ describe("JIT.class", () => {
     expect(event.occurredAt).toBeInstanceOf(Date);
     expect(event["~event"]).toEqual({ version: 1, type: "order.confirmed", schemaVersion: 1 });
     expect(constructed).toMatchObject({ type: "order.confirmed", version: 1, payload: { orderId: "o_1" } });
-    expect(JIT.parse(OrderConfirmed)(event)).toBeInstanceOf(OrderConfirmed);
+    expect(JIT.validate.parse(OrderConfirmed)(event)).toBeInstanceOf(OrderConfirmed);
     const json = JIT.json.stringify(OrderConfirmed)(event);
     const restored = JIT.json.parse(OrderConfirmed).validate()(json);
     expect(restored).toBeInstanceOf(OrderConfirmed);

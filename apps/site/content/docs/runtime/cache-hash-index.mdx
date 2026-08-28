@@ -20,7 +20,7 @@ hashes and indexes remove repeated traversal work.
 | Situation                                           | Recommended configuration                                                  |
 | --------------------------------------------------- | -------------------------------------------------------------------------- |
 | Normal runtime use                                  | Keep the default compile cache and compile at module scope                 |
-| Only `is` and `parse` are needed                    | `JIT.validate.is(User)` and `JIT.validate.parse(User)`                       |
+| Only `is` and `parse` are needed                    | `JIT.validate.is(User)` and `JIT.validate.parse(User)`                     |
 | Measure cold compilation                            | Pass `{ cache: false }` to the supported factory                           |
 | Repeated equality for nested immutable objects      | Add `.hash()` to the schema                                                |
 | Repeated equality for large immutable entity arrays | Use `.keyed("id")` or `.entity({ key: "id" }).indexBy("id")`               |
@@ -62,9 +62,9 @@ schema:
 const A = JIT.object({ id: JIT.number() });
 const B = JIT.object({ id: JIT.number() });
 
-const equalA1 = JIT.equal(A).compile();
-const equalA2 = JIT.equal(A).compile(); // reuses A's compilation
-const equalB = JIT.equal(B).compile(); // B is a distinct cache target
+const equalA1 = JIT.compare.equal(A).compile();
+const equalA2 = JIT.compare.equal(A).compile(); // reuses A's compilation
+const equalB = JIT.compare.equal(B).compile(); // B is a distinct cache target
 ```
 
 Declare reusable schemas once. Rebuilding an equivalent schema for every
@@ -81,9 +81,9 @@ stored in the generated source.
 ```ts
 const is = JIT.validate.is(User);
 const parse = JIT.validate.parse(User);
-const equalUser = JIT.equal(User).compile();
+const equalUser = JIT.compare.equal(User).compile();
 const cloneUser = JIT.clone(User).compile();
-const hashUser = JIT.hash(User).compile();
+const hashUser = JIT.compare.hash(User).compile();
 ```
 
 Selection and caching solve different problems. Independent `JIT.validate.is(User)` and
@@ -98,8 +98,7 @@ bindings. One tenant's value or callback cannot leak into another compilation.
 
 ```ts
 const findNamed = (name: string) =>
-  JIT.query(JIT.array(User))
-    .filter((q) => q.eq("name", name));
+  JIT.cqrs.query(JIT.array(User)).filter((q) => q.eq("name", name));
 
 const findAda = findNamed("Ada");
 const findGrace = findNamed("Grace");
@@ -160,7 +159,7 @@ connections.
 
 ### Low-level compiler functions
 
-The ergonomic `JIT.equal(User)`, `JIT.clone(User)` and similar facades use the
+The ergonomic `JIT.compare.equal(User)`, `JIT.clone(User)` and similar facades use the
 default cache. Compiler tooling and cold-compile benchmarks can bypass it at
 the low-level boundary:
 
@@ -186,7 +185,7 @@ one-time cost back into recurring code generation.
 
 ## Structural hash cache
 
-`JIT.hash(schema)` emits a schema-specialized structural hash and memoizes the
+`JIT.compare.hash(schema)` emits a schema-specialized structural hash and memoizes the
 result for object references. Primitives bypass the `WeakMap` because they
 cannot be weak keys.
 
@@ -196,8 +195,8 @@ const HashedUser = JIT.object({
   profile: JIT.object({ name: JIT.string(), roles: JIT.array(JIT.string()) }),
 }).hash();
 
-const hashUser = JIT.hash(HashedUser).compile();
-const equalUser = JIT.equal(HashedUser).compile();
+const hashUser = JIT.compare.hash(HashedUser).compile();
+const equalUser = JIT.compare.equal(HashedUser).compile();
 
 const firstHash = hashUser(user);
 const secondHash = hashUser(user); // same reference: cached traversal
@@ -273,7 +272,7 @@ nested search:
 
 ```ts
 const Users = JIT.array(User).keyed("id");
-const equalUsers = JIT.equal(Users).compile();
+const equalUsers = JIT.compare.equal(Users).compile();
 
 equalUsers(
   [
@@ -337,7 +336,7 @@ instead of a `Map`:
 
 ```ts
 const OrderedUsers = JIT.array(User).ordered("id", "asc");
-const equalOrderedUsers = JIT.equal(OrderedUsers).compile();
+const equalOrderedUsers = JIT.compare.equal(OrderedUsers).compile();
 ```
 
 This avoids index allocation and searches by key in O(log n), but the input
@@ -349,7 +348,8 @@ runtime sorting step.
 A compiled query is reusable code, not a memoized answer:
 
 ```ts
-const adaNames = JIT.query(JIT.array(User))
+const adaNames = JIT.cqrs
+  .query(JIT.array(User))
   .filter((q) => q.eq("name", "Ada"))
   .select("name");
 

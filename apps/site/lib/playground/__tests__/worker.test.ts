@@ -129,11 +129,11 @@ const EntityUsers = JIT.array(schema).entity({ key: "id" });
 const IndexedUsers = JIT.array(schema).indexBy("id");
 const KeyedUsers = JIT.array(schema).keyed("id");
 const indexes = {
-  entityEqual: JIT.equal(EntityUsers),
-  indexedEqual: JIT.equal(IndexedUsers),
-  keyedEqual: JIT.equal(KeyedUsers),
+  entityEqual: JIT.compare.equal(EntityUsers),
+  indexedEqual: JIT.compare.equal(IndexedUsers),
+  keyedEqual: JIT.compare.equal(KeyedUsers),
   normalize: Compiler.compileNormalize(EntityUsers.schema),
-  keyedQuery: JIT.query(JIT.array(schema)).keyed("id").select("name"),
+  keyedQuery: JIT.cqrs.query(JIT.array(schema)).keyed("id").select("name"),
 };`,
       left,
       right
@@ -153,7 +153,7 @@ const indexes = {
     const lazy = execute(
       "lazy",
       `${eventSchema}
-const lazy = JIT.query(JIT.array(schema))
+const lazy = JIT.cqrs.query(JIT.array(schema))
   .filter((q) => q.eq("active", true))
   .select("id", "score")
   .take(2)
@@ -163,7 +163,7 @@ const lazy = JIT.query(JIT.array(schema))
     const visitor = execute(
       "visitor",
       `${eventSchema}
-const visitor = JIT.query(JIT.array(schema))
+const visitor = JIT.cqrs.query(JIT.array(schema))
   .filter((q) => q.and(q.eq("active", true), q.gte("score", 40)))
   .select("id", "score")
   .to.visitor();`,
@@ -231,7 +231,7 @@ const watchedList = (initial) => JIT.watchedList(Users, initial, { key: "id" });
       "binary",
       `${eventSchema}
 const binary = JIT.array(schema).binary({ strategy: "exact", memoryLayout: "columnar" });
-const binaryQuery = JIT.query(binary)
+const binaryQuery = JIT.cqrs.query(binary)
   .filter((q) => q.and(q.eq("region", "br"), q.eq("active", true)))
   .select("id", "score")
 `,

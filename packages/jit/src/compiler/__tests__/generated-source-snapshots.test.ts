@@ -39,7 +39,8 @@ describe("generated source snapshots", () => {
   const Users = JIT.array(User);
 
   it("query: filter with nested and/or/not + select + unique + orderBy", () => {
-    const compiled = JIT.query(Users)
+    const compiled = JIT.cqrs
+      .query(Users)
       .filter((q) => q.and(q.not(q.eq("role", "blocked")), q.or(q.gt("id", 100), q.eq("role", "admin"))))
       .select("id", "name", "role")
       .unique("id")
@@ -105,7 +106,8 @@ describe("generated source snapshots", () => {
   });
 
   it("query: groupBy after filter", () => {
-    const compiled = JIT.query(Users)
+    const compiled = JIT.cqrs
+      .query(Users)
       .filter((q) => q.gte("id", 10))
       .groupBy("role");
 
@@ -113,7 +115,8 @@ describe("generated source snapshots", () => {
   });
 
   it("query: filtered aggregation", () => {
-    const compiled = JIT.query(Users)
+    const compiled = JIT.cqrs
+      .query(Users)
       .filter((q) => q.eq("role", "user"))
       .avg("id");
 
@@ -273,13 +276,16 @@ describe("generated source snapshots", () => {
     });
     const Users = JIT.array(User).binary({ strategy: "exact", memoryLayout: "aligned" });
     const ColumnarUsers = JIT.array(User).binary({ strategy: "exact", memoryLayout: "columnar" });
-    const query = JIT.query(Users)
+    const query = JIT.cqrs
+      .query(Users)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
       .select("id", "score");
-    const sum = JIT.query(Users)
+    const sum = JIT.cqrs
+      .query(Users)
       .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
       .sum("score");
-    const columnarQuery = JIT.query(ColumnarUsers)
+    const columnarQuery = JIT.cqrs
+      .query(ColumnarUsers)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
       .select("id", "score");
     const adaptiveProcess = JIT.process(User)
@@ -312,7 +318,7 @@ describe("generated source snapshots", () => {
       }),
     ]);
     const Shapes = JIT.array(Shape).binary({ strategy: "exact", memoryLayout: "columnar" });
-    const circles = JIT.query(Shapes).filter((q) => q.eq("kind", "circle"));
+    const circles = JIT.cqrs.query(Shapes).filter((q) => q.eq("kind", "circle"));
 
     expect({
       writer: Compiler.emitBinaryRowSetWriterSource(Shapes.layout),
@@ -322,7 +328,8 @@ describe("generated source snapshots", () => {
   });
 
   it("lazy query and chunked JSON backends", () => {
-    const iterate = JIT.query(Users)
+    const iterate = JIT.cqrs
+      .query(Users)
       .filter((q) => q.eq("role", "admin"))
       .select("id", "name")
       .take(10)

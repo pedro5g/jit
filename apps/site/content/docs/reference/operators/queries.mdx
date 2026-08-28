@@ -9,14 +9,15 @@ The condition builder supports `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `and`,
 `or`, and `not`.
 
 ```ts
-const query = JIT.query(Users)
+const query = JIT.cqrs
+  .query(Users)
   .params({ minimum: JIT.number(), role: JIT.string() })
   .filter((q, params) =>
     q.and(q.eq("role", params.role), q.gte("score", params.minimum)),
   );
 ```
 
-Runtime parameters are read from the typed params object. `JIT.const(value)`
+Runtime parameters are read from the typed params object. `JIT.cqrs.const(value)`
 marks a compiler literal. Ordinary values become external bindings and are not
 interpolated into generated source.
 
@@ -65,7 +66,8 @@ arrays so retaining one result is safe.
 ## Output backends
 
 ```ts
-const plan = JIT.query(Users)
+const plan = JIT.cqrs
+  .query(Users)
   .filter((q) => q.eq("active", true))
   .select("id", "name")
   .take(10);
@@ -107,7 +109,7 @@ algorithm when memory must remain bounded.
 
 ## Binary queries
 
-`JIT.query(rowset)` reuses the same condition AST for fixed-offset scans. It
+`JIT.cqrs.query(rowset)` reuses the same condition AST for fixed-offset scans. It
 supports filter, projection and numeric aggregates. Only touched typed views
 and dictionaries are bound in generated source. String/literal filters resolve
 to integer dictionary IDs before the loop.

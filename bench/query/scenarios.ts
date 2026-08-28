@@ -38,7 +38,7 @@ export function registerQueryScenarios(): void {
   const users = createQueryUsers(10_000);
   const smallUsers = createQueryUsers(100);
 
-  const filterAdults = JIT.query(QueryUsersSchema).filter((q) => q.gt("age", 18));
+  const filterAdults = JIT.cqrs.query(QueryUsersSchema).filter((q) => q.gt("age", 18));
 
   registerScenario({
     op: "query filter",
@@ -67,7 +67,8 @@ export function registerQueryScenarios(): void {
     ],
   });
 
-  const filterSelect = JIT.query(QueryUsersSchema)
+  const filterSelect = JIT.cqrs
+    .query(QueryUsersSchema)
     .filter((q) => q.and(q.gt("age", 18), q.neq("role", "viewer")))
     .select("id", "name");
 
@@ -90,7 +91,8 @@ export function registerQueryScenarios(): void {
     ],
   });
 
-  const uniqueRoles = JIT.query(QueryUsersSchema)
+  const uniqueRoles = JIT.cqrs
+    .query(QueryUsersSchema)
     .filter((q) => q.gt("age", 18))
     .unique("role")
     .select("role");
@@ -119,7 +121,8 @@ export function registerQueryScenarios(): void {
     ],
   });
 
-  const groupByRole = JIT.query(QueryUsersSchema)
+  const groupByRole = JIT.cqrs
+    .query(QueryUsersSchema)
     .filter((q) => q.gt("age", 18))
     .groupBy("role")
     .select("id", "name");
@@ -143,7 +146,8 @@ export function registerQueryScenarios(): void {
     ],
   });
 
-  const promote = JIT.query(QueryUsersSchema)
+  const promote = JIT.cqrs
+    .query(QueryUsersSchema)
     .filter((q) => q.gt("age", 40))
     .update({ role: "senior" });
 
@@ -160,7 +164,8 @@ export function registerQueryScenarios(): void {
     ],
   });
 
-  const sumAdultAges = JIT.query(QueryUsersSchema)
+  const sumAdultAges = JIT.cqrs
+    .query(QueryUsersSchema)
     .filter((q) => q.gt("age", 18))
     .sum("age");
 
@@ -189,7 +194,7 @@ export function registerQueryScenarios(): void {
     ],
   });
 
-  const filterSmall = JIT.query(QueryUsersSchema).filter((q) => q.and(q.gt("age", 18), q.eq("role", "admin")));
+  const filterSmall = JIT.cqrs.query(QueryUsersSchema).filter((q) => q.and(q.gt("age", 18), q.eq("role", "admin")));
 
   registerScenario({
     op: "query filter",

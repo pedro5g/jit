@@ -13,14 +13,14 @@ import { Compiler } from "@jit-compiler/jit";
 Compiler.compileEqual(User.schema);
 ```
 
-The capability namespaces — `JIT.equal`, `JIT.clone`, `JIT.query`,
-`JIT.transform`, `JIT.update` — provide metadata, builder ergonomics and the
-clearest AOT registration, and are what application code should use.
+The public capabilities — `JIT.compare.equal`, `JIT.clone`, `JIT.cqrs.query`,
+`JIT.transform`, and `JIT.update` — provide metadata, builder ergonomics and
+the clearest AOT registration, and are what application code should use.
 
 ## compileEqual
 
 Compiles equality directly from an unwrapped schema AST. Prefer
-`JIT.equal` for application exports.
+`JIT.compare.equal` for application exports.
 
 ## compileClone
 
@@ -28,11 +28,11 @@ Compiles direct schema-shaped cloning. Prefer `JIT.clone`.
 
 ## compileDiff
 
-Compiles direct structural diff. Prefer `JIT.diff`.
+Compiles direct structural diff. Prefer `JIT.compare.diff`.
 
 ## compileHash
 
-Compiles direct structural hashing. Prefer `JIT.hash`.
+Compiles direct structural hashing. Prefer `JIT.compare.hash`.
 
 ## compileUpdate
 

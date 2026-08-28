@@ -6,8 +6,9 @@ development and generated production builds.
 
 ## API
 
-Use the capability namespace (or the common root aliases) when you want one
-callable artifact:
+Use the capability namespace when you want one callable artifact. Validation
+leaves are deliberately not duplicated at the root: use `JIT.validate.is`,
+`JIT.validate.parse`, and `JIT.validate.safeParse`:
 
 ```ts
 import { JIT } from "@jit-compiler/jit/runtime";

@@ -6,22 +6,22 @@ description: Create callable validation artifacts for a boundary.
 ## validate
 
 ```ts
-const isUser = JIT.is(User);
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 ```
 
 `JIT.validate` is a capability namespace. Each method returns a callable,
 lazy artifact; `.compile()` is optional eager warm-up and `.plan` exposes the
 same descriptor consumed by AOT.
 
-| Selection           | Return                | Failure behavior              | Output transforms      |
-| ------------------- | --------------------- | ----------------------------- | ---------------------- |
+| Selection                | Return                | Failure behavior              | Output transforms      |
+| ------------------------ | --------------------- | ----------------------------- | ---------------------- |
 | `is(schema)`             | type predicate        | `false`, first failure        | checks current input   |
 | `parse(schema)`          | inferred output       | throws `JITValidationError`   | yes                    |
 | `safeParse(schema)`      | success union         | returns issue vector          | yes                    |
-| `parseAsync(schema)`      | output promise        | rejects with validation error | yes                   |
-| `safeParseAsync(schema)`  | success-union promise | resolves with issues          | yes                   |
+| `parseAsync(schema)`     | output promise        | rejects with validation error | yes                    |
+| `safeParseAsync(schema)` | success-union promise | resolves with issues          | yes                    |
 | `issues(schema)`         | iterator              | yields only issues            | no extra public vector |
 
 Use `is` in hot filtering and guards. Use `safeParse` at user-controlled
@@ -47,16 +47,16 @@ success path and only builds issues after failure. Observable callbacks,
 stateful regexes and transforming schemas remain single-pass. `safeParse`
 rebuilds output only when defaults, coercions or transforms require it.
 
-## Root aliases
+## Canonical paths
 
-`JIT.is`, `JIT.parse`, and `JIT.safeParse` are direct aliases for the matching
-`JIT.validate.*` leaf operation. They create the same descriptor and use the
-same compiler/cache path:
+Validation operations are available only through `JIT.validate`. The removed
+root-level spellings are documented only in the [migration guide](../../guides/migrating-to-2);
+current code should use:
 
 ```ts
-const isUser = JIT.is(User);
-const parseUser = JIT.parse(User);
-const safeParseUser = JIT.safeParse(User);
+const isUser = JIT.validate.is(User);
+const parseUser = JIT.validate.parse(User);
+const safeParseUser = JIT.validate.safeParse(User);
 ```
 
 ## Async schemas

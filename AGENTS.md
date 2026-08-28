@@ -238,9 +238,10 @@ reported as explicit AOT skip reasons and must never be silently miscompiled.
 
 ## Query
 
-`JIT.cqrs` is the canonical public query namespace. Keep `JIT.query` only as a
-compatibility path and do not introduce new operations exclusively on it. Reuse
-the existing query AST and `QueryProgram`; do not create a second query engine.
+`JIT.cqrs` is the only public query namespace. Query construction, parameters,
+and compiler literals live under `JIT.cqrs`; do not add top-level query aliases.
+Reuse the existing query AST and `QueryProgram`; do not create a second query
+engine.
 
 Keep the structural `~query` protocol at version 1 until a published external
 compatibility boundary exists. Evolve V1 deliberately when needed, and never

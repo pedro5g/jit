@@ -1,3 +1,4 @@
+import { type BinaryArray, type BinaryRowSet, isBinaryArray, isBinaryRowSet } from "../compiler/binary-rowset.js";
 import { compileJoin, createJoinPlan, explainJoinPlan, type JoinPair, type LeftJoinPair } from "../compiler/join.js";
 import type {
   QueryAggregateOperator,
@@ -13,9 +14,12 @@ import { JITError } from "../errors/index.js";
 import { getArtifact, registerArtifact } from "../runtime/artifact-registry.js";
 import { array } from "./collection/collection.js";
 import {
+  type BinaryQueryBuilder,
+  constant,
   query as createQuery,
   getQueryProgram,
   type LazyQueryBuilder,
+  param,
   type QueryBuilder,
   type QueryConditionBuilder,
   type QueryRuntimeParams,
@@ -243,6 +247,9 @@ type CqrsSelectResult<TResult, TSelected> =
     : TResult extends Record<infer TKey extends PropertyKey, unknown[]>
       ? Record<TKey, TSelected[]>
       : TSelected[];
+type CqrsProjection<TValue, TKey extends keyof TValue, TReadonly extends boolean> = TReadonly extends true
+  ? { readonly [TField in TKey]: TValue[TField] }
+  : Pick<TValue, TKey>;
 type IterableElement<TValue> = TValue extends Iterable<infer TElement> ? TElement : never;
 type ParamShape = Readonly<Record<string, SchemaInput>>;
 type Params<TShape extends ParamShape> = {
@@ -291,80 +298,113 @@ interface CqrsQueryOps<
   TOutput,
   TResult,
   TParams extends Readonly<Record<string, unknown>>,
+  TReadonlyProjection extends boolean,
 > {
   params<const TShape extends ParamShape>(
     shape: TShape
-  ): CqrsQuery<TSchema, TOutput, TResult, TParams & Params<TShape>>;
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams & Params<TShape>, TReadonlyProjection>;
   filter(
     predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
-  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
   select<const TKeys extends readonly Extract<keyof TOutput, string>[]>(
     ...fields: TKeys
-  ): CqrsQuery<TSchema, Pick<TOutput, TKeys[number]>, CqrsSelectResult<TResult, Pick<TOutput, TKeys[number]>>, TParams>;
-  unique<TKey extends CqrsKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  ): CqrsQuery<
+    TSchema,
+    CqrsProjection<TOutput, TKeys[number], TReadonlyProjection>,
+    CqrsSelectResult<TResult, CqrsProjection<TOutput, TKeys[number], TReadonlyProjection>>,
+    TParams,
+    TReadonlyProjection
+  >;
+  unique<TKey extends CqrsKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
   distinct<const TKeys extends readonly CqrsKey<TSchema>[]>(
     ...fields: TKeys
-  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
   keyed<TKey extends CqrsKey<TSchema>>(
     key: TKey
-  ): CqrsQuery<TSchema, TOutput, Map<Row<TSchema>[TKey], TOutput>, TParams>;
+  ): CqrsQuery<TSchema, TOutput, Map<Row<TSchema>[TKey], TOutput>, TParams, TReadonlyProjection>;
   groupBy<TKey extends CqrsKey<TSchema>>(
     key: TKey
-  ): CqrsQuery<TSchema, TOutput, Record<Extract<Row<TSchema>[TKey], PropertyKey>, TOutput[]>, TParams>;
+  ): CqrsQuery<
+    TSchema,
+    TOutput,
+    Record<Extract<Row<TSchema>[TKey], PropertyKey>, TOutput[]>,
+    TParams,
+    TReadonlyProjection
+  >;
   orderBy<TKey extends CqrsKey<TSchema>>(
     key: TKey,
     direction?: "asc" | "desc"
-  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
   flatMap<TKey extends Extract<keyof TOutput, string>>(
     key: TKey
-  ): CqrsQuery<TSchema, IterableElement<TOutput[TKey]>, IterableElement<TOutput[TKey]>[], TParams>;
-  take(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams>;
-  drop(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  ): CqrsQuery<TSchema, IterableElement<TOutput[TKey]>, IterableElement<TOutput[TKey]>[], TParams, TReadonlyProjection>;
+  take(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
+  drop(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
   takeWhile(
     predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
-  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
   dropWhile(
     predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
-  ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
-  chunk(size: number): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams>;
-  window(size: number): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams>;
-  pairwise(): CqrsQuery<TSchema, readonly [TOutput, TOutput], (readonly [TOutput, TOutput])[], TParams>;
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
+  chunk(size: number): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams, TReadonlyProjection>;
+  window(size: number): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams, TReadonlyProjection>;
+  pairwise(): CqrsQuery<
+    TSchema,
+    readonly [TOutput, TOutput],
+    (readonly [TOutput, TOutput])[],
+    TParams,
+    TReadonlyProjection
+  >;
   scan<TAccumulator>(options: {
     readonly initial: TAccumulator;
     readonly update: (accumulator: TAccumulator, value: TOutput) => TAccumulator | Promise<TAccumulator>;
-  }): CqrsQuery<TSchema, TAccumulator, TAccumulator[], TParams>;
+  }): CqrsQuery<TSchema, TAccumulator, TAccumulator[], TParams, TReadonlyProjection>;
   groupAdjacentBy<TKey extends Extract<keyof TOutput, string>>(
     key: TKey
-  ): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams>;
-  delete(): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams>;
+  ): CqrsQuery<TSchema, TOutput[], TOutput[][], TParams, TReadonlyProjection>;
+  delete(): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams, TReadonlyProjection>;
   update(
     patch: {
       readonly [TKey in CqrsKey<TSchema>]?: Row<TSchema>[TKey];
     }
-  ): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams>;
-  sum<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number, TParams>;
-  count(): CqrsQuery<TSchema, TOutput, number, TParams>;
-  avg<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
-  min<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
-  max<TKey extends CqrsNumericKey<TSchema>>(key: TKey): CqrsQuery<TSchema, TOutput, number | undefined, TParams>;
+  ): CqrsQuery<TSchema, TOutput, Row<TSchema>[], TParams, TReadonlyProjection>;
+  sum<TKey extends CqrsNumericKey<TSchema>>(
+    key: TKey
+  ): CqrsQuery<TSchema, TOutput, number, TParams, TReadonlyProjection>;
+  count(): CqrsQuery<TSchema, TOutput, number, TParams, TReadonlyProjection>;
+  avg<TKey extends CqrsNumericKey<TSchema>>(
+    key: TKey
+  ): CqrsQuery<TSchema, TOutput, number | undefined, TParams, TReadonlyProjection>;
+  min<TKey extends CqrsNumericKey<TSchema>>(
+    key: TKey
+  ): CqrsQuery<TSchema, TOutput, number | undefined, TParams, TReadonlyProjection>;
+  max<TKey extends CqrsNumericKey<TSchema>>(
+    key: TKey
+  ): CqrsQuery<TSchema, TOutput, number | undefined, TParams, TReadonlyProjection>;
   /**
    * Several reductions over one pass. Each field keeps its own accumulator, so
    * asking for four answers still reads the collection once.
    */
   aggregate<const TSpec extends Readonly<Record<string, CqrsAggregateSpec<unknown>>>>(
     spec: TSpec
-  ): CqrsQuery<TSchema, TOutput, CqrsAggregateOutput<TResult, CqrsAggregateResult<TSpec>>, TParams>;
+  ): CqrsQuery<
+    TSchema,
+    TOutput,
+    CqrsAggregateOutput<TResult, CqrsAggregateResult<TSpec>>,
+    TParams,
+    TReadonlyProjection
+  >;
   /**
    * Returns the first matching row, or `undefined`. The answer comes from
    * inside the loop, so nothing is collected and the scan stops there.
    */
-  first(): CqrsQuery<TSchema, TOutput, TOutput | undefined, TParams>;
+  first(): CqrsQuery<TSchema, TOutput, TOutput | undefined, TParams, TReadonlyProjection>;
   /** Index of the first matching row in the input, or `-1`. */
-  findIndex(): CqrsQuery<TSchema, TOutput, number, TParams>;
+  findIndex(): CqrsQuery<TSchema, TOutput, number, TParams, TReadonlyProjection>;
   /** True as soon as one row matches; stops there. */
-  some(): CqrsQuery<TSchema, TOutput, boolean, TParams>;
+  some(): CqrsQuery<TSchema, TOutput, boolean, TParams, TReadonlyProjection>;
   /** True when every row matches; stops at the first that does not. */
-  every(): CqrsQuery<TSchema, TOutput, boolean, TParams>;
+  every(): CqrsQuery<TSchema, TOutput, boolean, TParams, TReadonlyProjection>;
   join<TRightTarget extends ATS.AnyTypeSchema, TKind extends QueryJoinKind = "inner">(
     schema: SchemaInput<TRightTarget>,
     kind?: TKind
@@ -380,25 +420,40 @@ export type CqrsQuery<
   TOutput = Row<TSchema>,
   TResult = TOutput[],
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
+  TReadonlyProjection extends boolean = false,
 > = ((value: Row<TSchema>[], params?: TParams) => TResult) &
-  CqrsQueryOps<TSchema, TOutput, TResult, TParams> & {
+  CqrsQueryOps<TSchema, TOutput, TResult, TParams, TReadonlyProjection> & {
     where(
       predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
-    ): CqrsQuery<TSchema, TOutput, TResult, TParams>;
-    limit(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams>;
+    ): CqrsQuery<TSchema, TOutput, TResult, TParams, false>;
+    limit(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
     readonly "~query": StandardQuery;
   };
 
-export function cqrsQuery<TSchema extends ATS.AnyTypeSchema>(
-  schema: SchemaInput<ATS.ArraySchema<TSchema>>
-): CqrsQuery<TSchema>;
-export function cqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQuery<TSchema>;
-export function cqrsQuery(schema: SchemaInput): CqrsQuery<ATS.AnyTypeSchema> {
+export function cqrsQuery<TElement>(
+  target: BinaryArray<TElement> | BinaryRowSet<TElement>
+): BinaryQueryBuilder<TElement, TElement, TElement[]>;
+export function cqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQueryFor<TSchema>;
+export function cqrsQuery(
+  schema: SchemaInput | BinaryArray<unknown> | BinaryRowSet<unknown>
+):
+  | CqrsQuery<ATS.AnyTypeSchema>
+  | QueryBuilder<ATS.AnyTypeSchema, unknown, unknown[]>
+  | BinaryQueryBuilder<unknown, unknown, unknown[]> {
+  if (isBinaryArray(schema) || isBinaryRowSet(schema)) return createQuery(schema);
+
   const target = unwrapSchema(schema);
-  const row = target.type === "array" ? (target as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : target;
-  if (row.type !== "object" && row.type !== "runtimeType") {
-    throw new JITError("INVALID_QUERY", "JIT.cqrs.query() requires an object or Runtime Type, or an array of either");
+  if (target.type === "set" || target.type === "map") {
+    return createQuery(target) as QueryBuilder<ATS.AnyTypeSchema, unknown, unknown[]>;
   }
+  if (target.type !== "array" && target.type !== "object" && target.type !== "runtimeType") {
+    throw new JITError(
+      "INVALID_QUERY",
+      "JIT.cqrs.query() requires an object or Runtime Type, or a collection of either"
+    );
+  }
+  const row = target.type === "array" ? (target as ATS.ArraySchema<ATS.AnyTypeSchema>).def.element : target;
+  if (row.type !== "object" && row.type !== "runtimeType") return createQuery(target) as never;
   const collection = target.type === "array" ? (target as ATS.ArraySchema<ATS.AnyTypeSchema>) : array(row).schema;
   return wrap(
     row,
@@ -406,6 +461,24 @@ export function cqrsQuery(schema: SchemaInput): CqrsQuery<ATS.AnyTypeSchema> {
     createQuery(collection) as QueryBuilder<ATS.ArraySchema<ATS.AnyTypeSchema>, unknown, unknown[]>
   );
 }
+
+type QueryElement<TSchema extends ATS.AnyTypeSchema> =
+  ATS.TypeofSchema<TSchema> extends readonly (infer TElement)[]
+    ? TElement
+    : ATS.TypeofSchema<TSchema> extends Set<infer TElement>
+      ? TElement
+      : ATS.TypeofSchema<TSchema> extends Map<unknown, infer TElement>
+        ? TElement
+        : never;
+
+export type CqrsQueryFor<TSchema extends ATS.AnyTypeSchema> = TSchema extends {
+  readonly type: "array";
+  readonly def: Readonly<{ readonly element: infer TElement extends ATS.AnyTypeSchema }>;
+}
+  ? CqrsQuery<TElement, Row<TElement>, Row<TElement>[], Readonly<Record<never, never>>, true>
+  : TSchema extends { readonly type: "object" | "runtimeType" }
+    ? CqrsQuery<TSchema>
+    : QueryBuilder<TSchema, QueryElement<TSchema>, QueryElement<TSchema>[]>;
 
 function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams extends Readonly<Record<string, unknown>>>(
   schema: TSchema,
@@ -1232,6 +1305,8 @@ export const cqrs = Object.freeze({
   input: cqrsInput,
   parse: cqrsParse,
   query: cqrsQuery,
+  param,
+  const: constant,
   /** Counts the rows that reach the aggregate; `0` when none do. */
   count: () => aggregateSpec<number>("count"),
   /** Sums a numeric field; `0` when no row reaches the aggregate. */

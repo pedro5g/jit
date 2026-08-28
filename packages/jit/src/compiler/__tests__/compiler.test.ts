@@ -231,13 +231,6 @@ describe("JIT compiler", () => {
       expect(equal({ id: 1 }, { id: 2 })).toBe(false);
     });
 
-    it("should expose JIT.equal as the ergonomic schema-aware equality API", () => {
-      const equal = JIT.compare.equal(JIT.object({ id: JIT.number() }).schema);
-
-      expect(equal({ id: 1 }, { id: 1 })).toBe(true);
-      expect(equal({ id: 1 }, { id: 2 })).toBe(false);
-    });
-
     it("should compile entity index hints into a map strategy", () => {
       const User = JIT.object({ id: JIT.number(), name: JIT.string() });
       const Users = JIT.array(User).entity({ key: "id" }).indexBy("id").schema;

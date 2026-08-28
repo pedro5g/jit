@@ -11,51 +11,43 @@ documentation.
 
 ## Compiled operations
 
-| API               | Reference                            | Purpose                                       |
-| ----------------- | ------------------------------------ | --------------------------------------------- |
-| `JIT.validate`    | [Validation](./validation)           | `is`, `parse`, `safeParse`, `issues`, `parseAsync`, `safeParseAsync`, `async` |
-| `JIT.is`          | [Validation](./validation)           | Root alias for `JIT.validate.is`              |
-| `JIT.parse`       | [Validation](./validation)           | Root alias for `JIT.validate.parse`           |
-| `JIT.safeParse`   | [Validation](./validation)           | Root alias for `JIT.validate.safeParse`       |
-| `JIT.equal`       | [Equal](./equal)                     | Shape-specialized structural equality         |
-| `JIT.diff`        | [Diff](./diff)                       | Shape-specialized structural changes          |
-| `JIT.hash`        | [Hash](./hash)                       | Shape-specialized structural fingerprint      |
-| `JIT.compare`     | [Equal](./equal)                     | `equal`, `diff`, `hash`, `changed`             |
-| `JIT.security`    | [Mask](./mask)                       | `mask`, `sanitize`                            |
-| `JIT.json`        | [JSON](./json)                       | `value`, `parse`, `stringify`, `stringifyChunks` |
-| `JIT.binary`      | [Codec](./codec)                     | `encode`, `decode`, `codec`                   |
-| `JIT.clone`       | [Clone](./clone)                     | Shape-specialized deep clone                  |
-| `JIT.update`      | [Update](./update)                   | Immutable patches, recipes and reactive state |
-| `JIT.jsonValue`   | [JSON](./json)                       | JSON-value schema factory                     |
-| `JIT.codec`       | [Codec](./codec)                     | Two-way value conversion inside a schema      |
-| `JIT.jsonSchema`  | [JSON Schema](./json-schema)         | `to` a document, `from` a document             |
-| `JIT.ops`         | [Value operations](./ops)            | Declarative transform compiled into the output |
-| `JIT.mock`        | [Mock](./mock)                       | Deterministic sample generator                |
-| `JIT.format`      | [Format](./format)                   | Standalone string-mask formatter              |
-| `JIT.from`        | [Query](./query)                     | Starts a value-source execution pipeline      |
-| `JIT.transform`   | [Transform](./transform)             | Select and transform object fields            |
-| `JIT.query`       | [Query](./query)                     | Eager and lazy compiled collection query      |
-| `JIT.sort`        | [Sort](./sort)                       | Schema-specialized comparator and ordering plan |
-| `JIT.index`       | [Index](./index-plans)               | Materialize an index from collection key facts |
-| `JIT.lookup`      | [Lookup](./lookup)                   | Reach one row by key through a chosen access path |
-| `JIT.reconcile`   | [Reconcile](./reconcile)             | Compare two snapshots of a keyed collection    |
-| `JIT.project`     | [Project](./project)                 | Narrow a value to a subset of its own fields   |
-| `JIT.patch`       | [Patch](./patch)                     | `apply`, `merge`, `json`                       |
-| `JIT.cacheKey`    | [Cache keys](./cache-key)            | `string`, `hash` keys from selected fields     |
-| `JIT.canonical`   | [Canonical](./canonical)             | One deterministic field arrangement            |
-| `JIT.access`      | [Access control](./access)           | Compiled can/cannot authorization checks       |
-| `JIT.match`       | [Match](./match)                     | Compiled discriminated-union dispatch          |
-| `JIT.migrate`     | [Migration](./migrate)               | Versioned schema migration compiled as one plan |
-| `JIT.cqrs`        | [Query](./query#cqrs)                | `query`, `input`, `parse`, `count`, `sum`, `avg`, `min`, `max` |
-| `JIT.process`     | [Process](./process)                 | Fused load-and-query binary pipeline          |
-| `JIT.stream`      | [Stream](./stream)                   | Incremental JSON and NDJSON validation        |
-| `JIT.csv`         | [CSV](./csv)                         | Schema-specialized incremental CSV parsing and serialization |
-| `JIT.ndjson`      | [NDJSON](./ndjson)                   | Fused incremental NDJSON validation, filtering and projection |
-| `JIT.watch`       | [Watch](./watch)                     | Stateless keyed collection changes            |
-| `JIT.watchedList` | [Watch](./watch#watchedlist)         | Stateful aggregate collection                 |
-| `JIT.dto`         | [DTO](./dto)                         | Application-boundary schema annotation        |
-| `JIT.class`       | [Runtime classes](./runtime-classes) | Generated class, construction and capabilities |
-| `JIT.ddd`         | [Runtime classes](./runtime-classes#ddd-factories) | `valueObject`, `entity`, `aggregateRoot`, `domainEvent` |
+| API               | Reference                                          | Purpose                                                                          |
+| ----------------- | -------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `JIT.validate`    | [Validation](./validation)                         | `is`, `parse`, `safeParse`, `issues`, `parseAsync`, `safeParseAsync`, `async`    |
+| `JIT.compare`     | [Equal](./equal)                                   | `equal`, `diff`, `hash`, `changed`                                               |
+| `JIT.security`    | [Mask](./mask)                                     | `mask`, `sanitize`                                                               |
+| `JIT.json`        | [JSON](./json)                                     | `value`, `parse`, `stringify`, `stringifyChunks`                                 |
+| `JIT.binary`      | [Codec](./codec)                                   | `encode`, `decode`, `codec`                                                      |
+| `JIT.clone`       | [Clone](./clone)                                   | Shape-specialized deep clone                                                     |
+| `JIT.update`      | [Update](./update)                                 | Immutable patches, recipes and reactive state                                    |
+| `JIT.codec`       | [Codec](./codec)                                   | Two-way value conversion inside a schema                                         |
+| `JIT.jsonSchema`  | [JSON Schema](./json-schema)                       | `to` a document, `from` a document                                               |
+| `JIT.ops`         | [Value operations](./ops)                          | Declarative transform compiled into the output                                   |
+| `JIT.mock`        | [Mock](./mock)                                     | Deterministic sample generator                                                   |
+| `JIT.format`      | [Format](./format)                                 | Standalone string-mask formatter                                                 |
+| `JIT.from`        | [Query](./query)                                   | Starts a value-source execution pipeline                                         |
+| `JIT.transform`   | [Transform](./transform)                           | Select and transform object fields                                               |
+| `JIT.sort`        | [Sort](./sort)                                     | Schema-specialized comparator and ordering plan                                  |
+| `JIT.index`       | [Index](./index-plans)                             | Materialize an index from collection key facts                                   |
+| `JIT.lookup`      | [Lookup](./lookup)                                 | Reach one row by key through a chosen access path                                |
+| `JIT.reconcile`   | [Reconcile](./reconcile)                           | Compare two snapshots of a keyed collection                                      |
+| `JIT.project`     | [Project](./project)                               | Narrow a value to a subset of its own fields                                     |
+| `JIT.patch`       | [Patch](./patch)                                   | `apply`, `merge`, `json`                                                         |
+| `JIT.cacheKey`    | [Cache keys](./cache-key)                          | `string`, `hash` keys from selected fields                                       |
+| `JIT.canonical`   | [Canonical](./canonical)                           | One deterministic field arrangement                                              |
+| `JIT.access`      | [Access control](./access)                         | Compiled can/cannot authorization checks                                         |
+| `JIT.match`       | [Match](./match)                                   | Compiled discriminated-union dispatch                                            |
+| `JIT.migrate`     | [Migration](./migrate)                             | Versioned schema migration compiled as one plan                                  |
+| `JIT.cqrs`        | [Query](./query#cqrs)                              | `query`, `param`, `const`, `input`, `parse`, `count`, `sum`, `avg`, `min`, `max` |
+| `JIT.process`     | [Process](./process)                               | Fused load-and-query binary pipeline                                             |
+| `JIT.stream`      | [Stream](./stream)                                 | Incremental JSON and NDJSON validation                                           |
+| `JIT.csv`         | [CSV](./csv)                                       | Schema-specialized incremental CSV parsing and serialization                     |
+| `JIT.ndjson`      | [NDJSON](./ndjson)                                 | Fused incremental NDJSON validation, filtering and projection                    |
+| `JIT.watch`       | [Watch](./watch)                                   | Stateless keyed collection changes                                               |
+| `JIT.watchedList` | [Watch](./watch#watchedlist)                       | Stateful aggregate collection                                                    |
+| `JIT.dto`         | [DTO](./dto)                                       | Application-boundary schema annotation                                           |
+| `JIT.class`       | [Runtime classes](./runtime-classes)               | Generated class, construction and capabilities                                   |
+| `JIT.ddd`         | [Runtime classes](./runtime-classes#ddd-factories) | `valueObject`, `entity`, `aggregateRoot`, `domainEvent`                          |
 
 ## Schema factories and composition
 
@@ -81,12 +73,12 @@ documentation.
 | `JIT.intersection`     | [Composition](./composition#intersection)     | `JIT.iso`                | [Composition](./composition#iso)                |
 | `JIT.lazy`             | [Composition](./composition#lazy)             | `JIT.not`                | [Composition](./composition#not)                |
 | `JIT.nullable`         | [Composition](./composition#nullable)         | `JIT.nullish`            | [Composition](./composition#nullish)            |
-| `JIT.optional`         | [Composition](./composition#optional)         | `JIT.param`              | [Query](./query#param)                          |
+| `JIT.optional`         | [Composition](./composition#optional)         |                          |                                                 |
 | `JIT.pipe`             | [Composition](./composition#pipe)             | `JIT.promise`            | [Composition](./composition#promise)            |
 | `JIT.readonly`         | [Composition](./composition#readonly)         | `JIT.refine`             | [Composition](./composition#refine)             |
 | `JIT.regexes`          | [Composition](./composition#regexes)          | `JIT.templateLiteral`    | [Composition](./composition#templateliteral)    |
 | `JIT.templateLiterals` | [Composition](./composition#templateliterals) | `JIT.union`              | [Composition](./composition#union)              |
-| `JIT.xor`              | [Composition](./composition#xor)              | `JIT.const`              | [Query](./query#const)                          |
+| `JIT.xor`              | [Composition](./composition#xor)              |                          |                                                 |
 
 ## Class exports
 

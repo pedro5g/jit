@@ -1321,7 +1321,8 @@ describe("JIT AOT generate", () => {
       { id: 2, role: "user" as const, active: true, score: 7 },
       { id: 3, role: "admin" as const, active: false, score: 3 },
     ]);
-    const ActiveAdmins = JIT.query(rowset)
+    const ActiveAdmins = JIT.cqrs
+      .query(rowset)
       .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true)))
       .select("id", "score");
 
@@ -1351,12 +1352,14 @@ describe("JIT AOT generate", () => {
       active: JIT.boolean(),
     });
     const Users = JIT.array(User);
-    const ActiveIds = JIT.query(Users)
+    const ActiveIds = JIT.cqrs
+      .query(Users)
       .filter((q) => q.eq("active", true))
       .select("id")
       .take(2)
       .to.iterator();
-    const VisitActiveIds = JIT.query(Users)
+    const VisitActiveIds = JIT.cqrs
+      .query(Users)
       .filter((q) => q.eq("active", true))
       .select("id")
       .to.visitor();

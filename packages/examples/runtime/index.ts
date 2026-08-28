@@ -12,12 +12,12 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   };
   const parsedUsers = users.map((user) => validator.parse(user));
   const invalid = validator.safeParse(invalidUser);
-  const equal = JIT.equal(UserSchema);
+  const equal = JIT.compare.equal(UserSchema);
   const clone = JIT.clone(UserSchema);
-  const diff = JIT.diff(UserSchema);
-  const hash = JIT.hash(UserSchema);
+  const diff = JIT.compare.diff(UserSchema);
+  const hash = JIT.compare.hash(UserSchema);
   const update = JIT.update(UserSchema)
-    .patch({ name: JIT.param("name") })
+    .patch({ name: JIT.cqrs.param("name") })
     .compile();
   const mask = JIT.security.mask(UserSchema);
   const sanitize = JIT.security.sanitize(UserSchema);
@@ -34,19 +34,22 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   const json = stringify(parsedUsers[0]);
   const decodedJson = fromJSON(json);
   const encoded = codec.encode(parsedUsers[0]);
-  const admins = JIT.query(UserListSchema)
+  const admins = JIT.cqrs
+    .query(UserListSchema)
     .filter((query) => query.and(query.eq("role", "admin"), query.eq("active", true)))
     .select(
       "id",
       "name",
       "score"
     )(parsedUsers);
-  const iterateActive = JIT.query(UserListSchema)
+  const iterateActive = JIT.cqrs
+    .query(UserListSchema)
     .filter((query) => query.eq("active", true))
     .select("id", "name")
     .take(10)
     .to.iterator();
-  const visitActive = JIT.query(UserListSchema)
+  const visitActive = JIT.cqrs
+    .query(UserListSchema)
     .filter((query) => query.eq("active", true))
     .select("id")
     .to.visitor();
@@ -62,7 +65,8 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
 
   const binary = JIT.array(EventSchema).binary({ strategy: "exact", memoryLayout: "columnar" });
   const rowset = binary.load(events);
-  const binaryAdmins = JIT.query(rowset)
+  const binaryAdmins = JIT.cqrs
+    .query(rowset)
     .filter((query) => query.and(query.eq("region", "br"), query.eq("active", true)))
     .select(
       "id",

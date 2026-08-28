@@ -100,7 +100,7 @@ describe("JIT compile cache", () => {
 
   it("should lower a query builder once and reuse it across calls", () => {
     const emitSpy = vi.spyOn(globalThis, "Function");
-    const findAda = JIT.query(Users).filter((q) => q.eq("name", "Ada"));
+    const findAda = JIT.cqrs.query(Users).filter((q) => q.eq("name", "Ada"));
     const people = [{ id: 1, name: "Ada", tags: [] }];
 
     findAda(people);

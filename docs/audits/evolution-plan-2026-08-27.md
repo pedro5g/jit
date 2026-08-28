@@ -8,35 +8,35 @@ Verdict: every accepted milestone is implemented and covered. M20 (`memo`) and t
 
 ## Milestone checklist
 
-| Milestone | Result | Principal evidence |
-| --- | --- | --- |
-| M0 operation/IR audit | ✅ | `docs/internal/STATUS.md`, architecture and feature inventory |
-| M1 runtime/define/AOT parity | ✅ | `entrypoints.test.ts`, `aot.test.ts`, `treeshake.test.ts`, `docs/aot/api-parity.md` |
-| M2 canonical `JIT.cqrs` | ✅ | `cqrs.test.ts`, structural `~query` V1 coverage, compatibility `JIT.query` |
-| M3 OrderingDescriptor/SortPlan | ✅ | `sort.test.ts`, generated-source snapshot, AOT/tree-shaking, `bench/sort` |
-| M4 IndexDescriptor/IndexPlan | ✅ | `indexing.test.ts`, cached/compound/grouped tests, AOT/tree-shaking, `bench/index` |
-| M5 physical planner V1 | ✅ | differential scan/index/binary tests in `physical-query.test.ts`; explain and cold-index measurements |
-| M6 terminal sinks | ✅ | early-exit/source assertions in `cqrs-terminals.test.ts`; runtime/AOT benchmark |
-| M7 composite aggregate | ✅ | single-loop/source assertions in `cqrs-aggregate.test.ts`; runtime/AOT/ceiling benchmark |
-| M8 grouped aggregate | ✅ | no-group-array and average-finalization tests; allocation benchmark |
-| M9 JoinPlan V1 | ✅ | inner/left/semi/anti and boundary tests in `cqrs-join.test.ts` |
-| M10 MergeJoin | ✅ | ordered-fact selection plus differential behavior in `cqrs-join.test.ts` |
-| M11 distinct consolidation | ✅ | scalar/compound/adjacent/structural strategies in `cqrs-distinct.test.ts` |
-| M12 LookupPlan | ✅ | present/absent/boundary differential cases in `lookup.test.ts` |
-| M13 ReconcilePlan | ✅ | channel selection, diff, iterator, visitor, duplicate keys and O(n+m) source checks in `reconcile.test.ts` |
-| M14 ProjectionTree | ✅ | projection/query/compare/cache/access reuse in `projection.test.ts` and consumer tests |
-| M15 selective compare | ✅ | type/runtime/source coverage in `projection.test.ts`; runtime/AOT benchmark |
-| M16 ChangedPlan | ✅ | number/bigint masks, path lookup and AOT in `changed.test.ts` |
-| M17 RFC 6902/7396 patch | ✅ | operation/path/error/immutability tests in `patch.test.ts`; both tree-shaking fixtures |
-| M18 CanonicalPlan | ✅ | deterministic order and representation tests in `canonical.test.ts` |
-| M19 CacheKeyPlan | ✅ | field specialization, structural boundaries and AOT in `cache-key.test.ts`; benchmark includes AOT |
-| M20 memo | ⛔ rejected by gate | measured 33–77% regression for cheap/moderate work in `docs/features/cache-key.md`; caller-owned `Map` recipe retained |
-| M21 Access Control Plan | ✅ | allow/deny precedence, field rules, actors and AOT in `access.test.ts` |
-| M22 MatchPlan | ✅ | exhaustive/partial narrowing, unknown-tag guard, callback reconstruction/closure skip and tree-shaking |
-| M23 MigrationPlan | ✅ | version dispatch, zero-copy current version, mapper edges, types, runtime/define/AOT and benchmark |
-| M24 CSV | ✅ | RFC 4180, fragmented UTF-8, CRLF, aliases, types, runtime/define/AOT, sinks and benchmark |
-| M25 NDJSON | ✅ | physical line errors, fragmented chunks, fused filter/select/stringify, sinks, runtime/define/AOT and benchmark |
-| M26 merge audit | ⛔ duplicate API rejected | specialized compiler exists; public contract is RFC 7396 `JIT.patch.merge`; another spelling avoids no work |
+| Milestone                      | Result                    | Principal evidence                                                                                                     |
+| ------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| M0 operation/IR audit          | ✅                        | `docs/internal/STATUS.md`, architecture and feature inventory                                                          |
+| M1 runtime/define/AOT parity   | ✅                        | `entrypoints.test.ts`, `aot.test.ts`, `treeshake.test.ts`, `docs/aot/api-parity.md`                                    |
+| M2 canonical `JIT.cqrs`        | ✅                        | `cqrs.test.ts`, structural `~query` V1 coverage, compatibility `JIT.cqrs.query`                                        |
+| M3 OrderingDescriptor/SortPlan | ✅                        | `sort.test.ts`, generated-source snapshot, AOT/tree-shaking, `bench/sort`                                              |
+| M4 IndexDescriptor/IndexPlan   | ✅                        | `indexing.test.ts`, cached/compound/grouped tests, AOT/tree-shaking, `bench/index`                                     |
+| M5 physical planner V1         | ✅                        | differential scan/index/binary tests in `physical-query.test.ts`; explain and cold-index measurements                  |
+| M6 terminal sinks              | ✅                        | early-exit/source assertions in `cqrs-terminals.test.ts`; runtime/AOT benchmark                                        |
+| M7 composite aggregate         | ✅                        | single-loop/source assertions in `cqrs-aggregate.test.ts`; runtime/AOT/ceiling benchmark                               |
+| M8 grouped aggregate           | ✅                        | no-group-array and average-finalization tests; allocation benchmark                                                    |
+| M9 JoinPlan V1                 | ✅                        | inner/left/semi/anti and boundary tests in `cqrs-join.test.ts`                                                         |
+| M10 MergeJoin                  | ✅                        | ordered-fact selection plus differential behavior in `cqrs-join.test.ts`                                               |
+| M11 distinct consolidation     | ✅                        | scalar/compound/adjacent/structural strategies in `cqrs-distinct.test.ts`                                              |
+| M12 LookupPlan                 | ✅                        | present/absent/boundary differential cases in `lookup.test.ts`                                                         |
+| M13 ReconcilePlan              | ✅                        | channel selection, diff, iterator, visitor, duplicate keys and O(n+m) source checks in `reconcile.test.ts`             |
+| M14 ProjectionTree             | ✅                        | projection/query/compare/cache/access reuse in `projection.test.ts` and consumer tests                                 |
+| M15 selective compare          | ✅                        | type/runtime/source coverage in `projection.test.ts`; runtime/AOT benchmark                                            |
+| M16 ChangedPlan                | ✅                        | number/bigint masks, path lookup and AOT in `changed.test.ts`                                                          |
+| M17 RFC 6902/7396 patch        | ✅                        | operation/path/error/immutability tests in `patch.test.ts`; both tree-shaking fixtures                                 |
+| M18 CanonicalPlan              | ✅                        | deterministic order and representation tests in `canonical.test.ts`                                                    |
+| M19 CacheKeyPlan               | ✅                        | field specialization, structural boundaries and AOT in `cache-key.test.ts`; benchmark includes AOT                     |
+| M20 memo                       | ⛔ rejected by gate       | measured 33–77% regression for cheap/moderate work in `docs/features/cache-key.md`; caller-owned `Map` recipe retained |
+| M21 Access Control Plan        | ✅                        | allow/deny precedence, field rules, actors and AOT in `access.test.ts`                                                 |
+| M22 MatchPlan                  | ✅                        | exhaustive/partial narrowing, unknown-tag guard, callback reconstruction/closure skip and tree-shaking                 |
+| M23 MigrationPlan              | ✅                        | version dispatch, zero-copy current version, mapper edges, types, runtime/define/AOT and benchmark                     |
+| M24 CSV                        | ✅                        | RFC 4180, fragmented UTF-8, CRLF, aliases, types, runtime/define/AOT, sinks and benchmark                              |
+| M25 NDJSON                     | ✅                        | physical line errors, fragmented chunks, fused filter/select/stringify, sinks, runtime/define/AOT and benchmark        |
+| M26 merge audit                | ⛔ duplicate API rejected | specialized compiler exists; public contract is RFC 7396 `JIT.patch.merge`; another spelling avoids no work            |
 
 ## Public API and type audit
 
@@ -73,17 +73,17 @@ The source indexes contain no behavior, namespace barrels do not become dependen
 
 Every accepted public feature has all applicable layers:
 
-| Layer | Evidence |
-| --- | --- |
-| runtime semantics | colocated factory/compiler Vitest suites |
-| type inference and invalid calls | `expectTypeOf` and `@ts-expect-error` cases in feature suites |
-| define parity | central runtime/define matrix in `entrypoints.test.ts` |
-| AOT semantic parity | generated modules executed in `aot.test.ts` |
-| deterministic source | `generated-source-snapshots.test.ts` |
-| tree shaking | focused esbuild fixtures in `treeshake.test.ts` |
-| physical equivalence | differential scan/access-path tests for index, lookup, joins and physical CQRS |
-| docs examples | site `audit:docs` executes every example against the real library |
-| measured claims | feature-specific `bench/*` suites include idiomatic, handwritten ceiling, runtime JIT and standalone AOT |
+| Layer                            | Evidence                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| runtime semantics                | colocated factory/compiler Vitest suites                                                                 |
+| type inference and invalid calls | `expectTypeOf` and `@ts-expect-error` cases in feature suites                                            |
+| define parity                    | central runtime/define matrix in `entrypoints.test.ts`                                                   |
+| AOT semantic parity              | generated modules executed in `aot.test.ts`                                                              |
+| deterministic source             | `generated-source-snapshots.test.ts`                                                                     |
+| tree shaking                     | focused esbuild fixtures in `treeshake.test.ts`                                                          |
+| physical equivalence             | differential scan/access-path tests for index, lookup, joins and physical CQRS                           |
+| docs examples                    | site `audit:docs` executes every example against the real library                                        |
+| measured claims                  | feature-specific `bench/*` suites include idiomatic, handwritten ceiling, runtime JIT and standalone AOT |
 
 ## Performance measurements
 

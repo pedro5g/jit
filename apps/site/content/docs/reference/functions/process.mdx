@@ -65,7 +65,7 @@ strategy.
 
 ## process or query?
 
-Use normal `JIT.query` for ordinary arrays, nested objects and one-off flows.
+Use normal `JIT.cqrs.query` for ordinary arrays, nested objects and one-off flows.
 Use `process` for large flat scalar batches where binary memory and repeated
 scans pay for loading cost. Read [binary rowsets](/docs/runtime/binary-rowsets)
 for supported shapes and memory ownership.

@@ -12,7 +12,7 @@
  * import { JIT } from "@jit-compiler/jit";
  *
  * const User = JIT.object({ id: JIT.number(), name: JIT.string() });
- * const equal = JIT.compileEqual(User.schema);
+ * const equal = JIT.compare.equal(User);
  *
  * equal({ id: 1, name: "Ada" }, { id: 1, name: "Ada" }); // true
  * ```
@@ -57,7 +57,7 @@ export type {
 export * as Host from "./core/host.js";
 /** Typed error classes thrown by compiled functions (`JITError`). */
 export * as Errors from "./errors/index.js";
-/** The main public API: schema factories plus every `compile*` entry point. */
+/** The main public API: schema factories plus namespaced compiled operations. */
 export * as JIT from "./factories/index.js";
 /** Runtime helpers referenced by generated (AOT) code (`getIndex`, hash primitives). */
 export * as Runtime from "./runtime/runtime.js";

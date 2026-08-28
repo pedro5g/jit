@@ -98,7 +98,7 @@ const validator = JIT.validator(User).get("is", "parse");
 export const UserCompiled = {
   ...validator,
   stringify: JIT.serializer(User).stringify,
-  findAdmins: JIT.query(JIT.array(User)).filter((q) => q.eq("role", "admin")),
+  findAdmins: JIT.cqrs.query(JIT.array(User)).filter((q) => q.eq("role", "admin")),
 };
 ```
 

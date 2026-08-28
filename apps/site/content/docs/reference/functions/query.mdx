@@ -8,7 +8,8 @@ description: Compile eager, iterator, async iterator, visitor and binary collect
 ```ts
 const Users = JIT.array(User);
 
-const findAdmins = JIT.query(Users)
+const findAdmins = JIT.cqrs
+  .query(Users)
   .filter((q) => q.eq("role", "admin"))
   .select("id", "name");
 
@@ -22,7 +23,8 @@ loops.
 ## Parameters
 
 ```ts
-const byRole = JIT.query(Users)
+const byRole = JIT.cqrs
+  .query(Users)
   .params({ role: JIT.string() })
   .filter((q, params) => q.eq("role", params.role));
 
@@ -34,13 +36,13 @@ constants from being accidentally baked into shared cache entries.
 
 ## param
 
-`JIT.param(name)` creates a typed parameter reference for APIs such as
+`JIT.cqrs.param(name)` creates a typed parameter reference for APIs such as
 parameterized update patches. Query `.params()` normally provides references
 through its callback.
 
 ## const
 
-`JIT.const(value)` marks an intentional literal query value. The condition
+`JIT.cqrs.const(value)` marks an intentional literal query value. The condition
 builder also exposes `q.constant(value)`.
 
 ## Operators
@@ -53,7 +55,8 @@ some keyed outputs require materialization.
 Mutation outputs are explicit:
 
 ```ts
-const deactivateAdmins = JIT.query(Users)
+const deactivateAdmins = JIT.cqrs
+  .query(Users)
   .filter((q) => q.eq("role", "admin"))
   .update({ active: false });
 ```
@@ -76,7 +79,8 @@ comparison and avoid the key table.
 | `.lazy()`             | generator            | generator-first chain                       |
 
 ```ts
-const visit = JIT.query(Users)
+const visit = JIT.cqrs
+  .query(Users)
   .filter((q) => q.eq("active", true))
   .to.visitor();
 
@@ -229,7 +233,8 @@ try {
 ## Explain
 
 ```ts
-const plan = JIT.query(Users)
+const plan = JIT.cqrs
+  .query(Users)
   .filter((q) => q.gt("score", 10))
   .orderBy("score", "desc")
   .explain("generator");

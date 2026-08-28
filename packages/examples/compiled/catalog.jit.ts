@@ -31,10 +31,10 @@ export const Users = {
   is: JIT.validate.is(User),
   parse: JIT.validate.parse(User),
   safeParse: JIT.validate.safeParse(User),
-  equal: JIT.equal(User),
+  equal: JIT.compare.equal(User),
   clone: JIT.clone(User),
-  diff: JIT.diff(User),
-  hash: JIT.hash(User),
+  diff: JIT.compare.diff(User),
+  hash: JIT.compare.hash(User),
   stringify: JIT.json.stringify(User),
   fromJSON: JIT.json.parse(User).validate(),
   mask: JIT.security.mask(User),
@@ -48,17 +48,20 @@ export const UserJsonSchema = JIT.jsonSchema.to(User);
 
 export const toPublicUser = JIT.map(User, PublicUser);
 
-export const findActiveAdmins = JIT.query(UserList)
+export const findActiveAdmins = JIT.cqrs
+  .query(UserList)
   .filter((query) => query.and(query.eq("role", "admin"), query.eq("active", true)))
   .select("id", "name", "score");
 
-export const iterateActiveUsers = JIT.query(UserList)
+export const iterateActiveUsers = JIT.cqrs
+  .query(UserList)
   .filter((query) => query.eq("active", true))
   .select("id", "name")
   .take(10)
   .to.iterator();
 
-export const visitActiveUsers = JIT.query(UserList)
+export const visitActiveUsers = JIT.cqrs
+  .query(UserList)
   .filter((query) => query.eq("active", true))
   .select("id")
   .to.visitor();

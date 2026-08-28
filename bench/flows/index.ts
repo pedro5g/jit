@@ -36,7 +36,8 @@ type PublicUser = JIT.Typeof<typeof PublicUser>;
 
 const users = createUsers(COUNT);
 const isUser = JIT.validate.is(User);
-const selectAdmins = JIT.query(Users)
+const selectAdmins = JIT.cqrs
+  .query(Users)
   .filter((q) => q.and(q.eq("role", "admin"), q.eq("active", true), q.gt("score", 500)))
   .select("id", "name", "score");
 const stringifyPublicUsers = JIT.json.stringify(PublicUsers);

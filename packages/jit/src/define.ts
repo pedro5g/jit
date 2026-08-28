@@ -5,6 +5,7 @@
  */
 
 import { type AccessRule, resolveAccessDescriptor, unconditionalFields } from "./compiler/access.js";
+import type { BinaryArray, BinaryRowSet } from "./compiler/binary-rowset.js";
 import { resolveCacheKeyDescriptor } from "./compiler/cache-key.js";
 import { allFieldPaths, resolveChangedDescriptor } from "./compiler/changed.js";
 import type { Clone } from "./compiler/clone.js";
@@ -51,7 +52,7 @@ import { unwrapSchema } from "./core/builder/index.js";
 import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/host.js";
 import { JITError } from "./errors/index.js";
 import type { AccessBuilder } from "./factories/access.js";
-import type { CqrsInput, CqrsQuery, ParsedCqrsInput } from "./factories/cqrs.js";
+import type { CqrsInput, CqrsQuery, CqrsQueryFor, ParsedCqrsInput } from "./factories/cqrs.js";
 import type { CsvNamespace, CsvParsePlan, CsvSchemaOptions, CsvStringifyPlan } from "./factories/csv.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
 import * as RuntimeJIT from "./factories/index.js";
@@ -61,7 +62,12 @@ import type { MatchBuilder } from "./factories/match.js";
 import type { MigrationPlan } from "./factories/migration.js";
 import type { NdjsonNamespace, NdjsonParsePlan, NdjsonStringifyPlan } from "./factories/ndjson.js";
 import type { ProjectBuilder } from "./factories/project.js";
-import { createConditionBuilder, type QueryConditionBuilder } from "./factories/query.js";
+import {
+  type BinaryQueryBuilder,
+  createConditionBuilder,
+  type QueryBuilder,
+  type QueryConditionBuilder,
+} from "./factories/query.js";
 import type { ReconcileChange, ReconcilePlan, ResolvedChannels } from "./factories/reconcile.js";
 import type { SortBuilder, SortPlan } from "./factories/sort.js";
 import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
@@ -127,10 +133,6 @@ const validate = Object.freeze({
     safeParse: safeParseAsync,
   }),
 });
-
-const is = validate.is;
-const parse = validate.parse;
-const safeParse = validate.safeParse;
 
 const json = Object.freeze({
   value: RuntimeJIT.json.value,
@@ -972,12 +974,24 @@ function defineAccessPlan(
   return stub;
 }
 
-function defineCqrsQuery<TSchema extends ATS.AnyTypeSchema>(
-  schema: SchemaInput<ATS.ArraySchema<TSchema>>
-): CqrsQuery<TSchema>;
-function defineCqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQuery<TSchema>;
-function defineCqrsQuery(schema: SchemaInput): CqrsQuery<ATS.AnyTypeSchema> {
-  return wrapDefineCqrsQuery(RuntimeJIT.cqrs.query(schema));
+function defineCqrsQuery<TElement>(
+  target: BinaryArray<TElement> | BinaryRowSet<TElement>
+): BinaryQueryBuilder<TElement, TElement, TElement[]>;
+function defineCqrsQuery<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): CqrsQueryFor<TSchema>;
+function defineCqrsQuery(
+  schema: SchemaInput | BinaryArray<unknown> | BinaryRowSet<unknown>
+):
+  | CqrsQuery<ATS.AnyTypeSchema>
+  | QueryBuilder<ATS.AnyTypeSchema, unknown, unknown[]>
+  | BinaryQueryBuilder<unknown, unknown, unknown[]> {
+  const builder = RuntimeJIT.cqrs.query(schema as never) as unknown as
+    | CqrsQuery<ATS.AnyTypeSchema>
+    | QueryBuilder<ATS.AnyTypeSchema, unknown, unknown[]>
+    | BinaryQueryBuilder<unknown, unknown, unknown[]>;
+  if (getArtifact(builder)?.kind === "query" || !("~query" in builder)) {
+    return builder as QueryBuilder<ATS.AnyTypeSchema, unknown, unknown[]>;
+  }
+  return wrapDefineCqrsQuery(builder as CqrsQuery<ATS.AnyTypeSchema>);
 }
 
 function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(builder: TQuery): TQuery {
@@ -1445,9 +1459,6 @@ function stage(kind: string, input: ExecutionStage["input"], output: ExecutionSt
 
 export const JIT = {
   ...RuntimeJIT,
-  is,
-  parse,
-  safeParse,
   validate,
   json,
   binary,
@@ -1482,9 +1493,6 @@ export const JIT = {
   security: Object.freeze({ mask, sanitize }),
 } as Omit<
   typeof RuntimeJIT,
-  | "is"
-  | "parse"
-  | "safeParse"
   | "validate"
   | "json"
   | "binary"
@@ -1512,9 +1520,6 @@ export const JIT = {
   | "compare"
   | "security"
 > & {
-  readonly is: typeof is;
-  readonly parse: typeof parse;
-  readonly safeParse: typeof safeParse;
   readonly validate: typeof validate;
   readonly json: typeof json;
   readonly binary: typeof binary;

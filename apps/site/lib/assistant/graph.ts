@@ -85,16 +85,16 @@ export const CONCEPTS: ConceptNode[] = [
       "A jit é um data engine schema-first para TypeScript: você descreve um formato uma vez com JIT.object({...}) e ela compila JavaScript especializado para cada operação sobre esse formato — validação, igualdade, clonagem, diff, queries, serialização e mais.",
     mechanisms: [
       "One declaration drives every operation: validation, equality, cloning, diffing, hashing, immutable updates, queries, DTO mapping, PII masking, sanitizing, JSON, a versioned binary codec, binary rowsets and progressive streaming.",
-      "Validation, security and transport are navigable namespaces; structural leaves are JIT.equal, JIT.diff, JIT.hash and JIT.clone; schema factories sit at the root.",
+      "Validation, security and transport are navigable namespaces; structural leaves are JIT.compare.equal, JIT.compare.diff, JIT.compare.hash and JIT.clone; schema factories sit at the root.",
       "Every artifact is lazy and callable: `.compile()` is an optional warm-up and `.plan` exposes the descriptor AOT consumes.",
     ],
     mechanismsPt: [
       "Uma declaração alimenta todas as operações: validação, igualdade, clonagem, diff, hash, updates imutáveis, queries, mapeamento de DTO, mascaramento de PII, sanitização, JSON, um codec binário versionado, rowsets binários e validação progressiva em stream.",
-      "Validação, segurança e transporte são namespaces navegáveis; as operações estruturais são JIT.equal, JIT.diff, JIT.hash e JIT.clone; as fábricas de schema ficam na raiz.",
+      "Validação, segurança e transporte são namespaces navegáveis; as operações estruturais são JIT.compare.equal, JIT.compare.diff, JIT.compare.hash e JIT.clone; as fábricas de schema ficam na raiz.",
       "Todo artefato é lazy e chamável: `.compile()` é um aquecimento opcional e `.plan` expõe o descritor que o AOT consome.",
     ],
     example:
-      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n  age: JIT.number().int().min(0),\n});\n\n// one declaration, many compiled operations\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.equal(User);\nconst cloneUser = JIT.clone(User);\nconst toJson = JIT.json.stringify(User);",
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email(),\n  age: JIT.number().int().min(0),\n});\n\n// one declaration, many compiled operations\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.compare.equal(User);\nconst cloneUser = JIT.clone(User);\nconst toJson = JIT.json.stringify(User);",
     page: "/docs",
     edges: { purpose: 0.7, compilation: 0.6, validation: 0.3, aot: 0.3 },
   },
@@ -146,7 +146,7 @@ export const CONCEPTS: ConceptNode[] = [
       "AOT generation closes the loop: the engine itself never ships to production, so the only thing in the bundle is the generated code the application actually calls.",
     ],
     example:
-      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email().pii(),\n});\n\n// every one of these is derived from the SAME declaration,\n// so they cannot disagree about what a User is\nconst isUser = JIT.validate.is(User);\nconst safeForLogs = JIT.security.mask(User);\nconst sameUser = JIT.equal(User);",
+      "const User = JIT.object({\n  id: JIT.string().uuid(),\n  email: JIT.string().email().pii(),\n});\n\n// every one of these is derived from the SAME declaration,\n// so they cannot disagree about what a User is\nconst isUser = JIT.validate.is(User);\nconst safeForLogs = JIT.security.mask(User);\nconst sameUser = JIT.compare.equal(User);",
     page: "/docs/concepts/why-jit",
     edges: { compilation: 0.7, performance: 0.5, comparison: 0.4, self: 0.4 },
   },
@@ -422,7 +422,7 @@ export const CONCEPTS: ConceptNode[] = [
       "create aceita o input de fronteira e resolve defaults; hydrate rejeita estado persistido incompleto em vez de fabricar dados.",
     ],
     example:
-      'const User = JIT.object({ id: JIT.string().readonly().default("generated"), name: JIT.string() });\nconst parseUser = JIT.parse(User);\n\nparseUser({ name: "Ada" }); // { id: "generated", name: "Ada" }',
+      'const User = JIT.object({ id: JIT.string().readonly().default("generated"), name: JIT.string() });\nconst parseUser = JIT.validate.parse(User);\n\nparseUser({ name: "Ada" }); // { id: "generated", name: "Ada" }',
     page: "/docs/concepts/schemas-and-types#input-output-and-updates",
     edges: { validation: 0.5, query: 0.2 },
   },
@@ -430,21 +430,21 @@ export const CONCEPTS: ConceptNode[] = [
     id: "query",
     aliases: ["query", "consulta", "filter", "filtro", "search", "buscar", "where", "sort", "ordenar", "aggregate"],
     terms: ["query", "filter", "projection", "orderby", "groupby", "iterator", "visitor", "fused", "physical plan"],
-    apis: ["cqrs", "from", "param", "const"],
+    apis: ["cqrs", "from"],
     fact: "A query builder compiles to one fused loop over the collection: filters and projections are lowered into a single pass with no intermediate arrays.",
     factPt:
       "Um query builder compila para um único laço fundido sobre a coleção: filtros e projeções descem para uma só passada, sem arrays intermediários.",
     mechanisms: [
       "Filters and projections are lowered into one loop: the query preallocates a single output array, writes by cursor and trims once.",
       "`count`, `sum`, `avg`, `min` and `max` allocate no output array at all. `count` and `sum` return zero for empty input; the other three return undefined.",
-      "`.params(shape)` is for values supplied per call and `JIT.const(value)` for a compiler literal; ordinary closure values become safe external bindings, and no untrusted value is interpolated into generated source.",
+      "`.params(shape)` is for values supplied per call and `JIT.cqrs.const(value)` for a compiler literal; ordinary closure values become safe external bindings, and no untrusted value is interpolated into generated source.",
       "`unique` keeps first occurrences, `keyed` returns a Map, `groupBy` returns arrays per key, and `orderBy` performs a global sort.",
       "Mutation operators rebuild collections immutably and require a filter, so a full-table update cannot happen by accident.",
     ],
     mechanismsPt: [
       "Filtros e projeções descem para um único laço: a query pré-aloca um array de saída, escreve por cursor e corta uma vez no fim.",
       "`count`, `sum`, `avg`, `min` e `max` não alocam array de saída nenhum. `count` e `sum` devolvem zero para entrada vazia; os outros três devolvem undefined.",
-      "`.params(shape)` é para valores passados por chamada e `JIT.const(value)` para um literal de compilação; valores de closure comuns viram bindings externos seguros, e nenhum valor não confiável é interpolado no fonte gerado.",
+      "`.params(shape)` é para valores passados por chamada e `JIT.cqrs.const(value)` para um literal de compilação; valores de closure comuns viram bindings externos seguros, e nenhum valor não confiável é interpolado no fonte gerado.",
       "`unique` mantém as primeiras ocorrências, `keyed` devolve um Map, `groupBy` devolve arrays por chave, e `orderBy` faz uma ordenação global.",
       "Operadores de mutação reconstroem coleções de forma imutável e exigem um filtro, então um update de tabela inteira não acontece por acidente.",
     ],
@@ -578,7 +578,7 @@ export const CONCEPTS: ConceptNode[] = [
       "O modo colunar mantém máscaras e lanes tipadas por campo em um único buffer, e os scans gerados usam um índice-base de coluna em cache, sem cursor de linha.",
     ],
     example:
-      'const Event = JIT.object({\n  id: JIT.string(),\n  kind: JIT.enum(["click", "view", "purchase"]),\n  amount: JIT.number(),\n});\n\n// packed into fixed-width memory and scanned as typed views\nconst Events = JIT.array(Event).binary();\n\nconst revenue = JIT.query(Events).filter((q) => q.eq("kind", "purchase")).sum("amount");',
+      'const Event = JIT.object({\n  id: JIT.string(),\n  kind: JIT.enum(["click", "view", "purchase"]),\n  amount: JIT.number(),\n});\n\n// packed into fixed-width memory and scanned as typed views\nconst Events = JIT.array(Event).binary();\n\nconst revenue = JIT.cqrs.query(Events).filter((q) => q.eq("kind", "purchase")).sum("amount");',
     page: "/docs/runtime/binary-rowsets",
     edges: { memory: 0.6, query: 0.5 },
   },
@@ -586,7 +586,7 @@ export const CONCEPTS: ConceptNode[] = [
     id: "json",
     aliases: ["json", "stringify", "serializar", "serialize", "serialization", "encode", "decode"],
     terms: ["json", "stringify", "parse", "chunks", "escape", "wire"],
-    apis: ["json", "jsonValue"],
+    apis: ["json"],
     fact: "JIT.json compiles serialization from the known shape: JIT.json.stringify(User) bakes known keys and punctuation into the generated source, JIT.json.parse(User).validate() decodes with native JSON.parse and runs the compiled validator in the same execution function, and JIT.json.stringifyChunks emits bounded chunks for large arrays.",
     factPt:
       "JIT.json compila a serialização a partir do formato conhecido: JIT.json.stringify(User) grava chaves e pontuação conhecidas direto no fonte gerado, JIT.json.parse(User).validate() decodifica com o JSON.parse nativo e roda o validador compilado na mesma função de execução, e JIT.json.stringifyChunks emite chunks limitados para arrays grandes.",
@@ -713,10 +713,10 @@ export const CONCEPTS: ConceptNode[] = [
     id: "compare",
     aliases: ["equal", "igual", "compare", "comparar", "diff", "hash", "clone", "clonar", "copy", "cópia"],
     terms: ["equal", "diff", "hash", "clone", "structural", "identity"],
-    apis: ["equal", "diff", "hash", "compare", "clone"],
-    fact: "JIT.equal(schema) emits equality code from the known shape: objects use direct field access, arrays use indexed loops, tuples unroll fixed positions, and tagged unions dispatch on the tag before comparing variant fields. JIT.diff reports the paths that differ and JIT.hash produces a structural fingerprint.",
+    apis: ["compare", "clone"],
+    fact: "JIT.compare.equal(schema) emits equality code from the known shape: objects use direct field access, arrays use indexed loops, tuples unroll fixed positions, and tagged unions dispatch on the tag before comparing variant fields. JIT.compare.diff reports the paths that differ and JIT.compare.hash produces a structural fingerprint.",
     factPt:
-      "JIT.equal(schema) emite código de igualdade a partir do formato conhecido: objetos usam acesso direto a campo, arrays usam laços indexados, tuplas desenrolam posições fixas, e uniões com tag despacham pela tag antes de comparar os campos da variante. JIT.diff reporta os caminhos que diferem e JIT.hash produz uma impressão digital estrutural.",
+      "JIT.compare.equal(schema) emite código de igualdade a partir do formato conhecido: objetos usam acesso direto a campo, arrays usam laços indexados, tuplas desenrolam posições fixas, e uniões com tag despacham pela tag antes de comparar os campos da variante. JIT.compare.diff reporta os caminhos que diferem e JIT.compare.hash produz uma impressão digital estrutural.",
     mechanisms: [
       "Equality returns on the first difference and allocates no result object — there is no key enumeration because the keys were known when the function was written.",
       "A tagged union dispatches on its discriminant first, so mismatched variants cost one comparison instead of a field-by-field walk.",
@@ -732,7 +732,7 @@ export const CONCEPTS: ConceptNode[] = [
       "`JIT.clone` é a mesma ideia para cópia: um deep clone especializado no formato, em vez de uma varredura genérica.",
     ],
     example:
-      "const Order = JIT.object({\n  id: JIT.string(),\n  lines: JIT.array(JIT.object({ sku: JIT.string(), quantity: JIT.number() })),\n});\n\nconst same = JIT.equal(Order);\nconst changes = JIT.diff(Order);\nconst fingerprint = JIT.hash(Order);",
+      "const Order = JIT.object({\n  id: JIT.string(),\n  lines: JIT.array(JIT.object({ sku: JIT.string(), quantity: JIT.number() })),\n});\n\nconst same = JIT.compare.equal(Order);\nconst changes = JIT.compare.diff(Order);\nconst fingerprint = JIT.compare.hash(Order);",
     page: "/docs/reference/functions/equal",
     edges: { update: 0.4 },
   },
@@ -782,7 +782,7 @@ export const CONCEPTS: ConceptNode[] = [
       "O cache de compilação elimina trabalho de geração de código; hashes e índices eliminam trabalho de travessia repetida. São custos diferentes e são cacheados separadamente.",
     ],
     example:
-      "// ONE declaration, reused — this is what the compile cache is keyed by\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.equal(User);\n\n// declaring a fresh schema per request reuses nothing and recompiles every time",
+      "// ONE declaration, reused — this is what the compile cache is keyed by\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User);\nconst sameUser = JIT.compare.equal(User);\n\n// declaring a fresh schema per request reuses nothing and recompiles every time",
     page: "/docs/runtime/cache-hash-index",
     edges: { runtime: 0.5 },
   },
@@ -819,20 +819,20 @@ export const CONCEPTS: ConceptNode[] = [
       "A 2.0 removeu as fachadas JIT.validator, JIT.model, JIT.mapper e JIT.serializer. Cada operação é um artefato chamável, e um agregado é um objeto simples de artefatos.",
     mechanisms: [
       "`JIT.validator(User)` became the `JIT.validate.*` namespace: `is`, `parse`, `safeParse`, `issues`, `async`.",
-      "`JIT.equal`, `JIT.diff` and `JIT.hash` remain the canonical structural leaves; their `.compile()` call is optional warm-up.",
+      "`JIT.compare.equal`, `JIT.compare.diff` and `JIT.compare.hash` remain the canonical structural leaves; their `.compile()` call is optional warm-up.",
       "`JIT.mask` and `JIT.sanitize` became `JIT.security.mask` and `JIT.security.sanitize`.",
       "An aggregate is now written as an ordinary object literal of artifacts rather than through a facade constructor.",
       "Names that appear only in the migration guide are counter-examples, not usable code.",
     ],
     mechanismsPt: [
       "`JIT.validator(User)` virou o namespace `JIT.validate.*`: `is`, `parse`, `safeParse`, `issues`, `async`.",
-      "`JIT.equal`, `JIT.diff` e `JIT.hash` continuam sendo as operações estruturais canônicas; `.compile()` é apenas aquecimento opcional.",
+      "`JIT.compare.equal`, `JIT.compare.diff` e `JIT.compare.hash` continuam sendo as operações estruturais canônicas; `.compile()` é apenas aquecimento opcional.",
       "`JIT.mask` e `JIT.sanitize` viraram `JIT.security.mask` e `JIT.security.sanitize`.",
       "Um agregado agora é escrito como um objeto literal comum de artefatos, não por um construtor de fachada.",
       "Nomes que aparecem só no guia de migração são contraexemplos, não código utilizável.",
     ],
     example:
-      "// 2.0 — one callable artifact per operation\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User); // was JIT.validator(User).is\nconst sameUser = JIT.equal(User);\nconst safeUser = JIT.security.mask(User); // was JIT.mask(User)\n\nconst artifacts = { isUser, sameUser, safeUser };",
+      "// 2.0 — one callable artifact per operation\nconst User = JIT.object({ id: JIT.string() });\n\nconst isUser = JIT.validate.is(User); // was JIT.validator(User).is\nconst sameUser = JIT.compare.equal(User);\nconst safeUser = JIT.security.mask(User); // was JIT.mask(User)\n\nconst artifacts = { isUser, sameUser, safeUser };",
     page: "/docs/guides/migrating-to-2",
     edges: { self: 0.3 },
   },
@@ -878,7 +878,7 @@ export const CONCEPTS: ConceptNode[] = [
       "Se validação é tudo que você precisa e ela não aparece no seu profile, o motivo para mudar é o argumento da declaração compartilhada, não velocidade.",
     ],
     example:
-      "// jit's distinguishing move: many operations from ONE declaration\nconst User = JIT.object({ id: JIT.string(), email: JIT.string().email() });\n\nconst isUser = JIT.validate.is(User);      // what a validator library gives you\nconst sameUser = JIT.equal(User);  // and a deep-equal library\nconst cloneUser = JIT.clone(User);         // and a clone library\nconst toJson = JIT.json.stringify(User);   // and a serializer",
+      "// jit's distinguishing move: many operations from ONE declaration\nconst User = JIT.object({ id: JIT.string(), email: JIT.string().email() });\n\nconst isUser = JIT.validate.is(User);      // what a validator library gives you\nconst sameUser = JIT.compare.equal(User);  // and a deep-equal library\nconst cloneUser = JIT.clone(User);         // and a clone library\nconst toJson = JIT.json.stringify(User);   // and a serializer",
     page: "/docs/reference/library-comparison",
     edges: { performance: 0.4 },
   },

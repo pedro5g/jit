@@ -47,7 +47,7 @@ very hot loops.
 ```ts
 const setRole = JIT.update(User)
   .patch({
-    role: JIT.param("role"),
+    role: JIT.cqrs.param("role"),
   })
   .compile();
 

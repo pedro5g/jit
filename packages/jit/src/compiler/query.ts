@@ -152,7 +152,7 @@ export function explainPhysicalQuery(schema: ATS.AnyTypeSchema, program: QueryPr
  * delete/update) into a single specialized function with one fused pass over
  * the collection, with no intermediate arrays between steps.
  *
- * Prefer the typed `JIT.query(schema)` builder; this is the low-level entry
+ * Prefer the typed `JIT.cqrs.query(schema)` builder; this is the low-level entry
  * point it delegates to.
  *
  * @template TSchema - The collection schema the query runs against.

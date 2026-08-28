@@ -8,25 +8,6 @@ describe("composable capability API", () => {
   });
   const ada = { id: 1, name: "Ada", role: "admin" as const };
 
-  it("does not expose the removed selection facades", () => {
-    expect(JIT).not.toHaveProperty("validator");
-    expect(JIT).not.toHaveProperty("serializer");
-    expect(JIT).not.toHaveProperty("model");
-    expect(JIT).not.toHaveProperty("mapper");
-    expect(JIT).not.toHaveProperty("compile");
-    expectTypeOf<
-      Extract<"validator" | "serializer" | "model" | "mapper" | "compile", keyof typeof JIT>
-    >().toEqualTypeOf<never>();
-  });
-
-  it("exposes the structural leaf operations named by the public plan", () => {
-    expect(JIT.equal(User)(ada, { ...ada })).toBe(true);
-    expect(JIT.diff(User)(ada, { ...ada, name: "Grace" })).not.toHaveLength(0);
-    expect(JIT.hash(User)(ada)).toBe(JIT.compare.hash(User)(ada));
-    expectTypeOf<Extract<"equal" | "diff" | "hash", keyof typeof JIT>>().toEqualTypeOf<"equal" | "diff" | "hash">();
-    expectTypeOf<Extract<"mask" | "sanitize", keyof typeof JIT>>().toEqualTypeOf<never>();
-  });
-
   it("compiles validation through the validate namespace", () => {
     const isUser = JIT.validate.is(User);
     const parseUser = JIT.validate.parse(User);
@@ -40,9 +21,9 @@ describe("composable capability API", () => {
 
     expectTypeOf(isUser).toMatchTypeOf<(value: unknown) => value is AST.Typeof<typeof User>>();
     expectTypeOf(parseUser).toMatchTypeOf<(value: unknown) => AST.Typeof<typeof User>>();
-    expect(JIT.is(User)(ada)).toBe(true);
-    expect(JIT.parse(User)).not.toBeUndefined();
-    expect(JIT.safeParse(User)(ada)).toMatchObject({ success: true });
+    expect(JIT.validate.is(User)(ada)).toBe(true);
+    expect(JIT.validate.parse(User)).not.toBeUndefined();
+    expect(JIT.validate.safeParse(User)(ada)).toMatchObject({ success: true });
     expect(JIT.validate.parseAsync).toBeDefined();
     expect(JIT.validate.safeParseAsync).toBeDefined();
   });

@@ -14,7 +14,7 @@ describe("PipelineAST", () => {
     it("builds compare nodes with field/binding value nodes", () => {
       let captured: PipelineAST.QueryConditionNode | undefined;
 
-      JIT.query(Users).filter((c) => {
+      JIT.cqrs.query(Users).filter((c) => {
         captured = c.eq("role", "admin");
         return captured;
       });
@@ -30,7 +30,7 @@ describe("PipelineAST", () => {
     it("builds logical and not nodes recursively", () => {
       let captured: PipelineAST.QueryConditionNode | undefined;
 
-      JIT.query(Users).filter((c) => {
+      JIT.cqrs.query(Users).filter((c) => {
         captured = c.not(c.and(c.eq("role", "admin"), c.gt("id", 10)));
         return captured;
       });
@@ -50,7 +50,7 @@ describe("PipelineAST", () => {
       let first: PipelineAST.QueryCompareNode | undefined;
       let second: PipelineAST.QueryCompareNode | undefined;
 
-      JIT.query(Users).filter((c) => {
+      JIT.cqrs.query(Users).filter((c) => {
         first = c.eq("role", "admin");
         second = c.lt("id", 100);
         return c.and(first, second);
@@ -80,7 +80,7 @@ describe("PipelineAST", () => {
     it("query nodes built by the public builder are plain JSON data", () => {
       let condition: PipelineAST.QueryConditionNode | undefined;
 
-      JIT.query(Users).filter((c) => {
+      JIT.cqrs.query(Users).filter((c) => {
         condition = c.or(c.eq("role", "admin"), c.neq("name", ""));
         return condition;
       });

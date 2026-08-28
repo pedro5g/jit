@@ -50,40 +50,52 @@ for (const size of SIZES) {
   const alignedRowset = alignedBinary.load(users);
   const columnarBinary = Users.binary({ strategy: "exact", memoryLayout: "columnar" });
   const columnarRowset = columnarBinary.load(users);
-  const byteQuery = JIT.query(rowset)
+  const byteQuery = JIT.cqrs
+    .query(rowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score");
-  const regularQuery = JIT.query(Users)
+  const regularQuery = JIT.cqrs
+    .query(Users)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score");
-  const alignedByteQuery = JIT.query(alignedRowset)
+  const alignedByteQuery = JIT.cqrs
+    .query(alignedRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score");
-  const columnarByteQuery = JIT.query(columnarRowset)
+  const columnarByteQuery = JIT.cqrs
+    .query(columnarRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .select("id", "name", "score");
-  const byteCount = JIT.query(rowset)
+  const byteCount = JIT.cqrs
+    .query(rowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .count();
-  const regularCount = JIT.query(Users)
+  const regularCount = JIT.cqrs
+    .query(Users)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .count();
-  const alignedByteCount = JIT.query(alignedRowset)
+  const alignedByteCount = JIT.cqrs
+    .query(alignedRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .count();
-  const columnarByteCount = JIT.query(columnarRowset)
+  const columnarByteCount = JIT.cqrs
+    .query(columnarRowset)
     .filter((q) => q.and(q.eq("role", "admin"), q.and(q.eq("active", true), q.gt("score", 500))))
     .count();
-  const byteSum = JIT.query(rowset)
+  const byteSum = JIT.cqrs
+    .query(rowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
     .sum("score");
-  const regularSum = JIT.query(Users)
+  const regularSum = JIT.cqrs
+    .query(Users)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
     .sum("score");
-  const alignedByteSum = JIT.query(alignedRowset)
+  const alignedByteSum = JIT.cqrs
+    .query(alignedRowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
     .sum("score");
-  const columnarByteSum = JIT.query(columnarRowset)
+  const columnarByteSum = JIT.cqrs
+    .query(columnarRowset)
     .filter((q) => q.and(q.eq("active", true), q.gt("score", 500)))
     .sum("score");
   const exactPipeline = JIT.process(User)

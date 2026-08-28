@@ -18,7 +18,8 @@ describe("lazy query execution", () => {
   ];
 
   it("compiles filter/select/take as an explicit iterator with early termination", () => {
-    const query = JIT.query(Events)
+    const query = JIT.cqrs
+      .query(Events)
       .filter((q) => q.eq("active", true))
       .select("id", "score")
       .take(2);
@@ -49,15 +50,16 @@ describe("lazy query execution", () => {
   });
 
   it("supports flatMap, drop/takeWhile, unique, chunks, windows, and pairs", () => {
-    const tags = JIT.query(Events).flatMap("tags").to.iterator();
-    const range = JIT.query(Events)
+    const tags = JIT.cqrs.query(Events).flatMap("tags").to.iterator();
+    const range = JIT.cqrs
+      .query(Events)
       .dropWhile((q) => q.lt("score", 80))
       .takeWhile((q) => q.gte("score", 40))
       .to.iterator();
-    const unique = JIT.query(Events).unique("category").to.iterator();
-    const chunks = JIT.query(Events).select("id").chunk(2).to.iterator();
-    const windows = JIT.query(Events).select("id").window(3).to.iterator();
-    const pairs = JIT.query(Events).select("id").pairwise().to.iterator();
+    const unique = JIT.cqrs.query(Events).unique("category").to.iterator();
+    const chunks = JIT.cqrs.query(Events).select("id").chunk(2).to.iterator();
+    const windows = JIT.cqrs.query(Events).select("id").window(3).to.iterator();
+    const pairs = JIT.cqrs.query(Events).select("id").pairwise().to.iterator();
 
     expect([...tags(events)]).toEqual(["cold", "hot", "new", "hot", "top"]);
     expect([...range(events)].map((event) => event.id)).toEqual([2, 3, 4, 5]);
@@ -77,12 +79,14 @@ describe("lazy query execution", () => {
   });
 
   it("supports scan, adjacent groups, visitor output, and ordering barriers", () => {
-    const balances = JIT.query(Events)
+    const balances = JIT.cqrs
+      .query(Events)
       .scan({ initial: 0, update: (total, event) => total + event.score })
       .to.iterator();
-    const groups = JIT.query(Events).groupAdjacentBy("category").to.iterator();
-    const ordered = JIT.query(Events).orderBy("score", "desc");
-    const visit = JIT.query(Events)
+    const groups = JIT.cqrs.query(Events).groupAdjacentBy("category").to.iterator();
+    const ordered = JIT.cqrs.query(Events).orderBy("score", "desc");
+    const visit = JIT.cqrs
+      .query(Events)
       .filter((q) => q.gt("score", 80))
       .select("id")
       .to.visitor();
@@ -105,7 +109,8 @@ describe("lazy query execution", () => {
       for (const event of events) yield event;
     }
 
-    const iterate = JIT.query(Events)
+    const iterate = JIT.cqrs
+      .query(Events)
       .filter((q) => q.eq("active", true))
       .scan({ initial: 0, update: async (total, event) => total + event.score })
       .take(2)
@@ -179,7 +184,7 @@ describe("lazy query execution", () => {
       category: "a",
       tags: [],
     }));
-    const query = JIT.query(Events).select("score").take(2);
+    const query = JIT.cqrs.query(Events).select("score").take(2);
 
     expect(query(rows)).toEqual([{ score: 1 }, { score: 2 }]);
     expect(reads).toBe(2);

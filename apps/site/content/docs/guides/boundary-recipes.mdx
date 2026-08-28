@@ -109,7 +109,8 @@ strings can use identity codes and skip the large lookup Map.
 ## Queue batching
 
 ```ts
-const batches = JIT.query(Events)
+const batches = JIT.cqrs
+  .query(Events)
   .filter((q) => q.eq("valid", true))
   .chunk(1_000)
   .to.asyncIterator();

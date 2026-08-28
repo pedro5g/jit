@@ -5,6 +5,7 @@ export type PublicUser = { id: number; name: string; role: "admin" | "member" };
 export type User = { id: number; name: string; email: string; role: "admin" | "member"; active: boolean; score: number; tags: string[]; createdAt: string; profile: { bio: string | null } | undefined };
 export type UserList = User[];
 
+const __hashCache = new WeakMap();
 class JITValidationError extends Error {
   constructor(issues) {
     const first = issues[0];
@@ -14,7 +15,6 @@ class JITValidationError extends Error {
     this.issues = issues;
   }
 }
-const __hashCache = new WeakMap();
 function __hashNumber(value) { return value | 0; }
 function __hashBoolean(value) { return value ? 1 : 0; }
 function __hashBigInt(value) { return Number(value & 0xffffffffn) | 0; }
@@ -1065,7 +1065,7 @@ const UserJsonSchema: { readonly [key: string]: unknown } = /*#__PURE__*/ Object
 const findActiveAdmins: __JitCall<typeof import("../catalog.jit.js").findActiveAdmins> = /*#__PURE__*/ (() => {
   const __q0 = "admin";
   const __q1 = true;
-  return (function query(value) {
+  const query = (function query(value) {
     const len = value.length;
     const out = new Array(len);
     let j = 0;
@@ -1077,37 +1077,37 @@ const findActiveAdmins: __JitCall<typeof import("../catalog.jit.js").findActiveA
     }
     out.length = j;
     return out;
-  });
+  }); Object.defineProperty(query, "~query", { value: {"version":1,"definition":{"source":{"kind":"object","fields":["id","name","email","role","active","score","tags","createdAt","profile"]},"pipeline":[{"kind":"where","condition":{"kind":"logical","operator":"and","left":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["role"]},"right":{"kind":"literal","value":"admin"}},"right":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["active"]},"right":{"kind":"literal","value":true}}}},{"kind":"select","fields":["id","name","score"]}],"filter":{"kind":"logical","operator":"and","left":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["role"]},"right":{"kind":"literal","value":"admin"}},"right":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["active"]},"right":{"kind":"literal","value":true}}},"projection":["id","name","score"],"params":[]}} }); return query;
 })();
-const iterateActiveUsers: typeof import("../catalog.jit.js").iterateActiveUsers = /*#__PURE__*/ (() => {
+const iterateActiveUsers: __JitCall<typeof import("../catalog.jit.js").iterateActiveUsers> = /*#__PURE__*/ (() => {
   const __q0 = true;
-  return ((function() {
-function* stage0(input, params) {
-  let count2 = 0;
-  if (Array.isArray(input)) {
-    for (let i = 0, len = input.length; i < len; i++) {
-      const item = input[i];
+  const query = ((function() {
+  function* stage0(input, params) {
+    let count2 = 0;
+    if (Array.isArray(input)) {
+      for (let i = 0, len = input.length; i < len; i++) {
+        const item = input[i];
+        let output = item;
+        if (!(item.active === __q0)) continue;
+        output = { "id": item.id, "name": item.name };
+        yield output;
+        if (++count2 === 10) return;
+      }
+      return;
+    }
+    for (const item of input) {
       let output = item;
       if (!(item.active === __q0)) continue;
       output = { "id": item.id, "name": item.name };
       yield output;
       if (++count2 === 10) return;
     }
-    return;
   }
-  for (const item of input) {
-    let output = item;
-    if (!(item.active === __q0)) continue;
-    output = { "id": item.id, "name": item.name };
-    yield output;
-    if (++count2 === 10) return;
+  function query(input) {
+    return stage0(input, undefined);
   }
-}
-function query(input) {
-  return stage0(input, undefined);
-}
-return query;
-})());
+  return query;
+  })()); Object.defineProperty(query, "~query", { value: {"version":1,"definition":{"source":{"kind":"object","fields":["id","name","email","role","active","score","tags","createdAt","profile"]},"pipeline":[{"kind":"where","condition":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["active"]},"right":{"kind":"literal","value":true}}},{"kind":"select","fields":["id","name"]},{"kind":"take","count":10}],"filter":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["active"]},"right":{"kind":"literal","value":true}},"projection":["id","name"],"limit":10,"params":[]}} }); return query;
 })();
 const toPublicUser: (value: User) => PublicUser = /*#__PURE__*/ (() => {
   const toPublicUser_mapper = /*#__PURE__*/ (() => {
@@ -1123,14 +1123,23 @@ const toPublicUser: (value: User) => PublicUser = /*#__PURE__*/ (() => {
     return value;
   };
 })();
-const visitActiveUsers: typeof import("../catalog.jit.js").visitActiveUsers = /*#__PURE__*/ (() => {
+const visitActiveUsers: __JitCall<typeof import("../catalog.jit.js").visitActiveUsers> = /*#__PURE__*/ (() => {
   const __q0 = true;
-  return ((function () {
-function visit(input, consume) {
-  let emitted = 0;
-  if (Array.isArray(input)) {
-    for (let i = 0, len = input.length; i < len; i++) {
-      const item = input[i];
+  const query = ((function () {
+  function visit(input, consume) {
+    let emitted = 0;
+    if (Array.isArray(input)) {
+      for (let i = 0, len = input.length; i < len; i++) {
+        const item = input[i];
+        let output = item;
+        if (!(item.active === __q0)) continue;
+        output = { "id": item.id };
+        consume(output);
+        emitted++;
+      }
+      return emitted;
+    }
+    for (const item of input) {
       let output = item;
       if (!(item.active === __q0)) continue;
       output = { "id": item.id };
@@ -1139,16 +1148,7 @@ function visit(input, consume) {
     }
     return emitted;
   }
-  for (const item of input) {
-    let output = item;
-    if (!(item.active === __q0)) continue;
-    output = { "id": item.id };
-    consume(output);
-    emitted++;
-  }
-  return emitted;
-}
-return visit;
-})());
+  return visit;
+  })()); Object.defineProperty(query, "~query", { value: {"version":1,"definition":{"source":{"kind":"object","fields":["id","name","email","role","active","score","tags","createdAt","profile"]},"pipeline":[{"kind":"where","condition":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["active"]},"right":{"kind":"literal","value":true}}},{"kind":"select","fields":["id"]}],"filter":{"kind":"compare","operator":"eq","left":{"kind":"field","path":["active"]},"right":{"kind":"literal","value":true}},"projection":["id"],"params":[]}} }); return query;
 })();
 export { Users, UserJsonSchema, findActiveAdmins, iterateActiveUsers, toPublicUser, visitActiveUsers };

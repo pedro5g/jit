@@ -68,7 +68,7 @@ const isOutput = `function is(value) {
   return true;
 }`;
 
-const equalInput = `const equalUser = JIT.equal(User).compile();
+const equalInput = `const equalUser = JIT.compare.equal(User).compile();
 
 equalUser(a, b); // schema-aware deep equality`;
 
@@ -151,7 +151,7 @@ function stringify(value) {
   return s;
 }`;
 
-const diffInput = `const diffUser = JIT.diff(User).compile();
+const diffInput = `const diffUser = JIT.compare.diff(User).compile();
 
 diffUser(before, after); // structural diff entries`;
 
@@ -193,7 +193,7 @@ const diffOutput = `function diff(left, right) {
   return changes;
 }`;
 
-const queryInput = `const admins = JIT.query(UserList)
+const queryInput = `const admins = JIT.cqrs.query(UserList)
   .params({ minimumId: JIT.int() })
   .filter((q, params) =>
     q.and(q.not(q.eq("role", "blocked")), q.gt("id", params.minimumId)),

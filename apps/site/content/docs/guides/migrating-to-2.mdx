@@ -14,29 +14,35 @@ it emitted for 1.x; only the surface that asks for it moved.
 
 ## The whole migration in one table
 
-| 1.x                                    | 2.0                                          |
-| -------------------------------------- | -------------------------------------------- |
-| `JIT.validator(User)`                  | `JIT.validate.is/parse/safeParse(User)`      |
-| `JIT.validator(User).get("is","parse")`| an object literal with those two artifacts   |
-| `JIT.validator(Job).parseAsync(x)`     | `JIT.validate.async.parse(Job)(x)`           |
-| `JIT.validator(Job).safeParseAsync(x)` | `JIT.validate.async.safeParse(Job)(x)`       |
-| `JIT.model(User)`                      | an object literal of artifacts               |
-| `JIT.compile(User, { ... })`           | the same object, without the wrapper call    |
-| `JIT.equal(User).compile()`            | `JIT.equal(User)`                            |
-| `JIT.diff(User)`                       | `JIT.diff(User)`                             |
-| `JIT.hash(User)`                       | `JIT.hash(User)`                             |
-| `JIT.mask(User)`                       | `JIT.security.mask(User)`                    |
-| `JIT.sanitize(Form)`                   | `JIT.security.sanitize(Form)`                |
-| `JIT.serializer(User)`                 | `JIT.json.stringify(User)` / `JIT.json.parse(User)` |
-| `JIT.json(User).stringify().compile()` | `JIT.json.stringify(User)`                   |
-| `JIT.mapper(A, B, overrides)`          | `JIT.map(A, B, overrides)`                   |
-| `JIT.mapper(A, B).get("many")`         | `JIT.map.many(A, B)`                         |
-| `JIT.map(Key, Value)` (Map schema)     | `JIT.mapSchema(Key, Value)`                  |
-| `JIT.query(Users)….compile()`          | `JIT.query(Users)…` — the builder is the query |
-| `….compileIterator()`                  | `….to.iterator()`                            |
-| `….compileVisitor()`                   | `….to.visitor()`                             |
+| 1.x                                       | 2.0                                                 |
+| ----------------------------------------- | --------------------------------------------------- |
+| `JIT.validator(User)`                     | `JIT.validate.is/parse/safeParse(User)`             |
+| `JIT.validator(User).get("is","parse")`   | an object literal with those two artifacts          |
+| `JIT.validator(Job).parseAsync(x)`        | `JIT.validate.async.parse(Job)(x)`                  |
+| `JIT.validator(Job).safeParseAsync(x)`    | `JIT.validate.async.safeParse(Job)(x)`              |
+| `JIT.is(User)`                            | `JIT.validate.is(User)`                             |
+| `JIT.parse(User)`                         | `JIT.validate.parse(User)`                          |
+| `JIT.safeParse(User)`                     | `JIT.validate.safeParse(User)`                      |
+| `JIT.model(User)`                         | an object literal of artifacts                      |
+| `JIT.compile(User, { ... })`              | the same object, without the wrapper call           |
+| `JIT.equal(User).compile()`               | `JIT.compare.equal(User)`                           |
+| `JIT.diff(User)`                          | `JIT.compare.diff(User)`                            |
+| `JIT.hash(User)`                          | `JIT.compare.hash(User)`                            |
+| `JIT.jsonValue()`                         | `JIT.json.value()`                                  |
+| `JIT.mask(User)`                          | `JIT.security.mask(User)`                           |
+| `JIT.sanitize(Form)`                      | `JIT.security.sanitize(Form)`                       |
+| `JIT.serializer(User)`                    | `JIT.json.stringify(User)` / `JIT.json.parse(User)` |
+| `JIT.json(User).stringify().compile()`    | `JIT.json.stringify(User)`                          |
+| `JIT.mapper(A, B, overrides)`             | `JIT.map(A, B, overrides)`                          |
+| `JIT.mapper(A, B).get("many")`            | `JIT.map.many(A, B)`                                |
+| `JIT.map(Key, Value)` (Map schema)        | `JIT.mapSchema(Key, Value)`                         |
+| `JIT.query(Users)….compile()`             | `JIT.cqrs.query(Users)…` — the builder is the query |
+| `JIT.param("name")`                       | `JIT.cqrs.param("name")`                            |
+| `JIT.const("admin")`                      | `JIT.cqrs.const("admin")`                           |
+| `….compileIterator()`                     | `….to.iterator()`                                   |
+| `….compileVisitor()`                      | `….to.visitor()`                                    |
 | `JIT.compileEqual`, `JIT.compileClone`, … | `Compiler.compileEqual`, `Compiler.compileClone`, … |
-| generated `UserStrict<T>`              | `JIT.Strict<typeof User, T>` in your source  |
+| generated `UserStrict<T>`                 | `JIT.Strict<typeof User, T>` in your source         |
 
 `JIT.clone`, `JIT.format`, `JIT.codec`, `JIT.update`, `JIT.stream`,
 `JIT.process`, `JIT.transform`, `JIT.watch`, and every schema factory are
@@ -83,14 +89,16 @@ and the object is the artifact:
 // 1.x
 export const User = JIT.compile(UserSchema, {
   is: JIT.validator(UserSchema).get("is").is,
-  findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")).compile(),
+  findAdmins: JIT.query(UserList)
+    .filter((q) => q.eq("role", "admin"))
+    .compile(),
   toDTO: JIT.mapper(UserSchema, PublicUser).get("many"),
 });
 
 // 2.0
 export const User = {
   is: JIT.validate.is(UserSchema),
-  findAdmins: JIT.query(UserList).filter((q) => q.eq("role", "admin")),
+  findAdmins: JIT.cqrs.query(UserList).filter((q) => q.eq("role", "admin")),
   toDTO: JIT.map.many(UserSchema, PublicUser),
 };
 ```
@@ -109,8 +117,8 @@ const diffUser = JIT.diff(User);
 const maskUser = JIT.mask(User);
 
 // 2.0
-const equalUser = JIT.equal(User);
-const diffUser = JIT.diff(User);
+const equalUser = JIT.compare.equal(User);
+const diffUser = JIT.compare.diff(User);
 const maskUser = JIT.security.mask(User);
 ```
 
@@ -125,12 +133,19 @@ backends hang off `.to`:
 
 ```ts
 // 1.x
-const findAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin")).compile();
-const streamAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin")).compileIterator();
+const findAdmins = JIT.query(Users)
+  .filter((q) => q.eq("role", "admin"))
+  .compile();
+const streamAdmins = JIT.query(Users)
+  .filter((q) => q.eq("role", "admin"))
+  .compileIterator();
 
 // 2.0
-const findAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin"));
-const streamAdmins = JIT.query(Users).filter((q) => q.eq("role", "admin")).to.iterator();
+const findAdmins = JIT.cqrs.query(Users).filter((q) => q.eq("role", "admin"));
+const streamAdmins = JIT.cqrs
+  .query(Users)
+  .filter((q) => q.eq("role", "admin"))
+  .to.iterator();
 ```
 
 `q.and` and `q.or` accept more than two conditions. In 1.x a third argument
@@ -139,20 +154,24 @@ than it claimed — check any call that passed three or more.
 
 ## Mappers
 
-`JIT.map` is the mapper, and the Map *schema* factory it collided with moved
+`JIT.map` is the mapper, and the Map _schema_ factory it collided with moved
 to `JIT.mapSchema`. The `overrides` argument now exists in the type only while
 a target field cannot be inferred, so an exhaustive override object that used
 to be required often disappears:
 
 ```ts
 // 1.x
-const toDTO = JIT.mapper(UserEntity, PublicUser, { name: { from: "fullName" } }).get("map", "many");
+const toDTO = JIT.mapper(UserEntity, PublicUser, {
+  name: { from: "fullName" },
+}).get("map", "many");
 toDTO.map(entity);
 toDTO.many(entities);
 
 // 2.0
 const toDTO = JIT.map(UserEntity, PublicUser, { name: { from: "fullName" } });
-const toDTOs = JIT.map.many(UserEntity, PublicUser, { name: { from: "fullName" } });
+const toDTOs = JIT.map.many(UserEntity, PublicUser, {
+  name: { from: "fullName" },
+});
 toDTO(entity);
 toDTOs(entities);
 ```
@@ -221,7 +240,7 @@ const Category = JIT.object({
 
 const isCategory = JIT.validate.is(Category);
 const cloneCategory = JIT.clone(Category);
-const diffCategory = JIT.diff(Category);
+const diffCategory = JIT.compare.diff(Category);
 ```
 
 ## Verifying the migration
