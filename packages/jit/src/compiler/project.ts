@@ -1,7 +1,15 @@
 import type * as ATS from "../core/ats/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
-import { buildProjectionTree, emitProjectionLiteral, type ProjectionTree, projectionCacheKey } from "./projection.js";
+import { type AccessAbilityContext, emitAccessActionExpression } from "./access.js";
+import {
+  buildProjectionTree,
+  emitProjectionLiteral,
+  expectProjectionObject,
+  type ProjectionTree,
+  projectionCacheKey,
+} from "./projection.js";
+import { emitPropertyAccess } from "./source/access.js";
 
 /**
  * Emits a projection as one object literal over static keys.
@@ -31,5 +39,38 @@ export function compileProject<TInput, TOutput>(
   const compiled = template.create() as (value: TInput) => TOutput;
 
   registerArtifact(compiled as object, { kind: "project-plan", schema, tree });
+  return compiled;
+}
+
+/** Emits a sparse authorized projection with static property access and no key iteration. */
+export function emitAuthorizedProjectSource(context: AccessAbilityContext, action: string): string {
+  const object = expectProjectionObject(context.descriptor.subject, "JIT.project().authorize()");
+  const lines = ["function project(value) {", "  const out = {};"];
+
+  for (const field of Object.keys(object.def.props)) {
+    const check = emitAccessActionExpression(context.descriptor, action, "value", JSON.stringify(field), "__actor");
+    if (check === "false") continue;
+    const assignment = `out${emitPropertyAccess("", field)} = ${emitPropertyAccess("value", field)};`;
+    lines.push(check === "true" ? `  ${assignment}` : `  if (${check}) ${assignment}`);
+  }
+  lines.push("  return out;", "}");
+  return lines.join("\n");
+}
+
+export function compileAuthorizedProject<TValue>(
+  context: AccessAbilityContext,
+  action: string
+): (value: TValue) => Partial<TValue> {
+  const source = emitAuthorizedProjectSource(context, action);
+  const compiled = globalThis.Function("__actor", `return ${source};`)(context.actor) as (
+    value: TValue
+  ) => Partial<TValue>;
+  registerArtifact(compiled as object, {
+    kind: "authorized-project-plan",
+    schema: context.descriptor.subject,
+    descriptor: context.descriptor,
+    actor: context.actor,
+    action,
+  });
   return compiled;
 }

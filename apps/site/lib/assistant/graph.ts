@@ -787,6 +787,31 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { runtime: 0.5 },
   },
   {
+    id: "access-control",
+    aliases: ["access", "authorization", "authorize", "permission", "ability", "autorização", "permissão"],
+    terms: ["access", "authorization", "default deny", "constraint", "projection", "mutation"],
+    apis: ["JIT.access", "authorize", "assert", "explain", "fields"],
+    fact: "JIT.access compiles default-deny can/cannot rules into direct action checks, and the same AccessPlan lowers into CQRS predicates, field projections, and mutation guards without a rule walker at runtime or any access-specific node in ~query.",
+    factPt:
+      "JIT.access compila regras can/cannot com default deny em checks diretos por action, e o mesmo AccessPlan baixa para predicados CQRS, projeções de campos e guards de mutação sem rule walker em runtime nem nó específico de access em ~query.",
+    mechanisms: [
+      "can() dispatches through a generated switch and cannot() is its exact negation; explain() and fields() are separate allocating paths.",
+      "query.authorize() turns actor references into ordinary bindings and combines the permission predicate with where() in the same QueryProgram.",
+      "JIT.project(...).authorize(...) emits direct conditional assignments, while authorized updates inspect only fields present in the patch before mutation.",
+      "Unconditional allow disappears from a query, unconditional deny becomes an empty query, and ~query stays at version 1 with only ordinary query semantics.",
+    ],
+    mechanismsPt: [
+      "can() despacha por um switch gerado e cannot() é sua negação exata; explain() e fields() são caminhos alocantes separados.",
+      "query.authorize() transforma referências ao actor em bindings comuns e combina o predicado de permissão com where() no mesmo QueryProgram.",
+      "JIT.project(...).authorize(...) emite atribuições condicionais diretas, enquanto updates autorizados inspecionam apenas os campos presentes no patch antes da mutação.",
+      "Allow incondicional desaparece da query, deny incondicional vira query vazia, e ~query permanece V1 somente com semântica normal de query.",
+    ],
+    example:
+      'const Actor = JIT.object({ id: JIT.number() });\nconst Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), title: JIT.string() });\nconst access = JIT.access(Post).actor(Actor).can("read", (query, actor) => query.eq("authorId", actor.field("id")));\nconst ability = access({ id: 1 });\nconst read = JIT.cqrs.query(Post).authorize(ability, "read").select("id", "title");\n\nconsole.log(read([{ id: 1, authorId: 1, title: "draft" }, { id: 2, authorId: 2, title: "other" }]));',
+    page: "/docs/reference/functions/access",
+    edges: { query: 0.7 },
+  },
+  {
     id: "jsonschema",
     aliases: ["json schema", "jsonschema", "openapi", "swagger", "contract", "contrato", "draft"],
     terms: ["jsonschema", "openapi", "draft", "document", "dialect", "ref"],

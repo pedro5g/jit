@@ -1,3 +1,4 @@
+import { accessProjectionFields, lowerAccessToQueryCondition, resolveAccessContext } from "../compiler/access.js";
 import {
   type BinaryArray,
   type BinaryRowSet,
@@ -37,6 +38,7 @@ import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
+import type { Ability, AccessPlan } from "./access.js";
 
 const QUERY_PROGRAMS = new WeakMap<object, QueryProgram>();
 
@@ -142,6 +144,13 @@ export interface QueryBuilderOps<
   TResult = TOutput[],
   TParams extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 > {
+  authorize<TAction extends string, TActor>(
+    ability:
+      | Ability<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TAction>
+      | AccessPlan<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TActor, TAction>,
+    action: TAction,
+    actor?: TActor
+  ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
   params<const TShape extends ParamSchemaShape>(
     shape: TShape
   ): QueryBuilder<TSchema, TOutput, TResult, TParams & TypeofParamShape<TShape>>;
@@ -499,6 +508,34 @@ function createQueryBuilder<
   } as QueryBuilder<TSchema, TOutput, TResult, TParams>;
 
   const builder: QueryBuilder<TSchema, TOutput, TResult, TParams> = Object.assign(callable, {
+    authorize(ability, action, actor) {
+      const context = resolveAccessContext(ability as object, actor);
+      if (context === undefined) {
+        throw new JITError("INVALID_OPERATION", "query.authorize() requires an ability created by JIT.access()");
+      }
+      const lowered = lowerAccessToQueryCondition(context, action, bindings.length);
+      const safeFields = accessProjectionFields(context.descriptor, action);
+      const projection = safeFields === undefined ? [] : [{ kind: "select:fields" as const, fields: safeFields }];
+      if (lowered.kind === "allow") {
+        return createQueryBuilder(schema, [...nodes, ...projection], bindings, paramNames);
+      }
+      const condition: QueryConditionNode =
+        lowered.kind === "deny"
+          ? {
+              kind: "compare",
+              op: "eq",
+              left: { kind: "literal", value: true },
+              right: { kind: "literal", value: false },
+            }
+          : (lowered.condition as QueryConditionNode);
+      return createQueryBuilder(
+        schema,
+        [...nodes, { kind: "filter", condition }, ...projection],
+        [...bindings, ...lowered.bindings],
+        paramNames
+      );
+    },
+
     params(shape) {
       return createQueryBuilder<TSchema, TOutput, TResult, TParams & TypeofParamShape<typeof shape>>(
         schema,
@@ -524,7 +561,10 @@ function createQueryBuilder<
     },
 
     select(...fields) {
-      return createQueryBuilder(schema, [...nodes, { kind: "select:fields", fields }], bindings, paramNames);
+      const prior = nodes.filter((node) => node.kind === "select:fields");
+      const selected =
+        prior.length === 0 ? fields : fields.filter((field) => prior.every((node) => node.fields.includes(field)));
+      return createQueryBuilder(schema, [...nodes, { kind: "select:fields", fields: selected }], bindings, paramNames);
     },
 
     unique(key) {

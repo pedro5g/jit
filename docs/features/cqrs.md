@@ -91,6 +91,20 @@ no stream left to yield.
 
 CQRS adapts the existing `QueryProgram`, eager query IR, optimizer and lazy emitters. It does not create a second internal AST. The portable `~query.definition.pipeline` is separately allocated semantic data and never exposes private or physical plans.
 
+## Authorization constraints and executors
+
+`query.authorize(ability, action)` lowers the AccessPlan to the same Query AST used by `where()`. Authorization therefore disappears before the structural protocol: `~query` contains only normalized predicates and projections, remains version 1, and requires no access-aware adapter.
+
+```text
+Controller
+  -> Application Query Handler
+  -> QueryExecutor
+  -> query["~query"]
+  -> Prisma / Knex / datastore adapter
+```
+
+An unconditional allow emits no predicate. An unconditional deny produces an empty query. Actor field references become ordinary literal values in `~query` when they are portable data. Fields used only by the predicate are required for local evaluation but never added to the final projection. The write side uses the same declaration through `JIT.update(...).authorize(...)` or `JIT.patch.apply(...).authorize(...)`; no storage-specific authorization adapter belongs in core.
+
 ## 6. Generated code
 
 Eager queries lower to specialized loops. Incremental backends are emitted only when selected. AOT contains no CQRS builder or query interpreter.

@@ -107,6 +107,92 @@ registerScenario({
   ],
 });
 
+// ------------------------------------------------------ CQRS authorization
+
+const authorizedQuery = JIT.cqrs.query(Post).authorize(ownedAbility, "delete");
+const handwrittenAuthorizedQuery = (input: readonly Post[]) => {
+  const out: Post[] = [];
+  let j = 0;
+  for (let i = 0, len = input.length; i < len; i++) {
+    const subject = input[i] as Post;
+    if (subject.authorId === actor.id && subject.locked !== true) out[j++] = subject;
+  }
+  return out;
+};
+
+registerScenario({
+  op: "access query",
+  name: "ownership + deny / 100000 rows",
+  args: [posts],
+  jit: authorizedQuery,
+  competitors: [
+    {
+      name: "filter ability.can",
+      fn: (input: Post[]) => input.filter((subject) => ownedAbility.can("delete", subject)),
+    },
+    { name: "handwritten inline loop", fn: handwrittenAuthorizedQuery },
+  ],
+});
+
+// ------------------------------------------------- authorized projection
+
+const projectionAccess = JIT.access(Post)
+  .actor(User)
+  .can("read", { fields: ["id", "title"] })
+  .can("read", { fields: ["body"], when: (query, self) => query.eq("authorId", self.field("id")) });
+const authorizedProjection = JIT.project(Post).authorize(projectionAccess(actor), "read");
+const projectSweep = (project: (subject: Post) => Partial<Post>) => (input: readonly Post[]) => {
+  const out = new Array<Partial<Post>>(input.length);
+  for (let i = 0, len = input.length; i < len; i++) out[i] = project(input[i] as Post);
+  return out;
+};
+
+registerScenario({
+  op: "access projection",
+  name: "conditional field / 100000 rows",
+  args: [posts],
+  jit: projectSweep(authorizedProjection),
+  competitors: [
+    {
+      name: "handwritten projection",
+      fn: projectSweep((subject) =>
+        subject.authorId === actor.id
+          ? { id: subject.id, title: subject.title, body: subject.body }
+          : { id: subject.id, title: subject.title }
+      ),
+    },
+  ],
+});
+
+// ------------------------------------------------------- authorized update
+
+const updateAccess = JIT.access(Post)
+  .actor(User)
+  .can("update", { fields: ["title"], when: (query, self) => query.eq("authorId", self.field("id")) });
+const authorizedUpdate = JIT.patch.apply(Post).authorize(updateAccess(actor), "update");
+const ownedPosts = posts.map((subject) => ({ ...subject, authorId: actor.id }));
+const updateSweep = (update: (subject: Post, patch: { title: string }) => Post) => (input: readonly Post[]) => {
+  let last: Post | undefined;
+  for (let i = 0, len = input.length; i < len; i++) last = update(input[i] as Post, { title: "next" });
+  return last;
+};
+
+registerScenario({
+  op: "access update",
+  name: "authorized title patch / 100000 rows",
+  args: [ownedPosts],
+  jit: updateSweep(authorizedUpdate),
+  competitors: [
+    {
+      name: "handwritten check + spread",
+      fn: updateSweep((subject, patch) => {
+        if (subject.authorId !== actor.id) throw new Error("denied");
+        return subject.title === patch.title ? subject : { ...subject, title: patch.title };
+      }),
+    },
+  ],
+});
+
 // --------------------------------------------------------- many actions, many rules
 
 const actions = ["read", "create", "update", "delete", "publish", "archive", "share", "comment"] as const;

@@ -69,6 +69,22 @@ interface ProjectPlanArtifact {
   readonly tree: ProjectionTree;
 }
 
+interface AuthorizedProjectArtifact {
+  readonly kind: "authorized-project-plan";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly descriptor: AccessDescriptor;
+  readonly actor: unknown;
+  readonly action: string;
+}
+
+interface AuthorizedUpdateArtifact {
+  readonly kind: "authorized-update-plan";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly descriptor: AccessDescriptor;
+  readonly actor: unknown;
+  readonly action: string;
+}
+
 /** A change mask carries its watched fields and their bit order. */
 interface ChangedPlanArtifact {
   readonly kind: "changed-plan";
@@ -226,6 +242,8 @@ export type CompiledArtifact =
   | LookupPlanArtifact
   | ReconcilePlanArtifact
   | ProjectPlanArtifact
+  | AuthorizedProjectArtifact
+  | AuthorizedUpdateArtifact
   | ChangedPlanArtifact
   | PatchPlanArtifact
   | CacheKeyPlanArtifact

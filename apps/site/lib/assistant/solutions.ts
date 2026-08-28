@@ -451,6 +451,37 @@ socket.on("end", () => lines.end());`,
     page: "/docs/reference/functions/stream",
   },
   {
+    id: "authorize-query-without-filter-callback",
+    triggers: [
+      ["filtrar", "permissão"],
+      ["query", "autorização"],
+      ["authorize", "rows"],
+      ["permission", "projection"],
+    ],
+    problem:
+      "Calling ability.can from Array.filter repeats action dispatch for every row and does not automatically constrain fields that may leave the boundary.",
+    apis: ["JIT.access", "JIT.cqrs.query", "authorize", "select"],
+    example: `import { JIT } from "@jit-compiler/jit/runtime";
+
+const Actor = JIT.object({ id: JIT.number() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), title: JIT.string() });
+const access = JIT.access(Post)
+  .actor(Actor)
+  .can("read", (query, actor) => query.eq("authorId", actor.field("id")));
+const ability = access({ id: 1 });
+const read = JIT.cqrs.query(Post).authorize(ability, "read").select("id", "title");
+
+console.log(read([
+  { id: 1, authorId: 1, title: "mine" },
+  { id: 2, authorId: 2, title: "other" },
+]));`,
+    why: [
+      "The AccessPlan lowers into the ordinary query predicate, so the eager backend emits one loop without calling ability.can for each row.",
+      "Field constraints intersect the query projection before a result crosses the boundary, and ~query contains only normal V1 query semantics.",
+    ],
+    page: "/docs/reference/functions/access",
+  },
+  {
     id: "openapi-contract",
     triggers: [
       ["openapi"],

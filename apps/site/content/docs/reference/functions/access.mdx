@@ -93,6 +93,58 @@ console.log(plan.fields("read"));
 console.log(plan.actions.join(","));
 ```
 
+An actor-bound ability can also resolve conditional fields for one subject:
+
+```ts
+const Actor = JIT.object({ id: JIT.number() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), title: JIT.string() });
+const access = JIT.access(Post)
+  .actor(Actor)
+  .can("read", { fields: ["id"] })
+  .can("read", { fields: ["title"], when: (query, actor) => query.eq("authorId", actor.field("id")) });
+const post = { id: 1, authorId: 1, title: "draft" };
+
+console.log(access({ id: 1 }).fields("read", post));
+```
+
+## Assert and explain
+
+`assert()` returns the same subject or throws `AccessDeniedError`. `explain()` is the separate diagnostic path, so ordinary boolean checks do not allocate a result object:
+
+```ts
+const Actor = JIT.object({ id: JIT.number() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), locked: JIT.boolean() });
+const access = JIT.access(Post)
+  .actor(Actor)
+  .can("update", (query, actor) => query.eq("authorId", actor.field("id")))
+  .cannot("update", { id: "locked", reason: "post-locked", when: (query) => query.eq("locked", true) });
+const ability = access({ id: 1 });
+const post = { id: 1, authorId: 1, locked: false };
+
+console.log(ability.assert("update", post) === post);
+console.log(ability.explain("update", { ...post, locked: true }));
+```
+
+## CQRS, projection, and patch constraints
+
+Authorization composes with the existing operations. CQRS receives an ordinary predicate and projection; `~query` never contains an ability, rule, or AccessPlan node:
+
+```ts
+const Actor = JIT.object({ id: JIT.number() });
+const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), title: JIT.string() });
+const access = JIT.access(Post)
+  .actor(Actor)
+  .can("read", (query, actor) => query.eq("authorId", actor.field("id")))
+  .can("update", { fields: ["title"], when: (query, actor) => query.eq("authorId", actor.field("id")) });
+const ability = access({ id: 1 });
+const read = JIT.cqrs.query(Post).authorize(ability, "read").select("id", "title");
+const project = JIT.project(Post).authorize(ability, "read");
+const patch = JIT.patch.apply(Post).authorize(ability, "update");
+const post = { id: 1, authorId: 1, title: "draft" };
+
+console.log(read([post]), project(post), patch(post, { title: "published" }));
+```
+
 ## Conditions are query conditions
 
 A rule's condition is the query condition builder over the subject, with
@@ -140,7 +192,7 @@ function ability(actor) {
         return false;
     }
   }
-  return { can: can, cannot: (action, subject, field) => !can(action, subject, field) };
+  return { can, cannot, assert, explain, fields };
 }
 ```
 

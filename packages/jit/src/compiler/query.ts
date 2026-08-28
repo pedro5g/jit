@@ -125,6 +125,8 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
   validateQueryPlan(target.objectSchema, plan);
 
   const hasParams = Boolean(program.params?.length);
+  const empty = emitStaticallyEmptyQuery(plan, target, hasParams);
+  if (empty !== undefined) return empty;
   // A keyed access path replaces the loop rather than shaping it, so it is
   // emitted directly instead of being lowered through the loop IR.
   const keyed = emitPhysicalQuerySource(resolvePhysicalQueryPlan(schema, target, plan), hasParams);
@@ -133,6 +135,75 @@ export function emitQuerySource(schema: ATS.AnyTypeSchema, program: QueryProgram
 
   const source = emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
   return wrapDistinctSource(source, resolvePlanDistinct(schema, plan));
+}
+
+function emitStaticallyEmptyQuery(
+  plan: OptimizedQueryPlan,
+  target: QueryTarget,
+  hasParams: boolean
+): string | undefined {
+  if (!plan.filters.some((filter) => evaluateConstantCondition(filter.condition) === false)) return undefined;
+  const signature = `value${hasParams ? ", params" : ""}`;
+  let result: string | undefined;
+
+  if (plan.mutation !== undefined) return undefined;
+  if (plan.terminal !== undefined) {
+    if (plan.terminal.op === "first") result = "undefined";
+    else if (plan.terminal.op === "findIndex") result = "-1";
+    else if (plan.terminal.op === "some") result = "false";
+    else {
+      const size = target.kind === "array" ? "value.length" : "value.size";
+      result = `${size} === 0`;
+    }
+  } else if (plan.aggregate !== undefined) {
+    result = plan.aggregate.op === "sum" || plan.aggregate.op === "count" ? "0" : "undefined";
+  } else if (plan.composite !== undefined) {
+    if (plan.collector?.kind === "groupBy") result = "{}";
+    else {
+      const fields = plan.composite.fields.map(
+        (field) => `${JSON.stringify(field.name)}: ${field.op === "sum" || field.op === "count" ? "0" : "undefined"}`
+      );
+      result = `{ ${fields.join(", ")} }`;
+    }
+  } else if (plan.collector?.kind === "keyed") result = "new Map()";
+  else if (plan.collector?.kind === "groupBy") result = "{}";
+  else result = "[]";
+
+  return `function query(${signature}) {\n  return ${result};\n}`;
+}
+
+function evaluateConstantCondition(condition: QueryConditionNode): boolean | undefined {
+  if (condition.kind === "logical") {
+    const left = evaluateConstantCondition(condition.left);
+    const right = evaluateConstantCondition(condition.right);
+    if (condition.op === "and") {
+      if (left === false || right === false) return false;
+      return left === true && right === true ? true : undefined;
+    }
+    if (left === true || right === true) return true;
+    return left === false && right === false ? false : undefined;
+  }
+  if (condition.kind === "not") {
+    const inner = evaluateConstantCondition(condition.inner);
+    return inner === undefined ? undefined : !inner;
+  }
+  if (condition.left.kind !== "literal" || condition.right.kind !== "literal") return undefined;
+  const left = condition.left.value as never;
+  const right = condition.right.value as never;
+  switch (condition.op) {
+    case "eq":
+      return left === right;
+    case "neq":
+      return left !== right;
+    case "gt":
+      return left > right;
+    case "gte":
+      return left >= right;
+    case "lt":
+      return left < right;
+    case "lte":
+      return left <= right;
+  }
 }
 
 /**

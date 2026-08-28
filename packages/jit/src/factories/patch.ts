@@ -1,9 +1,8 @@
 import { compileJsonPatch, compileMergePatch } from "../compiler/patch.js";
-import type { Update } from "../compiler/update.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
-import { update } from "./update.js";
+import { type RuntimeUpdate, update } from "./update.js";
 
 /** One RFC 6902 operation. `from` is required by `move` and `copy`. */
 export type JsonPatchOperation =
@@ -33,10 +32,10 @@ export const patch = Object.freeze({
    * A deep partial patch, applied immutably. This is `JIT.update` under the
    * patch namespace — the same plan, not a second engine.
    */
-  apply<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): Update<ATS.TypeofSchema<TSchema>> {
+  apply<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): RuntimeUpdate<ATS.TypeofSchema<TSchema>> {
     // Literally `JIT.update`, so it registers the same artifact and AOT emits
     // it through the same path. A second entry point, not a second engine.
-    return update(schema) as Update<ATS.TypeofSchema<TSchema>>;
+    return update(schema);
   },
 
   /** RFC 7396 JSON Merge Patch: `null` removes, objects merge, everything else replaces. */

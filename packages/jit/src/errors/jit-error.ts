@@ -20,6 +20,7 @@ export type JITErrorCode =
   | "INVALID_UPDATE"
   | "INVALID_MAPPER"
   | "INVALID_OPERATION"
+  | "ACCESS_DENIED"
   | "UNSUPPORTED_SCHEMA"
   | "READONLY_FIELD"
   | "REFINE_FAILED"
@@ -54,5 +55,22 @@ export class JITError extends Error {
     this.code = code;
     this.path = options.path;
     this.meta = options.meta;
+  }
+}
+
+/** Compact authorization failure that deliberately never retains the subject. */
+export class AccessDeniedError extends JITError {
+  readonly action: string;
+  readonly field: string | undefined;
+  readonly reason: string | undefined;
+  readonly ruleId: string | undefined;
+
+  constructor(action: string, field?: string, reason?: string, ruleId?: string) {
+    super("ACCESS_DENIED", `Access denied for action ${JSON.stringify(action)}`);
+    this.name = "AccessDeniedError";
+    this.action = action;
+    this.field = field;
+    this.reason = reason;
+    this.ruleId = ruleId;
   }
 }

@@ -43,6 +43,7 @@ describe("JITError", () => {
       | "INVALID_UPDATE"
       | "INVALID_MAPPER"
       | "INVALID_OPERATION"
+      | "ACCESS_DENIED"
       | "UNSUPPORTED_SCHEMA"
       | "READONLY_FIELD"
       | "REFINE_FAILED"

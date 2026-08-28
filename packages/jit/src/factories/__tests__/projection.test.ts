@@ -31,6 +31,23 @@ function projectSourceOf(plan: object): string {
 }
 
 describe("JIT.project", () => {
+  it("fuses conditional field authorization into static property assignments", () => {
+    const Actor = JIT.object({ id: JIT.number() });
+    const access = JIT.access(User)
+      .actor(Actor)
+      .can("read", { fields: ["id", "status"] })
+      .can("read", {
+        fields: ["email"],
+        when: (query, actor) => query.eq("id", actor.field("id")),
+      });
+    const own = JIT.project(User).authorize(access({ id: 1 }), "read");
+    const other = JIT.project(User).authorize(access({ id: 2 }), "read");
+
+    expect(own(value)).toEqual({ id: 1, email: "ada@x.com", status: "active" });
+    expect(other(value)).toEqual({ id: 1, status: "active" });
+    expectTypeOf(own(value)).toEqualTypeOf<Partial<User>>();
+  });
+
   it("keeps only the named fields", () => {
     const project = JIT.project(User).select("id", "status");
 

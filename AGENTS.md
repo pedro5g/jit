@@ -262,6 +262,14 @@ reused is slower than the scan it replaced, and the documentation says so.
 Do not add a public operation that asks callers to name an algorithm. The
 query describes the request; facts on the collection decide the access path.
 
+## Access Control
+
+- Access conditions reuse the Query AST; never create a second access-expression language.
+- Authorization must lower away before `~query`; the protocol never exposes AccessPlan, ability, rule, or diagnostic nodes.
+- Keep `can()` allocation-free. Diagnostics and field materialization must not add work to that boolean path.
+- Fuse authorization with query, projection, update, and patch lowerings when safe; AOT must not retain a rule walker or ability middleware.
+- Do not add storage-specific authorization adapters to core. Datastores consume the normalized `~query` predicate and projection.
+
 ## Feature Documentation
 
 Every public feature must add or update its `docs/features/*` document in the

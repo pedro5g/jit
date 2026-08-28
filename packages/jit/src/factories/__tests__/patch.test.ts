@@ -151,6 +151,25 @@ describe("JIT.patch.json (RFC 6902)", () => {
 });
 
 describe("JIT.patch.apply", () => {
+  it("checks only fields present in an authorized patch before mutation", () => {
+    const Actor = JIT.object({ id: JIT.number() });
+    const access = JIT.access(User)
+      .actor(Actor)
+      .can("update", { fields: ["name"] })
+      .can("update", {
+        fields: ["address"],
+        when: (query, actor) => query.eq("id", actor.field("id")),
+      });
+    const own = JIT.patch.apply(User).authorize(access({ id: 1 }), "update");
+    const other = JIT.patch.apply(User).authorize(access({ id: 2 }), "update");
+
+    expect(other(value, { name: "Grace" }).name).toBe("Grace");
+    expect(own(value, { address: { city: "Paris" } }).address.city).toBe("Paris");
+    expect(() => other(value, { address: { city: "Paris" } })).toThrowError(
+      expect.objectContaining({ code: "ACCESS_DENIED", action: "update", field: "address" })
+    );
+  });
+
   it("is the update plan, not a second engine", () => {
     const apply = JIT.patch.apply(User);
 

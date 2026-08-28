@@ -502,4 +502,44 @@ describe("runtime and define entrypoints", () => {
       rmSync(outDir, { recursive: true, force: true });
     }
   });
+
+  it("should reconstruct authorized query, projection, and patch from the define host", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "jit-define-access-"));
+
+    try {
+      const Actor = DefineJIT.object({ id: DefineJIT.number() });
+      const Post = DefineJIT.object({
+        id: DefineJIT.number(),
+        authorId: DefineJIT.number(),
+        title: DefineJIT.string(),
+      });
+      const access = DefineJIT.access(Post)
+        .actor(Actor)
+        .can("read", (query, actor) => query.eq("authorId", actor.field("id")))
+        .can("update", { fields: ["title"], when: (query, actor) => query.eq("authorId", actor.field("id")) });
+      const actor = { id: 1 };
+      const read = DefineJIT.cqrs.query(Post).authorize(access, "read", actor).select("id", "title");
+      const shape = DefineJIT.project(Post).authorize(access, "read", actor);
+      const change = DefineJIT.patch.apply(Post).authorize(access, "update", actor);
+
+      AOT.generate({ schemas: {}, artifacts: { read, shape, change }, outDir });
+      const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+        read: (rows: Array<{ id: number; authorId: number; title: string }>) => unknown[];
+        shape: (value: { id: number; authorId: number; title: string }) => object;
+        change: (
+          value: { id: number; authorId: number; title: string },
+          patch: unknown
+        ) => { id: number; authorId: number; title: string };
+      };
+      const own = { id: 1, authorId: 1, title: "draft" };
+      const other = { id: 2, authorId: 2, title: "other" };
+
+      expect(generated.read([own, other])).toEqual([{ id: 1, title: "draft" }]);
+      expect(generated.shape(own)).toEqual(own);
+      expect(generated.change(own, { title: "published" }).title).toBe("published");
+      expect(() => generated.change(other, { title: "blocked" })).toThrow(/Access denied/);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
 });

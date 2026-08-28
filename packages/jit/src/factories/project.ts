@@ -1,7 +1,10 @@
-import { compileProject } from "../compiler/project.js";
+import { resolveAccessContext } from "../compiler/access.js";
+import { compileAuthorizedProject, compileProject } from "../compiler/project.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import { JITError } from "../errors/index.js";
+import type { Ability, AccessPlan } from "./access.js";
 
 /** Paths a projection may name: a declared field, or a dotted path into one. */
 export type ProjectablePath<TValue, TDepth extends readonly unknown[] = []> = TDepth["length"] extends 4
@@ -38,6 +41,11 @@ export type Projected<TValue, TPaths extends string> = {
 };
 
 export interface ProjectBuilder<TValue> {
+  authorize<TAction extends string, TActor>(
+    ability: Ability<TValue, TAction> | AccessPlan<TValue, TActor, TAction>,
+    action: TAction,
+    actor?: TActor
+  ): (value: TValue) => Partial<TValue>;
   /**
    * Keeps only the named fields. A dotted path narrows the nested object
    * rather than pulling it whole.
@@ -61,6 +69,17 @@ export function project<TSchema extends ATS.AnyTypeSchema>(
   const unwrapped = unwrapSchema(schema);
 
   return Object.freeze({
+    authorize: <TAction extends string, TActor>(
+      ability: Ability<ATS.TypeofSchema<TSchema>, TAction> | AccessPlan<ATS.TypeofSchema<TSchema>, TActor, TAction>,
+      action: TAction,
+      actor?: TActor
+    ) => {
+      const context = resolveAccessContext(ability as object, actor);
+      if (context === undefined) {
+        throw new JITError("INVALID_OPERATION", "project.authorize() requires an ability created by JIT.access()");
+      }
+      return compileAuthorizedProject<ATS.TypeofSchema<TSchema>>(context, action);
+    },
     select: (...paths: string[]) => compileProject(unwrapped, paths),
   }) as ProjectBuilder<ATS.TypeofSchema<TSchema>>;
 }

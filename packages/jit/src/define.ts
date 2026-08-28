@@ -4,7 +4,12 @@
  * execute before `jit generate` has lowered them.
  */
 
-import { type AccessRule, resolveAccessDescriptor, unconditionalFields } from "./compiler/access.js";
+import {
+  type AccessRule,
+  resolveAccessContext,
+  resolveAccessDescriptor,
+  unconditionalFields,
+} from "./compiler/access.js";
 import type { BinaryArray, BinaryRowSet } from "./compiler/binary-rowset.js";
 import { resolveCacheKeyDescriptor } from "./compiler/cache-key.js";
 import { allFieldPaths, resolveChangedDescriptor } from "./compiler/changed.js";
@@ -51,7 +56,7 @@ import type { SchemaInput } from "./core/builder/index.js";
 import { unwrapSchema } from "./core/builder/index.js";
 import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/host.js";
 import { JITError } from "./errors/index.js";
-import type { AccessBuilder } from "./factories/access.js";
+import type { Ability, AccessBuilder, AccessPlan } from "./factories/access.js";
 import type { CqrsInput, CqrsQuery, CqrsQueryFor, ParsedCqrsInput } from "./factories/cqrs.js";
 import type { CsvNamespace, CsvParsePlan, CsvSchemaOptions, CsvStringifyPlan } from "./factories/csv.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
@@ -801,6 +806,30 @@ function defineProject<TSchema extends ATS.AnyTypeSchema>(
   const unwrapped = unwrapSchema(schema);
 
   return Object.freeze({
+    authorize: <TAction extends string, TActor>(
+      ability: Ability<ATS.TypeofSchema<TSchema>, TAction> | AccessPlan<ATS.TypeofSchema<TSchema>, TActor, TAction>,
+      action: TAction,
+      actor?: TActor
+    ) => {
+      const context = resolveAccessContext(ability as object, actor);
+      if (context === undefined) {
+        throw new JITError("INVALID_OPERATION", "project.authorize() requires an ability created by JIT.access()");
+      }
+      const stub = function aotAuthorizedProjectArtifact(): never {
+        throw new JITError(
+          "JIT_AOT_001_ARTIFACT_EXECUTED",
+          "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+        );
+      } as unknown as (value: ATS.TypeofSchema<TSchema>) => Partial<ATS.TypeofSchema<TSchema>>;
+      registerArtifact(stub, {
+        kind: "authorized-project-plan",
+        schema: unwrapped,
+        descriptor: context.descriptor,
+        actor: context.actor,
+        action,
+      });
+      return stub;
+    },
     select: (...paths: string[]) => {
       const stub = function aotProjectArtifact(): never {
         throw new JITError(
@@ -1024,6 +1053,7 @@ function wrapDefineCqrsQuery<TQuery extends (...args: never[]) => unknown>(build
   const source = builder as unknown as Record<string, unknown>;
   const chainMethods = [
     "params",
+    "authorize",
     "filter",
     "where",
     "select",

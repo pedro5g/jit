@@ -300,6 +300,13 @@ interface CqrsQueryOps<
   TParams extends Readonly<Record<string, unknown>>,
   TReadonlyProjection extends boolean,
 > {
+  authorize<TAction extends string, TActor>(
+    ability:
+      | import("./access.js").Ability<Row<TSchema>, TAction>
+      | import("./access.js").AccessPlan<Row<TSchema>, TActor, TAction>,
+    action: TAction,
+    actor?: TActor
+  ): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
   params<const TShape extends ParamShape>(
     shape: TShape
   ): CqrsQuery<TSchema, TOutput, TResult, TParams & Params<TShape>, TReadonlyProjection>;
@@ -493,6 +500,7 @@ function wrap<TSchema extends ATS.AnyTypeSchema, TOutput, TResult, TParams exten
   const takeMethod = record.take as (...args: unknown[]) => QueryBuilder<ATS.ArraySchema<TSchema>, unknown, unknown>;
   const chainMethods = [
     "params",
+    "authorize",
     "filter",
     "select",
     "unique",

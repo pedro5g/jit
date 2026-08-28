@@ -1,3 +1,4 @@
+import { compileAccessMutationGuard, resolveAccessContext } from "../compiler/access.js";
 import { compileDiff, type Diff } from "../compiler/diff.js";
 import { compileUpdate, type UpdatePatch } from "../compiler/update.js";
 import type { AnyTypeSchema, InnerTypeDef, LazyDef, TypeofSchema } from "../core/ats/index.js";
@@ -11,6 +12,7 @@ import {
   type ReactiveUpdateController,
   type ReactiveUpdateOptions,
 } from "../runtime/update/index.js";
+import type { Ability, AccessPlan } from "./access.js";
 import type { QueryParamRef } from "./query.js";
 
 export type ReactiveUpdate<T> = ReactiveUpdateController<T, UpdateInput<T>>;
@@ -68,6 +70,11 @@ export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
  */
 export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
   compile(): RuntimeUpdate<T>;
+  authorize<TAction extends string, TActor>(
+    ability: Ability<T, TAction> | AccessPlan<T, TActor, TAction>,
+    action: TAction,
+    actor?: TActor
+  ): RuntimeUpdate<T>;
   reactive(initial: T, options?: ReactiveUpdateOptions): ReactiveUpdate<T>;
   patch<const TPatch extends UpdatePatchTemplate<T>>(
     patch: TPatch
@@ -139,24 +146,7 @@ export function update<TSchema extends AnyTypeSchema>(
     return compiled(current, patch);
   }) as RuntimeUpdate<TypeofSchema<TSchema>>;
 
-  Object.defineProperties(run, {
-    compile: {
-      enumerable: false,
-      value: () => run,
-    },
-    patch: {
-      enumerable: false,
-      value: (template: UpdatePatchTemplate<TypeofSchema<TSchema>>) => ({
-        compile: () => (current: TypeofSchema<TSchema>, params: Readonly<Record<string, unknown>>) =>
-          run(current, materializeParamPatch(template, params) as UpdatePatch<TypeofSchema<TSchema>>),
-      }),
-    },
-    reactive: {
-      enumerable: false,
-      value: (initial: TypeofSchema<TSchema>, options?: ReactiveUpdateOptions) =>
-        createReactiveUpdate(initial, run, () => compileDiff(unwrapped) as Diff<TypeofSchema<TSchema>>, options),
-    },
-  });
+  installUpdateMethods(run, unwrapped);
 
   if (args.length === 0) {
     // Registered so `jit generate` sees a standalone update the same way it
@@ -166,6 +156,55 @@ export function update<TSchema extends AnyTypeSchema>(
   }
 
   return run(args[0], args[1]);
+}
+
+function installUpdateMethods<T>(run: RuntimeUpdate<T>, schema: AnyTypeSchema): void {
+  Object.defineProperties(run, {
+    compile: {
+      enumerable: false,
+      value: () => run,
+    },
+    patch: {
+      enumerable: false,
+      value: (template: UpdatePatchTemplate<T>) => ({
+        compile: () => (current: T, params: Readonly<Record<string, unknown>>) =>
+          run(current, materializeParamPatch(template, params) as UpdateInput<T>),
+      }),
+    },
+    reactive: {
+      enumerable: false,
+      value: (initial: T, options?: ReactiveUpdateOptions) =>
+        createReactiveUpdate(initial, run, () => compileDiff(schema) as Diff<T>, options),
+    },
+    authorize: {
+      enumerable: false,
+      value: <TAction extends string, TActor>(
+        ability: Ability<T, TAction> | AccessPlan<T, TActor, TAction>,
+        action: TAction,
+        actor?: TActor
+      ) => {
+        const context = resolveAccessContext(ability as object, actor);
+        if (context === undefined) {
+          throw new JITError("INVALID_OPERATION", "update.authorize() requires an ability created by JIT.access()");
+        }
+        const guard = compileAccessMutationGuard(context, action);
+        const authorized = ((current: T, input: UpdateInput<T>) => {
+          const patch = typeof input === "function" ? captureDraftPatch(input as UpdateRecipe<T>) : input;
+          guard(current, patch);
+          return run(current, patch as UpdateInput<T>);
+        }) as RuntimeUpdate<T>;
+        installUpdateMethods(authorized, schema);
+        registerArtifact(authorized as object, {
+          kind: "authorized-update-plan",
+          schema,
+          descriptor: context.descriptor,
+          actor: context.actor,
+          action,
+        });
+        return authorized;
+      },
+    },
+  });
 }
 
 function materializeParamPatch(template: unknown, params: Readonly<Record<string, unknown>>): unknown {

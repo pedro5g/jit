@@ -1,4 +1,4 @@
-import { Compiler, JIT } from "../../index.js";
+import { Compiler, Errors, JIT } from "../../index.js";
 import { getArtifact } from "../../runtime/artifact-registry.js";
 
 const User = JIT.object({ id: JIT.number().int(), role: JIT.string() });
@@ -205,6 +205,59 @@ describe("JIT.access", () => {
         .can("read", (query, actor) => query.eq("authorId", actor.field("id")));
 
       expect(plan.fields("read")).toEqual([]);
+    });
+  });
+
+  describe("assertions and diagnostics", () => {
+    const plan = JIT.access(Post)
+      .actor(User)
+      .can("update", (query, actor) => query.eq("authorId", actor.field("id")))
+      .cannot("update", {
+        id: "post-locked",
+        reason: "locked",
+        when: (query) => query.eq("locked", true),
+      });
+
+    it("returns the same subject from assert and retains no subject on denial", () => {
+      const ability = plan(ada);
+
+      expect(ability.assert("update", post)).toBe(post);
+      try {
+        ability.assert("update", locked);
+        expect.unreachable();
+      } catch (error) {
+        expect(error).toBeInstanceOf(Errors.AccessDeniedError);
+        expect(error).toMatchObject({
+          code: "ACCESS_DENIED",
+          action: "update",
+          reason: "locked",
+          ruleId: "post-locked",
+        });
+        expect(error).not.toHaveProperty("subject");
+      }
+    });
+
+    it("allocates diagnostic detail only through explain", () => {
+      const ability = plan(ada);
+
+      expect(ability.explain("update", post)).toEqual({ allowed: true });
+      expect(ability.explain("update", locked)).toEqual({
+        allowed: false,
+        reason: "locked",
+        ruleId: "post-locked",
+        matchedProhibition: true,
+      });
+    });
+
+    it("resolves conditional fields for a concrete subject", () => {
+      const scoped = JIT.access(Post)
+        .actor(User)
+        .can("read", { fields: ["id", "title"] })
+        .can("read", { fields: ["body"], when: (query, actor) => query.eq("authorId", actor.field("id")) });
+
+      expect(scoped(ada).fields("read", post)).toEqual(["id", "title", "body"]);
+      expect(scoped(grace).fields("read", post)).toEqual(["id", "title"]);
+      expect(scoped(ada).fields("read")).toEqual(["id", "title"]);
     });
   });
 

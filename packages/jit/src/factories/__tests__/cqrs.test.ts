@@ -1,9 +1,85 @@
 import * as fc from "fast-check";
 
-import { JIT } from "../../index.js";
+import { Compiler, JIT } from "../../index.js";
+import { getArtifact } from "../../runtime/artifact-registry.js";
 import { emitCqrsAotParserSource, emitCqrsInputParser, encodeCqrsCursor } from "../cqrs.js";
 
 describe("JIT.cqrs", () => {
+  describe("authorization constraints", () => {
+    const Actor = JIT.object({ id: JIT.number() });
+    const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), published: JIT.boolean() });
+    const rows = [
+      { id: 1, authorId: 1, published: false },
+      { id: 2, authorId: 2, published: true },
+      { id: 3, authorId: 2, published: false },
+    ];
+    const access = JIT.access(Post)
+      .actor(Actor)
+      .can("read", (query, actor) => query.or(query.eq("published", true), query.eq("authorId", actor.field("id"))));
+
+    it("inlines access and user predicates into the same query program", () => {
+      const ability = access({ id: 1 });
+      const query = JIT.cqrs
+        .query(Post)
+        .authorize(ability, "read")
+        .where((condition) => condition.gt("id", 1));
+
+      expect(query(rows)).toEqual([rows[1]]);
+      expect(query(rows)).toEqual(rows.filter((row) => ability.can("read", row) && row.id > 1));
+      const standard = JSON.stringify(query["~query"]);
+      expect(standard).not.toMatch(/access|ability|permission|rule/i);
+      expect(standard).toContain('"value":1');
+    });
+
+    it("keeps complete rows after a subject-wide denial has been pushed into the predicate", () => {
+      const deniedLocked = JIT.access(Post)
+        .actor(Actor)
+        .can("read")
+        .cannot("read", (condition) => condition.eq("published", false));
+      const query = JIT.cqrs.query(Post).authorize(deniedLocked({ id: 1 }), "read");
+
+      expect(query(rows)).toEqual([rows[1]]);
+    });
+
+    it("folds unconditional allow away and unconditional deny to an empty query", () => {
+      const allow = JIT.access(Post).actor(Actor).can("read")({ id: 1 });
+      const deny = JIT.access(Post).actor(Actor).cannot("read")({ id: 1 });
+      const allowed = JIT.cqrs.query(Post).authorize(allow, "read");
+      const denied = JIT.cqrs.query(Post).authorize(deny, "read");
+
+      expect(allowed(rows)).toEqual(rows);
+      expect(allowed["~query"].definition.pipeline).toEqual([]);
+      expect(denied(rows)).toEqual([]);
+      expect(JSON.stringify(denied["~query"])).not.toMatch(/access|ability|permission|rule/i);
+      const artifact = getArtifact(denied);
+      if (artifact?.kind !== "query-plan") throw new Error("missing denied query plan");
+      const source = Compiler.emitQuerySource(artifact.schema, artifact.program as never);
+      expect(source).toContain("return [];");
+      expect(source).not.toContain("for (");
+    });
+
+    it("intersects requested fields with the projection guaranteed safe for every returned row", () => {
+      const scoped = JIT.access(Post)
+        .actor(Actor)
+        .can("read", { fields: ["id", "published"] })
+        .can("read", {
+          fields: ["authorId"],
+          when: (condition, actor) => condition.eq("authorId", actor.field("id")),
+        });
+      const query = JIT.cqrs
+        .query(Post)
+        .authorize(scoped({ id: 1 }), "read")
+        .select("id", "authorId", "published");
+
+      expect(query(rows)).toEqual([
+        { id: 1, published: false },
+        { id: 2, published: true },
+        { id: 3, published: false },
+      ]);
+      expect(query["~query"].definition.projection).toEqual(["id", "published"]);
+    });
+  });
+
   it("exposes the complete query engine through the canonical CQRS surface", () => {
     const Entry = JIT.object({
       id: JIT.number(),
@@ -22,6 +98,7 @@ describe("JIT.cqrs", () => {
     expect(
       [
         "where",
+        "authorize",
         "filter",
         "select",
         "unique",

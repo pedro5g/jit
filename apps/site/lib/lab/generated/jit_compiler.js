@@ -147,6 +147,16 @@ var JITError = class extends Error {
     this.meta = options.meta;
   }
 };
+var AccessDeniedError = class extends JITError {
+  constructor(action, field, reason, ruleId) {
+    super("ACCESS_DENIED", `Access denied for action ${JSON.stringify(action)}`);
+    this.name = "AccessDeniedError";
+    this.action = action;
+    this.field = field;
+    this.reason = reason;
+    this.ruleId = ruleId;
+  }
+};
 
 // ../../packages/jit/src/errors/validation-error.ts
 var JITValidationError = class extends JITError {
@@ -972,6 +982,19 @@ function emitObjectKey(key) {
 }
 
 // ../../packages/jit/src/compiler/access.ts
+var ACCESS_ABILITIES = /* @__PURE__ */ new WeakMap();
+function registerAccessAbility(ability, descriptor, actor) {
+  ACCESS_ABILITIES.set(ability, Object.freeze({ descriptor, actor }));
+}
+function getAccessAbility(ability) {
+  return ACCESS_ABILITIES.get(ability);
+}
+function resolveAccessContext(value, actor) {
+  const ability = getAccessAbility(value);
+  if (ability !== void 0) return ability;
+  const artifact = getArtifact(value);
+  return artifact?.kind === "access-plan" ? Object.freeze({ descriptor: artifact.descriptor, actor }) : void 0;
+}
 function resolveAccessDescriptor(subject, actor, rules) {
   const object2 = expectProjectionObject(subject, "JIT.access()");
   const actions = [];
@@ -986,7 +1009,53 @@ function resolveAccessDescriptor(subject, actor, rules) {
       }
     }
   }
-  return Object.freeze({ subject, actor, rules: Object.freeze([...rules]), actions: Object.freeze(actions) });
+  const normalized = rules.map(
+    (rule) => rule.fields === void 0 ? rule : Object.freeze({ ...rule, fields: Object.freeze([...new Set(rule.fields)]) })
+  );
+  const actionPlans = actions.map((action) => {
+    const allow = foldDominatedRules(normalized.filter((rule) => rule.effect === "can" && rule.action === action));
+    const deny = foldDominatedRules(normalized.filter((rule) => rule.effect === "cannot" && rule.action === action));
+    const subjectPaths = /* @__PURE__ */ new Set();
+    const actorPaths = /* @__PURE__ */ new Set();
+    for (const rule of [...allow, ...deny]) collectConditionPaths(rule.condition, subjectPaths, actorPaths);
+    return Object.freeze({
+      action,
+      allow: Object.freeze(allow),
+      deny: Object.freeze(deny),
+      subjectPaths: Object.freeze([...subjectPaths]),
+      actorPaths: Object.freeze([...actorPaths])
+    });
+  });
+  return Object.freeze({
+    subject,
+    actor,
+    rules: Object.freeze(normalized),
+    actions: Object.freeze(actions),
+    actionPlans: Object.freeze(actionPlans)
+  });
+}
+function foldDominatedRules(rules) {
+  const unconditional = rules.find((rule) => rule.condition === void 0 && rule.fields === void 0);
+  return unconditional === void 0 ? [...rules] : [unconditional];
+}
+function collectConditionPaths(condition, subject, actor) {
+  if (condition === void 0) return;
+  if (condition.kind === "logical") {
+    collectConditionPaths(condition.left, subject, actor);
+    collectConditionPaths(condition.right, subject, actor);
+    return;
+  }
+  if (condition.kind === "not") {
+    collectConditionPaths(condition.inner, subject, actor);
+    return;
+  }
+  for (const value of [condition.left, condition.right]) {
+    if (value.kind === "field") subject.add(value.key);
+    else if (value.kind === "param") actor.add(value.name);
+  }
+}
+function actionPlan(descriptor, action) {
+  return descriptor.actionPlans.find((plan) => plan.action === action);
 }
 function emitAccessSource(descriptor) {
   const writer = new CodeWriter();
@@ -1006,18 +1075,92 @@ function emitAccessSource(descriptor) {
       writer.line("}");
     });
     writer.line("}");
-    writer.line("return { can: can, cannot: (action, subject, field) => !can(action, subject, field) };");
+    writer.line("function explain(action, subject, field) {");
+    writer.indent(() => {
+      writer.line("switch (action) {");
+      writer.indent(() => {
+        for (const action of descriptor.actions) emitExplainCase(writer, descriptor, action);
+        writer.line("default:");
+        writer.indent(() => writer.line('return { allowed: false, reason: "default-deny" };'));
+      });
+      writer.line("}");
+    });
+    writer.line("}");
+    writer.line("function assert(action, subject, field) {");
+    writer.indent(() => {
+      writer.line("if (can(action, subject, field)) return subject;");
+      writer.line("const detail = explain(action, subject, field);");
+      writer.line("throw new __AccessDeniedError(action, field, detail.reason, detail.ruleId);");
+    });
+    writer.line("}");
+    writer.line("function fields(action, subject) {");
+    writer.indent(() => {
+      writer.line("if (subject === undefined) {");
+      writer.indent(() => {
+        writer.line("switch (action) {");
+        writer.indent(() => {
+          const object3 = expectProjectionObject(descriptor.subject, "JIT.access()");
+          const allFields = Object.keys(object3.def.props);
+          for (const action of descriptor.actions) {
+            const fields = unconditionalFields(descriptor, action) ?? allFields;
+            writer.line(`case ${JSON.stringify(action)}:`);
+            writer.indent(() => writer.line(`return ${JSON.stringify(fields)};`));
+          }
+          writer.line("default:");
+          writer.indent(() => writer.line("return [];"));
+        });
+        writer.line("}");
+      });
+      writer.line("}");
+      writer.line("const out = [];");
+      writer.line("let j = 0;");
+      const object2 = expectProjectionObject(descriptor.subject, "JIT.access()");
+      for (const field of Object.keys(object2.def.props)) {
+        writer.line(`if (can(action, subject, ${JSON.stringify(field)})) out[j++] = ${JSON.stringify(field)};`);
+      }
+      writer.line("return out;");
+    });
+    writer.line("}");
+    writer.line(
+      "return { can: can, cannot: (action, subject, field) => !can(action, subject, field), assert: assert, explain: explain, fields: fields };"
+    );
   });
   writer.line("}");
   return writer.toString();
 }
+function emitExplainCase(writer, descriptor, action) {
+  const plan = actionPlan(descriptor, action);
+  const cans = plan?.allow ?? [];
+  const cannots = plan?.deny ?? [];
+  writer.line(`case ${JSON.stringify(action)}:`);
+  writer.indent(() => {
+    for (const rule of cannots) {
+      writer.line(`if (${emitRule(rule, "cannot")}) return ${diagnosticLiteral(rule)};`);
+    }
+    for (const rule of cans) {
+      writer.line(`if (${emitRule(rule, "can")}) return { allowed: true };`);
+    }
+    writer.line('return { allowed: false, reason: "default-deny" };');
+  });
+}
+function diagnosticLiteral(rule) {
+  const entries = ["allowed: false"];
+  entries.push(`reason: ${JSON.stringify(rule.metadata?.reason ?? "denied-by-rule")}`);
+  if (rule.metadata?.id !== void 0) entries.push(`ruleId: ${JSON.stringify(rule.metadata.id)}`);
+  entries.push("matchedProhibition: true");
+  return `{ ${entries.join(", ")} }`;
+}
 function emitAction(descriptor, action) {
-  const cans = descriptor.rules.filter((rule) => rule.effect === "can" && rule.action === action);
-  const cannots = descriptor.rules.filter((rule) => rule.effect === "cannot" && rule.action === action);
+  return emitAccessActionExpression(descriptor, action, "subject", "field", "actor");
+}
+function emitAccessActionExpression(descriptor, action, subject, field, actor) {
+  const plan = actionPlan(descriptor, action);
+  const cans = plan?.allow ?? [];
+  const cannots = plan?.deny ?? [];
   if (cans.length === 0) return "false";
-  const allowed = joinOr(cans.map((rule) => emitRule(rule, "can")));
+  const allowed = joinOr(cans.map((rule) => emitRuleAt(rule, "can", subject, field, actor)));
   if (cannots.length === 0) return allowed;
-  const denied = joinOr(cannots.map((rule) => emitRule(rule, "cannot")));
+  const denied = joinOr(cannots.map((rule) => emitRuleAt(rule, "cannot", subject, field, actor)));
   if (allowed === "true") return `!(${denied})`;
   return `(${allowed}) && !(${denied})`;
 }
@@ -1028,25 +1171,28 @@ function joinOr(parts) {
   return meaningful.length === 1 ? meaningful[0] : meaningful.map((part) => `(${part})`).join(" || ");
 }
 function emitRule(rule, effect) {
-  const condition = rule.condition === void 0 ? "true" : emitCondition(rule.condition);
+  return emitRuleAt(rule, effect, "subject", "field", "actor");
+}
+function emitRuleAt(rule, effect, subject, field, actor) {
+  const condition = rule.condition === void 0 ? "true" : emitConditionAt(rule.condition, subject, actor);
   if (rule.fields === void 0) return condition;
-  const names = rule.fields.map((field) => `field === ${JSON.stringify(field)}`).join(" || ");
-  const guard = effect === "can" ? `(field === undefined || ${names})` : `(field !== undefined && (${names}))`;
+  const names = rule.fields.map((name) => `${field} === ${JSON.stringify(name)}`).join(" || ");
+  const guard = effect === "can" ? `(${field} === undefined || ${names})` : `(${field} !== undefined && (${names}))`;
   return condition === "true" ? guard : `${guard} && (${condition})`;
 }
-function emitCondition(condition) {
+function emitConditionAt(condition, subject, actor) {
   if (condition.kind === "logical") {
     const operator = condition.op === "and" ? "&&" : "||";
-    return `(${emitCondition(condition.left)} ${operator} ${emitCondition(condition.right)})`;
+    return `(${emitConditionAt(condition.left, subject, actor)} ${operator} ${emitConditionAt(condition.right, subject, actor)})`;
   }
-  if (condition.kind === "not") return `!(${emitCondition(condition.inner)})`;
+  if (condition.kind === "not") return `!(${emitConditionAt(condition.inner, subject, actor)})`;
   const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
-  return `${emitValue(condition.left)} ${operators[condition.op]} ${emitValue(condition.right)}`;
+  return `${emitValueAt(condition.left, subject, actor)} ${operators[condition.op]} ${emitValueAt(condition.right, subject, actor)}`;
 }
-function emitValue(value) {
-  if (value.kind === "field") return emitPropertyAccess("subject", value.key);
+function emitValueAt(value, subject, actor) {
+  if (value.kind === "field") return emitPropertyAccess(subject, value.key);
   if (value.kind === "literal") return emitLiteral(value.value);
-  if (value.kind === "param") return emitPropertyAccess("actor", value.name);
+  if (value.kind === "param") return emitPropertyAccess(actor, value.name);
   return value.name;
 }
 function accessCacheKey(descriptor) {
@@ -1058,13 +1204,102 @@ function compileAccess(descriptor, options) {
     accessCacheKey(descriptor),
     () => {
       const source = emitAccessSource(descriptor);
-      return { source, create: globalThis.Function(`return ${source};`) };
+      return { source, create: globalThis.Function("__AccessDeniedError", `return ${source};`) };
     },
     options
   );
-  const compiled = template.create();
+  const compiled = template.create(AccessDeniedError);
   registerArtifact(compiled, { kind: "access-plan", schema: descriptor.subject, descriptor });
   return compiled;
+}
+function lowerAccessToQueryCondition(context, action, bindingOffset) {
+  const plan = actionPlan(context.descriptor, action);
+  const cans = plan?.allow ?? [];
+  const cannots = (plan?.deny ?? []).filter((rule) => rule.fields === void 0);
+  if (cans.length === 0 || cannots.some((rule) => rule.condition === void 0)) {
+    return Object.freeze({ kind: "deny", bindings: Object.freeze([]) });
+  }
+  const allowConditions = cans.map((rule) => rule.condition);
+  const denyConditions = cannots.map((rule) => rule.condition).filter(isCondition);
+  const allowAlways = allowConditions.some((condition2) => condition2 === void 0);
+  if (allowAlways && denyConditions.length === 0) {
+    return Object.freeze({ kind: "allow", bindings: Object.freeze([]) });
+  }
+  let semantic = allowAlways ? truth(true) : joinConditions("or", allowConditions.filter(isCondition));
+  if (denyConditions.length > 0) {
+    semantic = {
+      kind: "logical",
+      op: "and",
+      left: semantic,
+      right: { kind: "not", inner: joinConditions("or", denyConditions) }
+    };
+  }
+  const values = [];
+  const condition = bindActorRefs(semantic, context.actor, bindingOffset, values);
+  return Object.freeze({ kind: "condition", condition, bindings: Object.freeze(values) });
+}
+function compileAccessMutationGuard(context, action) {
+  const source = emitAccessMutationGuardSource(context.descriptor, action);
+  return globalThis.Function("actor", "__AccessDeniedError", `return ${source};`)(context.actor, AccessDeniedError);
+}
+function emitAccessMutationGuardSource(descriptor, action) {
+  const object2 = expectProjectionObject(descriptor.subject, "authorized mutation");
+  const writer = new CodeWriter();
+  writer.line("function authorizeMutation(subject, patch) {");
+  writer.indent(() => {
+    for (const field of Object.keys(object2.def.props)) {
+      const patchValue = emitPropertyAccess("patch", field);
+      const check = emitAccessActionExpression(descriptor, action, "subject", JSON.stringify(field), "actor");
+      if (check === "true") continue;
+      const denied = `throw new __AccessDeniedError(${JSON.stringify(action)}, ${JSON.stringify(field)}, "field-denied")`;
+      writer.line(`if (${patchValue} !== undefined${check === "false" ? "" : ` && !(${check})`}) ${denied};`);
+    }
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function isCondition(value) {
+  return value !== void 0;
+}
+function joinConditions(op, values) {
+  if (values.length === 0) return truth(op === "and");
+  let result = values[0];
+  for (let index2 = 1; index2 < values.length; index2++) {
+    result = { kind: "logical", op, left: result, right: values[index2] };
+  }
+  return result;
+}
+function truth(value) {
+  return {
+    kind: "compare",
+    op: "eq",
+    left: { kind: "literal", value: true },
+    right: { kind: "literal", value }
+  };
+}
+function bindActorRefs(condition, actor, bindingOffset, bindings) {
+  if (condition.kind === "logical") {
+    return {
+      ...condition,
+      left: bindActorRefs(condition.left, actor, bindingOffset, bindings),
+      right: bindActorRefs(condition.right, actor, bindingOffset, bindings)
+    };
+  }
+  if (condition.kind === "not") {
+    return { ...condition, inner: bindActorRefs(condition.inner, actor, bindingOffset, bindings) };
+  }
+  return {
+    ...condition,
+    left: bindActorValue(condition.left, actor, bindingOffset, bindings),
+    right: bindActorValue(condition.right, actor, bindingOffset, bindings)
+  };
+}
+function bindActorValue(value, actor, bindingOffset, bindings) {
+  if (value.kind !== "param") return value;
+  const record2 = actor;
+  const name = `__q${bindingOffset + bindings.length}`;
+  bindings.push(record2?.[value.name]);
+  return { kind: "binding", name };
 }
 function unconditionalFields(descriptor, action) {
   const cans = descriptor.rules.filter(
@@ -1086,6 +1321,24 @@ function unconditionalFields(descriptor, action) {
     for (const field of rule.fields ?? allowed) allowed.delete(field);
   }
   return [...allowed];
+}
+function accessProjectionFields(descriptor, action) {
+  const plan = actionPlan(descriptor, action);
+  if (plan === void 0 || plan.allow.length === 0) return [];
+  const object2 = expectProjectionObject(descriptor.subject, "authorized query projection");
+  const all = Object.keys(object2.def.props);
+  const allowed = new Set(
+    all.filter(
+      (field) => plan.allow.some(
+        (rule) => rule.condition === void 0 && (rule.fields === void 0 || rule.fields.includes(field))
+      ) || plan.allow.every((rule) => rule.fields === void 0 || rule.fields.includes(field))
+    )
+  );
+  for (const rule of plan.deny) {
+    if (rule.fields === void 0) continue;
+    for (const field of rule.fields) allowed.delete(field);
+  }
+  return allowed.size === all.length ? void 0 : all.filter((field) => allowed.has(field));
 }
 
 // ../../packages/jit/src/runtime/hash/hash-cache.ts
@@ -8989,18 +9242,18 @@ function assertJoinPrefix(program) {
 function emitLeftGuard(program, row) {
   const filters = program.nodes.filter((node) => node.kind === "filter");
   if (filters.length === 0) return void 0;
-  return filters.map((filter) => `(${emitCondition2(filter.condition, row)})`).join(" && ");
+  return filters.map((filter) => `(${emitCondition(filter.condition, row)})`).join(" && ");
 }
-function emitCondition2(condition, row) {
+function emitCondition(condition, row) {
   if (condition.kind === "logical") {
     const operator = condition.op === "and" ? "&&" : "||";
-    return `(${emitCondition2(condition.left, row)} ${operator} ${emitCondition2(condition.right, row)})`;
+    return `(${emitCondition(condition.left, row)} ${operator} ${emitCondition(condition.right, row)})`;
   }
-  if (condition.kind === "not") return `!(${emitCondition2(condition.inner, row)})`;
+  if (condition.kind === "not") return `!(${emitCondition(condition.inner, row)})`;
   const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
-  return `${emitValue2(condition.left, row)} ${operators[condition.op]} ${emitValue2(condition.right, row)}`;
+  return `${emitValue(condition.left, row)} ${operators[condition.op]} ${emitValue(condition.right, row)}`;
 }
-function emitValue2(value, row) {
+function emitValue(value, row) {
   if (value.kind === "field") return emitPropertyAccess(row, value.key);
   if (value.kind === "literal") return emitLiteral(value.value);
   if (value.kind === "param") return emitPropertyAccess("params", value.name);
@@ -11067,10 +11320,75 @@ function emitQuerySource(schema, program) {
   const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
   validateQueryPlan(target.objectSchema, plan);
   const hasParams = Boolean(program.params?.length);
+  const empty = emitStaticallyEmptyQuery(plan, target, hasParams);
+  if (empty !== void 0) return empty;
   const keyed = emitPhysicalQuerySource(resolvePhysicalQueryPlan(schema, target, plan), hasParams);
   if (keyed) return keyed;
   const source = emitQuery(optimizeQueryIR(buildQueryIR(target, plan, { hasParams })));
   return wrapDistinctSource(source, resolvePlanDistinct(schema, plan));
+}
+function emitStaticallyEmptyQuery(plan, target, hasParams) {
+  if (!plan.filters.some((filter) => evaluateConstantCondition(filter.condition) === false)) return void 0;
+  const signature = `value${hasParams ? ", params" : ""}`;
+  let result;
+  if (plan.mutation !== void 0) return void 0;
+  if (plan.terminal !== void 0) {
+    if (plan.terminal.op === "first") result = "undefined";
+    else if (plan.terminal.op === "findIndex") result = "-1";
+    else if (plan.terminal.op === "some") result = "false";
+    else {
+      const size = target.kind === "array" ? "value.length" : "value.size";
+      result = `${size} === 0`;
+    }
+  } else if (plan.aggregate !== void 0) {
+    result = plan.aggregate.op === "sum" || plan.aggregate.op === "count" ? "0" : "undefined";
+  } else if (plan.composite !== void 0) {
+    if (plan.collector?.kind === "groupBy") result = "{}";
+    else {
+      const fields = plan.composite.fields.map(
+        (field) => `${JSON.stringify(field.name)}: ${field.op === "sum" || field.op === "count" ? "0" : "undefined"}`
+      );
+      result = `{ ${fields.join(", ")} }`;
+    }
+  } else if (plan.collector?.kind === "keyed") result = "new Map()";
+  else if (plan.collector?.kind === "groupBy") result = "{}";
+  else result = "[]";
+  return `function query(${signature}) {
+  return ${result};
+}`;
+}
+function evaluateConstantCondition(condition) {
+  if (condition.kind === "logical") {
+    const left2 = evaluateConstantCondition(condition.left);
+    const right2 = evaluateConstantCondition(condition.right);
+    if (condition.op === "and") {
+      if (left2 === false || right2 === false) return false;
+      return left2 === true && right2 === true ? true : void 0;
+    }
+    if (left2 === true || right2 === true) return true;
+    return left2 === false && right2 === false ? false : void 0;
+  }
+  if (condition.kind === "not") {
+    const inner = evaluateConstantCondition(condition.inner);
+    return inner === void 0 ? void 0 : !inner;
+  }
+  if (condition.left.kind !== "literal" || condition.right.kind !== "literal") return void 0;
+  const left = condition.left.value;
+  const right = condition.right.value;
+  switch (condition.op) {
+    case "eq":
+      return left === right;
+    case "neq":
+      return left !== right;
+    case "gt":
+      return left > right;
+    case "gte":
+      return left >= right;
+    case "lt":
+      return left < right;
+    case "lte":
+      return left <= right;
+  }
 }
 function explainPhysicalQuery(schema, program) {
   const target = expectCollectionObjectSchema(schema, "explainPhysicalQuery");
@@ -11566,7 +11884,7 @@ function emitVisitorBody(nodes) {
   nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
-        body.push(`if (!(${emitCondition3(node.condition)})) continue;`);
+        body.push(`if (!(${emitCondition2(node.condition)})) continue;`);
         break;
       case "select:fields":
         body.push(`output = ${emitProjection(node.fields)};`);
@@ -11578,10 +11896,10 @@ function emitVisitorBody(nodes) {
         body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
-        body.push(`if (!(${emitCondition3(node.condition)})) return emitted;`);
+        body.push(`if (!(${emitCondition2(node.condition)})) return emitted;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index2} && (${emitCondition3(node.condition)})) continue;`);
+        body.push(`if (dropping${index2} && (${emitCondition2(node.condition)})) continue;`);
         body.push(`dropping${index2} = false;`);
         break;
       case "unique":
@@ -11692,7 +12010,7 @@ function emitDirectArraySource(schema, program) {
   program.nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
-        body.push(`if (!(${emitCondition3(node.condition)})) continue;`);
+        body.push(`if (!(${emitCondition2(node.condition)})) continue;`);
         break;
       case "select:fields":
         body.push(`output = ${emitProjection(node.fields)};`);
@@ -11704,10 +12022,10 @@ function emitDirectArraySource(schema, program) {
         body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
-        body.push(`if (!(${emitCondition3(node.condition)})) return out;`);
+        body.push(`if (!(${emitCondition2(node.condition)})) return out;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index2} && (${emitCondition3(node.condition)})) continue;`);
+        body.push(`if (dropping${index2} && (${emitCondition2(node.condition)})) continue;`);
         body.push(`dropping${index2} = false;`);
         break;
       case "unique":
@@ -11755,7 +12073,7 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
   nodes.forEach((node, index2) => {
     switch (node.kind) {
       case "filter":
-        body.push(`if (!(${emitCondition3(node.condition)})) continue;`);
+        body.push(`if (!(${emitCondition2(node.condition)})) continue;`);
         break;
       case "select:fields":
         body.push(`output = ${emitProjection(node.fields)};`);
@@ -11767,10 +12085,10 @@ function emitFusedStage(lines, nodes, forAwait, directArray) {
         body.push(`if (count${index2}++ < ${node.count}) continue;`);
         break;
       case "takeWhile":
-        body.push(`if (!(${emitCondition3(node.condition)})) return;`);
+        body.push(`if (!(${emitCondition2(node.condition)})) return;`);
         break;
       case "dropWhile":
-        body.push(`if (dropping${index2} && (${emitCondition3(node.condition)})) continue;`);
+        body.push(`if (dropping${index2} && (${emitCondition2(node.condition)})) continue;`);
         body.push(`dropping${index2} = false;`);
         break;
       case "unique":
@@ -11815,7 +12133,7 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSc
   };
   switch (node.kind) {
     case "filter":
-      loop([`if (${emitCondition3(node.condition)}) yield item;`]);
+      loop([`if (${emitCondition2(node.condition)}) yield item;`]);
       return;
     case "select:fields":
       loop([`yield ${emitProjection(node.fields)};`]);
@@ -11838,11 +12156,11 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSc
       loop([`if (count++ >= ${node.count}) yield item;`]);
       return;
     case "takeWhile":
-      loop([`if (!(${emitCondition3(node.condition)})) return;`, "yield item;"]);
+      loop([`if (!(${emitCondition2(node.condition)})) return;`, "yield item;"]);
       return;
     case "dropWhile":
       lines.push("  let dropping = true;");
-      loop([`if (dropping && (${emitCondition3(node.condition)})) continue;`, "dropping = false;", "yield item;"]);
+      loop([`if (dropping && (${emitCondition2(node.condition)})) continue;`, "dropping = false;", "yield item;"]);
       return;
     case "unique":
       lines.push("  const seen = new Set();");
@@ -11921,7 +12239,7 @@ function emitStage(lines, node, previous, async, awaitPrefix, forAwait, objectSc
       throw new JITError("INVALID_QUERY", `${node.kind} is not an incremental output operation`);
   }
 }
-function emitCondition3(condition) {
+function emitCondition2(condition) {
   switch (condition.kind) {
     case "compare": {
       const operators = {
@@ -11932,15 +12250,15 @@ function emitCondition3(condition) {
         lt: "<",
         lte: "<="
       };
-      return `${emitValue3(condition.left)} ${operators[condition.op]} ${emitValue3(condition.right)}`;
+      return `${emitValue2(condition.left)} ${operators[condition.op]} ${emitValue2(condition.right)}`;
     }
     case "logical":
-      return `(${emitCondition3(condition.left)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition3(condition.right)})`;
+      return `(${emitCondition2(condition.left)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition2(condition.right)})`;
     case "not":
-      return `!(${emitCondition3(condition.inner)})`;
+      return `!(${emitCondition2(condition.inner)})`;
   }
 }
-function emitValue3(value) {
+function emitValue2(value) {
   switch (value.kind) {
     case "field":
       return `item${emitPropertyAccess("", value.key)}`;
@@ -12744,13 +13062,13 @@ return ${source};`) };
   return compiled;
 }
 function emitMockSource(schema) {
-  const body = emitValue4(schema, 0);
+  const body = emitValue3(schema, 0);
   return `function mock(options) {
   __srand(options && options.seed !== undefined ? options.seed : (Math.random() * 2147483647) | 0);
   return ${body};
 }`;
 }
-function emitValue4(schema, depth) {
+function emitValue3(schema, depth) {
   if (depth > 6) return emitTerminal(schema);
   const current = schema;
   const checks = current.def.checks ?? [];
@@ -12785,7 +13103,7 @@ function emitValue4(schema, depth) {
     }
     case TypeName.object: {
       const props = current.def.props ?? {};
-      const entries = Object.keys(props).map((key) => `${propertyKey(key)}: ${emitValue4(props[key], depth + 1)}`);
+      const entries = Object.keys(props).map((key) => `${propertyKey(key)}: ${emitValue3(props[key], depth + 1)}`);
       return entries.length === 0 ? "{}" : `{ ${entries.join(", ")} }`;
     }
     case TypeName.array:
@@ -12793,47 +13111,47 @@ function emitValue4(schema, depth) {
     case TypeName.set:
       return `new Set(${emitArray(current.def.element, checks, depth)})`;
     case TypeName.map: {
-      const key = emitValue4(current.def.key, depth + 1);
-      const value = emitValue4(current.def.value, depth + 1);
+      const key = emitValue3(current.def.key, depth + 1);
+      const value = emitValue3(current.def.value, depth + 1);
       return `new Map([[${key}, ${value}]])`;
     }
     case TypeName.record:
-      return `{ [${emitString([])}]: ${emitValue4(current.def.value, depth + 1)} }`;
+      return `{ [${emitString([])}]: ${emitValue3(current.def.value, depth + 1)} }`;
     case TypeName.tuple: {
       const items = current.def.items ?? [];
-      return `[${items.map((item) => emitValue4(item, depth + 1)).join(", ")}]`;
+      return `[${items.map((item) => emitValue3(item, depth + 1)).join(", ")}]`;
     }
     case TypeName.union:
     case TypeName.xor:
     case TypeName.discriminatedUnion: {
       const options = current.def.options ?? [];
       if (options.length === 0) return "undefined";
-      if (options.length === 1) return emitValue4(options[0], depth + 1);
-      return `(() => { switch (__int(0, ${options.length - 1})) { ${options.map((option, index2) => `case ${index2}: return ${emitValue4(option, depth + 1)};`).join(" ")} } })()`;
+      if (options.length === 1) return emitValue3(options[0], depth + 1);
+      return `(() => { switch (__int(0, ${options.length - 1})) { ${options.map((option, index2) => `case ${index2}: return ${emitValue3(option, depth + 1)};`).join(" ")} } })()`;
     }
     case TypeName.intersection: {
       const options = current.def.options ?? [];
-      return `Object.assign({}, ${options.map((option) => emitValue4(option, depth + 1)).join(", ")})`;
+      return `Object.assign({}, ${options.map((option) => emitValue3(option, depth + 1)).join(", ")})`;
     }
     case TypeName.optional:
-      return `(__rand() < 0.5 ? undefined : ${emitValue4(current.def.innerType, depth + 1)})`;
+      return `(__rand() < 0.5 ? undefined : ${emitValue3(current.def.innerType, depth + 1)})`;
     case TypeName.nullable:
-      return `(__rand() < 0.25 ? null : ${emitValue4(current.def.innerType, depth + 1)})`;
+      return `(__rand() < 0.25 ? null : ${emitValue3(current.def.innerType, depth + 1)})`;
     case TypeName.nullish:
-      return `(__rand() < 0.5 ? null : ${emitValue4(current.def.innerType, depth + 1)})`;
+      return `(__rand() < 0.5 ? null : ${emitValue3(current.def.innerType, depth + 1)})`;
     case TypeName.readonly:
     case TypeName.brand:
     case TypeName.coerce:
     case TypeName.default:
-      return emitValue4(current.def.innerType, depth + 1);
+      return emitValue3(current.def.innerType, depth + 1);
     case TypeName.refine:
     case TypeName.pipe:
     case TypeName.transform:
-      return emitValue4(current.def.innerType, depth + 1);
+      return emitValue3(current.def.innerType, depth + 1);
     case TypeName.lazy:
-      return emitValue4(current.def.getter(), depth + 1);
+      return emitValue3(current.def.getter(), depth + 1);
     case TypeName.promise:
-      return `Promise.resolve(${emitValue4(current.def.innerType, depth + 1)})`;
+      return `Promise.resolve(${emitValue3(current.def.innerType, depth + 1)})`;
     case TypeName.json:
     case TypeName.any:
     case TypeName.unknown:
@@ -12952,7 +13270,7 @@ function emitArray(element, checks, depth) {
   const length = numeric(checks, "length");
   const min = length ?? numeric(checks, "min") ?? (hasCheck(checks, "nonEmpty") ? 1 : 1);
   const max = depth >= 5 ? min : length ?? numeric(checks, "max") ?? Math.max(min, 3);
-  const item = emitValue4(element, depth + 1);
+  const item = emitValue3(element, depth + 1);
   return `Array.from({ length: __int(${min}, ${Math.max(min, max)}) }, () => (${item}))`;
 }
 function numeric(checks, kind) {
@@ -13144,7 +13462,7 @@ function emitNdjsonLine(writer, descriptor) {
   writer.line('if (line.trim() !== "") {');
   writer.indent(() => {
     writer.line("const item = ndjsonRow(line, lineNumber);");
-    const filters = descriptor.filters.map((condition) => `(${emitCondition4(condition)})`).join(" && ");
+    const filters = descriptor.filters.map((condition) => `(${emitCondition3(condition)})`).join(" && ");
     if (filters.length > 0) {
       writer.line(`if (${filters}) {`);
       writer.indent(() => emitNdjsonSink(writer, descriptor));
@@ -13187,11 +13505,11 @@ function emitStringify(writer, descriptor) {
   });
   writer.line("}");
 }
-function emitCondition4(condition) {
+function emitCondition3(condition) {
   if (condition.kind === "logical") {
-    return `(${emitCondition4(condition.left)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition4(condition.right)})`;
+    return `(${emitCondition3(condition.left)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition3(condition.right)})`;
   }
-  if (condition.kind === "not") return `!(${emitCondition4(condition.inner)})`;
+  if (condition.kind === "not") return `!(${emitCondition3(condition.inner)})`;
   const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
   return `${emitQueryValue(condition.left)} ${operators[condition.op]} ${emitQueryValue(condition.right)}`;
 }
@@ -13506,6 +13824,30 @@ function compileProject(schema, paths, options) {
   );
   const compiled = template.create();
   registerArtifact(compiled, { kind: "project-plan", schema, tree });
+  return compiled;
+}
+function emitAuthorizedProjectSource(context, action) {
+  const object2 = expectProjectionObject(context.descriptor.subject, "JIT.project().authorize()");
+  const lines = ["function project(value) {", "  const out = {};"];
+  for (const field of Object.keys(object2.def.props)) {
+    const check = emitAccessActionExpression(context.descriptor, action, "value", JSON.stringify(field), "__actor");
+    if (check === "false") continue;
+    const assignment = `out${emitPropertyAccess("", field)} = ${emitPropertyAccess("value", field)};`;
+    lines.push(check === "true" ? `  ${assignment}` : `  if (${check}) ${assignment}`);
+  }
+  lines.push("  return out;", "}");
+  return lines.join("\n");
+}
+function compileAuthorizedProject(context, action) {
+  const source = emitAuthorizedProjectSource(context, action);
+  const compiled = globalThis.Function("__actor", `return ${source};`)(context.actor);
+  registerArtifact(compiled, {
+    kind: "authorized-project-plan",
+    schema: context.descriptor.subject,
+    descriptor: context.descriptor,
+    actor: context.actor,
+    action
+  });
   return compiled;
 }
 
@@ -15297,7 +15639,7 @@ function filtersReadField(filters, key) {
 }
 function emitBinaryFilter(plan, lookup2, prepared, comparableOverrides) {
   if (plan.filters.length === 0) return void 0;
-  return plan.filters.map((filter) => emitCondition5(filter.condition, lookup2, prepared, comparableOverrides)).join(" && ");
+  return plan.filters.map((filter) => emitCondition4(filter.condition, lookup2, prepared, comparableOverrides)).join(" && ");
 }
 function emitBinaryArrayQuery(writer, layout, plan, condition, accessedFields) {
   writer.line("const out = new Array(len);");
@@ -15416,19 +15758,19 @@ function emitBinaryAggregateQuery(writer, layout, lookup2, plan, condition, acce
     }
   }
 }
-function emitCondition5(condition, lookup2, prepared, comparableOverrides) {
+function emitCondition4(condition, lookup2, prepared, comparableOverrides) {
   switch (condition.kind) {
     case "compare":
       return emitCompare(condition.left, condition.op, condition.right, lookup2, prepared, comparableOverrides);
     case "logical":
-      return `(${emitCondition5(condition.left, lookup2, prepared, comparableOverrides)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition5(
+      return `(${emitCondition4(condition.left, lookup2, prepared, comparableOverrides)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition4(
         condition.right,
         lookup2,
         prepared,
         comparableOverrides
       )})`;
     case "not":
-      return `!(${emitCondition5(condition.inner, lookup2, prepared, comparableOverrides)})`;
+      return `!(${emitCondition4(condition.inner, lookup2, prepared, comparableOverrides)})`;
   }
 }
 function emitCompare(left, op, right, lookup2, prepared, comparableOverrides) {
@@ -16590,7 +16932,9 @@ function accessPlanType(artifact, typeNames) {
   const actor = artifact.descriptor.actor === void 0 ? "unknown" : namedType(artifact.descriptor.actor, typeNames);
   const actions = artifact.descriptor.actions.map((action) => JSON.stringify(action)).join(" | ") || "never";
   const check = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => boolean`;
-  return `(actor: ${actor}) => { can: ${check}; cannot: ${check} }`;
+  const fields = `(action: ${actions}, subject?: ${subject}) => readonly (keyof ${subject} & string)[]`;
+  const explain = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => { readonly allowed: boolean; readonly reason?: string; readonly ruleId?: string; readonly matchedProhibition?: boolean }`;
+  return `(actor: ${actor}) => { can: ${check}; cannot: ${check}; assert(action: ${actions}, subject: ${subject}, field?: keyof ${subject} & string): ${subject}; explain: ${explain}; fields: ${fields} }`;
 }
 function typeImportSpecifier(outDir, sourceFile) {
   const relativePath = relative(
@@ -17174,6 +17518,53 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "project-plan") return emitProjectPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "authorized-project-plan") {
+      const actor = serializeStaticData(artifact.actor);
+      if (actor === void 0) {
+        skipped.push({
+          schema: reportName,
+          operation: "project.authorize",
+          reason: "the bound actor cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(`  const __actor = ${actor};`);
+      js.push(`  return ${asExpression(emitAuthorizedProjectSource(artifact, artifact.action), "project")};`);
+      js.push("})();");
+      return { binding, type };
+    }
+    if (artifact.kind === "authorized-update-plan") {
+      const actor = serializeStaticData(artifact.actor);
+      if (actor === void 0) {
+        skipped.push({
+          schema: reportName,
+          operation: "update.authorize",
+          reason: "the bound actor cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(`  const actor = ${actor};`);
+      js.push("  class __AccessDeniedError extends Error {");
+      js.push("    constructor(action, field, reason) {");
+      js.push('      super("Access denied for action " + JSON.stringify(action));');
+      js.push('      this.name = "AccessDeniedError";');
+      js.push('      this.code = "ACCESS_DENIED";');
+      js.push("      this.action = action;");
+      js.push("      this.field = field;");
+      js.push("      this.reason = reason;");
+      js.push("    }");
+      js.push("  }");
+      js.push(`  const update = ${asExpression(emitUpdateSource(artifact.schema), "update")};`);
+      js.push(...indentBlock(emitAccessMutationGuardSource(artifact.descriptor, artifact.action)));
+      js.push("  return function authorizedUpdate(value, patch) {");
+      js.push("    authorizeMutation(value, patch);");
+      js.push("    return update(value, patch);");
+      js.push("  };");
+      js.push("})();");
+      return { binding, type };
+    }
     if (artifact.kind === "changed-plan") return emitChangedPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "patch-plan") return emitPatchPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "cache-key-plan") return emitCacheKeyPlanArtifact(binding, declaration, artifact, type);
@@ -17256,7 +17647,20 @@ function emitModule(plan, options, layout) {
       return { binding, type };
     }
     if (artifact.kind === "access-plan") {
-      js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitAccessSource(artifact.descriptor), "access")};`);
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push("  class __AccessDeniedError extends Error {");
+      js.push("    constructor(action, field, reason, ruleId) {");
+      js.push('      super("Access denied for action " + JSON.stringify(action));');
+      js.push('      this.name = "AccessDeniedError";');
+      js.push('      this.code = "ACCESS_DENIED";');
+      js.push("      this.action = action;");
+      js.push("      this.field = field;");
+      js.push("      this.reason = reason;");
+      js.push("      this.ruleId = ruleId;");
+      js.push("    }");
+      js.push("  }");
+      js.push(`  return ${asExpression(emitAccessSource(artifact.descriptor), "access")};`);
+      js.push("})();");
       return { binding, type };
     }
     if (artifact.kind === "canonical-plan") {
@@ -17295,6 +17699,10 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
     if (artifact.kind === "project-plan") return projectPlanType(artifact, typeNames);
+    if (artifact.kind === "authorized-project-plan")
+      return `(value: ${namedType(artifact.schema, typeNames)}) => Partial<${namedType(artifact.schema, typeNames)}>`;
+    if (artifact.kind === "authorized-update-plan")
+      return `(value: ${namedType(artifact.schema, typeNames)}, patch: unknown) => ${namedType(artifact.schema, typeNames)}`;
     if (artifact.kind === "changed-plan") return changedPlanType(artifact, typeNames);
     if (artifact.kind === "patch-plan") return patchPlanType(artifact, typeNames);
     if (artifact.kind === "cache-key-plan")
@@ -18933,7 +19341,12 @@ function access(schema) {
 }
 function createPlan(subject, actor, rules) {
   const descriptor = resolveAccessDescriptor(subject, actor, rules);
-  const plan = compileAccess(descriptor);
+  const compiled = compileAccess(descriptor);
+  const plan = ((actorValue) => {
+    const ability = compiled(actorValue);
+    registerAccessAbility(ability, descriptor, actorValue);
+    return ability;
+  });
   const add = (effect) => (action, rule) => createPlan(subject, actor, [...rules, toRule(effect, action, rule)]);
   Object.defineProperties(plan, {
     actor: { value: (next) => createPlan(subject, unwrapSchema(next), rules) },
@@ -18942,6 +19355,7 @@ function createPlan(subject, actor, rules) {
     actions: { value: descriptor.actions },
     fields: { value: (action) => unconditionalFields(descriptor, action) }
   });
+  registerArtifact(plan, { kind: "access-plan", schema: subject, descriptor });
   return plan;
 }
 function toRule(effect, action, rule) {
@@ -18958,6 +19372,10 @@ function toRule(effect, action, rule) {
     effect,
     action,
     fields: options.fields,
+    metadata: options.id === void 0 && options.reason === void 0 ? void 0 : Object.freeze({
+      ...options.id === void 0 ? {} : { id: options.id },
+      ...options.reason === void 0 ? {} : { reason: options.reason }
+    }),
     condition: options.when === void 0 ? void 0 : options.when(CONDITION, ACTOR)
   };
 }
@@ -20651,6 +21069,30 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
     return compiled(value, params);
   };
   const builder2 = Object.assign(callable, {
+    authorize(ability, action, actor) {
+      const context = resolveAccessContext(ability, actor);
+      if (context === void 0) {
+        throw new JITError("INVALID_OPERATION", "query.authorize() requires an ability created by JIT.access()");
+      }
+      const lowered = lowerAccessToQueryCondition(context, action, bindings.length);
+      const safeFields = accessProjectionFields(context.descriptor, action);
+      const projection = safeFields === void 0 ? [] : [{ kind: "select:fields", fields: safeFields }];
+      if (lowered.kind === "allow") {
+        return createQueryBuilder(schema, [...nodes, ...projection], bindings, paramNames);
+      }
+      const condition = lowered.kind === "deny" ? {
+        kind: "compare",
+        op: "eq",
+        left: { kind: "literal", value: true },
+        right: { kind: "literal", value: false }
+      } : lowered.condition;
+      return createQueryBuilder(
+        schema,
+        [...nodes, { kind: "filter", condition }, ...projection],
+        [...bindings, ...lowered.bindings],
+        paramNames
+      );
+    },
     params(shape) {
       return createQueryBuilder(
         schema,
@@ -20673,7 +21115,9 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
       );
     },
     select(...fields) {
-      return createQueryBuilder(schema, [...nodes, { kind: "select:fields", fields }], bindings, paramNames);
+      const prior = nodes.filter((node) => node.kind === "select:fields");
+      const selected = prior.length === 0 ? fields : fields.filter((field) => prior.every((node) => node.fields.includes(field)));
+      return createQueryBuilder(schema, [...nodes, { kind: "select:fields", fields: selected }], bindings, paramNames);
     },
     unique(key) {
       return createQueryBuilder(schema, [...nodes, { kind: "unique", key }], bindings, paramNames);
@@ -20993,6 +21437,7 @@ function wrap(schema, collection, builder2) {
   const takeMethod = record2.take;
   const chainMethods = [
     "params",
+    "authorize",
     "filter",
     "select",
     "unique",
@@ -22152,6 +22597,14 @@ function update(schema, ...args) {
     const patch3 = typeof updateInput === "function" ? captureDraftPatch(updateInput) : updateInput;
     return compiled(current, patch3);
   });
+  installUpdateMethods(run, unwrapped);
+  if (args.length === 0) {
+    registerArtifact(run, { kind: "operation", schema: unwrapped, op: "update" });
+    return run;
+  }
+  return run(args[0], args[1]);
+}
+function installUpdateMethods(run, schema) {
   Object.defineProperties(run, {
     compile: {
       enumerable: false,
@@ -22165,14 +22618,33 @@ function update(schema, ...args) {
     },
     reactive: {
       enumerable: false,
-      value: (initial, options) => createReactiveUpdate(initial, run, () => compileDiff(unwrapped), options)
+      value: (initial, options) => createReactiveUpdate(initial, run, () => compileDiff(schema), options)
+    },
+    authorize: {
+      enumerable: false,
+      value: (ability, action, actor) => {
+        const context = resolveAccessContext(ability, actor);
+        if (context === void 0) {
+          throw new JITError("INVALID_OPERATION", "update.authorize() requires an ability created by JIT.access()");
+        }
+        const guard = compileAccessMutationGuard(context, action);
+        const authorized = ((current, input) => {
+          const patch3 = typeof input === "function" ? captureDraftPatch(input) : input;
+          guard(current, patch3);
+          return run(current, patch3);
+        });
+        installUpdateMethods(authorized, schema);
+        registerArtifact(authorized, {
+          kind: "authorized-update-plan",
+          schema,
+          descriptor: context.descriptor,
+          actor: context.actor,
+          action
+        });
+        return authorized;
+      }
     }
   });
-  if (args.length === 0) {
-    registerArtifact(run, { kind: "operation", schema: unwrapped, op: "update" });
-    return run;
-  }
-  return run(args[0], args[1]);
 }
 function materializeParamPatch(template, params) {
   if (isParamRef(template)) return params[template.name];
@@ -22603,6 +23075,13 @@ function isQueryConstRef2(value) {
 function project(schema) {
   const unwrapped = unwrapSchema(schema);
   return Object.freeze({
+    authorize: (ability, action, actor) => {
+      const context = resolveAccessContext(ability, actor);
+      if (context === void 0) {
+        throw new JITError("INVALID_OPERATION", "project.authorize() requires an ability created by JIT.access()");
+      }
+      return compileAuthorizedProject(context, action);
+    },
     select: (...paths) => compileProject(unwrapped, paths)
   });
 }
@@ -24596,6 +25075,26 @@ function createDefineReconcilePlan(schema, key, channels, changes) {
 function defineProject(schema) {
   const unwrapped = unwrapSchema(schema);
   return Object.freeze({
+    authorize: (ability, action, actor) => {
+      const context = resolveAccessContext(ability, actor);
+      if (context === void 0) {
+        throw new JITError("INVALID_OPERATION", "project.authorize() requires an ability created by JIT.access()");
+      }
+      const stub = function aotAuthorizedProjectArtifact() {
+        throw new JITError(
+          "JIT_AOT_001_ARTIFACT_EXECUTED",
+          "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+        );
+      };
+      registerArtifact(stub, {
+        kind: "authorized-project-plan",
+        schema: unwrapped,
+        descriptor: context.descriptor,
+        actor: context.actor,
+        action
+      });
+      return stub;
+    },
     select: (...paths) => {
       const stub = function aotProjectArtifact() {
         throw new JITError(
@@ -24763,6 +25262,7 @@ function wrapDefineCqrsQuery(builder2) {
   const source = builder2;
   const chainMethods = [
     "params",
+    "authorize",
     "filter",
     "where",
     "select",

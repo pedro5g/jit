@@ -1,8 +1,15 @@
-import { type AccessRule, compileAccess, resolveAccessDescriptor, unconditionalFields } from "../compiler/access.js";
+import {
+  type AccessRule,
+  compileAccess,
+  registerAccessAbility,
+  resolveAccessDescriptor,
+  unconditionalFields,
+} from "../compiler/access.js";
 import type { QueryCompareNode, QueryConditionNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
+import { registerArtifact } from "../runtime/artifact-registry.js";
 
 type Field<TValue> = Extract<keyof TValue, string>;
 
@@ -41,12 +48,25 @@ export type AccessPredicate<TSubject, TActor> = (
 export interface AccessRuleOptions<TSubject, TActor> {
   readonly fields?: readonly Field<TSubject>[];
   readonly when?: AccessPredicate<TSubject, TActor>;
+  readonly id?: string;
+  readonly reason?: string;
+}
+
+export interface AccessExplanation<TSubject> {
+  readonly allowed: boolean;
+  readonly field?: Field<TSubject>;
+  readonly reason?: string;
+  readonly ruleId?: string;
+  readonly matchedProhibition?: boolean;
 }
 
 /** The compiled answer for one actor. */
 export interface Ability<TSubject, TAction extends string> {
   can(action: TAction, subject?: TSubject, field?: Field<TSubject>): boolean;
   cannot(action: TAction, subject?: TSubject, field?: Field<TSubject>): boolean;
+  assert(action: TAction, subject: TSubject, field?: Field<TSubject>): TSubject;
+  explain(action: TAction, subject?: TSubject, field?: Field<TSubject>): AccessExplanation<TSubject>;
+  fields(action: TAction, subject?: TSubject): readonly Field<TSubject>[];
 }
 
 export interface AccessPlan<TSubject, TActor, TAction extends string> {
@@ -100,7 +120,12 @@ function createPlan(
   rules: readonly AccessRule[]
 ): AnyPlan {
   const descriptor = resolveAccessDescriptor(subject, actor, rules);
-  const plan = compileAccess<unknown, Ability<unknown, string>>(descriptor) as unknown as AnyPlan;
+  const compiled = compileAccess<unknown, Ability<unknown, string>>(descriptor);
+  const plan = ((actorValue: unknown) => {
+    const ability = compiled(actorValue);
+    registerAccessAbility(ability as object, descriptor, actorValue);
+    return ability;
+  }) as AnyPlan;
   const add = (effect: "can" | "cannot") => (action: string, rule?: unknown) =>
     createPlan(subject, actor, [...rules, toRule(effect, action, rule)]);
 
@@ -111,6 +136,7 @@ function createPlan(
     actions: { value: descriptor.actions },
     fields: { value: (action: string) => unconditionalFields(descriptor, action) },
   });
+  registerArtifact(plan, { kind: "access-plan", schema: subject, descriptor });
   return plan;
 }
 
@@ -130,6 +156,13 @@ function toRule(effect: "can" | "cannot", action: string, rule: unknown): Access
     effect,
     action,
     fields: options.fields,
+    metadata:
+      options.id === undefined && options.reason === undefined
+        ? undefined
+        : Object.freeze({
+            ...(options.id === undefined ? {} : { id: options.id }),
+            ...(options.reason === undefined ? {} : { reason: options.reason }),
+          }),
     condition:
       options.when === undefined
         ? undefined

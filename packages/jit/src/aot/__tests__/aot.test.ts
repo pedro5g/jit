@@ -16,6 +16,43 @@ describe("JIT AOT generate", () => {
     rmSync(outDir, { recursive: true, force: true });
   });
 
+  it("lowers authorized query, projection and update without an ability runtime", async () => {
+    const Actor = JIT.object({ id: JIT.number() });
+    const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), title: JIT.string(), secret: JIT.string() });
+    const access = JIT.access(Post)
+      .actor(Actor)
+      .can("read", (query, actor) => query.eq("authorId", actor.field("id")))
+      .can("update", { fields: ["title"], when: (query, actor) => query.eq("authorId", actor.field("id")) });
+    const ability = access({ id: 1 });
+    const read = JIT.cqrs.query(Post).authorize(ability, "read").select("id", "title");
+    const shape = JIT.project(Post).authorize(ability, "read");
+    const change = JIT.patch.apply(Post).authorize(ability, "update");
+
+    const result = AOT.generate({ artifacts: { read, shape, change }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly read: (rows: Array<{ id: number; authorId: number; title: string; secret: string }>) => unknown[];
+      readonly shape: (value: { id: number; authorId: number; title: string; secret: string }) => object;
+      readonly change: (
+        value: { id: number; authorId: number; title: string; secret: string },
+        patch: unknown
+      ) => { id: number; authorId: number; title: string; secret: string };
+    };
+    const own = { id: 1, authorId: 1, title: "draft", secret: "s" };
+    const other = { id: 2, authorId: 2, title: "other", secret: "x" };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.read([own, other])).toEqual([{ id: 1, title: "draft" }]);
+    expect(generated.shape(own)).toEqual(own);
+    expect(generated.change(own, { title: "published" }).title).toBe("published");
+    expect(() => generated.change(other, { title: "blocked" })).toThrowError(
+      expect.objectContaining({ code: "ACCESS_DENIED", field: "title" })
+    );
+    expect(source).not.toContain("AccessPlan");
+    expect(source).not.toContain("ability.can");
+    expect(source).not.toContain("rules");
+  });
+
   it("should emit only explicitly grouped operations", async () => {
     const User = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
     const UserRuntime = { is: JIT.validate.is(User), clone: JIT.clone(User) };

@@ -311,7 +311,10 @@ export function accessPlanType(
   const actions = artifact.descriptor.actions.map((action) => JSON.stringify(action)).join(" | ") || "never";
   const check = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => boolean`;
 
-  return `(actor: ${actor}) => { can: ${check}; cannot: ${check} }`;
+  const fields = `(action: ${actions}, subject?: ${subject}) => readonly (keyof ${subject} & string)[]`;
+  const explain = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => { readonly allowed: boolean; readonly reason?: string; readonly ruleId?: string; readonly matchedProhibition?: boolean }`;
+
+  return `(actor: ${actor}) => { can: ${check}; cannot: ${check}; assert(action: ${actions}, subject: ${subject}, field?: keyof ${subject} & string): ${subject}; explain: ${explain}; fields: ${fields} }`;
 }
 
 export type TypeNames = ReadonlyMap<ATS.AnyTypeSchema, string> | undefined;

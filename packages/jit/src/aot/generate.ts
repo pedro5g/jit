@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { emitAccessSource } from "../compiler/access.js";
+import { emitAccessMutationGuardSource, emitAccessSource } from "../compiler/access.js";
 import { cacheKeyHashBindings, emitCacheKeySource } from "../compiler/cache-key.js";
 import { emitCanonicalSource } from "../compiler/canonical.js";
 import { changedEqualBindings, emitChangedSource } from "../compiler/changed.js";
@@ -34,7 +34,7 @@ import {
   JSON_PATCH_HELPERS,
   PATCH_EQUAL_HELPER,
 } from "../compiler/patch.js";
-import { emitProjectSource } from "../compiler/project.js";
+import { emitAuthorizedProjectSource, emitProjectSource } from "../compiler/project.js";
 import { emitQuerySource, expectCollectionObjectSchema, type QueryProgram } from "../compiler/query.js";
 import { emitReconcileSource } from "../compiler/reconcile.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
@@ -423,6 +423,53 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "project-plan") return emitProjectPlanArtifact(binding, declaration, artifact, type);
+    if (artifact.kind === "authorized-project-plan") {
+      const actor = serializeStaticData(artifact.actor);
+      if (actor === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "project.authorize",
+          reason: "the bound actor cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(`  const __actor = ${actor};`);
+      js.push(`  return ${asExpression(emitAuthorizedProjectSource(artifact, artifact.action), "project")};`);
+      js.push("})();");
+      return { binding, type };
+    }
+    if (artifact.kind === "authorized-update-plan") {
+      const actor = serializeStaticData(artifact.actor);
+      if (actor === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "update.authorize",
+          reason: "the bound actor cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(`  const actor = ${actor};`);
+      js.push("  class __AccessDeniedError extends Error {");
+      js.push("    constructor(action, field, reason) {");
+      js.push('      super("Access denied for action " + JSON.stringify(action));');
+      js.push('      this.name = "AccessDeniedError";');
+      js.push('      this.code = "ACCESS_DENIED";');
+      js.push("      this.action = action;");
+      js.push("      this.field = field;");
+      js.push("      this.reason = reason;");
+      js.push("    }");
+      js.push("  }");
+      js.push(`  const update = ${asExpression(emitUpdateSource(artifact.schema), "update")};`);
+      js.push(...indentBlock(emitAccessMutationGuardSource(artifact.descriptor, artifact.action)));
+      js.push("  return function authorizedUpdate(value, patch) {");
+      js.push("    authorizeMutation(value, patch);");
+      js.push("    return update(value, patch);");
+      js.push("  };");
+      js.push("})();");
+      return { binding, type };
+    }
     if (artifact.kind === "changed-plan") return emitChangedPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "patch-plan") return emitPatchPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "cache-key-plan") return emitCacheKeyPlanArtifact(binding, declaration, artifact, type);
@@ -512,7 +559,20 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return { binding, type };
     }
     if (artifact.kind === "access-plan") {
-      js.push(`${declaration} /*#__PURE__*/ ${asExpression(emitAccessSource(artifact.descriptor), "access")};`);
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push("  class __AccessDeniedError extends Error {");
+      js.push("    constructor(action, field, reason, ruleId) {");
+      js.push('      super("Access denied for action " + JSON.stringify(action));');
+      js.push('      this.name = "AccessDeniedError";');
+      js.push('      this.code = "ACCESS_DENIED";');
+      js.push("      this.action = action;");
+      js.push("      this.field = field;");
+      js.push("      this.reason = reason;");
+      js.push("      this.ruleId = ruleId;");
+      js.push("    }");
+      js.push("  }");
+      js.push(`  return ${asExpression(emitAccessSource(artifact.descriptor), "access")};`);
+      js.push("})();");
       return { binding, type };
     }
     if (artifact.kind === "canonical-plan") {
@@ -555,6 +615,10 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
     if (artifact.kind === "project-plan") return projectPlanType(artifact, typeNames);
+    if (artifact.kind === "authorized-project-plan")
+      return `(value: ${namedType(artifact.schema, typeNames)}) => Partial<${namedType(artifact.schema, typeNames)}>`;
+    if (artifact.kind === "authorized-update-plan")
+      return `(value: ${namedType(artifact.schema, typeNames)}, patch: unknown) => ${namedType(artifact.schema, typeNames)}`;
     if (artifact.kind === "changed-plan") return changedPlanType(artifact, typeNames);
     if (artifact.kind === "patch-plan") return patchPlanType(artifact, typeNames);
     if (artifact.kind === "cache-key-plan")

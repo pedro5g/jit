@@ -28,6 +28,7 @@ export {
   type Ability,
   type AccessBuilder,
   type AccessConditionBuilder,
+  type AccessExplanation,
   type AccessPlan,
   type AccessPredicate,
   type AccessRuleOptions,
