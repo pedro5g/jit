@@ -34,6 +34,7 @@ work and for production performance. Each page explains:
 - [Cache keys](./cache-key.md)
 - [Canonical](./canonical.md)
 - [Access control](./access-control.md)
+- [Rules](./rules.md)
 - [Match](./match.md)
 - [Schema migrations](./migration.md)
 - [CSV](./csv.md)

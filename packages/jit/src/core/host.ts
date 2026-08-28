@@ -43,6 +43,7 @@ export type OperationDescriptor =
         | "cacheKey"
         | "canonical"
         | "access"
+        | "rules"
         | "match"
         | "migrate"
         | "csv"

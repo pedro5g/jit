@@ -128,6 +128,26 @@ describe("runtime and define entrypoints", () => {
       .actor(DefineUser)
       .can("read")
       .can("update", (query, self) => query.eq("id", self.field("id")));
+    const RuntimeReview = RuntimeJIT.object({ userId: RuntimeJIT.number(), tier: RuntimeJIT.literal("known") });
+    const DefineReview = DefineJIT.object({ userId: DefineJIT.number(), tier: DefineJIT.literal("known") });
+    const runtimeRules = RuntimeJIT.rules(RuntimeUser)
+      .inputs({ minimum: RuntimeJIT.number() })
+      .rule("known", {
+        when: (query, input) => query.gte("id", input.field("minimum")),
+        emit: RuntimeReview,
+        values: (subject) => ({ userId: subject.field("id") }),
+      })
+      .rule("named", { when: (query) => query.neq("name", "") });
+    const defineRules = DefineJIT.rules(DefineUser)
+      .inputs({ minimum: DefineJIT.number() })
+      .rule("known", {
+        when: (query, input) => query.gte("id", input.field("minimum")),
+        emit: DefineReview,
+        values: (subject) => ({ userId: subject.field("id") }),
+      })
+      .rule("named", { when: (query) => query.neq("name", "") });
+    const runtimeManyRules = runtimeRules.many();
+    const defineManyRules = defineRules.many();
     const runtimeCanonical = RuntimeJIT.canonical(RuntimeUser);
     const defineCanonical = DefineJIT.canonical(DefineUser);
     const runtimeMergePatch = RuntimeJIT.patch.merge(RuntimeUser);
@@ -296,6 +316,78 @@ describe("runtime and define entrypoints", () => {
           ability.can("update", { ...value, id: 99 }),
           ability.can("archive" as never, value),
         ],
+      },
+      {
+        name: "testUserRule",
+        runtime: runtimeRules.test as UnknownArtifact,
+        define: defineRules.test as UnknownArtifact,
+        args: ["known", value, { minimum: 1 }],
+      },
+      {
+        name: "someUserRule",
+        runtime: runtimeRules.some as UnknownArtifact,
+        define: defineRules.some as UnknownArtifact,
+        args: [value, { minimum: 1 }],
+      },
+      {
+        name: "firstUserRule",
+        runtime: runtimeRules.first as UnknownArtifact,
+        define: defineRules.first as UnknownArtifact,
+        args: [value, { minimum: 1 }],
+      },
+      {
+        name: "matchUserRules",
+        runtime: runtimeRules.match as UnknownArtifact,
+        define: defineRules.match as UnknownArtifact,
+        args: [value, { minimum: 1 }],
+      },
+      {
+        name: "runUserRules",
+        runtime: runtimeRules.run as UnknownArtifact,
+        define: defineRules.run as UnknownArtifact,
+        args: [value, { minimum: 1 }],
+      },
+      {
+        name: "explainUserRules",
+        runtime: runtimeRules.explain as UnknownArtifact,
+        define: defineRules.explain as UnknownArtifact,
+        args: [value, { minimum: 1 }],
+      },
+      {
+        name: "knownUserPredicate",
+        runtime: runtimeRules.predicate("known") as UnknownArtifact,
+        define: defineRules.predicate("known") as UnknownArtifact,
+        args: [value, { minimum: 1 }],
+      },
+      {
+        name: "visitUserRules",
+        runtime: runtimeRules.to.visitor() as UnknownArtifact,
+        define: defineRules.to.visitor() as UnknownArtifact,
+        args: [value, { minimum: 1 }, () => {}],
+      },
+      {
+        name: "iterateUserRules",
+        runtime: runtimeRules.to.iterator() as UnknownArtifact,
+        define: defineRules.to.iterator() as UnknownArtifact,
+        args: [value, { minimum: 1 }],
+      },
+      {
+        name: "classifyUsers",
+        runtime: runtimeManyRules as UnknownArtifact,
+        define: defineManyRules as UnknownArtifact,
+        args: [[value], { minimum: 1 }],
+      },
+      {
+        name: "visitClassifiedUsers",
+        runtime: runtimeManyRules.to.visitor() as UnknownArtifact,
+        define: defineManyRules.to.visitor() as UnknownArtifact,
+        args: [[value], { minimum: 1 }, () => {}],
+      },
+      {
+        name: "iterateClassifiedUsers",
+        runtime: runtimeManyRules.to.iterator() as UnknownArtifact,
+        define: defineManyRules.to.iterator() as UnknownArtifact,
+        args: [[value], { minimum: 1 }],
       },
       {
         name: "canonicalUser",

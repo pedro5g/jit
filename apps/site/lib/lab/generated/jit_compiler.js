@@ -981,6 +981,25 @@ function emitObjectKey(key) {
   return parse_exports.parseKey(key);
 }
 
+// ../../packages/jit/src/compiler/source/query-condition.ts
+function emitQueryConditionSource(condition, context) {
+  if (condition.kind === "logical") {
+    const operator = condition.op === "and" ? "&&" : "||";
+    const left = emitQueryConditionSource(condition.left, context);
+    const right = emitQueryConditionSource(condition.right, context);
+    return `(${left} ${operator} ${right})`;
+  }
+  if (condition.kind === "not") return `!(${emitQueryConditionSource(condition.inner, context)})`;
+  const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
+  return `${emitQueryValueSource(condition.left, context)} ${operators[condition.op]} ${emitQueryValueSource(condition.right, context)}`;
+}
+function emitQueryValueSource(value, context) {
+  if (value.kind === "field") return context.fieldAccess?.(value.key) ?? emitPropertyAccess(context.fieldBase, value.key);
+  if (value.kind === "param") return context.paramAccess?.(value.name) ?? emitPropertyAccess(context.paramBase, value.name);
+  if (value.kind === "literal") return emitLiteral(value.value);
+  return value.name;
+}
+
 // ../../packages/jit/src/compiler/access.ts
 var ACCESS_ABILITIES = /* @__PURE__ */ new WeakMap();
 function registerAccessAbility(ability, descriptor, actor) {
@@ -995,10 +1014,10 @@ function resolveAccessContext(value, actor) {
   const artifact = getArtifact(value);
   return artifact?.kind === "access-plan" ? Object.freeze({ descriptor: artifact.descriptor, actor }) : void 0;
 }
-function resolveAccessDescriptor(subject, actor, rules) {
+function resolveAccessDescriptor(subject, actor, rules2) {
   const object2 = expectProjectionObject(subject, "JIT.access()");
   const actions = [];
-  for (const rule of rules) {
+  for (const rule of rules2) {
     if (!actions.includes(rule.action)) actions.push(rule.action);
     for (const field of rule.fields ?? []) {
       if (object2.def.props[field] === void 0) {
@@ -1009,7 +1028,7 @@ function resolveAccessDescriptor(subject, actor, rules) {
       }
     }
   }
-  const normalized = rules.map(
+  const normalized = rules2.map(
     (rule) => rule.fields === void 0 ? rule : Object.freeze({ ...rule, fields: Object.freeze([...new Set(rule.fields)]) })
   );
   const actionPlans = actions.map((action) => {
@@ -1034,9 +1053,9 @@ function resolveAccessDescriptor(subject, actor, rules) {
     actionPlans: Object.freeze(actionPlans)
   });
 }
-function foldDominatedRules(rules) {
-  const unconditional = rules.find((rule) => rule.condition === void 0 && rule.fields === void 0);
-  return unconditional === void 0 ? [...rules] : [unconditional];
+function foldDominatedRules(rules2) {
+  const unconditional = rules2.find((rule) => rule.condition === void 0 && rule.fields === void 0);
+  return unconditional === void 0 ? [...rules2] : [unconditional];
 }
 function collectConditionPaths(condition, subject, actor) {
   if (condition === void 0) return;
@@ -1181,19 +1200,7 @@ function emitRuleAt(rule, effect, subject, field, actor) {
   return condition === "true" ? guard : `${guard} && (${condition})`;
 }
 function emitConditionAt(condition, subject, actor) {
-  if (condition.kind === "logical") {
-    const operator = condition.op === "and" ? "&&" : "||";
-    return `(${emitConditionAt(condition.left, subject, actor)} ${operator} ${emitConditionAt(condition.right, subject, actor)})`;
-  }
-  if (condition.kind === "not") return `!(${emitConditionAt(condition.inner, subject, actor)})`;
-  const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" };
-  return `${emitValueAt(condition.left, subject, actor)} ${operators[condition.op]} ${emitValueAt(condition.right, subject, actor)}`;
-}
-function emitValueAt(value, subject, actor) {
-  if (value.kind === "field") return emitPropertyAccess(subject, value.key);
-  if (value.kind === "literal") return emitLiteral(value.value);
-  if (value.kind === "param") return emitPropertyAccess(actor, value.name);
-  return value.name;
+  return emitQueryConditionSource(condition, { fieldBase: subject, paramBase: actor });
 }
 function accessCacheKey(descriptor) {
   return `access:${JSON.stringify(descriptor.rules)}`;
@@ -2960,7 +2967,7 @@ function mergeHints(left, right) {
   const entity2 = right.entity ?? left.entity;
   const index2 = right.index ?? left.index;
   const order = right.order ?? left.order;
-  const compare2 = mergeOptional(left.compare, right.compare);
+  const compare3 = mergeOptional(left.compare, right.compare);
   const clone3 = mergeOptional(left.clone, right.clone);
   const hash4 = mergeOptional(left.hash, right.hash);
   const diff3 = mergeOptional(left.diff, right.diff);
@@ -2970,7 +2977,7 @@ function mergeHints(left, right) {
     ...index2 ? { index: index2 } : {},
     ...order ? { order } : {},
     ...collection ? { collection } : {},
-    ...compare2 ? { compare: compare2 } : {},
+    ...compare3 ? { compare: compare3 } : {},
     ...clone3 ? { clone: clone3 } : {},
     ...hash4 ? { hash: hash4 } : {},
     ...diff3 ? { diff: diff3 } : {},
@@ -14023,6 +14030,728 @@ function compileReconcile(schema, descriptor, options) {
   return compiled;
 }
 
+// ../../packages/jit/src/compiler/rules.ts
+function resolveRulesDescriptor(subject, inputs, declarations) {
+  const subjectObject = expectProjectionObject(subject, "JIT.rules()");
+  const inputObject = inputs === void 0 ? void 0 : expectProjectionObject(inputs, "JIT.rules().inputs()");
+  const ids = /* @__PURE__ */ new Set();
+  const rules2 = [];
+  const bindingNames = [];
+  const bindings = [];
+  for (let order = 0; order < declarations.length; order++) {
+    const declaration = declarations[order];
+    if (declaration.id.length === 0) throw new JITError("INVALID_OPERATION", "rule id must not be empty");
+    if (ids.has(declaration.id)) {
+      throw new JITError("INVALID_OPERATION", `rule id ${JSON.stringify(declaration.id)} is duplicated`);
+    }
+    if (!Number.isSafeInteger(declaration.priority)) {
+      throw new JITError("INVALID_OPERATION", `rule ${JSON.stringify(declaration.id)} priority must be a safe integer`);
+    }
+    const subjectPaths = /* @__PURE__ */ new Set();
+    const inputPaths = /* @__PURE__ */ new Set();
+    validateCondition3(declaration.condition, subjectObject, inputObject, subjectPaths, inputPaths);
+    const folded = foldCondition(declaration.condition);
+    const constant2 = typeof folded === "boolean" ? folded : void 0;
+    const condition = typeof folded === "boolean" ? TRUE_CONDITION : folded;
+    const dependencies = constant2 === void 0 ? { subjectPaths, inputPaths } : collectPaths(condition);
+    const outcome = declaration.outcome === void 0 ? void 0 : resolveOutcome(declaration, subjectObject, inputObject, dependencies, (value) => {
+      const name = `__ro${bindings.length}`;
+      bindings[bindings.length] = value;
+      bindingNames[bindingNames.length] = name;
+      return name;
+    });
+    ids.add(declaration.id);
+    rules2[rules2.length] = Object.freeze({
+      id: declaration.id,
+      condition: freezeCondition(condition),
+      constant: constant2,
+      priority: declaration.priority,
+      order,
+      subjectPaths: Object.freeze([...dependencies.subjectPaths]),
+      inputPaths: Object.freeze([...dependencies.inputPaths]),
+      outcome
+    });
+  }
+  return Object.freeze({
+    subject,
+    inputs,
+    rules: Object.freeze(rules2),
+    ids: Object.freeze([...ids]),
+    outcomes: rules2.some((rule) => rule.outcome !== void 0),
+    bindingNames: Object.freeze(bindingNames),
+    bindings: Object.freeze(bindings)
+  });
+}
+var TRUE_CONDITION = Object.freeze({
+  kind: "compare",
+  op: "eq",
+  left: Object.freeze({ kind: "literal", value: true }),
+  right: Object.freeze({ kind: "literal", value: true })
+});
+function collectPaths(condition) {
+  const subjectPaths = /* @__PURE__ */ new Set();
+  const inputPaths = /* @__PURE__ */ new Set();
+  const walk = (node) => {
+    if (node.kind === "logical") {
+      walk(node.left);
+      walk(node.right);
+      return;
+    }
+    if (node.kind === "not") {
+      walk(node.inner);
+      return;
+    }
+    for (const value of [node.left, node.right]) {
+      if (value.kind === "field") subjectPaths.add(value.key);
+      else if (value.kind === "param") inputPaths.add(value.name);
+    }
+  };
+  walk(condition);
+  return { subjectPaths, inputPaths };
+}
+function resolveOutcome(declaration, subject, inputs, dependencies, bind) {
+  const outcome = declaration.outcome;
+  const shape = expectProjectionObject(outcome.target, `rule ${JSON.stringify(declaration.id)} outcome`);
+  const explicit = outcome.fields;
+  for (const key of Object.keys(explicit)) {
+    if (shape.def.props[key] === void 0) {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `rule ${JSON.stringify(declaration.id)} outcome names unknown target field ${JSON.stringify(key)}`
+      );
+    }
+  }
+  const fields = [];
+  for (const key of Object.keys(shape.def.props)) {
+    const target = shape.def.props[key];
+    const value = explicit[key] ?? autoMatchOutcomeValue(key, target, subject, inputs);
+    if (value === void 0) {
+      if (resolveWrappers(target).optional) continue;
+      throw new JITError(
+        "INVALID_OPERATION",
+        `rule ${JSON.stringify(declaration.id)} outcome cannot fill required target field ${JSON.stringify(key)}`
+      );
+    }
+    if (value.kind === "field") {
+      if (subject.def.props[value.key] === void 0) {
+        throw new JITError(
+          "INVALID_OPERATION",
+          `rule ${JSON.stringify(declaration.id)} outcome names unknown subject field ${JSON.stringify(value.key)}`
+        );
+      }
+      dependencies.subjectPaths.add(value.key);
+    } else if (value.kind === "param") {
+      if (inputs?.def.props[value.name] === void 0) {
+        throw new JITError(
+          "INVALID_OPERATION",
+          `rule ${JSON.stringify(declaration.id)} outcome names unknown input ${JSON.stringify(value.name)}`
+        );
+      }
+      dependencies.inputPaths.add(value.name);
+    } else if (value.kind === "binding") {
+      throw new JITError("INVALID_OPERATION", "rule outcomes carry compiler literals, subject fields or inputs");
+    }
+    fields[fields.length] = Object.freeze({ key, value: Object.freeze({ ...value }) });
+  }
+  return Object.freeze({
+    kind: outcome.kind,
+    target: outcome.target,
+    type: outcome.type,
+    fields: Object.freeze(fields),
+    binding: outcome.kind === "event" ? bind(outcome.factory) : void 0
+  });
+}
+function autoMatchOutcomeValue(key, target, subject, inputs) {
+  if (subject.def.props[key] !== void 0) return { kind: "field", key };
+  if (inputs?.def.props[key] !== void 0) return { kind: "param", name: key };
+  const base = resolveWrappers(target).base;
+  if (base.type === TypeName.literal) return { kind: "literal", value: base.def.value };
+  return void 0;
+}
+function validateCondition3(condition, subject, inputs, subjectPaths, inputPaths) {
+  if (condition.kind === "logical") {
+    validateCondition3(condition.left, subject, inputs, subjectPaths, inputPaths);
+    validateCondition3(condition.right, subject, inputs, subjectPaths, inputPaths);
+    return;
+  }
+  if (condition.kind === "not") {
+    validateCondition3(condition.inner, subject, inputs, subjectPaths, inputPaths);
+    return;
+  }
+  validateValue2(condition.left, subject, inputs, subjectPaths, inputPaths);
+  validateValue2(condition.right, subject, inputs, subjectPaths, inputPaths);
+}
+function validateValue2(value, subject, inputs, subjectPaths, inputPaths) {
+  if (value.kind === "field") {
+    if (subject.def.props[value.key] === void 0) {
+      throw new JITError("INVALID_OPERATION", `rule condition names unknown subject field ${JSON.stringify(value.key)}`);
+    }
+    subjectPaths.add(value.key);
+    return;
+  }
+  if (value.kind === "param") {
+    if (inputs?.def.props[value.name] === void 0) {
+      throw new JITError("INVALID_OPERATION", `rule condition names unknown input ${JSON.stringify(value.name)}`);
+    }
+    inputPaths.add(value.name);
+    return;
+  }
+  if (value.kind === "binding") {
+    throw new JITError("INVALID_OPERATION", "rules require compiler literals or declared inputs, not runtime bindings");
+  }
+  const literal4 = value.value;
+  if (literal4 !== null && literal4 !== void 0 && typeof literal4 !== "string" && typeof literal4 !== "number" && typeof literal4 !== "bigint" && typeof literal4 !== "boolean") {
+    throw new JITError("INVALID_OPERATION", "rule literals must be primitive compiler literals");
+  }
+}
+var COMPARATORS = Object.freeze({
+  eq: (left, right) => left === right,
+  neq: (left, right) => left !== right,
+  gt: (left, right) => left > right,
+  gte: (left, right) => left >= right,
+  lt: (left, right) => left < right,
+  lte: (left, right) => left <= right
+});
+function foldCondition(condition) {
+  if (condition.kind === "logical") {
+    const left = foldCondition(condition.left);
+    const right = foldCondition(condition.right);
+    if (condition.op === "and") {
+      if (left === false || right === false) return false;
+      if (left === true) return right;
+      if (right === true) return left;
+    } else {
+      if (left === true || right === true) return true;
+      if (left === false) return right;
+      if (right === false) return left;
+    }
+    return { kind: "logical", op: condition.op, left, right };
+  }
+  if (condition.kind === "not") {
+    const inner = foldCondition(condition.inner);
+    if (typeof inner === "boolean") return !inner;
+    if (inner.kind === "not") return inner.inner;
+    return { kind: "not", inner };
+  }
+  if (condition.left.kind === "literal" && condition.right.kind === "literal") {
+    return COMPARATORS[condition.op](condition.left.value, condition.right.value);
+  }
+  return condition;
+}
+function freezeCondition(condition) {
+  if (condition.kind === "logical") {
+    return Object.freeze({
+      ...condition,
+      left: freezeCondition(condition.left),
+      right: freezeCondition(condition.right)
+    });
+  }
+  if (condition.kind === "not") return Object.freeze({ ...condition, inner: freezeCondition(condition.inner) });
+  return Object.freeze({
+    ...condition,
+    left: Object.freeze({ ...condition.left }),
+    right: Object.freeze({ ...condition.right })
+  });
+}
+var SUBJECT = "subject";
+var INPUTS = "inputs";
+function paramList(descriptor, head, tail) {
+  const parts = [head];
+  if (descriptor.inputs !== void 0) parts[parts.length] = INPUTS;
+  if (tail !== void 0) parts[parts.length] = tail;
+  return parts.join(", ");
+}
+function orderedRules(descriptor) {
+  const live = descriptor.rules.filter((rule) => rule.constant !== false);
+  return [...live].sort((left, right) => right.priority - left.priority || left.order - right.order);
+}
+var EMPTY_PLAN = Object.freeze({
+  reads: /* @__PURE__ */ new Map(),
+  predicates: /* @__PURE__ */ new Map(),
+  invariant: Object.freeze([]),
+  variant: Object.freeze([])
+});
+function planShared(rules2, loop = false) {
+  const leaves = [];
+  const collect = (node) => {
+    if (node.kind === "logical") {
+      collect(node.left);
+      collect(node.right);
+      return;
+    }
+    if (node.kind === "not") {
+      collect(node.inner);
+      return;
+    }
+    leaves[leaves.length] = node;
+  };
+  for (const rule of rules2) if (rule.constant === void 0) collect(rule.condition);
+  const plain = { fieldBase: SUBJECT, paramBase: INPUTS };
+  const counts = /* @__PURE__ */ new Map();
+  const nodes = /* @__PURE__ */ new Map();
+  for (const leaf of leaves) {
+    const key = emitQueryConditionSource(leaf, plain);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (!nodes.has(key)) nodes.set(key, leaf);
+  }
+  const predicates = /* @__PURE__ */ new Map();
+  for (const [key, count] of counts) {
+    if (count > 1 || loop && !readsSubject(nodes.get(key))) {
+      predicates.set(key, `c${predicates.size}`);
+    }
+  }
+  const readCounts = /* @__PURE__ */ new Map();
+  const countValue = (value) => {
+    const key = value.kind === "field" ? `f:${value.key}` : value.kind === "param" ? `p:${value.name}` : void 0;
+    if (key !== void 0) readCounts.set(key, (readCounts.get(key) ?? 0) + 1);
+  };
+  const countLeaf = (leaf) => {
+    if (leaf.kind !== "compare") return;
+    countValue(leaf.left);
+    countValue(leaf.right);
+  };
+  for (const leaf of leaves) {
+    if (leaf.kind !== "compare") continue;
+    if (predicates.has(emitQueryConditionSource(leaf, plain))) continue;
+    countLeaf(leaf);
+  }
+  for (const key of predicates.keys()) countLeaf(nodes.get(key));
+  for (const rule of rules2) {
+    for (const field of rule.outcome?.fields ?? []) countValue(field.value);
+  }
+  const reads = /* @__PURE__ */ new Map();
+  const invariant = [];
+  const variant = [];
+  for (const [key, count] of readCounts) {
+    const invariantRead = loop && key.startsWith("p:");
+    if (count < 2 && !invariantRead) continue;
+    const path = key.slice(2);
+    if (key.startsWith("f:")) {
+      const local = `s${variant.length}`;
+      reads.set(key, local);
+      variant[variant.length] = { local, source: emitPropertyAccess(SUBJECT, path) };
+    } else {
+      const local = `p${invariant.length}`;
+      reads.set(key, local);
+      invariant[invariant.length] = { local, source: emitPropertyAccess(INPUTS, path) };
+    }
+  }
+  const withReads = readContext(reads);
+  for (const [key, local] of predicates) {
+    const node = nodes.get(key);
+    const binding = { local, source: emitQueryConditionSource(node, withReads) };
+    if (readsSubject(node)) variant[variant.length] = binding;
+    else invariant[invariant.length] = binding;
+  }
+  return {
+    reads,
+    predicates,
+    invariant: Object.freeze(invariant),
+    variant: Object.freeze(variant)
+  };
+}
+function readsSubject(node) {
+  if (node.kind === "logical") return readsSubject(node.left) || readsSubject(node.right);
+  if (node.kind === "not") return readsSubject(node.inner);
+  return node.left.kind === "field" || node.right.kind === "field";
+}
+function readContext(reads) {
+  if (reads.size === 0) return { fieldBase: SUBJECT, paramBase: INPUTS };
+  return {
+    fieldBase: SUBJECT,
+    paramBase: INPUTS,
+    fieldAccess: (key) => reads.get(`f:${key}`) ?? emitPropertyAccess(SUBJECT, key),
+    paramAccess: (name) => reads.get(`p:${name}`) ?? emitPropertyAccess(INPUTS, name)
+  };
+}
+function emitCondition4(rule, plan) {
+  if (rule.constant !== void 0) return String(rule.constant);
+  return emitNode2(rule.condition, plan);
+}
+function emitNode2(node, plan) {
+  if (node.kind === "logical") {
+    const operator = node.op === "and" ? "&&" : "||";
+    return `(${emitNode2(node.left, plan)} ${operator} ${emitNode2(node.right, plan)})`;
+  }
+  if (node.kind === "not") return `!(${emitNode2(node.inner, plan)})`;
+  const shared = plan.predicates.get(emitQueryConditionSource(node, { fieldBase: SUBJECT, paramBase: INPUTS }));
+  return shared ?? emitQueryConditionSource(node, readContext(plan.reads));
+}
+function emitOutcome(rule, plan, options) {
+  const outcome = rule.outcome;
+  if (outcome === void 0) return "undefined";
+  const context = readContext(plan.reads);
+  const fields = outcome.fields.map((field) => `${emitObjectKey(field.key)}: ${emitQueryValueSource(field.value, context)}`).join(", ");
+  const value = `{ ${fields} }`;
+  if (outcome.kind === "object") return value;
+  const binding = outcome.binding;
+  return `${options.bindingNames?.get(binding) ?? binding}.create(${value})`;
+}
+function emitBindings(writer, bindings) {
+  for (const binding of bindings) writer.line(`const ${binding.local} = ${binding.source};`);
+}
+function emitRulesTestSource(descriptor) {
+  const writer = new CodeWriter();
+  writer.line(`function rulesTest(${paramList(descriptor, "rule, subject")}) {`);
+  writer.indent(() => {
+    writer.line("switch (rule) {");
+    writer.indent(() => {
+      for (const rule of descriptor.rules) {
+        writer.line(`case ${JSON.stringify(rule.id)}:`);
+        writer.indent(() => writer.line(`return ${emitCondition4(rule, EMPTY_PLAN)};`));
+      }
+      writer.line("default:");
+      writer.indent(() => writer.line("return false;"));
+    });
+    writer.line("}");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesPredicateSource(descriptor, ruleId) {
+  const rule = descriptor.rules.find((candidate) => candidate.id === ruleId);
+  if (rule === void 0) {
+    throw new JITError("INVALID_OPERATION", `unknown rule ${JSON.stringify(ruleId)}`);
+  }
+  return `function rulesPredicate(${paramList(descriptor, SUBJECT)}) {
+  return ${emitCondition4(rule, EMPTY_PLAN)};
+}
+`;
+}
+function emitRulesSomeSource(descriptor) {
+  const rules2 = descriptor.rules.filter((rule) => rule.constant !== false);
+  const always = rules2.some((rule) => rule.constant === true);
+  const expression = always ? "true" : rules2.length === 0 ? "false" : rules2.map((rule) => `(${emitCondition4(rule, EMPTY_PLAN)})`).join(" || ");
+  return `function rulesSome(${paramList(descriptor, SUBJECT)}) {
+  return ${expression};
+}
+`;
+}
+function emitRulesFirstSource(descriptor) {
+  const writer = new CodeWriter();
+  writer.line(`function rulesFirst(${paramList(descriptor, SUBJECT)}) {`);
+  writer.indent(() => {
+    for (const rule of orderedRules(descriptor)) {
+      if (rule.constant === true) {
+        writer.line(`return ${JSON.stringify(rule.id)};`);
+        writer.line("}");
+        return;
+      }
+      writer.line(`if (${emitCondition4(rule, EMPTY_PLAN)}) return ${JSON.stringify(rule.id)};`);
+    }
+    writer.line("return undefined;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesMatchSource(descriptor) {
+  const rules2 = orderedRules(descriptor);
+  const plan = planShared(rules2);
+  const writer = new CodeWriter();
+  writer.line(`function rulesMatch(${paramList(descriptor, SUBJECT)}) {`);
+  writer.indent(() => {
+    emitBindings(writer, plan.invariant);
+    emitBindings(writer, plan.variant);
+    writer.line("const out = [];");
+    writer.line("let j = 0;");
+    for (const rule of rules2) {
+      const id = JSON.stringify(rule.id);
+      if (rule.constant === true) writer.line(`out[j++] = ${id};`);
+      else writer.line(`if (${emitCondition4(rule, plan)}) out[j++] = ${id};`);
+    }
+    writer.line("return out;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function outcomeRules(descriptor) {
+  return orderedRules(descriptor).filter((rule) => rule.outcome !== void 0);
+}
+function emitRulesRunSource(descriptor, options = {}) {
+  const rules2 = outcomeRules(descriptor);
+  const plan = planShared(rules2);
+  const writer = new CodeWriter();
+  writer.line(`function rulesRun(${paramList(descriptor, SUBJECT)}) {`);
+  writer.indent(() => {
+    emitBindings(writer, plan.invariant);
+    emitBindings(writer, plan.variant);
+    writer.line("const out = [];");
+    writer.line("let j = 0;");
+    for (const rule of rules2) {
+      const outcome = emitOutcome(rule, plan, options);
+      if (rule.constant === true) writer.line(`out[j++] = ${outcome};`);
+      else writer.line(`if (${emitCondition4(rule, plan)}) out[j++] = ${outcome};`);
+    }
+    writer.line("return out;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesVisitorSource(descriptor, options = {}) {
+  const rules2 = orderedRules(descriptor);
+  const plan = planShared(rules2);
+  const writer = new CodeWriter();
+  writer.line(`function rulesVisit(${paramList(descriptor, SUBJECT, "consume")}) {`);
+  writer.indent(() => {
+    emitBindings(writer, plan.invariant);
+    emitBindings(writer, plan.variant);
+    writer.line("let n = 0;");
+    for (const rule of rules2) {
+      const call2 = `n++, consume(${JSON.stringify(rule.id)}, ${emitOutcome(rule, plan, options)});`;
+      if (rule.constant === true) writer.line(call2);
+      else writer.line(`if (${emitCondition4(rule, plan)}) ${call2}`);
+    }
+    writer.line("return n;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesIteratorSource(descriptor, options = {}) {
+  const rules2 = outcomeRules(descriptor);
+  const plan = planShared(rules2);
+  const writer = new CodeWriter();
+  writer.line(`function* rulesIterate(${paramList(descriptor, SUBJECT)}) {`);
+  writer.indent(() => {
+    emitBindings(writer, plan.invariant);
+    emitBindings(writer, plan.variant);
+    for (const rule of rules2) {
+      const outcome = `yield ${emitOutcome(rule, plan, options)};`;
+      if (rule.constant === true) writer.line(outcome);
+      else writer.line(`if (${emitCondition4(rule, plan)}) ${outcome}`);
+    }
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitManyBody(writer, rules2, plan, options, statement) {
+  emitBindings(writer, plan.invariant);
+  writer.line("const size = list.length;");
+  writer.line("for (let i = 0; i < size; i++) {");
+  writer.indent(() => {
+    writer.line("const subject = list[i];");
+    emitBindings(writer, plan.variant);
+    for (const rule of rules2) {
+      const line = statement(rule, emitOutcome(rule, plan, options));
+      if (rule.constant === true) writer.line(line);
+      else writer.line(`if (${emitCondition4(rule, plan)}) ${line}`);
+    }
+  });
+  writer.line("}");
+}
+function emitRulesManySource(descriptor, options = {}) {
+  const rules2 = outcomeRules(descriptor);
+  const plan = planShared(rules2, true);
+  const writer = new CodeWriter();
+  writer.line(`function rulesMany(${paramList(descriptor, "list")}) {`);
+  writer.indent(() => {
+    writer.line("const out = [];");
+    writer.line("let j = 0;");
+    emitManyBody(writer, rules2, plan, options, (_rule, outcome) => `out[j++] = ${outcome};`);
+    writer.line("return out;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesManyVisitorSource(descriptor, options = {}) {
+  const rules2 = orderedRules(descriptor);
+  const plan = planShared(rules2, true);
+  const writer = new CodeWriter();
+  writer.line(`function rulesManyVisit(${paramList(descriptor, "list", "consume")}) {`);
+  writer.indent(() => {
+    writer.line("let n = 0;");
+    emitManyBody(
+      writer,
+      rules2,
+      plan,
+      options,
+      (rule, outcome) => `n++, consume(${JSON.stringify(rule.id)}, ${outcome}, i);`
+    );
+    writer.line("return n;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesManyIteratorSource(descriptor, options = {}) {
+  const rules2 = outcomeRules(descriptor);
+  const plan = planShared(rules2, true);
+  const writer = new CodeWriter();
+  writer.line(`function* rulesManyIterate(${paramList(descriptor, "list")}) {`);
+  writer.indent(() => {
+    emitManyBody(writer, rules2, plan, options, (_rule, outcome) => `yield ${outcome};`);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesExplainSource(descriptor) {
+  const rules2 = orderedRules(descriptor);
+  const plan = planShared(rules2);
+  const writer = new CodeWriter();
+  writer.line(`function rulesExplain(${paramList(descriptor, SUBJECT)}) {`);
+  writer.indent(() => {
+    emitBindings(writer, plan.invariant);
+    emitBindings(writer, plan.variant);
+    writer.line("const matched = [];");
+    writer.line("let j = 0;");
+    for (const rule of rules2) {
+      const id = JSON.stringify(rule.id);
+      if (rule.constant === true) writer.line(`matched[j++] = ${id};`);
+      else writer.line(`if (${emitCondition4(rule, plan)}) matched[j++] = ${id};`);
+    }
+    writer.line(`return { matched, evaluated: ${JSON.stringify(rules2.map((rule) => rule.id))} };`);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitRulesPlanSource(descriptor, options) {
+  const writer = new CodeWriter();
+  writer.line("(() => {");
+  writer.indent(() => {
+    for (const source of [
+      emitRulesTestSource(descriptor),
+      emitRulesSomeSource(descriptor),
+      emitRulesFirstSource(descriptor),
+      emitRulesMatchSource(descriptor),
+      emitRulesRunSource(descriptor, options),
+      emitRulesVisitorSource(descriptor, options),
+      emitRulesIteratorSource(descriptor, options),
+      emitRulesManySource(descriptor, options),
+      emitRulesManyVisitorSource(descriptor, options),
+      emitRulesManyIteratorSource(descriptor, options),
+      emitRulesExplainSource(descriptor)
+    ]) {
+      for (const line of source.split("\n")) writer.line(line);
+    }
+    writer.line("const many = Object.assign(rulesMany, {");
+    writer.indent(() => {
+      writer.line("to: Object.freeze({ visitor: () => rulesManyVisit, iterator: () => rulesManyIterate }),");
+    });
+    writer.line("});");
+    writer.line("const predicates = Object.freeze({");
+    writer.indent(() => {
+      for (const rule of descriptor.rules) {
+        writer.line(`${emitObjectKey(rule.id)}: ${emitRulesPredicateSource(descriptor, rule.id).trim()},`);
+      }
+    });
+    writer.line("});");
+    writer.line("return Object.freeze({");
+    writer.indent(() => {
+      writer.line("test: rulesTest,");
+      writer.line("some: rulesSome,");
+      writer.line("first: rulesFirst,");
+      writer.line("match: rulesMatch,");
+      writer.line("run: rulesRun,");
+      writer.line("explain: rulesExplain,");
+      writer.line("predicate: (rule) => predicates[rule],");
+      writer.line("many: () => many,");
+      writer.line("to: Object.freeze({ visitor: () => rulesVisit, iterator: () => rulesIterate }),");
+      writer.line(`ids: Object.freeze(${JSON.stringify(descriptor.ids)}),`);
+    });
+    writer.line("});");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function emitRulesSinkSource(descriptor, sink, options = {}) {
+  switch (sink) {
+    case "test":
+      return emitRulesTestSource(descriptor);
+    case "some":
+      return emitRulesSomeSource(descriptor);
+    case "first":
+      return emitRulesFirstSource(descriptor);
+    case "match":
+      return emitRulesMatchSource(descriptor);
+    case "run":
+      return emitRulesRunSource(descriptor, options);
+    case "visitor":
+      return emitRulesVisitorSource(descriptor, options);
+    case "iterator":
+      return emitRulesIteratorSource(descriptor, options);
+    case "many":
+      return emitRulesManySource(descriptor, options);
+    case "many-visitor":
+      return emitRulesManyVisitorSource(descriptor, options);
+    case "many-iterator":
+      return emitRulesManyIteratorSource(descriptor, options);
+    case "explain":
+      return emitRulesExplainSource(descriptor);
+    case "predicate":
+      return emitRulesPredicateSource(descriptor, options.ruleId);
+    default:
+      return emitRulesPlanSource(descriptor, options);
+  }
+}
+function compileRulesSink(descriptor, sink, options) {
+  const source = emitRulesSinkSource(descriptor, sink, { ruleId: options?.ruleId });
+  const template = getCompileCached(
+    descriptor.subject,
+    `rules:${sink}:${source}`,
+    () => ({ source, create: globalThis.Function(...descriptor.bindingNames, `return ${source};`) }),
+    options
+  );
+  return template.create(...descriptor.bindings);
+}
+function inspectRules(descriptor) {
+  const live = orderedRules(descriptor);
+  const plan = planShared(live);
+  const subjectPaths = /* @__PURE__ */ new Set();
+  const inputPaths = /* @__PURE__ */ new Set();
+  for (const rule of live) {
+    for (const path of rule.subjectPaths) subjectPaths.add(path);
+    for (const path of rule.inputPaths) inputPaths.add(path);
+  }
+  const declared = descriptor.inputs === void 0 ? [] : Object.keys(expectProjectionObject(descriptor.inputs, "JIT.rules().inputs()").def.props);
+  return Object.freeze({
+    rules: descriptor.rules.length,
+    liveRules: live.length,
+    deadRules: Object.freeze(descriptor.rules.filter((rule) => rule.constant === false).map((rule) => rule.id)),
+    subjectPaths: Object.freeze([...subjectPaths]),
+    inputPaths: Object.freeze([...inputPaths]),
+    deadInputs: Object.freeze(declared.filter((name) => !inputPaths.has(name))),
+    sharedReads: plan.reads.size,
+    sharedPredicates: plan.predicates.size,
+    priorityGroups: new Set(live.map((rule) => rule.priority)).size,
+    outcomes: descriptor.rules.filter((rule) => rule.outcome !== void 0).length,
+    strategy: "inline"
+  });
+}
+function lowerRuleToQueryCondition(descriptor, ruleId, inputs, bindingOffset) {
+  const rule = descriptor.rules.find((candidate) => candidate.id === ruleId);
+  if (rule === void 0) throw new JITError("INVALID_OPERATION", `unknown rule ${JSON.stringify(ruleId)}`);
+  if (rule.constant !== void 0) {
+    return Object.freeze({ kind: rule.constant ? "always" : "never", bindings: Object.freeze([]) });
+  }
+  const values = [];
+  const condition = bindInputs(
+    rule.condition,
+    inputs,
+    bindingOffset,
+    values
+  );
+  return Object.freeze({ kind: "condition", condition, bindings: Object.freeze(values) });
+}
+function bindInputs(condition, inputs, offset, bindings) {
+  if (condition.kind === "logical") {
+    return {
+      ...condition,
+      left: bindInputs(condition.left, inputs, offset, bindings),
+      right: bindInputs(condition.right, inputs, offset, bindings)
+    };
+  }
+  if (condition.kind === "not") return { ...condition, inner: bindInputs(condition.inner, inputs, offset, bindings) };
+  return {
+    ...condition,
+    left: bindInputValue(condition.left, inputs, offset, bindings),
+    right: bindInputValue(condition.right, inputs, offset, bindings)
+  };
+}
+function bindInputValue(value, inputs, offset, bindings) {
+  if (value.kind !== "param") return value;
+  const name = `__q${offset + bindings.length}`;
+  bindings[bindings.length] = inputs?.[value.name];
+  return { kind: "binding", name };
+}
+
 // ../../packages/jit/src/compiler/sort.ts
 function emitSortSource(descriptor) {
   const writer = new CodeWriter();
@@ -15576,26 +16305,26 @@ function createFieldLookup(layout) {
   return { fields: new Map(layout.fields.map((field) => [field.key, field])) };
 }
 function validateBinaryQueryPlan(lookup2, plan) {
-  for (const filter of plan.filters) validateCondition3(lookup2, filter.condition);
+  for (const filter of plan.filters) validateCondition4(lookup2, filter.condition);
   if (plan.select) validateKeys(lookup2, plan.select.fields, "binary query select");
   if (plan.aggregate?.key) validateKeys(lookup2, [plan.aggregate.key], `binary query ${plan.aggregate.op}`);
 }
-function validateCondition3(lookup2, condition) {
+function validateCondition4(lookup2, condition) {
   switch (condition.kind) {
     case "compare":
-      validateValue2(lookup2, condition.left);
-      validateValue2(lookup2, condition.right);
+      validateValue3(lookup2, condition.left);
+      validateValue3(lookup2, condition.right);
       return;
     case "logical":
-      validateCondition3(lookup2, condition.left);
-      validateCondition3(lookup2, condition.right);
+      validateCondition4(lookup2, condition.left);
+      validateCondition4(lookup2, condition.right);
       return;
     case "not":
-      validateCondition3(lookup2, condition.inner);
+      validateCondition4(lookup2, condition.inner);
       return;
   }
 }
-function validateValue2(lookup2, value) {
+function validateValue3(lookup2, value) {
   if (value.kind === "field") validateKeys(lookup2, [value.key], "binary query filter");
 }
 function validateKeys(lookup2, keys, label) {
@@ -15639,7 +16368,7 @@ function filtersReadField(filters, key) {
 }
 function emitBinaryFilter(plan, lookup2, prepared, comparableOverrides) {
   if (plan.filters.length === 0) return void 0;
-  return plan.filters.map((filter) => emitCondition4(filter.condition, lookup2, prepared, comparableOverrides)).join(" && ");
+  return plan.filters.map((filter) => emitCondition5(filter.condition, lookup2, prepared, comparableOverrides)).join(" && ");
 }
 function emitBinaryArrayQuery(writer, layout, plan, condition, accessedFields) {
   writer.line("const out = new Array(len);");
@@ -15758,19 +16487,19 @@ function emitBinaryAggregateQuery(writer, layout, lookup2, plan, condition, acce
     }
   }
 }
-function emitCondition4(condition, lookup2, prepared, comparableOverrides) {
+function emitCondition5(condition, lookup2, prepared, comparableOverrides) {
   switch (condition.kind) {
     case "compare":
       return emitCompare(condition.left, condition.op, condition.right, lookup2, prepared, comparableOverrides);
     case "logical":
-      return `(${emitCondition4(condition.left, lookup2, prepared, comparableOverrides)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition4(
+      return `(${emitCondition5(condition.left, lookup2, prepared, comparableOverrides)} ${condition.op === "and" ? "&&" : "||"} ${emitCondition5(
         condition.right,
         lookup2,
         prepared,
         comparableOverrides
       )})`;
     case "not":
-      return `!(${emitCondition4(condition.inner, lookup2, prepared, comparableOverrides)})`;
+      return `!(${emitCondition5(condition.inner, lookup2, prepared, comparableOverrides)})`;
   }
 }
 function emitCompare(left, op, right, lookup2, prepared, comparableOverrides) {
@@ -16936,6 +17665,48 @@ function accessPlanType(artifact, typeNames) {
   const explain = `(action: ${actions}, subject?: ${subject}, field?: keyof ${subject} & string) => { readonly allowed: boolean; readonly reason?: string; readonly ruleId?: string; readonly matchedProhibition?: boolean }`;
   return `(actor: ${actor}) => { can: ${check}; cannot: ${check}; assert(action: ${actions}, subject: ${subject}, field?: keyof ${subject} & string): ${subject}; explain: ${explain}; fields: ${fields} }`;
 }
+function rulesPlanType(artifact, typeNames) {
+  const descriptor = artifact.descriptor;
+  const subject = namedType(artifact.schema, typeNames);
+  const ids = descriptor.ids.map((id) => JSON.stringify(id)).join(" | ") || "never";
+  const outcomes = descriptor.rules.map((rule) => rule.outcome).filter((outcome2) => outcome2 !== void 0).map((outcome2) => namedType(outcome2.type, typeNames));
+  const outcome = outcomes.length === 0 ? "never" : [...new Set(outcomes)].join(" | ");
+  const inputs = descriptor.inputs;
+  const input = inputs === void 0 ? "" : `, inputs: ${namedType(inputs, typeNames)}`;
+  const list = `subjects: readonly ${subject}[]`;
+  const consume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined) => void`;
+  const manyConsume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined, index: number) => void`;
+  const signatures = {
+    test: `(rule: ${ids}, subject: ${subject}${input}) => boolean`,
+    some: `(subject: ${subject}${input}) => boolean`,
+    first: `(subject: ${subject}${input}) => ${ids} | undefined`,
+    match: `(subject: ${subject}${input}) => (${ids})[]`,
+    run: `(subject: ${subject}${input}) => (${outcome})[]`,
+    explain: `(subject: ${subject}${input}) => { readonly matched: readonly (${ids})[]; readonly evaluated: readonly (${ids})[] }`,
+    predicate: `(subject: ${subject}${input}) => boolean`,
+    visitor: `(subject: ${subject}${input}, ${consume}) => number`,
+    iterator: `(subject: ${subject}${input}) => IterableIterator<${outcome}>`,
+    many: `(${list}${input}) => (${outcome})[]`,
+    "many-visitor": `(${list}${input}, ${manyConsume}) => number`,
+    "many-iterator": `(${list}${input}) => IterableIterator<${outcome}>`
+  };
+  if (artifact.sink !== "plan") return signatures[artifact.sink];
+  const manyPlan = `${signatures.many} & { readonly to: { visitor(): ${signatures["many-visitor"]}; iterator(): ${signatures["many-iterator"]} } }`;
+  return [
+    "{",
+    `readonly test: ${signatures.test};`,
+    `readonly some: ${signatures.some};`,
+    `readonly first: ${signatures.first};`,
+    `readonly match: ${signatures.match};`,
+    `readonly run: ${signatures.run};`,
+    `readonly explain: ${signatures.explain};`,
+    `readonly predicate: (rule: ${ids}) => ${signatures.predicate};`,
+    `readonly many: () => ${manyPlan};`,
+    `readonly to: { visitor(): ${signatures.visitor}; iterator(): ${signatures.iterator} };`,
+    `readonly ids: readonly (${ids})[];`,
+    "}"
+  ].join(" ");
+}
 function typeImportSpecifier(outDir, sourceFile) {
   const relativePath = relative(
     resolve(
@@ -17389,6 +18160,15 @@ function emitBarrel(modules, layout) {
   return `${lines.join("\n")}
 `;
 }
+var RULES_OUTCOME_SINKS = /* @__PURE__ */ new Set([
+  "plan",
+  "run",
+  "visitor",
+  "iterator",
+  "many",
+  "many-visitor",
+  "many-iterator"
+]);
 function emitModule(plan, options, layout) {
   const ts = layout.format === "ts";
   const skipped = [];
@@ -17663,6 +18443,37 @@ function emitModule(plan, options, layout) {
       js.push("})();");
       return { binding, type };
     }
+    if (artifact.kind === "rules-plan") {
+      const bindingNames = /* @__PURE__ */ new Map();
+      for (let index2 = 0; index2 < artifact.descriptor.bindingNames.length; index2++) {
+        const name = artifact.descriptor.bindingNames[index2];
+        const emitted = classBindings.get(artifact.descriptor.bindings[index2]);
+        if (emitted === void 0) {
+          if (RULES_OUTCOME_SINKS.has(artifact.sink)) {
+            skipped.push({
+              schema: reportName,
+              operation: `rules.${artifact.sink}`,
+              reason: "AOT rule outcomes require exporting the domain event Runtime Class artifact alongside the rules plan"
+            });
+            return void 0;
+          }
+          continue;
+        }
+        bindingNames.set(name, emitted);
+      }
+      const source2 = tryEmit(
+        reportName,
+        `rules.${artifact.sink}`,
+        skipped,
+        () => emitRulesSinkSource(artifact.descriptor, artifact.sink, {
+          bindingNames,
+          ...artifact.ruleId === void 0 ? {} : { ruleId: artifact.ruleId }
+        })
+      );
+      if (!source2) return void 0;
+      js.push(`${declaration} /*#__PURE__*/ ${source2};`);
+      return { binding, type };
+    }
     if (artifact.kind === "canonical-plan") {
       js.push(`${declaration} /*#__PURE__*/ ${emitCanonicalSource(artifact.schema)};`);
       return { binding, type };
@@ -17712,6 +18523,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "csv-plan") return csvPlanType(artifact, typeNames);
     if (artifact.kind === "ndjson-plan") return ndjsonPlanType(artifact, typeNames);
     if (artifact.kind === "access-plan") return accessPlanType(artifact, typeNames);
+    if (artifact.kind === "rules-plan") return rulesPlanType(artifact, typeNames);
     if (artifact.kind === "canonical-plan") {
       const canonicalValue = namedType(artifact.schema, typeNames);
       return `(value: ${canonicalValue}) => ${canonicalValue}`;
@@ -19252,7 +20064,7 @@ __export(factories_exports, {
   clone: () => clone,
   codec: () => codec,
   coerce: () => coerce2,
-  compare: () => compare,
+  compare: () => compare2,
   cqrs: () => cqrs,
   csv: () => csv,
   custom: () => custom,
@@ -19303,6 +20115,7 @@ __export(factories_exports, {
   refine: () => refine2,
   regex: () => regex,
   regexes: () => regexes_exports,
+  rules: () => rules,
   security: () => security,
   set: () => set,
   sort: () => sort,
@@ -19339,17 +20152,17 @@ var jsonSchema = Object.freeze({
 function access(schema) {
   return createPlan(unwrapSchema(schema), void 0, []);
 }
-function createPlan(subject, actor, rules) {
-  const descriptor = resolveAccessDescriptor(subject, actor, rules);
+function createPlan(subject, actor, rules2) {
+  const descriptor = resolveAccessDescriptor(subject, actor, rules2);
   const compiled = compileAccess(descriptor);
   const plan = ((actorValue) => {
     const ability = compiled(actorValue);
     registerAccessAbility(ability, descriptor, actorValue);
     return ability;
   });
-  const add = (effect) => (action, rule) => createPlan(subject, actor, [...rules, toRule(effect, action, rule)]);
+  const add = (effect) => (action, rule) => createPlan(subject, actor, [...rules2, toRule(effect, action, rule)]);
   Object.defineProperties(plan, {
-    actor: { value: (next) => createPlan(subject, unwrapSchema(next), rules) },
+    actor: { value: (next) => createPlan(subject, unwrapSchema(next), rules2) },
     can: { value: add("can") },
     cannot: { value: add("cannot") },
     actions: { value: descriptor.actions },
@@ -21003,9 +21816,21 @@ function createBinaryQueryBuilder(target, nodes, bindings, paramNames) {
         mergeParamNames(paramNames, shape)
       );
     },
-    filter(predicate) {
+    filter(predicate, ruleInputs) {
+      const lowered = lowerRulePredicate(predicate, ruleInputs, bindings.length);
+      if (lowered !== void 0) {
+        return createBinaryQueryBuilder(
+          target,
+          lowered.condition === void 0 ? nodes : [...nodes, { kind: "filter", condition: lowered.condition }],
+          [...bindings, ...lowered.bindings],
+          paramNames
+        );
+      }
       const state = createConditionBuilder(bindings.length);
-      const condition = predicate(state.builder, createParamRefs(paramNames));
+      const condition = predicate(
+        state.builder,
+        createParamRefs(paramNames)
+      );
       return createBinaryQueryBuilder(
         target,
         [...nodes, { kind: "filter", condition }],
@@ -21101,7 +21926,16 @@ function createQueryBuilder(schema, nodes, bindings, paramNames) {
         mergeParamNames(paramNames, shape)
       );
     },
-    filter(predicate) {
+    filter(predicate, ruleInputs) {
+      const lowered = lowerRulePredicate(predicate, ruleInputs, bindings.length);
+      if (lowered !== void 0) {
+        return createQueryBuilder(
+          schema,
+          lowered.condition === void 0 ? nodes : [...nodes, { kind: "filter", condition: lowered.condition }],
+          [...bindings, ...lowered.bindings],
+          paramNames
+        );
+      }
       const state = createConditionBuilder(bindings.length);
       const condition = predicate(
         state.builder,
@@ -21360,7 +22194,7 @@ function createConditionBuilder(startIndex) {
     bindings[bindings.length] = value;
     return { kind: "binding", name: `__q${index2}` };
   };
-  const compare2 = (op, key, value) => ({
+  const compare3 = (op, key, value) => ({
     kind: "compare",
     op,
     left: { kind: "field", key },
@@ -21370,12 +22204,12 @@ function createConditionBuilder(startIndex) {
     bindings,
     builder: {
       constant,
-      eq: (key, value) => compare2("eq", key, value),
-      neq: (key, value) => compare2("neq", key, value),
-      gt: (key, value) => compare2("gt", key, value),
-      gte: (key, value) => compare2("gte", key, value),
-      lt: (key, value) => compare2("lt", key, value),
-      lte: (key, value) => compare2("lte", key, value),
+      eq: (key, value) => compare3("eq", key, value),
+      neq: (key, value) => compare3("neq", key, value),
+      gt: (key, value) => compare3("gt", key, value),
+      gte: (key, value) => compare3("gte", key, value),
+      lt: (key, value) => compare3("lt", key, value),
+      lte: (key, value) => compare3("lte", key, value),
       and: (left, right, ...rest) => fold2("and", left, right, rest),
       or: (left, right, ...rest) => fold2("or", left, right, rest),
       not: (inner) => ({ kind: "not", inner })
@@ -21406,6 +22240,23 @@ function isQueryParamRef(value) {
 }
 function isQueryConstRef(value) {
   return value !== null && typeof value === "object" && value.__jitQueryValue === "const";
+}
+var IMPOSSIBLE = {
+  kind: "compare",
+  op: "eq",
+  left: { kind: "literal", value: true },
+  right: { kind: "literal", value: false }
+};
+function lowerRulePredicate(predicate, inputs, bindingOffset) {
+  if (typeof predicate !== "function") return void 0;
+  const artifact = getArtifact(predicate);
+  if (artifact?.kind !== "rules-plan" || artifact.sink !== "predicate" || artifact.ruleId === void 0) {
+    return void 0;
+  }
+  const lowered = lowerRuleToQueryCondition(artifact.descriptor, artifact.ruleId, inputs, bindingOffset);
+  if (lowered.kind === "always") return { condition: void 0, bindings: lowered.bindings };
+  if (lowered.kind === "never") return { condition: IMPOSSIBLE, bindings: lowered.bindings };
+  return { condition: lowered.condition, bindings: lowered.bindings };
 }
 
 // ../../packages/jit/src/factories/cqrs.ts
@@ -23037,7 +23888,7 @@ function createConditionBuilder2(startIndex) {
     bindings[bindings.length] = value;
     return { kind: "binding", name: `__q${index2}` };
   };
-  const compare2 = (op, key, value) => ({
+  const compare3 = (op, key, value) => ({
     kind: "compare",
     op,
     left: { kind: "field", key },
@@ -23047,12 +23898,12 @@ function createConditionBuilder2(startIndex) {
     bindings,
     builder: {
       constant,
-      eq: (key, value) => compare2("eq", key, value),
-      neq: (key, value) => compare2("neq", key, value),
-      gt: (key, value) => compare2("gt", key, value),
-      gte: (key, value) => compare2("gte", key, value),
-      lt: (key, value) => compare2("lt", key, value),
-      lte: (key, value) => compare2("lte", key, value),
+      eq: (key, value) => compare3("eq", key, value),
+      neq: (key, value) => compare3("neq", key, value),
+      gt: (key, value) => compare3("gt", key, value),
+      gte: (key, value) => compare3("gte", key, value),
+      lt: (key, value) => compare3("lt", key, value),
+      lte: (key, value) => compare3("lte", key, value),
       and: (left, right) => ({ kind: "logical", op: "and", left, right }),
       or: (left, right) => ({ kind: "logical", op: "or", left, right }),
       not: (inner) => ({ kind: "not", inner })
@@ -23115,6 +23966,177 @@ function canResolve2(schema) {
 }
 function unresolved(schema) {
   return (() => resolveReconcileDescriptor(schema, void 0, ALL_CHANNELS, "value", "result"));
+}
+
+// ../../packages/jit/src/factories/rules.ts
+function rules(schema) {
+  return createRulesPlan(unwrapSchema(schema), void 0, []);
+}
+function createRulesPlan(subject, inputs, declarations) {
+  const descriptor = resolveRulesDescriptor(subject, inputs, declarations);
+  const lazy2 = (sink, ruleId) => {
+    let compiled;
+    return ((...args) => {
+      compiled ??= compileRulesSink(descriptor, sink, ruleId === void 0 ? void 0 : { ruleId });
+      return compiled(...args);
+    });
+  };
+  const test = lazy2("test");
+  const some = lazy2("some");
+  const first = lazy2("first");
+  const match2 = lazy2("match");
+  const run = lazy2("run");
+  const explain = lazy2("explain");
+  const predicates = /* @__PURE__ */ new Map();
+  const visitor = memoize(() => compileSink(descriptor, "visitor"));
+  const iterator = memoize(() => compileSink(descriptor, "iterator"));
+  const many = memoize(() => createManyPlan(descriptor));
+  const plan = {};
+  Object.defineProperties(plan, {
+    inputs: {
+      value: (shape) => {
+        if (inputs !== void 0) {
+          throw new JITError("INVALID_OPERATION", "JIT.rules().inputs() may only be declared once");
+        }
+        return createRulesPlan(subject, unwrapSchema(object(shape)), declarations);
+      }
+    },
+    rule: {
+      value: (id, options) => createRulesPlan(subject, inputs, [...declarations, toDeclaration(id, options)])
+    },
+    test: { value: test },
+    some: { value: some },
+    first: { value: first },
+    match: { value: match2 },
+    run: { value: run },
+    explain: { value: explain },
+    predicate: {
+      value: (rule) => {
+        let compiled = predicates.get(rule);
+        if (compiled === void 0) {
+          compiled = lazy2("predicate", rule);
+          registerArtifact(compiled, { kind: "rules-plan", schema: subject, descriptor, sink: "predicate", ruleId: rule });
+          predicates.set(rule, compiled);
+        }
+        return compiled;
+      }
+    },
+    many: { value: many },
+    to: { value: Object.freeze({ visitor, iterator }) },
+    ids: { value: descriptor.ids, enumerable: true },
+    inspect: { value: () => inspectRules(descriptor) }
+  });
+  Object.freeze(plan);
+  registerArtifact(plan, { kind: "rules-plan", schema: subject, descriptor, sink: "plan" });
+  registerArtifact(test, { kind: "rules-plan", schema: subject, descriptor, sink: "test" });
+  registerArtifact(some, { kind: "rules-plan", schema: subject, descriptor, sink: "some" });
+  registerArtifact(first, { kind: "rules-plan", schema: subject, descriptor, sink: "first" });
+  registerArtifact(match2, { kind: "rules-plan", schema: subject, descriptor, sink: "match" });
+  registerArtifact(run, { kind: "rules-plan", schema: subject, descriptor, sink: "run" });
+  registerArtifact(explain, { kind: "rules-plan", schema: subject, descriptor, sink: "explain" });
+  return plan;
+}
+function compileSink(descriptor, sink, ruleId) {
+  const compiled = compileRulesSink(descriptor, sink, ruleId === void 0 ? void 0 : { ruleId });
+  registerArtifact(compiled, {
+    kind: "rules-plan",
+    schema: descriptor.subject,
+    descriptor,
+    sink,
+    ...ruleId === void 0 ? {} : { ruleId }
+  });
+  return compiled;
+}
+function createManyPlan(descriptor) {
+  let compiled;
+  const callable = ((...args) => {
+    compiled ??= compileRulesSink(descriptor, "many");
+    return compiled(...args);
+  });
+  const visitor = memoize(() => compileSink(descriptor, "many-visitor"));
+  const iterator = memoize(() => compileSink(descriptor, "many-iterator"));
+  Object.defineProperty(callable, "to", { value: Object.freeze({ visitor, iterator }) });
+  registerArtifact(callable, { kind: "rules-plan", schema: descriptor.subject, descriptor, sink: "many" });
+  return callable;
+}
+function memoize(build) {
+  let value;
+  return () => value ??= build();
+}
+function toDeclaration(id, options) {
+  const condition = options.when(CONDITION2, INPUTS2);
+  const priority = options.priority ?? 0;
+  if (options.emit === void 0) {
+    if (options.values !== void 0) {
+      throw new JITError("INVALID_OPERATION", `rule ${JSON.stringify(id)} declares values without emit`);
+    }
+    return { id, condition, priority };
+  }
+  const values = options.values?.(SUBJECT_REF, INPUTS2) ?? {};
+  const fields = {};
+  for (const key of Object.keys(values)) fields[key] = toOutcomeValue(values[key]);
+  const event = resolveEventTarget(options.emit);
+  if (event !== void 0) {
+    return { id, condition, priority, outcome: { ...event, fields, factory: options.emit } };
+  }
+  const target = unwrapSchema(options.emit);
+  return { id, condition, priority, outcome: { kind: "object", target, type: target, fields } };
+}
+function resolveEventTarget(emit) {
+  if (typeof emit !== "function") return void 0;
+  const artifact = getArtifact(emit);
+  if (artifact?.kind !== "class" || artifact.domainEvent === void 0) return void 0;
+  const schema = artifact.schema;
+  const payload = schema.def.props.payload;
+  if (payload === void 0) {
+    throw new JITError("INVALID_OPERATION", "domain event outcome requires a payload schema");
+  }
+  return { kind: "event", target: payload, type: schema };
+}
+function toOutcomeValue(value) {
+  if (isInputValue(value)) return { kind: "param", name: value.name };
+  if (isFieldValue(value)) return { kind: "field", key: value.key };
+  return { kind: "literal", value };
+}
+function toValue(value, subjectField) {
+  if (isInputValue(value)) return { kind: "param", name: value.name };
+  if (subjectField) return { kind: "field", key: value };
+  return { kind: "literal", value };
+}
+function compare(op, left, right) {
+  return {
+    kind: "compare",
+    op,
+    left: toValue(left, !isInputValue(left)),
+    right: toValue(right, false)
+  };
+}
+function fold3(op, left, right, rest) {
+  const tail = rest.length === 0 ? right : fold3(op, right, rest[0], rest.slice(1));
+  return { kind: "logical", op, left, right: tail };
+}
+var CONDITION2 = Object.freeze({
+  eq: (left, right) => compare("eq", left, right),
+  neq: (left, right) => compare("neq", left, right),
+  gt: (left, right) => compare("gt", left, right),
+  gte: (left, right) => compare("gte", left, right),
+  lt: (left, right) => compare("lt", left, right),
+  lte: (left, right) => compare("lte", left, right),
+  and: (left, right, ...rest) => fold3("and", left, right, rest),
+  or: (left, right, ...rest) => fold3("or", left, right, rest),
+  not: (inner) => ({ kind: "not", inner })
+});
+var INPUTS2 = Object.freeze({
+  field: (key) => ({ kind: "param", name: key })
+});
+var SUBJECT_REF = Object.freeze({
+  field: (key) => ({ kind: "field", key })
+});
+function isInputValue(value) {
+  return typeof value === "object" && value !== null && value.kind === "param";
+}
+function isFieldValue(value) {
+  return typeof value === "object" && value !== null && value.kind === "field";
 }
 
 // ../../packages/jit/src/compiler/execution-plan.ts
@@ -24064,7 +25086,7 @@ function mask(schema) {
 function sanitize(schema) {
   return operationArtifact(schema, "sanitize", "value", "value", compileSanitize);
 }
-var compare = Object.freeze({ equal, diff, hash: hash2, changed });
+var compare2 = Object.freeze({ equal, diff, hash: hash2, changed });
 var security = Object.freeze({ mask, sanitize });
 function mapCapability(source, target, ...overrides) {
   const sourceSchema = unwrapSchema(source);
@@ -25194,8 +26216,8 @@ function defineCanonical(schema) {
 function defineAccess(schema) {
   return defineAccessPlan(unwrapSchema(schema), void 0, []);
 }
-function defineAccessPlan(subject, actor, rules) {
-  const descriptor = resolveAccessDescriptor(subject, actor, rules);
+function defineAccessPlan(subject, actor, rules2) {
+  const descriptor = resolveAccessDescriptor(subject, actor, rules2);
   const stub = function aotAccessArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -25207,7 +26229,7 @@ function defineAccessPlan(subject, actor, rules) {
     const next = effect === "can" ? runtimePlan.can : runtimePlan.cannot;
     const built = getArtifact(next.call(runtimePlan, action, rule));
     if (built?.kind !== "access-plan") throw new JITError("INVALID_OPERATION", "access rule could not be resolved");
-    return defineAccessPlan(subject, actor, [...rules, ...built.descriptor.rules.slice(-1)]);
+    return defineAccessPlan(subject, actor, [...rules2, ...built.descriptor.rules.slice(-1)]);
   };
   Object.defineProperties(stub, {
     [AOT_ARTIFACT]: {
@@ -25217,7 +26239,7 @@ function defineAccessPlan(subject, actor, rules) {
         operation: { kind: "operation", op: "access" }
       }
     },
-    actor: { value: (next) => defineAccessPlan(subject, unwrapSchema(next), rules) },
+    actor: { value: (next) => defineAccessPlan(subject, unwrapSchema(next), rules2) },
     can: { value: add("can") },
     cannot: { value: add("cannot") },
     actions: { value: descriptor.actions },
@@ -25225,6 +26247,81 @@ function defineAccessPlan(subject, actor, rules) {
   });
   registerArtifact(stub, { kind: "access-plan", schema: subject, descriptor });
   return stub;
+}
+function defineRules(schema) {
+  return defineRulesPlan(rules(schema));
+}
+function defineRulesPlan(runtime) {
+  const artifact = getArtifact(runtime);
+  if (artifact?.kind !== "rules-plan") {
+    throw new JITError("INVALID_OPERATION", "rules descriptor could not be resolved");
+  }
+  const register = (name, ruleId) => {
+    const fail = function aotRulesArtifact() {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    };
+    Object.defineProperty(fail, AOT_ARTIFACT, {
+      value: {
+        artifactId: `operation:rules:${ruleId === void 0 ? name : `${name}:${ruleId}`}`,
+        schemaId: artifact.schema.type,
+        operation: { kind: "operation", op: "rules" }
+      }
+    });
+    registerArtifact(fail, { ...artifact, sink: name, ...ruleId === void 0 ? {} : { ruleId } });
+    return fail;
+  };
+  const test = register("test");
+  const some = register("some");
+  const first = register("first");
+  const match2 = register("match");
+  const run = register("run");
+  const explain = register("explain");
+  const predicates = /* @__PURE__ */ new Map();
+  const visitor = register("visitor");
+  const iterator = register("iterator");
+  const many = register("many");
+  const manyVisitor = register("many-visitor");
+  const manyIterator = register("many-iterator");
+  const plan = {};
+  Object.defineProperty(many, "to", {
+    value: Object.freeze({ visitor: () => manyVisitor, iterator: () => manyIterator })
+  });
+  Object.defineProperties(plan, {
+    inputs: {
+      value: (shape) => defineRulesPlan(runtime.inputs(shape))
+    },
+    rule: {
+      value: (id, options) => defineRulesPlan(
+        runtime.rule(id, options)
+      )
+    },
+    test: { value: test },
+    some: { value: some },
+    first: { value: first },
+    match: { value: match2 },
+    run: { value: run },
+    explain: { value: explain },
+    predicate: {
+      value: (rule) => {
+        let value = predicates.get(rule);
+        if (value === void 0) {
+          value = register("predicate", rule);
+          predicates.set(rule, value);
+        }
+        return value;
+      }
+    },
+    many: { value: () => many },
+    to: { value: Object.freeze({ visitor: () => visitor, iterator: () => iterator }) },
+    ids: { value: artifact.descriptor.ids, enumerable: true },
+    inspect: { value: () => inspectRules(artifact.descriptor) }
+  });
+  Object.freeze(plan);
+  registerArtifact(plan, { ...artifact, sink: "plan" });
+  return plan;
 }
 function defineCqrsQuery(schema) {
   const builder2 = cqrs.query(schema);
@@ -25655,6 +26752,7 @@ var JIT = {
   cacheKey: cacheKey2,
   canonical: defineCanonical,
   access: defineAccess,
+  rules: defineRules,
   match: defineMatch,
   migrate: defineMigrate,
   csv: csv2,

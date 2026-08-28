@@ -46,6 +46,7 @@ import {
   resolveReconcileDescriptor,
 } from "./compiler/reconcile.js";
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
+import { inspectRules, type RulesSink } from "./compiler/rules.js";
 import type { Sanitize } from "./compiler/sanitize.js";
 import type { Serialize } from "./compiler/serialize.js";
 import type { UpdatePatch } from "./compiler/update.js";
@@ -74,6 +75,7 @@ import {
   type QueryConditionBuilder,
 } from "./factories/query.js";
 import type { ReconcileChange, ReconcilePlan, ResolvedChannels } from "./factories/reconcile.js";
+import type { RuleOptions, RulesBuilder, RulesPlan } from "./factories/rules.js";
 import type { SortBuilder, SortPlan } from "./factories/sort.js";
 import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
 
@@ -1003,6 +1005,103 @@ function defineAccessPlan(
   return stub;
 }
 
+function defineRules<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): RulesBuilder<ATS.TypeofSchema<TSchema>> {
+  return defineRulesPlan(RuntimeJIT.rules(schema) as unknown as AnyDefineRulesPlan) as unknown as RulesBuilder<
+    ATS.TypeofSchema<TSchema>
+  >;
+}
+
+type AnyDefineRulesPlan = RulesPlan<unknown, Readonly<Record<string, unknown>>, string, unknown>;
+type AnyDefineRuleOptions = RuleOptions<unknown, Readonly<Record<string, unknown>>, unknown>;
+
+/**
+ * The define host mirrors every rules sink one-to-one. Nothing is executed
+ * here: each sink is a reconstructive artifact the generator lowers, so a
+ * definition file can compose rules without compiling them.
+ */
+function defineRulesPlan(runtime: AnyDefineRulesPlan): AnyDefineRulesPlan {
+  const artifact = getArtifact(runtime);
+
+  if (artifact?.kind !== "rules-plan") {
+    throw new JITError("INVALID_OPERATION", "rules descriptor could not be resolved");
+  }
+
+  const register = (name: RulesSink, ruleId?: string): (() => never) => {
+    const fail = function aotRulesArtifact(): never {
+      throw new JITError(
+        "JIT_AOT_001_ARTIFACT_EXECUTED",
+        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+      );
+    };
+
+    Object.defineProperty(fail, AOT_ARTIFACT, {
+      value: {
+        artifactId: `operation:rules:${ruleId === undefined ? name : `${name}:${ruleId}`}`,
+        schemaId: artifact.schema.type,
+        operation: { kind: "operation", op: "rules" },
+      } satisfies ArtifactDescriptor,
+    });
+    registerArtifact(fail, { ...artifact, sink: name, ...(ruleId === undefined ? {} : { ruleId }) });
+    return fail;
+  };
+  const test = register("test");
+  const some = register("some");
+  const first = register("first");
+  const match = register("match");
+  const run = register("run");
+  const explain = register("explain");
+  const predicates = new Map<string, () => never>();
+  const visitor = register("visitor");
+  const iterator = register("iterator");
+  const many = register("many") as (() => never) & { to?: unknown };
+  const manyVisitor = register("many-visitor");
+  const manyIterator = register("many-iterator");
+  const plan = {} as AnyDefineRulesPlan;
+
+  Object.defineProperty(many, "to", {
+    value: Object.freeze({ visitor: () => manyVisitor, iterator: () => manyIterator }),
+  });
+  Object.defineProperties(plan, {
+    inputs: {
+      value: (shape: Readonly<Record<string, SchemaInput>>) =>
+        defineRulesPlan((runtime.inputs as (value: typeof shape) => AnyDefineRulesPlan)(shape)),
+    },
+    rule: {
+      value: (id: string, options: AnyDefineRuleOptions) =>
+        defineRulesPlan(
+          (runtime.rule as (value: string, rule: AnyDefineRuleOptions) => AnyDefineRulesPlan)(id, options)
+        ),
+    },
+    test: { value: test },
+    some: { value: some },
+    first: { value: first },
+    match: { value: match },
+    run: { value: run },
+    explain: { value: explain },
+    predicate: {
+      value: (rule: string) => {
+        let value = predicates.get(rule);
+
+        if (value === undefined) {
+          value = register("predicate", rule);
+          predicates.set(rule, value);
+        }
+        return value;
+      },
+    },
+    many: { value: () => many },
+    to: { value: Object.freeze({ visitor: () => visitor, iterator: () => iterator }) },
+    ids: { value: artifact.descriptor.ids, enumerable: true },
+    inspect: { value: () => inspectRules(artifact.descriptor) },
+  });
+  Object.freeze(plan);
+
+  registerArtifact(plan, { ...artifact, sink: "plan" });
+  return plan;
+}
+
 function defineCqrsQuery<TElement>(
   target: BinaryArray<TElement> | BinaryRowSet<TElement>
 ): BinaryQueryBuilder<TElement, TElement, TElement[]>;
@@ -1514,6 +1613,7 @@ export const JIT = {
   cacheKey,
   canonical: defineCanonical,
   access: defineAccess,
+  rules: defineRules,
   match: defineMatch,
   migrate: defineMigrate,
   csv,
@@ -1542,6 +1642,7 @@ export const JIT = {
   | "cacheKey"
   | "canonical"
   | "access"
+  | "rules"
   | "match"
   | "migrate"
   | "csv"
@@ -1568,6 +1669,7 @@ export const JIT = {
   readonly cacheKey: typeof cacheKey;
   readonly canonical: typeof defineCanonical;
   readonly access: typeof defineAccess;
+  readonly rules: typeof defineRules;
   readonly match: typeof defineMatch;
   readonly migrate: typeof defineMigrate;
   readonly csv: CsvNamespace;

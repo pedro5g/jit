@@ -26,6 +26,7 @@
     "cache-key",
     "canonical",
     "access",
+    "rules",
     "match",
     "migrate",
     "csv",

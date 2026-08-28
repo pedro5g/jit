@@ -1,0 +1,262 @@
+---
+title: rules
+description: Business decisions compiled into direct comparisons, with no rule array, fact registry, or operator lookup at run time.
+---
+
+## Signature
+
+```ts
+const Transaction = JIT.object({
+  id: JIT.number().int(),
+  amount: JIT.number(),
+  country: JIT.string(),
+});
+
+const TransactionRules = JIT.rules(Transaction)
+  .inputs({ riskScore: JIT.number(), accountAgeDays: JIT.number().int() })
+  .rule("manual-review", {
+    when: (query, input) => query.or(query.gte("amount", 10_000), query.gte(input.field("riskScore"), 80)),
+  })
+  .rule("block", {
+    priority: 100,
+    when: (query, input) =>
+      query.and(query.gte(input.field("riskScore"), 95), query.lt(input.field("accountAgeDays"), 7)),
+  });
+
+const transaction = { id: 1, amount: 500, country: "BR" };
+
+console.log(TransactionRules.test("block", transaction, { riskScore: 96, accountAgeDays: 2 }));
+console.log(TransactionRules.match(transaction, { riskScore: 96, accountAgeDays: 2 }));
+```
+
+Rule ids stay literal and the subject is a schema, so a decision compiles to the
+comparison it describes — not to a scan over a rule array.
+
+## Facts are typed
+
+Subject fields come from the schema. External values are declared with
+`.inputs()` and referenced as `input.field(...)`, so both sides of a condition
+are checked when the rule is written:
+
+```ts
+const Order = JIT.object({ total: JIT.number(), items: JIT.number().int() });
+
+const rules = JIT.rules(Order)
+  .inputs({ tier: JIT.number().int() })
+  .rule("free-shipping", {
+    when: (query, input) => query.or(query.gte("total", 100), query.gte(input.field("tier"), 3)),
+  });
+
+console.log(rules.test("free-shipping", { total: 20, items: 1 }, { tier: 3 }));
+console.log(rules.test("free-shipping", { total: 20, items: 1 }, { tier: 1 }));
+```
+
+There is no dynamic fact resolver: the application resolves I/O first, and the
+rules decide.
+
+## Result modes
+
+Each mode compiles separately, so you pay only for the answer you asked for:
+
+```ts
+const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number(), country: JIT.string() });
+const rules = JIT.rules(Transaction)
+  .rule("large", { priority: 10, when: (query) => query.gte("amount", 1000) })
+  .rule("domestic", { when: (query) => query.eq("country", "BR") });
+const transaction = { id: 1, amount: 5000, country: "BR" };
+
+console.log(rules.some(transaction));
+console.log(rules.first(transaction));
+console.log(rules.match(transaction));
+console.log(rules.explain(transaction));
+```
+
+`test` and `some` allocate nothing, `first` returns early in priority order, and
+`match` writes matched ids into a single array.
+
+## Priority
+
+Higher priority runs first and ties break by declaration order. That decides
+output order everywhere, and decides semantics for `first`, which stops at the
+first match:
+
+```ts
+const Ticket = JIT.object({ severity: JIT.number().int(), paying: JIT.boolean() });
+const routing = JIT.rules(Ticket)
+  .rule("standard", { when: (query) => query.gte("severity", 1) })
+  .rule("urgent", { priority: 100, when: (query) => query.gte("severity", 3) });
+
+console.log(routing.first({ severity: 4, paying: true }));
+console.log(routing.match({ severity: 4, paying: true }));
+```
+
+## Outcomes are data
+
+A rule may emit a value. Target fields resolve by name against the subject and
+then the inputs, a `literal` field fills itself, and `values` covers the rest:
+
+```ts
+const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number() });
+const ManualReview = JIT.dto(
+  JIT.object({
+    type: JIT.literal("manual-review"),
+    transactionId: JIT.number().int(),
+    riskScore: JIT.number(),
+  })
+);
+
+const rules = JIT.rules(Transaction)
+  .inputs({ riskScore: JIT.number() })
+  .rule("manual-review", {
+    when: (query, input) => query.gte(input.field("riskScore"), 80),
+    emit: ManualReview,
+    values: (subject) => ({ transactionId: subject.field("id") }),
+  });
+
+console.log(rules.run({ id: 7, amount: 100 }, { riskScore: 90 }));
+```
+
+A rule declared without `emit` is a pure predicate: it appears in `match` and
+`first`, and contributes nothing to `run`.
+
+## Domain events as outcomes
+
+The engine builds the event; publishing stays in the application:
+
+```ts
+const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number() });
+const TransactionBlocked = JIT.ddd.domainEvent("transaction.blocked", {
+  version: 1,
+  payload: JIT.object({ transactionId: JIT.number().int(), reason: JIT.string() }),
+});
+
+const rules = JIT.rules(Transaction).rule("block", {
+  when: (query) => query.gte("amount", 10_000),
+  emit: TransactionBlocked,
+  values: (subject) => ({ transactionId: subject.field("id"), reason: "amount" }),
+});
+
+const [event] = rules.run({ id: 7, amount: 20_000 });
+
+console.log(event?.type, event?.payload);
+```
+
+## Collections and visitors
+
+`many()` is one generated loop over the collection, and the visitor hands each
+outcome to the consumer without materializing a result array:
+
+```ts
+const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number() });
+const Flag = JIT.object({ transactionId: JIT.number().int(), amount: JIT.number() });
+const rules = JIT.rules(Transaction).rule("large", {
+  when: (query) => query.gte("amount", 1000),
+  emit: Flag,
+  values: (subject) => ({ transactionId: subject.field("id") }),
+});
+const transactions = [
+  { id: 1, amount: 5000 },
+  { id: 2, amount: 10 },
+  { id: 3, amount: 2000 },
+];
+const classify = rules.many();
+let total = 0;
+
+classify.to.visitor()(transactions, (_rule, outcome) => {
+  total += outcome ? outcome.amount : 0;
+});
+console.log(classify(transactions).length, total);
+```
+
+## A rule as a query predicate
+
+A named rule lowers into the query's own condition AST and fuses into the same
+scan. Its inputs become query bindings, so `~query` never contains a rule node:
+
+```ts
+const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number(), country: JIT.string() });
+const rules = JIT.rules(Transaction)
+  .inputs({ riskScore: JIT.number() })
+  .rule("high-risk", {
+    when: (query, input) => query.and(query.gte("amount", 500), query.gte(input.field("riskScore"), 80)),
+  });
+
+const flagged = JIT.cqrs.query(Transaction).where(rules.predicate("high-risk"), { riskScore: 90 });
+const rows = [
+  { id: 1, amount: 1000, country: "BR" },
+  { id: 2, amount: 10, country: "US" },
+];
+
+console.log(flagged(rows));
+console.log(JSON.stringify(flagged["~query"].definition.pipeline));
+```
+
+## Streaming
+
+The same predicate filters an NDJSON stream inside its parse loop, so a row no
+rule selects is never materialized:
+
+```ts
+const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number() });
+const rules = JIT.rules(Transaction)
+  .inputs({ riskScore: JIT.number() })
+  .rule("high-risk", {
+    when: (query, input) => query.and(query.gte("amount", 500), query.gte(input.field("riskScore"), 80)),
+  });
+const lines = ['{"id":1,"amount":1000}', '{"id":2,"amount":10}'].join("\n");
+const parse = JIT.ndjson.parse(Transaction).validate().where(rules.predicate("high-risk"), { riskScore: 90 });
+
+console.log(parse(lines));
+```
+
+## Inspecting the plan
+
+`inspect()` reports what the compiler decided, without touching the evaluation
+path:
+
+```ts
+const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number() });
+const rules = JIT.rules(Transaction)
+  .inputs({ riskScore: JIT.number(), unusedTier: JIT.number().int() })
+  .rule("a", { when: (query, input) => query.gte(input.field("riskScore"), 80) })
+  .rule("b", {
+    when: (query, input) => query.and(query.gte(input.field("riskScore"), 80), query.gt("amount", 5000)),
+  });
+
+console.log(JSON.stringify(rules.inspect()));
+```
+
+`sharedPredicates` counts comparisons written by more than one rule and computed
+once, `sharedReads` counts hoisted field and input reads, and `deadInputs`
+usually means a declaration mistake.
+
+## What AOT emits
+
+```ts
+// rules.jit.ts
+export const blockTransaction = JIT.rules(Transaction)
+  .inputs({ riskScore: JIT.number(), accountAgeDays: JIT.number().int() })
+  .rule("block", {
+    when: (query, input) =>
+      query.and(query.gte(input.field("riskScore"), 95), query.lt(input.field("accountAgeDays"), 7)),
+  }).test;
+```
+
+becomes the comparison and nothing else:
+
+```js
+function rulesTest(rule, subject, inputs) {
+  switch (rule) {
+    case "block":
+      return inputs.riskScore >= 95 && inputs.accountAgeDays < 7;
+    default:
+      return false;
+  }
+}
+```
+
+## See also
+
+- [Query](./query) — the condition builder these rules reuse
+- [Access](./access) — authorization, which answers a different question with the same primitives
+- [Feature guide](https://github.com/pedro5g/jit/blob/main/docs/features/rules.md) — semantics, generated code and benchmarks against a generic rules engine

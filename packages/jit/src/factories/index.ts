@@ -117,6 +117,15 @@ export {
   type ResolvedChannels,
   reconcile,
 } from "./reconcile.js";
+export {
+  type RuleConditionBuilder,
+  type RuleInputRef,
+  type RuleInputValue,
+  type RuleOptions,
+  type RulesBuilder,
+  type RulesPlan,
+  rules,
+} from "./rules.js";
 export type { RuntimeCompiledFunction } from "./runtime-ops.js";
 export {
   binary,

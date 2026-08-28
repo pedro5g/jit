@@ -54,6 +54,7 @@ export * from "./reconcile.js";
 export * from "./resolvers/resolve-hints.js";
 export * from "./resolvers/resolve-wrappers.js";
 export * from "./row-keys.js";
+export * from "./rules.js";
 export * from "./sanitize.js";
 export * from "./serialize.js";
 export * from "./sort.js";

@@ -139,6 +139,59 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
     expect(bundled).not.toContain("rules.filter");
   });
 
+  it("should ship only the selected rules sink", async () => {
+    const Transaction = JIT.object({ amount: JIT.number(), country: JIT.string() });
+    const Rules = JIT.rules(Transaction)
+      .inputs({ risk: JIT.number() })
+      .rule("review", {
+        when: (query, input) => query.or(query.gte("amount", 10_000), query.gte(input.field("risk"), 80)),
+      })
+      .rule("block", {
+        priority: 100,
+        when: (query, input) => query.and(query.eq("country", "BR"), query.gte(input.field("risk"), 95)),
+      });
+
+    AOT.generate({ artifacts: { testRule: Rules.test }, outDir });
+    const bundled = await bundle(
+      `import { testRule } from "./index.js";\nconsole.log(testRule("block", { amount: 100, country: "BR" }, { risk: 96 }));\n`
+    );
+
+    expect(bundled).toContain("function rulesTest");
+    expect(bundled).toContain('case "block"');
+    expect(bundled).not.toContain("rulesSome");
+    expect(bundled).not.toContain("rulesFirst");
+    expect(bundled).not.toContain("rulesMatch");
+    expect(bundled).not.toContain("const out = []");
+    expect(bundled).not.toContain("Object.freeze");
+  });
+
+  it("should ship only the selected rules outcome sink", async () => {
+    const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number(), country: JIT.string() });
+    const ManualReview = JIT.object({ transactionId: JIT.number().int(), riskScore: JIT.number() });
+    const Rules = JIT.rules(Transaction)
+      .inputs({ riskScore: JIT.number() })
+      .rule("review", {
+        when: (query, input) => query.or(query.gte("amount", 10_000), query.gte(input.field("riskScore"), 80)),
+        emit: ManualReview,
+        values: (subject) => ({ transactionId: subject.field("id") }),
+      })
+      .rule("domestic", { when: (query) => query.eq("country", "BR") });
+
+    AOT.generate({ artifacts: { runRules: Rules.run }, outDir });
+    const bundled = await bundle(
+      'import { runRules } from "./index.js";\nconsole.log(runRules({ id: 1, amount: 100, country: "BR" }, { riskScore: 90 }));\n'
+    );
+
+    expect(bundled).toContain("function rulesRun");
+    expect(bundled).toContain("transactionId:");
+    // A predicate-only rule contributes nothing to `run`, and no other sink ships.
+    expect(bundled).not.toContain('"domestic"');
+    expect(bundled).not.toContain("rulesMatch");
+    expect(bundled).not.toContain("rulesVisit");
+    expect(bundled).not.toContain("rulesExplain");
+    expect(bundled).not.toContain("evaluated");
+  });
+
   it("should keep a composite aggregate down to accumulators", async () => {
     const Order = JIT.object({ id: JIT.number(), total: JIT.number() });
     const summary = JIT.cqrs

@@ -812,6 +812,31 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { query: 0.7 },
   },
   {
+    id: "rules",
+    aliases: ["rules", "rule engine", "business rules", "decision", "eligibility", "regras", "decisão", "fraude"],
+    terms: ["rules", "decision", "outcome", "priority", "fact", "predicate", "classification"],
+    apis: ["JIT.rules", "test", "some", "first", "match", "run", "many", "predicate", "inspect"],
+    fact: "JIT.rules compiles a static decision graph into direct comparisons: rule ids are literal types, conditions reuse the query AST, inputs are declared schemas, and the generated code contains no rule array, fact registry, or operator lookup.",
+    factPt:
+      "JIT.rules compila um grafo de decisão estático em comparações diretas: ids de regra são tipos literais, condições reutilizam a AST de query, inputs são schemas declarados, e o código gerado não contém array de regras, registro de facts nem lookup de operadores.",
+    mechanisms: [
+      "Each result mode compiles separately and lazily: test/some/first/predicate allocate nothing, match writes one array by index, and the visitor sinks hand each outcome to the consumer.",
+      "Dependency analysis records the subject and input paths every rule reads, so test() touches no other rule's facts and a constant-false rule is eliminated with its dependencies.",
+      "Modes that must evaluate every rule hoist repeated reads and shared comparisons into locals; many() also moves loop-invariant input work out of the loop.",
+      "Outcomes are pure data — a schema value or a domain event built but never published — and rules.predicate(id) lowers into an ordinary query condition with its inputs as bindings.",
+    ],
+    mechanismsPt: [
+      "Cada modo de resultado compila separadamente e sob demanda: test/some/first/predicate não alocam, match escreve um array por índice, e os visitors entregam cada outcome ao consumidor.",
+      "A análise de dependências registra os paths de subject e input que cada regra lê, então test() não toca facts de outras regras e uma regra constante-falsa é eliminada junto com suas dependências.",
+      "Modos que avaliam todas as regras içam leituras repetidas e comparações compartilhadas para locais; many() ainda move o trabalho invariante do laço para fora dele.",
+      "Outcomes são dados puros — um valor de schema ou um domain event criado mas nunca publicado — e rules.predicate(id) baixa para uma condição de query comum com os inputs como bindings.",
+    ],
+    example:
+      'const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number(), country: JIT.string() });\nconst rules = JIT.rules(Transaction)\n  .inputs({ riskScore: JIT.number() })\n  .rule("manual-review", { when: (query, input) => query.or(query.gte("amount", 10000), query.gte(input.field("riskScore"), 80)) })\n  .rule("block", { priority: 100, when: (query, input) => query.gte(input.field("riskScore"), 95) });\nconst transaction = { id: 1, amount: 500, country: "BR" };\n\nconsole.log(rules.match(transaction, { riskScore: 96 }), rules.first(transaction, { riskScore: 81 }));',
+    page: "/docs/reference/functions/rules",
+    edges: { query: 0.7, "access-control": 0.5 },
+  },
+  {
     id: "jsonschema",
     aliases: ["json schema", "jsonschema", "openapi", "swagger", "contract", "contrato", "draft"],
     terms: ["jsonschema", "openapi", "draft", "document", "dialect", "ref"],

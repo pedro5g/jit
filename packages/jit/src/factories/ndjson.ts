@@ -12,7 +12,8 @@ import type { QueryConditionNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
-import { createConditionBuilder, type QueryConditionBuilder } from "./query.js";
+import { createConditionBuilder, lowerRulePredicate, type QueryConditionBuilder } from "./query.js";
+import type { RulePredicate } from "./rules.js";
 
 type NdjsonPick<TValue, TKeys extends keyof TValue> = { readonly [TKey in TKeys]: TValue[TKey] };
 
@@ -20,6 +21,15 @@ export interface NdjsonParsePlan<TRow, TOutput = TRow> {
   (input: NdjsonInput): TOutput[];
   validate(): NdjsonParsePlan<TRow, TOutput>;
   where(predicate: (query: QueryConditionBuilder<TRow>) => QueryConditionNode): NdjsonParsePlan<TRow, TOutput>;
+  /**
+   * Filters by a compiled rule predicate, fused into the same parse loop. The
+   * rule lowers into the shared condition AST and its inputs become bindings,
+   * so no rules runtime reaches the stream.
+   */
+  where<TInputs extends Readonly<Record<string, unknown>>>(
+    predicate: RulePredicate<TRow, TInputs>,
+    ...inputs: keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs]
+  ): NdjsonParsePlan<TRow, TOutput>;
   select<const TKeys extends readonly Extract<keyof TRow, string>[]>(
     ...fields: TKeys
   ): NdjsonParsePlan<TRow, NdjsonPick<TRow, TKeys[number]>>;
@@ -49,9 +59,20 @@ export function createParsePlan(descriptor: NdjsonDescriptor): NdjsonParsePlan<u
   Object.defineProperties(result, {
     validate: { value: () => result },
     where: {
-      value: (predicate: (query: QueryConditionBuilder<unknown>) => QueryConditionNode) => {
+      value: (predicate: unknown, ruleInputs?: unknown) => {
+        const lowered = lowerRulePredicate(predicate, ruleInputs, descriptor.bindingValues.length);
+
+        if (lowered !== undefined) {
+          return createParsePlan(
+            lowered.condition === undefined
+              ? descriptor
+              : appendNdjsonFilter(descriptor, lowered.condition, lowered.bindings)
+          );
+        }
+
         const state = createConditionBuilder(descriptor.bindingValues.length);
-        const condition = predicate(state.builder);
+        const condition = (predicate as (query: QueryConditionBuilder<unknown>) => QueryConditionNode)(state.builder);
+
         return createParsePlan(appendNdjsonFilter(descriptor, condition, state.bindings));
       },
     },

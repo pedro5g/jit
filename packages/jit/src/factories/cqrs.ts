@@ -25,6 +25,7 @@ import {
   type QueryRuntimeParams,
   type QuerySinks,
 } from "./query.js";
+import type { RulePredicate } from "./rules.js";
 
 export interface StandardQuery {
   readonly version: 1;
@@ -432,6 +433,15 @@ export type CqrsQuery<
   CqrsQueryOps<TSchema, TOutput, TResult, TParams, TReadonlyProjection> & {
     where(
       predicate: (query: QueryConditionBuilder<Row<TSchema>>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
+    ): CqrsQuery<TSchema, TOutput, TResult, TParams, false>;
+    /**
+     * Filters by a compiled rule predicate. The rule lowers into this query's
+     * condition AST, so the decision is fused into the same scan and the
+     * query protocol still sees an ordinary predicate.
+     */
+    where<TInputs extends Readonly<Record<string, unknown>>>(
+      predicate: RulePredicate<Row<TSchema>, TInputs>,
+      ...inputs: keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs]
     ): CqrsQuery<TSchema, TOutput, TResult, TParams, false>;
     limit(count: number): CqrsQuery<TSchema, TOutput, TResult, TParams, TReadonlyProjection>;
     readonly "~query": StandardQuery;

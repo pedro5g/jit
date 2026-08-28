@@ -6,7 +6,7 @@ import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/com
 import { CodeWriter } from "./emitter/code-writer.js";
 import { expectProjectionObject } from "./projection.js";
 import { emitPropertyAccess } from "./source/access.js";
-import { emitLiteral } from "./source/literal.js";
+import { emitQueryConditionSource } from "./source/query-condition.js";
 
 /**
  * One authorization rule.
@@ -322,23 +322,7 @@ function emitRuleAt(rule: AccessRule, effect: "can" | "cannot", subject: string,
 }
 
 function emitConditionAt(condition: QueryConditionNode, subject: string, actor: string): string {
-  if (condition.kind === "logical") {
-    const operator = condition.op === "and" ? "&&" : "||";
-
-    return `(${emitConditionAt(condition.left, subject, actor)} ${operator} ${emitConditionAt(condition.right, subject, actor)})`;
-  }
-  if (condition.kind === "not") return `!(${emitConditionAt(condition.inner, subject, actor)})`;
-
-  const operators = { eq: "===", neq: "!==", gt: ">", gte: ">=", lt: "<", lte: "<=" } as const;
-
-  return `${emitValueAt(condition.left, subject, actor)} ${operators[condition.op]} ${emitValueAt(condition.right, subject, actor)}`;
-}
-
-function emitValueAt(value: QueryValueNode, subject: string, actor: string): string {
-  if (value.kind === "field") return emitPropertyAccess(subject, value.key);
-  if (value.kind === "literal") return emitLiteral(value.value as never);
-  if (value.kind === "param") return emitPropertyAccess(actor, value.name);
-  return value.name;
+  return emitQueryConditionSource(condition, { fieldBase: subject, paramBase: actor });
 }
 
 export function accessCacheKey(descriptor: AccessDescriptor): string {

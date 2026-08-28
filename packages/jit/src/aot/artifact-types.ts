@@ -317,6 +317,61 @@ export function accessPlanType(
   return `(actor: ${actor}) => { can: ${check}; cannot: ${check}; assert(action: ${actions}, subject: ${subject}, field?: keyof ${subject} & string): ${subject}; explain: ${explain}; fields: ${fields} }`;
 }
 
+/** Rule IDs and the optional input object remain literal/structural in generated TypeScript. */
+export function rulesPlanType(
+  artifact: Extract<CompiledArtifact, { readonly kind: "rules-plan" }>,
+  typeNames: TypeNames
+): string {
+  const descriptor = artifact.descriptor;
+  const subject = namedType(artifact.schema, typeNames);
+  const ids = descriptor.ids.map((id) => JSON.stringify(id)).join(" | ") || "never";
+  const outcomes = descriptor.rules
+    .map((rule) => rule.outcome)
+    .filter((outcome) => outcome !== undefined)
+    .map((outcome) => namedType(outcome.type, typeNames));
+  const outcome = outcomes.length === 0 ? "never" : [...new Set(outcomes)].join(" | ");
+  const inputs = descriptor.inputs;
+  const input = inputs === undefined ? "" : `, inputs: ${namedType(inputs, typeNames)}`;
+  const list = `subjects: readonly ${subject}[]`;
+  const consume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined) => void`;
+  const manyConsume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined, index: number) => void`;
+  const signatures = {
+    test: `(rule: ${ids}, subject: ${subject}${input}) => boolean`,
+    some: `(subject: ${subject}${input}) => boolean`,
+    first: `(subject: ${subject}${input}) => ${ids} | undefined`,
+    match: `(subject: ${subject}${input}) => (${ids})[]`,
+    run: `(subject: ${subject}${input}) => (${outcome})[]`,
+    explain: `(subject: ${subject}${input}) => { readonly matched: readonly (${ids})[]; readonly evaluated: readonly (${ids})[] }`,
+    predicate: `(subject: ${subject}${input}) => boolean`,
+    visitor: `(subject: ${subject}${input}, ${consume}) => number`,
+    iterator: `(subject: ${subject}${input}) => IterableIterator<${outcome}>`,
+    many: `(${list}${input}) => (${outcome})[]`,
+    "many-visitor": `(${list}${input}, ${manyConsume}) => number`,
+    "many-iterator": `(${list}${input}) => IterableIterator<${outcome}>`,
+  } as const;
+
+  if (artifact.sink !== "plan") return signatures[artifact.sink];
+
+  // The signature is parenthesized: without it the intersection would attach to
+  // the return type instead of to the callable itself.
+  const manyPlan = `((${signatures.many})) & { readonly to: { visitor(): ${signatures["many-visitor"]}; iterator(): ${signatures["many-iterator"]} } }`;
+
+  return [
+    "{",
+    `readonly test: ${signatures.test};`,
+    `readonly some: ${signatures.some};`,
+    `readonly first: ${signatures.first};`,
+    `readonly match: ${signatures.match};`,
+    `readonly run: ${signatures.run};`,
+    `readonly explain: ${signatures.explain};`,
+    `readonly predicate: (rule: ${ids}) => ${signatures.predicate};`,
+    `readonly many: () => ${manyPlan};`,
+    `readonly to: { visitor(): ${signatures.visitor}; iterator(): ${signatures.iterator} };`,
+    `readonly ids: readonly (${ids})[];`,
+    "}",
+  ].join(" ");
+}
+
 export type TypeNames = ReadonlyMap<ATS.AnyTypeSchema, string> | undefined;
 
 /** Relative type-import path from generated TypeScript to its declaration. */

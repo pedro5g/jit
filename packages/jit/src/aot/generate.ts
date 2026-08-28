@@ -39,6 +39,7 @@ import { emitQuerySource, expectCollectionObjectSchema, type QueryProgram } from
 import { emitReconcileSource } from "../compiler/reconcile.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { resolveRowObjectSchema } from "../compiler/row-keys.js";
+import { emitRulesSinkSource, type RulesSink } from "../compiler/rules.js";
 import { emitSanitizeSource, sanitizeChainBindings } from "../compiler/sanitize.js";
 import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
 import { emitSerialize } from "../compiler/serialize/emit-serialize.js";
@@ -68,6 +69,7 @@ import {
   patchPlanType,
   projectPlanType,
   queryPlanType,
+  rulesPlanType,
   sortPlanType,
   standaloneType,
 } from "./artifact-types.js";
@@ -249,6 +251,17 @@ function emitBarrel(modules: readonly EmittedModule[], layout: OutputLayout): st
 
   return `${lines.join("\n")}\n`;
 }
+
+/** The rules sinks whose generated source materializes outcomes. */
+const RULES_OUTCOME_SINKS: ReadonlySet<RulesSink> = new Set<RulesSink>([
+  "plan",
+  "run",
+  "visitor",
+  "iterator",
+  "many",
+  "many-visitor",
+  "many-iterator",
+]);
 
 function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLayout): EmittedModule {
   const ts = layout.format === "ts";
@@ -575,6 +588,41 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       js.push("})();");
       return { binding, type };
     }
+    if (artifact.kind === "rules-plan") {
+      // A domain-event outcome uses the Runtime Class emitted beside it, so
+      // the generated module never captures a runtime constructor.
+      const bindingNames = new Map<string, string>();
+
+      for (let index = 0; index < artifact.descriptor.bindingNames.length; index++) {
+        const name = artifact.descriptor.bindingNames[index] as string;
+        const emitted = classBindings.get(artifact.descriptor.bindings[index]);
+
+        if (emitted === undefined) {
+          if (RULES_OUTCOME_SINKS.has(artifact.sink)) {
+            skipped.push({
+              schema: reportName,
+              operation: `rules.${artifact.sink}`,
+              reason:
+                "AOT rule outcomes require exporting the domain event Runtime Class artifact alongside the rules plan",
+            });
+            return undefined;
+          }
+          continue;
+        }
+        bindingNames.set(name, emitted);
+      }
+
+      const source = tryEmit(reportName, `rules.${artifact.sink}`, skipped, () =>
+        emitRulesSinkSource(artifact.descriptor, artifact.sink, {
+          bindingNames,
+          ...(artifact.ruleId === undefined ? {} : { ruleId: artifact.ruleId }),
+        })
+      );
+
+      if (!source) return undefined;
+      js.push(`${declaration} /*#__PURE__*/ ${source};`);
+      return { binding, type };
+    }
     if (artifact.kind === "canonical-plan") {
       js.push(`${declaration} /*#__PURE__*/ ${emitCanonicalSource(artifact.schema)};`);
       return { binding, type };
@@ -628,6 +676,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "csv-plan") return csvPlanType(artifact, typeNames);
     if (artifact.kind === "ndjson-plan") return ndjsonPlanType(artifact, typeNames);
     if (artifact.kind === "access-plan") return accessPlanType(artifact, typeNames);
+    if (artifact.kind === "rules-plan") return rulesPlanType(artifact, typeNames);
     if (artifact.kind === "canonical-plan") {
       const canonicalValue = namedType(artifact.schema, typeNames);
 

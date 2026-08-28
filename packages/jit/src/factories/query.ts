@@ -24,6 +24,7 @@ import {
   explainPhysicalQuery,
   type QueryProgram,
 } from "../compiler/query.js";
+import { lowerRuleToQueryCondition } from "../compiler/rules.js";
 import type {
   QueryAggregateOperator,
   QueryCompareNode,
@@ -37,8 +38,9 @@ import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
-import { registerArtifact } from "../runtime/artifact-registry.js";
+import { getArtifact, registerArtifact } from "../runtime/artifact-registry.js";
 import type { Ability, AccessPlan } from "./access.js";
+import type { RulePredicate } from "./rules.js";
 
 const QUERY_PROGRAMS = new WeakMap<object, QueryProgram>();
 
@@ -159,6 +161,15 @@ export interface QueryBuilderOps<
       query: QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
       params: QueryRuntimeParams<TParams>
     ) => QueryConditionNode
+  ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
+  /**
+   * Filters by a compiled rule predicate. The rule lowers into this query's
+   * own condition AST and fuses into the same loop; its declared inputs
+   * become query bindings, so no rule node reaches the query protocol.
+   */
+  filter<TInputs extends Readonly<Record<string, unknown>>>(
+    predicate: RulePredicate<CollectionElementOf<ATS.TypeofSchema<TSchema>>, TInputs>,
+    ...inputs: keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs]
   ): QueryBuilder<TSchema, TOutput, TResult, TParams>;
   select<const TKeys extends readonly QueryOutputKey<TOutput>[]>(
     ...fields: TKeys
@@ -305,6 +316,11 @@ export interface BinaryQueryBuilderOps<
   filter(
     predicate: (query: QueryConditionBuilder<TElement>, params: QueryRuntimeParams<TParams>) => QueryConditionNode
   ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
+  /** Filters by a compiled rule predicate, fused into the same rowset scan. */
+  filter<TInputs extends Readonly<Record<string, unknown>>>(
+    predicate: RulePredicate<TElement, TInputs>,
+    ...inputs: keyof TInputs extends never ? readonly [] : readonly [inputs: TInputs]
+  ): BinaryQueryBuilder<TElement, TOutput, TResult, TParams>;
   select<const TKeys extends readonly Extract<keyof TOutput, string>[]>(
     ...fields: TKeys
   ): BinaryQueryBuilder<TElement, QueryPick<TOutput, TKeys[number]>, QueryPick<TOutput, TKeys[number]>[], TParams>;
@@ -415,11 +431,25 @@ function createBinaryQueryBuilder<
       );
     },
 
-    filter(predicate) {
-      const state = createConditionBuilder(bindings.length);
-      const condition = predicate(state.builder as QueryConditionBuilder<TElement>, createParamRefs(paramNames));
+    filter(predicate: unknown, ruleInputs?: unknown): BinaryQueryBuilder<TElement, TOutput, TResult, TParams> {
+      const lowered = lowerRulePredicate(predicate, ruleInputs, bindings.length);
 
-      return createBinaryQueryBuilder(
+      if (lowered !== undefined) {
+        return createBinaryQueryBuilder<TElement, TOutput, TResult, TParams>(
+          target,
+          lowered.condition === undefined ? nodes : [...nodes, { kind: "filter", condition: lowered.condition }],
+          [...bindings, ...lowered.bindings],
+          paramNames
+        );
+      }
+
+      const state = createConditionBuilder(bindings.length);
+      const condition = (predicate as (query: unknown, params: unknown) => QueryConditionNode)(
+        state.builder as QueryConditionBuilder<TElement>,
+        createParamRefs(paramNames)
+      );
+
+      return createBinaryQueryBuilder<TElement, TOutput, TResult, TParams>(
         target,
         [...nodes, { kind: "filter", condition }],
         [...bindings, ...state.bindings],
@@ -545,14 +575,25 @@ function createQueryBuilder<
       );
     },
 
-    filter(predicate) {
+    filter(predicate: unknown, ruleInputs?: unknown): QueryBuilder<TSchema, TOutput, TResult, TParams> {
+      const lowered = lowerRulePredicate(predicate, ruleInputs, bindings.length);
+
+      if (lowered !== undefined) {
+        return createQueryBuilder<TSchema, TOutput, TResult, TParams>(
+          schema,
+          lowered.condition === undefined ? nodes : [...nodes, { kind: "filter", condition: lowered.condition }],
+          [...bindings, ...lowered.bindings],
+          paramNames
+        );
+      }
+
       const state = createConditionBuilder(bindings.length);
-      const condition = predicate(
+      const condition = (predicate as (query: unknown, params: unknown) => QueryConditionNode)(
         state.builder as QueryConditionBuilder<CollectionElementOf<ATS.TypeofSchema<TSchema>>>,
         createParamRefs(paramNames)
       );
 
-      return createQueryBuilder(
+      return createQueryBuilder<TSchema, TOutput, TResult, TParams>(
         schema,
         [...nodes, { kind: "filter", condition }],
         [...bindings, ...state.bindings],
@@ -960,4 +1001,36 @@ function isQueryConstRef(value: unknown): value is QueryConstRef {
     typeof value === "object" &&
     (value as { readonly __jitQueryValue?: unknown }).__jitQueryValue === "const"
   );
+}
+
+/** An impossible predicate; the query compiler folds the scan away. */
+const IMPOSSIBLE: QueryConditionNode = {
+  kind: "compare",
+  op: "eq",
+  left: { kind: "literal", value: true },
+  right: { kind: "literal", value: false },
+};
+
+/**
+ * Recognizes a rule predicate passed to `filter()` and lowers it to a plain
+ * condition. Anything else is an ordinary predicate callback.
+ */
+export function lowerRulePredicate(
+  predicate: unknown,
+  inputs: unknown,
+  bindingOffset: number
+): { readonly condition: QueryConditionNode | undefined; readonly bindings: readonly unknown[] } | undefined {
+  if (typeof predicate !== "function") return undefined;
+
+  const artifact = getArtifact(predicate);
+
+  if (artifact?.kind !== "rules-plan" || artifact.sink !== "predicate" || artifact.ruleId === undefined) {
+    return undefined;
+  }
+
+  const lowered = lowerRuleToQueryCondition(artifact.descriptor, artifact.ruleId, inputs, bindingOffset);
+
+  if (lowered.kind === "always") return { condition: undefined, bindings: lowered.bindings };
+  if (lowered.kind === "never") return { condition: IMPOSSIBLE, bindings: lowered.bindings };
+  return { condition: lowered.condition, bindings: lowered.bindings };
 }

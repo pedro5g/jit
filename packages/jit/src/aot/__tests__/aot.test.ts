@@ -16,6 +16,200 @@ describe("JIT AOT generate", () => {
     rmSync(outDir, { recursive: true, force: true });
   });
 
+  it("emits each rules sink as direct decision code without a rules runtime", async () => {
+    const Transaction = JIT.object({ amount: JIT.number(), country: JIT.string() });
+    const Rules = JIT.rules(Transaction)
+      .inputs({ risk: JIT.number() })
+      .rule("review", {
+        when: (query, input) => query.or(query.gte("amount", 10_000), query.gte(input.field("risk"), 80)),
+      })
+      .rule("block", {
+        priority: 100,
+        when: (query, input) => query.and(query.eq("country", "BR"), query.gte(input.field("risk"), 95)),
+      });
+
+    const result = AOT.generate({
+      artifacts: {
+        Rules,
+        testRule: Rules.test,
+        hasRule: Rules.some,
+        firstRule: Rules.first,
+        matchedRules: Rules.match,
+      },
+      outDir,
+    });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Rules: typeof Rules;
+      readonly testRule: typeof Rules.test;
+      readonly hasRule: typeof Rules.some;
+      readonly firstRule: typeof Rules.first;
+      readonly matchedRules: typeof Rules.match;
+    };
+    const transaction = { amount: 100, country: "BR" };
+    const inputs = { risk: 96 };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.Rules.test("block", transaction, inputs)).toBe(true);
+    expect(generated.testRule("review", transaction, inputs)).toBe(true);
+    expect(generated.hasRule(transaction, inputs)).toBe(true);
+    expect(generated.firstRule(transaction, inputs)).toBe("block");
+    expect(generated.matchedRules(transaction, inputs)).toEqual(["block", "review"]);
+    expect(source).toContain("inputs.risk >= 95");
+    expect(source).not.toMatch(/Rule\[|Almanac|operatorRegistry|new Map|from ["']@jit-compiler\/jit/);
+  });
+
+  it("lowers every rules result mode, including domain event outcomes", async () => {
+    const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number(), country: JIT.string() });
+    const ManualReview = JIT.dto(
+      JIT.object({ type: JIT.literal("manual-review"), transactionId: JIT.number().int(), riskScore: JIT.number() })
+    );
+    const TransactionBlocked = JIT.ddd.domainEvent("transaction.blocked", {
+      version: 1,
+      payload: JIT.object({ transactionId: JIT.number().int(), reason: JIT.string() }),
+    });
+    const Rules = JIT.rules(Transaction)
+      .inputs({ riskScore: JIT.number() })
+      .rule("review", {
+        when: (query, input) => query.or(query.gte("amount", 10_000), query.gte(input.field("riskScore"), 80)),
+        emit: ManualReview,
+        values: (subject) => ({ transactionId: subject.field("id") }),
+      })
+      .rule("block", {
+        priority: 100,
+        when: (query, input) => query.and(query.eq("country", "BR"), query.gte(input.field("riskScore"), 95)),
+        emit: TransactionBlocked,
+        values: (subject) => ({ transactionId: subject.field("id"), reason: "risk" }),
+      });
+    const many = Rules.many();
+    const result = AOT.generate({
+      artifacts: {
+        TransactionBlocked,
+        Rules,
+        runRules: Rules.run,
+        explainRules: Rules.explain,
+        blockPredicate: Rules.predicate("block"),
+        visitRules: Rules.to.visitor(),
+        iterateRules: Rules.to.iterator(),
+        classifyMany: many,
+        visitMany: many.to.visitor(),
+      },
+      outDir,
+    });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Rules: typeof Rules;
+      readonly runRules: typeof Rules.run;
+      readonly explainRules: typeof Rules.explain;
+      readonly blockPredicate: ReturnType<typeof Rules.predicate>;
+      readonly visitRules: ReturnType<typeof Rules.to.visitor>;
+      readonly iterateRules: ReturnType<typeof Rules.to.iterator>;
+      readonly classifyMany: typeof many;
+      readonly visitMany: ReturnType<typeof many.to.visitor>;
+    };
+    const transaction = { id: 7, amount: 100, country: "BR" };
+    const inputs = { riskScore: 96 };
+    const visited: string[] = [];
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.runRules(transaction, inputs)).toMatchObject([
+      { type: "transaction.blocked", payload: { transactionId: 7, reason: "risk" } },
+      { type: "manual-review", transactionId: 7, riskScore: 96 },
+    ]);
+    expect(generated.explainRules(transaction, inputs)).toEqual({
+      matched: ["block", "review"],
+      evaluated: ["block", "review"],
+    });
+    expect(generated.blockPredicate(transaction, inputs)).toBe(true);
+    expect(generated.visitRules(transaction, inputs, (rule) => visited.push(rule))).toBe(2);
+    expect(visited).toEqual(["block", "review"]);
+    expect([...generated.iterateRules(transaction, inputs)]).toHaveLength(2);
+    expect(generated.classifyMany([transaction, transaction], inputs)).toHaveLength(4);
+    expect(generated.visitMany([transaction], inputs, () => {})).toBe(2);
+    expect(generated.Rules.first(transaction, inputs)).toBe("block");
+    expect(generated.Rules.many()([transaction], inputs)).toHaveLength(2);
+    // The event constructor is the co-emitted class, never a captured runtime value.
+    expect(source).toContain("TransactionBlocked.create({");
+    expect(source).not.toMatch(/Almanac|operatorRegistry|from ["']@jit-compiler\/jit/);
+  });
+
+  it("types every rules result mode in the generated declaration", () => {
+    const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number() });
+    const Review = JIT.object({ transactionId: JIT.number().int(), amount: JIT.number() });
+    const Rules = JIT.rules(Transaction)
+      .inputs({ riskScore: JIT.number() })
+      .rule("review", {
+        when: (query, input) => query.gte(input.field("riskScore"), 80),
+        emit: Review,
+        values: (subject) => ({ transactionId: subject.field("id") }),
+      })
+      .rule("domestic", { when: (query) => query.gte("amount", 1) });
+    const typedOutDir = join(outDir, "rules-typed");
+
+    AOT.generate({ artifacts: { Rules }, outDir: typedOutDir, format: "ts" });
+    writeFileSync(
+      join(typedOutDir, "consumer.ts"),
+      [
+        'import { Rules } from "./index.js";',
+        "const transaction = { id: 1, amount: 10 };",
+        'const first: "review" | "domestic" | undefined = Rules.first(transaction, { riskScore: 90 });',
+        "const outcomes: { transactionId: number; amount: number }[] = Rules.run(transaction, { riskScore: 90 });",
+        "const classify = Rules.many();",
+        "const many: { transactionId: number; amount: number }[] = classify([transaction], { riskScore: 90 });",
+        "const visited: number = classify.to.visitor()([transaction], { riskScore: 90 }, () => {});",
+        'const predicate: boolean = Rules.predicate("review")(transaction, { riskScore: 90 });',
+        "// @ts-expect-error — an id that was never declared is not part of the union",
+        'Rules.test("missing", transaction, { riskScore: 90 });',
+        "console.log(first, outcomes, many, visited, predicate);",
+        "",
+      ].join("\n")
+    );
+    writeFileSync(
+      join(typedOutDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          exactOptionalPropertyTypes: true,
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmit: true,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["index.ts", "consumer.ts"],
+      })
+    );
+    writeFileSync(join(typedOutDir, "package.json"), '{"type":"module"}\n');
+
+    expect(() =>
+      execFileSync(process.execPath, [join(process.cwd(), "node_modules", "typescript", "bin", "tsc")], {
+        cwd: typedOutDir,
+        stdio: "pipe",
+      })
+    ).not.toThrow();
+  });
+
+  it("reports a rules outcome whose domain event class is not co-emitted", () => {
+    const Transaction = JIT.object({ id: JIT.number().int(), amount: JIT.number() });
+    const Flagged = JIT.ddd.domainEvent("transaction.flagged", {
+      version: 1,
+      payload: JIT.object({ transactionId: JIT.number().int() }),
+    });
+    const Rules = JIT.rules(Transaction).rule("large", {
+      when: (query) => query.gte("amount", 10_000),
+      emit: Flagged,
+      values: (subject) => ({ transactionId: subject.field("id") }),
+    });
+    const result = AOT.generate({ artifacts: { runRules: Rules.run }, outDir });
+
+    expect(result.skipped).toEqual([
+      {
+        schema: "runRules",
+        operation: "rules.run",
+        reason: "AOT rule outcomes require exporting the domain event Runtime Class artifact alongside the rules plan",
+      },
+    ]);
+  });
+
   it("lowers authorized query, projection and update without an ability runtime", async () => {
     const Actor = JIT.object({ id: JIT.number() });
     const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), title: JIT.string(), secret: JIT.string() });

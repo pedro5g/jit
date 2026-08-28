@@ -18,6 +18,7 @@ import type { NdjsonDescriptor } from "../compiler/ndjson.js";
 import type { OrderingDescriptor } from "../compiler/ordering.js";
 import type { ProjectionTree } from "../compiler/projection.js";
 import type { ReconcileDescriptor } from "../compiler/reconcile.js";
+import type { RulesDescriptor, RulesSink } from "../compiler/rules.js";
 import type * as ATS from "../core/ats/index.js";
 
 interface SourceArtifact {
@@ -117,6 +118,16 @@ interface AccessPlanArtifact {
   readonly kind: "access-plan";
   readonly schema: ATS.AnyTypeSchema;
   readonly descriptor: AccessDescriptor;
+}
+
+/** A pure rule graph is reconstructed per sink, so unused result modes stay absent. */
+interface RulesPlanArtifact {
+  readonly kind: "rules-plan";
+  readonly schema: ATS.AnyTypeSchema;
+  readonly descriptor: RulesDescriptor;
+  readonly sink: RulesSink;
+  /** Set for the `predicate` sink: the single rule it lowers. */
+  readonly ruleId?: string | undefined;
 }
 
 /** A match carries its tags; the handlers are user values, bound at compile time. */
@@ -249,6 +260,7 @@ export type CompiledArtifact =
   | CacheKeyPlanArtifact
   | CanonicalPlanArtifact
   | AccessPlanArtifact
+  | RulesPlanArtifact
   | MatchPlanArtifact
   | MigrationPlanArtifact
   | CsvPlanArtifact

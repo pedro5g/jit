@@ -270,6 +270,17 @@ query describes the request; facts on the collection decide the access path.
 - Fuse authorization with query, projection, update, and patch lowerings when safe; AOT must not retain a rule walker or ability middleware.
 - Do not add storage-specific authorization adapters to core. Datastores consume the normalized `~query` predicate and projection.
 
+## Rules
+
+- Rule conditions reuse the shared condition/query AST; never create a second rules-expression language.
+- Do not create runtime operator registries or fact-name registries for static rules.
+- Rules are pure by default: consequences are data, not side effects. Do not add callbacks to the rule hot path when a declarative descriptor can represent the operation.
+- Rules must preserve runtime/define/AOT 1:1 parity, one reconstructive artifact per result mode.
+- Execution sinks must avoid allocations they do not semantically require: `test`, `some`, `first` and `predicate` allocate nothing, and the visitor sinks allocate only what the consumer takes.
+- Facts shared between rules are evaluated at most once per full evaluation, and loop-invariant work leaves the `many()` loop. Early-exit sinks do not hoist: that would perform work the short circuit was entitled to skip.
+- Diagnostics (`explain`, `inspect`) must not add cost to the normal evaluation path.
+- A rule predicate consumed by `JIT.cqrs` lowers to a plain query condition with its inputs as bindings; no rule, fact or outcome node may reach `~query`.
+
 ## Feature Documentation
 
 Every public feature must add or update its `docs/features/*` document in the

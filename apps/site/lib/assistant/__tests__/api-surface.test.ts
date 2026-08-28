@@ -123,17 +123,18 @@ describe("the deep audit", () => {
   });
 
   /**
-   * `const result = await user.run()` never touches a `JIT.` chain, so the
+   * `const result = await user.evaluateAll()` never touches a `JIT.` chain, so the
    * expression walk cannot see it — and it is the exact shape of the answer
-   * that started this work.
+   * that started this work. The method has to be one the library really does
+   * not have: `.run()` used to serve here and is now a rules result mode.
    */
   it("catches a method invented on a local variable inside a jit example", () => {
     const { methods } = unknownNames(
-      "```ts\nconst User = JIT.object({});\nconst result = await user.run();\n```",
+      "```ts\nconst User = JIT.object({});\nconst result = await user.evaluateAll();\n```",
       surface
     );
 
-    expect(methods).toEqual([".run()"]);
+    expect(methods).toEqual([".evaluateAll()"]);
   });
 
   it("passes an answer that only uses real names", () => {
