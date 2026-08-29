@@ -994,8 +994,10 @@ function emitQueryConditionSource(condition, context) {
   return `${emitQueryValueSource(condition.left, context)} ${operators[condition.op]} ${emitQueryValueSource(condition.right, context)}`;
 }
 function emitQueryValueSource(value, context) {
-  if (value.kind === "field") return context.fieldAccess?.(value.key) ?? emitPropertyAccess(context.fieldBase, value.key);
-  if (value.kind === "param") return context.paramAccess?.(value.name) ?? emitPropertyAccess(context.paramBase, value.name);
+  if (value.kind === "field")
+    return context.fieldAccess?.(value.key) ?? emitPropertyAccess(context.fieldBase, value.key);
+  if (value.kind === "param")
+    return context.paramAccess?.(value.name) ?? emitPropertyAccess(context.paramBase, value.name);
   if (value.kind === "literal") return emitLiteral(value.value);
   return value.name;
 }
@@ -14055,6 +14057,8 @@ function resolveRulesDescriptor(subject, inputs, declarations) {
     const condition = typeof folded === "boolean" ? TRUE_CONDITION : folded;
     const dependencies = constant2 === void 0 ? { subjectPaths, inputPaths } : collectPaths(condition);
     const outcome = declaration.outcome === void 0 ? void 0 : resolveOutcome(declaration, subjectObject, inputObject, dependencies, (value) => {
+      const existing = bindings.indexOf(value);
+      if (existing !== -1) return bindingNames[existing];
       const name = `__ro${bindings.length}`;
       bindings[bindings.length] = value;
       bindingNames[bindingNames.length] = name;
@@ -14162,11 +14166,16 @@ function resolveOutcome(declaration, subject, inputs, dependencies, bind) {
   });
 }
 function autoMatchOutcomeValue(key, target, subject, inputs) {
-  if (subject.def.props[key] !== void 0) return { kind: "field", key };
-  if (inputs?.def.props[key] !== void 0) return { kind: "param", name: key };
   const base = resolveWrappers(target).base;
+  const subjectProp = subject.def.props[key];
+  if (subjectProp !== void 0 && compatible(base, subjectProp)) return { kind: "field", key };
+  const inputProp = inputs?.def.props[key];
+  if (inputProp !== void 0 && compatible(base, inputProp)) return { kind: "param", name: key };
   if (base.type === TypeName.literal) return { kind: "literal", value: base.def.value };
   return void 0;
+}
+function compatible(target, source) {
+  return target.type === resolveWrappers(source).base.type;
 }
 function validateCondition3(condition, subject, inputs, subjectPaths, inputPaths) {
   if (condition.kind === "logical") {
@@ -14184,7 +14193,10 @@ function validateCondition3(condition, subject, inputs, subjectPaths, inputPaths
 function validateValue2(value, subject, inputs, subjectPaths, inputPaths) {
   if (value.kind === "field") {
     if (subject.def.props[value.key] === void 0) {
-      throw new JITError("INVALID_OPERATION", `rule condition names unknown subject field ${JSON.stringify(value.key)}`);
+      throw new JITError(
+        "INVALID_OPERATION",
+        `rule condition names unknown subject field ${JSON.stringify(value.key)}`
+      );
     }
     subjectPaths.add(value.key);
     return;
@@ -14434,7 +14446,6 @@ function emitRulesFirstSource(descriptor) {
     for (const rule of orderedRules(descriptor)) {
       if (rule.constant === true) {
         writer.line(`return ${JSON.stringify(rule.id)};`);
-        writer.line("}");
         return;
       }
       writer.line(`if (${emitCondition4(rule, EMPTY_PLAN)}) return ${JSON.stringify(rule.id)};`);
@@ -14602,6 +14613,30 @@ function emitRulesExplainSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
+function emitRulesInspectSource(descriptor) {
+  const inspection = inspectRules(descriptor);
+  const writer = new CodeWriter();
+  writer.line("function rulesInspect() {");
+  writer.indent(() => {
+    writer.line("return Object.freeze({");
+    writer.indent(() => {
+      writer.line(`rules: ${inspection.rules},`);
+      writer.line(`liveRules: ${inspection.liveRules},`);
+      writer.line(`deadRules: Object.freeze(${JSON.stringify(inspection.deadRules)}),`);
+      writer.line(`subjectPaths: Object.freeze(${JSON.stringify(inspection.subjectPaths)}),`);
+      writer.line(`inputPaths: Object.freeze(${JSON.stringify(inspection.inputPaths)}),`);
+      writer.line(`deadInputs: Object.freeze(${JSON.stringify(inspection.deadInputs)}),`);
+      writer.line(`sharedReads: ${inspection.sharedReads},`);
+      writer.line(`sharedPredicates: ${inspection.sharedPredicates},`);
+      writer.line(`priorityGroups: ${inspection.priorityGroups},`);
+      writer.line(`outcomes: ${inspection.outcomes},`);
+      writer.line(`strategy: ${JSON.stringify(inspection.strategy)},`);
+    });
+    writer.line("});");
+  });
+  writer.line("}");
+  return writer.toString();
+}
 function emitRulesPlanSource(descriptor, options) {
   const writer = new CodeWriter();
   writer.line("(() => {");
@@ -14617,7 +14652,8 @@ function emitRulesPlanSource(descriptor, options) {
       emitRulesManySource(descriptor, options),
       emitRulesManyVisitorSource(descriptor, options),
       emitRulesManyIteratorSource(descriptor, options),
-      emitRulesExplainSource(descriptor)
+      emitRulesExplainSource(descriptor),
+      emitRulesInspectSource(descriptor)
     ]) {
       for (const line of source.split("\n")) writer.line(line);
     }
@@ -14641,6 +14677,7 @@ function emitRulesPlanSource(descriptor, options) {
       writer.line("match: rulesMatch,");
       writer.line("run: rulesRun,");
       writer.line("explain: rulesExplain,");
+      writer.line("inspect: rulesInspect,");
       writer.line("predicate: (rule) => predicates[rule],");
       writer.line("many: () => many,");
       writer.line("to: Object.freeze({ visitor: () => rulesVisit, iterator: () => rulesIterate }),");
@@ -17676,6 +17713,7 @@ function rulesPlanType(artifact, typeNames) {
   const list = `subjects: readonly ${subject}[]`;
   const consume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined) => void`;
   const manyConsume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined, index: number) => void`;
+  const inspection = `{ readonly rules: number; readonly liveRules: number; readonly deadRules: readonly string[]; readonly subjectPaths: readonly string[]; readonly inputPaths: readonly string[]; readonly deadInputs: readonly string[]; readonly sharedReads: number; readonly sharedPredicates: number; readonly priorityGroups: number; readonly outcomes: number; readonly strategy: "inline" }`;
   const signatures = {
     test: `(rule: ${ids}, subject: ${subject}${input}) => boolean`,
     some: `(subject: ${subject}${input}) => boolean`,
@@ -17691,7 +17729,7 @@ function rulesPlanType(artifact, typeNames) {
     "many-iterator": `(${list}${input}) => IterableIterator<${outcome}>`
   };
   if (artifact.sink !== "plan") return signatures[artifact.sink];
-  const manyPlan = `${signatures.many} & { readonly to: { visitor(): ${signatures["many-visitor"]}; iterator(): ${signatures["many-iterator"]} } }`;
+  const manyPlan = `((${signatures.many})) & { readonly to: { visitor(): ${signatures["many-visitor"]}; iterator(): ${signatures["many-iterator"]} } }`;
   return [
     "{",
     `readonly test: ${signatures.test};`,
@@ -17700,6 +17738,7 @@ function rulesPlanType(artifact, typeNames) {
     `readonly match: ${signatures.match};`,
     `readonly run: ${signatures.run};`,
     `readonly explain: ${signatures.explain};`,
+    `readonly inspect: () => ${inspection};`,
     `readonly predicate: (rule: ${ids}) => ${signatures.predicate};`,
     `readonly many: () => ${manyPlan};`,
     `readonly to: { visitor(): ${signatures.visitor}; iterator(): ${signatures.iterator} };`,
@@ -23145,7 +23184,13 @@ function createParsePlan(descriptor) {
   Object.defineProperties(result, {
     validate: { value: () => result },
     where: {
-      value: (predicate) => {
+      value: (predicate, ruleInputs) => {
+        const lowered = lowerRulePredicate(predicate, ruleInputs, descriptor.bindingValues.length);
+        if (lowered !== void 0) {
+          return createParsePlan(
+            lowered.condition === void 0 ? descriptor : appendNdjsonFilter(descriptor, lowered.condition, lowered.bindings)
+          );
+        }
         const state = createConditionBuilder(descriptor.bindingValues.length);
         const condition = predicate(state.builder);
         return createParsePlan(appendNdjsonFilter(descriptor, condition, state.bindings));
@@ -24015,7 +24060,13 @@ function createRulesPlan(subject, inputs, declarations) {
         let compiled = predicates.get(rule);
         if (compiled === void 0) {
           compiled = lazy2("predicate", rule);
-          registerArtifact(compiled, { kind: "rules-plan", schema: subject, descriptor, sink: "predicate", ruleId: rule });
+          registerArtifact(compiled, {
+            kind: "rules-plan",
+            schema: subject,
+            descriptor,
+            sink: "predicate",
+            ruleId: rule
+          });
           predicates.set(rule, compiled);
         }
         return compiled;

@@ -55,6 +55,20 @@ describe("JIT AOT generate", () => {
     expect(generated.hasRule(transaction, inputs)).toBe(true);
     expect(generated.firstRule(transaction, inputs)).toBe("block");
     expect(generated.matchedRules(transaction, inputs)).toEqual(["block", "review"]);
+    expect(generated.Rules.inspect()).toEqual({
+      rules: 2,
+      liveRules: 2,
+      deadRules: [],
+      subjectPaths: ["country", "amount"],
+      inputPaths: ["risk"],
+      deadInputs: [],
+      sharedReads: 1,
+      sharedPredicates: 0,
+      priorityGroups: 2,
+      outcomes: 0,
+      strategy: "inline",
+    });
+    expect(Object.isFrozen(generated.Rules.inspect())).toBe(true);
     expect(source).toContain("inputs.risk >= 95");
     expect(source).not.toMatch(/Rule\[|Almanac|operatorRegistry|new Map|from ["']@jit-compiler\/jit/);
   });
@@ -158,9 +172,10 @@ describe("JIT AOT generate", () => {
         "const many: { transactionId: number; amount: number }[] = classify([transaction], { riskScore: 90 });",
         "const visited: number = classify.to.visitor()([transaction], { riskScore: 90 }, () => {});",
         'const predicate: boolean = Rules.predicate("review")(transaction, { riskScore: 90 });',
+        'const strategy: "inline" = Rules.inspect().strategy;',
         "// @ts-expect-error — an id that was never declared is not part of the union",
         'Rules.test("missing", transaction, { riskScore: 90 });',
-        "console.log(first, outcomes, many, visited, predicate);",
+        "console.log(first, outcomes, many, visited, predicate, strategy);",
         "",
       ].join("\n")
     );

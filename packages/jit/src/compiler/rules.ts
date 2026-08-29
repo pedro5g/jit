@@ -900,6 +900,33 @@ export function emitRulesExplainSource(descriptor: RulesDescriptor): string {
   return writer.toString();
 }
 
+/** Emits the immutable compile-plan report carried by a complete AOT plan. */
+function emitRulesInspectSource(descriptor: RulesDescriptor): string {
+  const inspection = inspectRules(descriptor);
+  const writer = new CodeWriter();
+
+  writer.line("function rulesInspect() {");
+  writer.indent(() => {
+    writer.line("return Object.freeze({");
+    writer.indent(() => {
+      writer.line(`rules: ${inspection.rules},`);
+      writer.line(`liveRules: ${inspection.liveRules},`);
+      writer.line(`deadRules: Object.freeze(${JSON.stringify(inspection.deadRules)}),`);
+      writer.line(`subjectPaths: Object.freeze(${JSON.stringify(inspection.subjectPaths)}),`);
+      writer.line(`inputPaths: Object.freeze(${JSON.stringify(inspection.inputPaths)}),`);
+      writer.line(`deadInputs: Object.freeze(${JSON.stringify(inspection.deadInputs)}),`);
+      writer.line(`sharedReads: ${inspection.sharedReads},`);
+      writer.line(`sharedPredicates: ${inspection.sharedPredicates},`);
+      writer.line(`priorityGroups: ${inspection.priorityGroups},`);
+      writer.line(`outcomes: ${inspection.outcomes},`);
+      writer.line(`strategy: ${JSON.stringify(inspection.strategy)},`);
+    });
+    writer.line("});");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+
 function emitRulesPlanSource(descriptor: RulesDescriptor, options: RulesEmitOptions): string {
   const writer = new CodeWriter();
 
@@ -917,6 +944,7 @@ function emitRulesPlanSource(descriptor: RulesDescriptor, options: RulesEmitOpti
       emitRulesManyVisitorSource(descriptor, options),
       emitRulesManyIteratorSource(descriptor, options),
       emitRulesExplainSource(descriptor),
+      emitRulesInspectSource(descriptor),
     ]) {
       for (const line of source.split("\n")) writer.line(line);
     }
@@ -940,6 +968,7 @@ function emitRulesPlanSource(descriptor: RulesDescriptor, options: RulesEmitOpti
       writer.line("match: rulesMatch,");
       writer.line("run: rulesRun,");
       writer.line("explain: rulesExplain,");
+      writer.line("inspect: rulesInspect,");
       writer.line("predicate: (rule) => predicates[rule],");
       writer.line("many: () => many,");
       writer.line("to: Object.freeze({ visitor: () => rulesVisit, iterator: () => rulesIterate }),");

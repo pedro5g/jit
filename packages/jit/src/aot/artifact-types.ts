@@ -335,6 +335,7 @@ export function rulesPlanType(
   const list = `subjects: readonly ${subject}[]`;
   const consume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined) => void`;
   const manyConsume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined, index: number) => void`;
+  const inspection = `{ readonly rules: number; readonly liveRules: number; readonly deadRules: readonly string[]; readonly subjectPaths: readonly string[]; readonly inputPaths: readonly string[]; readonly deadInputs: readonly string[]; readonly sharedReads: number; readonly sharedPredicates: number; readonly priorityGroups: number; readonly outcomes: number; readonly strategy: "inline" }`;
   const signatures = {
     test: `(rule: ${ids}, subject: ${subject}${input}) => boolean`,
     some: `(subject: ${subject}${input}) => boolean`,
@@ -364,6 +365,7 @@ export function rulesPlanType(
     `readonly match: ${signatures.match};`,
     `readonly run: ${signatures.run};`,
     `readonly explain: ${signatures.explain};`,
+    `readonly inspect: () => ${inspection};`,
     `readonly predicate: (rule: ${ids}) => ${signatures.predicate};`,
     `readonly many: () => ${manyPlan};`,
     `readonly to: { visitor(): ${signatures.visitor}; iterator(): ${signatures.iterator} };`,
