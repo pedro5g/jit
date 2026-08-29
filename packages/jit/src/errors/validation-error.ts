@@ -16,6 +16,15 @@ export interface ValidationIssue {
   readonly message: string;
   /** `typeof` of the rejected value on type mismatches. */
   readonly received?: string;
+  /**
+   * Machine-readable detail beside the code, for the checks that have one.
+   *
+   * `message` is presentation and cannot be translated by a caller; a bound
+   * can. A check that has nothing structured to add omits the key entirely
+   * rather than carrying an empty object, and no issue ever holds the rejected
+   * value: that is how a diagnostic ends up in a log with data in it.
+   */
+  readonly params?: Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
 }
 
 /**

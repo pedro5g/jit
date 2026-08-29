@@ -763,7 +763,7 @@ const __validator0 = ((__v0) => {
         issues[issues.length] = { path: "name", code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
       } else {
         if (v6.length < 2) {
-          issues[issues.length] = { path: "name", code: "too_small", expected: "length >= 2", message: "expected at least 2 characters" };
+          issues[issues.length] = { path: "name", code: "too_small", expected: "length >= 2", message: "expected at least 2 characters", params: { minimum: 2, inclusive: true } };
         }
       }
       b3 = { "id": o5, "name": v6 };
@@ -887,10 +887,10 @@ const __validator0 = ((__v0) => {
             issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "expected_string", expected: "string", message: "expected string", received: typeof v8 };
           } else {
             if (v8.length < 2) {
-              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "too_small", expected: "length >= 2", message: "expected at least 2 characters" };
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "too_small", expected: "length >= 2", message: "expected at least 2 characters", params: { minimum: 2, inclusive: true } };
             }
             if (v8.length > 64) {
-              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "too_big", expected: "length <= 64", message: "expected at most 64 characters" };
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".name" : "name"), code: "too_big", expected: "length <= 64", message: "expected at most 64 characters", params: { maximum: 64, inclusive: true } };
             }
           }
           let v10 = v4.email;
@@ -917,7 +917,7 @@ const __validator0 = ((__v0) => {
             issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".tags" : "tags"), code: "expected_array", expected: "array", message: "expected array", received: typeof v16 };
           } else {
             if (v16.length > 8) {
-              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".tags" : "tags"), code: "too_big", expected: "length <= 8", message: "expected at most 8 items" };
+              issues[issues.length] = { path: ("[" + i3 + "]" ? "[" + i3 + "]" + ".tags" : "tags"), code: "too_big", expected: "length <= 8", message: "expected at most 8 items", params: { maximum: 8, inclusive: true } };
             }
             for (let i18 = 0; i18 < v16.length; i18++) {
               let v19 = v16[i18];
@@ -1697,7 +1697,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "cupom", code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
       } else {
         if (v6.length < 3) {
-          issues[issues.length] = { path: "cupom", code: "too_small", expected: "length >= 3", message: "expected at least 3 characters" };
+          issues[issues.length] = { path: "cupom", code: "too_small", expected: "length >= 3", message: "expected at least 3 characters", params: { minimum: 3, inclusive: true } };
         }
       }
       w5 = v6;
@@ -1724,7 +1724,7 @@ function safeParse(value) {
       issues[issues.length] = { path: "at", code: "invalid_date", expected: "Date", message: "expected a valid Date" };
     } else {
       if (v20.getTime() < 1782864000000 || v20.getTime() > 1785542399999) {
-        issues[issues.length] = { path: "at", code: "out_of_range", expected: "2026-07-01T00:00:00.000Z..2026-07-31T23:59:59.999Z", message: "expected a value between 2026-07-01T00:00:00.000Z and 2026-07-31T23:59:59.999Z" };
+        issues[issues.length] = { path: "at", code: "out_of_range", expected: "2026-07-01T00:00:00.000Z..2026-07-31T23:59:59.999Z", message: "expected a value between 2026-07-01T00:00:00.000Z and 2026-07-31T23:59:59.999Z", params: { minimum: "2026-07-01T00:00:00.000Z", maximum: "2026-07-31T23:59:59.999Z", inclusive: true } };
       }
       if (v20.getSeconds() !== 0 || v20.getMilliseconds() !== 0) {
         issues[issues.length] = { path: "at", code: "invalid_precision", expected: "minute", message: "expected value truncated to minute" };
@@ -1898,7 +1898,7 @@ function safeParse(value) {
       } else {
         v22 = v22.trim();
         if (v22.length > 140) {
-          issues[issues.length] = { path: "note", code: "too_big", expected: "length <= 140", message: "expected at most 140 characters" };
+          issues[issues.length] = { path: "note", code: "too_big", expected: "length <= 140", message: "expected at most 140 characters", params: { maximum: 140, inclusive: true } };
         }
       }
       o23 = v22;
@@ -2106,10 +2106,10 @@ function safeParse(value) {
       issues[issues.length] = { path: "age", code: "expected_number", expected: "number", message: "expected number", received: typeof v6 };
     } else {
       if (v6 <= 17) {
-        issues[issues.length] = { path: "age", code: "too_small", expected: "> 17", message: "expected a number > 17" };
+        issues[issues.length] = { path: "age", code: "too_small", expected: "> 17", message: "expected a number > 17", params: { minimum: 17, inclusive: false } };
       }
       if (v6 >= 130) {
-        issues[issues.length] = { path: "age", code: "too_big", expected: "< 130", message: "expected a number < 130" };
+        issues[issues.length] = { path: "age", code: "too_big", expected: "< 130", message: "expected a number < 130", params: { maximum: 130, inclusive: false } };
       }
       if ((v6 | 0) !== v6) {
         issues[issues.length] = { path: "age", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
@@ -2167,7 +2167,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "credentials.password", code: "expected_string", expected: "string", message: "expected string", received: typeof v16 };
       } else {
         if (v16.length < 8) {
-          issues[issues.length] = { path: "credentials.password", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters" };
+          issues[issues.length] = { path: "credentials.password", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters", params: { minimum: 8, inclusive: true } };
         }
       }
       let v18 = v14.confirmPassword;
@@ -2175,7 +2175,7 @@ function safeParse(value) {
         issues[issues.length] = { path: "credentials.confirmPassword", code: "expected_string", expected: "string", message: "expected string", received: typeof v18 };
       } else {
         if (v18.length < 8) {
-          issues[issues.length] = { path: "credentials.confirmPassword", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters" };
+          issues[issues.length] = { path: "credentials.confirmPassword", code: "too_small", expected: "length >= 8", message: "expected at least 8 characters", params: { minimum: 8, inclusive: true } };
         }
       }
     }

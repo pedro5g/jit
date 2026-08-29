@@ -165,6 +165,7 @@ var DomainAssertionError = class extends JITError {
     this.name = "DomainAssertionError";
     this.rule = details?.rule;
     this.field = details?.field;
+    this.issues = details?.issues ?? [];
   }
 };
 
@@ -6002,6 +6003,10 @@ function emitStrictFormatCondition(value, pattern) {
 }
 
 // ../../packages/jit/src/compiler/validate/emit-validate.ts
+function emitCheckParams(params) {
+  const entries = Object.entries(params).map(([key, value]) => `${emitObjectKey(key)}: ${JSON.stringify(value)}`);
+  return `{ ${entries.join(", ")} }`;
+}
 var EMAIL_REGEX = regexes_exports.email;
 var UUID_REGEX = /* @__PURE__ */ regexes_exports.uuid();
 var ValidatorEmitter = class {
@@ -6194,15 +6199,15 @@ var ValidatorEmitter = class {
     return name;
   }
   /** Emits `if (<failCondition>) { fail }` — early return or issue push. */
-  failIf(failCondition, path, code, expected, message) {
+  failIf(failCondition, path, code, expected, message, params) {
     const writer = this.writer;
     writer.line(`if (${failCondition}) {`);
     writer.indent(() => {
-      this.emitFail(path, code, expected, message);
+      this.emitFail(path, code, expected, message, void 0, params);
     });
     writer.line("}");
   }
-  emitFail(path, code, expected, message, received) {
+  emitFail(path, code, expected, message, received, params) {
     const writer = this.writer;
     if (this.mode === "is") {
       writer.line("return false;");
@@ -6210,8 +6215,9 @@ var ValidatorEmitter = class {
     }
     const pathSource = path.kind === "static" ? emitLiteral(path.source) : path.source;
     const receivedPart = received ? `, received: ${received}` : "";
+    const paramsPart = params === void 0 ? "" : `, params: ${emitCheckParams(params)}`;
     writer.line(
-      `issues[issues.length] = { path: ${pathSource}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart} };`
+      `issues[issues.length] = { path: ${pathSource}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
     );
   }
   /** Type guard + checks + children for the unwrapped base schema. */
@@ -6527,7 +6533,8 @@ var ValidatorEmitter = class {
             path,
             "too_small",
             `>= ${String(check.value)}`,
-            check.message ?? `expected a value >= ${String(check.value)}`
+            check.message ?? `expected a value >= ${String(check.value)}`,
+            { minimum: String(check.value), inclusive: true }
           );
           break;
         }
@@ -6538,7 +6545,8 @@ var ValidatorEmitter = class {
             path,
             "too_big",
             `<= ${String(check.value)}`,
-            check.message ?? `expected a value <= ${String(check.value)}`
+            check.message ?? `expected a value <= ${String(check.value)}`,
+            { maximum: String(check.value), inclusive: true }
           );
           break;
         }
@@ -6551,7 +6559,8 @@ var ValidatorEmitter = class {
             path,
             "out_of_range",
             `${String(range.min)}..${String(range.max)}`,
-            check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`
+            check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`,
+            { minimum: String(range.min), maximum: String(range.max), inclusive: true }
           );
           break;
         }
@@ -6724,7 +6733,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_small",
                 `length >= ${check.value}`,
-                check.message ?? `expected at least ${check.value} characters`
+                check.message ?? `expected at least ${check.value} characters`,
+                { minimum: check.value, inclusive: true }
               );
               break;
             case "max":
@@ -6733,7 +6743,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_big",
                 `length <= ${check.value}`,
-                check.message ?? `expected at most ${check.value} characters`
+                check.message ?? `expected at most ${check.value} characters`,
+                { maximum: check.value, inclusive: true }
               );
               break;
             case "length":
@@ -6742,7 +6753,8 @@ var ValidatorEmitter = class {
                 path,
                 "invalid_length",
                 `length === ${check.value}`,
-                check.message ?? `expected exactly ${check.value} characters`
+                check.message ?? `expected exactly ${check.value} characters`,
+                { length: check.value }
               );
               break;
             case "oneOf": {
@@ -6934,7 +6946,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_small",
                 `>= ${check.value}`,
-                check.message ?? `expected a number >= ${check.value}`
+                check.message ?? `expected a number >= ${check.value}`,
+                { minimum: check.value, inclusive: true }
               );
               break;
             case "max":
@@ -6943,7 +6956,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_big",
                 `<= ${check.value}`,
-                check.message ?? `expected a number <= ${check.value}`
+                check.message ?? `expected a number <= ${check.value}`,
+                { maximum: check.value, inclusive: true }
               );
               break;
             case "moreThan":
@@ -6952,7 +6966,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_small",
                 `> ${check.value}`,
-                check.message ?? `expected a number > ${check.value}`
+                check.message ?? `expected a number > ${check.value}`,
+                { minimum: check.value, inclusive: false }
               );
               break;
             case "lessThan":
@@ -6961,7 +6976,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_big",
                 `< ${check.value}`,
-                check.message ?? `expected a number < ${check.value}`
+                check.message ?? `expected a number < ${check.value}`,
+                { maximum: check.value, inclusive: false }
               );
               break;
             case "oneOf": {
@@ -7033,7 +7049,8 @@ var ValidatorEmitter = class {
                 path,
                 "not_multiple_of",
                 `multiple of ${check.value}`,
-                check.message ?? `expected a multiple of ${check.value}`
+                check.message ?? `expected a multiple of ${check.value}`,
+                { multipleOf: check.value }
               );
               break;
             default:
@@ -7066,7 +7083,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_small",
                 `length >= ${check.value}`,
-                check.message ?? `expected at least ${check.value} items`
+                check.message ?? `expected at least ${check.value} items`,
+                { minimum: check.value, inclusive: true }
               );
               break;
             case "max":
@@ -7075,7 +7093,8 @@ var ValidatorEmitter = class {
                 path,
                 "too_big",
                 `length <= ${check.value}`,
-                check.message ?? `expected at most ${check.value} items`
+                check.message ?? `expected at most ${check.value} items`,
+                { maximum: check.value, inclusive: true }
               );
               break;
             case "length":
@@ -17014,14 +17033,18 @@ var baseBuilderPrototype = {
   regex(value, message) {
     return createBuilder(appendCheck(this.schema, { kind: "regex", value, message }));
   },
-  email(regexOrMessage, message) {
-    const override = regexOrMessage instanceof RegExp ? regexOrMessage : void 0;
-    const text = typeof regexOrMessage === "string" ? regexOrMessage : message;
+  // Two dimensions, so an options object exists beside the shorthand: a lone
+  // string is still the message, and nobody has to remember an argument order.
+  email(patternOrMessageOrOptions, message) {
+    const options = isCheckOptions(patternOrMessageOrOptions);
+    const override = options?.pattern ?? (patternOrMessageOrOptions instanceof RegExp ? patternOrMessageOrOptions : void 0);
+    const text = options?.message ?? (typeof patternOrMessageOrOptions === "string" ? patternOrMessageOrOptions : message);
     return createBuilder(appendCheck(this.schema, { kind: "email", value: override, message: text }));
   },
-  uuid(versionOrMessage, message) {
-    const version = typeof versionOrMessage === "number" ? versionOrMessage : void 0;
-    const text = typeof versionOrMessage === "string" ? versionOrMessage : message;
+  uuid(versionOrMessageOrOptions, message) {
+    const options = isCheckOptions(versionOrMessageOrOptions);
+    const version = options?.version ?? (typeof versionOrMessageOrOptions === "number" ? versionOrMessageOrOptions : void 0);
+    const text = options?.message ?? (typeof versionOrMessageOrOptions === "string" ? versionOrMessageOrOptions : message);
     return createBuilder(
       appendCheck(this.schema, { kind: "uuid", value: version ? regexes_exports.uuid(version) : void 0, message: text })
     );
@@ -17180,23 +17203,33 @@ var baseBuilderPrototype = {
   emoji(message) {
     return createBuilder(appendCheck(this.schema, { kind: "emoji", value: regexes_exports.emoji(), message }));
   },
+  // The delimiter is itself a string, so this is the one check where the
+  // message cannot take the first position: `.mac(undefined, "…")`.
   mac(delimiter, message) {
     return createBuilder(appendCheck(this.schema, { kind: "mac", value: regexes_exports.mac(delimiter), message }));
   },
-  time(options, message) {
-    return createBuilder(appendCheck(this.schema, { kind: "time", value: regexes_exports.time(options ?? {}), message }));
+  time(optionsOrMessage, message) {
+    const options = typeof optionsOrMessage === "string" ? void 0 : optionsOrMessage;
+    const text = typeof optionsOrMessage === "string" ? optionsOrMessage : message;
+    return createBuilder(appendCheck(this.schema, { kind: "time", value: regexes_exports.time(options ?? {}), message: text }));
   },
-  datetime(options, message) {
+  datetime(optionsOrMessage, message) {
+    const options = typeof optionsOrMessage === "string" ? void 0 : optionsOrMessage;
+    const text = typeof optionsOrMessage === "string" ? optionsOrMessage : message;
     return createBuilder(
-      appendCheck(this.schema, { kind: "datetime", value: regexes_exports.datetime(options ?? {}), message })
+      appendCheck(this.schema, { kind: "datetime", value: regexes_exports.datetime(options ?? {}), message: text })
     );
   },
-  digest(algorithm, encoding, message) {
+  digest(algorithm, encodingOrMessage, message) {
+    const encoding = isHashEncoding(encodingOrMessage) ? encodingOrMessage : void 0;
+    const text = isHashEncoding(encodingOrMessage) ? message : encodingOrMessage ?? message;
     return createBuilder(
-      appendCheck(this.schema, { kind: "digest", value: regexes_exports.hash(algorithm, encoding), message })
+      appendCheck(this.schema, { kind: "digest", value: regexes_exports.hash(algorithm, encoding), message: text })
     );
   },
-  format(pattern, options, message) {
+  format(pattern, optionsOrMessage, message) {
+    const options = typeof optionsOrMessage === "string" ? void 0 : optionsOrMessage;
+    const text = typeof optionsOrMessage === "string" ? optionsOrMessage : message;
     const mode = options?.mode ?? "transform";
     return createBuilder(
       appendCheck(this.schema, {
@@ -17206,7 +17239,7 @@ var baseBuilderPrototype = {
           mode,
           stripNonDigits: options?.stripNonDigits ?? mode === "transform"
         },
-        message
+        message: text
       })
     );
   },
@@ -17456,6 +17489,13 @@ function attachStandardSchemaGetter(prototype) {
       return getStandardSchema(this.schema);
     }
   });
+}
+function isCheckOptions(value) {
+  return typeof value === "object" && value !== null && !(value instanceof RegExp) ? value : void 0;
+}
+var HASH_ENCODINGS = /* @__PURE__ */ new Set(["hex", "base64", "base64url"]);
+function isHashEncoding(value) {
+  return typeof value === "string" && HASH_ENCODINGS.has(value);
 }
 function createBuilder(schema) {
   const prototype = schema.type === TypeName.object ? objectBuilderPrototype : schema.type === TypeName.function ? functionBuilderPrototype : schema.type === TypeName.codec ? codecBuilderPrototype : baseBuilderPrototype;
@@ -18898,15 +18938,20 @@ function emitModule(plan, options, layout) {
           });
           return void 0;
         }
-        const details = JSON.stringify({
-          ...failure.rule === void 0 ? {} : { rule: failure.rule },
-          ...failure.field === void 0 ? {} : { field: failure.field }
-        });
         lines.push(
-          custom2 === void 0 ? `  const __fail${index2} = () => new DomainAssertionError(${JSON.stringify(failure.message)}, ${details});` : `  const __fail${index2} = (value) => (${custom2})(value, ${JSON.stringify({ ...failure, error: void 0 })});`
+          `  const __issue${index2} = Object.freeze(${JSON.stringify({
+            path: failure.field ?? "",
+            code: failure.code,
+            expected: failure.rule ?? "a domain invariant",
+            message: failure.message
+          })});`,
+          custom2 === void 0 ? `  const __fail${index2} = () => undefined;` : `  const __fail${index2} = (value) => (${custom2})(value, ${JSON.stringify({ ...failure, error: void 0 })});`
         );
       }
       lines.push(...indentBlock(assertions.source));
+      lines.push(
+        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path || undefined, issues: outcome.issues }); };'
+      );
     }
     return lines;
   }
@@ -19109,7 +19154,7 @@ function emitModule(plan, options, layout) {
     const freeze = artifact.frozen ? " Object.freeze(this);" : "";
     const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
     const policy = artifact.policy;
-    const assertionCall = policy?.assertions === void 0 ? "" : "const failure = __assert(result.data); if (failure !== undefined) return __failure(failure); ";
+    const assertionCall = policy?.assertions === void 0 ? "" : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome)); ";
     const policyCreate = policy === void 0 || !policy.create ? void 0 : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
     const policyHydrate = policy === void 0 || !policy.hydrate ? void 0 : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
     const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? "return new this(input, __construct);";
@@ -20153,6 +20198,7 @@ function emitModule(plan, options, layout) {
       '    this.code = "ASSERTION_FAILED";',
       "    this.rule = details?.rule;",
       "    this.field = details?.field;",
+      "    this.issues = details?.issues ?? [];",
       "    this.path = details?.field === undefined ? undefined : [details.field];",
       "  }",
       "}"
@@ -23759,6 +23805,9 @@ function resolveAssertionDescriptor(input) {
     condition: input.condition,
     bindings: Object.freeze([...input.bindings]),
     rule,
+    // A domain code is the caller's vocabulary; without one the issue says
+    // only that this was an application rule rather than a schema shape.
+    code: input.code ?? "custom",
     message: input.message ?? (rule === void 0 ? "a domain assertion does not hold" : `the assertion on ${JSON.stringify(rule)} does not hold`),
     field
   });
@@ -23767,28 +23816,49 @@ function emitAssertionSource(descriptors) {
   const writer = new CodeWriter();
   writer.line("function __assert(value) {");
   writer.indent(() => {
+    writer.line("let issues;");
     descriptors.forEach((descriptor, index2) => {
       const test = emitQueryConditionSource(descriptor.condition, { fieldBase: "value", paramBase: "value" });
-      writer.line(`if (!(${test})) return __fail${index2}(value);`);
+      writer.line(`if (!(${test})) {`);
+      writer.indent(() => {
+        writer.line(`const failure = __fail${index2}(value);`);
+        writer.line("if (failure !== undefined) return { error: failure };");
+        writer.line(`(issues ??= [])[issues.length] = __issue${index2};`);
+      });
+      writer.line("}");
     });
-    writer.line("return undefined;");
+    writer.line("return issues === undefined ? undefined : { issues };");
   });
   writer.line("}");
   return writer.toString();
 }
+function assertionIssues(descriptors) {
+  return descriptors.map(
+    (descriptor) => Object.freeze({
+      path: descriptor.field ?? "",
+      code: descriptor.code,
+      expected: descriptor.rule ?? GENERIC_RULE,
+      message: descriptor.message
+    })
+  );
+}
 function assertionFailures(descriptors, errors) {
   return descriptors.map((descriptor, index2) => {
     const custom2 = errors[index2];
-    if (custom2 === void 0) {
-      const failure = Object.freeze({
-        ...descriptor.rule === void 0 ? {} : { rule: descriptor.rule },
-        ...descriptor.field === void 0 ? {} : { field: descriptor.field }
-      });
-      return () => new DomainAssertionError(descriptor.message, failure);
-    }
+    if (custom2 === void 0) return () => void 0;
     return (value) => custom2(value, descriptor);
   });
 }
+function assertionError(issues) {
+  const first = issues[0];
+  const rule = first?.expected === GENERIC_RULE ? void 0 : first?.expected;
+  return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", {
+    ...rule === void 0 ? {} : { rule },
+    ...first?.path === void 0 || first.path === "" ? {} : { field: first.path },
+    issues
+  });
+}
+var GENERIC_RULE = "a domain invariant";
 function conditionFields(condition, into) {
   if (condition.kind === "logical") {
     conditionFields(condition.left, into);
@@ -24828,15 +24898,23 @@ function compileAssertions(policy) {
     return;
   }
   const failures = assertionFailures(policy.assertions, policy.assertionErrors);
+  const issues = assertionIssues(policy.assertions);
   const bindings = policy.assertions.flatMap((descriptor) => descriptor.bindings);
   const bindingNames = bindings.map((_, index2) => `__q${index2}`);
   const failureNames = failures.map((_, index2) => `__fail${index2}`);
-  policy.assert = globalThis.Function(
+  const issueNames = issues.map((_, index2) => `__issue${index2}`);
+  const guard = globalThis.Function(
     ...bindingNames,
     ...failureNames,
+    ...issueNames,
     `${emitAssertionSource(policy.assertions)}
 return __assert;`
-  )(...bindings, ...failures);
+  )(...bindings, ...failures, ...issues);
+  policy.assert = (value) => {
+    const outcome = guard(value);
+    if (outcome === void 0) return void 0;
+    return outcome.error ?? assertionError(outcome.issues ?? []);
+  };
 }
 function policySuccess(policy, value) {
   if (policy.mode === "result") return { ok: true, value };
@@ -24868,6 +24946,7 @@ function policyArtifact(policy) {
           failures: policy.assertions.map((descriptor, index2) => ({
             rule: descriptor.rule,
             field: descriptor.field,
+            code: descriptor.code,
             message: descriptor.message,
             ...policy.assertionErrors[index2] === void 0 ? {} : { error: policy.assertionErrors[index2] }
           }))
@@ -24895,6 +24974,7 @@ function applyAssertion(policy, schema, predicate, options) {
       condition,
       bindings: builder2.bindings,
       ...options?.rule === void 0 ? {} : { rule: options.rule },
+      ...options?.code === void 0 ? {} : { code: options.code },
       ...options?.message === void 0 ? {} : { message: options.message }
     })
   );

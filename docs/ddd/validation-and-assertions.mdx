@@ -75,17 +75,34 @@ Money.create({ amount: -1, currency: "BRL" });
 // DomainAssertionError: the assertion on "amount" does not hold
 ```
 
-`DomainAssertionError` carries `rule` and `field` — what a caller can act on —
-and never the rejected value, which would put domain data into a log by
-default. Name the rule, the message or the error when the default is not what
-you want to show:
+A failed invariant becomes an **issue**, in the same shape a schema failure
+takes, so one list carries both kinds:
+
+```ts
+error.issues;
+// [{ path: "amount", code: "negative_amount", expected: "amount", message: "Amount cannot be negative" }]
+```
+
+Independent invariants are independent answers: all of them are collected, the
+way sibling schema failures are, rather than the caller learning one per
+attempt. `code` defaults to `custom` — the issue says only that this was an
+application rule — and naming one gives the failure your own vocabulary.
+
+`DomainAssertionError` carries `issues`, plus `rule` and `field` for the first
+of them, and never the rejected value, which would put domain data into a log
+by default. Name the code, the rule, the message or the error when the default
+is not what you want to show:
 
 ```ts
 .assert((query) => query.gte("amount", 0), {
+  code: "negative_amount",
   rule: "non-negative",
   error: () => new NegativeMoneyError(),
 })
 ```
+
+A declared `error` short-circuits to that error instead of an issue: it is a
+domain error type, not a diagnostic.
 
 Assertions run after schema validation and before the instance is built, on
 data the parse already produced. They report through **the factory's result

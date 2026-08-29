@@ -8,7 +8,7 @@ import { findRecursiveSchemas, resolveLazySchema } from "../schema-recursion.js"
 import { emitPropertyAccess } from "../source/access.js";
 import { countFormatPlaceholders, emitFormatMaskExpression, emitStrictFormatCondition } from "../source/format-mask.js";
 import { emitSchemaGuard } from "../source/guard.js";
-import { emitLiteral } from "../source/literal.js";
+import { emitLiteral, emitObjectKey } from "../source/literal.js";
 
 type AnySchema = ATS.AnyTypeSchema & { readonly def: Record<string, unknown> };
 
@@ -45,6 +45,21 @@ interface UnwrappedSchema {
   readonly pipes: readonly PipeStep[];
   readonly fieldTransforms: Readonly<Record<string, string>> | undefined;
   readonly materialize: string | undefined;
+}
+
+/**
+ * Machine-readable detail a diagnostic carries beside its code.
+ *
+ * This is what a translator needs and a message cannot give: the bound itself,
+ * not a sentence containing it. Only checks that have one declare it, so an
+ * issue never allocates an object to say nothing.
+ */
+export type CheckParams = Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
+
+function emitCheckParams(params: CheckParams): string {
+  const entries = Object.entries(params).map(([key, value]) => `${emitObjectKey(key)}: ${JSON.stringify(value)}`);
+
+  return `{ ${entries.join(", ")} }`;
 }
 
 /** Static-when-possible issue path; loops switch it to a dynamic expression. */
@@ -309,17 +324,31 @@ class ValidatorEmitter {
   }
 
   /** Emits `if (<failCondition>) { fail }` — early return or issue push. */
-  failIf(failCondition: string, path: PathRef, code: string, expected: string, message: string): void {
+  failIf(
+    failCondition: string,
+    path: PathRef,
+    code: string,
+    expected: string,
+    message: string,
+    params?: CheckParams
+  ): void {
     const writer = this.writer;
 
     writer.line(`if (${failCondition}) {`);
     writer.indent(() => {
-      this.emitFail(path, code, expected, message);
+      this.emitFail(path, code, expected, message, undefined, params);
     });
     writer.line("}");
   }
 
-  emitFail(path: PathRef, code: string, expected: string, message: string, received?: string): void {
+  emitFail(
+    path: PathRef,
+    code: string,
+    expected: string,
+    message: string,
+    received?: string,
+    params?: CheckParams
+  ): void {
     const writer = this.writer;
 
     if (this.mode === "is") {
@@ -329,9 +358,12 @@ class ValidatorEmitter {
 
     const pathSource = path.kind === "static" ? emitLiteral(path.source) : path.source;
     const receivedPart = received ? `, received: ${received}` : "";
+    // A bound only reaches an issue when the check actually declares one, so
+    // no issue carries an empty object nobody asked for.
+    const paramsPart = params === undefined ? "" : `, params: ${emitCheckParams(params)}`;
 
     writer.line(
-      `issues[issues.length] = { path: ${pathSource}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart} };`
+      `issues[issues.length] = { path: ${pathSource}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
     );
   }
 
@@ -708,7 +740,8 @@ class ValidatorEmitter {
             path,
             "too_small",
             `>= ${String(check.value)}`,
-            check.message ?? `expected a value >= ${String(check.value)}`
+            check.message ?? `expected a value >= ${String(check.value)}`,
+            { minimum: String(check.value), inclusive: true }
           );
           break;
         }
@@ -720,7 +753,8 @@ class ValidatorEmitter {
             path,
             "too_big",
             `<= ${String(check.value)}`,
-            check.message ?? `expected a value <= ${String(check.value)}`
+            check.message ?? `expected a value <= ${String(check.value)}`,
+            { maximum: String(check.value), inclusive: true }
           );
           break;
         }
@@ -734,7 +768,8 @@ class ValidatorEmitter {
             path,
             "out_of_range",
             `${String(range.min)}..${String(range.max)}`,
-            check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`
+            check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`,
+            { minimum: String(range.min), maximum: String(range.max), inclusive: true }
           );
           break;
         }
@@ -932,7 +967,8 @@ class ValidatorEmitter {
                 path,
                 "too_small",
                 `length >= ${check.value}`,
-                check.message ?? `expected at least ${check.value} characters`
+                check.message ?? `expected at least ${check.value} characters`,
+                { minimum: check.value as number, inclusive: true }
               );
               break;
             case "max":
@@ -941,7 +977,8 @@ class ValidatorEmitter {
                 path,
                 "too_big",
                 `length <= ${check.value}`,
-                check.message ?? `expected at most ${check.value} characters`
+                check.message ?? `expected at most ${check.value} characters`,
+                { maximum: check.value as number, inclusive: true }
               );
               break;
             case "length":
@@ -950,7 +987,8 @@ class ValidatorEmitter {
                 path,
                 "invalid_length",
                 `length === ${check.value}`,
-                check.message ?? `expected exactly ${check.value} characters`
+                check.message ?? `expected exactly ${check.value} characters`,
+                { length: check.value as number }
               );
               break;
             case "oneOf": {
@@ -1158,7 +1196,8 @@ class ValidatorEmitter {
                 path,
                 "too_small",
                 `>= ${check.value}`,
-                check.message ?? `expected a number >= ${check.value}`
+                check.message ?? `expected a number >= ${check.value}`,
+                { minimum: check.value as number, inclusive: true }
               );
               break;
             case "max":
@@ -1167,7 +1206,8 @@ class ValidatorEmitter {
                 path,
                 "too_big",
                 `<= ${check.value}`,
-                check.message ?? `expected a number <= ${check.value}`
+                check.message ?? `expected a number <= ${check.value}`,
+                { maximum: check.value as number, inclusive: true }
               );
               break;
             case "moreThan":
@@ -1176,7 +1216,8 @@ class ValidatorEmitter {
                 path,
                 "too_small",
                 `> ${check.value}`,
-                check.message ?? `expected a number > ${check.value}`
+                check.message ?? `expected a number > ${check.value}`,
+                { minimum: check.value as number, inclusive: false }
               );
               break;
             case "lessThan":
@@ -1185,7 +1226,8 @@ class ValidatorEmitter {
                 path,
                 "too_big",
                 `< ${check.value}`,
-                check.message ?? `expected a number < ${check.value}`
+                check.message ?? `expected a number < ${check.value}`,
+                { maximum: check.value as number, inclusive: false }
               );
               break;
             case "oneOf": {
@@ -1258,7 +1300,8 @@ class ValidatorEmitter {
                 path,
                 "not_multiple_of",
                 `multiple of ${check.value}`,
-                check.message ?? `expected a multiple of ${check.value}`
+                check.message ?? `expected a multiple of ${check.value}`,
+                { multipleOf: check.value as number }
               );
               break;
             default:
@@ -1295,7 +1338,8 @@ class ValidatorEmitter {
                 path,
                 "too_small",
                 `length >= ${check.value}`,
-                check.message ?? `expected at least ${check.value} items`
+                check.message ?? `expected at least ${check.value} items`,
+                { minimum: check.value as number, inclusive: true }
               );
               break;
             case "max":
@@ -1304,7 +1348,8 @@ class ValidatorEmitter {
                 path,
                 "too_big",
                 `length <= ${check.value}`,
-                check.message ?? `expected at most ${check.value} items`
+                check.message ?? `expected at most ${check.value} items`,
+                { maximum: check.value as number, inclusive: true }
               );
               break;
             case "length":

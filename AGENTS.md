@@ -329,6 +329,10 @@ query describes the request; facts on the collection decide the access path.
 - Factory validation and domain assertions are opt-in and add zero work to unconfigured classes. `.validate()` selects the failure channel and the phases it covers; it does not decide whether the schema is checked, because defaults and nested Runtime Type materialization come from that same parse.
 - A domain assertion reports through the factory's result policy, never its own. An assertion error carries the rule and the field, never the rejected value.
 - Result policy is fixed at artifact declaration and reflected exactly in factory types.
+- Boolean validation is fail-fast and constructs no issue. Diagnostic validation collects every independent failure, and a failed prerequisite type check suppresses the checks that depended on it.
+- `parse()` and `safeParse()` share one diagnostic emitter and report the same issues; factory validation reuses the same ValidationPlan rather than a class- or DDD-specific validator.
+- Every validation operator that can fail declares a stable issue code, a default message and a way to override that message. The diagnostics matrix test is the gate: a new failing operator that skips it breaks the build.
+- A custom message never changes an issue code and never reaches boolean codegen. Application logic depends on `issue.code`/`issue.params`, never on `issue.message`, and no issue carries the rejected value.
 - Class capabilities reuse existing compiler plans; do not create separate clone, validation or diff engines for classes.
 - Class and DDD capabilities attach through `.extends()`; do not reintroduce `.use()` for prototype capabilities.
 - Custom extensions live on the prototype and never allocate a method per instance, and there is no dispatcher between a call and its body.

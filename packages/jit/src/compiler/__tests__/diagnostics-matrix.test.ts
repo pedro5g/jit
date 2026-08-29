@@ -195,6 +195,24 @@ describe("validation operator diagnostics", () => {
     expect(custom?.path).toBe("value");
   });
 
+  it("carries the bound a translator needs, and nothing more", () => {
+    const issues = (schema: unknown, invalid: unknown) => firstIssue(schema, invalid);
+
+    expect(issues(JIT.string().min(3), "x")?.params).toEqual({ minimum: 3, inclusive: true });
+    expect(issues(JIT.string().max(1), "xx")?.params).toEqual({ maximum: 1, inclusive: true });
+    expect(issues(JIT.string().length(4), "x")?.params).toEqual({ length: 4 });
+    expect(issues(JIT.number().gte(18), 1)?.params).toEqual({ minimum: 18, inclusive: true });
+    expect(issues(JIT.number().gt(0), 0)?.params).toEqual({ minimum: 0, inclusive: false });
+    expect(issues(JIT.number().lt(0), 1)?.params).toEqual({ maximum: 0, inclusive: false });
+    expect(issues(JIT.number().multipleOf(5), 3)?.params).toEqual({ multipleOf: 5 });
+    expect(issues(JIT.array(JIT.string()).min(2), [])?.params).toEqual({ minimum: 2, inclusive: true });
+    // A format check has no bound to report, so the key is absent rather than
+    // an empty object every issue would have to carry.
+    expect(issues(JIT.string().email(), "x")).not.toHaveProperty("params");
+    // And a diagnostic never carries the value it rejected.
+    expect(JSON.stringify(issues(JIT.string().min(8), "secret"))).not.toContain("secret");
+  });
+
   it("keeps a custom message out of boolean validation", () => {
     const withMessage = JIT.object({ value: JIT.string().min(3, "a very long custom diagnostic message") });
     const withoutMessage = JIT.object({ value: JIT.string().min(3) });

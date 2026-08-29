@@ -47,6 +47,38 @@ success path and only builds issues after failure. Observable callbacks,
 stateful regexes and transforming schemas remain single-pass. `safeParse`
 rebuilds output only when defaults, coercions or transforms require it.
 
+## Issues and custom messages
+
+`safeParse` collects every independent failure; `parse` collects the same list
+and throws it once as a `JITValidationError`. Sibling fields, several checks on
+one value and several array elements all report together, while a failed
+prerequisite suppresses what depended on it — `name: 123` against
+`JIT.string().min(10).email()` is one `invalid_type`, not three issues.
+
+An issue carries a stable `code`, a `path`, a `message`, and `params` when the
+check has a bound worth reporting:
+
+```ts
+const Account = JIT.object({ name: JIT.string().min(3, "Name is too short") });
+const [issue] = (JIT.validate.safeParse(Account)({ name: "" }) as { issues: readonly unknown[] }).issues;
+
+issue; // { path: "name", code: "too_small", expected: "length >= 3", message: "Name is too short", params: { minimum: 3, inclusive: true } }
+```
+
+Branch on `code`. `message` is presentation, and every check that can fail lets
+you replace it without moving the code:
+
+```ts
+JIT.string().min(3, "Name is too short").email({ message: "Invalid email" });
+JIT.number().positive("Amount must be positive");
+JIT.string().uuid({ version: 4, message: "Expected UUID v4" });
+```
+
+Messages are static strings, never callbacks: a code plus `params` is what
+translation actually needs, and it keeps the diagnostic path free of bindings
+AOT would have to reconstruct. A custom message never reaches boolean
+validation — `is` emits identical source with or without one.
+
 ## Canonical paths
 
 Validation operations are available only through `JIT.validate`. The removed
