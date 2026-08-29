@@ -293,6 +293,11 @@ query describes the request; facts on the collection decide the access path.
 - Changed masks, watch, mutation results and derived computations share a compatible `ChangeLayout`.
 - Every public runtime state/query-boundary API has define/AOT parity.
 - Every performance claim includes an idiomatic baseline, handwritten optimized ceiling, runtime JIT and AOT measurement.
+- A guard that cannot fire is not emitted. Structural limits and semantic budgets are static, so prove a check unreachable before generating it.
+- A declared patch is specialized only where the generic deep-partial update would *assign* the leaf. A leaf that update *merges* — object, array, map, set, union — keeps running through it: a patch never changes meaning in order to become faster.
+- A collection mutation refuses to write the identity or ordering key. Leaving a collection that still claims a fact which stopped being true is worse than refusing.
+- A change mask is meaningful only next to the `ChangeLayout` it was produced against, and is never a persistence format. Report the layout so compatibility can be checked rather than assumed.
+- Report a measurement that does not flatter the library as plainly as one that does.
 
 ## Feature Documentation
 

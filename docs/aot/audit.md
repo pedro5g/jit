@@ -1,6 +1,6 @@
 # Dual JIT + AOT API Audit
 
-Updated: 2026-08-26
+Updated: 2026-08-29
 
 The continuous public guarantee is specified in
 [Runtime / Define / AOT API Parity](./api-parity.md). This document remains the
@@ -27,7 +27,14 @@ Implemented and covered by tests:
 - `JIT.compare.equal/diff/hash(schema)` and `JIT.clone(schema)`.
 - `JIT.json.stringify(schema)`.
 - `JIT.json.parse(schema).validate()` as AOT `fromJSON`.
-- `JIT.state.update(schema).patch({ field: JIT.cqrs.param("name") }).compile()`.
+- `JIT.state.update(schema).patch({ field: JIT.cqrs.param("name") }).compile()`,
+  including `.result({ value, changed, patch, inverse })`: the mask and both
+  patches are produced in the mutation's own pass and a channel nobody asked
+  for is absent from the generated source.
+- `JIT.state.collection(schema).updateByKey/removeByKey/upsert/append/prepend`
+  and `updateWhere/removeWhere`, each carrying its resolved access path.
+- `JIT.state.derive(schema).select(...)` and its `.memo()`.
+- `JIT.api.query(schema, options)`, `JIT.api.parse` and `JIT.api.authorize`.
 - `JIT.cqrs.query(schema).params({...}).where((q, params) => ...)`, with
   object collections and binary rowsets sharing the namespace.
 - `JIT.cqrs.const(value)` and `q.constant(value)` for build-time query literals.
@@ -101,7 +108,16 @@ Currently implemented:
 - a query carries its chosen access path into the generated module and nothing
   that chose it: an index lookup emits the builder and the shared
   `__cachedIndex` helper, a binary search emits neither, and no fact resolution
-  or planner reaches the output;
+  or planner reaches the output. A collection mutation carries the same
+  resolved path the same way, and its upsert no-op test becomes a local
+  specialized equality rather than a runtime binding;
+- a public query boundary emits its parser, the V1 `~query` descriptor and its
+  frozen `explain()` constant; an authorized boundary emits one function that
+  parses and intersects with the actor in a single call, with the access error
+  class inlined and no rule set in the output;
+- a declared patch emits one copy-on-write function, and a derived computation
+  emits its selector, its memo closure factory and its structural equality
+  helpers — no projection tree, mutation planner or change engine survives;
 - an eager query's generated signature follows its reducing node, so a
   terminal, a scalar aggregate and a composite aggregate are typed as what they
   return rather than as an array;
@@ -114,6 +130,10 @@ Currently implemented:
 - previous output is replaced by ownership (generated banner), never by name,
   so hand-written files in the same directory survive.
 
+Skipped with a reason rather than emitted wrongly: a declared patch value, an
+access rule value or a collection mutation binding that cannot be serialized
+ahead of time. The skip names the operation and the reason.
+
 Still structural/future work from the plan:
 
 - source maps and atomic directory swaps;
@@ -122,7 +142,11 @@ Still structural/future work from the plan:
 - `jit check` and deeper stage inspection for logical/physical IR. `explain()`
   now reports the selected physical strategy, its reason, its expected
   complexity and the facts behind it, which closes the reviewability half of
-  this gap; surfacing it through the CLI is what remains.
+  this gap; surfacing it through the CLI is what remains;
+- collection change channels, and the watch integration that depends on them:
+  a collection mutation knows exactly which row it replaced, but does not yet
+  report it, so `JIT.state.watch` still compares two snapshots;
+- Map and Set collection mutation.
 
 ## Known Architectural Gap
 

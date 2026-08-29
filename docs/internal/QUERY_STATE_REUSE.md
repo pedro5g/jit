@@ -163,8 +163,11 @@ the layout next.
   function. Namespace migration does not change that contract.
 
 These implementations move as capabilities; they are not folded into
-`MutationPlan`. Later ChangeLayout integration may remove redundant comparison
-work without changing their result semantics.
+`MutationPlan`. `watch` still compares two snapshots: a mask over a root state
+does not say whether a nested collection's rows moved, and the thing that
+*would* say so — a collection mutation reporting which row it replaced — is the
+collection change channel that this phase deliberately deferred. Watch
+integration belongs with that channel, not before it.
 
 ## Physical access reuse
 
@@ -215,6 +218,27 @@ their semantics differ:
 
 Generated output must never retain builders, schema walkers, plan walkers,
 operator registries, path registries or JIT imports.
+
+## What this phase built, and what it left
+
+Built and measured: the public query boundary (typed operators, structural
+limits, semantic budget, actor intersection, `explain`), `MutationPlan` for
+declared patches, `JIT.state.collection` over the shared access path,
+`updateWhere`/`removeWhere` on the shared query condition, mutation result
+channels in one pass, `ChangeLayout`, and `JIT.state.derive` with its memo and
+mask shortcut. Each has runtime, define and AOT parity and a benchmark against
+an idiomatic baseline and a handwritten ceiling.
+
+Left, with the reason:
+
+- relations, collection predicates and logical input at the query boundary, and
+  the `in`/`between`/string operators — the shared Query AST does not lower them
+  yet, and a boundary-only string that cannot become a query node would be a
+  second engine;
+- collection change channels, and therefore watch integration;
+- Map and Set collection mutation;
+- explicit rekey and reposition for collections;
+- a dependency graph across derived computations.
 
 ## Sequencing constraints
 
