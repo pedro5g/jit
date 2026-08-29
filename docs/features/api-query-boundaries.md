@@ -125,8 +125,12 @@ existed.
 The boundary is resolved once against the schema. Runtime parsing uses a
 specialized function containing direct field and operator branches. It checks
 top-level keys, filters, conditions, projection, sorting, pagination and the
-offset budget while normalizing the request. Invalid input exits through the
-first failing check.
+offset budget while normalizing the request. The specialized function leaves at
+the first failing check and does not continue building the request; on the
+runtime host it then hands the request to the reference parser, whose job is to
+produce the precise error. That costs a rejected request a second bounded pass,
+which is the price of one place owning the error text — the import-free AOT
+parser throws directly and pays no second pass.
 
 Resolution produces an immutable internal `QueryBoundary` with normalized
 field paths, operator sets, projection, sorting, pagination and structural
@@ -199,12 +203,34 @@ physical-plan node.
 
 ## Performance and tradeoffs
 
-The existing CQRS boundary benchmark remains reproducible with
-`pnpm bench:cqrs`: on the recorded Ryzen 7 5800H run, the specialized dynamic
-request parser averages about 219 ns and 43 bytes of heap for the flat fixture.
-That figure is not a datastore-cost estimate; it measures syntax validation and
-normalization only. The benchmark will move under the API boundary suite when
-the semantic cost model lands.
+`pnpm bench:api-query` compares the compiled boundary against the two shapes
+this replaces — a generic config-driven REST filter parser, and schema
+validation followed by generic normalization — plus the import-free AOT parser
+and a handwritten specialization. Recorded on a Ryzen 7 5800H, Node 22:
+
+| Request | JIT | JIT AOT | generic parser | zod + normalize | handwritten |
+| --- | --- | --- | --- | --- | --- |
+| single equality filter | 74 ns / 400 b | 78 ns / 400 b | 86 ns / 576 b | 860 ns / 2073 b | 22 ns / 241 b |
+| five filters | 224 ns / 1193 b | 180 ns / 1193 b | 860 ns / 1935 b | 3124 ns / 4104 b | — |
+| projection, sort, pagination | 574 ns / 1407 b | 560 ns / 1408 b | 908 ns / 1818 b | 2435 ns / 3392 b | — |
+| undeclared field, first key | 8502 ns / 1715 b | 6308 ns / 816 b | 9430 ns / 1152 b | 22531 ns / 8939 b | — |
+| budget exceeded, first field | 9246 ns / 3058 b | — | 7055 ns / 1848 b | — | — |
+| boundary ∩ actor access | 766 ns / 2542 b | — | 1859 ns / 1805 b¹ | — | — |
+
+¹ parse then intersect by hand, with one actor's rules written out inline.
+
+The handwritten row is not comparable: it assumes an already valid request and
+enforces no allowlist, budget or pagination bound. It is there as the ceiling.
+
+Two results deserve to be read honestly. Rejection is dominated by building the
+error — several microseconds of stack capture on every path measured, JIT and
+baseline alike. And a rejected request costs the runtime host more than the
+generic parser, because the specialized function stops early and then hands the
+request to the reference parser for the message; the AOT parser, which throws
+directly, is the fastest rejection measured.
+
+None of these numbers is a datastore-cost estimate. They measure syntax
+validation and normalization only.
 
 The current object input is deliberate: HTTP frameworks commonly provide an
 already parsed record. Raw query-string streaming is not implemented without a
