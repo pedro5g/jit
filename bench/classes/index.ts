@@ -162,4 +162,141 @@ registerScenario({
   ],
 });
 
+/**
+ * The DDD ergonomics of this phase, measured against a handwritten ceiling.
+ *
+ * A Value Object wrapper, a nested identifier and an opt-in result policy all
+ * add work. The point of these scenarios is to say how much, and to prove the
+ * unconfigured artifact did not get slower for the configured one's sake.
+ */
+const Email = JIT.ddd.valueObject(JIT.string().email());
+const UserId = JIT.ddd.uniqueIdentifier();
+
+class HandwrittenEmail {
+  constructor(readonly value: string) {
+    Object.freeze(this);
+  }
+
+  equals(other: HandwrittenEmail): boolean {
+    return this.value === other.value;
+  }
+}
+
+const email = Email.create("ada@example.com");
+const sameEmail = Email.create("ada@example.com");
+const handwrittenEmail = new HandwrittenEmail("ada@example.com");
+const handwrittenSameEmail = new HandwrittenEmail("ada@example.com");
+
+registerScenario({
+  op: "value object create",
+  name: "scalar wrapper",
+  args: ["ada@example.com"],
+  jit: (input: string) => Email.create(input),
+  competitors: [
+    {
+      name: "handwritten wrapper",
+      fn: (input: string) => new HandwrittenEmail(input),
+      biased: "wraps a trusted string without applying the schema's email validation",
+    },
+  ],
+});
+
+registerScenario({
+  op: "value object equals",
+  name: "scalar wrapper",
+  args: [email, sameEmail],
+  jit: (left: typeof email, right: typeof email) => left.equals(right),
+  competitors: [
+    {
+      name: "handwritten wrapper",
+      fn: () => handwrittenEmail.equals(handwrittenSameEmail),
+    },
+  ],
+});
+
+registerScenario({
+  op: "value object read",
+  name: "scalar value accessor",
+  args: [email],
+  jit: (instance: typeof email) => instance.value,
+  competitors: [{ name: "handwritten wrapper", fn: () => handwrittenEmail.value }],
+});
+
+const NestedBase = JIT.ddd.entity(
+  JIT.object({
+    id: UserId,
+    name: JIT.string(),
+    email: Email,
+    aliases: JIT.array(UserId),
+  })
+);
+class NestedUser extends NestedBase {}
+const persistedId = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
+const aliasId = "f63ca4d3-2b8f-49e6-80ff-0cedaf1e6504";
+const nestedState = { id: persistedId, name: "Ada", email: "ada@example.com", aliases: [aliasId] };
+
+registerScenario({
+  op: "entity hydrate",
+  name: "nested runtime types",
+  args: [nestedState],
+  jit: (state: typeof nestedState) => NestedUser.hydrate(state),
+  competitors: [
+    {
+      name: "handwritten materialization",
+      fn: (state: typeof nestedState) => ({
+        id: new HandwrittenEmail(state.id),
+        name: state.name,
+        email: new HandwrittenEmail(state.email),
+        aliases: state.aliases.map((alias) => new HandwrittenEmail(alias)),
+      }),
+      biased: "constructs trusted wrappers without applying schema validation",
+    },
+  ],
+});
+
+registerScenario({
+  op: "entity create",
+  name: "defaulted nested identifier",
+  args: [{ name: "Ada", email: "ada@example.com", aliases: [] }],
+  jit: (input: { name: string; email: string; aliases: string[] }) => NestedUser.create(input),
+  competitors: [],
+});
+
+const PlainMoney = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
+const ResultMoney = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() })).validate({
+  result: "result",
+});
+const AssertedMoney = JIT.ddd
+  .valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }))
+  .validate({ result: "result" })
+  .assert((query) => query.gte("amount", 0));
+
+registerScenario({
+  op: "factory policy",
+  name: "accepted input",
+  args: [moneyInput],
+  jit: (input: typeof moneyInput) => PlainMoney.create(input),
+  competitors: [
+    { name: "result policy", fn: (input: typeof moneyInput) => ResultMoney.create(input) },
+    { name: "result policy + assertion", fn: (input: typeof moneyInput) => AssertedMoney.create(input) },
+  ],
+});
+
+registerScenario({
+  op: "factory policy",
+  name: "rejected input",
+  args: [{ amount: "x", currency: "BRL" }],
+  jit: (input: unknown) => {
+    try {
+      return PlainMoney.create(input as typeof moneyInput);
+    } catch (error) {
+      return error;
+    }
+  },
+  competitors: [
+    { name: "result policy", fn: (input: unknown) => ResultMoney.create(input as typeof moneyInput) },
+    { name: "result policy + assertion", fn: (input: unknown) => AssertedMoney.create(input as typeof moneyInput) },
+  ],
+});
+
 await runSuite("classes");

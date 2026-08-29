@@ -379,3 +379,12 @@ locally, with no JIT runtime import. Generated Domain Events preserve
 `create(payload)` and `hydrate(state)`; direct construction and `hydrate()` use
 the complete persisted event envelope. Value Objects, Entities, Aggregate
 Roots, and Domain Events are factory-only by default.
+
+Everything on this page reaches the generated module: the construction token,
+the scalar wrapper with its `value` accessor and scalar wire form, the nested
+identifier classes co-emitted beside the entity that materializes them, the
+result shaping, the error construction, each assertion as a comparison, and
+`clone`. A callback that cannot be reconstructed — a custom error factory
+built over a captured value, for instance — **skips the artifact with a
+reason** rather than generating a module whose failures differ from the
+runtime's.

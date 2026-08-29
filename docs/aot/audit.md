@@ -34,6 +34,13 @@ Implemented and covered by tests:
 - `JIT.state.collection(schema).updateByKey/removeByKey/upsert/append/prepend`
   and `updateWhere/removeWhere`, each carrying its resolved access path.
 - `JIT.state.derive(schema).select(...)` and its `.memo()`.
+- `JIT.class` constructor-first and DDD factory-first construction, including
+  the internal construction token and polymorphic subclass factories.
+- `JIT.ddd.uniqueIdentifier()`, scalar Value Objects with a `value` accessor,
+  identity inference, and nested Runtime Type materialization at fields and
+  array elements.
+- `.validate({ result, error, create, hydrate })`, `.assert(...)` and the
+  `clone` capability.
 - `JIT.api.query(schema, options)`, `JIT.api.parse` and `JIT.api.authorize`.
 - `JIT.cqrs.query(schema).params({...}).where((q, params) => ...)`, with
   object collections and binary rowsets sharing the namespace.
@@ -131,8 +138,9 @@ Currently implemented:
   so hand-written files in the same directory survive.
 
 Skipped with a reason rather than emitted wrongly: a declared patch value, an
-access rule value or a collection mutation binding that cannot be serialized
-ahead of time. The skip names the operation and the reason.
+access rule value, a collection mutation binding, a configured error factory or
+an assertion error factory that cannot be serialized ahead of time. The skip
+names the operation and the reason.
 
 Still structural/future work from the plan:
 

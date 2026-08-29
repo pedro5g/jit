@@ -40,9 +40,14 @@ artifact calling convention so runtime, define and AOT stay reconstructive.
 
 The implementation now extends that descriptor with positional and replacement
 operations plus read/write/order/identity facts. Positional access is reported
-as `DirectPosition`, separately from shared key access planning. Fact repair
-for ordered/keyed replacement writes remains a later milestone; it is recorded
-as invalidation rather than silently claimed by the positional emitter.
+as `DirectPosition`, separately from shared key access planning.
+
+Ordered repair is implemented: a patch that writes the ordering key relocates
+the row rather than being refused. The collection minus the old slot is still
+sorted, so the destination is a binary search over the array the mutation is
+about to produce — the search skips the moved slot — and the copy fills one
+array from three ranges. The identity key stays refused: moving a row is a
+repair the planner can perform, changing which row a key reaches is not.
 
 ## Runtime Class construction today
 
@@ -131,6 +136,27 @@ reasons the DDD docs give.
 
 No validation, clone, assertion, identity lookup or materialization compiler
 specific to DDD should be introduced.
+
+## What this phase built, and what it left
+
+Built and measured: the nine positional collection operations, the semantic and
+predicate ones, ordered repositioning, one canonical construction boundary per
+Runtime Type, scalar Value Objects with a `value` accessor, `uniqueIdentifier`
+with identity inference, nested Runtime Type materialization at both
+boundaries, factory result policies, domain assertions and the `clone`
+capability. Each has runtime, define and AOT parity and a benchmark against a
+handwritten ceiling.
+
+Left, with the reason:
+
+- an explicit `rekey`: no real case has appeared, and inventing one would fix
+  the semantics before anyone needs them;
+- Map and Set collection mutation, still waiting behind arrays;
+- `state.sort`/`state.dedupe`: they would reuse `SortPlan`/`DistinctPlan`, but
+  neither has a use case that CQRS does not already answer;
+- an instance-level `.validate()` capability: the factory policy covers the
+  boundary, and adding a method to every DDD class for it was not asked for by
+  a real case.
 
 ## Safe sequencing
 

@@ -243,6 +243,41 @@ const cloneCategory = JIT.clone(Category);
 const diffCategory = JIT.compare.diff(Category);
 ```
 
+## Runtime classes have one construction boundary
+
+A generated class used to answer to `new`, `create()` and `hydrate()` at once.
+It now has exactly one boundary, and which one depends on what you asked for.
+
+| Declaration | Construction |
+| --- | --- |
+| `JIT.class(schema)` | `new Type(input)`; no factory aliases |
+| `JIT.class(schema).factories({...})` | the configured factories; `new` is closed |
+| `JIT.ddd.valueObject` / `entity` / `aggregateRoot` / `domainEvent` | `create()` / `hydrate()`; `new` is closed |
+
+Calling `.factories(...)` is what opens the factory boundary, and it closes
+direct construction in the same step — in the types and at run time, through an
+internal construction token. Replace `new User(input)` on a DDD type with
+`User.create(input)`, and `User.create(...)` on a plain `JIT.class` with either
+`new User(...)` or an explicit `.factories({ create: "create" })`.
+
+A scalar Value Object is now a real object rather than a primitive with methods
+attached. Read `.value` where the primitive itself was used before:
+
+```ts
+const Email = JIT.ddd.valueObject(JIT.string().email());
+const email = Email.create("ada@example.com");
+
+email.value; // "ada@example.com" — was the instance itself in 1.x
+JSON.stringify({ email }); // {"email":"ada@example.com"} — unchanged
+```
+
+The wire form did not change, so persisted data and API payloads are
+unaffected: only the in-memory representation gained the wrapper.
+
+`JIT.ddd.entity(schema, { id })` still accepts an explicit identity field and
+still wins over inference. The `{ id }` argument becomes optional only when
+exactly one field is a `JIT.ddd.uniqueIdentifier()`.
+
 ## Verifying the migration
 
 1. `pnpm jit doctor` reports config discovery, output target, and declaration

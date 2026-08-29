@@ -30,4 +30,24 @@ Identifier metadata means “identifier-like”, not automatically “the entity
 
 Nested object fields and arrays accept scalar boundary values and are materialized directly into identifier instances by the compiled validator. Runtime and define declarations register the same reconstructive class descriptor. AOT co-emits the identifier class and rewrites nested materialization bindings to that standalone class; no Runtime Type registry or schema walker remains in generated code.
 
+## Performance
+
+`pnpm bench:classes`, Ryzen 7 5800H, Node 22:
+
+| | JIT | handwritten wrapper |
+| --- | --- | --- |
+| create a scalar Value Object | 97 ns | 36 ns¹ |
+| `equals` | 317 ps | 315 ps |
+| read `.value` | 439 ps | 451 ps |
+| hydrate an entity with two nested wrappers and an array of them | 465 ns | 109 ns¹ |
+| create the same entity, identifier defaulted | 338 ns | — |
+
+¹ not comparable: the handwritten wrapper stores a trusted string and applies
+no schema validation.
+
+Reading a value and comparing two of them are at parity with a hand-written
+class — that is the whole cost of the wrapper representation once it exists.
+Construction is where the schema is actually checked, and the gap is that
+check, not the wrapper.
+
 Identifier creation is not a cryptographic key-management facility, a database uniqueness check, or an identity map. Uniqueness across persisted records remains an application/storage invariant.

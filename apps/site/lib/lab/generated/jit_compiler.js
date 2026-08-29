@@ -20757,8 +20757,9 @@ function resolveCollectionMutation(schema, kind, key, row, condition, mode = "al
   }
   const field = resolveRowField(object2, resolved, "state.collection");
   const choice = resolveKeyedAccessChoice(schema, resolved);
-  const ordered = resolveOrderingKey(schema);
-  if (row !== void 0) assertFactsPreserved(row, resolved, ordered);
+  const ordering = resolveOrdering(schema);
+  if (row !== void 0) assertFactsPreserved(row, resolved, ordering?.key);
+  const reposition = writesOrderingKey(row, ordering) ? ordering : void 0;
   return Object.freeze({
     kind,
     key: resolved,
@@ -20770,9 +20771,10 @@ function resolveCollectionMutation(schema, kind, key, row, condition, mode = "al
     choice,
     date: resolveScalarKeyKind(field, resolved, "state.collection") === "date",
     ...row === void 0 ? {} : { row },
-    ...ordered === void 0 ? {} : { orderedBy: ordered },
+    ...ordering === void 0 ? {} : { orderedBy: ordering.key },
+    ...reposition === void 0 ? {} : { reposition },
     probe: "params.key",
-    facts: mutationFacts(kind, row),
+    facts: mutationFacts(kind, row, reposition !== void 0),
     mode
   });
 }
@@ -20802,7 +20804,7 @@ function resolvePositionalMutation(schema, kind, row) {
     mode: "all"
   });
 }
-function mutationFacts(kind, row) {
+function mutationFacts(kind, row, reposition = false) {
   const changesLength = [
     "append",
     "prepend",
@@ -20848,7 +20850,9 @@ function mutationFacts(kind, row) {
     reads: Object.freeze(row?.dependencies.reads ?? []),
     writes: Object.freeze(row?.dependencies.writes ?? [Object.freeze([])]),
     changesLength,
-    changesOrder,
+    // Repositioning moves the row, so the order changes even though the
+    // collection is still ordered afterwards. Both facts are true at once.
+    changesOrder: changesOrder || reposition,
     changesIdentity: kind === "replaceAt" || kind === "replaceByKey" || kind === "replaceWhere" || kind === "upsert",
     preservesKeyed,
     preservesOrdering
@@ -20909,13 +20913,18 @@ function resolveWhereMutation(schema, kind, condition, row, mode) {
     mode
   });
 }
-function resolveOrderingKey(schema) {
+function resolveOrdering(schema) {
   const hints = resolveHints(schema);
   const ordered = hints.order ?? hints.collection?.ordered;
   const key = ordered?.key;
-  return typeof key === "string" ? key : void 0;
+  if (typeof key !== "string") return void 0;
+  return Object.freeze({ key, direction: ordered?.direction === "desc" ? "desc" : "asc" });
+}
+function resolveOrderingKey(schema) {
+  return resolveOrdering(schema)?.key;
 }
 function assertFactsPreserved(row, key, ordered) {
+  void ordered;
   for (const write of row.writes) {
     if (write.path.length === 1 && write.path[0] === key) {
       throw new JITError(
@@ -20923,13 +20932,11 @@ function assertFactsPreserved(row, key, ordered) {
         `updateByKey() cannot write the identity key ${JSON.stringify(key)}; remove and insert the row instead`
       );
     }
-    if (ordered !== void 0 && write.path.length === 1 && write.path[0] === ordered) {
-      throw new JITError(
-        "INVALID_UPDATE",
-        `updateByKey() cannot write the ordering key ${JSON.stringify(ordered)}; the collection would no longer be ordered`
-      );
-    }
   }
+}
+function writesOrderingKey(row, ordering) {
+  if (row === void 0 || ordering === void 0) return false;
+  return row.writes.some((write) => write.path.length === 1 && write.path[0] === ordering.key);
 }
 function explainCollectionMutation(descriptor) {
   const positional = POSITIONAL_KINDS.has(descriptor.kind);
@@ -21053,8 +21060,53 @@ function emitReplaceAt(writer, descriptor, rowVar) {
   writer.line(
     descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere" ? `if (__equal(${rowVar}, next)) return value;` : `if (next === ${rowVar}) return value;`
   );
+  if (descriptor.reposition !== void 0) {
+    emitReposition(writer, descriptor.reposition);
+    return;
+  }
   writer.line("const out = value.slice();");
   writer.line("out[at] = next;");
+  writer.line("return out;");
+}
+function emitReposition(writer, ordering) {
+  const read = (row) => emitPropertyAccess(row, ordering.key);
+  const goRight = ordering.direction === "desc" ? "probe > target" : "probe < target";
+  writer.line("const len = value.length;");
+  writer.line(`const target = ${read("next")};`);
+  writer.line("let low = 0;");
+  writer.line("let high = len - 2;");
+  writer.line("while (low <= high) {");
+  writer.indent(() => {
+    writer.line("const mid = (low + high) >>> 1;");
+    writer.line(`const probe = ${read("value[mid < at ? mid : mid + 1]")};`);
+    writer.line(`if (${goRight}) low = mid + 1;`);
+    writer.line("else high = mid - 1;");
+  });
+  writer.line("}");
+  writer.line("const to = low;");
+  writer.line("if (to === at) {");
+  writer.indent(() => {
+    writer.line("const out = value.slice();");
+    writer.line("out[at] = next;");
+    writer.line("return out;");
+  });
+  writer.line("}");
+  writer.line("const out = new Array(len);");
+  writer.line("if (to < at) {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < to; i++) out[i] = value[i];");
+    writer.line("out[to] = next;");
+    writer.line("for (let i = to; i < at; i++) out[i + 1] = value[i];");
+    writer.line("for (let i = at + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < at; i++) out[i] = value[i];");
+    writer.line("for (let i = at + 1; i <= to; i++) out[i - 1] = value[i];");
+    writer.line("out[to] = next;");
+    writer.line("for (let i = to + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("}");
   writer.line("return out;");
 }
 function emitRemoveAt(writer) {

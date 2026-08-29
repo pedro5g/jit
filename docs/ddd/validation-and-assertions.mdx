@@ -108,6 +108,25 @@ is a callback like any other: when it cannot be reconstructed the artifact is
 **skipped with a reason** rather than generated with a silently different
 failure.
 
+## Performance
+
+`pnpm bench:classes`, Ryzen 7 5800H, Node 22, on a two-field Value Object.
+
+| Factory | accepted input | rejected input |
+| --- | --- | --- |
+| no policy (throws) | 48 ns | 7.3 µs |
+| `result: "result"` | 42 ns | 6.6 µs |
+| `result: "result"` + one assertion | 47 ns | 6.9 µs |
+
+Two things worth reading twice. **A configured policy is not slower on the
+accepted path** — it validates once and constructs a value it already trusts,
+where the unconfigured factory validates inside the constructor. And a rejected
+input is *cheaper* under a result policy, because nothing builds a stack trace:
+throwing is the expensive part of failing, on every path measured.
+
+The assertion costs about five nanoseconds, which is what one generated
+comparison costs.
+
 ## Non-goals
 
 - Validation is not skippable. Defaults and nested Runtime Types come from the

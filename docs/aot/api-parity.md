@@ -89,6 +89,12 @@ remain when their semantics require them.
 | Collection mutation       | yes     | yes    | yes            | one function carrying its access path; upsert equality inlined as a local helper |
 | Mutation result channels  | yes     | yes    | yes            | mask, forward and inverse patch in the same pass; the layout ships as a frozen constant |
 | Derived state             | yes     | yes    | yes            | selector, memo closure factory and structural equality helpers; no projection-tree runtime |
+| Runtime class construction | yes    | yes    | yes            | one canonical boundary; the factory token is a module-local symbol |
+| Scalar Value Object / identifier | yes | yes | yes            | standalone wrapper class with a `value` accessor; wire stays scalar |
+| Nested Runtime Type materialization | yes | yes | yes        | nested classes co-emitted; materialization bindings rewritten to them |
+| Factory result policy     | yes     | yes    | yes            | result shaping and error construction inlined; unserializable error factory skips with a reason |
+| Domain assertions         | yes     | yes    | yes            | one generated guard; `DomainAssertionError` inlined |
+| Class clone capability    | yes     | yes    | yes            | reuses the clone plan; aggregate copies start with an empty event queue |
 | sort / ordering plans     | yes     | yes    | yes            | descriptor stays off the compiled plan           |
 | index plans               | yes     | yes    | yes            | cache helper emitted only when an index is       |
 | physical query access     | yes     | yes    | yes            | strategy is compiled in; never in `~query`       |
