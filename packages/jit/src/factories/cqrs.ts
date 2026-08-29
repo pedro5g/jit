@@ -1,11 +1,6 @@
 import { type BinaryArray, type BinaryRowSet, isBinaryArray, isBinaryRowSet } from "../compiler/binary-rowset.js";
 import { compileJoin, createJoinPlan, explainJoinPlan, type JoinPair, type LeftJoinPair } from "../compiler/join.js";
-import {
-  type QueryBoundary,
-  type QueryBoundaryPagination,
-  queryBoundaryFilters,
-  resolveQueryBoundary,
-} from "../compiler/query-boundary.js";
+import { type QueryBoundary, queryBoundaryFilters, resolveQueryBoundary } from "../compiler/query-boundary.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import type {
   QueryAggregateOperator,
@@ -153,6 +148,8 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
         readonly type: "offset";
         readonly defaultLimit: number;
         readonly maxLimit: number;
+        /** Largest computed offset a request may reach; defaults to 10000. */
+        readonly maxOffset?: number;
       }
     | {
         readonly type: "cursor";
@@ -166,6 +163,8 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
     readonly maxConditions?: number;
     readonly maxSortFields?: number;
     readonly maxSelectFields?: number;
+    /** Last global stop for declared traversal depth; defaults to 3. */
+    readonly maxDepth?: number;
   };
 }
 
@@ -176,6 +175,9 @@ export interface CqrsInput<TSchema extends ATS.AnyTypeSchema> {
 }
 
 const queryBoundaries = new WeakMap<object, QueryBoundary>();
+
+/** Offset pagination is bounded by default; deep pages are the common amplification. */
+const DEFAULT_MAX_OFFSET = 10_000;
 
 /** Structural dynamic-query definition that adapters may inspect without importing JIT. */
 export interface StandardQueryInput {
@@ -970,6 +972,10 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       throw new JITError("INVALID_QUERY", "API query structural limits must be non-negative safe integers");
     }
   }
+  const maxDepth = options.limits?.maxDepth ?? 3;
+  if (!Number.isSafeInteger(maxDepth) || maxDepth < 1) {
+    throw new JITError("INVALID_QUERY", "API query maxDepth must be a positive safe integer");
+  }
   if (options.pagination) {
     const { defaultLimit, maxLimit } = options.pagination;
     if (
@@ -979,6 +985,12 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       maxLimit < defaultLimit
     ) {
       throw new JITError("INVALID_QUERY", "API query pagination requires positive bounded limits");
+    }
+    if (options.pagination.type === "offset") {
+      const maxOffset = options.pagination.maxOffset ?? DEFAULT_MAX_OFFSET;
+      if (!Number.isSafeInteger(maxOffset) || maxOffset < 0) {
+        throw new JITError("INVALID_QUERY", "API query maxOffset must be a non-negative safe integer");
+      }
     }
     if (options.pagination.type === "cursor" && options.pagination.by.length === 0) {
       throw new JITError("INVALID_QUERY", "API query cursor pagination requires at least one stable ordering field");
@@ -1017,7 +1029,10 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
               ...options.pagination,
               by: Object.freeze([...options.pagination.by]),
             }
-          : { ...options.pagination }
+          : {
+              ...options.pagination,
+              maxOffset: options.pagination.maxOffset ?? DEFAULT_MAX_OFFSET,
+            }
       )
     : undefined;
   const frozenLimits = options.limits ? Object.freeze({ ...options.limits }) : undefined;
@@ -1044,6 +1059,7 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       maxConditions: frozenOptions.limits?.maxConditions ?? maxFilters,
       maxSortFields: frozenOptions.limits?.maxSortFields ?? 3,
       maxSelectFields: frozenOptions.limits?.maxSelectFields ?? 30,
+      maxDepth,
     },
   });
   const definition: StandardQueryInput["definition"] = Object.freeze({
@@ -1056,10 +1072,20 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
     sorting: boundary.sorting,
     ...(boundary.pagination
       ? {
-          pagination: Object.freeze({
-            ...boundary.pagination,
-            ...(boundary.pagination.type === "cursor" ? { by: boundary.pagination.by } : {}),
-          }),
+          pagination: Object.freeze(
+            boundary.pagination.type === "cursor"
+              ? {
+                  type: "cursor" as const,
+                  by: boundary.pagination.by,
+                  defaultLimit: boundary.pagination.defaultLimit,
+                  maxLimit: boundary.pagination.maxLimit,
+                }
+              : {
+                  type: "offset" as const,
+                  defaultLimit: boundary.pagination.defaultLimit,
+                  maxLimit: boundary.pagination.maxLimit,
+                }
+          ),
         }
       : {}),
     limits: Object.freeze({
@@ -1077,16 +1103,7 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   registerArtifact(input, {
     kind: "cqrs-input",
     definition,
-    source: emitCqrsAotParserSource(
-      queryBoundaryFilters(boundary),
-      boundary.limits.maxFilters,
-      boundary.sorting,
-      boundary.pagination ?? undefined,
-      boundary.limits.maxConditions,
-      boundary.limits.maxSortFields,
-      boundary.projection,
-      boundary.limits.maxSelectFields
-    ),
+    source: emitCqrsAotParserSource(boundary),
   });
   return input;
 }
@@ -1096,16 +1113,7 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
   const boundary = queryBoundaries.get(definition);
   if (!boundary) throw new JITError("INVALID_QUERY", "API query boundary is missing its semantic descriptor");
   const reference = cqrsParseReference(boundary);
-  const source = emitCqrsInputParser(
-    queryBoundaryFilters(boundary),
-    boundary.limits.maxFilters,
-    boundary.sorting,
-    boundary.pagination ?? undefined,
-    boundary.limits.maxConditions,
-    boundary.limits.maxSortFields,
-    boundary.projection,
-    boundary.limits.maxSelectFields
-  );
+  const source = emitCqrsInputParser(boundary);
   const parser = globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor) as (
     input: unknown
   ) => ParsedCqrsInput;
@@ -1254,6 +1262,9 @@ function normalizeCqrsTail(
   ) {
     throw new JITError("INVALID_QUERY", "Invalid offset pagination");
   }
+  if (offset > pagination.maxOffset) {
+    throw new JITError("INVALID_QUERY", "API query offset exceeds the configured pagination limit");
+  }
   return {
     filter,
     sort,
@@ -1321,16 +1332,13 @@ function decodeCqrsCursor(value: unknown, size: number): readonly unknown[] {
   }
 }
 
-export function emitCqrsInputParser(
-  fields: readonly [string, true | readonly string[]][],
-  maxFilters: number,
-  sortFields: readonly string[] = [],
-  pagination?: QueryBoundaryPagination,
-  maxConditions = maxFilters,
-  maxSortFields = 3,
-  selectFields: readonly string[] = [],
-  maxSelectFields = 30
-): string {
+/** Specializes one boundary into direct request source; the descriptor is the only input. */
+export function emitCqrsInputParser(boundary: QueryBoundary): string {
+  const fields = queryBoundaryFilters(boundary);
+  const { maxFilters, maxConditions, maxSortFields, maxSelectFields } = boundary.limits;
+  const sortFields = boundary.sorting;
+  const selectFields = boundary.projection;
+  const pagination = boundary.pagination ?? undefined;
   const allowedFields = fields.map(([field]) => JSON.stringify(field));
   const inputFields = [
     "filter",
@@ -1365,14 +1373,14 @@ export function emitCqrsInputParser(
   const paginationSource = !pagination
     ? "return select === undefined ? { filter: out, sort } : { filter: out, sort, select };"
     : pagination.type === "offset"
-      ? `const page = typeof input.page === "number" ? input.page : 1; const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; const offset = (page - 1) * limit; if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > ${pagination.maxLimit} || !Number.isSafeInteger(offset)) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "offset", offset, limit } } : { filter: out, sort, select, pagination: { kind: "offset", offset, limit } };`
+      ? `const page = typeof input.page === "number" ? input.page : 1; const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; const offset = (page - 1) * limit; if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > ${pagination.maxLimit} || !Number.isSafeInteger(offset) || offset > ${pagination.maxOffset}) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "offset", offset, limit } } : { filter: out, sort, select, pagination: { kind: "offset", offset, limit } };`
       : `if (typeof sortText === "string" && sortText.length > 0 && sortText !== ${JSON.stringify(pagination.by.join(","))}) return __reference(input); sort = ${JSON.stringify(pagination.by.map((field) => ({ path: [field], direction: "asc" })))}; const afterText = input.after; const beforeText = input.before; if (afterText !== undefined && beforeText !== undefined) return __reference(input); const after = afterText === undefined ? undefined : __decodeCursor(afterText, ${pagination.by.length}); const before = beforeText === undefined ? undefined : __decodeCursor(beforeText, ${pagination.by.length}); const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; if (!Number.isInteger(limit) || limit < 1 || limit > ${pagination.maxLimit}) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } } : { filter: out, sort, select, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } };`;
   return `return function parse(input) { if (input === null || typeof input !== "object" || Array.isArray(input)) return __reference(input); const inputKeys = Object.keys(input); for (let i = 0; i < inputKeys.length; i++) { if (${inputFields.map((field) => `inputKeys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } let out; if (input.filter === undefined) out = []; else { const filter = input.filter; if (filter === null || typeof filter !== "object" || Array.isArray(filter)) return __reference(input); const keys = Object.keys(filter); if (keys.length > ${maxFilters}) return __reference(input); for (let i = 0; i < keys.length; i++) { if (${allowedFields.map((field) => `keys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } out = new Array(keys.length * ${conditionCapacity}); let j = 0; ${fieldBodies.join(" ")} if (j > ${maxConditions}) return __reference(input); if (j !== out.length) out.length = j; } ${selectSource} ${sortSource} ${paginationSource} };`;
 }
 
 /** Import-free variant consumed by the AOT emitter; invalid syntax throws directly. */
-export function emitCqrsAotParserSource(...args: Parameters<typeof emitCqrsInputParser>): string {
-  const parser = emitCqrsInputParser(...args)
+export function emitCqrsAotParserSource(boundary: QueryBoundary): string {
+  const parser = emitCqrsInputParser(boundary)
     .split("return __reference(input);")
     .join('throw new Error("Invalid API query input");')
     .split("__decodeCursor")

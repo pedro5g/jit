@@ -1,3 +1,5 @@
+import { JITError } from "../errors/index.js";
+
 /** One filter capability resolved before an untrusted request is parsed. */
 export interface QueryBoundaryField {
   readonly path: readonly string[];
@@ -26,6 +28,7 @@ export type QueryBoundaryPagination =
       readonly type: "offset";
       readonly defaultLimit: number;
       readonly maxLimit: number;
+      readonly maxOffset: number;
     }
   | {
       readonly type: "cursor";
@@ -39,6 +42,8 @@ export interface QueryBoundaryLimits {
   readonly maxConditions: number;
   readonly maxSortFields: number;
   readonly maxSelectFields: number;
+  /** Last global stop for traversal depth; declarations remain the primary boundary. */
+  readonly maxDepth: number;
 }
 
 /**
@@ -71,12 +76,19 @@ export interface QueryBoundaryInput {
 
 /** Resolves the current flat public-query surface into the extensible IR. */
 export function resolveQueryBoundary(input: QueryBoundaryInput): QueryBoundary {
-  const fields = input.filters.map(({ path, operators }) =>
-    Object.freeze({
-      path: Object.freeze(path.split(".")),
+  const fields = input.filters.map(({ path, operators }) => {
+    const segments = path.split(".");
+    if (segments.length > input.limits.maxDepth) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(path)} exceeds the configured traversal depth`
+      );
+    }
+    return Object.freeze({
+      path: Object.freeze(segments),
       operators: Object.freeze(operators === true ? ["eq"] : [...operators]),
-    })
-  );
+    });
+  });
   const pagination =
     input.pagination === undefined
       ? null

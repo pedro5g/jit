@@ -331,7 +331,9 @@ support `eq` and `neq`; object and collection fields cannot be exposed as flat
 filters. Top-level arrays, unknown request keys, malformed or
 repeated sort/select fields, undeclared fields, and undeclared operators are
 rejected identically by runtime and AOT parsers. Offset pagination also rejects
-page/limit combinations whose computed offset is not a safe integer.
+page/limit combinations whose computed offset is not a safe integer or exceeds
+`pagination.maxOffset`, which defaults to `10000` so a deep page cannot reach
+an adapter unbounded.
 
 Cursor pagination uses an opaque compound tuple and always fixes the ordering
 to its declared `by` fields. A request may provide exactly one of `after` or
@@ -341,7 +343,9 @@ pages.
 Use `limits` to bound untrusted request complexity before it reaches an
 adapter. `maxConditions` limits normalized filter operations and
 `maxSortFields` limits comma-separated ordering fields; both are enforced by
-the generated parser.
+the generated parser. `limits.maxDepth` (default `3`) is the last global stop
+on declared traversal: a dotted filter path with more segments than the budget
+fails when the boundary is declared, not once per request.
 
 Set `select: ["id", "name"]` to permit exactly that sparse fieldset. The
 parser rejects every other model field and can bound the fieldset with

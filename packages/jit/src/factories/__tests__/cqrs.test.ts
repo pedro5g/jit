@@ -1,8 +1,40 @@
 import * as fc from "fast-check";
 
+import {
+  type QueryBoundaryInput,
+  type QueryBoundaryPagination,
+  resolveQueryBoundary,
+} from "../../compiler/query-boundary.js";
 import { Compiler, JIT } from "../../index.js";
 import { getArtifact } from "../../runtime/artifact-registry.js";
 import { emitCqrsAotParserSource, emitCqrsInputParser, encodeCqrsCursor } from "../cqrs.js";
+
+/** Builds the descriptor the emitters consume, so source tests exercise one input. */
+function boundaryFor(options: {
+  filters: QueryBoundaryInput["filters"];
+  sorting?: readonly string[];
+  projection?: readonly string[];
+  pagination?: QueryBoundaryPagination;
+  maxFilters?: number;
+  maxConditions?: number;
+  maxSortFields?: number;
+  maxSelectFields?: number;
+}) {
+  return resolveQueryBoundary({
+    sourceFields: options.filters.map((filter) => filter.path),
+    filters: options.filters,
+    projection: options.projection ?? [],
+    sorting: options.sorting ?? [],
+    ...(options.pagination === undefined ? {} : { pagination: options.pagination }),
+    limits: {
+      maxFilters: options.maxFilters ?? 8,
+      maxConditions: options.maxConditions ?? options.maxFilters ?? 8,
+      maxSortFields: options.maxSortFields ?? 3,
+      maxSelectFields: options.maxSelectFields ?? 30,
+      maxDepth: 3,
+    },
+  });
+}
 
 describe("JIT.cqrs", () => {
   describe("authorization constraints", () => {
@@ -546,6 +578,62 @@ describe("JIT.cqrs", () => {
     expect(() => JIT.api.parse(JIT.api.query(User, {}))({ fields: "id" })).toThrow(/sparse fields/i);
   });
 
+  it("stops deep offset pagination before an adapter sees it", () => {
+    const User = JIT.object({ name: JIT.string() });
+    const bounded = JIT.api.parse(
+      JIT.api.query(User, {
+        pagination: { type: "offset", defaultLimit: 20, maxLimit: 100, maxOffset: 100 },
+      })
+    );
+
+    expect(bounded({ page: 6, limit: 20 })).toEqual({
+      filter: [],
+      sort: [],
+      pagination: { kind: "offset", offset: 100, limit: 20 },
+    });
+    expect(() => bounded({ page: 7, limit: 20 })).toThrow(/offset exceeds/i);
+
+    const byDefault = JIT.api.parse(
+      JIT.api.query(User, { pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 } })
+    );
+    expect(() => byDefault({ page: 1_000_000, limit: 100 })).toThrow(/offset/i);
+    expect(byDefault({ page: 101, limit: 100 })?.pagination).toEqual({ kind: "offset", offset: 10_000, limit: 100 });
+  });
+
+  it("keeps the offset boundary identical in the import-free parser", () => {
+    const User = JIT.object({ name: JIT.string() });
+    const definition = JIT.api.query(User, {
+      pagination: { type: "offset", defaultLimit: 20, maxLimit: 100, maxOffset: 60 },
+    });
+    const runtime = JIT.api.parse(definition);
+    const artifact = getArtifact(definition);
+    if (artifact?.kind !== "cqrs-input") throw new Error("missing boundary artifact");
+    const aot = globalThis.Function(artifact.source)() as (value: unknown) => unknown;
+
+    expect(aot({ page: 4, limit: 20 })).toEqual(runtime({ page: 4, limit: 20 }));
+    expect(() => aot({ page: 5, limit: 20 })).toThrow(/invalid API query input/i);
+    expect(() => runtime({ page: 5, limit: 20 })).toThrow(/offset exceeds/i);
+  });
+
+  it("closes declared traversal beyond the configured depth", () => {
+    const User = JIT.object({
+      profile: JIT.object({ address: JIT.object({ city: JIT.string() }) }),
+    });
+
+    expect(
+      JIT.api.parse(JIT.api.query(User, { filter: { "profile.address.city": true } }))({
+        filter: { "profile.address.city": "Lisboa" },
+      })
+    ).toEqual({
+      filter: [{ kind: "eq", path: ["profile", "address", "city"], value: "Lisboa" }],
+      sort: [],
+    });
+    expect(() => JIT.api.query(User, { filter: { "profile.address.city": true }, limits: { maxDepth: 2 } })).toThrow(
+      /traversal depth/i
+    );
+    expect(() => JIT.api.query(User, { limits: { maxDepth: 0 } })).toThrow(/maxDepth/i);
+  });
+
   it("normalizes declared nested filter paths in compiled source", () => {
     const User = JIT.object({ profile: JIT.object({ age: JIT.number() }) });
     const parse = JIT.api.parse(JIT.api.query(User, { filter: { "profile.age": ["gte"] } }));
@@ -579,6 +667,11 @@ describe("JIT.cqrs", () => {
         pagination: { type: "offset", defaultLimit: 10, maxLimit: 5 },
       })
     ).toThrow(/pagination/i);
+    expect(() =>
+      JIT.api.query(User, {
+        pagination: { type: "offset", defaultLimit: 10, maxLimit: 20, maxOffset: -1 },
+      })
+    ).toThrow(/maxOffset/i);
     expect(() =>
       JIT.api.query(User, {
         pagination: { type: "cursor", by: [], defaultLimit: 10, maxLimit: 20 },
@@ -620,16 +713,14 @@ describe("JIT.cqrs", () => {
   });
 
   it("emits deterministic direct source for filter, sort and offset pagination", () => {
-    const first = emitCqrsInputParser([["age", ["gte", "lte"]]], 8, ["age"], {
-      type: "offset",
-      defaultLimit: 20,
-      maxLimit: 100,
-    });
-    const second = emitCqrsInputParser([["age", ["gte", "lte"]]], 8, ["age"], {
-      type: "offset",
-      defaultLimit: 20,
-      maxLimit: 100,
-    });
+    const descriptor = () =>
+      boundaryFor({
+        filters: [{ path: "age", operators: ["gte", "lte"] }],
+        sorting: ["age"],
+        pagination: { type: "offset", defaultLimit: 20, maxLimit: 100, maxOffset: 10_000 },
+      });
+    const first = emitCqrsInputParser(descriptor());
+    const second = emitCqrsInputParser(descriptor());
 
     expect(first).toBe(second);
     expect(first).toContain("const sortText = input.sort");
@@ -640,16 +731,14 @@ describe("JIT.cqrs", () => {
 
   it("emits an import-free parser for AOT", () => {
     const source = emitCqrsAotParserSource(
-      [
-        ["age", ["gte"]],
-        ["name", true],
-      ],
-      8,
-      ["age", "name"],
-      undefined,
-      8,
-      3,
-      ["age", "name"]
+      boundaryFor({
+        filters: [
+          { path: "age", operators: ["gte"] },
+          { path: "name", operators: true },
+        ],
+        sorting: ["age", "name"],
+        projection: ["age", "name"],
+      })
     );
     const parse = globalThis.Function(source)() as (input: unknown) => unknown;
     expect(source).not.toContain("__reference");
@@ -676,16 +765,17 @@ describe("JIT.cqrs", () => {
     });
     const runtime = JIT.api.parse(input);
     const source = emitCqrsAotParserSource(
-      [
-        ["age", ["gte", "lte"]],
-        ["name", true],
-      ],
-      32,
-      ["age", "name"],
-      { type: "offset", defaultLimit: 20, maxLimit: 100 },
-      3,
-      3,
-      ["age", "name"]
+      boundaryFor({
+        filters: [
+          { path: "age", operators: ["gte", "lte"] },
+          { path: "name", operators: true },
+        ],
+        sorting: ["age", "name"],
+        projection: ["age", "name"],
+        pagination: { type: "offset", defaultLimit: 20, maxLimit: 100, maxOffset: 10_000 },
+        maxFilters: 32,
+        maxConditions: 3,
+      })
     );
     const aot = globalThis.Function(source)() as (value: unknown) => unknown;
 

@@ -53,9 +53,13 @@ is no cost model. Operator types now come from the shared Query AST; constructio
 also rejects non-scalar fields and operators incompatible with the schema.
 Projection has an explicit allowlist rather than inheriting every model field.
 Operations absent from the Query AST (`in`, `between`, string search) remain
-unavailable instead of being represented by boundary-only strings. Parsed
-predicates continue to lower to `QueryConditionNode` and standard V1 query
-data.
+unavailable instead of being represented by boundary-only strings. Structural
+limits now cover traversal depth and offset pagination; `maxDepth` is checked
+while the descriptor is resolved and `maxOffset` while a request is normalized,
+and neither reaches `~query` V1. Both source emitters take the descriptor as
+their only argument, so a limit cannot land in one parser and miss the other.
+Parsed predicates continue to lower to `QueryConditionNode` and standard V1
+query data.
 
 ## Read dependencies
 

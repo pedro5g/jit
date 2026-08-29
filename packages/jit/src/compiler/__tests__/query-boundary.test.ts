@@ -12,7 +12,7 @@ describe("QueryBoundary", () => {
       projection: ["id", "name"],
       sorting: ["createdAt"],
       pagination: { type: "cursor", by: ["createdAt", "id"], defaultLimit: 20, maxLimit: 100 },
-      limits: { maxFilters: 8, maxConditions: 10, maxSortFields: 2, maxSelectFields: 2 },
+      limits: { maxFilters: 8, maxConditions: 10, maxSortFields: 2, maxSelectFields: 2, maxDepth: 3 },
     });
 
     expect(boundary).toEqual({
@@ -27,7 +27,7 @@ describe("QueryBoundary", () => {
       projection: ["id", "name"],
       sorting: ["createdAt"],
       pagination: { type: "cursor", by: ["createdAt", "id"], defaultLimit: 20, maxLimit: 100 },
-      limits: { maxFilters: 8, maxConditions: 10, maxSortFields: 2, maxSelectFields: 2 },
+      limits: { maxFilters: 8, maxConditions: 10, maxSortFields: 2, maxSelectFields: 2, maxDepth: 3 },
     });
     expect(Object.isFrozen(boundary)).toBe(true);
     expect(Object.isFrozen(boundary.fields[0])).toBe(true);
@@ -45,7 +45,7 @@ describe("QueryBoundary", () => {
       filters: [],
       projection: [],
       sorting: [],
-      limits: { maxFilters: 0, maxConditions: 0, maxSortFields: 0, maxSelectFields: 0 },
+      limits: { maxFilters: 0, maxConditions: 0, maxSortFields: 0, maxSelectFields: 0, maxDepth: 3 },
     });
 
     expect(boundary.fields).toEqual([]);
@@ -53,5 +53,19 @@ describe("QueryBoundary", () => {
     expect(boundary.collections).toEqual([]);
     expect(boundary.logical).toEqual({ and: false, or: false, not: false });
     expect(boundary.pagination).toBeNull();
+  });
+
+  it("stops declared traversal at the configured depth", () => {
+    const resolve = (maxDepth: number) =>
+      resolveQueryBoundary({
+        sourceFields: ["profile"],
+        filters: [{ path: "profile.address.city", operators: true }],
+        projection: [],
+        sorting: [],
+        limits: { maxFilters: 1, maxConditions: 1, maxSortFields: 0, maxSelectFields: 0, maxDepth },
+      });
+
+    expect(resolve(3).fields[0]?.path).toEqual(["profile", "address", "city"]);
+    expect(() => resolve(2)).toThrow(/traversal depth/i);
   });
 });

@@ -31,6 +31,7 @@ const UsersQuery = JIT.api.query(User, {
     maxConditions: 20,
     maxSortFields: 2,
     maxSelectFields: 8,
+    maxDepth: 3,
   },
 });
 
@@ -54,19 +55,44 @@ of its lowerings support them.
 Relations, collection predicates and logical input are not inferred from a
 nested schema and are not exposed in the current boundary.
 
+## Structural limits
+
+Declaration is the primary boundary; the limits are the last global stop.
+
+| Limit | Default | Enforced |
+| --- | --- | --- |
+| `maxFilters` | 32 | request filter keys |
+| `limits.maxConditions` | `maxFilters` | conditions produced by the request |
+| `limits.maxSortFields` | 3 | requested sort fields |
+| `limits.maxSelectFields` | 30 | requested projection fields |
+| `limits.maxDepth` | 3 | declared filter path segments |
+| `pagination.maxLimit` | required | requested page size |
+| `pagination.maxOffset` | 10000 | computed offset of an offset page |
+
+`maxDepth` is checked while the boundary is resolved, so a path deeper than the
+budget fails at declaration rather than per request. Every other limit is
+checked while the request is normalized.
+
+Offset pagination is bounded by default because a deep page is the cheapest
+amplification an external consumer can ask for: the boundary refuses
+`page=1000000` before an adapter is given the chance to scan for it. Prefer
+cursor pagination when an endpoint is expected to be paged deeply at all.
+
 ## Compilation and allocation
 
 The boundary is resolved once against the schema. Runtime parsing uses a
 specialized function containing direct field and operator branches. It checks
-top-level keys, filters, conditions, projection, sorting and pagination while
-normalizing the request. Invalid input exits through the first failing check.
+top-level keys, filters, conditions, projection, sorting, pagination and the
+offset budget while normalizing the request. Invalid input exits through the
+first failing check.
 
 Resolution produces an immutable internal `QueryBoundary` with normalized
 field paths, operator sets, projection, sorting, pagination and structural
 limits. Relation, collection and logical capabilities are present in the IR
-but closed in the current API. The runtime reference parser and generated
-parser source are both derived from this descriptor; it is consumed before the
-normal Query AST or physical planner sees the request.
+but closed in the current API. The descriptor is the only argument the runtime
+and AOT source emitters take, so a limit cannot reach one parser and miss the
+other; it is consumed before the normal Query AST or physical planner sees the
+request.
 
 Successful parsing allocates only the semantic output it returns: condition,
 sort, projection and pagination data. It does not allocate an operator registry
