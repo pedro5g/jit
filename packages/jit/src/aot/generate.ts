@@ -434,6 +434,28 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-authorized-parser")
       return emitCqrsAuthorizedParserArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "collection-mutation-plan") {
+      const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "state.collection",
+          reason: "a declared patch value cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      if (artifact.source.includes("__cachedIndex")) needsRuntimeCachedIndex = true;
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      // The upsert no-op test is schema-specialized equality; it becomes a
+      // local helper rather than a binding an import-free module cannot have.
+      if (artifact.equalSource !== undefined) {
+        js.push(`  const __equal = ${asExpression(artifact.equalSource, "equal")};`);
+      }
+      js.push(`  return ${artifact.source};`);
+      js.push("})();");
+      return { binding, type };
+    }
     if (artifact.kind === "mutation-plan") {
       const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
       if (inlined === undefined) {
@@ -678,6 +700,10 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown; readonly explain: () => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "cqrs-authorized-parser") return "(input: unknown, actor?: unknown) => unknown";
+    if (artifact.kind === "collection-mutation-plan") {
+      const value = namedType(artifact.schema, typeNames);
+      return `(value: ${value}, params: Readonly<Record<string, unknown>>) => ${value}`;
+    }
     if (artifact.kind === "mutation-plan") {
       const value = namedType(artifact.schema, typeNames);
       return `(value: ${value}, params: Readonly<Record<${

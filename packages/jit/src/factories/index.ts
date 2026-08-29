@@ -48,6 +48,7 @@ export {
   type StandardEvent,
 } from "./class.js";
 export * from "./collection/index.js";
+export type { CollectionMutation, CollectionState } from "./collection-state.js";
 export * from "./composition/index.js";
 export {
   type CqrsQuery,

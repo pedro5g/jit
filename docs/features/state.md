@@ -10,6 +10,7 @@ JIT.state.update(User);
 JIT.state.patch.apply(User);
 JIT.state.patch.merge(User);
 JIT.state.patch.json(User);
+JIT.state.collection(Users);
 JIT.state.reconcile(Users);
 JIT.state.watch(Users, { key: "id" });
 JIT.state.watchedList(Users, initial, { key: "id" });
@@ -60,6 +61,23 @@ A path is specialized only when the generic update would assign its leaf; a
 leaf the deep-partial update *merges* — an object, array, map, set or union —
 keeps running through it, so a declared patch never changes meaning in order to
 become faster. `explain()` reports which strategy it got.
+
+## Collection mutations
+
+`collection(Users)` mutates a collection immutably, and the algorithm that
+finds the row comes from the collection's own facts rather than from the call:
+a cached index for `.keyed()`, a binary search for `.ordered()` and unique, and
+an early-exit scan otherwise. See
+[Collection mutations](./collection-mutations.md).
+
+```ts
+const renameUser = JIT.state
+  .collection(Users)
+  .updateByKey({ key: "id", patch: { name: JIT.cqrs.param("name") } });
+```
+
+`explain()` reports the chosen path and, separately, that rebuilding the array
+is `O(n)` whatever found the row.
 
 ## Performance and tradeoffs
 

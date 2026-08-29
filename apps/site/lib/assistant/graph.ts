@@ -570,6 +570,38 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { query: 0.8, compilation: 0.5, aot: 0.3 },
   },
   {
+    id: "collection-mutation",
+    aliases: [
+      "collection mutation",
+      "state collection",
+      "updateByKey",
+      "removeByKey",
+      "upsert",
+      "mutar coleção",
+      "atualizar item da lista",
+      "immutable array update",
+    ],
+    terms: ["collection", "updateByKey", "removeByKey", "upsert", "append", "prepend", "access path"],
+    apis: ["state"],
+    fact: "JIT.state.collection mutates a collection immutably, and the algorithm that finds the row comes from the collection's declared facts rather than from the call: a cached index for .keyed(), a binary search for .ordered() and unique, an early-exit scan otherwise.",
+    factPt:
+      "JIT.state.collection muta uma coleção de forma imutável, e o algoritmo que encontra a linha vem dos facts declarados da coleção, não da chamada: índice em cache para .keyed(), busca binária para .ordered() com unicidade, e scan com saída antecipada nos demais casos.",
+    mechanisms: [
+      "updateByKey, removeByKey, upsert, append and prepend compile to one function each. Nothing is copied before the decision: a missing key and a row that did not semantically change both return the original array, and removal fills one array of length n-1 with indexed loops instead of calling filter.",
+      "explain() reports the chosen strategy and its facts, and reports separately that rebuilding the array is O(n) whatever found the row. A mutation index maps the key to a position rather than to the row, and a binary search returns the insertion point when the key is missing, so an ordered upsert stays ordered.",
+      "Writing the identity key or the ordering key through updateByKey is refused, because the collection would still claim a fact that stopped being true; remove and insert the row instead.",
+    ],
+    mechanismsPt: [
+      "updateByKey, removeByKey, upsert, append e prepend compilam para uma função cada. Nada é copiado antes da decisão: chave ausente e linha sem mudança semântica retornam o array original, e a remoção preenche um array de tamanho n-1 com loops indexados em vez de chamar filter.",
+      "explain() informa a estratégia escolhida e seus facts, e informa separadamente que reconstruir o array é O(n) independente de quem encontrou a linha. O índice de mutação mapeia a chave para uma posição, e a busca binária devolve o ponto de inserção quando a chave falta, então um upsert ordenado continua ordenado.",
+      "Escrever a chave de identidade ou a chave de ordenação via updateByKey é recusado, porque a coleção continuaria declarando um fact que deixou de ser verdade; remova e insira a linha.",
+    ],
+    example:
+      'const User = JIT.object({ id: JIT.string(), name: JIT.string() });\nconst Members = JIT.array(User).keyed("id");\n\nconst renameMember = JIT.state\n  .collection(Members)\n  .updateByKey({ key: "id", patch: { name: JIT.cqrs.param("name") } });\n\nconst members = [{ id: "u_1", name: "Ada" }];\nrenameMember(members, { key: "u_1", name: "Grace" });\nrenameMember.explain().physical.strategy;',
+    page: "/docs/reference/functions/update#collection-mutations",
+    edges: { update: 0.8, indexing: 0.5, lookup: 0.4 },
+  },
+  {
     id: "binary",
     aliases: ["binary", "binário", "rowset", "columnar", "batch", "lote", "million", "milhão", "analytics"],
     terms: ["binary", "rowset", "columnar", "packed", "aligned", "typed", "view"],

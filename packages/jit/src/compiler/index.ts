@@ -3,6 +3,7 @@ export {
   clearCompileCache,
 } from "../runtime/cache/compile-cache.js";
 export * from "./access.js";
+export * from "./access-path.js";
 export * from "./aggregate-mutation.js";
 export * from "./binary-rowset.js";
 export * from "./cache-key.js";

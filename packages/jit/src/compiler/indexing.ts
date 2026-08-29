@@ -20,8 +20,14 @@ export interface IndexKey {
   readonly nullish: boolean;
 }
 
-/** How the built index stores the rows that share a key. */
-export type IndexShape = "unique" | "grouped";
+/**
+ * How the built index stores what it finds for a key.
+ *
+ * `position` exists because an immutable replacement needs the slot, not the
+ * row: it is the same builder, the same key reads and the same cache, with the
+ * row's index stored instead of the row.
+ */
+export type IndexShape = "unique" | "grouped" | "position";
 
 /**
  * Semantic description of an index over the rows of a collection. It is
@@ -138,6 +144,8 @@ export function emitIndexBuilder(
         writer.line("} else {");
         writer.indent(() => writer.line("group[group.length] = row;"));
         writer.line("}");
+      } else if (descriptor.shape === "position") {
+        writer.line(`${bucket}.set(${lastKey}, i);`);
       } else {
         writer.line(`${bucket}.set(${lastKey}, row);`);
       }

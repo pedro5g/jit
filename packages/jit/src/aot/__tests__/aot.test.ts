@@ -390,6 +390,39 @@ describe("JIT AOT generate", () => {
     expect(() => generated.ListUsers.parse({ page: 1_000, limit: 100 })).toThrow(/invalid API query input/i);
   });
 
+  it("emits a collection mutation with its chosen access path", async () => {
+    const User = JIT.object({ id: JIT.string(), name: JIT.string() });
+    const Users = JIT.array(User).keyed("id");
+    const RenameMember = JIT.state
+      .collection(Users)
+      .updateByKey({ key: "id", patch: { name: JIT.cqrs.param("name") } });
+    const RemoveMember = JIT.state.collection(Users).removeByKey({ key: "id" });
+    const UpsertMember = JIT.state.collection(Users).upsert({ key: "id" });
+
+    const result = AOT.generate({ artifacts: { RenameMember, RemoveMember, UpsertMember }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly RenameMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly RemoveMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly UpsertMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+    };
+    const rows = [
+      { id: "a", name: "Ada" },
+      { id: "b", name: "Bob" },
+    ];
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).not.toContain(".filter(");
+    expect(generated.RenameMember(rows, { key: "b", name: "Bee" })).toEqual(
+      RenameMember(rows, { key: "b", name: "Bee" })
+    );
+    expect(generated.RemoveMember(rows, { key: "a" })).toEqual(RemoveMember(rows, { key: "a" }));
+    // The upsert no-op test is specialized equality, inlined into the module.
+    expect(generated.UpsertMember(rows, { key: "b", row: { id: "b", name: "Bob" } })).toBe(rows);
+    expect(generated.RenameMember(rows, { key: "b", name: "Bob" })).toBe(rows);
+  });
+
   it("emits a declared patch as one copy-on-write function", async () => {
     const User = JIT.object({
       id: JIT.string(),

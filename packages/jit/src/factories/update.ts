@@ -297,7 +297,7 @@ export function emitMutationSource(plan: MutationPlan): string {
  * object; anywhere else it is the value being written, which is what keeps the
  * declaration and the deep-partial patch it replaces in agreement.
  */
-function collectPatchWrites(
+export function collectPatchWrites(
   schema: AnyTypeSchema,
   template: unknown,
   path: readonly string[],

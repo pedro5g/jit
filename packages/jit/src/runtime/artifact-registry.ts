@@ -176,6 +176,20 @@ interface MutationPlanArtifact {
   readonly params: readonly string[];
 }
 
+/** One immutable collection mutation, with its resolved access path. */
+interface CollectionMutationPlanArtifact {
+  readonly kind: "collection-mutation-plan";
+  readonly schema: import("../core/ats/index.js").AnyTypeSchema;
+  /** Import-free source of the mutation expression. */
+  readonly source: string;
+  readonly bindingNames: readonly string[];
+  readonly bindingValues: readonly unknown[];
+  /** Specialized equality for the upsert no-op test, when the operation needs it. */
+  readonly equalSource: string | undefined;
+  readonly cacheKey: string;
+  readonly explanation: unknown;
+}
+
 interface CqrsAuthorizedParserArtifact {
   readonly kind: "cqrs-authorized-parser";
   readonly definition: unknown;
@@ -273,6 +287,7 @@ export type CompiledArtifact =
   | CqrsParserArtifact
   | CqrsAuthorizedParserArtifact
   | MutationPlanArtifact
+  | CollectionMutationPlanArtifact
   | SortPlanArtifact
   | JoinPlanArtifact
   | IndexPlanArtifact

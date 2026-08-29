@@ -2,17 +2,16 @@ import type * as ATS from "../core/ats/index.js";
 import { JITError } from "../errors/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
-import { CodeWriter } from "./emitter/code-writer.js";
-import { type IndexDescriptor, resolveIndexDescriptor, resolveIndexKeysFromFacts } from "./indexing.js";
 import {
   emitBinarySearch,
   emitCachedIndexLookup,
+  emitEarlyExitScan,
   type KeyedAccessChoice,
   type KeyedEmitShape,
   resolveKeyedAccessChoice,
-} from "./physical-query.js";
+} from "./access-path.js";
+import { type IndexDescriptor, resolveIndexDescriptor, resolveIndexKeysFromFacts } from "./indexing.js";
 import { resolveRowField, resolveRowObjectSchema, resolveScalarKeyKind } from "./row-keys.js";
-import { emitPropertyAccess } from "./source/access.js";
 
 /** Reaching one row by one key. The caller supplies the value; JIT picks the path. */
 export interface LookupDescriptor {
@@ -72,38 +71,10 @@ export function emitLookupSource(lookup: LookupDescriptor): string {
   if (lookup.choice.strategy === "BinarySearch") {
     return emitBinarySearch(lookup.key, lookup.descriptor, lookup.choice.direction, shape);
   }
-  return emitLookupScan(lookup, shape);
-}
-
-/**
- * The fallback: no fact reaches this key, so rows are read in order and the
- * loop returns the moment one matches. Nothing is allocated and nothing is
- * visited past the answer.
- */
-function emitLookupScan(lookup: LookupDescriptor, shape: KeyedEmitShape): string {
-  const writer = new CodeWriter();
-  const read = lookup.date
-    ? `${emitPropertyAccess("row", lookup.key)}.getTime()`
-    : emitPropertyAccess("row", lookup.key);
-
-  writer.line("(() => {");
-  writer.indent(() => {
-    writer.line(`function lookup(${shape.signature}) {`);
-    writer.indent(() => {
-      writer.line(`const target = ${shape.probe};`);
-      writer.line("for (let i = 0, len = value.length; i < len; i++) {");
-      writer.indent(() => {
-        writer.line("const row = value[i];");
-        writer.line(`if (${read} === target) return row;`);
-      });
-      writer.line("}");
-      writer.line("return undefined;");
-    });
-    writer.line("}");
-    writer.line("return lookup;");
-  });
-  writer.line("})()");
-  return writer.toString();
+  // The fallback is the shared early-exit scan: a lookup, a keyed query
+  // terminal and a collection mutation reach a row the same way, so there is
+  // one scan rather than one per caller.
+  return emitEarlyExitScan(lookup.key, lookup.descriptor, shape);
 }
 
 export function lookupCacheKey(lookup: LookupDescriptor): string {

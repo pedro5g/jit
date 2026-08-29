@@ -11,6 +11,7 @@ description: Canonical namespace for immutable updates, patches, reconciliation 
 | `patch.apply` | Apply the canonical deep-partial update contract |
 | `patch.merge` | Apply JSON Merge Patch semantics |
 | `patch.json` | Apply RFC 6902 operations |
+| `collection` | Mutate a collection immutably through a planned access path |
 | `reconcile` | Compare keyed collection snapshots with selective sinks |
 | `watch` | Compile stateless collection change detection |
 | `watchedList` | Track changes in one stateful aggregate collection |
@@ -27,5 +28,20 @@ The namespace does not use a Proxy-based draft runtime to discover shape.
 Operations compile from the schema, delay allocation until a semantic change
 is known, and preserve references for unchanged branches.
 
-See [Update](./update), [Patch](./patch), [Reconcile](./reconcile), and
-[Watch](./watch) for the individual contracts.
+`collection` extends that to a collection: the operation says what should
+happen to a row, and the collection's declared facts decide how that row is
+reached.
+
+```ts
+const Members = JIT.array(User).keyed("id");
+const renameMember = JIT.state
+  .collection(Members)
+  .updateByKey({ key: "id", patch: { name: JIT.cqrs.param("name") } });
+
+renameMember([{ id: 1, name: "Ada" }], { key: 1, name: "Grace" });
+renameMember.explain().physical.strategy; // "CachedIndexLookup"
+```
+
+See [Update](./update), [Patch](./patch),
+[Collection mutations](./update#collection-mutations), [Reconcile](./reconcile),
+and [Watch](./watch) for the individual contracts.

@@ -162,7 +162,8 @@ work without changing their result semantics.
 
 ## Physical access reuse
 
-`resolveKeyedAccessChoice` in `compiler/physical-query.ts` already chooses:
+`resolveKeyedAccessChoice` now lives in `compiler/access-path.ts`, which is the
+shared planner the audit asked for. It chooses:
 
 ```text
 ordered + unique key -> BinarySearch
@@ -176,11 +177,20 @@ it into a neutral module/name and add the position-oriented emit shape required
 by collection mutation. It must retain the rule that a one-off rebuilt index is
 slower than a scan.
 
-The current cache maps keys to row values. Immutable array replacement needs a
-position. Do not introduce a second cached representation until a benchmark
-compares key-to-position against locating the cached row's position. Binary
-search already yields a position internally and should expose that compiler
-shape without another search implementation.
+Immutable array replacement needs a position rather than a row. Instead of a
+second cache, `IndexShape` gained a `position` shape: the same builder, the same
+key reads and the same cache, storing the row's index. `KeyedEmitShape.answers`
+gained `"position"`, so the binary search reports the slot when the key is
+present and the bitwise complement of the insertion point when it is not, and
+the scan does the same. `emitEarlyExitScan` is now shared: lookup's private scan
+was deleted in favour of it, so query, lookup and collection mutation reach a row
+through one implementation.
+
+`JIT.state.collection` consumes that planner. `updateByKey` reuses `MutationPlan`
+for the row, `upsert` uses schema-specialized equality for its no-op test, and
+`updateByKey` refuses to write the identity or ordering key rather than leave a
+collection whose declared facts stopped being true. `updateWhere`/`removeWhere`
+and explicit rekey/reposition are still to come.
 
 ## AOT/artifact implications
 

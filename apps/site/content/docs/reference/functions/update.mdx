@@ -78,6 +78,39 @@ On a three-level object a declared patch runs in about half the time of the
 generic update it specializes, and returns the original value in about 10 ns
 when nothing changed.
 
+## Collection mutations
+
+`JIT.state.collection(Users)` mutates a collection immutably. The operation is
+semantic — update this key, remove it, upsert it — and the algorithm that finds
+the row comes from the collection's declared facts: a cached index for
+`.keyed()`, a binary search for `.ordered()` and unique, an early-exit scan
+otherwise. `explain().physical` reports which one was chosen.
+
+```ts
+const Members = JIT.array(User).keyed("id");
+const renameMember = JIT.state
+  .collection(Members)
+  .updateByKey({ key: "id", patch: { name: JIT.cqrs.param("name") } });
+
+const members = [{ id: "u_1", name: "Ada", active: true, role: "admin" }];
+renameMember(members, { key: "u_1", name: "Grace" });
+renameMember.explain().physical.strategy; // "CachedIndexLookup"
+```
+
+`removeByKey`, `upsert`, `append` and `prepend` are compiled the same way.
+Nothing is copied before the decision: a missing key and a row that did not
+change both return the original array, and removal fills one array of length
+`n - 1` with indexed loops rather than calling `filter`.
+
+Reaching the row can be `O(1)` or `O(log n)`; rebuilding the array is `O(n)`
+whatever found it, which `explain().copy` reports separately. An ordered
+`upsert` inserts at the position the search reported, so the collection stays
+ordered.
+
+Writing the identity key or the ordering key through `updateByKey` is refused:
+both would leave the collection claiming a fact that is no longer true. Remove
+and insert the row instead.
+
 ## Reactive mode
 
 ```ts
