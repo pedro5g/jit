@@ -48,6 +48,20 @@ export interface MutationLevel {
   readonly children: ReadonlyMap<string, MutationLevel>;
 }
 
+/**
+ * Which outputs one mutation is asked to produce.
+ *
+ * An output nobody asked for is not computed and does not appear in the
+ * generated source: the mask, the forward patch and the inverse patch are all
+ * work, and a mutation that only needs the new value must not pay for them.
+ */
+export interface MutationChannels {
+  readonly value?: boolean;
+  readonly changed?: boolean | readonly string[];
+  readonly patch?: boolean;
+  readonly inverse?: boolean;
+}
+
 export interface MutationPlan {
   readonly schema: ATS.AnyTypeSchema;
   readonly writes: readonly MutationWrite[];

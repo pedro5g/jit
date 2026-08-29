@@ -152,6 +152,107 @@ describe("MutationPlan", () => {
     expect(moved.at).not.toBe(current.at);
   });
 
+  describe("result channels", () => {
+    const declared = JIT.state
+      .update(User)
+      .patch({ name: JIT.cqrs.param("name"), profile: { address: { city: JIT.cqrs.param("city") } } });
+    const applyPatch = JIT.state.patch.apply(User);
+
+    it("produces the mask compare.changed produces, in the same pass", () => {
+      const mutate = declared.result({ value: true, changed: true }).compile();
+      const changed = JIT.compare.changed(User);
+      const result = mutate(value, { name: "Grace", city: "Paris" });
+
+      expect(result.changed).toBe(changed(value, result.value));
+      expect(mutate(value, { name: "Ada", city: "London" }).changed).toBe(0);
+      // The mask is only meaningful next to the layout it was made against.
+      expect(mutate.layout()?.paths).toEqual(["id", "name", "profile", "settings", "tags"]);
+      const narrow = declared.result({ changed: ["profile.address.city"] }).compile();
+      expect(narrow.layout()?.paths).toEqual(["profile.address.city"]);
+      expect(narrow(value, { name: "Grace", city: "Paris" }).changed).toBe(1);
+      expect(narrow(value, { name: "Grace", city: "London" }).changed).toBe(0);
+    });
+
+    it("round-trips through the forward and inverse patches", () => {
+      const mutate = declared.result({ value: true, patch: true, inverse: true }).compile();
+      const result = mutate(value, { name: "Grace", city: "Paris" });
+
+      expect(result.patch).toEqual({ name: "Grace", profile: { address: { city: "Paris" } } });
+      expect(result.inverse).toEqual({ name: "Ada", profile: { address: { city: "London" } } });
+      expect(applyPatch(value, result.patch as never)).toEqual(result.value);
+      expect(applyPatch(result.value, result.inverse as never)).toEqual(value);
+    });
+
+    it("allocates no patch for a mutation that changed nothing", () => {
+      const mutate = declared.result({ value: true, changed: true, patch: true, inverse: true }).compile();
+      const result = mutate(value, { name: "Ada", city: "London" });
+
+      expect(result.value).toBe(value);
+      expect(result.changed).toBe(0);
+      expect(result.patch).toBeUndefined();
+      expect(result.inverse).toBeUndefined();
+    });
+
+    it("does not generate an output nobody asked for", () => {
+      const only = (channels: Parameters<typeof declared.result>[0]) => {
+        const artifact = getArtifact(declared.result(channels).compile() as object);
+        if (artifact?.kind !== "mutation-plan") throw new Error("expected a specialized mutation artifact");
+        return artifact.source;
+      };
+
+      expect(only({ value: true })).not.toContain("mask");
+      expect(only({ value: true })).not.toContain("patch");
+      expect(only({ value: true })).not.toContain("inverse");
+      expect(only({ changed: true })).toContain("mask |=");
+      expect(only({ changed: true })).not.toContain("_patch");
+      expect(only({ patch: true })).toContain("_patch");
+      expect(only({ patch: true })).not.toContain("_inverse");
+      expect(only({ patch: true })).not.toContain("mask");
+      expect(only({ inverse: true })).toContain("_inverse");
+      expect(only({ inverse: true })).not.toContain("_patch =");
+    });
+
+    it("refuses channels a generic patch cannot produce", () => {
+      expect(() =>
+        JIT.state
+          .update(User)
+          .patch({ settings: JIT.cqrs.param("settings") })
+          .result({ changed: true })
+      ).toThrow(/specialized mutation/i);
+    });
+
+    it("round-trips on every input, against the update it specializes", () => {
+      const mutate = declared.result({ value: true, changed: true, patch: true, inverse: true }).compile();
+      const changed = JIT.compare.changed(User);
+
+      fc.assert(
+        fc.property(
+          fc.option(fc.string(), { nil: undefined }),
+          fc.option(fc.string(), { nil: undefined }),
+          fc.string(),
+          fc.string(),
+          (name, city, currentName, currentCity) => {
+            const current = {
+              ...value,
+              name: currentName,
+              profile: { ...value.profile, address: { city: currentCity, zip: "E1" } },
+            };
+            const result = mutate(current, { name, city });
+
+            expect(result.changed).toBe(changed(current, result.value));
+            if (result.patch === undefined) {
+              expect(result.value).toBe(current);
+              return;
+            }
+            expect(applyPatch(current, result.patch as never)).toEqual(result.value);
+            expect(applyPatch(result.value, result.inverse as never)).toEqual(current);
+          }
+        ),
+        { numRuns: 400 }
+      );
+    });
+  });
+
   it("agrees with the generic deep-partial update on every input", () => {
     const mutate = JIT.state
       .update(User)

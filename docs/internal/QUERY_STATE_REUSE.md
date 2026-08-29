@@ -124,7 +124,8 @@ not to an opaque runtime patch whose keys are known only per call.
 ## Write dependencies and change layout
 
 `MutationPlan.dependencies` carries the first read and write sets, as
-normalized paths. They exist only for declared writes; the update IR still
+normalized paths, and `changeLayoutBitFor` maps a write onto the layout bit it
+sets. They exist only for declared writes; the update IR still
 knows schema shape but not a static set of writes for a runtime patch, which is
 the correct boundary. A shared `PathSet` can be lifted from these once derived
 state needs to intersect against them.
@@ -138,9 +139,14 @@ state needs to intersect against them.
 - `has(mask, path)` uses the same bit positions;
 - runtime and AOT already reconstruct the descriptor.
 
-Extracting `ChangeLayout` must preserve the current mask values and source.
-Mutation, derive and watch may consume the shared layout only after differential
-tests prove equality with `JIT.compare.changed`.
+`ChangeLayout` now exists in `compiler/change-layout.ts`, derived from the same
+`ChangedDescriptor` rather than replacing it: the mask values and the emitted
+`changed` source are unchanged. A declared patch's `result({changed})` produces
+its mask from the comparisons the copy plan already made, and a property test
+holds it against `JIT.compare.changed` on random inputs. Forward and inverse
+patches come from the same next/previous pairs, in the same pass; a channel
+nobody requested is absent from the generated source. Derive and watch can adopt
+the layout next.
 
 ## Patch, reconcile and watch
 

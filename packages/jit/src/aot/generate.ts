@@ -468,7 +468,16 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       }
       js.push(`${declaration} /*#__PURE__*/ (() => {`);
       js.push(...inlined.map((line) => `  ${line}`));
-      js.push(...indentBlock(artifact.source));
+      if (artifact.layout === undefined) {
+        js.push(...indentBlock(artifact.source));
+      } else {
+        // A mask is only meaningful next to its layout, so the generated
+        // mutation carries the same agreement the runtime one reports.
+        js.push(...indentBlock(artifact.source.replace("return function mutate", "const mutate = function mutate")));
+        js.push(`  const __layout = Object.freeze(${JSON.stringify(artifact.layout)});`);
+        js.push('  Object.defineProperty(mutate, "layout", { value: () => __layout });');
+        js.push("  return mutate;");
+      }
       js.push("})();");
       return { binding, type };
     }

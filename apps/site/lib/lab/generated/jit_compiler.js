@@ -18397,7 +18397,14 @@ function emitModule(plan, options, layout) {
       }
       js.push(`${declaration} /*#__PURE__*/ (() => {`);
       js.push(...inlined2.map((line) => `  ${line}`));
-      js.push(...indentBlock(artifact.source));
+      if (artifact.layout === void 0) {
+        js.push(...indentBlock(artifact.source));
+      } else {
+        js.push(...indentBlock(artifact.source.replace("return function mutate", "const mutate = function mutate")));
+        js.push(`  const __layout = Object.freeze(${JSON.stringify(artifact.layout)});`);
+        js.push('  Object.defineProperty(mutate, "layout", { value: () => __layout });');
+        js.push("  return mutate;");
+      }
       js.push("})();");
       return { binding, type };
     }
@@ -25231,6 +25238,39 @@ function createSortPlan(schema, criteria) {
   return compiled;
 }
 
+// ../../packages/jit/src/compiler/change-layout.ts
+function resolveChangeLayout(schema, paths) {
+  return changeLayoutOf(resolveChangedDescriptor(schema, paths ?? allFieldPaths(schema, "JIT.compare.changed()")));
+}
+function changeLayoutOf(descriptor) {
+  const paths = descriptor.fields.map((field) => field.path);
+  return Object.freeze({
+    paths: Object.freeze(paths),
+    representation: descriptor.representation,
+    id: `${descriptor.representation}:${paths.join(",")}`
+  });
+}
+function changeLayoutBitFor(layout, path) {
+  const written = path.join(".");
+  let best;
+  let bestLength = -1;
+  for (let index2 = 0; index2 < layout.paths.length; index2++) {
+    const candidate = layout.paths[index2];
+    if (candidate !== written && !written.startsWith(`${candidate}.`)) continue;
+    if (candidate.length > bestLength) {
+      best = index2;
+      bestLength = candidate.length;
+    }
+  }
+  return best;
+}
+function emitChangeBit(layout, bit) {
+  return layout.representation === "bigint" ? `(1n << ${bit}n)` : `${1 << bit}`;
+}
+function emitChangeZero(layout) {
+  return layout.representation === "bigint" ? "0n" : "0";
+}
+
 // ../../packages/jit/src/compiler/mutation/mutation-plan.ts
 function buildMutationPlan(schema, writes, bindings) {
   const resolved = [];
@@ -25363,26 +25403,34 @@ function planLevels(schema, writes) {
 }
 
 // ../../packages/jit/src/compiler/mutation/emit-mutation.ts
-function emitMutationBody(plan) {
+function emitMutationBody(plan, outputs = {}) {
   const writer = new CodeWriter();
+  const channels = outputs.changed !== void 0 || outputs.patch === true || outputs.inverse === true;
   if (plan.root === void 0) {
-    writer.line("return value;");
+    writer.line(channels ? `return ${emitEmptyResult(outputs)};` : "return value;");
     return writer.toString();
   }
   for (const name of plan.params) {
     writer.line(`const ${paramVar(name)} = params${emitPropertyAccess("", name)};`);
   }
-  for (const [key, child] of plan.root.children) emitLevel(writer, child, emitPropertyAccess("value", key));
+  for (const [key, child] of plan.root.children) emitLevel(writer, child, emitPropertyAccess("value", key), outputs);
   const changed3 = emitLevelTests(writer, plan.root, "value");
-  writer.line(`if (!(${changed3})) return value;`);
-  writer.line(`return ${emitReplacement(plan.root, "value")};`);
+  writer.line(`const root_changed = ${changed3};`);
+  if (!channels) {
+    writer.line("if (!root_changed) return value;");
+    writer.line(`return ${emitReplacement(plan.root, "value")};`);
+    return writer.toString();
+  }
+  writer.line(`if (!root_changed) return ${emitEmptyResult(outputs)};`);
+  emitOutputs(writer, plan.root, "value", outputs);
+  writer.line(`return ${emitResult(plan.root, `${emitReplacement(plan.root, "value")}`, outputs)};`);
   return writer.toString();
 }
-function emitLevel(writer, level, source) {
+function emitLevel(writer, level, source, outputs) {
   const name = levelVar(level);
   const current = `${name}_value`;
   writer.line(`const ${current} = ${source};`);
-  for (const [key, child] of level.children) emitLevel(writer, child, emitPropertyAccess(current, key));
+  for (const [key, child] of level.children) emitLevel(writer, child, emitPropertyAccess(current, key), outputs);
   const changed3 = emitLevelTests(writer, level, current);
   writer.line(`const ${name}_changed = ${changed3};`);
   writer.line(`let ${name}_next = ${current};`);
@@ -25407,6 +25455,69 @@ function emitReplacement(level, current) {
     if (child !== void 0) return `${emitObjectKey(prop)}: ${levelVar(child)}_next`;
     return `${emitObjectKey(prop)}: ${emitPropertyAccess(current, prop)}`;
   });
+  return `{ ${entries.join(", ")} }`;
+}
+function emitOutputs(writer, root, current, outputs) {
+  const layout = outputs.changed;
+  if (layout !== void 0) {
+    writer.line(`let mask = ${emitChangeZero(layout)};`);
+    emitMaskBits(writer, root, layout);
+  }
+  if (outputs.patch === true || outputs.inverse === true) emitPatchLevels(writer, root, current, outputs);
+}
+function emitMaskBits(writer, level, layout) {
+  for (const [key, write] of level.writes) {
+    const bit = changeLayoutBitFor(layout, write.path);
+    if (bit === void 0) continue;
+    const next = `${levelVar(level)}_${safeName(key)}`;
+    writer.line(`if (${next} !== ${next}_previous) mask |= ${emitChangeBit(layout, bit)};`);
+  }
+  for (const child of level.children.values()) emitMaskBits(writer, child, layout);
+}
+function emitPatchLevels(writer, level, current, outputs) {
+  for (const [key, child] of level.children) emitPatchLevels(writer, child, emitPropertyAccess(current, key), outputs);
+  const name = levelVar(level);
+  const channels = [
+    ...outputs.patch === true ? ["patch"] : [],
+    ...outputs.inverse === true ? ["inverse"] : []
+  ];
+  for (const channel of channels) writer.line(`const ${name}_${channel} = {};`);
+  for (const [key, write] of level.writes) {
+    void write;
+    const next = `${name}_${safeName(key)}`;
+    writer.line(`if (${next} !== ${next}_previous) {`);
+    writer.indent(() => {
+      if (outputs.patch === true) writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${next};`);
+      if (outputs.inverse === true) writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${next}_previous;`);
+    });
+    writer.line("}");
+  }
+  for (const [key, child] of level.children) {
+    const childName3 = levelVar(child);
+    writer.line(`if (${childName3}_changed) {`);
+    writer.indent(() => {
+      if (outputs.patch === true) {
+        writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${childName3}_patch;`);
+      }
+      if (outputs.inverse === true) {
+        writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${childName3}_inverse;`);
+      }
+    });
+    writer.line("}");
+  }
+}
+function emitResult(root, valueSource, outputs) {
+  const entries = [`value: ${valueSource}`];
+  if (outputs.changed !== void 0) entries.push("changed: mask");
+  if (outputs.patch === true) entries.push(`patch: ${levelVar(root)}_patch`);
+  if (outputs.inverse === true) entries.push(`inverse: ${levelVar(root)}_inverse`);
+  return `{ ${entries.join(", ")} }`;
+}
+function emitEmptyResult(outputs) {
+  const entries = ["value"];
+  if (outputs.changed !== void 0) entries.push(`changed: ${emitChangeZero(outputs.changed)}`);
+  if (outputs.patch === true) entries.push("patch: undefined");
+  if (outputs.inverse === true) entries.push("inverse: undefined");
   return `{ ${entries.join(", ")} }`;
 }
 function emitWriteValue(write, previous) {
@@ -26043,30 +26154,56 @@ function createCompiledPatch(run, schema, template) {
   });
   return {
     explain: () => explanation,
+    result: (channels) => {
+      if (plan === void 0) {
+        throw new JITError(
+          "INVALID_UPDATE",
+          "result() needs a specialized mutation; explain().strategy reports why this patch stayed generic"
+        );
+      }
+      const outputs = resolveMutationOutputs(schema, channels);
+      return {
+        explain: () => explanation,
+        compile: () => compileMutation(schema, plan, explanation, outputs)
+      };
+    },
     compile: () => {
       if (plan === void 0) {
         return (current, params) => run(current, materializeParamPatch(template, params));
       }
-      const source = emitMutationSource(plan);
-      const names = plan.bindings.map((_, index2) => `__q${index2}`);
-      const mutate = globalThis.Function(...names, source)(...plan.bindings);
-      registerArtifact(mutate, {
-        kind: "mutation-plan",
-        schema,
-        source,
-        bindingNames: names,
-        bindingValues: plan.bindings,
-        reads: explanation.reads,
-        writes: explanation.writes,
-        params: explanation.params
-      });
-      return mutate;
+      return compileMutation(schema, plan, explanation, {});
     }
   };
 }
-function emitMutationSource(plan) {
+function resolveMutationOutputs(schema, channels) {
+  const changed3 = channels.changed === void 0 || channels.changed === false ? void 0 : resolveChangeLayout(schema, Array.isArray(channels.changed) ? channels.changed : void 0);
+  return Object.freeze({
+    ...changed3 === void 0 ? {} : { changed: changed3 },
+    ...channels.patch === true ? { patch: true } : {},
+    ...channels.inverse === true ? { inverse: true } : {}
+  });
+}
+function compileMutation(schema, plan, explanation, outputs) {
+  const source = emitMutationSource(plan, outputs);
+  const names = plan.bindings.map((_, index2) => `__q${index2}`);
+  const mutate = globalThis.Function(...names, source)(...plan.bindings);
+  Object.defineProperty(mutate, "layout", { enumerable: false, value: () => outputs.changed });
+  registerArtifact(mutate, {
+    kind: "mutation-plan",
+    schema,
+    source,
+    bindingNames: names,
+    bindingValues: plan.bindings,
+    reads: explanation.reads,
+    writes: explanation.writes,
+    params: explanation.params,
+    ...outputs.changed === void 0 ? {} : { layout: outputs.changed }
+  });
+  return mutate;
+}
+function emitMutationSource(plan, outputs = {}) {
   return `return function mutate(value, params) {
-${emitMutationBody(plan)}};`;
+${emitMutationBody(plan, outputs)}};`;
 }
 function collectPatchWrites(schema, template, path, bindings) {
   if (template === null || typeof template !== "object" || Array.isArray(template) || isParamRef(template)) {
@@ -26232,7 +26369,10 @@ function collection(schema) {
     updateWhere: (predicate, patch3) => {
       const bindings = [];
       const writes = collectPatchWrites(rowSchema, patch3, [], bindings);
-      if (writes === void 0 || !isSpecializableMutation(rowSchema, writes.map((write) => write.path))) {
+      if (writes === void 0 || !isSpecializableMutation(
+        rowSchema,
+        writes.map((write) => write.path)
+      )) {
         throw new JITError(
           "INVALID_UPDATE",
           "updateWhere() patches a row field by field; a leaf the deep-partial update merges is not supported yet"

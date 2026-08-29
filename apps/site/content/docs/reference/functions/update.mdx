@@ -78,6 +78,37 @@ On a three-level object a declared patch runs in about half the time of the
 generic update it specializes, and returns the original value in about 10 ns
 when nothing changed.
 
+### Mutation channels
+
+A declared patch can be asked for more than the new value. The mask, the
+forward patch and the inverse patch are produced in the same pass, from the
+comparisons the mutation was already making — not by diffing afterwards.
+
+```ts
+const renameUser = JIT.state
+  .update(User)
+  .patch({ role: JIT.cqrs.param("role") })
+  .result({ value: true, changed: true, patch: true, inverse: true })
+  .compile();
+
+const user = { id: "u_1", name: "Ada", active: true, role: "member" };
+const result = renameUser(user, { role: "admin" });
+result.patch; // { role: "admin" }
+result.inverse; // { role: "member" }
+```
+
+`result.changed` is exactly `JIT.compare.changed(User)(before, result.value)`:
+writing a field is not the same as changing it, and the mask is set from the
+comparison rather than from the write. `layout()` reports the path-to-bit
+agreement the mask was made against; pass paths to `changed` to narrow it.
+
+Both patches apply through `JIT.state.patch.apply`, so undo and redo need no
+history manager and no draft. A mutation that changed nothing returns the
+input value, a zero mask and `undefined` for both patches.
+
+Without `.result(...)` a declared patch returns only the new value, and an
+output nobody asked for is not generated at all.
+
 ## Collection mutations
 
 `JIT.state.collection(Users)` mutates a collection immutably. The operation is

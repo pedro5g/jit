@@ -390,6 +390,40 @@ describe("JIT AOT generate", () => {
     expect(() => generated.ListUsers.parse({ page: 1_000, limit: 100 })).toThrow(/invalid API query input/i);
   });
 
+  it("emits the requested mutation channels in one generated pass", async () => {
+    const User = JIT.object({
+      id: JIT.string(),
+      name: JIT.string(),
+      profile: JIT.object({ age: JIT.number(), city: JIT.string() }),
+    });
+    const RenameUser = JIT.state
+      .update(User)
+      .patch({ name: JIT.cqrs.param("name"), profile: { city: JIT.cqrs.param("city") } })
+      .result({ value: true, changed: true, patch: true, inverse: true })
+      .compile();
+
+    const result = AOT.generate({ artifacts: { RenameUser }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly RenameUser: ((value: unknown, params: Readonly<Record<string, unknown>>) => unknown) & {
+        layout(): unknown;
+      };
+    };
+    const value = { id: "u_1", name: "Ada", profile: { age: 36, city: "London" } };
+    const params = { name: "Grace", city: "Paris" };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(generated.RenameUser(value, params)).toEqual(RenameUser(value, params));
+    expect(generated.RenameUser.layout()).toEqual(RenameUser.layout());
+    expect(generated.RenameUser(value, { name: "Ada", city: "London" })).toEqual({
+      value,
+      changed: 0,
+      patch: undefined,
+      inverse: undefined,
+    });
+  });
+
   it("emits a collection mutation with its chosen access path", async () => {
     const User = JIT.object({ id: JIT.string(), name: JIT.string() });
     const Users = JIT.array(User).keyed("id");

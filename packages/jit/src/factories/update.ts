@@ -1,9 +1,12 @@
 import { compileAccessMutationGuard, resolveAccessContext } from "../compiler/access.js";
+import { type ChangeLayout, resolveChangeLayout } from "../compiler/change-layout.js";
 import { compileDiff, type Diff } from "../compiler/diff.js";
 import {
   buildMutationPlan,
   emitMutationBody,
   isSpecializableMutation,
+  type MutationChannels,
+  type MutationOutputs,
   type MutationPlan,
   type MutationWriteInput,
 } from "../compiler/mutation/index.js";
@@ -96,7 +99,30 @@ export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
 export interface CompiledPatch<T, TPatch> {
   compile(): (value: T, params: UpdatePatchParams<TPatch>) => T;
   explain(): MutationExplanation;
+  /**
+   * Asks the mutation for more than the new value.
+   *
+   * The mask, the forward patch and the inverse patch are produced in the same
+   * pass, from the comparisons the mutation was already making — not by
+   * diffing afterwards. An output nobody asked for is not computed and does
+   * not appear in the generated source.
+   */
+  result<const TChannels extends MutationChannels>(channels: TChannels): CompiledMutation<T, TPatch, TChannels>;
 }
+
+export interface CompiledMutation<T, TPatch, TChannels extends MutationChannels> {
+  compile(): ((value: T, params: UpdatePatchParams<TPatch>) => MutationResult<T, TChannels>) & {
+    /** The path-to-bit agreement the mask was produced against. */
+    layout(): ChangeLayout | undefined;
+  };
+  explain(): MutationExplanation;
+}
+
+export type MutationResult<T, TChannels extends MutationChannels> = {
+  readonly value: T;
+} & (TChannels["changed"] extends undefined | false ? Record<never, never> : { readonly changed: number | bigint }) &
+  (TChannels["patch"] extends true ? { readonly patch: UpdatePatch<T> | undefined } : Record<never, never>) &
+  (TChannels["inverse"] extends true ? { readonly inverse: UpdatePatch<T> | undefined } : Record<never, never>);
 
 export interface MutationExplanation {
   /** `"specialized"` rebuilds only the changed levels; `"generic"` runs the deep-partial update. */
@@ -259,35 +285,77 @@ function createCompiledPatch<T, TPatch>(
 
   return {
     explain: () => explanation,
+    result: <const TChannels extends MutationChannels>(channels: TChannels) => {
+      if (plan === undefined) {
+        throw new JITError(
+          "INVALID_UPDATE",
+          "result() needs a specialized mutation; explain().strategy reports why this patch stayed generic"
+        );
+      }
+      const outputs = resolveMutationOutputs(schema, channels);
+      return {
+        explain: () => explanation,
+        compile: () => compileMutation<T>(schema, plan, explanation, outputs),
+      } as unknown as CompiledMutation<T, TPatch, TChannels>;
+    },
     compile: () => {
       if (plan === undefined) {
         return (current: T, params: Readonly<Record<string, unknown>>) =>
           run(current, materializeParamPatch(template, params) as UpdateInput<T>);
       }
-      const source = emitMutationSource(plan);
-      const names = plan.bindings.map((_, index) => `__q${index}`);
-      const mutate = globalThis.Function(...names, source)(...plan.bindings) as (
+      return compileMutation<T>(schema, plan, explanation, {}) as unknown as (
         value: T,
-        params: Readonly<Record<string, unknown>>
+        params: UpdatePatchParams<TPatch>
       ) => T;
-      registerArtifact(mutate as object, {
-        kind: "mutation-plan",
-        schema,
-        source,
-        bindingNames: names,
-        bindingValues: plan.bindings,
-        reads: explanation.reads,
-        writes: explanation.writes,
-        params: explanation.params,
-      });
-      return mutate as (value: T, params: UpdatePatchParams<TPatch>) => T;
     },
   };
 }
 
+/** Resolves the requested channels into the layout and flags the emitter needs. */
+function resolveMutationOutputs(schema: AnyTypeSchema, channels: MutationChannels): MutationOutputs {
+  const changed =
+    channels.changed === undefined || channels.changed === false
+      ? undefined
+      : resolveChangeLayout(schema, Array.isArray(channels.changed) ? channels.changed : undefined);
+
+  return Object.freeze({
+    ...(changed === undefined ? {} : { changed }),
+    ...(channels.patch === true ? { patch: true as const } : {}),
+    ...(channels.inverse === true ? { inverse: true as const } : {}),
+  });
+}
+
+function compileMutation<T>(
+  schema: AnyTypeSchema,
+  plan: MutationPlan,
+  explanation: MutationExplanation,
+  outputs: MutationOutputs
+): ((value: T, params: Readonly<Record<string, unknown>>) => unknown) & { layout(): ChangeLayout | undefined } {
+  const source = emitMutationSource(plan, outputs);
+  const names = plan.bindings.map((_, index) => `__q${index}`);
+  const mutate = globalThis.Function(...names, source)(...plan.bindings) as ((
+    value: T,
+    params: Readonly<Record<string, unknown>>
+  ) => unknown) & { layout(): ChangeLayout | undefined };
+
+  Object.defineProperty(mutate, "layout", { enumerable: false, value: () => outputs.changed });
+  registerArtifact(mutate as object, {
+    kind: "mutation-plan",
+    schema,
+    source,
+    bindingNames: names,
+    bindingValues: plan.bindings,
+    reads: explanation.reads,
+    writes: explanation.writes,
+    params: explanation.params,
+    ...(outputs.changed === undefined ? {} : { layout: outputs.changed }),
+  });
+  return mutate;
+}
+
 /** Function-body source for one plan; shared by the runtime and AOT hosts. */
-export function emitMutationSource(plan: MutationPlan): string {
-  return `return function mutate(value, params) {\n${emitMutationBody(plan)}};`;
+export function emitMutationSource(plan: MutationPlan, outputs: MutationOutputs = {}): string {
+  return `return function mutate(value, params) {\n${emitMutationBody(plan, outputs)}};`;
 }
 
 /**

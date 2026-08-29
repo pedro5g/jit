@@ -1,3 +1,4 @@
+import { type ChangeLayout, changeLayoutBitFor, emitChangeBit, emitChangeZero } from "../change-layout.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitObjectKey } from "../source/literal.js";
@@ -9,6 +10,13 @@ import {
   type MutationWrite,
 } from "./mutation-plan.js";
 
+/** Everything a mutation may be asked to produce beyond the new value. */
+export interface MutationOutputs {
+  readonly changed?: ChangeLayout;
+  readonly patch?: boolean;
+  readonly inverse?: boolean;
+}
+
 /**
  * Emits the body of a specialized mutation.
  *
@@ -16,24 +24,36 @@ import {
  * anything changed, and only then allocates. A level whose subtree did not
  * change keeps its reference, so a mutation costs one object per changed level
  * — and a mutation that changes nothing costs none: it returns its input.
+ *
+ * The mask, the forward patch and the inverse patch are produced in the same
+ * pass, from the comparisons the mutation was already making. An output that
+ * was not requested does not appear in this source at all.
  */
-export function emitMutationBody(plan: MutationPlan): string {
+export function emitMutationBody(plan: MutationPlan, outputs: MutationOutputs = {}): string {
   const writer = new CodeWriter();
+  const channels = outputs.changed !== undefined || outputs.patch === true || outputs.inverse === true;
 
   if (plan.root === undefined) {
-    writer.line("return value;");
+    writer.line(channels ? `return ${emitEmptyResult(outputs)};` : "return value;");
     return writer.toString();
   }
 
   for (const name of plan.params) {
     writer.line(`const ${paramVar(name)} = params${emitPropertyAccess("", name)};`);
   }
-  for (const [key, child] of plan.root.children) emitLevel(writer, child, emitPropertyAccess("value", key));
+  for (const [key, child] of plan.root.children) emitLevel(writer, child, emitPropertyAccess("value", key), outputs);
 
   const changed = emitLevelTests(writer, plan.root, "value");
-  writer.line(`if (!(${changed})) return value;`);
-  writer.line(`return ${emitReplacement(plan.root, "value")};`);
+  writer.line(`const root_changed = ${changed};`);
+  if (!channels) {
+    writer.line("if (!root_changed) return value;");
+    writer.line(`return ${emitReplacement(plan.root, "value")};`);
+    return writer.toString();
+  }
 
+  writer.line(`if (!root_changed) return ${emitEmptyResult(outputs)};`);
+  emitOutputs(writer, plan.root, "value", outputs);
+  writer.line(`return ${emitResult(plan.root, `${emitReplacement(plan.root, "value")}`, outputs)};`);
   return writer.toString();
 }
 
@@ -43,11 +63,11 @@ export function emitMutationBody(plan: MutationPlan): string {
  * Children are emitted before their parent, so a parent decides what to carry
  * over from a flag that is already known rather than by looking again.
  */
-function emitLevel(writer: CodeWriter, level: MutationLevel, source: string): void {
+function emitLevel(writer: CodeWriter, level: MutationLevel, source: string, outputs: MutationOutputs): void {
   const name = levelVar(level);
   const current = `${name}_value`;
   writer.line(`const ${current} = ${source};`);
-  for (const [key, child] of level.children) emitLevel(writer, child, emitPropertyAccess(current, key));
+  for (const [key, child] of level.children) emitLevel(writer, child, emitPropertyAccess(current, key), outputs);
 
   const changed = emitLevelTests(writer, level, current);
   writer.line(`const ${name}_changed = ${changed};`);
@@ -82,6 +102,88 @@ function emitReplacement(level: MutationLevel, current: string): string {
     if (child !== undefined) return `${emitObjectKey(prop)}: ${levelVar(child)}_next`;
     return `${emitObjectKey(prop)}: ${emitPropertyAccess(current, prop)}`;
   });
+  return `{ ${entries.join(", ")} }`;
+}
+
+/**
+ * Emits the requested channels from the comparisons already made.
+ *
+ * Nothing here compares anything a second time: the mask reads the same change
+ * flags the copy plan used, and both patches read the same next/previous pairs.
+ */
+function emitOutputs(writer: CodeWriter, root: MutationLevel, current: string, outputs: MutationOutputs): void {
+  const layout = outputs.changed;
+  if (layout !== undefined) {
+    writer.line(`let mask = ${emitChangeZero(layout)};`);
+    emitMaskBits(writer, root, layout);
+  }
+  if (outputs.patch === true || outputs.inverse === true) emitPatchLevels(writer, root, current, outputs);
+}
+
+function emitMaskBits(writer: CodeWriter, level: MutationLevel, layout: ChangeLayout): void {
+  for (const [key, write] of level.writes) {
+    const bit = changeLayoutBitFor(layout, write.path);
+    if (bit === undefined) continue;
+    const next = `${levelVar(level)}_${safeName(key)}`;
+    writer.line(`if (${next} !== ${next}_previous) mask |= ${emitChangeBit(layout, bit)};`);
+  }
+  for (const child of level.children.values()) emitMaskBits(writer, child, layout);
+}
+
+/** One deep-partial object per changed level, carrying only what changed. */
+function emitPatchLevels(writer: CodeWriter, level: MutationLevel, current: string, outputs: MutationOutputs): void {
+  for (const [key, child] of level.children) emitPatchLevels(writer, child, emitPropertyAccess(current, key), outputs);
+
+  const name = levelVar(level);
+  const channels: readonly ("patch" | "inverse")[] = [
+    ...(outputs.patch === true ? (["patch"] as const) : []),
+    ...(outputs.inverse === true ? (["inverse"] as const) : []),
+  ];
+  for (const channel of channels) writer.line(`const ${name}_${channel} = {};`);
+  for (const [key, write] of level.writes) {
+    void write;
+    const next = `${name}_${safeName(key)}`;
+    writer.line(`if (${next} !== ${next}_previous) {`);
+    writer.indent(() => {
+      if (outputs.patch === true) writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${next};`);
+      if (outputs.inverse === true) writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${next}_previous;`);
+    });
+    writer.line("}");
+  }
+  for (const [key, child] of level.children) {
+    const childName = levelVar(child);
+    writer.line(`if (${childName}_changed) {`);
+    writer.indent(() => {
+      if (outputs.patch === true) {
+        writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${childName}_patch;`);
+      }
+      if (outputs.inverse === true) {
+        writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${childName}_inverse;`);
+      }
+    });
+    writer.line("}");
+  }
+}
+
+function emitResult(root: MutationLevel, valueSource: string, outputs: MutationOutputs): string {
+  const entries = [`value: ${valueSource}`];
+  if (outputs.changed !== undefined) entries.push("changed: mask");
+  if (outputs.patch === true) entries.push(`patch: ${levelVar(root)}_patch`);
+  if (outputs.inverse === true) entries.push(`inverse: ${levelVar(root)}_inverse`);
+  return `{ ${entries.join(", ")} }`;
+}
+
+/**
+ * The result of a mutation that changed nothing.
+ *
+ * The value is the input, the mask is empty, and neither patch exists: an
+ * unchanged mutation must not allocate a nested object to say so.
+ */
+function emitEmptyResult(outputs: MutationOutputs): string {
+  const entries = ["value"];
+  if (outputs.changed !== undefined) entries.push(`changed: ${emitChangeZero(outputs.changed)}`);
+  if (outputs.patch === true) entries.push("patch: undefined");
+  if (outputs.inverse === true) entries.push("inverse: undefined");
   return `{ ${entries.join(", ")} }`;
 }
 

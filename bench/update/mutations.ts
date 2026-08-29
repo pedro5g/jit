@@ -64,6 +64,67 @@ export function registerDeclaredMutations(): void {
     ],
   });
 
+  /**
+   * The whole reason the channels exist.
+   *
+   * Asking for the new value, the change mask, the forward patch and the
+   * inverse patch separately means three passes over the same fields. The
+   * mutation already compared those fields to decide what to rebuild, so it
+   * can answer all four from that one comparison.
+   */
+  const changed = JIT.compare.changed(DeepUserSchema);
+  const onePass = JIT.state
+    .update(DeepUserSchema)
+    .patch({ profile: { name: JIT.cqrs.param("name"), address: { city: JIT.cqrs.param("city") } } })
+    .result({ value: true, changed: true, patch: true, inverse: true })
+    .compile();
+  const diff = JIT.compare.diff(DeepUserSchema);
+
+  registerScenario({
+    op: "mutation channels",
+    name: "value, mask, forward and inverse patch",
+    args: [value, { name: "changed", city: "changed" }],
+    jit: onePass as (...args: never[]) => unknown,
+    competitors: [
+      {
+        name: "update + changed + diff + inverse diff",
+        fn: (current: DeepUser) => {
+          const next = genericUpdate(current, {
+            profile: { name: "changed", address: { city: "changed" } },
+          });
+          return {
+            value: next,
+            changed: changed(current, next),
+            patch: diff(current, next),
+            inverse: diff(next, current),
+          };
+        },
+      },
+    ],
+  });
+
+  registerScenario({
+    op: "mutation channels",
+    name: "value and mask only",
+    args: [value, { name: "changed", city: "changed" }],
+    jit: JIT.state
+      .update(DeepUserSchema)
+      .patch({ profile: { name: JIT.cqrs.param("name"), address: { city: JIT.cqrs.param("city") } } })
+      .result({ value: true, changed: true })
+      .compile() as (...args: never[]) => unknown,
+    competitors: [
+      {
+        name: "update + changed",
+        fn: (current: DeepUser) => {
+          const next = genericUpdate(current, {
+            profile: { name: "changed", address: { city: "changed" } },
+          });
+          return { value: next, changed: changed(current, next) };
+        },
+      },
+    ],
+  });
+
   registerScenario({
     op: "declared mutation",
     name: "two branches, one shared parent",

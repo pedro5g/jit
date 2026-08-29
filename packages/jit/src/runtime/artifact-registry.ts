@@ -174,6 +174,8 @@ interface MutationPlanArtifact {
   readonly reads: readonly string[];
   readonly writes: readonly string[];
   readonly params: readonly string[];
+  /** Present when the mutation produces a change mask. */
+  readonly layout?: import("../compiler/change-layout.js").ChangeLayout;
 }
 
 /** One immutable collection mutation, with its resolved access path. */
