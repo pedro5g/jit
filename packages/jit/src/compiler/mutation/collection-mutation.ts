@@ -1,3 +1,4 @@
+import type { QueryConditionNode } from "../../core/ast/index.js";
 import type * as ATS from "../../core/ats/index.js";
 import { resolveHints } from "../../core/hints/index.js";
 import { JITError } from "../../errors/index.js";
@@ -8,14 +9,23 @@ import {
   type KeyedAccessChoice,
   type KeyedEmitShape,
   resolveKeyedAccessChoice,
+  singleKeyEquality,
 } from "../access-path.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { type IndexDescriptor, resolveIndexDescriptor, resolveIndexKeysFromFacts } from "../indexing.js";
 import { resolveRowField, resolveRowObjectSchema, resolveScalarKeyKind } from "../row-keys.js";
+import { emitQueryConditionSource, emitQueryValueSource } from "../source/query-condition.js";
 import { emitMutationBody } from "./emit-mutation.js";
 import type { MutationPlan } from "./mutation-plan.js";
 
-export type CollectionMutationKind = "updateByKey" | "removeByKey" | "upsert" | "append" | "prepend";
+export type CollectionMutationKind =
+  | "updateByKey"
+  | "removeByKey"
+  | "upsert"
+  | "append"
+  | "prepend"
+  | "updateWhere"
+  | "removeWhere";
 
 /**
  * One immutable mutation of a collection, and the path it reaches a row by.
@@ -32,10 +42,14 @@ export interface CollectionMutationDescriptor {
   readonly choice: KeyedAccessChoice;
   /** A Date key is matched by timestamp, the way the index stores it. */
   readonly date: boolean;
-  /** Set for `updateByKey`: how the matched row is rebuilt. */
+  /** Set for `updateByKey`/`updateWhere`: how a matched row is rebuilt. */
   readonly row?: MutationPlan;
   /** Ordering facts this mutation must not silently break. */
   readonly orderedBy?: string;
+  /** Set for the `where` operations: the shared query condition they select by. */
+  readonly condition?: QueryConditionNode;
+  /** Expression the access path matches the key against. */
+  readonly probe: string;
 }
 
 export interface CollectionMutationExplain {
@@ -61,9 +75,13 @@ export function resolveCollectionMutation(
   schema: ATS.AnyTypeSchema,
   kind: CollectionMutationKind,
   key: string | undefined,
-  row?: MutationPlan
+  row?: MutationPlan,
+  condition?: QueryConditionNode
 ): CollectionMutationDescriptor {
   const object = resolveRowObjectSchema(schema, "state.collection");
+  if (kind === "updateWhere" || kind === "removeWhere") {
+    return resolveWhereMutation(schema, kind, condition as QueryConditionNode, row);
+  }
   // An insertion at either end reaches no row, so it needs no key and no
   // access path; it is here for the copy plan alone.
   if (kind === "append" || kind === "prepend") {
@@ -79,6 +97,7 @@ export function resolveCollectionMutation(
         direction: "asc" as const,
       }),
       date: false,
+      probe: "params.key",
     });
   }
   const resolved = key ?? resolveIndexKeysFromFacts(schema)?.[0];
@@ -104,6 +123,69 @@ export function resolveCollectionMutation(
     ),
     choice,
     date: resolveScalarKeyKind(field, resolved, "state.collection") === "date",
+    ...(row === undefined ? {} : { row }),
+    ...(ordered === undefined ? {} : { orderedBy: ordered }),
+    probe: "params.key",
+  });
+}
+
+/**
+ * Resolves a mutation selected by a predicate rather than by identity.
+ *
+ * The predicate is the shared query condition, not a second filter language.
+ * When it is one equality over a key the collection declares unique, the same
+ * access path that answers a lookup answers the mutation and at most one row
+ * is reached; anything else is a scan over every row, because anything else
+ * can match more than one.
+ */
+function resolveWhereMutation(
+  schema: ATS.AnyTypeSchema,
+  kind: "updateWhere" | "removeWhere",
+  condition: QueryConditionNode,
+  row: MutationPlan | undefined
+): CollectionMutationDescriptor {
+  const object = resolveRowObjectSchema(schema, "state.collection");
+  const equality = singleKeyEquality(condition);
+  const lifted = equality ? resolveKeyedAccessChoice(schema, equality.key) : undefined;
+  const ordered = resolveOrderingKey(schema);
+  if (row !== undefined && equality !== undefined) assertFactsPreserved(row, equality.key, ordered);
+
+  if (equality === undefined || lifted === undefined || lifted.strategy === "EarlyExitScan") {
+    return Object.freeze({
+      kind,
+      key: "",
+      descriptor: Object.freeze({ keys: Object.freeze([]), shape: "unique" as const, uniqueByFact: false }),
+      choice: Object.freeze({
+        strategy: "EarlyExitScan" as const,
+        reason: "the predicate can match more than one row, so every row is visited",
+        complexity: "O(n)" as const,
+        facts: Object.freeze([]),
+        direction: "asc" as const,
+      }),
+      date: false,
+      condition,
+      probe: "",
+      ...(row === undefined ? {} : { row }),
+      ...(ordered === undefined ? {} : { orderedBy: ordered }),
+    });
+  }
+
+  const field = resolveRowField(object, equality.key, "state.collection");
+  const date = resolveScalarKeyKind(field, equality.key, "state.collection") === "date";
+  const probe = emitQueryValueSource(equality.probe, { fieldBase: "row", paramBase: "params" });
+
+  return Object.freeze({
+    kind,
+    key: equality.key,
+    descriptor: resolveIndexDescriptor(
+      schema,
+      [equality.key],
+      lifted.strategy === "CachedIndexLookup" ? "position" : "unique"
+    ),
+    choice: lifted,
+    date,
+    condition,
+    probe: date ? `(${probe} == null ? ${probe} : ${probe}.getTime())` : probe,
     ...(row === undefined ? {} : { row }),
     ...(ordered === undefined ? {} : { orderedBy: ordered }),
   });
@@ -165,8 +247,11 @@ export function collectionMutationCacheKey(descriptor: CollectionMutationDescrip
 /** Emits the position finder for one mutation, from the shared access path. */
 function emitFindPosition(descriptor: CollectionMutationDescriptor): string {
   const shape: KeyedEmitShape = {
-    signature: "value, key",
-    probe: descriptor.date ? "(key == null ? key : key.getTime())" : "key",
+    signature: "value, params",
+    probe:
+      descriptor.date && descriptor.probe === "params.key"
+        ? "(params.key == null ? params.key : params.key.getTime())"
+        : descriptor.probe,
     answers: "position",
   };
 
@@ -190,9 +275,7 @@ export function emitCollectionMutationSource(descriptor: CollectionMutationDescr
 
   writer.line("(() => {");
   writer.indent(() => {
-    if (descriptor.kind !== "append" && descriptor.kind !== "prepend") {
-      writer.line(`const find = ${emitFindPosition(descriptor)};`);
-    }
+    if (needsPositionFinder(descriptor)) writer.line(`const find = ${emitFindPosition(descriptor)};`);
     writer.line("function mutate(value, params) {");
     writer.indent(() => emitBody(writer, descriptor));
     writer.line("}");
@@ -202,12 +285,30 @@ export function emitCollectionMutationSource(descriptor: CollectionMutationDescr
   return writer.toString();
 }
 
+function needsPositionFinder(descriptor: CollectionMutationDescriptor): boolean {
+  if (descriptor.kind === "append" || descriptor.kind === "prepend") return false;
+  if (descriptor.kind !== "updateWhere" && descriptor.kind !== "removeWhere") return true;
+  return descriptor.choice.strategy !== "EarlyExitScan";
+}
+
 function emitBody(writer: CodeWriter, descriptor: CollectionMutationDescriptor): void {
   if (descriptor.kind === "append" || descriptor.kind === "prepend") {
     emitInsertEnd(writer, descriptor.kind);
     return;
   }
-  writer.line("const at = find(value, params.key);");
+  if (descriptor.kind === "updateWhere" || descriptor.kind === "removeWhere") {
+    if (descriptor.choice.strategy === "EarlyExitScan") {
+      if (descriptor.kind === "updateWhere") emitUpdateWhereScan(writer, descriptor);
+      else emitRemoveWhereScan(writer, descriptor);
+      return;
+    }
+    writer.line("const at = find(value, params);");
+    writer.line("if (at < 0) return value;");
+    if (descriptor.kind === "removeWhere") emitRemoveAt(writer);
+    else emitReplaceAt(writer, descriptor, "row");
+    return;
+  }
+  writer.line("const at = find(value, params);");
 
   if (descriptor.kind === "removeByKey") {
     writer.line("if (at < 0) return value;");
@@ -270,6 +371,72 @@ function emitUpsert(writer: CodeWriter): void {
   writer.line("out[insertion] = params.row;");
   writer.line("for (let i = insertion; i < len; i++) out[i + 1] = value[i];");
   writer.line("return out;");
+}
+
+/**
+ * Updates every row the predicate selects, copying once and only once.
+ *
+ * The output array is not allocated until a row actually changes, so a
+ * predicate that matches nothing — or matches rows that were already correct —
+ * returns the original collection.
+ */
+function emitUpdateWhereScan(writer: CodeWriter, descriptor: CollectionMutationDescriptor): void {
+  writer.line("const len = value.length;");
+  writer.line("let out = null;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
+    writer.line("const next = (() => {");
+    writer.indent(() => {
+      writer.line("const value = row;");
+      if (descriptor.row === undefined) writer.line("return params.row;");
+      else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
+    });
+    writer.line("})();");
+    writer.line("if (next === row) continue;");
+    writer.line("if (out === null) out = value.slice();");
+    writer.line("out[i] = next;");
+  });
+  writer.line("}");
+  writer.line("return out === null ? value : out;");
+}
+
+/**
+ * Removes every row the predicate selects.
+ *
+ * The matches are counted first so exactly one array of the final length is
+ * allocated; a predicate that matches nothing returns the original collection
+ * without allocating at all. The predicate runs twice per row, which is the
+ * price of never over-allocating and never growing an array.
+ */
+function emitRemoveWhereScan(writer: CodeWriter, descriptor: CollectionMutationDescriptor): void {
+  const predicate = emitPredicate(descriptor);
+  writer.line("const len = value.length;");
+  writer.line("let removed = 0;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (${predicate}) removed++;`);
+  });
+  writer.line("}");
+  writer.line("if (removed === 0) return value;");
+  writer.line("const out = new Array(len - removed);");
+  writer.line("let j = 0;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${predicate})) out[j++] = row;`);
+  });
+  writer.line("}");
+  writer.line("return out;");
+}
+
+function emitPredicate(descriptor: CollectionMutationDescriptor): string {
+  return emitQueryConditionSource(descriptor.condition as QueryConditionNode, {
+    fieldBase: "row",
+    paramBase: "params",
+  });
 }
 
 function emitInsertEnd(writer: CodeWriter, kind: "append" | "prepend"): void {

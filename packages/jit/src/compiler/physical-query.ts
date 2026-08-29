@@ -1,10 +1,11 @@
-import type { QueryConditionNode, QueryValueNode } from "../core/ast/index.js";
+import type { QueryValueNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import {
   emitBinarySearch,
   emitCachedIndexLookup,
   type KeyedEmitShape,
   resolveKeyedAccessChoice,
+  singleKeyEquality,
 } from "./access-path.js";
 import { type IndexDescriptor, resolveIndexDescriptor } from "./indexing.js";
 import type { OptimizedQueryPlan, QueryTarget } from "./query.js";
@@ -20,6 +21,7 @@ export {
   type KeyedAccessChoice,
   type KeyedEmitShape,
   resolveKeyedAccessChoice,
+  singleKeyEquality,
 } from "./access-path.js";
 
 /**
@@ -101,7 +103,7 @@ export function resolvePhysicalQueryPlan(
   if (target.kind !== "array") return scan;
   if (plan.filters.length !== 1) return scan;
 
-  const equality = singleEquality(plan.filters[0]?.condition);
+  const equality = singleKeyEquality(plan.filters[0]?.condition);
 
   if (!equality) return scan;
 
@@ -130,19 +132,6 @@ function keyedAccess(
     probe: equality.probe,
     terminal,
   });
-}
-
-/** Reads `eq(field, value)` in either operand order; anything else is a scan. */
-function singleEquality(
-  condition: QueryConditionNode | undefined
-): { readonly key: string; readonly probe: QueryValueNode } | undefined {
-  if (condition?.kind !== "compare" || condition.op !== "eq") return undefined;
-
-  const { left, right } = condition;
-
-  if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
-  if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
-  return undefined;
 }
 
 /**

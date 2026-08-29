@@ -96,6 +96,57 @@ describe("JIT.state.collection", () => {
     expect(sourceOf(append)).not.toContain("find(");
   });
 
+  it("selects rows by the shared query condition", () => {
+    const Wide = JIT.object({ id: JIT.string(), name: JIT.string(), score: JIT.number(), active: JIT.boolean() });
+    const Members = JIT.array(Wide).keyed("id");
+    const members = [
+      { id: "a", name: "Ada", score: 1, active: true },
+      { id: "b", name: "Bob", score: 2, active: false },
+      { id: "c", name: "Cy", score: 3, active: false },
+    ];
+    const rename = JIT.state
+      .collection(Members)
+      .updateWhere((query) => query.eq("active", false), { name: JIT.cqrs.param("name") });
+    const drop = JIT.state.collection(Members).removeWhere((query) => query.gte("score", 2));
+
+    // A predicate that can match several rows visits every row.
+    expect(rename.explain().physical.strategy).toBe("EarlyExitScan");
+    expect(rename(members, { name: "x" }).map((row) => row.name)).toEqual(["Ada", "x", "x"]);
+    expect(rename(members, { name: "x" })[0]).toBe(members[0]);
+    expect(drop(members, {})).toEqual([members[0]]);
+    // Nothing matched, or nothing changed: the original collection.
+    expect(rename(members, { name: undefined })).toBe(members);
+    expect(JIT.state.collection(Members).removeWhere((query) => query.eq("id", "absent"))(members, {})).toBe(members);
+  });
+
+  it("lifts a unique equality predicate onto the declared access path", () => {
+    const byKey = JIT.state
+      .collection(Keyed)
+      .updateWhere((query) => query.eq("id", JIT.cqrs.param("id")), { name: JIT.cqrs.param("name") });
+    const removeByKey = JIT.state.collection(Ordered).removeWhere((query) => query.eq("id", JIT.cqrs.param("id")));
+
+    expect(byKey.explain().physical.strategy).toBe("CachedIndexLookup");
+    expect(removeByKey.explain().physical.strategy).toBe("BinarySearch");
+    expect(byKey(rows, { id: "b", name: "Bee" })[1]?.name).toBe("Bee");
+    expect(byKey(rows, { id: "absent", name: "Bee" })).toBe(rows);
+    expect(removeByKey(rows, { id: "b" })).toEqual([rows[0], rows[2]]);
+    // The predicate matches at most one row, so the row is reached rather
+    // than searched for; the only loop left is the index build itself.
+    expect(sourceOf(byKey)).toContain("const at = find(value, params);");
+    expect(sourceOf(removeByKey)).not.toContain("removed");
+  });
+
+  it("allocates the removal array once and only when something matches", () => {
+    const drop = JIT.state.collection(Plain).removeWhere((query) => query.eq("name", JIT.cqrs.param("name")));
+    const source = sourceOf(drop);
+
+    expect(source).not.toContain(".filter(");
+    expect(source).toContain("if (removed === 0) return value;");
+    expect(source).toContain("new Array(len - removed)");
+    expect(drop(rows, { name: "Ada" })).toEqual([rows[1], rows[2]]);
+    expect(drop(rows, { name: "absent" })).toBe(rows);
+  });
+
   it("refuses a patch that would invalidate the facts the search rests on", () => {
     expect(() => JIT.state.collection(Keyed).updateByKey({ key: "id", patch: { id: JIT.cqrs.param("id") } })).toThrow(
       /identity key/i

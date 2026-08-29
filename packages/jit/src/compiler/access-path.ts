@@ -1,3 +1,4 @@
+import type { QueryConditionNode, QueryValueNode } from "../core/ast/index.js";
 import type * as ATS from "../core/ats/index.js";
 import { resolveHints } from "../core/hints/index.js";
 import { CodeWriter } from "./emitter/code-writer.js";
@@ -215,4 +216,17 @@ export function emitEarlyExitScan(key: string, descriptor: IndexDescriptor, shap
   });
   writer.line("})()");
   return writer.toString();
+}
+
+/** Reads `eq(field, value)` in either operand order; anything else is a scan. */
+export function singleKeyEquality(
+  condition: QueryConditionNode | undefined
+): { readonly key: string; readonly probe: QueryValueNode } | undefined {
+  if (condition?.kind !== "compare" || condition.op !== "eq") return undefined;
+
+  const { left, right } = condition;
+
+  if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
+  if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
+  return undefined;
 }

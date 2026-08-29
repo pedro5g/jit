@@ -98,6 +98,10 @@ renameMember.explain().physical.strategy; // "CachedIndexLookup"
 ```
 
 `removeByKey`, `upsert`, `append` and `prepend` are compiled the same way.
+`updateWhere` and `removeWhere` select rows with the shared query condition
+rather than by identity; a predicate that can match several rows visits every
+row, while one equality over a key the collection declares unique is lifted
+onto the same access path identity uses.
 Nothing is copied before the decision: a missing key and a row that did not
 change both return the original array, and removal fills one array of length
 `n - 1` with indexed loops rather than calling `filter`.

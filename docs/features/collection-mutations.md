@@ -75,6 +75,41 @@ mix finding the target with building the result.
 An ordered `upsert` inserts at the position the search reported, so the
 collection is still ordered afterwards.
 
+## Selecting by predicate
+
+When identity is not the question, `updateWhere` and `removeWhere` select rows
+with the **shared query condition** — the same builder `JIT.cqrs.query` uses.
+There is no separate mutation predicate language:
+
+```ts
+const deactivateStale = JIT.state
+  .collection(Users)
+  .updateWhere((query) => query.lt("lastSeen", JIT.cqrs.param("cutoff")), {
+    active: JIT.cqrs.param("active"),
+  });
+
+const dropInactive = JIT.state.collection(Users).removeWhere((query) => query.eq("active", false));
+```
+
+A predicate that can match several rows visits every row — that is what the
+predicate means. But when it is **one equality over a key the collection
+declares unique**, the planner lifts it onto the same access path identity uses,
+and at most one row is reached:
+
+```ts
+JIT.state
+  .collection(Users)
+  .updateWhere((query) => query.eq("id", JIT.cqrs.param("id")), { name: JIT.cqrs.param("name") })
+  .explain().physical.strategy; // "CachedIndexLookup"
+```
+
+Both scans allocate late. `updateWhere` does not copy the array until a row
+actually changes, so a predicate that matches nothing — or matches rows that
+were already correct — returns the original collection. `removeWhere` counts
+the matches first and then fills exactly one array of the final length; the
+predicate runs twice per row, which is the price of never over-allocating and
+never growing an array.
+
 ## Fact preservation
 
 A mutation must not leave a collection whose declared facts have stopped being
@@ -151,5 +186,6 @@ function.
   built once per array, and rebuilding the array rebuilds the index.
 - Compare with `===` after a mutation — a missing key and an unchanged row both
   return the original array.
-- `updateWhere`, `removeWhere`, rekey, reposition, and Map/Set mutation are not
-  part of this milestone.
+- Prefer `updateByKey` over `updateWhere` when the question really is identity:
+  it needs no predicate and no condition to evaluate.
+- Rekey, reposition, and Map/Set mutation are not part of this milestone.

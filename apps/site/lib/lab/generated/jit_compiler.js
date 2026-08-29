@@ -11330,6 +11330,13 @@ function emitEarlyExitScan(key, descriptor, shape) {
   writer.line("})()");
   return writer.toString();
 }
+function singleKeyEquality(condition) {
+  if (condition?.kind !== "compare" || condition.op !== "eq") return void 0;
+  const { left, right } = condition;
+  if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
+  if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
+  return void 0;
+}
 
 // ../../packages/jit/src/compiler/physical-query.ts
 function describePhysicalQueryPlan(plan) {
@@ -11359,7 +11366,7 @@ function resolvePhysicalQueryPlan(schema, target, plan) {
   if (terminal.op !== "first" && terminal.op !== "some") return scan;
   if (target.kind !== "array") return scan;
   if (plan.filters.length !== 1) return scan;
-  const equality = singleEquality(plan.filters[0]?.condition);
+  const equality = singleKeyEquality(plan.filters[0]?.condition);
   if (!equality) return scan;
   const choice = resolveKeyedAccessChoice(schema, equality.key);
   if (choice.strategy === "EarlyExitScan") return scan;
@@ -11379,13 +11386,6 @@ function keyedAccess(schema, equality, direction, terminal) {
     probe: equality.probe,
     terminal
   });
-}
-function singleEquality(condition) {
-  if (condition?.kind !== "compare" || condition.op !== "eq") return void 0;
-  const { left, right } = condition;
-  if (left.kind === "field" && right.kind !== "field") return { key: left.key, probe: right };
-  if (right.kind === "field" && left.kind !== "field") return { key: right.key, probe: left };
-  return void 0;
 }
 function emitPhysicalQuerySource(physical, hasParams) {
   const access2 = physical.access;
@@ -25430,8 +25430,11 @@ function safeName(key) {
 }
 
 // ../../packages/jit/src/compiler/mutation/collection-mutation.ts
-function resolveCollectionMutation(schema, kind, key, row) {
+function resolveCollectionMutation(schema, kind, key, row, condition) {
   const object2 = resolveRowObjectSchema(schema, "state.collection");
+  if (kind === "updateWhere" || kind === "removeWhere") {
+    return resolveWhereMutation(schema, kind, condition, row);
+  }
   if (kind === "append" || kind === "prepend") {
     return Object.freeze({
       kind,
@@ -25444,7 +25447,8 @@ function resolveCollectionMutation(schema, kind, key, row) {
         facts: Object.freeze([]),
         direction: "asc"
       }),
-      date: false
+      date: false,
+      probe: "params.key"
     });
   }
   const resolved = key ?? resolveIndexKeysFromFacts(schema)?.[0];
@@ -25461,9 +25465,58 @@ function resolveCollectionMutation(schema, kind, key, row) {
   return Object.freeze({
     kind,
     key: resolved,
-    descriptor: resolveIndexDescriptor(schema, [resolved], choice.strategy === "CachedIndexLookup" ? "position" : "unique"),
+    descriptor: resolveIndexDescriptor(
+      schema,
+      [resolved],
+      choice.strategy === "CachedIndexLookup" ? "position" : "unique"
+    ),
     choice,
     date: resolveScalarKeyKind(field, resolved, "state.collection") === "date",
+    ...row === void 0 ? {} : { row },
+    ...ordered === void 0 ? {} : { orderedBy: ordered },
+    probe: "params.key"
+  });
+}
+function resolveWhereMutation(schema, kind, condition, row) {
+  const object2 = resolveRowObjectSchema(schema, "state.collection");
+  const equality = singleKeyEquality(condition);
+  const lifted = equality ? resolveKeyedAccessChoice(schema, equality.key) : void 0;
+  const ordered = resolveOrderingKey(schema);
+  if (row !== void 0 && equality !== void 0) assertFactsPreserved(row, equality.key, ordered);
+  if (equality === void 0 || lifted === void 0 || lifted.strategy === "EarlyExitScan") {
+    return Object.freeze({
+      kind,
+      key: "",
+      descriptor: Object.freeze({ keys: Object.freeze([]), shape: "unique", uniqueByFact: false }),
+      choice: Object.freeze({
+        strategy: "EarlyExitScan",
+        reason: "the predicate can match more than one row, so every row is visited",
+        complexity: "O(n)",
+        facts: Object.freeze([]),
+        direction: "asc"
+      }),
+      date: false,
+      condition,
+      probe: "",
+      ...row === void 0 ? {} : { row },
+      ...ordered === void 0 ? {} : { orderedBy: ordered }
+    });
+  }
+  const field = resolveRowField(object2, equality.key, "state.collection");
+  const date3 = resolveScalarKeyKind(field, equality.key, "state.collection") === "date";
+  const probe = emitQueryValueSource(equality.probe, { fieldBase: "row", paramBase: "params" });
+  return Object.freeze({
+    kind,
+    key: equality.key,
+    descriptor: resolveIndexDescriptor(
+      schema,
+      [equality.key],
+      lifted.strategy === "CachedIndexLookup" ? "position" : "unique"
+    ),
+    choice: lifted,
+    date: date3,
+    condition,
+    probe: date3 ? `(${probe} == null ? ${probe} : ${probe}.getTime())` : probe,
     ...row === void 0 ? {} : { row },
     ...ordered === void 0 ? {} : { orderedBy: ordered }
   });
@@ -25510,8 +25563,8 @@ function collectionMutationCacheKey(descriptor) {
 }
 function emitFindPosition(descriptor) {
   const shape = {
-    signature: "value, key",
-    probe: descriptor.date ? "(key == null ? key : key.getTime())" : "key",
+    signature: "value, params",
+    probe: descriptor.date && descriptor.probe === "params.key" ? "(params.key == null ? params.key : params.key.getTime())" : descriptor.probe,
     answers: "position"
   };
   if (descriptor.choice.strategy === "CachedIndexLookup") return emitCachedIndexLookup(descriptor.descriptor, shape);
@@ -25524,9 +25577,7 @@ function emitCollectionMutationSource(descriptor) {
   const writer = new CodeWriter();
   writer.line("(() => {");
   writer.indent(() => {
-    if (descriptor.kind !== "append" && descriptor.kind !== "prepend") {
-      writer.line(`const find = ${emitFindPosition(descriptor)};`);
-    }
+    if (needsPositionFinder(descriptor)) writer.line(`const find = ${emitFindPosition(descriptor)};`);
     writer.line("function mutate(value, params) {");
     writer.indent(() => emitBody(writer, descriptor));
     writer.line("}");
@@ -25535,12 +25586,29 @@ function emitCollectionMutationSource(descriptor) {
   writer.line("})()");
   return writer.toString();
 }
+function needsPositionFinder(descriptor) {
+  if (descriptor.kind === "append" || descriptor.kind === "prepend") return false;
+  if (descriptor.kind !== "updateWhere" && descriptor.kind !== "removeWhere") return true;
+  return descriptor.choice.strategy !== "EarlyExitScan";
+}
 function emitBody(writer, descriptor) {
   if (descriptor.kind === "append" || descriptor.kind === "prepend") {
     emitInsertEnd(writer, descriptor.kind);
     return;
   }
-  writer.line("const at = find(value, params.key);");
+  if (descriptor.kind === "updateWhere" || descriptor.kind === "removeWhere") {
+    if (descriptor.choice.strategy === "EarlyExitScan") {
+      if (descriptor.kind === "updateWhere") emitUpdateWhereScan(writer, descriptor);
+      else emitRemoveWhereScan(writer, descriptor);
+      return;
+    }
+    writer.line("const at = find(value, params);");
+    writer.line("if (at < 0) return value;");
+    if (descriptor.kind === "removeWhere") emitRemoveAt(writer);
+    else emitReplaceAt(writer, descriptor, "row");
+    return;
+  }
+  writer.line("const at = find(value, params);");
   if (descriptor.kind === "removeByKey") {
     writer.line("if (at < 0) return value;");
     emitRemoveAt(writer);
@@ -25592,6 +25660,54 @@ function emitUpsert(writer) {
   writer.line("out[insertion] = params.row;");
   writer.line("for (let i = insertion; i < len; i++) out[i + 1] = value[i];");
   writer.line("return out;");
+}
+function emitUpdateWhereScan(writer, descriptor) {
+  writer.line("const len = value.length;");
+  writer.line("let out = null;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
+    writer.line("const next = (() => {");
+    writer.indent(() => {
+      writer.line("const value = row;");
+      if (descriptor.row === void 0) writer.line("return params.row;");
+      else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
+    });
+    writer.line("})();");
+    writer.line("if (next === row) continue;");
+    writer.line("if (out === null) out = value.slice();");
+    writer.line("out[i] = next;");
+  });
+  writer.line("}");
+  writer.line("return out === null ? value : out;");
+}
+function emitRemoveWhereScan(writer, descriptor) {
+  const predicate = emitPredicate(descriptor);
+  writer.line("const len = value.length;");
+  writer.line("let removed = 0;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (${predicate}) removed++;`);
+  });
+  writer.line("}");
+  writer.line("if (removed === 0) return value;");
+  writer.line("const out = new Array(len - removed);");
+  writer.line("let j = 0;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${predicate})) out[j++] = row;`);
+  });
+  writer.line("}");
+  writer.line("return out;");
+}
+function emitPredicate(descriptor) {
+  return emitQueryConditionSource(descriptor.condition, {
+    fieldBase: "row",
+    paramBase: "params"
+  });
 }
 function emitInsertEnd(writer, kind) {
   writer.line("const len = value.length;");
@@ -26093,7 +26209,10 @@ function collection(schema) {
     updateByKey: (options) => {
       const bindings = [];
       const writes = collectPatchWrites(rowSchema, options.patch, [], bindings);
-      if (writes === void 0 || !isSpecializableMutation(rowSchema, writes.map((write) => write.path))) {
+      if (writes === void 0 || !isSpecializableMutation(
+        rowSchema,
+        writes.map((write) => write.path)
+      )) {
         throw new JITError(
           "INVALID_UPDATE",
           "updateByKey() patches a row field by field; a leaf the deep-partial update merges is not supported yet"
@@ -26109,7 +26228,34 @@ function collection(schema) {
     removeByKey: (options) => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "removeByKey", options?.key), []),
     upsert: (options) => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "upsert", options?.key), []),
     append: () => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "append", void 0), []),
-    prepend: () => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "prepend", void 0), [])
+    prepend: () => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "prepend", void 0), []),
+    updateWhere: (predicate, patch3) => {
+      const bindings = [];
+      const writes = collectPatchWrites(rowSchema, patch3, [], bindings);
+      if (writes === void 0 || !isSpecializableMutation(rowSchema, writes.map((write) => write.path))) {
+        throw new JITError(
+          "INVALID_UPDATE",
+          "updateWhere() patches a row field by field; a leaf the deep-partial update merges is not supported yet"
+        );
+      }
+      const plan = buildMutationPlan(rowSchema, writes, bindings);
+      const condition = createConditionBuilder(plan.bindings.length);
+      const node = predicate(condition.builder);
+      return compileCollectionMutation(
+        unwrapped,
+        resolveCollectionMutation(unwrapped, "updateWhere", void 0, plan, node),
+        [...plan.bindings, ...condition.bindings]
+      );
+    },
+    removeWhere: (predicate) => {
+      const condition = createConditionBuilder(0);
+      const node = predicate(condition.builder);
+      return compileCollectionMutation(
+        unwrapped,
+        resolveCollectionMutation(unwrapped, "removeWhere", void 0, void 0, node),
+        condition.bindings
+      );
+    }
   };
   return Object.freeze(state3);
 }
