@@ -17,8 +17,8 @@ const value: User = {
   tags: ["a", "b"],
 };
 
-describe("JIT.patch.merge (RFC 7396)", () => {
-  const merge = JIT.patch.merge(User);
+describe("JIT.state.patch.merge (RFC 7396)", () => {
+  const merge = JIT.state.patch.merge(User);
 
   it("merges an object member instead of replacing it", () => {
     expect(merge(value, { address: { city: "Paris" } })).toEqual({
@@ -74,8 +74,8 @@ describe("JIT.patch.merge (RFC 7396)", () => {
   });
 });
 
-describe("JIT.patch.json (RFC 6902)", () => {
-  const json = JIT.patch.json(User);
+describe("JIT.state.patch.json (RFC 6902)", () => {
+  const json = JIT.state.patch.json(User);
 
   it("replaces at a pointer", () => {
     expect(json(value, [{ op: "replace", path: "/name", value: "Grace" }]).name).toBe("Grace");
@@ -125,7 +125,7 @@ describe("JIT.patch.json (RFC 6902)", () => {
 
   it("unescapes ~1 and ~0 in a pointer segment", () => {
     const Odd = JIT.object({ "a/b": JIT.string(), "c~d": JIT.string() });
-    const patch = JIT.patch.json(Odd);
+    const patch = JIT.state.patch.json(Odd);
     const odd = { "a/b": "x", "c~d": "y" };
 
     expect(patch(odd, [{ op: "replace", path: "/a~1b", value: "z" }])["a/b"]).toBe("z");
@@ -150,7 +150,7 @@ describe("JIT.patch.json (RFC 6902)", () => {
   });
 });
 
-describe("JIT.patch.apply", () => {
+describe("JIT.state.patch.apply", () => {
   it("checks only fields present in an authorized patch before mutation", () => {
     const Actor = JIT.object({ id: JIT.number() });
     const access = JIT.access(User)
@@ -160,8 +160,8 @@ describe("JIT.patch.apply", () => {
         fields: ["address"],
         when: (query, actor) => query.eq("id", actor.field("id")),
       });
-    const own = JIT.patch.apply(User).authorize(access({ id: 1 }), "update");
-    const other = JIT.patch.apply(User).authorize(access({ id: 2 }), "update");
+    const own = JIT.state.patch.apply(User).authorize(access({ id: 1 }), "update");
+    const other = JIT.state.patch.apply(User).authorize(access({ id: 2 }), "update");
 
     expect(other(value, { name: "Grace" }).name).toBe("Grace");
     expect(own(value, { address: { city: "Paris" } }).address.city).toBe("Paris");
@@ -171,16 +171,16 @@ describe("JIT.patch.apply", () => {
   });
 
   it("is the update plan, not a second engine", () => {
-    const apply = JIT.patch.apply(User);
+    const apply = JIT.state.patch.apply(User);
 
     expect(apply(value, { name: "Ada L" })).toEqual({ ...value, name: "Ada L" });
-    // Same artifact shape as JIT.update over the same schema.
-    expect(getArtifact(apply)?.kind).toBe(getArtifact(JIT.update(User))?.kind);
+    // Same artifact shape as JIT.state.update over the same schema.
+    expect(getArtifact(apply)?.kind).toBe(getArtifact(JIT.state.update(User))?.kind);
   });
 
   /** `undefined` means "leave alone" here, where merge patch would read null as "remove". */
   it("leaves a member alone rather than removing it", () => {
-    const result = JIT.patch.apply(User)(value, { name: undefined });
+    const result = JIT.state.patch.apply(User)(value, { name: undefined });
 
     expect(result.name).toBe("Ada");
   });
@@ -191,8 +191,8 @@ describe("the three contracts are different on purpose", () => {
     const withNull = { name: null } as never;
 
     // merge: remove the member
-    expect("name" in (JIT.patch.merge(User)(value, withNull) as object)).toBe(false);
+    expect("name" in (JIT.state.patch.merge(User)(value, withNull) as object)).toBe(false);
     // json: an explicit replace with null
-    expect(JIT.patch.json(User)(value, [{ op: "replace", path: "/name", value: null }]).name).toBeNull();
+    expect(JIT.state.patch.json(User)(value, [{ op: "replace", path: "/name", value: null }]).name).toBeNull();
   });
 });

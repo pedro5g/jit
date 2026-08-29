@@ -39,9 +39,16 @@ describe("runtime and define entrypoints", () => {
   it("should keep the public namespace shape one-to-one", () => {
     expect(Object.keys(DefineJIT).sort()).toEqual(Object.keys(RuntimeJIT).sort());
 
-    for (const namespace of ["binary", "compare", "cqrs", "json", "security", "validate"] as const) {
+    for (const namespace of ["api", "binary", "compare", "cqrs", "json", "security", "state", "validate"] as const) {
       expect(Object.keys(DefineJIT[namespace]).sort(), namespace).toEqual(Object.keys(RuntimeJIT[namespace]).sort());
     }
+
+    for (const removed of ["update", "patch", "reconcile", "watch", "watchedList"] as const) {
+      expect(removed in RuntimeJIT, removed).toBe(false);
+      expect(removed in DefineJIT, removed).toBe(false);
+    }
+    expect("input" in RuntimeJIT.cqrs).toBe(false);
+    expect("parse" in RuntimeJIT.cqrs).toBe(false);
   });
 
   it("should verify registered runtime/define/AOT operations through one parity matrix", async () => {
@@ -74,8 +81,8 @@ describe("runtime and define entrypoints", () => {
       .query(DefineUser)
       .where((query) => query.eq("id", 1))
       .select("name");
-    const runtimeInputParser = RuntimeJIT.cqrs.parse(RuntimeJIT.cqrs.input(RuntimeUser, { filter: { id: true } }));
-    const defineInputParser = DefineJIT.cqrs.parse(DefineJIT.cqrs.input(DefineUser, { filter: { id: true } }));
+    const runtimeInputParser = RuntimeJIT.api.parse(RuntimeJIT.api.query(RuntimeUser, { filter: { id: true } }));
+    const defineInputParser = DefineJIT.api.parse(DefineJIT.api.query(DefineUser, { filter: { id: true } }));
     const runtimeSorted = RuntimeJIT.sort(RuntimeUser).by("name", "desc").thenBy("id");
     const defineSorted = DefineJIT.sort(DefineUser).by("name", "desc").thenBy("id");
     const runtimeIndexed = RuntimeJIT.index(RuntimeJIT.array(RuntimeUser)).by("id");
@@ -110,8 +117,8 @@ describe("runtime and define entrypoints", () => {
     const defineDistinct = DefineJIT.cqrs.query(DefineUser).distinct();
     const runtimeLookup = RuntimeJIT.lookup(RuntimeJIT.array(RuntimeUser).keyed("id"));
     const defineLookup = DefineJIT.lookup(DefineJIT.array(DefineUser).keyed("id"));
-    const runtimeReconcile = RuntimeJIT.reconcile(RuntimeJIT.array(RuntimeUser).keyed("id"));
-    const defineReconcile = DefineJIT.reconcile(DefineJIT.array(DefineUser).keyed("id"));
+    const runtimeReconcile = RuntimeJIT.state.reconcile(RuntimeJIT.array(RuntimeUser).keyed("id"));
+    const defineReconcile = DefineJIT.state.reconcile(DefineJIT.array(DefineUser).keyed("id"));
     const runtimeProject = RuntimeJIT.project(RuntimeUser).select("id");
     const defineProject = DefineJIT.project(DefineUser).select("id");
     const runtimeSelectedEqual = RuntimeJIT.compare.equal(RuntimeUser).select("id");
@@ -150,10 +157,10 @@ describe("runtime and define entrypoints", () => {
     const defineManyRules = defineRules.many();
     const runtimeCanonical = RuntimeJIT.canonical(RuntimeUser);
     const defineCanonical = DefineJIT.canonical(DefineUser);
-    const runtimeMergePatch = RuntimeJIT.patch.merge(RuntimeUser);
-    const defineMergePatch = DefineJIT.patch.merge(DefineUser);
-    const runtimeJsonPatch = RuntimeJIT.patch.json(RuntimeUser);
-    const defineJsonPatch = DefineJIT.patch.json(DefineUser);
+    const runtimeMergePatch = RuntimeJIT.state.patch.merge(RuntimeUser);
+    const defineMergePatch = DefineJIT.state.patch.merge(DefineUser);
+    const runtimeJsonPatch = RuntimeJIT.state.patch.json(RuntimeUser);
+    const defineJsonPatch = DefineJIT.state.patch.json(DefineUser);
     const RuntimeEvent = RuntimeJIT.discriminatedUnion("type", [
       RuntimeJIT.object({ type: RuntimeJIT.literal("created"), id: RuntimeJIT.number() }),
       RuntimeJIT.object({ type: RuntimeJIT.literal("deleted"), id: RuntimeJIT.number() }),
@@ -612,7 +619,7 @@ describe("runtime and define entrypoints", () => {
       const actor = { id: 1 };
       const read = DefineJIT.cqrs.query(Post).authorize(access, "read", actor).select("id", "title");
       const shape = DefineJIT.project(Post).authorize(access, "read", actor);
-      const change = DefineJIT.patch.apply(Post).authorize(access, "update", actor);
+      const change = DefineJIT.state.patch.apply(Post).authorize(access, "update", actor);
 
       AOT.generate({ schemas: {}, artifacts: { read, shape, change }, outDir });
       const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {

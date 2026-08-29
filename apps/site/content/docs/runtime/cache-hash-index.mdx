@@ -25,7 +25,7 @@ hashes and indexes remove repeated traversal work.
 | Repeated equality for nested immutable objects      | Add `.hash()` to the schema                                                |
 | Repeated equality for large immutable entity arrays | Use `.keyed("id")` or `.entity({ key: "id" }).indexBy("id")`               |
 | Arrays are already sorted by a stable key           | Use `.ordered("id", "asc")`                                                |
-| A collection is edited incrementally                | Use `JIT.watchedList()` and invalidate application caches from its changes |
+| A collection is edited incrementally                | Use `JIT.state.watchedList()` and invalidate application caches from its changes |
 | Browser, edge or CSP-sensitive production build     | Generate AOT functions and import only the selected operations             |
 
 ## Compile cache
@@ -367,11 +367,11 @@ hash plus equality confirmation.
 
 ## Watched lists and invalidation
 
-Use `JIT.watchedList()` when a collection is intentionally edited over time.
+Use `JIT.state.watchedList()` when a collection is intentionally edited over time.
 It owns retained identity indexes and reports exactly what changed:
 
 ```ts
-const watched = JIT.watchedList(Users, initialUsers, { key: "id" });
+const watched = JIT.state.watchedList(Users, initialUsers, { key: "id" });
 
 watched.update({ id: 1, name: "Grace" });
 watched.remove(2);

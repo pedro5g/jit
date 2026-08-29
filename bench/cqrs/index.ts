@@ -3,8 +3,8 @@ import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
 const User = JIT.object({ id: JIT.string(), age: JIT.number(), status: JIT.string() });
-const parse = JIT.cqrs.parse(
-  JIT.cqrs.input(User, {
+const parse = JIT.api.parse(
+  JIT.api.query(User, {
     filter: { age: ["gte", "lte"], status: ["eq"] },
     sort: ["age"],
     pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },

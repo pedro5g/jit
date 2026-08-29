@@ -23,7 +23,7 @@ It also makes the result a compile-time decision rather than a runtime one. A ca
 ## 3. API
 
 ```ts
-const reconcileUsers = JIT.reconcile(Users);
+const reconcileUsers = JIT.state.reconcile(Users);
 const result = reconcileUsers(previous, current);
 // { added, removed, changed, unchanged }
 ```
@@ -31,27 +31,27 @@ const result = reconcileUsers(previous, current);
 Name the identity when the collection declares none, or to override it:
 
 ```ts
-JIT.reconcile(Users).by("email");
+JIT.state.reconcile(Users).by("email");
 ```
 
 Ask for fewer channels:
 
 ```ts
-JIT.reconcile(Users, { unchanged: false });
+JIT.state.reconcile(Users, { unchanged: false });
 ```
 
 Attach a structural diff to each changed pair:
 
 ```ts
-JIT.reconcile(Users).changes("diff");
+JIT.state.reconcile(Users).changes("diff");
 // changed: [{ before, after, diff }]
 ```
 
 Stream results instead of collecting them:
 
 ```ts
-JIT.reconcile(Users).to.iterator();
-JIT.reconcile(Users).to.visitor();
+JIT.state.reconcile(Users).to.iterator();
+JIT.state.reconcile(Users).to.visitor();
 ```
 
 ## 4. Semantics
@@ -65,7 +65,7 @@ A channel that is turned off is absent from the result type as well as the resul
 ## 5. Compilation
 
 ```
-JIT.reconcile(Users, channels).changes(mode).to.sink()
+JIT.state.reconcile(Users, channels).changes(mode).to.sink()
         ↓
 ReconcileDescriptor   ← identity, channels, change mode, sink
         ↓
@@ -157,7 +157,7 @@ The declaration is identical and the generated module is standalone: the loop, t
 
 ## 11. Runtime/AOT parity
 
-`JIT.reconcile` exists on `@jit-compiler/jit/runtime` and `@jit-compiler/jit/define` with the same signature, registers a reconstructive `reconcile-plan` artifact, and is covered by the runtime/define/AOT parity matrix. All four sinks — result, iterator, visitor, and the diff variant — are verified to produce byte-identical results between runtime and generated code.
+`JIT.state.reconcile` exists on `@jit-compiler/jit/runtime` and `@jit-compiler/jit/define` with the same signature, registers a reconstructive `reconcile-plan` artifact, and is covered by the runtime/define/AOT parity matrix. All four sinks — result, iterator, visitor, and the diff variant — are verified to produce byte-identical results between runtime and generated code.
 
 ## 12. Benchmarks
 
@@ -206,4 +206,4 @@ Declare identity on the collection (`.keyed("id")`) rather than repeating `.by("
 
 ## 15. Non-goals
 
-Reconcile compares two snapshots by identity. It does not track changes over time, hold state between calls, or subscribe to anything — that is `JIT.watch` and `JIT.watchedList`. It does not merge, resolve conflicts, or produce a patch to apply; `changes("diff")` reports what differs and stops there. It does not reorder, and it does not detect a move as anything other than the identity staying put.
+Reconcile compares two snapshots by identity. It does not track changes over time, hold state between calls, or subscribe to anything — that is `JIT.state.watch` and `JIT.state.watchedList`. It does not merge, resolve conflicts, or produce a patch to apply; `changes("diff")` reports what differs and stops there. It does not reorder, and it does not detect a move as anything other than the identity staying put.

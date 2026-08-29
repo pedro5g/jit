@@ -61,7 +61,7 @@ export type UpdateRecipe<T> = (draft: Draft<T>) => void;
  */
 export type UpdateInput<T> = UpdatePatch<T> | UpdateRecipe<T>;
 /**
- * Runtime update function returned by `JIT.update(schema)`.
+ * Runtime update function returned by `JIT.state.update(schema)`.
  *
  * @template T - The value type being updated.
  * @param value - The value to update.

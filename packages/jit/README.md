@@ -243,7 +243,7 @@ Immutable updates can also own reactive state without proxies. Typed path
 watchers read only their selected value, and a batch emits one notification:
 
 ```ts
-const state = JIT.update(User).reactive(initialUser, {
+const state = JIT.state.update(User).reactive(initialUser, {
   schedule: "microtask",
 });
 
@@ -667,7 +667,7 @@ const equalUser = JIT.compare.equal(schema);
 const cloneUser = JIT.clone(schema);
 const diffUser = JIT.compare.diff(schema);
 const hashUser = JIT.compare.hash(schema);
-const updateUser = JIT.update(schema);
+const updateUser = JIT.state.update(schema);
 const stringifyUser = JIT.json.stringify(schema);
 const parseUserJson = JIT.json.parse(schema).validate();
 const maskUser = JIT.security.mask(schema);
@@ -697,7 +697,8 @@ a root update for that branch.
 Parameterized updates follow the same compile shape:
 
 ```ts
-const renameUser = JIT.update(User)
+const renameUser = JIT.state
+  .update(User)
   .patch({ name: JIT.cqrs.param("name") })
   .compile();
 
@@ -706,13 +707,13 @@ renameUser(user, { name: "Grace" });
 
 ### Watched collections
 
-Use `JIT.watch` for a compiled, stateless diff between immutable collection
+Use `JIT.state.watch` for a compiled, stateless diff between immutable collection
 snapshots. A stable object key gives O(n) additions, removals and
 reference-level updates:
 
 ```ts
 const Users = JIT.array(UserSchema);
-const watchUsers = JIT.watch(Users, { key: "id" });
+const watchUsers = JIT.state.watch(Users, { key: "id" });
 
 const changes = watchUsers(previousUsers, currentUsers);
 changes.newItems;
@@ -721,11 +722,11 @@ changes.updatedItems;
 changes.isChanged;
 ```
 
-Use `JIT.watchedList` when an aggregate owns an evolving list. The keyed form
+Use `JIT.state.watchedList` when an aggregate owns an evolving list. The keyed form
 maintains identity indexes and tracks canceled additions/removals:
 
 ```ts
-const members = JIT.watchedList(Users, previousUsers, { key: "id" });
+const members = JIT.state.watchedList(Users, previousUsers, { key: "id" });
 
 members.add(newUser);
 members.remove(oldUser);
@@ -733,7 +734,7 @@ members.snapshot();
 ```
 
 Schemas provide types here; they do not validate inserted values. Validate
-untrusted input first. Callback-free `JIT.watch` functions can be exported
+untrusted input first. Callback-free `JIT.state.watch` functions can be exported
 standalone from `*.jit.ts` or gathered in an artifact object; the AOT result has no
 runtime compiler import. Stateful watched-list instances remain runtime-owned.
 

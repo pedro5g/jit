@@ -7,15 +7,15 @@ JIT exposes two related APIs with different ownership models:
 
 | Need | API | State | Best use |
 | --- | --- | --- | --- |
-| Compare two snapshots | `JIT.watch(schema, options)` | stateless compiled function | sync, events, cache invalidation, change sets |
-| Track changes while editing a list | `JIT.watchedList(schema, initial, options)` | stateful object | DDD aggregates, units of work, forms |
+| Compare two snapshots | `JIT.state.watch(schema, options)` | stateless compiled function | sync, events, cache invalidation, change sets |
+| Track changes while editing a list | `JIT.state.watchedList(schema, initial, options)` | stateful object | DDD aggregates, units of work, forms |
 
 Both APIs classify additions, removals and updates. Neither validates external
 input. Parse untrusted values first, then pass typed collections to the watcher.
 
 ## Compile a snapshot watcher
 
-`JIT.watch` specializes one diff function from an Array, Set or Map schema. The
+`JIT.state.watch` specializes one diff function from an Array, Set or Map schema. The
 collection values must be objects, and `key` must name one of their fields.
 
 ```ts
@@ -28,7 +28,7 @@ const User = JIT.object({
 });
 const Users = JIT.array(User);
 
-const changes = JIT.watch(Users, { key: "id" });
+const changes = JIT.state.watch(Users, { key: "id" });
 
 const previous = [
   { id: 1, name: "Ada", role: "admin" },
@@ -70,7 +70,7 @@ item was updated.
 - missing key: removed.
 
 This is designed for immutable updates. Mutating an object in place and passing
-the same reference cannot be detected. Use `JIT.update`, a new object literal or
+the same reference cannot be detected. Use `JIT.state.update`, a new object literal or
 another immutable update mechanism before comparing snapshots.
 
 Keys must be unique inside each snapshot. Duplicate keys overwrite each other
@@ -79,7 +79,7 @@ in the internal index and make the change set ambiguous.
 ## Watch configuration
 
 ```ts
-const changes = JIT.watch(Users, {
+const changes = JIT.state.watch(Users, {
   key: "id",
   onAdd(item) {
     audit.record("user-added", item.id);
@@ -107,9 +107,9 @@ perform effects from the returned change set.
 ## Arrays, Sets and Maps
 
 ```ts
-const watchArray = JIT.watch(JIT.array(User), { key: "id" });
-const watchSet = JIT.watch(JIT.set(User), { key: "id" });
-const watchMap = JIT.watch(JIT.mapSchema(JIT.number(), User), { key: "id" });
+const watchArray = JIT.state.watch(JIT.array(User), { key: "id" });
+const watchSet = JIT.state.watch(JIT.set(User), { key: "id" });
+const watchMap = JIT.state.watch(JIT.mapSchema(JIT.number(), User), { key: "id" });
 ```
 
 Array order is preserved in `initialItems` and `currentItems`. Sets use
@@ -118,11 +118,11 @@ watch identity, so `options.key` still refers to a field on the value schema.
 
 ## Stateful watched lists
 
-Use `JIT.watchedList` when a domain object changes incrementally before it is
+Use `JIT.state.watchedList` when a domain object changes incrementally before it is
 persisted.
 
 ```ts
-const members = JIT.watchedList(Users, previous, { key: "id" });
+const members = JIT.state.watchedList(Users, previous, { key: "id" });
 
 members.add({ id: 3, name: "Alan", role: "member" });
 members.remove({ id: 2, name: "Grace", role: "member" });
@@ -160,7 +160,7 @@ indexes and change tracking stay synchronized.
 
 ```ts
 // Recommended for object collections: indexed identity.
-const keyed = JIT.watchedList(Users, previous, { key: "id" });
+const keyed = JIT.state.watchedList(Users, previous, { key: "id" });
 
 // Custom identity when there is no stable field.
 const byEmail = new JIT.WatchedList(previous, {
@@ -193,7 +193,7 @@ const User = JIT.object({
 });
 const Users = JIT.array(User);
 
-export const UserChanges = JIT.watch(Users, { key: "id" });
+export const UserChanges = JIT.state.watch(Users, { key: "id" });
 ```
 
 Configure a project-local output:
@@ -238,7 +238,7 @@ Group the watcher with other explicitly selected collection operations when a
 domain namespace is more convenient:
 
 ```ts title="src/watchers/users.jit.ts"
-const changes = JIT.watch(Users, { key: "id" });
+const changes = JIT.state.watch(Users, { key: "id" });
 
 export const UserCollection = {
   changes,
@@ -254,7 +254,7 @@ UserCollection.changes(previous, current);
 Standalone exports are the narrowest tree-shaking unit. Grouped exports are
 ergonomic when consumers normally use the operations together.
 
-`JIT.watchedList` itself is stateful runtime infrastructure and is not emitted
+`JIT.state.watchedList` itself is stateful runtime infrastructure and is not emitted
 as an AOT function. Use the generated stateless watcher to compare persisted
 snapshots, and keep a runtime watched list only where an in-memory unit of work
 owns its evolving state.
@@ -283,7 +283,7 @@ intermediate per-stage arrays. Runtime is O(n) and retained memory is O(n) for
 indexes plus result arrays.
 
 Compile or import the watcher once at module scope and reuse it. Do not call
-`JIT.watch` inside a request loop. For a continuously edited aggregate, reuse
+`JIT.state.watch` inside a request loop. For a continuously edited aggregate, reuse
 one keyed watched-list instance so its indexes remain hot. For one comparison
 between immutable snapshots, the stateless compiled watcher is simpler and
 does not retain state after the result becomes unreachable.

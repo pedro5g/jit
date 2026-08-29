@@ -6,7 +6,7 @@ description: Immutable patches, draft recipes, parameterized updates and reactiv
 ## Compile an updater
 
 ```ts
-const updateUser = JIT.update(User);
+const updateUser = JIT.state.update(User);
 
 const next = updateUser(current, {
   profile: { name: "Grace" },
@@ -23,7 +23,7 @@ next.settings === current.settings;
 An immediate overload is available for one-off work:
 
 ```ts
-const next = JIT.update(User, current, { active: false });
+const next = JIT.state.update(User, current, { active: false });
 ```
 
 Compile and reuse the function for repeated updates.
@@ -45,7 +45,7 @@ very hot loops.
 ## Parameterized patches
 
 ```ts
-const setRole = JIT.update(User)
+const setRole = JIT.state.update(User)
   .patch({
     role: JIT.cqrs.param("role"),
   })
@@ -60,7 +60,7 @@ slots and execute the specialized updater.
 ## Reactive mode
 
 ```ts
-const users = JIT.update(State).reactive(initialState, {
+const users = JIT.state.update(State).reactive(initialState, {
   schedule: "microtask",
 });
 

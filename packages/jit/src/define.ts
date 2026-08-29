@@ -859,13 +859,13 @@ function defineProject<TSchema extends ATS.AnyTypeSchema>(
 
 /**
  * The patch namespace, declared. `apply` is the update stub, because in the
- * runtime it is literally `JIT.update`; the two RFC contracts declare their own
+ * runtime it is literally `JIT.state.update`; the two RFC contracts declare their own
  * reconstructive artifacts.
  */
 const patch = Object.freeze({
   // `update` is not stubbed on this host, so `apply` is the same function the
   // runtime namespace exposes — which is exactly the one-to-one the contract asks for.
-  apply: RuntimeJIT.update,
+  apply: RuntimeJIT.state.update,
   merge: <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) => definePatchStub(schema, "merge"),
   json: <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) => definePatchStub(schema, "json"),
 });
@@ -1272,32 +1272,44 @@ function wrapDefineJoin<TJoin extends (...args: never[]) => unknown>(join: TJoin
 
 const cqrs = Object.freeze({
   ...RuntimeJIT.cqrs,
-  parse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {
-    const artifact = getArtifact(definition);
-    if (artifact?.kind !== "cqrs-input") {
-      throw new JITError("INVALID_QUERY", "CQRS input is missing reconstructive parser metadata");
-    }
-    const stub = function aotCqrsParser(): never {
-      throw new JITError(
-        "JIT_AOT_001_ARTIFACT_EXECUTED",
-        "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
-      );
-    } as (input: unknown) => ParsedCqrsInput;
-    Object.defineProperty(stub, AOT_ARTIFACT, {
-      value: {
-        artifactId: "cqrs:parse",
-        schemaId: definition.schema.type,
-        operation: { kind: "query" },
-      } satisfies ArtifactDescriptor,
-    });
-    registerArtifact(stub, {
-      kind: "cqrs-parser",
-      definition: artifact.definition,
-      source: artifact.source,
-    });
-    return stub;
-  },
   query: defineCqrsQuery,
+});
+
+function defineApiParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {
+  const artifact = getArtifact(definition);
+  if (artifact?.kind !== "cqrs-input") {
+    throw new JITError("INVALID_QUERY", "API query boundary is missing reconstructive parser metadata");
+  }
+  const stub = function aotCqrsParser(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as (input: unknown) => ParsedCqrsInput;
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: "cqrs:parse",
+      schemaId: definition.schema.type,
+      operation: { kind: "query" },
+    } satisfies ArtifactDescriptor,
+  });
+  registerArtifact(stub, {
+    kind: "cqrs-parser",
+    definition: artifact.definition,
+    source: artifact.source,
+  });
+  return stub;
+}
+
+const api = Object.freeze({
+  query: RuntimeJIT.api.query,
+  parse: defineApiParse,
+});
+
+const state = Object.freeze({
+  ...RuntimeJIT.state,
+  patch,
+  reconcile: defineReconcile,
 });
 
 function operationStub<TSchema extends ATS.AnyTypeSchema, TFunction extends (...args: never[]) => unknown>(
@@ -1607,9 +1619,7 @@ export const JIT = {
   sort: defineSort,
   index: defineIndex,
   lookup: defineLookup,
-  reconcile: defineReconcile,
   project: defineProject,
-  patch,
   cacheKey,
   canonical: defineCanonical,
   access: defineAccess,
@@ -1618,7 +1628,9 @@ export const JIT = {
   migrate: defineMigrate,
   csv,
   ndjson,
+  api,
   cqrs,
+  state,
   compare: Object.freeze({ equal, diff, hash, changed }),
   security: Object.freeze({ mask, sanitize }),
 } as Omit<
@@ -1635,10 +1647,8 @@ export const JIT = {
   | "sort"
   | "index"
   | "lookup"
-  | "reconcile"
   | "project"
   | "changed"
-  | "patch"
   | "cacheKey"
   | "canonical"
   | "access"
@@ -1647,7 +1657,9 @@ export const JIT = {
   | "migrate"
   | "csv"
   | "ndjson"
+  | "api"
   | "cqrs"
+  | "state"
   | "compare"
   | "security"
 > & {
@@ -1663,9 +1675,7 @@ export const JIT = {
   readonly sort: typeof defineSort;
   readonly index: typeof defineIndex;
   readonly lookup: typeof defineLookup;
-  readonly reconcile: typeof defineReconcile;
   readonly project: typeof defineProject;
-  readonly patch: typeof patch;
   readonly cacheKey: typeof cacheKey;
   readonly canonical: typeof defineCanonical;
   readonly access: typeof defineAccess;
@@ -1674,7 +1684,9 @@ export const JIT = {
   readonly migrate: typeof defineMigrate;
   readonly csv: CsvNamespace;
   readonly ndjson: NdjsonNamespace;
+  readonly api: typeof api;
   readonly cqrs: typeof cqrs;
+  readonly state: typeof state;
   readonly compare: {
     readonly equal: typeof equal;
     readonly diff: typeof diff;

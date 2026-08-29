@@ -316,8 +316,10 @@ const ActiveUsers = JIT.cqrs
 ActiveUsers([{ id: "u_1", active: true }]); // [{ id: "u_1" }]
 ```
 
-`JIT.cqrs.input(Model, options)` declares permitted external filters, sorting,
-and offset pagination. `JIT.cqrs.parse(definition)` normalizes input into the
+### Public query boundaries
+
+`JIT.api.query(Model, options)` declares permitted external filters, sorting,
+and offset pagination. `JIT.api.parse(definition)` normalizes input into the
 portable filter representation; configured fields and operators are rejected
 before a backend adapter sees them.
 
@@ -349,7 +351,7 @@ against the declared model before an adapter receives it.
 
 ```ts
 const Users = JIT.object({ id: JIT.string(), createdAt: JIT.string() });
-const ListUsers = JIT.cqrs.input(Users, {
+const ListUsers = JIT.api.query(Users, {
   pagination: {
     type: "cursor",
     by: ["createdAt", "id"],
@@ -358,6 +360,6 @@ const ListUsers = JIT.cqrs.input(Users, {
   },
 });
 
-const parseListUsers = JIT.cqrs.parse(ListUsers);
+const parseListUsers = JIT.api.parse(ListUsers);
 // parseListUsers({ after: opaqueCursor, limit: 10 })
 ```

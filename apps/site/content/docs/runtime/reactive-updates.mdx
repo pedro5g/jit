@@ -3,11 +3,11 @@ title: Reactive immutable updates
 description: Subscribe to compiled structural updates by root value, typed property path or derived selector.
 ---
 
-`JIT.update(schema).reactive(initial)` owns one immutable value and notifies
+`JIT.state.update(schema).reactive(initial)` owns one immutable value and notifies
 consumers only when the compiled updater returns a new root reference. It is a
 small external store, not a proxy-based state system: reads are ordinary
 property reads and writes keep the same structural-sharing guarantees as
-`JIT.update`.
+`JIT.state.update`.
 
 ```ts
 import { JIT } from "@jit-compiler/jit/runtime";
@@ -18,7 +18,7 @@ const User = JIT.object({
   profile: JIT.object({ score: JIT.number(), active: JIT.boolean() }),
 });
 
-const user = JIT.update(User).reactive({
+const user = JIT.state.update(User).reactive({
   id: 1,
   name: "Ada",
   profile: { score: 10, active: true },
@@ -86,14 +86,14 @@ JavaScript turn. A custom scheduler integrates with animation frames, a UI
 framework or a job queue.
 
 ```ts
-const uiState = JIT.update(User).reactive(initial, {
+const uiState = JIT.state.update(User).reactive(initial, {
   schedule: "microtask",
   onError(error) {
     reportSubscriberError(error);
   },
 });
 
-const framed = JIT.update(User).reactive(initial, {
+const framed = JIT.state.update(User).reactive(initial, {
   schedule: (flush) => requestAnimationFrame(() => flush()),
 });
 ```

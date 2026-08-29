@@ -27,7 +27,7 @@ offers iterable consumption over the same compiled issue vector.
 | `JIT.compare.equal(S)` | boolean                 | early return, no result object |
 | `JIT.clone(S)`         | deep shape clone        | allocates required output only |
 | `JIT.compare.diff(S)`  | change entries          | allocates only differences     |
-| `JIT.update(S)`        | immutable updated value | shares untouched branches      |
+| `JIT.state.update(S)`        | immutable updated value | shares untouched branches      |
 | `JIT.compare.hash(S)`  | numeric structural hash | scalar accumulator             |
 
 Hints such as `entity`, `keyed`, `ordered`, `indexBy` and `hash` influence
@@ -60,10 +60,10 @@ ExecutionPlan and emits only the declared properties.
 ## Collection changes
 
 ```ts
-const watchUsers = JIT.watch(JIT.array(User), { key: "id" });
+const watchUsers = JIT.state.watch(JIT.array(User), { key: "id" });
 const changes = watchUsers(previousUsers, currentUsers);
 
-const members = JIT.watchedList(JIT.array(User), previousUsers, {
+const members = JIT.state.watchedList(JIT.array(User), previousUsers, {
   key: "id",
 });
 members.add(newUser);
@@ -74,7 +74,7 @@ AOT function when it has no callbacks. `watchedList` retains state for an
 aggregate or unit of work. See [watched lists and collection
 changes](/docs/runtime/watched-lists) for identity rules and configuration.
 
-For state owned by one process or UI store, `JIT.update(User).reactive(initial)`
+For state owned by one process or UI store, `JIT.state.update(User).reactive(initial)`
 adds typed path watchers, selectors, batching and configurable scheduling over
 the compiled immutable updater. See [reactive updates](/docs/runtime/reactive-updates).
 

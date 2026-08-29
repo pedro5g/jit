@@ -44,7 +44,7 @@ describe("browser playground advanced operations", () => {
   profile: JIT.object({ score: JIT.number(), active: JIT.boolean() }),
 });
 const reactiveUpdate = (initial, patches) => {
-  const store = JIT.update(schema).reactive(initial);
+  const store = JIT.state.update(schema).reactive(initial);
   const events = [];
   store.watch(["profile", "score"], ({ previous, value }) => events.push({ previous, value }));
   store.subscribe((event) => events.push({ version: event.version, changes: event.changes }));
@@ -198,11 +198,16 @@ const visitor = JIT.cqrs.query(JIT.array(schema))
     const schema = `
 const schema = JIT.object({ id: JIT.number().int32(), name: JIT.string() });
 const Users = JIT.array(schema);`;
-    const watch = execute("watch", `${schema}\nconst watch = JIT.watch(Users, { key: "id" });`, previous, current);
+    const watch = execute(
+      "watch",
+      `${schema}\nconst watch = JIT.state.watch(Users, { key: "id" });`,
+      previous,
+      current
+    );
     const watchedList = execute(
       "watchedList",
       `${schema}
-const watchedList = (initial) => JIT.watchedList(Users, initial, { key: "id" });`,
+const watchedList = (initial) => JIT.state.watchedList(Users, initial, { key: "id" });`,
       previous,
       [
         { type: "remove", item: previous[1] },

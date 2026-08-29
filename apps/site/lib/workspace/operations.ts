@@ -261,7 +261,7 @@ const schema = JIT.object({
 });
 
 const reactiveUpdate = (initial: JIT.Typeof<typeof schema>, patches: unknown[]) => {
-  const store = JIT.update(schema).reactive(initial);
+  const store = JIT.state.update(schema).reactive(initial);
   const events: unknown[] = [];
 
   store.watch(["profile", "score"], ({ previous, value }) => {
@@ -368,7 +368,7 @@ const schema = JIT.object({
 const Users = JIT.array(schema);
 
 // Stateless O(n) diff specialized to direct item.id access.
-const watch = JIT.watch(Users, { key: "id" });
+const watch = JIT.state.watch(Users, { key: "id" });
 `,
     a: usersArrayInput,
     op: "watch",
@@ -387,7 +387,7 @@ const Users = JIT.array(schema);
 
 // The playground applies the JSON actions and returns snapshot().
 const watchedList = (initial: JIT.Typeof<typeof Users>) =>
-  JIT.watchedList(Users, initial, { key: "id" });
+  JIT.state.watchedList(Users, initial, { key: "id" });
 `,
     a: `[
   { "id": 1, "name": "Ada", "role": "admin" },

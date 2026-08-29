@@ -114,7 +114,7 @@ retain their user-ordered semantics in `pipeline`. Repeated
 projection/ordering declarations use the effective last value in compatibility
 summary fields and repeated limits use the smallest summary bound.
 
-`JIT.cqrs.input(...)` exposes the same versioned entry point, but its
+`JIT.api.query(...)` exposes the same versioned entry point, but its
 definition describes _capabilities_ instead of a static request: permitted
 filters, projection, sorting, pagination, and structural budgets. It is data
 only and likewise contains no schema AST.

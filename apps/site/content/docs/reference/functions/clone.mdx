@@ -57,7 +57,7 @@ transforms from unexpectedly executing during a copy.
 Static keys become object literals or direct assignments. Arrays use indexed
 loops with stable local variables. No generic recursion table, callback per
 field or path array is created. Clone necessarily allocates the cloned
-containers; use `JIT.update` when unchanged branches should retain references.
+containers; use `JIT.state.update` when unchanged branches should retain references.
 
 ## AOT
 

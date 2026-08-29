@@ -235,7 +235,7 @@ describe("JIT AOT generate", () => {
     const ability = access({ id: 1 });
     const read = JIT.cqrs.query(Post).authorize(ability, "read").select("id", "title");
     const shape = JIT.project(Post).authorize(ability, "read");
-    const change = JIT.patch.apply(Post).authorize(ability, "update");
+    const change = JIT.state.patch.apply(Post).authorize(ability, "update");
 
     const result = AOT.generate({ artifacts: { read, shape, change }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
@@ -348,9 +348,9 @@ describe("JIT AOT generate", () => {
     });
   });
 
-  it("emits dynamic CQRS input as an import-free parser artifact", async () => {
+  it("emits an API query boundary as an import-free parser artifact", async () => {
     const User = JIT.object({ id: JIT.string(), age: JIT.number() });
-    const ListUsers = JIT.cqrs.input(User, {
+    const ListUsers = JIT.api.query(User, {
       filter: { id: true, age: ["gte"] },
       sort: ["id", "age"],
       select: true,
@@ -375,15 +375,15 @@ describe("JIT AOT generate", () => {
       sort: [],
       pagination: { kind: "offset", offset: 0, limit: 20 },
     });
-    expect(() => generated.ListUsers.parse([])).toThrow(/invalid CQRS input/i);
-    expect(() => generated.ListUsers.parse({ filter: { id: { $eq: "u_1" } } })).toThrow(/invalid CQRS input/i);
-    expect(() => generated.ListUsers.parse({ sort: "age,age" })).toThrow(/invalid CQRS input/i);
-    expect(() => generated.ListUsers.parse({ fields: "id,id" })).toThrow(/invalid CQRS input/i);
-    expect(() => generated.ListUsers.parse({ fields: "" })).toThrow(/invalid CQRS input/i);
-    expect(() => generated.ListUsers.parse({ sort: 42 })).toThrow(/invalid CQRS input/i);
-    expect(() => generated.ListUsers.parse({ unknown: true })).toThrow(/invalid CQRS input/i);
+    expect(() => generated.ListUsers.parse([])).toThrow(/invalid API query input/i);
+    expect(() => generated.ListUsers.parse({ filter: { id: { $eq: "u_1" } } })).toThrow(/invalid API query input/i);
+    expect(() => generated.ListUsers.parse({ sort: "age,age" })).toThrow(/invalid API query input/i);
+    expect(() => generated.ListUsers.parse({ fields: "id,id" })).toThrow(/invalid API query input/i);
+    expect(() => generated.ListUsers.parse({ fields: "" })).toThrow(/invalid API query input/i);
+    expect(() => generated.ListUsers.parse({ sort: 42 })).toThrow(/invalid API query input/i);
+    expect(() => generated.ListUsers.parse({ unknown: true })).toThrow(/invalid API query input/i);
     expect(() => generated.ListUsers.parse({ page: Number.MAX_SAFE_INTEGER, limit: 100 })).toThrow(
-      /invalid CQRS input/i
+      /invalid API query input/i
     );
   });
 
@@ -443,9 +443,9 @@ describe("JIT AOT generate", () => {
     ).toEqual([{ id: "u_1", age: 30 }]);
   });
 
-  it("inlines compound cursor decoding for AOT CQRS input", async () => {
+  it("inlines compound cursor decoding for an AOT API query boundary", async () => {
     const User = JIT.object({ id: JIT.string(), createdAt: JIT.string() });
-    const ListUsers = JIT.cqrs.input(User, {
+    const ListUsers = JIT.api.query(User, {
       pagination: {
         type: "cursor",
         by: ["createdAt", "id"],
@@ -1642,7 +1642,7 @@ describe("JIT AOT generate", () => {
   it("should re-emit callback-free watched collection diffs", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
     const Users = JIT.array(User);
-    const UserChanges = JIT.watch(Users, { key: "id" });
+    const UserChanges = JIT.state.watch(Users, { key: "id" });
     const UserCollection = { changes: UserChanges };
     const result = AOT.generate({
       groups: { UserCollection },
@@ -1688,7 +1688,7 @@ describe("JIT AOT generate", () => {
         return undefined;
       },
     };
-    const UserChanges = JIT.watch(Users, { key: "id", onAdd: hooks.onAdd });
+    const UserChanges = JIT.state.watch(Users, { key: "id", onAdd: hooks.onAdd });
     const result = AOT.generate({
       groups: {},
       artifacts: { UserChanges },
@@ -2098,7 +2098,7 @@ describe("JIT AOT generate", () => {
         equalNode: JIT.compare.equal(Node),
         diffNode: JIT.compare.diff(Node),
         nodeToJson: JIT.json.stringify(Node),
-        updateNode: JIT.update(Node).compile(),
+        updateNode: JIT.state.update(Node).compile(),
         isNode: JIT.validate.is(Node),
       },
       outDir,

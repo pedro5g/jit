@@ -42,7 +42,7 @@ type Indexed<TItem> = {
  *
  * Use `key` for object identity, `compare` for custom identity, or no options
  * for primitive/Object.is identity. When a schema key is known, prefer
- * `JIT.watchedList(schema, items, { key })`, which returns the indexed
+ * `JIT.state.watchedList(schema, items, { key })`, which returns the indexed
  * implementation automatically.
  *
  * @template TItem - The watched item type.

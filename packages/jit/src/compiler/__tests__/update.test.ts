@@ -30,10 +30,11 @@ describe("JIT compiler update", () => {
       name: JIT.string(),
       active: JIT.boolean(),
     });
-    const rename = JIT.update(User)
+    const rename = JIT.state
+      .update(User)
       .patch({ name: JIT.cqrs.param("name") })
       .compile();
-    const direct = JIT.update(User).compile();
+    const direct = JIT.state.update(User).compile();
     const input = { id: 1, name: "Ada", active: true };
 
     expect(rename(input, { name: "Grace" })).toEqual({ id: 1, name: "Grace", active: true });
@@ -275,7 +276,7 @@ describe("JIT compiler update", () => {
     expect(update(input, { id: 2 })).toEqual({ id: 2 });
   });
 
-  it("should expose JIT.update with patch and draft recipe modes", () => {
+  it("should expose JIT.state.update with patch and draft recipe modes", () => {
     const User = JIT.object({
       id: JIT.number(),
       profile: JIT.object({
@@ -283,7 +284,7 @@ describe("JIT compiler update", () => {
         age: JIT.number(),
       }),
     });
-    const update = JIT.update(User);
+    const update = JIT.state.update(User);
     const input = { id: 1, profile: { name: "Ada", age: 37 } };
 
     expect(update(input, { profile: { name: "Ada" } })).toBe(input);
@@ -304,7 +305,7 @@ describe("JIT compiler update", () => {
       id: JIT.number(),
       profile: JIT.object({ name: JIT.string(), age: JIT.number() }),
     });
-    const store = JIT.update(User).reactive({ id: 1, profile: { name: "Ada", age: 37 } });
+    const store = JIT.state.update(User).reactive({ id: 1, profile: { name: "Ada", age: 37 } });
     const events: unknown[] = [];
     const unsubscribe = store.subscribe((event) => {
       events.push({ previous: event.previous, value: event.value, version: event.version, changes: event.changes });
@@ -335,7 +336,7 @@ describe("JIT compiler update", () => {
       id: JIT.number(),
       profile: JIT.object({ name: JIT.string(), age: JIT.number() }),
     });
-    const store = JIT.update(User).reactive({ id: 1, profile: { name: "Ada", age: 37 } });
+    const store = JIT.state.update(User).reactive({ id: 1, profile: { name: "Ada", age: 37 } });
     const ages: number[] = [];
     const labels: string[] = [];
 
@@ -355,7 +356,7 @@ describe("JIT compiler update", () => {
     expect(ages).toEqual([38]);
     expect(labels).toEqual(["Ada:38"]);
 
-    const optional = JIT.update(JIT.object({ profile: JIT.object({ age: JIT.number() }).optional() })).reactive({
+    const optional = JIT.state.update(JIT.object({ profile: JIT.object({ age: JIT.number() }).optional() })).reactive({
       profile: undefined,
     });
     optional.watch(["profile", "age"], (event) => {
@@ -365,7 +366,7 @@ describe("JIT compiler update", () => {
 
   it("should batch sync updates and coalesce microtask notifications", async () => {
     const Counter = JIT.object({ count: JIT.number(), label: JIT.string() });
-    const syncStore = JIT.update(Counter).reactive({ count: 0, label: "zero" });
+    const syncStore = JIT.state.update(Counter).reactive({ count: 0, label: "zero" });
     const syncEvents: Array<{ readonly previous: number; readonly value: number }> = [];
 
     syncStore.watch(["count"], ({ previous, value }) => syncEvents.push({ previous, value }));
@@ -378,7 +379,7 @@ describe("JIT compiler update", () => {
     expect(syncStore.version).toBe(3);
     expect(syncEvents).toEqual([{ previous: 0, value: 2 }]);
 
-    const asyncStore = JIT.update(Counter).reactive({ count: 0, label: "zero" }, { schedule: "microtask" });
+    const asyncStore = JIT.state.update(Counter).reactive({ count: 0, label: "zero" }, { schedule: "microtask" });
     const versions: number[] = [];
 
     asyncStore.subscribe((event) => versions.push(event.version));
@@ -394,7 +395,7 @@ describe("JIT compiler update", () => {
     let flush: (() => void) | undefined;
     const errors: unknown[] = [];
     const seen: number[] = [];
-    const store = JIT.update(Value).reactive(
+    const store = JIT.state.update(Value).reactive(
       { count: 0 },
       {
         schedule: (next) => {
@@ -424,7 +425,7 @@ describe("JIT compiler update", () => {
     const User = JIT.object({ id: JIT.number() }).readonly().schema;
 
     expect(() => Compiler.compileUpdate(User)).toThrow("readonly");
-    expect(() => JIT.update(User)).toThrow("readonly");
+    expect(() => JIT.state.update(User)).toThrow("readonly");
   });
 
   it("should keep generated array source allocation-conscious", () => {

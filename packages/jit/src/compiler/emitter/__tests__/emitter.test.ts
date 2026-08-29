@@ -190,7 +190,7 @@ describe("emitter", () => {
     });
 
     it("should serialize and update an intersection like the object it is", () => {
-      const update = JIT.update(Both).compile();
+      const update = JIT.state.update(Both).compile();
 
       expect(JIT.json.stringify(Both)(value as never)).toBe(JSON.stringify(value));
       expect(update(value as never, { nested: { n: 9 } } as never)).toEqual({ ...value, nested: { n: 9 } });

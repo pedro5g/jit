@@ -33,7 +33,7 @@ const profileChanged = JIT.compare.changed(User).select("status", "profile.name"
 And decide watch updates by a subset rather than by reference:
 
 ```ts
-JIT.watch(Users, { key: "id", fields: ["status"] });
+JIT.state.watch(Users, { key: "id", fields: ["status"] });
 ```
 
 ## 4. Semantics
@@ -115,8 +115,8 @@ Bit order is positional, so it is part of the contract: reordering `select()` ar
 
 ## 14. Best practices
 
-Name the fields you actually act on with `select()` rather than taking every field by default; it is both faster and a clearer statement of intent. Use `JIT.watch(…, { fields })` when a collection's updates should be decided by a few meaningful fields instead of by reference — that is the common case for data that arrives rebuilt from the wire.
+Name the fields you actually act on with `select()` rather than taking every field by default; it is both faster and a clearer statement of intent. Use `JIT.state.watch(…, { fields })` when a collection's updates should be decided by a few meaningful fields instead of by reference — that is the common case for data that arrives rebuilt from the wire.
 
 ## 15. Non-goals
 
-A mask says which fields differ, not how. For before/after values use [`JIT.compare.diff`](./diff), or `JIT.reconcile(…).changes("diff")` over a collection. It does not track changes over time, does not persist, and does not walk into arrays: an array field is one bit, compared by value as a whole.
+A mask says which fields differ, not how. For before/after values use [`JIT.compare.diff`](./diff), or `JIT.state.reconcile(…).changes("diff")` over a collection. It does not track changes over time, does not persist, and does not walk into arrays: an array field is one bit, compared by value as a whole.

@@ -6,7 +6,7 @@ description: Stateless snapshot changes and stateful aggregate collection tracki
 ## watch
 
 ```ts
-const watchUsers = JIT.watch(JIT.array(User), {
+const watchUsers = JIT.state.watch(JIT.array(User), {
   key: "id",
 });
 
@@ -23,7 +23,7 @@ Use `watch` for two snapshots with no retained controller state.
 ## watchedList
 
 ```ts
-const members = JIT.watchedList(JIT.array(User), initialUsers, {
+const members = JIT.state.watchedList(JIT.array(User), initialUsers, {
   key: "id",
 });
 
@@ -63,7 +63,7 @@ const list = new JIT.WatchedList<string>(["a"]);
 ## KeyedWatchedList class
 
 `JIT.KeyedWatchedList` maintains keyed lookup behavior. The factory
-`JIT.watchedList(schema, items, { key })` selects it automatically and is
+`JIT.state.watchedList(schema, items, { key })` selects it automatically and is
 normally preferable.
 
 ## AOT

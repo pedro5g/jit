@@ -544,16 +544,16 @@ export const CONCEPTS: ConceptNode[] = [
       "JIT.cqrs separa o contrato do read model da entrada de transporte: queries estáticas reutilizam o QueryProgram compilado, enquanto uma definição de input compila filtros permitidos, campos de ordenação e paginação offset em um normalizador limitado.",
     mechanisms: [
       "JIT.cqrs.query(Model) is a callable declarative read query; successive .where() calls combine with AND, successive .params() calls accumulate their typed shape, repeated select/order use the last declaration, limits use the smallest bound, and runtime/AOT/~query share the canonical plan.",
-      "JIT.cqrs.input(Model, options) declares the permitted dynamic surface. JIT.cqrs.parse(definition) emits a direct parser for known fields and operators, validates the structural budget, rejects duplicate sort/select fields, and never treats a client field name as generated source.",
+      "JIT.api.query(Model, options) declares the permitted dynamic surface. JIT.api.parse(definition) emits a direct parser for known fields and operators, validates the structural budget, rejects duplicate sort/select fields, and never treats a client field name as generated source.",
       "Sort fields and offset limits are checked before a query plan is formed, so application code receives normalized conditions rather than reparsing transport syntax in a hot query loop.",
     ],
     mechanismsPt: [
       "JIT.cqrs.query(Model) cria uma query de leitura declarativa e chamável; chamadas .where() sucessivas combinam com AND, .params() acumula tipos, select/order repetidos usam a última declaração, limits usam o menor limite e runtime/AOT/~query compartilham o plano canônico.",
-      "JIT.cqrs.input(Model, options) declara a superfície dinâmica permitida. JIT.cqrs.parse(definition) emite um parser direto para campos e operadores conhecidos, valida o orçamento estrutural, rejeita campos repetidos de sort/select e nunca trata um campo enviado pelo cliente como fonte gerada.",
+      "JIT.api.query(Model, options) declara a superfície dinâmica permitida. JIT.api.parse(definition) emite um parser direto para campos e operadores conhecidos, valida o orçamento estrutural, rejeita campos repetidos de sort/select e nunca trata um campo enviado pelo cliente como fonte gerada.",
       "Campos de ordenação e limites offset são checados antes de formar um plano de query, então a aplicação recebe condições normalizadas em vez de reprocessar sintaxe de transporte dentro do loop quente.",
     ],
     example:
-      'const User = JIT.object({ id: JIT.string(), active: JIT.boolean(), score: JIT.number() });\n\nconst activeUsers = JIT.cqrs\n  .query(User)\n  .where((q) => q.eq("active", true))\n  .select("id", "score")\n  .orderBy("score", "desc")\n  .limit(10);\n\nconst Search = JIT.cqrs.input(User, {\n  filter: { active: ["eq"], score: ["gte"] },\n  sort: ["score"],\n  pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },\n});\nconst parseSearch = JIT.cqrs.parse(Search);',
+      'const User = JIT.object({ id: JIT.string(), active: JIT.boolean(), score: JIT.number() });\n\nconst activeUsers = JIT.cqrs\n  .query(User)\n  .where((q) => q.eq("active", true))\n  .select("id", "score")\n  .orderBy("score", "desc")\n  .limit(10);\n\nconst Search = JIT.api.query(User, {\n  filter: { active: ["eq"], score: ["gte"] },\n  sort: ["score"],\n  pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },\n});\nconst parseSearch = JIT.api.parse(Search);',
     page: "/docs/reference/functions/query#cqrs",
     edges: { query: 0.8, compilation: 0.5, aot: 0.3 },
   },
@@ -691,21 +691,21 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["update", "atualizar", "patch", "immutable", "imutável", "state", "estado", "reactive", "draft"],
     terms: ["update", "patch", "immutable", "draft", "reactive", "watch"],
     apis: ["update", "watch", "watchedList"],
-    fact: "JIT.update(User) compiles an updater that applies a partial patch immutably: only changed branches are allocated, and unchanged children retain their identity.",
+    fact: "JIT.state.update(User) compiles an updater that applies a partial patch immutably: only changed branches are allocated, and unchanged children retain their identity.",
     factPt:
-      "JIT.update(User) compila um updater que aplica um patch parcial de forma imutável: só os ramos alterados são alocados, e filhos inalterados mantêm sua identidade.",
+      "JIT.state.update(User) compila um updater que aplica um patch parcial de forma imutável: só os ramos alterados são alocados, e filhos inalterados mantêm sua identidade.",
     mechanisms: [
       "Only the paths a patch touches are rebuilt; every other subtree is the same object reference it was before, which is what makes an identity check enough to skip work downstream.",
       "There is no Proxy and no draft to finalize: the updater is generated from the known shape, so the patch is applied by direct field writes.",
-      "`JIT.watch` and `JIT.watchedList` cover keyed collection changes — stateless snapshot diffs and stateful aggregates respectively.",
+      "`JIT.state.watch` and `JIT.state.watchedList` cover keyed collection changes — stateless snapshot diffs and stateful aggregates respectively.",
     ],
     mechanismsPt: [
       "Só os caminhos que o patch toca são reconstruídos; toda outra subárvore continua sendo a mesma referência de antes, e é isso que faz uma comparação de identidade bastar para pular trabalho adiante.",
       "Não há Proxy nem draft para finalizar: o updater é gerado a partir do formato conhecido, então o patch é aplicado por escrita direta de campo.",
-      "`JIT.watch` e `JIT.watchedList` cobrem mudanças em coleções com chave — diffs de snapshot sem estado e agregados com estado, respectivamente.",
+      "`JIT.state.watch` e `JIT.state.watchedList` cobrem mudanças em coleções com chave — diffs de snapshot sem estado e agregados com estado, respectivamente.",
     ],
     example:
-      'const User = JIT.object({\n  id: JIT.string(),\n  profile: JIT.object({ name: JIT.string(), city: JIT.string() }),\n});\n\nconst updateUser = JIT.update(User);\n\n// only the branches the patch touches are rebuilt\nconst next = updateUser(current, { profile: { name: "Grace" } });',
+      'const User = JIT.object({\n  id: JIT.string(),\n  profile: JIT.object({ name: JIT.string(), city: JIT.string() }),\n});\n\nconst updateUser = JIT.state.update(User);\n\n// only the branches the patch touches are rebuilt\nconst next = updateUser(current, { profile: { name: "Grace" } });',
     page: "/docs/runtime/reactive-updates",
     edges: { compare: 0.5 },
   },

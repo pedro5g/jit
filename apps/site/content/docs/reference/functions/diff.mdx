@@ -50,10 +50,10 @@ Use `watch` for collection snapshots where added, removed and updated items
 must be grouped by identity:
 
 ```ts
-const changes = JIT.watch(JIT.array(User), { key: "id" })(before, after);
+const changes = JIT.state.watch(JIT.array(User), { key: "id" })(before, after);
 ```
 
-Use `JIT.update(schema).reactive()` when subscribers should be notified as
+Use `JIT.state.update(schema).reactive()` when subscribers should be notified as
 updates happen instead of comparing snapshots manually.
 
 ## Arrays and mutation

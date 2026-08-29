@@ -256,7 +256,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
         break;
       }
       case "update": {
-        const update = JIT.update(requireSchema()).compile();
+        const update = JIT.state.update(requireSchema()).compile();
         run = () => {
           const out = update(requireA() as never, requireB("a patch object") as never);
           return { updated: out, untouchedInput: out !== a };
@@ -266,7 +266,9 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
       case "reactiveUpdate": {
         const reactiveUpdate = bindings.reactiveUpdate as ((initial: unknown, patches: unknown) => unknown) | undefined;
         if (typeof reactiveUpdate !== "function") {
-          throw new Error("define a `reactiveUpdate` binding that creates `JIT.update(schema).reactive(initial)`");
+          throw new Error(
+            "define a `reactiveUpdate` binding that creates `JIT.state.update(schema).reactive(initial)`"
+          );
         }
         run = () => reactiveUpdate(requireA("the initial JSON value"), requireB("a JSON patch array"));
         break;
@@ -353,7 +355,9 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
       case "watch": {
         const watch = bindings.watch as ((previous: unknown, current: unknown) => unknown) | undefined;
         if (typeof watch !== "function") {
-          throw new Error('define a `watch` binding, e.g. `const watch = JIT.watch(JIT.array(schema), { key: "id" })`');
+          throw new Error(
+            'define a `watch` binding, e.g. `const watch = JIT.state.watch(JIT.array(schema), { key: "id" })`'
+          );
         }
         source = sourceOf(watch);
         run = () => watch(requireA("the previous JSON collection"), requireB("the current JSON collection"));
@@ -365,7 +369,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
           | undefined;
         if (typeof createWatchedList !== "function") {
           throw new Error(
-            'define a `watchedList` factory, e.g. `const watchedList = (initial) => JIT.watchedList(Users, initial, { key: "id" })`'
+            'define a `watchedList` factory, e.g. `const watchedList = (initial) => JIT.state.watchedList(Users, initial, { key: "id" })`'
           );
         }
         run = () => {

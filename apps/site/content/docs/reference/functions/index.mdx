@@ -19,7 +19,8 @@ documentation.
 | `JIT.json`        | [JSON](./json)                                     | `value`, `parse`, `stringify`, `stringifyChunks`                                 |
 | `JIT.binary`      | [Codec](./codec)                                   | `encode`, `decode`, `codec`                                                      |
 | `JIT.clone`       | [Clone](./clone)                                   | Shape-specialized deep clone                                                     |
-| `JIT.update`      | [Update](./update)                                 | Immutable patches, recipes and reactive state                                    |
+| `JIT.api`         | [Query](./query#public-query-boundaries)            | Deny-by-default public `query` definitions and compiled `parse`                    |
+| `JIT.state`       | [State](./state)                                    | `update`, `patch`, `reconcile`, `watch`, `watchedList`                            |
 | `JIT.codec`       | [Codec](./codec)                                   | Two-way value conversion inside a schema                                         |
 | `JIT.jsonSchema`  | [JSON Schema](./json-schema)                       | `to` a document, `from` a document                                               |
 | `JIT.ops`         | [Value operations](./ops)                          | Declarative transform compiled into the output                                   |
@@ -30,22 +31,18 @@ documentation.
 | `JIT.sort`        | [Sort](./sort)                                     | Schema-specialized comparator and ordering plan                                  |
 | `JIT.index`       | [Index](./index-plans)                             | Materialize an index from collection key facts                                   |
 | `JIT.lookup`      | [Lookup](./lookup)                                 | Reach one row by key through a chosen access path                                |
-| `JIT.reconcile`   | [Reconcile](./reconcile)                           | Compare two snapshots of a keyed collection                                      |
 | `JIT.project`     | [Project](./project)                               | Narrow a value to a subset of its own fields                                     |
-| `JIT.patch`       | [Patch](./patch)                                   | `apply`, `merge`, `json`                                                         |
 | `JIT.cacheKey`    | [Cache keys](./cache-key)                          | `string`, `hash` keys from selected fields                                       |
 | `JIT.canonical`   | [Canonical](./canonical)                           | One deterministic field arrangement                                              |
 | `JIT.access`      | [Access control](./access)                         | Compiled can/cannot authorization checks                                         |
 | `JIT.rules`       | [Rules](./rules)                                   | Compiled business decisions, outcomes and predicates                             |
 | `JIT.match`       | [Match](./match)                                   | Compiled discriminated-union dispatch                                            |
 | `JIT.migrate`     | [Migration](./migrate)                             | Versioned schema migration compiled as one plan                                  |
-| `JIT.cqrs`        | [Query](./query#cqrs)                              | `query`, `param`, `const`, `input`, `parse`, `count`, `sum`, `avg`, `min`, `max` |
+| `JIT.cqrs`        | [Query](./query#cqrs)                              | `query`, `param`, `const`, `count`, `sum`, `avg`, `min`, `max`                   |
 | `JIT.process`     | [Process](./process)                               | Fused load-and-query binary pipeline                                             |
 | `JIT.stream`      | [Stream](./stream)                                 | Incremental JSON and NDJSON validation                                           |
 | `JIT.csv`         | [CSV](./csv)                                       | Schema-specialized incremental CSV parsing and serialization                     |
 | `JIT.ndjson`      | [NDJSON](./ndjson)                                 | Fused incremental NDJSON validation, filtering and projection                    |
-| `JIT.watch`       | [Watch](./watch)                                   | Stateless keyed collection changes                                               |
-| `JIT.watchedList` | [Watch](./watch#watchedlist)                       | Stateful aggregate collection                                                    |
 | `JIT.dto`         | [DTO](./dto)                                       | Application-boundary schema annotation                                           |
 | `JIT.class`       | [Runtime classes](./runtime-classes)               | Generated class, construction and capabilities                                   |
 | `JIT.ddd`         | [Runtime classes](./runtime-classes#ddd-factories) | `valueObject`, `entity`, `aggregateRoot`, `domainEvent`                          |
@@ -85,8 +82,8 @@ documentation.
 
 | API                    | Reference                                       | Prefer                          |
 | ---------------------- | ----------------------------------------------- | ------------------------------- |
-| `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)      | `JIT.watchedList()`             |
-| `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class) | `JIT.watchedList(..., { key })` |
+| `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)      | `JIT.state.watchedList()`             |
+| `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class) | `JIT.state.watchedList(..., { key })` |
 
 Low-level compilers (`compileEqual`, `compileNormalize`, emitters, IR passes)
 are not part of the `JIT` namespace. They live in the `Compiler` namespace of

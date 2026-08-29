@@ -14,7 +14,7 @@ Compiler.compileEqual(User.schema);
 ```
 
 The public capabilities — `JIT.compare.equal`, `JIT.clone`, `JIT.cqrs.query`,
-`JIT.transform`, and `JIT.update` — provide metadata, builder ergonomics and
+`JIT.transform`, and `JIT.state.update` — provide metadata, builder ergonomics and
 the clearest AOT registration, and are what application code should use.
 
 ## compileEqual
@@ -37,7 +37,7 @@ Compiles direct structural hashing. Prefer `JIT.compare.hash`.
 ## compileUpdate
 
 Compiles the low-level structural patch function. It does not add draft
-recipes, parameterized patches or reactive controllers; use `JIT.update` for
+recipes, parameterized patches or reactive controllers; use `JIT.state.update` for
 those.
 
 ## compilePipeline

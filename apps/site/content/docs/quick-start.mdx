@@ -51,7 +51,7 @@ const stringifyUser = JIT.json.stringify(User);
 equalUser(a, b); // schema-aware deep equality
 cloneUser(a); // static-literal deep clone
 diffUser(a, b); // structural diff entries
-JIT.update(User).patch({ name: "Ada" }).compile()(a, { name: "Ada" });
+JIT.state.update(User).patch({ name: "Ada" }).compile()(a, { name: "Ada" });
 stringifyUser(a); // compiled JSON — static keys baked in
 JIT.security.mask(User)(a); // PII-safe copy for logs
 ```

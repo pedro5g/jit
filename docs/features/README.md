@@ -20,6 +20,8 @@ work and for production performance. Each page explains:
 - [Temporal, ISO, codecs, and special schemas](./temporal-iso-codec-special-schemas.md)
 - [Queries, mappers, and high-volume flows](./query-mapper-flows.md)
 - [Canonical CQRS queries](./cqrs.md)
+- [API query boundaries](./api-query-boundaries.md)
+- [Compiled state](./state.md)
 - [Sort and ordering plans](./sort.md)
 - [Indexing](./indexing.md)
 - [Physical query planning](./physical-query-planning.md)

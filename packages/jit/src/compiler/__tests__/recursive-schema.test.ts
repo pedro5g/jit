@@ -136,7 +136,7 @@ describe("JIT recursive schemas", () => {
   });
 
   it("should update a recursive value through a named helper", () => {
-    const update = JIT.update(Tree).compile();
+    const update = JIT.state.update(Tree).compile();
     const value = { value: 1, children: [{ value: 2, children: [{ value: 3, children: [] }] }] } as never;
     const next = update(value, { children: [{ children: [{ value: 42 }] }] } as never) as {
       children: { children: { value: number }[] }[];

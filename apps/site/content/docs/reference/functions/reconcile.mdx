@@ -9,7 +9,7 @@ description: Compare two snapshots of a keyed collection in one pass over each s
 const User = JIT.object({ id: JIT.number(), name: JIT.string() });
 const Users = JIT.array(User).keyed("id");
 
-const reconcileUsers = JIT.reconcile(Users);
+const reconcileUsers = JIT.state.reconcile(Users);
 
 const previous = [
   { id: 1, name: "Ada" },
@@ -43,7 +43,7 @@ const Users = JIT.array(User).keyed("id");
 const previous = [{ id: 1, name: "Ada" }];
 const rebuilt = [{ id: 1, name: "Ada" }];
 
-const result = JIT.reconcile(Users)(previous, rebuilt);
+const result = JIT.state.reconcile(Users)(previous, rebuilt);
 
 console.log(result.changed.length, result.unchanged.length);
 ```
@@ -57,7 +57,7 @@ have served it is never generated:
 const User = JIT.object({ id: JIT.number(), name: JIT.string() });
 const Users = JIT.array(User).keyed("id");
 
-const additionsOnly = JIT.reconcile(Users, {
+const additionsOnly = JIT.state.reconcile(Users, {
   removed: false,
   changed: false,
   unchanged: false,
@@ -84,7 +84,7 @@ where equality already failed, so it costs nothing on unchanged rows:
 const User = JIT.object({ id: JIT.number(), name: JIT.string() });
 const Users = JIT.array(User).keyed("id");
 
-const result = JIT.reconcile(Users).changes("diff")(
+const result = JIT.state.reconcile(Users).changes("diff")(
   [{ id: 1, name: "Ada" }],
   [{ id: 1, name: "Ada Lovelace" }]
 );
@@ -103,11 +103,11 @@ const Users = JIT.array(User).keyed("id");
 const previous = [{ id: 1, name: "Ada" }];
 const current = [{ id: 2, name: "Grace" }];
 
-const events = [...JIT.reconcile(Users).to.iterator()(previous, current)];
+const events = [...JIT.state.reconcile(Users).to.iterator()(previous, current)];
 console.log(events.map((event) => event.type).join(","));
 
 const seen: string[] = [];
-JIT.reconcile(Users).to.visitor()(previous, current, {
+JIT.state.reconcile(Users).to.visitor()(previous, current, {
   added: (value) => seen.push(`+${value.id}`),
   removed: (value) => seen.push(`-${value.id}`),
 });
@@ -116,9 +116,9 @@ console.log(seen.join(","));
 
 ## Relationship to watch
 
-`JIT.reconcile` compares two snapshots you already hold and decides by value.
-[`JIT.watch`](./watch) is the stateless keyed-change surface that reports
-updates by reference, and `JIT.watchedList` holds the state for you. Reach for
+`JIT.state.reconcile` compares two snapshots you already hold and decides by value.
+[`JIT.state.watch`](./watch) is the stateless keyed-change surface that reports
+updates by reference, and `JIT.state.watchedList` holds the state for you. Reach for
 reconcile when both snapshots are in hand and value equality is what "changed"
 should mean.
 

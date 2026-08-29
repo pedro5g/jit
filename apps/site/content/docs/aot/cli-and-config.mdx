@@ -52,7 +52,7 @@ export const UserOps = {
 export const findAdmins = JIT.cqrs
   .query(Users)
   .filter((q) => q.eq("role", "admin"));
-export const watchUsers = JIT.watch(Users, { key: "id" });
+export const watchUsers = JIT.state.watch(Users, { key: "id" });
 ```
 
 ```ts title="src/app.ts"

@@ -79,7 +79,7 @@ function childName(parent: string, key: string, schema: ObjectSchema, nested: Ma
 
 /** The merge patch plus every nested helper it calls, as one expression. */
 export function emitMergePatchProgram(schema: ATS.AnyTypeSchema): string {
-  const object = expectProjectionObject(schema, "JIT.patch.merge()");
+  const object = expectProjectionObject(schema, "JIT.state.patch.merge()");
   const nested = new Map<string, string>();
   const root = new CodeWriter();
 
@@ -124,7 +124,7 @@ export function compileMergePatch<TValue>(
  */
 export function emitJsonPatchSource(schema: ATS.AnyTypeSchema): string {
   // The target must be an object for a pointer to reach into it.
-  expectProjectionObject(schema, "JIT.patch.json()");
+  expectProjectionObject(schema, "JIT.state.patch.json()");
 
   const writer = new CodeWriter();
 

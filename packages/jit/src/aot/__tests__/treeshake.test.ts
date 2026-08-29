@@ -319,7 +319,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
    */
   it("should ship only the channels a reconciliation asked for", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const addedOnly = JIT.reconcile(JIT.array(User).keyed("id"), {
+    const addedOnly = JIT.state.reconcile(JIT.array(User).keyed("id"), {
       removed: false,
       changed: false,
       unchanged: false,
@@ -342,8 +342,8 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
   it("should carry a diff into a reconciliation only when one was declared", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const withDiff = JIT.reconcile(JIT.array(User).keyed("id")).changes("diff");
-    const withoutDiff = JIT.reconcile(JIT.array(User).keyed("id"));
+    const withDiff = JIT.state.reconcile(JIT.array(User).keyed("id")).changes("diff");
+    const withoutDiff = JIT.state.reconcile(JIT.array(User).keyed("id"));
 
     AOT.generate({ artifacts: { withDiff }, outDir });
     const diffed = await bundle(
@@ -608,7 +608,7 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
   it("should keep JSON Patch down to pointer helpers without other patch contracts", async () => {
     const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-    const patchUser = JIT.patch.json(User);
+    const patchUser = JIT.state.patch.json(User);
 
     AOT.generate({ artifacts: { patchUser }, outDir });
     const bundled = await bundle(

@@ -6,6 +6,7 @@
     "equal",
     "clone",
     "diff",
+    "state",
     "update",
     "hash",
     "json",

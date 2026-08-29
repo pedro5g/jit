@@ -14,7 +14,7 @@ describe("JIT compiler watch", () => {
   const adaUpdated = { id: 1, name: "Ada Lovelace", role: "admin" };
 
   it("should compile watched-list results for arrays", () => {
-    const watch = JIT.watch(Users, { key: "id" });
+    const watch = JIT.state.watch(Users, { key: "id" });
     const result = watch([ada, grace], [adaUpdated, alan]);
     const source = Compiler.emitWatchSource(Users.schema, { key: "id" });
 
@@ -83,7 +83,7 @@ describe("JIT compiler watch", () => {
   });
 
   it("should report unchanged keyed references", () => {
-    const watch = JIT.watch(Users, { key: "id" });
+    const watch = JIT.state.watch(Users, { key: "id" });
     const result = watch([ada, grace], [ada, grace]);
 
     expect(result.newItems).toEqual([]);
@@ -93,7 +93,7 @@ describe("JIT compiler watch", () => {
   });
 
   it("should support Set watched lists", () => {
-    const watch = JIT.watch(JIT.set(User), { key: "id" });
+    const watch = JIT.state.watch(JIT.set(User), { key: "id" });
     const result = watch(new Set([ada, grace]), new Set([adaUpdated, alan]));
     const source = Compiler.emitWatchSource(JIT.set(User).schema, { key: "id" });
 
@@ -107,7 +107,7 @@ describe("JIT compiler watch", () => {
 
   it("should support Map watched lists over values", () => {
     const UserMap = JIT.mapSchema(JIT.number(), User);
-    const watch = JIT.watch(UserMap, { key: "id" });
+    const watch = JIT.state.watch(UserMap, { key: "id" });
     const result = watch(
       new Map([
         [1, ada],
@@ -134,7 +134,7 @@ describe("JIT compiler watch", () => {
     const added: (typeof alan)[] = [];
     const removed: (typeof grace)[] = [];
     const updated: Array<[typeof ada, typeof adaUpdated]> = [];
-    const watch = JIT.watch(Users, {
+    const watch = JIT.state.watch(Users, {
       key: "id",
       onAdd: (item) => {
         added[added.length] = item;
@@ -167,13 +167,13 @@ describe("JIT compiler watch", () => {
   });
 
   it("should reject unknown watch keys", () => {
-    expect(() => JIT.watch(Users, { key: "missing" as "id" })).toThrow(Errors.JITError);
+    expect(() => JIT.state.watch(Users, { key: "missing" as "id" })).toThrow(Errors.JITError);
 
     const typecheckOnly = false as boolean;
 
     if (typecheckOnly) {
       // @ts-expect-error watch keys must exist on collection items.
-      JIT.watch(Users, { key: "missing" });
+      JIT.state.watch(Users, { key: "missing" });
     }
   });
 });

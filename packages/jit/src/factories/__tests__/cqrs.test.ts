@@ -393,7 +393,7 @@ describe("JIT.cqrs", () => {
       age: JIT.number(),
       status: JIT.string(),
     });
-    const input = JIT.cqrs.input(User, {
+    const input = JIT.api.query(User, {
       filter: {
         name: true,
         age: ["gte", "lte", "between"],
@@ -403,7 +403,7 @@ describe("JIT.cqrs", () => {
       sort: ["name", "age"],
       pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
     });
-    const parse = JIT.cqrs.parse(input);
+    const parse = JIT.api.parse(input);
 
     expect(input["~query"]).toEqual({
       version: 1,
@@ -434,8 +434,8 @@ describe("JIT.cqrs", () => {
 
   it("normalizes allowed sort fields and bounded offset pagination", () => {
     const User = JIT.object({ name: JIT.string(), createdAt: JIT.date() });
-    const parse = JIT.cqrs.parse(
-      JIT.cqrs.input(User, {
+    const parse = JIT.api.parse(
+      JIT.api.query(User, {
         sort: ["name", "createdAt"],
         pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
       })
@@ -460,7 +460,7 @@ describe("JIT.cqrs", () => {
 
   it("keeps permitted operator aliases on the compiled path", () => {
     const User = JIT.object({ age: JIT.number() });
-    const parse = JIT.cqrs.parse(JIT.cqrs.input(User, { filter: { age: ["gte"] } }));
+    const parse = JIT.api.parse(JIT.api.query(User, { filter: { age: ["gte"] } }));
 
     expect(parse({ filter: { age: { gte: 18, $gte: 21 } } })).toEqual({
       filter: [
@@ -473,8 +473,8 @@ describe("JIT.cqrs", () => {
 
   it("normalizes opaque compound cursors with stable ordering", () => {
     const User = JIT.object({ id: JIT.string(), createdAt: JIT.string() });
-    const parse = JIT.cqrs.parse(
-      JIT.cqrs.input(User, {
+    const parse = JIT.api.parse(
+      JIT.api.query(User, {
         pagination: { type: "cursor", by: ["createdAt", "id"], defaultLimit: 20, maxLimit: 100 },
       })
     );
@@ -495,8 +495,8 @@ describe("JIT.cqrs", () => {
 
   it("enforces the configured structural filter budget", () => {
     const User = JIT.object({ name: JIT.string(), status: JIT.string() });
-    const parse = JIT.cqrs.parse(
-      JIT.cqrs.input(User, {
+    const parse = JIT.api.parse(
+      JIT.api.query(User, {
         filter: { name: true, status: true },
         maxFilters: 1,
       })
@@ -507,8 +507,8 @@ describe("JIT.cqrs", () => {
 
   it("enforces condition and sort budgets in the compiled request parser", () => {
     const User = JIT.object({ age: JIT.number(), name: JIT.string(), id: JIT.string() });
-    const parse = JIT.cqrs.parse(
-      JIT.cqrs.input(User, {
+    const parse = JIT.api.parse(
+      JIT.api.query(User, {
         filter: { age: ["gte", "lte"] },
         sort: ["age", "name", "id"],
         limits: { maxConditions: 1, maxSortFields: 1 },
@@ -521,7 +521,7 @@ describe("JIT.cqrs", () => {
 
   it("normalizes bounded sparse fieldsets against the schema", () => {
     const User = JIT.object({ id: JIT.string(), name: JIT.string(), email: JIT.string() });
-    const parse = JIT.cqrs.parse(JIT.cqrs.input(User, { select: true, limits: { maxSelectFields: 2 } }));
+    const parse = JIT.api.parse(JIT.api.query(User, { select: true, limits: { maxSelectFields: 2 } }));
 
     expect(parse({ fields: "id,name" })).toEqual({ filter: [], sort: [], select: ["id", "name"] });
     expect(() => parse({ fields: "id,name,email" })).toThrow(/select exceeds/i);
@@ -529,12 +529,12 @@ describe("JIT.cqrs", () => {
     expect(() => parse({ fields: "id,id" })).toThrow(/repeats/i);
     expect(() => parse({ fields: "id," })).toThrow(/empty|not allowed/i);
     expect(() => parse({ fields: "" })).toThrow(/empty/i);
-    expect(() => JIT.cqrs.parse(JIT.cqrs.input(User, {}))({ fields: "id" })).toThrow(/sparse fields/i);
+    expect(() => JIT.api.parse(JIT.api.query(User, {}))({ fields: "id" })).toThrow(/sparse fields/i);
   });
 
   it("normalizes declared nested filter paths in compiled source", () => {
     const User = JIT.object({ profile: JIT.object({ age: JIT.number() }) });
-    const parse = JIT.cqrs.parse(JIT.cqrs.input(User, { filter: { "profile.age": ["gte"] } }));
+    const parse = JIT.api.parse(JIT.api.query(User, { filter: { "profile.age": ["gte"] } }));
 
     expect(parse({ filter: { "profile.age": { $gte: 18 } } })).toEqual({
       filter: [{ kind: "gte", path: ["profile", "age"], value: 18 }],
@@ -544,26 +544,26 @@ describe("JIT.cqrs", () => {
 
   it("validates static parser configuration before generating source", () => {
     const User = JIT.object({ name: JIT.string() });
-    expect(() => JIT.cqrs.input(User, { maxFilters: -1 })).toThrow(/maxFilters/i);
+    expect(() => JIT.api.query(User, { maxFilters: -1 })).toThrow(/maxFilters/i);
     expect(() =>
-      JIT.cqrs.input(User, {
+      JIT.api.query(User, {
         pagination: { type: "offset", defaultLimit: 10, maxLimit: 5 },
       })
     ).toThrow(/pagination/i);
     expect(() =>
-      JIT.cqrs.input(User, {
+      JIT.api.query(User, {
         pagination: { type: "cursor", by: [], defaultLimit: 10, maxLimit: 20 },
       })
     ).toThrow(/stable ordering/i);
-    expect(() => JIT.cqrs.input(User, { limits: { maxSortFields: -1 } })).toThrow(/structural limits/i);
-    expect(() => JIT.cqrs.input(User, { filter: { missing: true } as never })).toThrow(/not declared/i);
-    expect(() => JIT.cqrs.input(User, { sort: ["missing"] as never })).toThrow(/not declared/i);
-    expect(() => JIT.cqrs.input(User, { sort: ["name", "name"] })).toThrow(/repeats/i);
-    expect(() => JIT.cqrs.input(User, { filter: { name: ["eq", "eq"] } })).toThrow(/repeats operator/i);
-    expect(() => JIT.cqrs.input(User, { filter: { name: [] } })).toThrow(/empty operator list/i);
-    expect(() => JIT.cqrs.input(User, { filter: { name: ["$eq"] } })).toThrow(/invalid operator/i);
+    expect(() => JIT.api.query(User, { limits: { maxSortFields: -1 } })).toThrow(/structural limits/i);
+    expect(() => JIT.api.query(User, { filter: { missing: true } as never })).toThrow(/not declared/i);
+    expect(() => JIT.api.query(User, { sort: ["missing"] as never })).toThrow(/not declared/i);
+    expect(() => JIT.api.query(User, { sort: ["name", "name"] })).toThrow(/repeats/i);
+    expect(() => JIT.api.query(User, { filter: { name: ["eq", "eq"] } })).toThrow(/repeats operator/i);
+    expect(() => JIT.api.query(User, { filter: { name: [] } })).toThrow(/empty operator list/i);
+    expect(() => JIT.api.query(User, { filter: { name: ["$eq"] } })).toThrow(/invalid operator/i);
     expect(() =>
-      JIT.cqrs.input(User, {
+      JIT.api.query(User, {
         pagination: { type: "cursor", by: ["name", "name"], defaultLimit: 10, maxLimit: 20 },
       })
     ).toThrow(/repeats/i);
@@ -572,12 +572,12 @@ describe("JIT.cqrs", () => {
   it("snapshots nested configuration before compiling the parser", () => {
     const User = JIT.object({ age: JIT.number() });
     const operators = ["gte"];
-    const input = JIT.cqrs.input(User, { filter: { age: operators } });
+    const input = JIT.api.query(User, { filter: { age: operators } });
 
     operators.push("lte");
     expect(input.options.filter?.age).toEqual(["gte"]);
     expect(() => (input.options.filter?.age as string[]).push("lte")).toThrow();
-    expect(JIT.cqrs.parse(input)({ filter: { age: { $gte: 18 } } })).toEqual({
+    expect(JIT.api.parse(input)({ filter: { age: { $gte: 18 } } })).toEqual({
       filter: [{ kind: "gte", path: ["age"], value: 18 }],
       sort: [],
     });
@@ -621,24 +621,24 @@ describe("JIT.cqrs", () => {
       filter: [{ kind: "gte", path: ["age"], value: 18 }],
       sort: [],
     });
-    expect(() => parse([])).toThrow(/invalid CQRS input/i);
-    expect(() => parse({ filter: { name: { $contains: "Ada" } } })).toThrow(/invalid CQRS input/i);
-    expect(() => parse({ sort: "age,age" })).toThrow(/invalid CQRS input/i);
-    expect(() => parse({ fields: "name,name" })).toThrow(/invalid CQRS input/i);
-    expect(() => parse({ fields: "" })).toThrow(/invalid CQRS input/i);
-    expect(() => parse({ sort: 42 })).toThrow(/invalid CQRS input/i);
-    expect(() => parse({ unknown: true })).toThrow(/invalid CQRS input/i);
+    expect(() => parse([])).toThrow(/invalid API query input/i);
+    expect(() => parse({ filter: { name: { $contains: "Ada" } } })).toThrow(/invalid API query input/i);
+    expect(() => parse({ sort: "age,age" })).toThrow(/invalid API query input/i);
+    expect(() => parse({ fields: "name,name" })).toThrow(/invalid API query input/i);
+    expect(() => parse({ fields: "" })).toThrow(/invalid API query input/i);
+    expect(() => parse({ sort: 42 })).toThrow(/invalid API query input/i);
+    expect(() => parse({ unknown: true })).toThrow(/invalid API query input/i);
   });
 
   it("keeps valid dynamic requests equivalent between runtime and import-free AOT", () => {
     const User = JIT.object({ age: JIT.number(), name: JIT.string() });
-    const input = JIT.cqrs.input(User, {
+    const input = JIT.api.query(User, {
       filter: { age: ["gte", "lte"], name: true },
       sort: ["age", "name"],
       select: true,
       pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
     });
-    const runtime = JIT.cqrs.parse(input);
+    const runtime = JIT.api.parse(input);
     const source = emitCqrsAotParserSource(
       [
         ["age", ["gte", "lte"]],

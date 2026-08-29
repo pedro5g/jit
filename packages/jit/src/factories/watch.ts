@@ -25,13 +25,13 @@ type CollectionElement<TValue> = TValue extends readonly (infer TElement)[]
  */
 export type WatchedListResult<TItem> = import("../compiler/watch.js").WatchResult<TItem>;
 /**
- * Input options accepted by `JIT.watch(schema, options)`.
+ * Input options accepted by `JIT.state.watch(schema, options)`.
  *
  * @template TValue - The watched collection type.
  */
 export type WatchInput<TValue> = WatchOptions<CollectionElement<TValue>>;
 /**
- * Runtime watcher returned by `JIT.watch(schema, options)`.
+ * Runtime watcher returned by `JIT.state.watch(schema, options)`.
  *
  * @template TValue - The watched collection type.
  * @param previous - The previous collection snapshot.

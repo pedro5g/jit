@@ -35,6 +35,7 @@ export {
   type ActorRef,
   access,
 } from "./access.js";
+export { type ApiQuery, type ApiQueryOptions, api } from "./api.js";
 export { type CacheKeyBuilder, cacheKey } from "./cache-key.js";
 export { canonical } from "./canonical.js";
 export {
@@ -49,8 +50,6 @@ export {
 export * from "./collection/index.js";
 export * from "./composition/index.js";
 export {
-  type CqrsInput,
-  type CqrsInputOptions,
   type CqrsQuery,
   cqrs,
   type StandardQuery,
@@ -91,7 +90,7 @@ export {
   ops,
   type StringOps,
 } from "./ops.js";
-export { type JsonPatchOperation, type MergePatch, patch } from "./patch.js";
+export type { JsonPatchOperation, MergePatch } from "./patch.js";
 export * from "./primitive/index.js";
 export type {
   BinaryProcessBuilder,
@@ -106,16 +105,15 @@ export type {
   QueryBuilder,
   QueryConditionBuilder,
 } from "./query.js";
-export {
-  type ReconcileChange,
-  type ReconcileChangeWithDiff,
-  type ReconcileDelta,
-  type ReconcileEvent,
-  type ReconcilePlan,
-  type ReconcileResult,
-  type ReconcileVisitor,
-  type ResolvedChannels,
-  reconcile,
+export type {
+  ReconcileChange,
+  ReconcileChangeWithDiff,
+  ReconcileDelta,
+  ReconcileEvent,
+  ReconcilePlan,
+  ReconcileResult,
+  ReconcileVisitor,
+  ResolvedChannels,
 } from "./reconcile.js";
 export {
   type RuleConditionBuilder,
@@ -142,6 +140,7 @@ export {
 export { codec } from "./serialize.js";
 export { type SortBuilder, type SortPlan, sort } from "./sort.js";
 export * from "./special/index.js";
+export { state } from "./state.js";
 export { stream } from "./stream.js";
 export type { TransformBuilder, TransformFieldOps } from "./transform.js";
 export { transform } from "./transform.js";
@@ -162,7 +161,6 @@ export type {
   UpdateInput,
   UpdateRecipe,
 } from "./update.js";
-export { update } from "./update.js";
 export type {
   RuntimeWatch,
   WatchedListOptions,
@@ -171,6 +169,6 @@ export type {
   WatchedListUpdate,
   WatchInput,
 } from "./watch.js";
-export { KeyedWatchedList, WatchedList, watch, watchedList } from "./watch.js";
+export { KeyedWatchedList, WatchedList } from "./watch.js";
 export * from "./wrappers/index.js";
 export { default } from "./wrappers/index.js";

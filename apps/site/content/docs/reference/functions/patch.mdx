@@ -8,9 +8,9 @@ description: Three patch contracts that disagree about null, under three explici
 ```ts
 const User = JIT.object({ id: JIT.number(), name: JIT.string() });
 
-const applyPatch = JIT.patch.apply(User);
-const mergePatch = JIT.patch.merge(User);
-const jsonPatch = JIT.patch.json(User);
+const applyPatch = JIT.state.patch.apply(User);
+const mergePatch = JIT.state.patch.merge(User);
+const jsonPatch = JIT.state.patch.json(User);
 ```
 
 | Member  | Contract                    | What `null` means             |
@@ -24,12 +24,12 @@ interchangeable deletes fields it meant to keep.
 
 ## apply — a deep partial
 
-`JIT.patch.apply` is [`JIT.update`](./update) under this namespace: the same
+`JIT.state.patch.apply` is [`JIT.state.update`](./update) under this namespace: the same
 compiled plan, not a second engine. A member left out is left alone.
 
 ```ts
 const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-const applyPatch = JIT.patch.apply(User);
+const applyPatch = JIT.state.patch.apply(User);
 
 console.log(JSON.stringify(applyPatch({ id: 1, name: "Ada" }, { name: "Ada L" })));
 ```
@@ -41,7 +41,7 @@ An object member is merged recursively; `null` removes; anything else replaces.
 ```ts
 const Address = JIT.object({ city: JIT.string(), zip: JIT.string() });
 const User = JIT.object({ id: JIT.number(), name: JIT.string(), address: Address });
-const mergePatch = JIT.patch.merge(User);
+const mergePatch = JIT.state.patch.merge(User);
 
 const user = { id: 1, name: "Ada", address: { city: "London", zip: "E1" } };
 
@@ -59,7 +59,7 @@ Operations are applied in order against JSON Pointers.
 
 ```ts
 const User = JIT.object({ id: JIT.number(), name: JIT.string(), tags: JIT.array(JIT.string()) });
-const jsonPatch = JIT.patch.json(User);
+const jsonPatch = JIT.state.patch.json(User);
 
 const user = { id: 1, name: "Ada", tags: ["a"] };
 
@@ -72,7 +72,7 @@ console.log(JSON.stringify(jsonPatch(user, [{ op: "remove", path: "/tags/0" }]))
 
 ```ts
 const User = JIT.object({ id: JIT.number(), name: JIT.string() });
-const jsonPatch = JIT.patch.json(User);
+const jsonPatch = JIT.state.patch.json(User);
 
 try {
   jsonPatch({ id: 1, name: "Ada" }, [{ op: "test", path: "/name", value: "Nope" }]);
@@ -90,7 +90,7 @@ implementation with no dependency on JIT, not because compiling makes it faster.
 
 ```ts
 const User = JIT.object({ id: JIT.number(), tags: JIT.array(JIT.string()) });
-const jsonPatch = JIT.patch.json(User);
+const jsonPatch = JIT.state.patch.json(User);
 
 const user = { id: 1, tags: ["a"] };
 jsonPatch(user, [{ op: "add", path: "/tags/-", value: "b" }]);

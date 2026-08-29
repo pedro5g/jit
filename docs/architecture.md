@@ -162,7 +162,10 @@ requires runtime, type, generated-source, runtime-AOT, and `define`-stub AOT
 coverage. See [composable execution pipelines](features/composable-execution.md)
 for the public contract.
 
-`JIT.cqrs` is the only public query surface. `JIT.cqrs.query` lowers through the
+Trusted application queries live under `JIT.cqrs`; untrusted request syntax
+lives under the deny-by-default `JIT.api` boundary. `JIT.api.query` compiles
+allowlisted fields, operators and structural limits into normalized query data
+and never introduces a second query AST. `JIT.cqrs.query` lowers through the
 same `QueryProgram` for object collections and through the existing binary
 query compiler for rowsets. Query output is a
 physical-plan choice. `.compile()` keeps the specialized
@@ -184,6 +187,14 @@ Distinct semantics also stay in `QueryProgram`. `DistinctDescriptor` selects a
 scalar key table, allocation-free adjacent comparison for matching ordering,
 a compound-key trie, or structural hash with compiled-equality confirmation.
 No physical strategy name is serialized through `~query`.
+
+Immutable state evolution lives under `JIT.state`: update, patch, reconcile
+and watch keep their independent descriptors and specialized emitters. The
+namespace is not a state runtime. `UpdateIRProgram` already delays parent
+allocation until a child changes and preserves unchanged references; the
+future `MutationPlan` is extracted around that baseline. `ChangedDescriptor`
+provides the current path-to-bit layout that mutation and derived computation
+will generalize without changing existing mask values.
 
 Versioned schema evolution uses an immutable `MigrationDescriptor`. Every edge
 is the existing MapperPlan; one generated version switch falls through only

@@ -139,7 +139,7 @@ const access = JIT.access(Post)
 const ability = access({ id: 1 });
 const read = JIT.cqrs.query(Post).authorize(ability, "read").select("id", "title");
 const project = JIT.project(Post).authorize(ability, "read");
-const patch = JIT.patch.apply(Post).authorize(ability, "update");
+const patch = JIT.state.patch.apply(Post).authorize(ability, "update");
 const post = { id: 1, authorId: 1, title: "draft" };
 
 console.log(read([post]), project(post), patch(post, { title: "published" }));

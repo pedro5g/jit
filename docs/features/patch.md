@@ -19,12 +19,12 @@ For JSON Patch, honestly: not much. A pointer is a string that arrives with the 
 ## 3. API
 
 ```ts
-JIT.patch.apply(User);  // deep partial; undefined means "leave alone"
-JIT.patch.merge(User);  // RFC 7396; null removes
-JIT.patch.json(User);   // RFC 6902; a list of operations
+JIT.state.patch.apply(User);  // deep partial; undefined means "leave alone"
+JIT.state.patch.merge(User);  // RFC 7396; null removes
+JIT.state.patch.json(User);   // RFC 6902; a list of operations
 ```
 
-`JIT.patch.apply` is `JIT.update` under the patch namespace — the same compiled plan and the same registered artifact, reached by a second name because it belongs in this group.
+`JIT.state.patch.apply` is `JIT.state.update` under the patch namespace — the same compiled plan and the same registered artifact, reached by a second name because it belongs in this group.
 
 ## 4. Semantics
 
@@ -39,13 +39,13 @@ All three are immutable and share unchanged substructure. `merge` and `apply` re
 ## 5. Compilation
 
 ```
-JIT.patch.merge(User)
+JIT.state.patch.merge(User)
         ↓
 one function per object level, named after its path
         ↓
 static-key checks per declared member, direct calls between levels
 
-JIT.patch.json(User)
+JIT.state.patch.json(User)
         ↓
 the operation switch, plus pointer helpers emitted once per module
 ```
@@ -102,9 +102,9 @@ All three exist on `@jit-compiler/jit/runtime` and `@jit-compiler/jit/define` wi
 
 ## 12. Benchmarks
 
-No performance claim is made for `JIT.patch.json`: it walks a runtime pointer, and a hand-written pointer walker does the same work. It is here for the RFC contract and for the AOT property that the generated module needs no library.
+No performance claim is made for `JIT.state.patch.json`: it walks a runtime pointer, and a hand-written pointer walker does the same work. It is here for the RFC contract and for the AOT property that the generated module needs no library.
 
-`JIT.patch.merge` is the one with a compiled advantage, and the shape of it is the same one measured for [Projection](./projection.md): replacing dynamic key iteration with static-key checks. The library's own `pnpm bench:ops` covers the update plan that `apply` reuses.
+`JIT.state.patch.merge` is the one with a compiled advantage, and the shape of it is the same one measured for [Projection](./projection.md): replacing dynamic key iteration with static-key checks. The library's own `pnpm bench:ops` covers the update plan that `apply` reuses.
 
 If you need a number before adopting `merge` in a hot path, measure it against your own patches with `pnpm bench:ops` as a template — patch shape (how many members are present, how deep) dominates, and a synthetic average would not tell you much.
 
@@ -118,6 +118,6 @@ Pick the contract by what the *sender* means, not by what is convenient to consu
 
 ## 15. Non-goals
 
-There is no `JIT.patch.math`. Atomic increment/decrement operators were considered and deferred: they would lower to the update plan and add API surface without avoiding work, allocations or a pass over the data, which is the bar this library sets for a new operation. They will be revisited only with a benchmark that shows a difference.
+There is no `JIT.state.patch.math`. Atomic increment/decrement operators were considered and deferred: they would lower to the update plan and add API surface without avoiding work, allocations or a pass over the data, which is the bar this library sets for a new operation. They will be revisited only with a benchmark that shows a difference.
 
-Patch does not validate the result against the schema — compose it with `JIT.validate` if a patch may arrive from an untrusted source. It does not produce patches; use [`JIT.compare.diff`](./diff.md) or `JIT.reconcile(…).changes("diff")` for that direction.
+Patch does not validate the result against the schema — compose it with `JIT.validate` if a patch may arrive from an untrusted source. It does not produce patches; use [`JIT.compare.diff`](./diff.md) or `JIT.state.reconcile(…).changes("diff")` for that direction.

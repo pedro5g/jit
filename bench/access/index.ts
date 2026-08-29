@@ -169,7 +169,7 @@ registerScenario({
 const updateAccess = JIT.access(Post)
   .actor(User)
   .can("update", { fields: ["title"], when: (query, self) => query.eq("authorId", self.field("id")) });
-const authorizedUpdate = JIT.patch.apply(Post).authorize(updateAccess(actor), "update");
+const authorizedUpdate = JIT.state.patch.apply(Post).authorize(updateAccess(actor), "update");
 const ownedPosts = posts.map((subject) => ({ ...subject, authorId: actor.id }));
 const updateSweep = (update: (subject: Post, patch: { title: string }) => Post) => (input: readonly Post[]) => {
   let last: Post | undefined;

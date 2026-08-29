@@ -29,11 +29,11 @@ export type MergePatch<TValue> = TValue extends object
  */
 export const patch = Object.freeze({
   /**
-   * A deep partial patch, applied immutably. This is `JIT.update` under the
+   * A deep partial patch, applied immutably. This is `JIT.state.update` under the
    * patch namespace — the same plan, not a second engine.
    */
   apply<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): RuntimeUpdate<ATS.TypeofSchema<TSchema>> {
-    // Literally `JIT.update`, so it registers the same artifact and AOT emits
+    // Literally `JIT.state.update`, so it registers the same artifact and AOT emits
     // it through the same path. A second entry point, not a second engine.
     return update(schema);
   },

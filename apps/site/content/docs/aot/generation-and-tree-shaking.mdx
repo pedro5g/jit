@@ -79,9 +79,9 @@ not parse cannot retain `JITValidationError`; a query that touches `id` and
 `score` cannot retain an unrelated string dictionary; a standalone `is` cannot
 retain codec or mapper infrastructure.
 
-Callback-free `JIT.watch` functions can also be declared standalone or as a
+Callback-free `JIT.state.watch` functions can also be declared standalone or as a
 member of an artifact object. Their generated module retains only the keyed diff loop;
-stateful `JIT.watchedList` instances remain runtime-owned. See [watched
+stateful `JIT.state.watchedList` instances remain runtime-owned. See [watched
 lists](/docs/runtime/watched-lists#aot-standalone-function).
 
 ## Proof, not assumption

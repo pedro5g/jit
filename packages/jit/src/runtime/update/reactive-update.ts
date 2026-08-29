@@ -138,7 +138,7 @@ interface SelectionListener<TValue> {
   readonly equals: (previous: unknown, value: unknown) => boolean;
 }
 
-/** Internal generic constructor used by the public `JIT.update` facade. */
+/** Internal generic constructor used by the public `JIT.state.update` facade. */
 export function createReactiveUpdate<TValue, TInput>(
   initial: TValue,
   updater: (value: TValue, input: TInput) => TValue,

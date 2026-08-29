@@ -16,7 +16,8 @@ export async function runRuntimeShowcase(): Promise<ShowcaseResult> {
   const clone = JIT.clone(UserSchema);
   const diff = JIT.compare.diff(UserSchema);
   const hash = JIT.compare.hash(UserSchema);
-  const update = JIT.update(UserSchema)
+  const update = JIT.state
+    .update(UserSchema)
     .patch({ name: JIT.cqrs.param("name") })
     .compile();
   const mask = JIT.security.mask(UserSchema);

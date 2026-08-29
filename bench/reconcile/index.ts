@@ -81,7 +81,7 @@ function handwritten(previous: readonly Row[], current: readonly Row[]) {
   return { added, removed, changed, unchanged };
 }
 
-const plan = JIT.reconcile(Rows);
+const plan = JIT.state.reconcile(Rows);
 const aot = aotOf(plan);
 
 // The nested scan is quadratic, so it only runs where it can still finish.
@@ -141,7 +141,7 @@ registerScenario({
 });
 
 // What narrowing the request is worth: the same data, only additions wanted.
-const addedOnly = JIT.reconcile(Rows, { removed: false, changed: false, unchanged: false });
+const addedOnly = JIT.state.reconcile(Rows, { removed: false, changed: false, unchanged: false });
 const halfChanged = next(base, 0.5);
 
 registerScenario({
@@ -156,7 +156,7 @@ registerScenario({
 });
 
 // A visitor answers the same question while materializing nothing.
-const visit = JIT.reconcile(Rows).to.visitor();
+const visit = JIT.state.reconcile(Rows).to.visitor();
 
 registerScenario({
   op: "reconcile",

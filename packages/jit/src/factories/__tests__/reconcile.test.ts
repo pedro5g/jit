@@ -24,9 +24,9 @@ function sourceOf(plan: object): string {
   return Compiler.emitReconcileSource(artifact.descriptor);
 }
 
-describe("JIT.reconcile", () => {
+describe("JIT.state.reconcile", () => {
   it("reports every channel from one pass over each side", () => {
-    const result = JIT.reconcile(Users)(previous, current);
+    const result = JIT.state.reconcile(Users)(previous, current);
 
     expect(result.added).toEqual([{ id: 4, name: "d", score: 4 }]);
     expect(result.removed).toEqual([{ id: 3, name: "c", score: 3 }]);
@@ -43,16 +43,16 @@ describe("JIT.reconcile", () => {
    */
   it("decides by value, so a rebuilt row with the same fields is unchanged", () => {
     const rebuilt = previous.map((row) => ({ ...row }));
-    const result = JIT.reconcile(Users)(previous, rebuilt);
+    const result = JIT.state.reconcile(Users)(previous, rebuilt);
 
     expect(result.changed).toEqual([]);
     expect(result.unchanged).toHaveLength(3);
   });
 
   it("takes identity from the collection's fact, and lets .by() name another", () => {
-    const byName = JIT.reconcile(JIT.array(User)).by("name");
+    const byName = JIT.state.reconcile(JIT.array(User)).by("name");
 
-    expect(JIT.reconcile(Users)(previous, current).added).toHaveLength(1);
+    expect(JIT.state.reconcile(Users)(previous, current).added).toHaveLength(1);
     // Keyed by name, row 2 is a removal plus an addition rather than a change.
     expect(byName(previous, current).changed).toEqual([]);
     expect(byName(previous, current).added).toHaveLength(2);
@@ -60,7 +60,7 @@ describe("JIT.reconcile", () => {
 
   it("refuses a collection with no identity and no named key", () => {
     // The diagnostic waits for use, so .by() still has a chance to name one.
-    expect(() => JIT.reconcile(JIT.array(User))(previous, current)).toThrow(/needs an identity/);
+    expect(() => JIT.state.reconcile(JIT.array(User))(previous, current)).toThrow(/needs an identity/);
   });
 
   it("matches a Date identity by timestamp", () => {
@@ -69,7 +69,7 @@ describe("JIT.reconcile", () => {
     const at = new Date("2026-01-01T00:00:00Z");
     const before = [{ at, user: "ada" }];
     const after = [{ at: new Date("2026-01-01T00:00:00Z"), user: "grace" }];
-    const result = JIT.reconcile(Sessions)(before, after);
+    const result = JIT.state.reconcile(Sessions)(before, after);
 
     expect(result.added).toEqual([]);
     expect(result.removed).toEqual([]);
@@ -78,7 +78,7 @@ describe("JIT.reconcile", () => {
 
   describe("channels", () => {
     it("omits a channel that was turned off", () => {
-      const result = JIT.reconcile(Users, { unchanged: false })(previous, current);
+      const result = JIT.state.reconcile(Users, { unchanged: false })(previous, current);
 
       expect(result).not.toHaveProperty("unchanged");
       expect(result.added).toHaveLength(1);
@@ -87,7 +87,7 @@ describe("JIT.reconcile", () => {
     });
 
     it("does not allocate an array for a channel that was turned off", () => {
-      const source = sourceOf(JIT.reconcile(Users, { unchanged: false }));
+      const source = sourceOf(JIT.state.reconcile(Users, { unchanged: false }));
 
       expect(source).not.toContain("unchanged");
       expect(source).toContain("const added = []");
@@ -95,14 +95,14 @@ describe("JIT.reconcile", () => {
 
     /** Turning a channel off has to remove work, not merely hide a result. */
     it("never compares rows when no channel depends on the comparison", () => {
-      const source = sourceOf(JIT.reconcile(Users, { changed: false, unchanged: false }));
+      const source = sourceOf(JIT.state.reconcile(Users, { changed: false, unchanged: false }));
 
       expect(source).not.toContain("__reconcileEqual");
     });
 
     it("walks the leftover index only when removals were asked for", () => {
-      const withRemoved = sourceOf(JIT.reconcile(Users));
-      const without = sourceOf(JIT.reconcile(Users, { removed: false }));
+      const withRemoved = sourceOf(JIT.state.reconcile(Users));
+      const without = sourceOf(JIT.state.reconcile(Users, { removed: false }));
 
       expect(withRemoved).toContain("index.values()");
       expect(without).not.toContain("index.values()");
@@ -111,7 +111,7 @@ describe("JIT.reconcile", () => {
     });
 
     it("reads the index once per row when only removals were asked for", () => {
-      const source = sourceOf(JIT.reconcile(Users, { added: false, changed: false, unchanged: false }));
+      const source = sourceOf(JIT.state.reconcile(Users, { added: false, changed: false, unchanged: false }));
 
       expect(source).toContain("index.delete(item.id);");
       expect(source).not.toContain("index.get");
@@ -121,7 +121,7 @@ describe("JIT.reconcile", () => {
 
   describe("changes('diff')", () => {
     it("attaches a structural diff to each changed pair", () => {
-      const result = JIT.reconcile(Users).changes("diff")(previous, current);
+      const result = JIT.state.reconcile(Users).changes("diff")(previous, current);
 
       expect(result.changed).toEqual([
         {
@@ -134,7 +134,7 @@ describe("JIT.reconcile", () => {
 
     /** A diff on an unchanged row is pure waste, so it runs behind equality. */
     it("runs the diff only where equality already failed", () => {
-      const source = sourceOf(JIT.reconcile(Users).changes("diff"));
+      const source = sourceOf(JIT.state.reconcile(Users).changes("diff"));
       const equalAt = source.indexOf("__reconcileEqual");
       const diffAt = source.indexOf("__reconcileDiff");
 
@@ -143,13 +143,13 @@ describe("JIT.reconcile", () => {
     });
 
     it("carries no diff when it was not asked for", () => {
-      expect(sourceOf(JIT.reconcile(Users))).not.toContain("__reconcileDiff");
+      expect(sourceOf(JIT.state.reconcile(Users))).not.toContain("__reconcileDiff");
     });
   });
 
   describe("sinks", () => {
     it("streams every result without building a single array", () => {
-      const iterate = JIT.reconcile(Users).to.iterator();
+      const iterate = JIT.state.reconcile(Users).to.iterator();
       const events = [...iterate(previous, current)];
 
       expect(events.map((event) => event.type)).toEqual(["unchanged", "changed", "added", "removed"]);
@@ -158,7 +158,7 @@ describe("JIT.reconcile", () => {
     });
 
     it("hands each result to a visitor, with no arrays and no generator frames", () => {
-      const visit = JIT.reconcile(Users).to.visitor();
+      const visit = JIT.state.reconcile(Users).to.visitor();
       const seen: string[] = [];
 
       visit(previous, current, {
@@ -173,7 +173,7 @@ describe("JIT.reconcile", () => {
     });
 
     it("passes the diff through to a visitor when one was asked for", () => {
-      const visit = JIT.reconcile(Users).changes("diff").to.visitor();
+      const visit = JIT.state.reconcile(Users).changes("diff").to.visitor();
       let captured: readonly unknown[] | undefined;
 
       visit(previous, current, { changed: (_before, _after, diff) => (captured = diff) });
@@ -181,8 +181,8 @@ describe("JIT.reconcile", () => {
     });
 
     it("answers the same results through every sink", () => {
-      const eager = JIT.reconcile(Users)(previous, current);
-      const streamed = [...JIT.reconcile(Users).to.iterator()(previous, current)];
+      const eager = JIT.state.reconcile(Users)(previous, current);
+      const streamed = [...JIT.state.reconcile(Users).to.iterator()(previous, current)];
 
       expect(streamed.filter((event) => event.type === "added").map((event) => event.value)).toEqual(eager.added);
       expect(streamed.filter((event) => event.type === "removed").map((event) => event.value)).toEqual(eager.removed);
@@ -191,7 +191,7 @@ describe("JIT.reconcile", () => {
 
   describe("generated source", () => {
     it("indexes identity once and never searches twice", () => {
-      const source = sourceOf(JIT.reconcile(Users));
+      const source = sourceOf(JIT.state.reconcile(Users));
 
       expect(source).not.toContain(".find(");
       expect(source).not.toContain(".indexOf(");
@@ -202,35 +202,35 @@ describe("JIT.reconcile", () => {
     });
 
     it("settles the common case on reference before reading a field", () => {
-      expect(sourceOf(JIT.reconcile(Users))).toContain("previousItem === item ||");
+      expect(sourceOf(JIT.state.reconcile(Users))).toContain("previousItem === item ||");
     });
   });
 
   describe("edge cases", () => {
     it("treats an empty previous snapshot as all added", () => {
-      const result = JIT.reconcile(Users)([], current);
+      const result = JIT.state.reconcile(Users)([], current);
 
       expect(result.added).toHaveLength(3);
       expect(result.removed).toEqual([]);
     });
 
     it("treats an empty current snapshot as all removed", () => {
-      const result = JIT.reconcile(Users)(previous, []);
+      const result = JIT.state.reconcile(Users)(previous, []);
 
       expect(result.removed).toHaveLength(3);
       expect(result.added).toEqual([]);
     });
 
     it("reports nothing for two empty snapshots", () => {
-      const result = JIT.reconcile(Users)([], []);
+      const result = JIT.state.reconcile(Users)([], []);
 
       expect(result).toEqual({ added: [], removed: [], changed: [], unchanged: [] });
     });
 
     it("is unaffected by the order rows arrive in", () => {
       const shuffled = [...current].reverse();
-      const straight = JIT.reconcile(Users)(previous, current);
-      const reversed = JIT.reconcile(Users)(previous, shuffled);
+      const straight = JIT.state.reconcile(Users)(previous, current);
+      const reversed = JIT.state.reconcile(Users)(previous, shuffled);
 
       expect(new Set(reversed.added)).toEqual(new Set(straight.added));
       expect(new Set(reversed.removed)).toEqual(new Set(straight.removed));
@@ -242,7 +242,7 @@ describe("JIT.reconcile", () => {
         { id: 1, name: "a", score: 1 },
         { id: 1, name: "a", score: 1 },
       ];
-      const result = JIT.reconcile(Users)([{ id: 1, name: "a", score: 1 }], duplicated);
+      const result = JIT.state.reconcile(Users)([{ id: 1, name: "a", score: 1 }], duplicated);
 
       expect(result.unchanged).toHaveLength(1);
       expect(result.added).toHaveLength(1);

@@ -85,8 +85,8 @@ adaptive keyed equality. `keyed` combines identity, index and uniqueness
 intent. Read [entity, keyed and indexes](/docs/reference/operators/entity-keyed-and-indexes)
 for operation behavior, complexity, cache lifetime and mutation rules.
 
-For collection identity and change tracking, use a compiled `JIT.watch`
-snapshot diff or a stateful `JIT.watchedList`. The [watched lists
+For collection identity and change tracking, use a compiled `JIT.state.watch`
+snapshot diff or a stateful `JIT.state.watchedList`. The [watched lists
 guide](/docs/runtime/watched-lists) covers keys, update semantics, performance
 and AOT generation.
 

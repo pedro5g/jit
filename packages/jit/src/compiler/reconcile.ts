@@ -50,7 +50,7 @@ export function resolveReconcileDescriptor(
   if (!resolved) {
     throw new JITError(
       "UNSUPPORTED_SCHEMA",
-      "JIT.reconcile() needs an identity: declare one with .keyed()/.indexBy()/.uniqueBy()/.entity(), or name it with .by()"
+      "JIT.state.reconcile() needs an identity: declare one with .keyed()/.indexBy()/.uniqueBy()/.entity(), or name it with .by()"
     );
   }
 

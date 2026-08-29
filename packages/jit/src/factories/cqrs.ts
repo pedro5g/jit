@@ -856,41 +856,53 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
 ): CqrsInput<TSchema> {
   const unwrapped = unwrapSchema(schema);
   if (unwrapped.type !== "object" && unwrapped.type !== "runtimeType") {
-    throw new JITError("INVALID_QUERY", "JIT.cqrs.input() requires an object or Runtime Type schema");
+    throw new JITError("INVALID_QUERY", "JIT.api.query() requires an object or Runtime Type schema");
   }
   if (
     options.filter !== undefined &&
     (options.filter === null || typeof options.filter !== "object" || Array.isArray(options.filter))
   ) {
-    throw new JITError("INVALID_QUERY", "CQRS filter configuration must be an object");
+    throw new JITError("INVALID_QUERY", "API query filter configuration must be an object");
   }
   if (options.sort !== undefined && !Array.isArray(options.sort)) {
-    throw new JITError("INVALID_QUERY", "CQRS sort configuration must be an array");
+    throw new JITError("INVALID_QUERY", "API query sort configuration must be an array");
   }
   if (options.select !== undefined && typeof options.select !== "boolean") {
-    throw new JITError("INVALID_QUERY", "CQRS select configuration must be boolean");
+    throw new JITError("INVALID_QUERY", "API query select configuration must be boolean");
   }
   const maxFilters = options.maxFilters ?? 32;
   const fields = new Set(objectFields(unwrapped));
   for (const [field, operators] of Object.entries(options.filter ?? {})) {
     if (!isSchemaPath(unwrapped, field))
-      throw new JITError("INVALID_QUERY", `CQRS filter field ${JSON.stringify(field)} is not declared by the model`);
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(field)} is not declared by the model`
+      );
     if (operators !== true && !Array.isArray(operators)) {
-      throw new JITError("INVALID_QUERY", `CQRS filter field ${JSON.stringify(field)} has an invalid operator list`);
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(field)} has an invalid operator list`
+      );
     }
     if (operators !== true) {
       if (operators.length === 0) {
-        throw new JITError("INVALID_QUERY", `CQRS filter field ${JSON.stringify(field)} has an empty operator list`);
+        throw new JITError(
+          "INVALID_QUERY",
+          `API query filter field ${JSON.stringify(field)} has an empty operator list`
+        );
       }
       const seen = new Set<string>();
       for (const operator of operators) {
         if (typeof operator !== "string" || operator.length === 0 || operator.startsWith("$")) {
-          throw new JITError("INVALID_QUERY", `CQRS filter field ${JSON.stringify(field)} has an invalid operator`);
+          throw new JITError(
+            "INVALID_QUERY",
+            `API query filter field ${JSON.stringify(field)} has an invalid operator`
+          );
         }
         if (seen.has(operator)) {
           throw new JITError(
             "INVALID_QUERY",
-            `CQRS filter field ${JSON.stringify(field)} repeats operator ${JSON.stringify(operator)}`
+            `API query filter field ${JSON.stringify(field)} repeats operator ${JSON.stringify(operator)}`
           );
         }
         seen.add(operator);
@@ -900,17 +912,17 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   const seenSort = new Set<string>();
   for (const field of options.sort ?? []) {
     if (!fields.has(field))
-      throw new JITError("INVALID_QUERY", `CQRS sort field ${JSON.stringify(field)} is not declared by the model`);
+      throw new JITError("INVALID_QUERY", `API query sort field ${JSON.stringify(field)} is not declared by the model`);
     if (seenSort.has(field))
-      throw new JITError("INVALID_QUERY", `CQRS sort configuration repeats ${JSON.stringify(field)}`);
+      throw new JITError("INVALID_QUERY", `API query sort configuration repeats ${JSON.stringify(field)}`);
     seenSort.add(field);
   }
   if (!Number.isSafeInteger(maxFilters) || maxFilters < 0) {
-    throw new JITError("INVALID_QUERY", "CQRS maxFilters must be a non-negative safe integer");
+    throw new JITError("INVALID_QUERY", "API query maxFilters must be a non-negative safe integer");
   }
   for (const value of [options.limits?.maxConditions, options.limits?.maxSortFields, options.limits?.maxSelectFields]) {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
-      throw new JITError("INVALID_QUERY", "CQRS structural limits must be non-negative safe integers");
+      throw new JITError("INVALID_QUERY", "API query structural limits must be non-negative safe integers");
     }
   }
   if (options.pagination) {
@@ -921,10 +933,10 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       defaultLimit < 1 ||
       maxLimit < defaultLimit
     ) {
-      throw new JITError("INVALID_QUERY", "CQRS pagination requires positive bounded limits");
+      throw new JITError("INVALID_QUERY", "API query pagination requires positive bounded limits");
     }
     if (options.pagination.type === "cursor" && options.pagination.by.length === 0) {
-      throw new JITError("INVALID_QUERY", "CQRS cursor pagination requires at least one stable ordering field");
+      throw new JITError("INVALID_QUERY", "API query cursor pagination requires at least one stable ordering field");
     }
     if (options.pagination.type === "cursor") {
       const seen = new Set<string>();
@@ -932,10 +944,10 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
         if (!fields.has(field))
           throw new JITError(
             "INVALID_QUERY",
-            `CQRS cursor field ${JSON.stringify(field)} is not declared by the model`
+            `API query cursor field ${JSON.stringify(field)} is not declared by the model`
           );
         if (seen.has(field))
-          throw new JITError("INVALID_QUERY", `CQRS cursor ordering repeats ${JSON.stringify(field)}`);
+          throw new JITError("INVALID_QUERY", `API query cursor ordering repeats ${JSON.stringify(field)}`);
         seen.add(field);
       }
     }
@@ -1042,7 +1054,7 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
 function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {
   return (input: unknown): ParsedCqrsInput => {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
-      throw new JITError("INVALID_QUERY", "CQRS input must be an object");
+      throw new JITError("INVALID_QUERY", "API query input must be an object");
     }
     const source = input as Record<string, unknown>;
     const allowedInputKeys = new Set([
@@ -1054,18 +1066,18 @@ function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsI
     ]);
     for (const key of Object.keys(source)) {
       if (!allowedInputKeys.has(key)) {
-        throw new JITError("INVALID_QUERY", `CQRS input field ${JSON.stringify(key)} is not allowed`);
+        throw new JITError("INVALID_QUERY", `API query input field ${JSON.stringify(key)} is not allowed`);
       }
     }
     const filter = source.filter;
     if (filter === undefined) return normalizeCqrsTail(source, definition, []);
     if (filter === null || typeof filter !== "object" || Array.isArray(filter)) {
-      throw new JITError("INVALID_QUERY", "CQRS filter must be an object");
+      throw new JITError("INVALID_QUERY", "API query filter must be an object");
     }
     const allowed: Readonly<Record<string, true | readonly string[] | undefined>> = definition.options.filter ?? {};
     const entries = Object.entries(filter as Record<string, unknown>);
     if (entries.length > (definition.options.maxFilters ?? 32)) {
-      throw new JITError("INVALID_QUERY", "CQRS filter exceeds the configured structural limit");
+      throw new JITError("INVALID_QUERY", "API query filter exceeds the configured structural limit");
     }
     const conditions: CqrsInputCondition[] = [];
     for (const [field, raw] of entries) {
@@ -1089,7 +1101,7 @@ function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsI
       } else conditions.push({ kind: "eq", path: field.split("."), value: raw });
     }
     if (conditions.length > (definition.options.limits?.maxConditions ?? definition.options.maxFilters ?? 32)) {
-      throw new JITError("INVALID_QUERY", "CQRS filter exceeds the configured condition limit");
+      throw new JITError("INVALID_QUERY", "API query filter exceeds the configured condition limit");
     }
     return normalizeCqrsTail(source, definition, conditions);
   };
@@ -1104,7 +1116,7 @@ function normalizeCqrsTail<TSchema extends ATS.AnyTypeSchema>(
   const pagination = definition.options.pagination;
   const allowedSort = new Set<string>(pagination?.type === "cursor" ? pagination.by : (definition.options.sort ?? []));
   if (source.sort !== undefined && (typeof source.sort !== "string" || source.sort.length === 0)) {
-    throw new JITError("INVALID_QUERY", "CQRS sort must be a non-empty string");
+    throw new JITError("INVALID_QUERY", "API query sort must be a non-empty string");
   }
   const sort =
     typeof source.sort === "string"
@@ -1122,12 +1134,12 @@ function normalizeCqrsTail<TSchema extends ATS.AnyTypeSchema>(
   const sortFields = new Set<string>();
   for (const entry of sort) {
     const field = entry.path[0] as string;
-    if (field.length === 0) throw new JITError("INVALID_QUERY", "CQRS sort field cannot be empty");
-    if (sortFields.has(field)) throw new JITError("INVALID_QUERY", `CQRS sort repeats ${JSON.stringify(field)}`);
+    if (field.length === 0) throw new JITError("INVALID_QUERY", "API query sort field cannot be empty");
+    if (sortFields.has(field)) throw new JITError("INVALID_QUERY", `API query sort repeats ${JSON.stringify(field)}`);
     sortFields.add(field);
   }
   if (sort.length > (definition.options.limits?.maxSortFields ?? 3)) {
-    throw new JITError("INVALID_QUERY", "CQRS sort exceeds the configured structural limit");
+    throw new JITError("INVALID_QUERY", "API query sort exceeds the configured structural limit");
   }
   if (!pagination) return { filter, sort, ...(select === undefined ? {} : { select }) };
   if (pagination.type === "cursor") {
@@ -1185,20 +1197,20 @@ function normalizeCqrsSelect<TSchema extends ATS.AnyTypeSchema>(
 ): readonly string[] | undefined {
   if (source.fields === undefined) return undefined;
   if (!definition.options.select || typeof source.fields !== "string") {
-    throw new JITError("INVALID_QUERY", "CQRS sparse fields are not allowed");
+    throw new JITError("INVALID_QUERY", "API query sparse fields are not allowed");
   }
-  if (source.fields.length === 0) throw new JITError("INVALID_QUERY", "CQRS select field cannot be empty");
+  if (source.fields.length === 0) throw new JITError("INVALID_QUERY", "API query select field cannot be empty");
   const fields = source.fields.split(",");
   if (fields.length > (definition.options.limits?.maxSelectFields ?? 30)) {
-    throw new JITError("INVALID_QUERY", "CQRS select exceeds the configured structural limit");
+    throw new JITError("INVALID_QUERY", "API query select exceeds the configured structural limit");
   }
   const allowed = new Set(objectFields(definition.schema));
   const selected = new Set<string>();
   for (const field of fields) {
-    if (field.length === 0) throw new JITError("INVALID_QUERY", "CQRS select field cannot be empty");
+    if (field.length === 0) throw new JITError("INVALID_QUERY", "API query select field cannot be empty");
     if (!allowed.has(field))
       throw new JITError("INVALID_QUERY", `Select field ${JSON.stringify(field)} is not allowed`);
-    if (selected.has(field)) throw new JITError("INVALID_QUERY", `CQRS select repeats ${JSON.stringify(field)}`);
+    if (selected.has(field)) throw new JITError("INVALID_QUERY", `API query select repeats ${JSON.stringify(field)}`);
     selected.add(field);
   }
   return fields;
@@ -1294,7 +1306,7 @@ export function emitCqrsInputParser(
 export function emitCqrsAotParserSource(...args: Parameters<typeof emitCqrsInputParser>): string {
   const parser = emitCqrsInputParser(...args)
     .split("return __reference(input);")
-    .join('throw new Error("Invalid CQRS input");')
+    .join('throw new Error("Invalid API query input");')
     .split("__decodeCursor")
     .join("decodeCursor");
   return `function decodeCursor(value, size) { if (typeof value !== "string") throw new Error("Malformed cursor"); try { const bytes = atob(value); let escaped = ""; for (let i = 0; i < bytes.length; i++) escaped += "%" + bytes.charCodeAt(i).toString(16).padStart(2, "0"); const decoded = JSON.parse(decodeURIComponent(escaped)); if (!Array.isArray(decoded) || decoded.length !== size) throw new Error("Malformed cursor"); return decoded; } catch { throw new Error("Malformed cursor"); } } ${parser}`;
@@ -1320,8 +1332,6 @@ function aggregateSpec<TResult>(op: QueryAggregateOperator, key?: string): CqrsA
 }
 
 export const cqrs = Object.freeze({
-  input: cqrsInput,
-  parse: cqrsParse,
   query: cqrsQuery,
   param,
   const: constant,

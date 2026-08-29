@@ -27,7 +27,7 @@ Implemented and covered by tests:
 - `JIT.compare.equal/diff/hash(schema)` and `JIT.clone(schema)`.
 - `JIT.json.stringify(schema)`.
 - `JIT.json.parse(schema).validate()` as AOT `fromJSON`.
-- `JIT.update(schema).patch({ field: JIT.cqrs.param("name") }).compile()`.
+- `JIT.state.update(schema).patch({ field: JIT.cqrs.param("name") }).compile()`.
 - `JIT.cqrs.query(schema).params({...}).where((q, params) => ...)`, with
   object collections and binary rowsets sharing the namespace.
 - `JIT.cqrs.const(value)` and `q.constant(value)` for build-time query literals.

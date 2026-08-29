@@ -144,12 +144,12 @@ describe("JIT.compare.changed", () => {
   });
 });
 
-describe("JIT.watch with a field subset", () => {
+describe("JIT.state.watch with a field subset", () => {
   const Users = JIT.array(User);
   const previous = [value];
 
   it("reports an update only when a named field moved", () => {
-    const byName = JIT.watch(Users, { key: "id", fields: ["status"] });
+    const byName = JIT.state.watch(Users, { key: "id", fields: ["status"] });
 
     expect(byName(previous, [{ ...value, email: "other@x.com" }]).updatedItems).toHaveLength(0);
     expect(byName(previous, [{ ...value, status: "blocked" }]).updatedItems).toHaveLength(1);
@@ -157,14 +157,14 @@ describe("JIT.watch with a field subset", () => {
 
   /** The existing behavior has to stay exactly as it was when no subset is named. */
   it("still compares by reference when no fields are named", () => {
-    const byReference = JIT.watch(Users, { key: "id" });
+    const byReference = JIT.state.watch(Users, { key: "id" });
 
     expect(byReference(previous, [{ ...value }]).updatedItems).toHaveLength(1);
     expect(byReference(previous, previous).updatedItems).toHaveLength(0);
   });
 
   it("still reports additions and removals the same way", () => {
-    const byName = JIT.watch(Users, { key: "id", fields: ["status"] });
+    const byName = JIT.state.watch(Users, { key: "id", fields: ["status"] });
     const result = byName(previous, [{ ...value, id: 2 }]);
 
     expect(result.newItems).toHaveLength(1);

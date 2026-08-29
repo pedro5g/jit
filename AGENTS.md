@@ -281,6 +281,19 @@ query describes the request; facts on the collection decide the access path.
 - Diagnostics (`explain`, `inspect`) must not add cost to the normal evaluation path.
 - A rule predicate consumed by `JIT.cqrs` lowers to a plain query condition with its inputs as bindings; no rule, fact or outcome node may reach `~query`.
 
+## Query Boundaries And State
+
+- Public query input must use `QueryBoundary` and lower to the shared Query AST. Never create a second query engine for API-facing filters.
+- Query boundaries are deny-by-default. Nested relations and collection predicates are never exposed merely because the schema contains them.
+- Mutation operations must lower through the shared `MutationPlan`; do not implement immutable updates through Proxy/draft discovery.
+- Mutation code delays allocation until a semantic change is known whenever possible.
+- Collection mutations reuse shared access-path planning. Do not introduce separate scan/index/binary implementations for queries and mutations.
+- Mutation results do not compute patches, inverse patches or changed masks unless requested.
+- Derived computations expose or infer their read dependencies. Do not deep-compare an entire state when the computation reads a known subset.
+- Changed masks, watch, mutation results and derived computations share a compatible `ChangeLayout`.
+- Every public runtime state/query-boundary API has define/AOT parity.
+- Every performance claim includes an idiomatic baseline, handwritten optimized ceiling, runtime JIT and AOT measurement.
+
 ## Feature Documentation
 
 Every public feature must add or update its `docs/features/*` document in the

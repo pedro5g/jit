@@ -103,7 +103,7 @@ Controller
   -> Prisma / Knex / datastore adapter
 ```
 
-An unconditional allow emits no predicate. An unconditional deny produces an empty query. Actor field references become ordinary literal values in `~query` when they are portable data. Fields used only by the predicate are required for local evaluation but never added to the final projection. The write side uses the same declaration through `JIT.update(...).authorize(...)` or `JIT.patch.apply(...).authorize(...)`; no storage-specific authorization adapter belongs in core.
+An unconditional allow emits no predicate. An unconditional deny produces an empty query. Actor field references become ordinary literal values in `~query` when they are portable data. Fields used only by the predicate are required for local evaluation but never added to the final projection. The write side uses the same declaration through `JIT.state.update(...).authorize(...)` or `JIT.state.patch.apply(...).authorize(...)`; no storage-specific authorization adapter belongs in core.
 
 ## 6. Generated code
 

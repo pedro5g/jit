@@ -67,8 +67,8 @@ const readPosts = JIT.cqrs
   .select("id", "title");
 
 const projectPost = JIT.project(Post).authorize(ability, "read");
-const updatePost = JIT.update(Post).authorize(ability, "update");
-const applyPatch = JIT.patch.apply(Post).authorize(ability, "update");
+const updatePost = JIT.state.update(Post).authorize(ability, "update");
+const applyPatch = JIT.state.patch.apply(Post).authorize(ability, "update");
 ```
 
 Definition files cannot execute an AccessPlan to build an ability. The reconstructive form binds the actor explicitly and is also available at runtime:
@@ -76,7 +76,7 @@ Definition files cannot execute an AccessPlan to build an ability. The reconstru
 ```ts
 const readPosts = JIT.cqrs.query(Post).authorize(PostAccess, "read", actor);
 const projectPost = JIT.project(Post).authorize(PostAccess, "read", actor);
-const updatePost = JIT.patch.apply(Post).authorize(PostAccess, "update", actor);
+const updatePost = JIT.state.patch.apply(Post).authorize(PostAccess, "update", actor);
 ```
 
 ## 4. Semantics

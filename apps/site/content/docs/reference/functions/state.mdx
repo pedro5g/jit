@@ -1,0 +1,31 @@
+---
+title: State
+description: Canonical namespace for immutable updates, patches, reconciliation and collection watching.
+---
+
+`JIT.state` groups operations that describe how application state evolves:
+
+| Operation | Purpose |
+| --- | --- |
+| `update` | Schema-specialized immutable update with structural sharing |
+| `patch.apply` | Apply the canonical deep-partial update contract |
+| `patch.merge` | Apply JSON Merge Patch semantics |
+| `patch.json` | Apply RFC 6902 operations |
+| `reconcile` | Compare keyed collection snapshots with selective sinks |
+| `watch` | Compile stateless collection change detection |
+| `watchedList` | Track changes in one stateful aggregate collection |
+
+```ts
+const User = JIT.object({ id: JIT.number(), name: JIT.string() });
+const rename = JIT.state.update(User);
+
+const before = { id: 1, name: "Ada" };
+const after = rename(before, { name: "Grace" });
+```
+
+The namespace does not use a Proxy-based draft runtime to discover shape.
+Operations compile from the schema, delay allocation until a semantic change
+is known, and preserve references for unchanged branches.
+
+See [Update](./update), [Patch](./patch), [Reconcile](./reconcile), and
+[Watch](./watch) for the individual contracts.
