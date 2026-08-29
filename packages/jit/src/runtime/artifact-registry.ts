@@ -163,6 +163,19 @@ interface CqrsInputArtifact {
   readonly explanation: unknown;
 }
 
+/** One specialized immutable mutation: static writes and its copy plan. */
+interface MutationPlanArtifact {
+  readonly kind: "mutation-plan";
+  readonly schema: import("../core/ats/index.js").AnyTypeSchema;
+  /** Import-free function-body source that returns the mutation function. */
+  readonly source: string;
+  readonly bindingNames: readonly string[];
+  readonly bindingValues: readonly unknown[];
+  readonly reads: readonly string[];
+  readonly writes: readonly string[];
+  readonly params: readonly string[];
+}
+
 interface CqrsAuthorizedParserArtifact {
   readonly kind: "cqrs-authorized-parser";
   readonly definition: unknown;
@@ -259,6 +272,7 @@ export type CompiledArtifact =
   | CqrsInputArtifact
   | CqrsParserArtifact
   | CqrsAuthorizedParserArtifact
+  | MutationPlanArtifact
   | SortPlanArtifact
   | JoinPlanArtifact
   | IndexPlanArtifact

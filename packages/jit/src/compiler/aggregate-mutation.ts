@@ -5,21 +5,25 @@ import { emitPropertyAccess } from "./source/access.js";
  * Declarative side effects of one aggregate mutation. The plan is assembled
  * before source emission so timestamp and version policies share a single
  * generated mutation body rather than wrapping `update()` at runtime.
+ *
+ * This is the Runtime Class plan: it assigns to `this`. Immutable state
+ * evolution is described by `MutationPlan` in `mutation/`, which never mutates
+ * its input.
  */
-export interface MutationPlan {
+export interface AggregateMutationPlan {
   readonly mutableFields: readonly string[];
   readonly updatedAt?: string;
   readonly version?: string;
 }
 
-export interface MutationPlanOptions {
+export interface AggregateMutationPlanOptions {
   readonly fields: readonly string[];
   readonly readonlyFields?: readonly string[];
   readonly updatedAt?: string;
   readonly version?: string;
 }
 
-export function buildMutationPlan(options: MutationPlanOptions): MutationPlan {
+export function buildAggregateMutationPlan(options: AggregateMutationPlanOptions): AggregateMutationPlan {
   const readonlyFields = new Set(options.readonlyFields);
   const mutableFields = [...new Set(options.fields)].filter((field) => !readonlyFields.has(field));
 
@@ -31,7 +35,10 @@ export function buildMutationPlan(options: MutationPlanOptions): MutationPlan {
 }
 
 /** Emits the hot aggregate mutation body with at most one clock read. */
-export function emitMutationPlanBody(plan: MutationPlan, updates: ReadonlyMap<string, string | null>): string {
+export function emitAggregateMutationBody(
+  plan: AggregateMutationPlan,
+  updates: ReadonlyMap<string, string | null>
+): string {
   const writer = new CodeWriter();
 
   writer.line("let changed = false;");

@@ -390,6 +390,41 @@ describe("JIT AOT generate", () => {
     expect(() => generated.ListUsers.parse({ page: 1_000, limit: 100 })).toThrow(/invalid API query input/i);
   });
 
+  it("emits a declared patch as one copy-on-write function", async () => {
+    const User = JIT.object({
+      id: JIT.string(),
+      name: JIT.string(),
+      profile: JIT.object({ age: JIT.number(), city: JIT.string() }),
+      settings: JIT.object({ theme: JIT.string() }),
+    });
+    const RenameUser = JIT.state
+      .update(User)
+      .patch({ name: JIT.cqrs.param("name"), profile: { city: JIT.cqrs.param("city") } })
+      .compile();
+
+    const result = AOT.generate({ artifacts: { RenameUser }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly RenameUser: (value: unknown, params: Readonly<Record<string, unknown>>) => Record<string, unknown>;
+    };
+    const value = {
+      id: "u_1",
+      name: "Ada",
+      profile: { age: 36, city: "London" },
+      settings: { theme: "dark" },
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).not.toContain("Object.keys");
+    expect(generated.RenameUser(value, { name: "Grace", city: "Paris" })).toEqual(
+      RenameUser(value, { name: "Grace", city: "Paris" })
+    );
+    // Structural sharing and the no-op identity survive generation.
+    expect(generated.RenameUser(value, { name: "Grace", city: "London" }).settings).toBe(value.settings);
+    expect(generated.RenameUser(value, { name: "Ada", city: "London" })).toBe(value);
+  });
+
   it("emits one effective-request parser for a boundary intersected with access", async () => {
     const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), published: JIT.boolean() });
     const Actor = JIT.object({ id: JIT.number() });

@@ -41,14 +41,34 @@ callback-free watch artifacts keep their reconstructive metadata and generate
 the same standalone functions as before the namespace migration. Stateful
 `watchedList` remains runtime infrastructure rather than an AOT function.
 
+## Declared patches
+
+`update(Model)` accepts any deep-partial patch, so its compiled function has to
+consider every field of every level it is handed. A patch declared in code is
+known earlier than that, and lowers to a `MutationPlan` instead: normalized
+writes, a read/write set, and a copy tree that says which levels have to be
+rebuilt. See [Mutation Planner](./mutation-planner.md).
+
+```ts
+const renameUser = JIT.state
+  .update(User)
+  .patch({ name: JIT.cqrs.param("name") })
+  .compile();
+```
+
+A path is specialized only when the generic update would assign its leaf; a
+leaf the deep-partial update *merges* — an object, array, map, set or union —
+keeps running through it, so a declared patch never changes meaning in order to
+become faster. `explain()` reports which strategy it got.
+
 ## Performance and tradeoffs
 
-This namespace migration makes no speed claim and deliberately does not change
-generated source. Existing measured claims remain with the individual
+The namespace migration itself made no speed claim and changed no generated
+source. Existing measured claims remain with the individual
 [Patch](./patch.md), [Reconcile](./reconcile.md), and
-[Change mask](./changed.md) features. MutationPlan extraction requires a
-regression benchmark against the current update emitter before its source may
-change.
+[Change mask](./changed.md) features. A declared patch is measured against the
+generic update it specializes in
+[Mutation Planner](./mutation-planner.md#performance).
 
 JIT does not implement Immer's `createDraft`, `finishDraft`, `current`,
 `original` or `isDraft`. Those APIs belong to Proxy/draft discovery. JIT uses a

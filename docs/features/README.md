@@ -22,6 +22,7 @@ work and for production performance. Each page explains:
 - [Canonical CQRS queries](./cqrs.md)
 - [API query boundaries](./api-query-boundaries.md)
 - [Compiled state](./state.md)
+- [Mutation planner](./mutation-planner.md)
 - [Sort and ordering plans](./sort.md)
 - [Indexing](./indexing.md)
 - [Physical query planning](./physical-query-planning.md)

@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { emitAccessMutationGuardSource, emitAccessSource } from "../compiler/access.js";
+import { buildAggregateMutationPlan, emitAggregateMutationBody } from "../compiler/aggregate-mutation.js";
 import { cacheKeyHashBindings, emitCacheKeySource } from "../compiler/cache-key.js";
 import { emitCanonicalSource } from "../compiler/canonical.js";
 import { changedEqualBindings, emitChangedSource } from "../compiler/changed.js";
@@ -25,7 +26,6 @@ import { emitMaskSource } from "../compiler/mask.js";
 import { emitMatchSource } from "../compiler/match.js";
 import { emitMigrationSource } from "../compiler/migration.js";
 import { emitMockSource, MOCK_HELPERS } from "../compiler/mock.js";
-import { buildMutationPlan, emitMutationPlanBody } from "../compiler/mutation-plan.js";
 import { emitNdjsonSource } from "../compiler/ndjson.js";
 import { emitTransformSource } from "../compiler/object-ops.js";
 import {
@@ -434,6 +434,22 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-authorized-parser")
       return emitCqrsAuthorizedParserArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "mutation-plan") {
+      const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "state.update.patch",
+          reason: "a declared patch value cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(...inlined.map((line) => `  ${line}`));
+      js.push(...indentBlock(artifact.source));
+      js.push("})();");
+      return { binding, type };
+    }
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
@@ -662,6 +678,12 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown; readonly explain: () => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "cqrs-authorized-parser") return "(input: unknown, actor?: unknown) => unknown";
+    if (artifact.kind === "mutation-plan") {
+      const value = namedType(artifact.schema, typeNames);
+      return `(value: ${value}, params: Readonly<Record<${
+        artifact.params.map((name) => JSON.stringify(name)).join(" | ") || "never"
+      }, unknown>>) => ${value}`;
+    }
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
@@ -954,7 +976,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (needsUpdate) {
       if (artifact.aggregate) {
         const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
-        const mutation = buildMutationPlan({
+        const mutation = buildAggregateMutationPlan({
           fields,
           readonlyFields,
           ...(artifact.mutation?.updatedAt === undefined ? {} : { updatedAt: artifact.mutation.updatedAt }),
@@ -973,7 +995,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           helpers.push(`const ${fieldUpdate} = ${asExpression(source, "update")};`);
           updates.set(field, fieldUpdate);
         }
-        aggregateUpdateBody = emitMutationPlanBody(mutation, updates);
+        aggregateUpdateBody = emitAggregateMutationBody(mutation, updates);
       } else {
         const source = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(artifact.schema));
         if (!source) return undefined;

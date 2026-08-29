@@ -1353,6 +1353,38 @@ function accessProjectionFields(descriptor, action) {
   return allowed.size === all.length ? void 0 : all.filter((field) => allowed.has(field));
 }
 
+// ../../packages/jit/src/compiler/aggregate-mutation.ts
+function buildAggregateMutationPlan(options) {
+  const readonlyFields = new Set(options.readonlyFields);
+  const mutableFields = [...new Set(options.fields)].filter((field) => !readonlyFields.has(field));
+  return Object.freeze({
+    mutableFields: Object.freeze(mutableFields),
+    ...options.updatedAt === void 0 ? {} : { updatedAt: options.updatedAt },
+    ...options.version === void 0 ? {} : { version: options.version }
+  });
+}
+function emitAggregateMutationBody(plan, updates) {
+  const writer = new CodeWriter();
+  writer.line("let changed = false;");
+  for (const field of plan.mutableFields) {
+    const update2 = updates.get(field);
+    if (update2 === void 0) continue;
+    const current = `this${emitPropertyAccess("", field)}`;
+    const fieldPatch = `patch${emitPropertyAccess("", field)}`;
+    writer.line(`if (${fieldPatch} !== undefined) {`);
+    writer.indent(() => {
+      writer.line(`const next = ${update2 === null ? fieldPatch : `${update2}(${current}, ${fieldPatch})`};`);
+      writer.line(`if (next !== ${current}) { ${current} = next; changed = true; }`);
+    });
+    writer.line("}");
+  }
+  writer.line("if (!changed) return;");
+  if (plan.updatedAt !== void 0) writer.line("const now = new Date();");
+  if (plan.updatedAt !== void 0) writer.line(`this${emitPropertyAccess("", plan.updatedAt)} = now;`);
+  if (plan.version !== void 0) writer.line(`this${emitPropertyAccess("", plan.version)} += 1;`);
+  return writer.toString();
+}
+
 // ../../packages/jit/src/runtime/hash/hash-cache.ts
 var HASH_CACHE = /* @__PURE__ */ new WeakMap();
 function getHash(value, compute) {
@@ -13301,38 +13333,6 @@ function propertyKey(key) {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
 }
 
-// ../../packages/jit/src/compiler/mutation-plan.ts
-function buildMutationPlan(options) {
-  const readonlyFields = new Set(options.readonlyFields);
-  const mutableFields = [...new Set(options.fields)].filter((field) => !readonlyFields.has(field));
-  return Object.freeze({
-    mutableFields: Object.freeze(mutableFields),
-    ...options.updatedAt === void 0 ? {} : { updatedAt: options.updatedAt },
-    ...options.version === void 0 ? {} : { version: options.version }
-  });
-}
-function emitMutationPlanBody(plan, updates) {
-  const writer = new CodeWriter();
-  writer.line("let changed = false;");
-  for (const field of plan.mutableFields) {
-    const update2 = updates.get(field);
-    if (update2 === void 0) continue;
-    const current = `this${emitPropertyAccess("", field)}`;
-    const fieldPatch = `patch${emitPropertyAccess("", field)}`;
-    writer.line(`if (${fieldPatch} !== undefined) {`);
-    writer.indent(() => {
-      writer.line(`const next = ${update2 === null ? fieldPatch : `${update2}(${current}, ${fieldPatch})`};`);
-      writer.line(`if (next !== ${current}) { ${current} = next; changed = true; }`);
-    });
-    writer.line("}");
-  }
-  writer.line("if (!changed) return;");
-  if (plan.updatedAt !== void 0) writer.line("const now = new Date();");
-  if (plan.updatedAt !== void 0) writer.line(`this${emitPropertyAccess("", plan.updatedAt)} = now;`);
-  if (plan.version !== void 0) writer.line(`this${emitPropertyAccess("", plan.version)} += 1;`);
-  return writer.toString();
-}
-
 // ../../packages/jit/src/compiler/ndjson.ts
 function createNdjsonDescriptor(schema, operation) {
   expectNdjsonObject(schema);
@@ -18338,6 +18338,22 @@ function emitModule(plan, options, layout) {
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-authorized-parser")
       return emitCqrsAuthorizedParserArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "mutation-plan") {
+      const inlined2 = inlineBindings(artifact.bindingNames, artifact.bindingValues);
+      if (inlined2 === void 0) {
+        skipped.push({
+          schema: reportName,
+          operation: "state.update.patch",
+          reason: "a declared patch value cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      js.push(...inlined2.map((line) => `  ${line}`));
+      js.push(...indentBlock(artifact.source));
+      js.push("})();");
+      return { binding, type };
+    }
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
@@ -18551,6 +18567,10 @@ function emitModule(plan, options, layout) {
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown; readonly explain: () => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "cqrs-authorized-parser") return "(input: unknown, actor?: unknown) => unknown";
+    if (artifact.kind === "mutation-plan") {
+      const value = namedType(artifact.schema, typeNames);
+      return `(value: ${value}, params: Readonly<Record<${artifact.params.map((name) => JSON.stringify(name)).join(" | ") || "never"}, unknown>>) => ${value}`;
+    }
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
@@ -18753,7 +18773,7 @@ function emitModule(plan, options, layout) {
     if (needsUpdate) {
       if (artifact.aggregate) {
         const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
-        const mutation = buildMutationPlan({
+        const mutation = buildAggregateMutationPlan({
           fields,
           readonlyFields,
           ...artifact.mutation?.updatedAt === void 0 ? {} : { updatedAt: artifact.mutation.updatedAt },
@@ -18772,7 +18792,7 @@ function emitModule(plan, options, layout) {
           helpers2.push(`const ${fieldUpdate} = ${asExpression(source2, "update")};`);
           updates.set(field, fieldUpdate);
         }
-        aggregateUpdateBody = emitMutationPlanBody(mutation, updates);
+        aggregateUpdateBody = emitAggregateMutationBody(mutation, updates);
       } else {
         const source2 = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(artifact.schema));
         if (!source2) return void 0;
@@ -21431,12 +21451,7 @@ function cqrsAuthorize(definition, ability, action) {
     "__AccessDeniedError",
     ...resolved.artifact.bindingNames,
     emitCqrsAuthorizedParser(emitCqrsInputParser(resolved.boundary), resolved.authorization, action)
-  )(
-    cqrsParseReference(resolved.boundary),
-    decodeCqrsCursor,
-    AccessDeniedError,
-    ...resolved.artifact.bindingValues
-  );
+  )(cqrsParseReference(resolved.boundary), decodeCqrsCursor, AccessDeniedError, ...resolved.artifact.bindingValues);
   const bound = resolved.actor;
   const authorize = bound === void 0 ? compiled : (input) => compiled(input, bound);
   registerArtifact(authorize, resolved.artifact);
@@ -23205,7 +23220,7 @@ function aggregateRoot(schema, options) {
   let deletedAt;
   let version;
   const installMutation = () => {
-    const mutation = buildMutationPlan({
+    const mutation = buildAggregateMutationPlan({
       fields,
       readonlyFields,
       ...updatedAt === void 0 ? {} : { updatedAt },
@@ -23213,7 +23228,7 @@ function aggregateRoot(schema, options) {
     });
     const assign = globalThis.Function(
       ...updateNames,
-      `return function update(patch) { ${emitMutationPlanBody(mutation, updateBindings)} };`
+      `return function update(patch) { ${emitAggregateMutationBody(mutation, updateBindings)} };`
     )(...updateValues);
     Object.defineProperty(aggregate.prototype, "update", {
       configurable: true,
@@ -25165,6 +25180,204 @@ function createSortPlan(schema, criteria) {
   return compiled;
 }
 
+// ../../packages/jit/src/compiler/mutation/mutation-plan.ts
+function buildMutationPlan(schema, writes, bindings) {
+  const resolved = [];
+  const byPath = /* @__PURE__ */ new Map();
+  for (const write of writes) {
+    const leaf = resolveMutationPath(schema, write.path);
+    const key = write.path.join(".");
+    const previous = byPath.get(key);
+    const node = Object.freeze({
+      kind: "set",
+      path: Object.freeze([...write.path]),
+      value: write.value,
+      schema: leaf
+    });
+    if (previous === void 0) {
+      byPath.set(key, resolved.length);
+      resolved.push(node);
+      continue;
+    }
+    resolved[previous] = node;
+  }
+  const params = [];
+  for (const write of resolved) {
+    if (write.value.kind === "param" && !params.includes(write.value.name)) params.push(write.value.name);
+  }
+  return Object.freeze({
+    schema,
+    writes: Object.freeze(resolved),
+    dependencies: Object.freeze({
+      // A declared write reads the field it overwrites, because the mutation
+      // compares before it allocates.
+      reads: Object.freeze(resolved.map((write) => write.path)),
+      writes: Object.freeze(resolved.map((write) => write.path))
+    }),
+    params: Object.freeze(params),
+    bindings: Object.freeze([...bindings]),
+    root: resolved.length === 0 ? void 0 : planLevels(schema, resolved)
+  });
+}
+function isSpecializableMutation(schema, paths) {
+  for (const path of paths) {
+    if (path.length === 0) return false;
+    let current = schema;
+    for (let index2 = 0; index2 < path.length; index2++) {
+      const wrappers = resolveWrappers(current);
+      if (index2 > 0 && (wrappers.optional || wrappers.nullable)) return false;
+      if (wrappers.base.type !== TypeName.object) return false;
+      if (hasDefault2(current)) return false;
+      const next = wrappers.base.def.props[path[index2]];
+      if (next === void 0) return false;
+      if (resolveWrappers(next).readonly) return false;
+      current = next;
+    }
+    if (!isAssignedLeaf(current)) return false;
+  }
+  return true;
+}
+function isAssignedLeaf(schema) {
+  if (hasDefault2(schema)) return false;
+  let program;
+  try {
+    program = buildUpdateIR(schema);
+  } catch {
+    return false;
+  }
+  if (program.helpers.length > 0) return false;
+  const node = program.body;
+  if (node.kind === "reuse" || node.kind === "date") return true;
+  return node.kind === "guard" && node.inner.kind === "reuse";
+}
+function isDateLeaf(schema) {
+  return resolveWrappers(schema).base.type === TypeName.date;
+}
+function hasDefault2(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.default) return true;
+    const inner = current.def.innerType;
+    if (inner === void 0) return false;
+    current = inner;
+  }
+}
+function resolveMutationPath(schema, path) {
+  let current = schema;
+  for (const key of path) {
+    const base = resolveWrappers(current).base;
+    if (base.type !== TypeName.object) {
+      throw new JITError("INVALID_UPDATE", `Mutation path ${JSON.stringify(path.join("."))} leaves the object shape`);
+    }
+    const next = base.def.props[key];
+    if (next === void 0) {
+      throw new JITError(
+        "INVALID_UPDATE",
+        `Mutation path ${JSON.stringify(path.join("."))} is not declared by the schema`
+      );
+    }
+    current = next;
+  }
+  return current;
+}
+function planLevels(schema, writes) {
+  const root = { path: [], schema, writes: /* @__PURE__ */ new Map(), children: /* @__PURE__ */ new Map() };
+  for (const write of writes) {
+    let level = root;
+    for (let index2 = 0; index2 < write.path.length - 1; index2++) {
+      const key = write.path[index2];
+      let child = level.children.get(key);
+      if (child === void 0) {
+        const base = resolveWrappers(level.schema).base;
+        child = {
+          path: write.path.slice(0, index2 + 1),
+          schema: base.def.props[key],
+          writes: /* @__PURE__ */ new Map(),
+          children: /* @__PURE__ */ new Map()
+        };
+        level.children.set(key, child);
+      }
+      level = child;
+    }
+    level.writes.set(write.path[write.path.length - 1], write);
+  }
+  const freeze = (draft) => Object.freeze({
+    path: Object.freeze([...draft.path]),
+    schema: draft.schema,
+    props: Object.freeze(Object.keys(resolveWrappers(draft.schema).base.def.props)),
+    writes: draft.writes,
+    children: new Map([...draft.children].map(([key, child]) => [key, freeze(child)]))
+  });
+  return freeze(root);
+}
+
+// ../../packages/jit/src/compiler/mutation/emit-mutation.ts
+function emitMutationBody(plan) {
+  const writer = new CodeWriter();
+  if (plan.root === void 0) {
+    writer.line("return value;");
+    return writer.toString();
+  }
+  for (const name of plan.params) {
+    writer.line(`const ${paramVar(name)} = params${emitPropertyAccess("", name)};`);
+  }
+  for (const [key, child] of plan.root.children) emitLevel(writer, child, emitPropertyAccess("value", key));
+  const changed3 = emitLevelTests(writer, plan.root, "value");
+  writer.line(`if (!(${changed3})) return value;`);
+  writer.line(`return ${emitReplacement(plan.root, "value")};`);
+  return writer.toString();
+}
+function emitLevel(writer, level, source) {
+  const name = levelVar(level);
+  const current = `${name}_value`;
+  writer.line(`const ${current} = ${source};`);
+  for (const [key, child] of level.children) emitLevel(writer, child, emitPropertyAccess(current, key));
+  const changed3 = emitLevelTests(writer, level, current);
+  writer.line(`const ${name}_changed = ${changed3};`);
+  writer.line(`let ${name}_next = ${current};`);
+  writer.line(`if (${name}_changed) ${name}_next = ${emitReplacement(level, current)};`);
+}
+function emitLevelTests(writer, level, current) {
+  const tests = [];
+  for (const [key, write] of level.writes) {
+    const next = `${levelVar(level)}_${safeName(key)}`;
+    const previous = `${next}_previous`;
+    writer.line(`const ${previous} = ${emitPropertyAccess(current, key)};`);
+    writer.line(`const ${next} = ${emitWriteValue(write, previous)};`);
+    tests.push(`${next} !== ${previous}`);
+  }
+  for (const child of level.children.values()) tests.push(`${levelVar(child)}_changed`);
+  return tests.join(" || ");
+}
+function emitReplacement(level, current) {
+  const entries = level.props.map((prop) => {
+    if (level.writes.has(prop)) return `${emitObjectKey(prop)}: ${levelVar(level)}_${safeName(prop)}`;
+    const child = level.children.get(prop);
+    if (child !== void 0) return `${emitObjectKey(prop)}: ${levelVar(child)}_next`;
+    return `${emitObjectKey(prop)}: ${emitPropertyAccess(current, prop)}`;
+  });
+  return `{ ${entries.join(", ")} }`;
+}
+function emitWriteValue(write, previous) {
+  const source = emitValueSource(write.value);
+  if (isDateLeaf(write.schema)) {
+    return `${source} === undefined || Object.is(${source}, ${previous}) || ${previous}.getTime() === ${source}.getTime() ? ${previous} : new Date(${source}.getTime())`;
+  }
+  return `${source} === undefined || Object.is(${source}, ${previous}) ? ${previous} : ${source}`;
+}
+function emitValueSource(value) {
+  return value.kind === "param" ? paramVar(value.name) : `__q${value.index}`;
+}
+function paramVar(name) {
+  return `__p_${safeName(name)}`;
+}
+function levelVar(level) {
+  return level.path.length === 0 ? "root" : `l_${level.path.map(safeName).join("_")}`;
+}
+function safeName(key) {
+  return key.replace(/[^A-Za-z0-9_$]/g, "_");
+}
+
 // ../../packages/jit/src/runtime/update/reactive-update.ts
 function createReactiveUpdate(initial, updater, createDiff, options = {}) {
   let value = initial;
@@ -25438,9 +25651,7 @@ function installUpdateMethods(run, schema) {
     },
     patch: {
       enumerable: false,
-      value: (template) => ({
-        compile: () => (current, params) => run(current, materializeParamPatch(template, params))
-      })
+      value: (template) => createCompiledPatch(run, schema, template)
     },
     reactive: {
       enumerable: false,
@@ -25471,6 +25682,76 @@ function installUpdateMethods(run, schema) {
       }
     }
   });
+}
+function createCompiledPatch(run, schema, template) {
+  const bindings = [];
+  const writes = collectPatchWrites(schema, template, [], bindings);
+  const specialized = writes !== void 0 && isSpecializableMutation(
+    schema,
+    writes.map((write) => write.path)
+  );
+  const plan = specialized ? buildMutationPlan(schema, writes, bindings) : void 0;
+  const explanation = Object.freeze({
+    strategy: plan === void 0 ? "generic" : "specialized",
+    reads: Object.freeze((plan?.dependencies.reads ?? []).map((path) => path.join("."))),
+    writes: Object.freeze((plan?.dependencies.writes ?? []).map((path) => path.join("."))),
+    params: Object.freeze([...plan?.params ?? []])
+  });
+  return {
+    explain: () => explanation,
+    compile: () => {
+      if (plan === void 0) {
+        return (current, params) => run(current, materializeParamPatch(template, params));
+      }
+      const source = emitMutationSource(plan);
+      const names = plan.bindings.map((_, index2) => `__q${index2}`);
+      const mutate = globalThis.Function(...names, source)(...plan.bindings);
+      registerArtifact(mutate, {
+        kind: "mutation-plan",
+        schema,
+        source,
+        bindingNames: names,
+        bindingValues: plan.bindings,
+        reads: explanation.reads,
+        writes: explanation.writes,
+        params: explanation.params
+      });
+      return mutate;
+    }
+  };
+}
+function emitMutationSource(plan) {
+  return `return function mutate(value, params) {
+${emitMutationBody(plan)}};`;
+}
+function collectPatchWrites(schema, template, path, bindings) {
+  if (template === null || typeof template !== "object" || Array.isArray(template) || isParamRef(template)) {
+    if (path.length === 0) return void 0;
+    if (isParamRef(template)) return [{ path, value: { kind: "param", name: template.name } }];
+    bindings.push(template);
+    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
+  }
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    if (path.length === 0) return void 0;
+    bindings.push(template);
+    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
+  }
+  const props = base.def.props;
+  const out = [];
+  for (const key of Object.keys(template)) {
+    const child = props[key];
+    if (child === void 0) return void 0;
+    const nested = collectPatchWrites(
+      child,
+      template[key],
+      [...path, key],
+      bindings
+    );
+    if (nested === void 0) return void 0;
+    out.push(...nested);
+  }
+  return out;
 }
 function materializeParamPatch(template, params) {
   if (isParamRef(template)) return params[template.name];

@@ -3,6 +3,7 @@ export {
   clearCompileCache,
 } from "../runtime/cache/compile-cache.js";
 export * from "./access.js";
+export * from "./aggregate-mutation.js";
 export * from "./binary-rowset.js";
 export * from "./cache-key.js";
 export * from "./canonical.js";
@@ -40,7 +41,6 @@ export * from "./mask.js";
 export * from "./match.js";
 export * from "./migration.js";
 export * from "./mock.js";
-export * from "./mutation-plan.js";
 export * from "./ndjson.js";
 export * from "./object-ops.js";
 export * from "./ordering.js";

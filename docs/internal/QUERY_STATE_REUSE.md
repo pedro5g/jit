@@ -106,11 +106,15 @@ The emitter already provides the important baseline guarantees:
 - Runtime Types remain atomic and keep their prototypes;
 - runtime/define/AOT and access-authorized update paths already exist.
 
-Therefore `MutationPlan` is extracted above or alongside `UpdateIRProgram`.
-The existing generic deep-patch update remains one specialization. Static
-`set`/`patch` mutations add explicit read/write metadata and selective result
-channels without replacing `emitUpdate` until compatibility and benchmark
-coverage proves the replacement.
+`MutationPlan` is now extracted alongside `UpdateIRProgram` in
+`compiler/mutation/`. It describes declared writes to normalized paths, derives
+the read/write sets and the copy tree, and runs dead-write elimination,
+same-parent fusion and no-op detection before emitting. `emitUpdate` is
+unchanged: a declared path is specialized only when the generic update would
+assign its leaf, so anything the deep-partial update merges keeps running
+through it, and `explain().strategy` reports which one a patch got. The
+existing generic deep-patch update remains the general case. Selective result
+channels are still to come.
 
 The first mutation optimization baseline is already good: delayed allocation
 and structural sharing must remain byte/behavior compatible during extraction.
@@ -119,9 +123,11 @@ not to an opaque runtime patch whose keys are known only per call.
 
 ## Write dependencies and change layout
 
-No shared `WriteSet` exists. Update IR knows schema shape but not a static set
-of writes for runtime patches. Static mutation nodes must carry normalized
-writes as they are declared.
+`MutationPlan.dependencies` carries the first read and write sets, as
+normalized paths. They exist only for declared writes; the update IR still
+knows schema shape but not a static set of writes for a runtime patch, which is
+the correct boundary. A shared `PathSet` can be lifted from these once derived
+state needs to intersect against them.
 
 `packages/jit/src/compiler/changed.ts` is the existing `ChangeLayout` seed:
 

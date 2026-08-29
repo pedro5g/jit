@@ -1,8 +1,8 @@
+import { buildAggregateMutationPlan, emitAggregateMutationBody } from "../compiler/aggregate-mutation.js";
 import { compileDiff } from "../compiler/diff.js";
 import { compileEqualMethod } from "../compiler/equal.js";
 import { compileHash } from "../compiler/hash.js";
 import { compileUpdate, type DiffChange, type UpdatePatch } from "../compiler/index.js";
-import { buildMutationPlan, emitMutationPlanBody } from "../compiler/mutation-plan.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
 import { emitPropertyAccess } from "../compiler/source/access.js";
@@ -544,7 +544,7 @@ export function aggregateRoot<
   let deletedAt: string | undefined;
   let version: string | undefined;
   const installMutation = () => {
-    const mutation = buildMutationPlan({
+    const mutation = buildAggregateMutationPlan({
       fields,
       readonlyFields,
       ...(updatedAt === undefined ? {} : { updatedAt }),
@@ -552,7 +552,7 @@ export function aggregateRoot<
     });
     const assign = globalThis.Function(
       ...updateNames,
-      `return function update(patch) { ${emitMutationPlanBody(mutation, updateBindings)} };`
+      `return function update(patch) { ${emitAggregateMutationBody(mutation, updateBindings)} };`
     )(...updateValues) as (this: object, patch: SchemaUpdate<TSchema>) => void;
 
     Object.defineProperty(aggregate.prototype, "update", {

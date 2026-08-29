@@ -191,10 +191,15 @@ No physical strategy name is serialized through `~query`.
 Immutable state evolution lives under `JIT.state`: update, patch, reconcile
 and watch keep their independent descriptors and specialized emitters. The
 namespace is not a state runtime. `UpdateIRProgram` already delays parent
-allocation until a child changes and preserves unchanged references; the
-future `MutationPlan` is extracted around that baseline. `ChangedDescriptor`
-provides the current path-to-bit layout that mutation and derived computation
-will generalize without changing existing mask values.
+allocation until a child changes and preserves unchanged references, and
+`MutationPlan` is extracted around that baseline rather than over it. A patch
+declared in code lowers to normalized writes, a read/write set and a copy tree;
+dead writes, sibling writes under one parent and mutations that write nothing
+are resolved before emission. A path is specialized only when the generic
+update would assign its leaf, so a declared patch cannot change what a
+deep-partial patch means. `ChangedDescriptor` provides the current path-to-bit
+layout that mutation and derived computation will generalize without changing
+existing mask values.
 
 Versioned schema evolution uses an immutable `MigrationDescriptor`. Every edge
 is the existing MapperPlan; one generated version switch falls through only

@@ -1,7 +1,15 @@
 import { compileAccessMutationGuard, resolveAccessContext } from "../compiler/access.js";
 import { compileDiff, type Diff } from "../compiler/diff.js";
+import {
+  buildMutationPlan,
+  emitMutationBody,
+  isSpecializableMutation,
+  type MutationPlan,
+  type MutationWriteInput,
+} from "../compiler/mutation/index.js";
+import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { compileUpdate, type UpdatePatch } from "../compiler/update.js";
-import type { AnyTypeSchema, InnerTypeDef, LazyDef, TypeofSchema } from "../core/ats/index.js";
+import type { AnyTypeSchema, InnerTypeDef, LazyDef, ObjectDef, TypeofSchema } from "../core/ats/index.js";
 import { TypeName } from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
@@ -76,12 +84,27 @@ export type RuntimeUpdate<T> = ((value: T, input: UpdateInput<T>) => T) & {
     actor?: TActor
   ): RuntimeUpdate<T>;
   reactive(initial: T, options?: ReactiveUpdateOptions): ReactiveUpdate<T>;
-  patch<const TPatch extends UpdatePatchTemplate<T>>(
-    patch: TPatch
-  ): {
-    compile(): (value: T, params: UpdatePatchParams<TPatch>) => T;
-  };
+  patch<const TPatch extends UpdatePatchTemplate<T>>(patch: TPatch): CompiledPatch<T, TPatch>;
 };
+
+/**
+ * A declared patch, before it is compiled.
+ *
+ * `explain()` reports which paths the mutation reads and writes and whether the
+ * planner could specialize it, without compiling anything.
+ */
+export interface CompiledPatch<T, TPatch> {
+  compile(): (value: T, params: UpdatePatchParams<TPatch>) => T;
+  explain(): MutationExplanation;
+}
+
+export interface MutationExplanation {
+  /** `"specialized"` rebuilds only the changed levels; `"generic"` runs the deep-partial update. */
+  readonly strategy: "specialized" | "generic";
+  readonly reads: readonly string[];
+  readonly writes: readonly string[];
+  readonly params: readonly string[];
+}
 
 export type UpdatePatchTemplate<T> = T extends object
   ? {
@@ -166,10 +189,7 @@ function installUpdateMethods<T>(run: RuntimeUpdate<T>, schema: AnyTypeSchema): 
     },
     patch: {
       enumerable: false,
-      value: (template: UpdatePatchTemplate<T>) => ({
-        compile: () => (current: T, params: Readonly<Record<string, unknown>>) =>
-          run(current, materializeParamPatch(template, params) as UpdateInput<T>),
-      }),
+      value: (template: UpdatePatchTemplate<T>) => createCompiledPatch(run, schema, template),
     },
     reactive: {
       enumerable: false,
@@ -205,6 +225,113 @@ function installUpdateMethods<T>(run: RuntimeUpdate<T>, schema: AnyTypeSchema): 
       },
     },
   });
+}
+
+/**
+ * Plans one declared patch and compiles the narrowest thing that is correct.
+ *
+ * When every declared path assigns a leaf the generic update would assign, the
+ * mutation becomes one function that reads the written fields, compares, and
+ * rebuilds only the levels that changed. Anything the deep-partial update would
+ * *merge* rather than assign keeps running through it, so a patch never quietly
+ * changes meaning to become faster.
+ */
+function createCompiledPatch<T, TPatch>(
+  run: RuntimeUpdate<T>,
+  schema: AnyTypeSchema,
+  template: unknown
+): CompiledPatch<T, TPatch> {
+  const bindings: unknown[] = [];
+  const writes = collectPatchWrites(schema, template, [], bindings);
+  const specialized =
+    writes !== undefined &&
+    isSpecializableMutation(
+      schema,
+      writes.map((write) => write.path)
+    );
+  const plan = specialized ? buildMutationPlan(schema, writes as MutationWriteInput[], bindings) : undefined;
+  const explanation: MutationExplanation = Object.freeze({
+    strategy: plan === undefined ? ("generic" as const) : ("specialized" as const),
+    reads: Object.freeze((plan?.dependencies.reads ?? []).map((path) => path.join("."))),
+    writes: Object.freeze((plan?.dependencies.writes ?? []).map((path) => path.join("."))),
+    params: Object.freeze([...(plan?.params ?? [])]),
+  });
+
+  return {
+    explain: () => explanation,
+    compile: () => {
+      if (plan === undefined) {
+        return (current: T, params: Readonly<Record<string, unknown>>) =>
+          run(current, materializeParamPatch(template, params) as UpdateInput<T>);
+      }
+      const source = emitMutationSource(plan);
+      const names = plan.bindings.map((_, index) => `__q${index}`);
+      const mutate = globalThis.Function(...names, source)(...plan.bindings) as (
+        value: T,
+        params: Readonly<Record<string, unknown>>
+      ) => T;
+      registerArtifact(mutate as object, {
+        kind: "mutation-plan",
+        schema,
+        source,
+        bindingNames: names,
+        bindingValues: plan.bindings,
+        reads: explanation.reads,
+        writes: explanation.writes,
+        params: explanation.params,
+      });
+      return mutate as (value: T, params: UpdatePatchParams<TPatch>) => T;
+    },
+  };
+}
+
+/** Function-body source for one plan; shared by the runtime and AOT hosts. */
+export function emitMutationSource(plan: MutationPlan): string {
+  return `return function mutate(value, params) {\n${emitMutationBody(plan)}};`;
+}
+
+/**
+ * Flattens a declared template into normalized writes.
+ *
+ * A nested plain object descends only when the schema says that level is an
+ * object; anywhere else it is the value being written, which is what keeps the
+ * declaration and the deep-partial patch it replaces in agreement.
+ */
+function collectPatchWrites(
+  schema: AnyTypeSchema,
+  template: unknown,
+  path: readonly string[],
+  bindings: unknown[]
+): MutationWriteInput[] | undefined {
+  if (template === null || typeof template !== "object" || Array.isArray(template) || isParamRef(template)) {
+    if (path.length === 0) return undefined;
+    if (isParamRef(template)) return [{ path, value: { kind: "param", name: template.name } }];
+    bindings.push(template);
+    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
+  }
+
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    if (path.length === 0) return undefined;
+    bindings.push(template);
+    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
+  }
+
+  const props = (base.def as ObjectDef).props;
+  const out: MutationWriteInput[] = [];
+  for (const key of Object.keys(template)) {
+    const child = props[key];
+    if (child === undefined) return undefined;
+    const nested = collectPatchWrites(
+      child,
+      (template as Readonly<Record<string, unknown>>)[key],
+      [...path, key],
+      bindings
+    );
+    if (nested === undefined) return undefined;
+    out.push(...nested);
+  }
+  return out;
 }
 
 function materializeParamPatch(template: unknown, params: Readonly<Record<string, unknown>>): unknown {
