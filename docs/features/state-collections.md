@@ -141,21 +141,49 @@ the matches first and then fills exactly one array of the final length; the
 predicate runs twice per row, which is the price of never over-allocating and
 never growing an array.
 
+## Ordered repositioning
+
+Writing the ordering key does not invalidate the ordering fact — it relocates
+the row. Replacing it in place would leave a collection that still claims to be
+sorted, so the mutation repairs the order instead:
+
+```ts
+const Tasks = JIT.array(Task).keyed("id").ordered("rank");
+const reorder = JIT.state
+  .collection(Tasks)
+  .updateByKey({ key: "id", patch: { rank: JIT.cqrs.param("rank") } });
+
+reorder(tasks, { key: "b", rank: 9 }); // b moves to where rank 9 belongs
+```
+
+The collection minus the old slot is still sorted, so the destination is a
+binary search over *the array the mutation is about to produce*, not a re-sort:
+the search skips the moved row while it looks. When the new key lands in the
+same slot the copy is the ordinary one-slot replacement; when it does not, one
+array is filled from three ranges and nothing is shifted twice. A no-op patch
+and a missing key still return the original collection.
+
+`explain().mutation` reports both facts at once — `changesOrder: true`, because
+the row moved, and `preservesOrdering: true`, because the collection is sorted
+afterwards.
+
 ## Fact preservation
 
 A mutation must not leave a collection whose declared facts have stopped being
 true. Writing the identity key changes which row a key reaches and can break
-uniqueness; writing the ordering key can move the row out of order while the
-collection still claims to be sorted. Both are repairs rather than writes, so
-the first version refuses them:
+uniqueness, so it is refused:
 
 ```ts
 JIT.state.collection(Users).updateByKey({ key: "id", patch: { id: JIT.cqrs.param("id") } });
 // JITError: updateByKey() cannot write the identity key "id"; remove and insert the row instead
 ```
 
-Remove and insert instead. Explicit rekey and reposition operations can be
-added later; silently invalidating a fact cannot.
+The identity key is different from the ordering key, and the two are handled
+differently on purpose. Moving a row is a repair the planner can perform, so
+writing the ordering key repositions. Changing which row a key reaches is a
+decision about identity, and the collection cannot make it for you: remove and
+insert instead. An explicit `rekey` can be added if a real case appears;
+silently invalidating a fact cannot.
 
 ## Performance
 
@@ -241,4 +269,4 @@ observable contract.
   it needs no predicate and no condition to evaluate.
 - Use CQRS for `map`, `filter`, and `groupBy`; state collections own immutable
   mutation, not collection querying.
-- Rekey, reposition, and Map/Set mutation are not part of this milestone.
+- Rekey and Map/Set mutation are not part of this milestone.

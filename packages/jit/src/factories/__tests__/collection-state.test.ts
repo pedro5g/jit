@@ -295,13 +295,66 @@ describe("JIT.state.collection", () => {
     expect(() => JIT.state.collection(Keyed).updateByKey({ key: "id", patch: { id: JIT.cqrs.param("id") } })).toThrow(
       /identity key/i
     );
-    const OrderedByScore = JIT.array(User).keyed("id").ordered("score");
-    expect(() =>
-      JIT.state.collection(OrderedByScore).updateByKey({ key: "id", patch: { score: JIT.cqrs.param("score") } })
-    ).toThrow(/ordering key/i);
     expect(() => JIT.state.collection(Plain).removeByKey()).toThrow(/needs a key/i);
     // @ts-expect-error a collection mutation needs an array schema
     expect(() => JIT.state.collection(User)).toThrow(/array schema/i);
+  });
+
+  describe("ordered repositioning", () => {
+    const OrderedByScore = JIT.array(User).keyed("id").ordered("score");
+    const reorder = JIT.state
+      .collection(OrderedByScore)
+      .updateByKey({ key: "id", patch: { score: JIT.cqrs.param("score") } });
+    const ranked = [
+      { id: "a", name: "A", score: 1 },
+      { id: "b", name: "B", score: 2 },
+      { id: "c", name: "C", score: 3 },
+      { id: "d", name: "D", score: 4 },
+    ];
+    const order = (rows: readonly (typeof ranked)[number][]) => rows.map((row) => row.id).join("");
+
+    it("moves the row rather than leaving a collection that lies about its order", () => {
+      // The old behavior refused this patch. Writing the ordering key does not
+      // invalidate the fact — it relocates the row — so the mutation repairs it.
+      expect(order(reorder(ranked, { key: "b", score: 9 }))).toBe("acdb");
+      expect(order(reorder(ranked, { key: "d", score: 0 }))).toBe("dabc");
+      expect(order(reorder(ranked, { key: "a", score: 3.5 }))).toBe("bcad");
+      // A new key that lands in the same slot keeps the one-slot replacement.
+      expect(order(reorder(ranked, { key: "b", score: 2.5 }))).toBe("abcd");
+      expect(reorder(ranked, { key: "b", score: 2.5 })[1]?.score).toBe(2.5);
+    });
+
+    it("keeps the collection sorted for every destination", () => {
+      for (const target of ["a", "b", "c", "d"]) {
+        for (const score of [-1, 0.5, 1.5, 2.5, 3.5, 10]) {
+          const next = reorder(ranked, { key: target, score });
+          expect(next).toHaveLength(ranked.length);
+          expect(next.map((row) => row.score)).toEqual([...next.map((row) => row.score)].sort((a, b) => a - b));
+          expect(next.find((row) => row.id === target)?.score).toBe(score);
+        }
+      }
+    });
+
+    it("searches the array it is about to produce, and reports the move", () => {
+      expect(reorder.explain().mutation.changesOrder).toBe(true);
+      expect(reorder.explain().mutation.preservesOrdering).toBe(true);
+      expect(sourceOf(reorder)).not.toContain(".sort(");
+      expect(sourceOf(reorder)).toContain("value[mid < at ? mid : mid + 1]");
+      // Nothing changed and nothing found still return the original array.
+      expect(reorder(ranked, { key: "b", score: 2 })).toBe(ranked);
+      expect(reorder(ranked, { key: "missing", score: 9 })).toBe(ranked);
+    });
+
+    it("follows a descending ordering fact", () => {
+      const descending = JIT.array(User).keyed("id").ordered("score", "desc");
+      const move = JIT.state
+        .collection(descending)
+        .updateByKey({ key: "id", patch: { score: JIT.cqrs.param("score") } });
+      const rows = [...ranked].reverse();
+
+      expect(order(move(rows, { key: "c", score: 0 }))).toBe("dbac");
+      expect(move(rows, { key: "c", score: 0 }).map((row) => row.score)).toEqual([4, 2, 1, 0]);
+    });
   });
 
   it("does not discover the shape or scan past the answer", () => {

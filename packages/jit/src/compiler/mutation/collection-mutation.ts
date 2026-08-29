@@ -14,6 +14,7 @@ import {
 import { CodeWriter } from "../emitter/code-writer.js";
 import { type IndexDescriptor, resolveIndexDescriptor, resolveIndexKeysFromFacts } from "../indexing.js";
 import { resolveRowField, resolveRowObjectSchema, resolveScalarKeyKind } from "../row-keys.js";
+import { emitPropertyAccess } from "../source/access.js";
 import { emitQueryConditionSource, emitQueryValueSource } from "../source/query-condition.js";
 import { emitMutationBody } from "./emit-mutation.js";
 import type { MutationPlan } from "./mutation-plan.js";
@@ -67,6 +68,8 @@ export interface CollectionMutationDescriptor {
   readonly row?: MutationPlan;
   /** Ordering facts this mutation must not silently break. */
   readonly orderedBy?: string;
+  /** Set when the patch writes the ordering key and the row has to be moved. */
+  readonly reposition?: OrderingFact;
   /** Set for the `where` operations: the shared query condition they select by. */
   readonly condition?: QueryConditionNode;
   /** Expression the access path matches the key against. */
@@ -130,8 +133,9 @@ export function resolveCollectionMutation(
   }
   const field = resolveRowField(object, resolved, "state.collection");
   const choice = resolveKeyedAccessChoice(schema, resolved);
-  const ordered = resolveOrderingKey(schema);
-  if (row !== undefined) assertFactsPreserved(row, resolved, ordered);
+  const ordering = resolveOrdering(schema);
+  if (row !== undefined) assertFactsPreserved(row, resolved, ordering?.key);
+  const reposition = writesOrderingKey(row, ordering) ? ordering : undefined;
 
   return Object.freeze({
     kind,
@@ -144,9 +148,10 @@ export function resolveCollectionMutation(
     choice,
     date: resolveScalarKeyKind(field, resolved, "state.collection") === "date",
     ...(row === undefined ? {} : { row }),
-    ...(ordered === undefined ? {} : { orderedBy: ordered }),
+    ...(ordering === undefined ? {} : { orderedBy: ordering.key }),
+    ...(reposition === undefined ? {} : { reposition }),
     probe: "params.key",
-    facts: mutationFacts(kind, row),
+    facts: mutationFacts(kind, row, reposition !== undefined),
     mode,
   });
 }
@@ -182,7 +187,7 @@ function resolvePositionalMutation(
   });
 }
 
-function mutationFacts(kind: CollectionMutationKind, row?: MutationPlan): CollectionMutationFacts {
+function mutationFacts(kind: CollectionMutationKind, row?: MutationPlan, reposition = false): CollectionMutationFacts {
   const changesLength = [
     "append",
     "prepend",
@@ -228,7 +233,9 @@ function mutationFacts(kind: CollectionMutationKind, row?: MutationPlan): Collec
     reads: Object.freeze(row?.dependencies.reads ?? []),
     writes: Object.freeze(row?.dependencies.writes ?? [Object.freeze([])]),
     changesLength,
-    changesOrder,
+    // Repositioning moves the row, so the order changes even though the
+    // collection is still ordered afterwards. Both facts are true at once.
+    changesOrder: changesOrder || reposition,
     changesIdentity: kind === "replaceAt" || kind === "replaceByKey" || kind === "replaceWhere" || kind === "upsert",
     preservesKeyed,
     preservesOrdering,
@@ -309,11 +316,21 @@ function resolveWhereMutation(
   });
 }
 
-function resolveOrderingKey(schema: ATS.AnyTypeSchema): string | undefined {
+interface OrderingFact {
+  readonly key: string;
+  readonly direction: "asc" | "desc";
+}
+
+function resolveOrdering(schema: ATS.AnyTypeSchema): OrderingFact | undefined {
   const hints = resolveHints(schema);
   const ordered = hints.order ?? hints.collection?.ordered;
   const key = ordered?.key;
-  return typeof key === "string" ? key : undefined;
+  if (typeof key !== "string") return undefined;
+  return Object.freeze({ key, direction: ordered?.direction === "desc" ? ("desc" as const) : ("asc" as const) });
+}
+
+function resolveOrderingKey(schema: ATS.AnyTypeSchema): string | undefined {
+  return resolveOrdering(schema)?.key;
 }
 
 /**
@@ -326,6 +343,7 @@ function resolveOrderingKey(schema: ATS.AnyTypeSchema): string | undefined {
  * declared facts have stopped being true.
  */
 function assertFactsPreserved(row: MutationPlan, key: string, ordered: string | undefined): void {
+  void ordered;
   for (const write of row.writes) {
     if (write.path.length === 1 && write.path[0] === key) {
       throw new JITError(
@@ -333,13 +351,19 @@ function assertFactsPreserved(row: MutationPlan, key: string, ordered: string | 
         `updateByKey() cannot write the identity key ${JSON.stringify(key)}; remove and insert the row instead`
       );
     }
-    if (ordered !== undefined && write.path.length === 1 && write.path[0] === ordered) {
-      throw new JITError(
-        "INVALID_UPDATE",
-        `updateByKey() cannot write the ordering key ${JSON.stringify(ordered)}; the collection would no longer be ordered`
-      );
-    }
   }
+}
+
+/**
+ * True when the patch moves the row within its declared ordering.
+ *
+ * Writing the ordering key does not invalidate the fact — it relocates the
+ * row. Replacing it in place would leave a collection that still claims to be
+ * sorted, so the mutation repairs the order instead of refusing or lying.
+ */
+function writesOrderingKey(row: MutationPlan | undefined, ordering: OrderingFact | undefined): boolean {
+  if (row === undefined || ordering === undefined) return false;
+  return row.writes.some((write) => write.path.length === 1 && write.path[0] === ordering.key);
 }
 
 export function explainCollectionMutation(descriptor: CollectionMutationDescriptor): CollectionMutationExplain {
@@ -490,8 +514,64 @@ function emitReplaceAt(writer: CodeWriter, descriptor: CollectionMutationDescrip
       ? `if (__equal(${rowVar}, next)) return value;`
       : `if (next === ${rowVar}) return value;`
   );
+  if (descriptor.reposition !== undefined) {
+    emitReposition(writer, descriptor.reposition);
+    return;
+  }
   writer.line("const out = value.slice();");
   writer.line("out[at] = next;");
+  writer.line("return out;");
+}
+
+/**
+ * Moves the rebuilt row to the slot its new ordering key belongs in.
+ *
+ * The collection minus the old slot is still ordered, so the destination is a
+ * binary search over that array rather than a re-sort. When the row does not
+ * move, the copy is the ordinary one-slot replacement; when it does, one array
+ * is filled from three ranges and nothing is shifted twice.
+ */
+function emitReposition(writer: CodeWriter, ordering: OrderingFact): void {
+  const read = (row: string) => emitPropertyAccess(row, ordering.key);
+  const goRight = ordering.direction === "desc" ? "probe > target" : "probe < target";
+
+  writer.line("const len = value.length;");
+  writer.line(`const target = ${read("next")};`);
+  writer.line("let low = 0;");
+  writer.line("let high = len - 2;");
+  writer.line("while (low <= high) {");
+  writer.indent(() => {
+    writer.line("const mid = (low + high) >>> 1;");
+    // The old slot is skipped, so the search runs over the array as it will be.
+    writer.line(`const probe = ${read("value[mid < at ? mid : mid + 1]")};`);
+    writer.line(`if (${goRight}) low = mid + 1;`);
+    writer.line("else high = mid - 1;");
+  });
+  writer.line("}");
+  writer.line("const to = low;");
+  writer.line("if (to === at) {");
+  writer.indent(() => {
+    writer.line("const out = value.slice();");
+    writer.line("out[at] = next;");
+    writer.line("return out;");
+  });
+  writer.line("}");
+  writer.line("const out = new Array(len);");
+  writer.line("if (to < at) {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < to; i++) out[i] = value[i];");
+    writer.line("out[to] = next;");
+    writer.line("for (let i = to; i < at; i++) out[i + 1] = value[i];");
+    writer.line("for (let i = at + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < at; i++) out[i] = value[i];");
+    writer.line("for (let i = at + 1; i <= to; i++) out[i - 1] = value[i];");
+    writer.line("out[to] = next;");
+    writer.line("for (let i = to + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("}");
   writer.line("return out;");
 }
 
