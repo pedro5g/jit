@@ -83,7 +83,7 @@ remain when their semantics require them.
 | mask and sanitize         | yes     | yes    | yes            | static schema security metadata                  |
 | eager CQRS query          | yes     | yes    | yes            | define artifacts are deliberately non-executable |
 | iterator/visitor query    | yes     | yes    | yes            | backend is part of the query artifact            |
-| API query boundary/parser | yes     | yes    | yes            | structural `~query` remains V1                   |
+| API query boundary/parser | yes     | yes    | yes            | `~query` stays V1; `explain()` ships as a frozen constant |
 | sort / ordering plans     | yes     | yes    | yes            | descriptor stays off the compiled plan           |
 | index plans               | yes     | yes    | yes            | cache helper emitted only when an index is       |
 | physical query access     | yes     | yes    | yes            | strategy is compiled in; never in `~query`       |

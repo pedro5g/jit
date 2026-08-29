@@ -347,6 +347,15 @@ the generated parser. `limits.maxDepth` (default `3`) is the last global stop
 on declared traversal: a dotted filter path with more segments than the budget
 fails when the boundary is declared, not once per request.
 
+`limits.maxCost` adds a semantic complexity budget over those counters:
+equality weighs `1`, a range `2`, an ordering field `3`. It measures how much
+work a request asks for, not what a database will spend. The budget is charged
+while the request is normalized, so an over-budget request stops at the
+condition that breaks it. Its default is whatever the other limits already
+allow, which narrows nothing and emits no counter into the parser.
+`definition.explain()` reports the permitted fields, their per-condition cost,
+the limits and both budget numbers on runtime, define and AOT hosts.
+
 Set `select: ["id", "name"]` to permit exactly that sparse fieldset. The
 parser rejects every other model field and can bound the fieldset with
 `limits.maxSelectFields`.

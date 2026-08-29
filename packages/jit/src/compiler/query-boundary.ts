@@ -1,4 +1,5 @@
 import { JITError } from "../errors/index.js";
+import { queryBoundaryMaxCost } from "./query-cost.js";
 
 /** One filter capability resolved before an untrusted request is parsed. */
 export interface QueryBoundaryField {
@@ -44,6 +45,8 @@ export interface QueryBoundaryLimits {
   readonly maxSelectFields: number;
   /** Last global stop for traversal depth; declarations remain the primary boundary. */
   readonly maxDepth: number;
+  /** Semantic complexity budget; defaults to what the structural limits already allow. */
+  readonly maxCost: number;
 }
 
 /**
@@ -71,7 +74,7 @@ export interface QueryBoundaryInput {
   readonly projection: readonly string[];
   readonly sorting: readonly string[];
   readonly pagination?: QueryBoundaryPagination;
-  readonly limits: QueryBoundaryLimits;
+  readonly limits: Omit<QueryBoundaryLimits, "maxCost"> & { readonly maxCost?: number };
 }
 
 /** Resolves the current flat public-query surface into the extensible IR. */
@@ -98,7 +101,7 @@ export function resolveQueryBoundary(input: QueryBoundaryInput): QueryBoundary {
             : { ...input.pagination }
         );
 
-  return Object.freeze({
+  const shape = {
     sourceFields: Object.freeze([...input.sourceFields]),
     fields: Object.freeze(fields),
     relations: Object.freeze([]),
@@ -107,7 +110,16 @@ export function resolveQueryBoundary(input: QueryBoundaryInput): QueryBoundary {
     projection: Object.freeze([...input.projection]),
     sorting: Object.freeze([...input.sorting]),
     pagination,
-    limits: Object.freeze({ ...input.limits }),
+  };
+  const structural = queryBoundaryMaxCost({ ...shape, limits: input.limits });
+  const maxCost = input.limits.maxCost ?? structural;
+  if (!Number.isSafeInteger(maxCost) || maxCost < 0) {
+    throw new JITError("INVALID_QUERY", "API query maxCost must be a non-negative safe integer");
+  }
+
+  return Object.freeze({
+    ...shape,
+    limits: Object.freeze({ ...input.limits, maxCost }),
   });
 }
 

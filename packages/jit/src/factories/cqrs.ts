@@ -1,6 +1,13 @@
 import { type BinaryArray, type BinaryRowSet, isBinaryArray, isBinaryRowSet } from "../compiler/binary-rowset.js";
 import { compileJoin, createJoinPlan, explainJoinPlan, type JoinPair, type LeftJoinPair } from "../compiler/join.js";
 import { type QueryBoundary, queryBoundaryFilters, resolveQueryBoundary } from "../compiler/query-boundary.js";
+import {
+  explainQueryBoundary,
+  QUERY_COST_WEIGHTS,
+  type QueryBoundaryExplanation,
+  queryBoundaryMaxCost,
+  queryOperatorCost,
+} from "../compiler/query-cost.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import type {
   QueryAggregateOperator,
@@ -165,6 +172,8 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
     readonly maxSelectFields?: number;
     /** Last global stop for declared traversal depth; defaults to 3. */
     readonly maxDepth?: number;
+    /** Semantic complexity budget; defaults to what the other limits already allow. */
+    readonly maxCost?: number;
   };
 }
 
@@ -172,6 +181,8 @@ export interface CqrsInput<TSchema extends ATS.AnyTypeSchema> {
   readonly schema: TSchema;
   readonly options: CqrsInputOptions<TSchema>;
   readonly "~query": StandardQueryInput;
+  /** Reports what the boundary permits and what it costs, without running a request. */
+  explain(): QueryBoundaryExplanation;
 }
 
 const queryBoundaries = new WeakMap<object, QueryBoundary>();
@@ -1060,6 +1071,7 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       maxSortFields: frozenOptions.limits?.maxSortFields ?? 3,
       maxSelectFields: frozenOptions.limits?.maxSelectFields ?? 30,
       maxDepth,
+      ...(frozenOptions.limits?.maxCost === undefined ? {} : { maxCost: frozenOptions.limits.maxCost }),
     },
   });
   const definition: StandardQueryInput["definition"] = Object.freeze({
@@ -1094,16 +1106,20 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       maxSelectFields: boundary.limits.maxSelectFields,
     }),
   });
-  const input = Object.freeze({
+  const input = {
     schema: unwrapped,
     options: frozenOptions,
     "~query": Object.freeze({ version: 1 as const, definition }),
-  });
+  } as CqrsInput<TSchema>;
+  const explanation = explainQueryBoundary(boundary);
+  Object.defineProperty(input, "explain", { enumerable: false, value: () => explanation });
+  Object.freeze(input);
   queryBoundaries.set(input, boundary);
   registerArtifact(input, {
     kind: "cqrs-input",
     definition,
     source: emitCqrsAotParserSource(boundary),
+    explanation,
   });
   return input;
 }
@@ -1129,6 +1145,16 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
 }
 
 function cqrsParseReference(boundary: QueryBoundary) {
+  // Built once with the boundary: the fallback path re-validates a request, it
+  // does not rebuild the allowlist for every request. Condition paths reuse the
+  // descriptor's frozen segments instead of splitting the key again.
+  const shorthand = queryBoundaryFilters(boundary);
+  const allowed = new Map(
+    boundary.fields.map((field, index) => {
+      const [path, operators] = shorthand[index] as [string, true | readonly string[]];
+      return [path, { path: field.path, operators }] as const;
+    })
+  );
   return (input: unknown): ParsedCqrsInput => {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
       throw new JITError("INVALID_QUERY", "API query input must be an object");
@@ -1147,49 +1173,69 @@ function cqrsParseReference(boundary: QueryBoundary) {
       }
     }
     const filter = source.filter;
-    if (filter === undefined) return normalizeCqrsTail(source, boundary, []);
+    if (filter === undefined) return normalizeCqrsTail(source, boundary, [], { cost: 0 });
     if (filter === null || typeof filter !== "object" || Array.isArray(filter)) {
       throw new JITError("INVALID_QUERY", "API query filter must be an object");
     }
-    const allowed: Readonly<Record<string, true | readonly string[] | undefined>> = Object.fromEntries(
-      queryBoundaryFilters(boundary)
-    );
-    const entries = Object.entries(filter as Record<string, unknown>);
-    if (entries.length > boundary.limits.maxFilters) {
+    const record = filter as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.length > boundary.limits.maxFilters) {
       throw new JITError("INVALID_QUERY", "API query filter exceeds the configured structural limit");
     }
     const conditions: CqrsInputCondition[] = [];
-    for (const [field, raw] of entries) {
-      const configured = allowed[field];
+    const budget = { cost: 0 };
+    for (let index = 0; index < keys.length; index++) {
+      const field = keys[index] as string;
+      const configured = allowed.get(field);
       if (configured === undefined)
         throw new JITError("INVALID_QUERY", `Filter field ${JSON.stringify(field)} is not allowed`);
+      const raw = record[field];
       if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
-        if (configured === true) {
+        if (configured.operators === true) {
           throw new JITError("INVALID_QUERY", `Filter field ${JSON.stringify(field)} only allows equality`);
         }
         for (const [operator, value] of Object.entries(raw as Record<string, unknown>)) {
           const kind = operator.startsWith("$") ? operator.slice(1) : operator;
-          if (!configured.includes(kind)) {
+          if (!configured.operators.includes(kind)) {
             throw new JITError(
               "INVALID_QUERY",
               `Filter operator ${JSON.stringify(kind)} is not allowed for ${JSON.stringify(field)}`
             );
           }
-          conditions.push({ kind, path: field.split("."), value });
+          conditions.push({ kind, path: configured.path, value });
+          chargeCqrsCondition(boundary, conditions.length, budget, queryOperatorCost(kind));
         }
-      } else conditions.push({ kind: "eq", path: field.split("."), value: raw });
+      } else {
+        conditions.push({ kind: "eq", path: configured.path, value: raw });
+        chargeCqrsCondition(boundary, conditions.length, budget, QUERY_COST_WEIGHTS.equality);
+      }
     }
-    if (conditions.length > boundary.limits.maxConditions) {
-      throw new JITError("INVALID_QUERY", "API query filter exceeds the configured condition limit");
-    }
-    return normalizeCqrsTail(source, boundary, conditions);
+    return normalizeCqrsTail(source, boundary, conditions, budget);
   };
+}
+
+/**
+ * Charges one condition against both budgets as it is produced.
+ *
+ * The counters are checked here rather than after the loop so an amplifying
+ * request stops at the condition that breaks the budget; the remaining request
+ * keys are never read.
+ */
+function chargeCqrsCondition(boundary: QueryBoundary, produced: number, budget: { cost: number }, cost: number): void {
+  if (produced > boundary.limits.maxConditions) {
+    throw new JITError("INVALID_QUERY", "API query filter exceeds the configured condition limit");
+  }
+  budget.cost += cost;
+  if (budget.cost > boundary.limits.maxCost) {
+    throw new JITError("INVALID_QUERY", "API query exceeds the configured complexity budget");
+  }
 }
 
 function normalizeCqrsTail(
   source: Record<string, unknown>,
   boundary: QueryBoundary,
-  filter: readonly CqrsInputCondition[]
+  filter: readonly CqrsInputCondition[],
+  budget: { cost: number } = { cost: 0 }
 ): ParsedCqrsInput {
   const select = normalizeCqrsSelect(source, boundary);
   const { pagination } = boundary;
@@ -1219,6 +1265,10 @@ function normalizeCqrsTail(
   }
   if (sort.length > boundary.limits.maxSortFields) {
     throw new JITError("INVALID_QUERY", "API query sort exceeds the configured structural limit");
+  }
+  budget.cost += QUERY_COST_WEIGHTS.sort * sort.length;
+  if (budget.cost > boundary.limits.maxCost) {
+    throw new JITError("INVALID_QUERY", "API query exceeds the configured complexity budget");
   }
   if (!pagination) return { filter, sort, ...(select === undefined ? {} : { select }) };
   if (pagination.type === "cursor") {
@@ -1351,6 +1401,19 @@ export function emitCqrsInputParser(boundary: QueryBoundary): string {
     1,
     ...fields.map(([, configured]) => (configured === true ? 1 : configured.length * 2))
   );
+  // A guard that cannot fire is not emitted. Both budgets are static, so the
+  // worst request the allowlist can express is known here: when it already fits,
+  // the hot path keeps the shape it had before the budget existed.
+  const worstConditions = fields.reduce(
+    (total, [, configured]) => total + (configured === true ? 1 : configured.length * 2),
+    0
+  );
+  const countGuarded = worstConditions > maxConditions;
+  const costGuarded = queryBoundaryMaxCost(boundary) > boundary.limits.maxCost;
+  const guard = (cost: number) =>
+    `${countGuarded ? ` if (j > ${maxConditions}) return __reference(input);` : ""}${
+      costGuarded ? ` cost += ${cost}; if (cost > ${boundary.limits.maxCost}) return __reference(input);` : ""
+    }`;
   const fieldBodies = fields.map(([field, configured]) => {
     const access = `[${JSON.stringify(field)}]`;
     const operators = configured === true ? [] : configured;
@@ -1359,23 +1422,23 @@ export function emitCqrsInputParser(boundary: QueryBoundary): string {
         const kind = JSON.stringify(operator);
         const path = JSON.stringify(field.split("."));
         return [
-          `if (raw[${JSON.stringify(`$${operator}`)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(`$${operator}`)}] }; }`,
-          `if (raw[${JSON.stringify(operator)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(operator)}] }; }`,
+          `if (raw[${JSON.stringify(`$${operator}`)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(`$${operator}`)}] };${guard(queryOperatorCost(operator))} }`,
+          `if (raw[${JSON.stringify(operator)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(operator)}] };${guard(queryOperatorCost(operator))} }`,
         ];
       })
       .join(" ");
-    return `if (filter${access} !== undefined) { const raw = filter${access}; if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) { ${operatorBodies ? `let matched = 0; ${operatorBodies} if (Object.keys(raw).length !== matched) return __reference(input);` : "return __reference(input);"} } else out[j++] = { kind: "eq", path: ${JSON.stringify(field.split("."))}, value: raw }; }`;
+    return `if (filter${access} !== undefined) { const raw = filter${access}; if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) { ${operatorBodies ? `let matched = 0; ${operatorBodies} if (Object.keys(raw).length !== matched) return __reference(input);` : "return __reference(input);"} } else { out[j++] = { kind: "eq", path: ${JSON.stringify(field.split("."))}, value: raw };${guard(QUERY_COST_WEIGHTS.equality)} } }`;
   });
   const allowedSort = sortFields.map((field) => JSON.stringify(field));
   const allowedSelect = selectFields.map((field) => JSON.stringify(field));
   const selectSource = `const selectText = input.fields; let select; if (selectText !== undefined) { if (typeof selectText !== "string" || selectText.length === 0) return __reference(input); const selected = selectText.split(","); if (selected.length > ${maxSelectFields}) return __reference(input); const seen = new Set(); for (let i = 0; i < selected.length; i++) { const field = selected[i]; if (field.length === 0 || seen.has(field) || (${allowedSelect.map((field) => `field !== ${field}`).join(" && ") || "true"})) return __reference(input); seen.add(field); } select = selected; }`;
-  const sortSource = `const sortText = input.sort; let sort = []; if (sortText !== undefined) { if (typeof sortText !== "string" || sortText.length === 0) return __reference(input); const tokens = sortText.split(","); if (tokens.length > ${maxSortFields}) return __reference(input); const seen = new Set(); sort = new Array(tokens.length); for (let i = 0; i < tokens.length; i++) { const token = tokens[i]; const descending = token.charCodeAt(0) === 45; const field = descending ? token.slice(1) : token; if (field.length === 0 || seen.has(field) || (${allowedSort.map((field) => `field !== ${field}`).join(" && ") || "true"})) return __reference(input); seen.add(field); sort[i] = { path: [field], direction: descending ? "desc" : "asc" }; } }`;
+  const sortSource = `const sortText = input.sort; let sort = []; if (sortText !== undefined) { if (typeof sortText !== "string" || sortText.length === 0) return __reference(input); const tokens = sortText.split(","); if (tokens.length > ${maxSortFields}) return __reference(input); const seen = new Set(); sort = new Array(tokens.length); for (let i = 0; i < tokens.length; i++) { const token = tokens[i]; const descending = token.charCodeAt(0) === 45; const field = descending ? token.slice(1) : token; if (field.length === 0 || seen.has(field) || (${allowedSort.map((field) => `field !== ${field}`).join(" && ") || "true"})) return __reference(input); seen.add(field); sort[i] = { path: [field], direction: descending ? "desc" : "asc" }; } }${costGuarded ? ` cost += ${QUERY_COST_WEIGHTS.sort} * sort.length; if (cost > ${boundary.limits.maxCost}) return __reference(input);` : ""}`;
   const paginationSource = !pagination
     ? "return select === undefined ? { filter: out, sort } : { filter: out, sort, select };"
     : pagination.type === "offset"
       ? `const page = typeof input.page === "number" ? input.page : 1; const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; const offset = (page - 1) * limit; if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > ${pagination.maxLimit} || !Number.isSafeInteger(offset) || offset > ${pagination.maxOffset}) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "offset", offset, limit } } : { filter: out, sort, select, pagination: { kind: "offset", offset, limit } };`
       : `if (typeof sortText === "string" && sortText.length > 0 && sortText !== ${JSON.stringify(pagination.by.join(","))}) return __reference(input); sort = ${JSON.stringify(pagination.by.map((field) => ({ path: [field], direction: "asc" })))}; const afterText = input.after; const beforeText = input.before; if (afterText !== undefined && beforeText !== undefined) return __reference(input); const after = afterText === undefined ? undefined : __decodeCursor(afterText, ${pagination.by.length}); const before = beforeText === undefined ? undefined : __decodeCursor(beforeText, ${pagination.by.length}); const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; if (!Number.isInteger(limit) || limit < 1 || limit > ${pagination.maxLimit}) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } } : { filter: out, sort, select, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } };`;
-  return `return function parse(input) { if (input === null || typeof input !== "object" || Array.isArray(input)) return __reference(input); const inputKeys = Object.keys(input); for (let i = 0; i < inputKeys.length; i++) { if (${inputFields.map((field) => `inputKeys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } let out; if (input.filter === undefined) out = []; else { const filter = input.filter; if (filter === null || typeof filter !== "object" || Array.isArray(filter)) return __reference(input); const keys = Object.keys(filter); if (keys.length > ${maxFilters}) return __reference(input); for (let i = 0; i < keys.length; i++) { if (${allowedFields.map((field) => `keys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } out = new Array(keys.length * ${conditionCapacity}); let j = 0; ${fieldBodies.join(" ")} if (j > ${maxConditions}) return __reference(input); if (j !== out.length) out.length = j; } ${selectSource} ${sortSource} ${paginationSource} };`;
+  return `return function parse(input) { if (input === null || typeof input !== "object" || Array.isArray(input)) return __reference(input); const inputKeys = Object.keys(input); for (let i = 0; i < inputKeys.length; i++) { if (${inputFields.map((field) => `inputKeys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } ${costGuarded ? "let cost = 0; " : ""}let out; if (input.filter === undefined) out = []; else { const filter = input.filter; if (filter === null || typeof filter !== "object" || Array.isArray(filter)) return __reference(input); const keys = Object.keys(filter); if (keys.length > ${maxFilters}) return __reference(input); for (let i = 0; i < keys.length; i++) { if (${allowedFields.map((field) => `keys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } out = new Array(keys.length * ${conditionCapacity}); let j = 0; ${fieldBodies.join(" ")} if (j !== out.length) out.length = j; } ${selectSource} ${sortSource} ${paginationSource} };`;
 }
 
 /** Import-free variant consumed by the AOT emitter; invalid syntax throws directly. */

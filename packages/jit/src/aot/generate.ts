@@ -657,7 +657,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
     if (artifact.kind === "join-plan") return joinPlanType(artifact, typeNames);
     if (artifact.kind === "cqrs-input")
-      return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
+      return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown; readonly explain: () => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
@@ -1497,10 +1497,22 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
       return undefined;
     }
+    const explanation = JSON.stringify(artifact.explanation);
+    if (explanation === undefined) {
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-input",
+        reason: "CQRS boundary explanation cannot be serialized",
+      });
+      return undefined;
+    }
     const parserSource = artifact.source.replace("return function parse", "const parse = function parse");
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push(...indentBlock(parserSource));
-    js.push(`  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse });`);
+    js.push(`  const explanation = Object.freeze(${explanation});`);
+    js.push(
+      `  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse, explain: () => explanation });`
+    );
     js.push("})();");
     return { binding, type };
   }

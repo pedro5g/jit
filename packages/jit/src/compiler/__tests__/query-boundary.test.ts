@@ -27,7 +27,7 @@ describe("QueryBoundary", () => {
       projection: ["id", "name"],
       sorting: ["createdAt"],
       pagination: { type: "cursor", by: ["createdAt", "id"], defaultLimit: 20, maxLimit: 100 },
-      limits: { maxFilters: 8, maxConditions: 10, maxSortFields: 2, maxSelectFields: 2, maxDepth: 3 },
+      limits: { maxFilters: 8, maxConditions: 10, maxSortFields: 2, maxSelectFields: 2, maxDepth: 3, maxCost: 15 },
     });
     expect(Object.isFrozen(boundary)).toBe(true);
     expect(Object.isFrozen(boundary.fields[0])).toBe(true);
@@ -53,6 +53,7 @@ describe("QueryBoundary", () => {
     expect(boundary.collections).toEqual([]);
     expect(boundary.logical).toEqual({ and: false, or: false, not: false });
     expect(boundary.pagination).toBeNull();
+    expect(boundary.limits.maxCost).toBe(0);
   });
 
   it("stops declared traversal at the configured depth", () => {

@@ -159,6 +159,8 @@ interface CqrsInputArtifact {
   readonly definition: unknown;
   /** Import-free function-body source that returns the specialized parser. */
   readonly source: string;
+  /** Boundary capability and budget, reported by `explain()` on either host. */
+  readonly explanation: unknown;
 }
 
 interface CqrsParserArtifact {

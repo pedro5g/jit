@@ -78,6 +78,48 @@ amplification an external consumer can ask for: the boundary refuses
 `page=1000000` before an adapter is given the chance to scan for it. Prefer
 cursor pagination when an endpoint is expected to be paged deeply at all.
 
+## Semantic complexity budget
+
+Counting conditions treats every condition as equal. `limits.maxCost` adds one
+semantic budget on top, with conservative internal weights:
+
+| Shape | Weight |
+| --- | --- |
+| scalar equality (`eq`, `neq`) | 1 |
+| range (`gt`, `gte`, `lt`, `lte`) | 2 |
+| ordering field | 3 |
+| relation | 5 |
+| collection predicate | 8 |
+
+This is complexity, not database cost. It says how much work a request asks an
+adapter to consider; it is not a PostgreSQL execution estimate and must not be
+read as one. A backend may later add its own physical cost on top of it.
+
+The default budget is exactly what the structural limits already permit, so an
+unconfigured `maxCost` narrows nothing. `explain()` reports both numbers:
+
+```ts
+const UsersQuery = JIT.api.query(User, {
+  filter: { id: true, age: ["gte", "lte"] },
+  sort: ["name"],
+  limits: { maxCost: 8 },
+});
+
+UsersQuery.explain();
+// {
+//   fields: [{ path: "id", operators: ["eq"], cost: 1 }, ...],
+//   cost: { weights: { ... }, sort: 3, structural: 12, budget: 8 },
+//   ...
+// }
+```
+
+The budget is charged while the request is normalized, not afterwards, so a
+request that breaks it stops at the condition that broke it and the remaining
+request keys are never read. Because both budgets are static, a guard that
+cannot fire is not emitted: when `maxCost` is the default, the generated parser
+carries no cost counter at all and keeps the shape it had before the budget
+existed.
+
 ## Compilation and allocation
 
 The boundary is resolved once against the schema. Runtime parsing uses a
@@ -101,10 +143,10 @@ configured limits bound both terms before an adapter receives the request.
 
 ## Runtime, define, AOT and `~query`
 
-`JIT.api` has the same `query`/`parse` surface on runtime and define hosts. The
-definition and parser register reconstructive artifacts. AOT emits an
-import-free parser and the V1 structural descriptor; no builder, schema walker
-or JIT import remains.
+`JIT.api` has the same `query`/`parse`/`explain` surface on runtime and define
+hosts. The definition and parser register reconstructive artifacts. AOT emits an
+import-free parser, the V1 structural descriptor and the same frozen
+explanation; no builder, schema walker or JIT import remains.
 
 The boundary descriptor is consumed before query optimization. Parsed
 conditions normalize to the shared query representation. The structural

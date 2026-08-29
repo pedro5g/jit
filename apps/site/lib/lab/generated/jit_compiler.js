@@ -18543,7 +18543,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "query-plan") return queryPlanType(artifact, typeNames);
     if (artifact.kind === "join-plan") return joinPlanType(artifact, typeNames);
     if (artifact.kind === "cqrs-input")
-      return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown }';
+      return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown; readonly explain: () => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
@@ -19145,10 +19145,22 @@ function emitModule(plan, options, layout) {
       });
       return void 0;
     }
+    const explanation = JSON.stringify(artifact.explanation);
+    if (explanation === void 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-input",
+        reason: "CQRS boundary explanation cannot be serialized"
+      });
+      return void 0;
+    }
     const parserSource = artifact.source.replace("return function parse", "const parse = function parse");
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push(...indentBlock(parserSource));
-    js.push(`  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse });`);
+    js.push(`  const explanation = Object.freeze(${explanation});`);
+    js.push(
+      `  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse, explain: () => explanation });`
+    );
     js.push("})();");
     return { binding, type };
   }
@@ -20254,18 +20266,91 @@ function fold(op, nodes) {
   return nodes.reduce((left, right) => ({ kind: "logical", op, left, right }));
 }
 
+// ../../packages/jit/src/compiler/query-cost.ts
+var QUERY_COST_WEIGHTS = Object.freeze({
+  equality: 1,
+  range: 2,
+  sort: 3,
+  relation: 5,
+  collection: 8
+});
+function queryOperatorCost(operator) {
+  return operator === "eq" || operator === "neq" ? QUERY_COST_WEIGHTS.equality : QUERY_COST_WEIGHTS.range;
+}
+function queryFieldCost(operators) {
+  let cost = 0;
+  for (let index2 = 0; index2 < operators.length; index2++) {
+    const operator = operators[index2];
+    const operatorCost = queryOperatorCost(operator);
+    if (operatorCost > cost) cost = operatorCost;
+  }
+  return cost;
+}
+function queryBoundaryConditionCosts(fields) {
+  const costs = [];
+  for (const field of fields) {
+    if (field.operators.length === 1 && field.operators[0] === "eq") {
+      costs.push(QUERY_COST_WEIGHTS.equality);
+      continue;
+    }
+    for (const operator of field.operators) {
+      const cost = queryOperatorCost(operator);
+      costs.push(cost, cost);
+    }
+  }
+  return costs.sort((left, right) => right - left);
+}
+function queryBoundaryMaxCost(input) {
+  const costs = queryBoundaryConditionCosts(input.fields);
+  let total = 0;
+  const affordable = Math.min(costs.length, input.limits.maxConditions);
+  for (let index2 = 0; index2 < affordable; index2++) total += costs[index2];
+  const orderable = input.pagination?.type === "cursor" ? input.pagination.by.length : input.sorting.length;
+  return total + QUERY_COST_WEIGHTS.sort * Math.min(orderable, input.limits.maxSortFields);
+}
+function explainQueryBoundary(boundary) {
+  return Object.freeze({
+    fields: Object.freeze(
+      boundary.fields.map(
+        (field) => Object.freeze({
+          path: field.path.join("."),
+          operators: field.operators,
+          cost: queryFieldCost(field.operators)
+        })
+      )
+    ),
+    projection: boundary.projection,
+    sorting: boundary.sorting,
+    pagination: boundary.pagination,
+    limits: boundary.limits,
+    cost: Object.freeze({
+      weights: QUERY_COST_WEIGHTS,
+      sort: QUERY_COST_WEIGHTS.sort,
+      structural: queryBoundaryMaxCost(boundary),
+      budget: boundary.limits.maxCost
+    })
+  });
+}
+
 // ../../packages/jit/src/compiler/query-boundary.ts
 function resolveQueryBoundary(input) {
-  const fields = input.filters.map(
-    ({ path, operators }) => Object.freeze({
-      path: Object.freeze(path.split(".")),
+  const fields = input.filters.map(({ path, operators }) => {
+    const segments = path.split(".");
+    if (segments.length > input.limits.maxDepth) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(path)} exceeds the configured traversal depth`
+      );
+    }
+    return Object.freeze({
+      path: Object.freeze(segments),
       operators: Object.freeze(operators === true ? ["eq"] : [...operators])
-    })
-  );
+    });
+  });
   const pagination = input.pagination === void 0 ? null : Object.freeze(
     input.pagination.type === "cursor" ? { ...input.pagination, by: Object.freeze([...input.pagination.by]) } : { ...input.pagination }
   );
-  return Object.freeze({
+  const shape = {
     sourceFields: Object.freeze([...input.sourceFields]),
     fields: Object.freeze(fields),
     relations: Object.freeze([]),
@@ -20273,8 +20358,16 @@ function resolveQueryBoundary(input) {
     logical: Object.freeze({ and: false, or: false, not: false }),
     projection: Object.freeze([...input.projection]),
     sorting: Object.freeze([...input.sorting]),
-    pagination,
-    limits: Object.freeze({ ...input.limits })
+    pagination
+  };
+  const structural = queryBoundaryMaxCost({ ...shape, limits: input.limits });
+  const maxCost = input.limits.maxCost ?? structural;
+  if (!Number.isSafeInteger(maxCost) || maxCost < 0) {
+    throw new JITError("INVALID_QUERY", "API query maxCost must be a non-negative safe integer");
+  }
+  return Object.freeze({
+    ...shape,
+    limits: Object.freeze({ ...input.limits, maxCost })
   });
 }
 function queryBoundaryFilters(boundary) {
@@ -20807,6 +20900,7 @@ function lowerRulePredicate(predicate, inputs, bindingOffset) {
 
 // ../../packages/jit/src/factories/cqrs.ts
 var queryBoundaries = /* @__PURE__ */ new WeakMap();
+var DEFAULT_MAX_OFFSET = 1e4;
 function cqrsQuery(schema) {
   if (isBinaryArray(schema) || isBinaryRowSet(schema)) return query(schema);
   const target = unwrapSchema(schema);
@@ -21068,16 +21162,37 @@ function objectFields(schema) {
   const object2 = schema.type === "runtimeType" ? schema.def.innerType : schema;
   return object2.type === "object" ? Object.keys(object2.def.props) : [];
 }
-function isSchemaPath(schema, path) {
+function schemaAtPath(schema, path) {
   let current = schema;
   for (const key of path.split(".")) {
-    if (current.type === "runtimeType") current = current.def.innerType;
-    if (current.type !== "object") return false;
+    current = resolveWrappers(current).base;
+    if (current.type !== "object") return void 0;
     const next = current.def.props[key];
-    if (!next) return false;
+    if (!next) return void 0;
     current = next;
   }
-  return true;
+  return resolveWrappers(current).base;
+}
+var EQUALITY_QUERY_OPERATORS = Object.freeze(["eq", "neq"]);
+var ORDERED_QUERY_OPERATORS = Object.freeze([
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte"
+]);
+function queryOperatorsForSchema(schema) {
+  const base = resolveWrappers(schema).base;
+  if (base.type === "boolean" || base.type === "null" || base.type === "undefined") return EQUALITY_QUERY_OPERATORS;
+  if (["string", "number", "int", "bigint", "date", "templateLiteral", "enum"].includes(base.type)) {
+    return ORDERED_QUERY_OPERATORS;
+  }
+  if (base.type === "literal") {
+    const value = base.def.value;
+    return typeof value === "boolean" || value === null ? EQUALITY_QUERY_OPERATORS : ORDERED_QUERY_OPERATORS;
+  }
+  return Object.freeze([]);
 }
 function toStandardCondition(condition, bindings) {
   if (condition.kind === "compare") {
@@ -21146,11 +21261,19 @@ function cqrsInput(schema, options) {
   const maxFilters = options.maxFilters ?? 32;
   const fields = new Set(objectFields(unwrapped));
   for (const [field, operators] of Object.entries(options.filter ?? {})) {
-    if (!isSchemaPath(unwrapped, field))
+    const fieldSchema = schemaAtPath(unwrapped, field);
+    if (!fieldSchema)
       throw new JITError(
         "INVALID_QUERY",
         `API query filter field ${JSON.stringify(field)} is not declared by the model`
       );
+    const supportedOperators = queryOperatorsForSchema(fieldSchema);
+    if (supportedOperators.length === 0) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(field)} is not a scalar query field`
+      );
+    }
     if (operators !== true && !Array.isArray(operators)) {
       throw new JITError(
         "INVALID_QUERY",
@@ -21166,7 +21289,7 @@ function cqrsInput(schema, options) {
       }
       const seen = /* @__PURE__ */ new Set();
       for (const operator of operators) {
-        if (typeof operator !== "string" || operator.length === 0 || operator.startsWith("$")) {
+        if (typeof operator !== "string" || !supportedOperators.includes(operator)) {
           throw new JITError(
             "INVALID_QUERY",
             `API query filter field ${JSON.stringify(field)} has an invalid operator`
@@ -21209,10 +21332,20 @@ function cqrsInput(schema, options) {
       throw new JITError("INVALID_QUERY", "API query structural limits must be non-negative safe integers");
     }
   }
+  const maxDepth = options.limits?.maxDepth ?? 3;
+  if (!Number.isSafeInteger(maxDepth) || maxDepth < 1) {
+    throw new JITError("INVALID_QUERY", "API query maxDepth must be a positive safe integer");
+  }
   if (options.pagination) {
     const { defaultLimit, maxLimit } = options.pagination;
     if (!Number.isSafeInteger(defaultLimit) || !Number.isSafeInteger(maxLimit) || defaultLimit < 1 || maxLimit < defaultLimit) {
       throw new JITError("INVALID_QUERY", "API query pagination requires positive bounded limits");
+    }
+    if (options.pagination.type === "offset") {
+      const maxOffset = options.pagination.maxOffset ?? DEFAULT_MAX_OFFSET;
+      if (!Number.isSafeInteger(maxOffset) || maxOffset < 0) {
+        throw new JITError("INVALID_QUERY", "API query maxOffset must be a non-negative safe integer");
+      }
     }
     if (options.pagination.type === "cursor" && options.pagination.by.length === 0) {
       throw new JITError("INVALID_QUERY", "API query cursor pagination requires at least one stable ordering field");
@@ -21245,7 +21378,10 @@ function cqrsInput(schema, options) {
     options.pagination.type === "cursor" ? {
       ...options.pagination,
       by: Object.freeze([...options.pagination.by])
-    } : { ...options.pagination }
+    } : {
+      ...options.pagination,
+      maxOffset: options.pagination.maxOffset ?? DEFAULT_MAX_OFFSET
+    }
   ) : void 0;
   const frozenLimits = options.limits ? Object.freeze({ ...options.limits }) : void 0;
   const frozenOptions = Object.freeze({
@@ -21270,7 +21406,9 @@ function cqrsInput(schema, options) {
       maxFilters,
       maxConditions: frozenOptions.limits?.maxConditions ?? maxFilters,
       maxSortFields: frozenOptions.limits?.maxSortFields ?? 3,
-      maxSelectFields: frozenOptions.limits?.maxSelectFields ?? 30
+      maxSelectFields: frozenOptions.limits?.maxSelectFields ?? 30,
+      maxDepth,
+      ...frozenOptions.limits?.maxCost === void 0 ? {} : { maxCost: frozenOptions.limits.maxCost }
     }
   });
   const definition = Object.freeze({
@@ -21282,10 +21420,18 @@ function cqrsInput(schema, options) {
     projection: boundary.projection.length > 0,
     sorting: boundary.sorting,
     ...boundary.pagination ? {
-      pagination: Object.freeze({
-        ...boundary.pagination,
-        ...boundary.pagination.type === "cursor" ? { by: boundary.pagination.by } : {}
-      })
+      pagination: Object.freeze(
+        boundary.pagination.type === "cursor" ? {
+          type: "cursor",
+          by: boundary.pagination.by,
+          defaultLimit: boundary.pagination.defaultLimit,
+          maxLimit: boundary.pagination.maxLimit
+        } : {
+          type: "offset",
+          defaultLimit: boundary.pagination.defaultLimit,
+          maxLimit: boundary.pagination.maxLimit
+        }
+      )
     } : {},
     limits: Object.freeze({
       maxConditions: boundary.limits.maxConditions,
@@ -21293,25 +21439,20 @@ function cqrsInput(schema, options) {
       maxSelectFields: boundary.limits.maxSelectFields
     })
   });
-  const input = Object.freeze({
+  const input = {
     schema: unwrapped,
     options: frozenOptions,
     "~query": Object.freeze({ version: 1, definition })
-  });
+  };
+  const explanation = explainQueryBoundary(boundary);
+  Object.defineProperty(input, "explain", { enumerable: false, value: () => explanation });
+  Object.freeze(input);
   queryBoundaries.set(input, boundary);
   registerArtifact(input, {
     kind: "cqrs-input",
     definition,
-    source: emitCqrsAotParserSource(
-      queryBoundaryFilters(boundary),
-      boundary.limits.maxFilters,
-      boundary.sorting,
-      boundary.pagination ?? void 0,
-      boundary.limits.maxConditions,
-      boundary.limits.maxSortFields,
-      boundary.projection,
-      boundary.limits.maxSelectFields
-    )
+    source: emitCqrsAotParserSource(boundary),
+    explanation
   });
   return input;
 }
@@ -21319,16 +21460,7 @@ function cqrsParse(definition) {
   const boundary = queryBoundaries.get(definition);
   if (!boundary) throw new JITError("INVALID_QUERY", "API query boundary is missing its semantic descriptor");
   const reference = cqrsParseReference(boundary);
-  const source = emitCqrsInputParser(
-    queryBoundaryFilters(boundary),
-    boundary.limits.maxFilters,
-    boundary.sorting,
-    boundary.pagination ?? void 0,
-    boundary.limits.maxConditions,
-    boundary.limits.maxSortFields,
-    boundary.projection,
-    boundary.limits.maxSelectFields
-  );
+  const source = emitCqrsInputParser(boundary);
   const parser = globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor);
   const artifact = getArtifact(definition);
   if (artifact?.kind === "cqrs-input") {
@@ -21341,6 +21473,13 @@ function cqrsParse(definition) {
   return parser;
 }
 function cqrsParseReference(boundary) {
+  const shorthand = queryBoundaryFilters(boundary);
+  const allowed = new Map(
+    boundary.fields.map((field, index2) => {
+      const [path, operators] = shorthand[index2];
+      return [path, { path: field.path, operators }];
+    })
+  );
   return (input) => {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
       throw new JITError("INVALID_QUERY", "API query input must be an object");
@@ -21359,45 +21498,56 @@ function cqrsParseReference(boundary) {
       }
     }
     const filter = source.filter;
-    if (filter === void 0) return normalizeCqrsTail(source, boundary, []);
+    if (filter === void 0) return normalizeCqrsTail(source, boundary, [], { cost: 0 });
     if (filter === null || typeof filter !== "object" || Array.isArray(filter)) {
       throw new JITError("INVALID_QUERY", "API query filter must be an object");
     }
-    const allowed = Object.fromEntries(
-      queryBoundaryFilters(boundary)
-    );
-    const entries = Object.entries(filter);
-    if (entries.length > boundary.limits.maxFilters) {
+    const record2 = filter;
+    const keys = Object.keys(record2);
+    if (keys.length > boundary.limits.maxFilters) {
       throw new JITError("INVALID_QUERY", "API query filter exceeds the configured structural limit");
     }
     const conditions = [];
-    for (const [field, raw] of entries) {
-      const configured = allowed[field];
+    const budget = { cost: 0 };
+    for (let index2 = 0; index2 < keys.length; index2++) {
+      const field = keys[index2];
+      const configured = allowed.get(field);
       if (configured === void 0)
         throw new JITError("INVALID_QUERY", `Filter field ${JSON.stringify(field)} is not allowed`);
+      const raw = record2[field];
       if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
-        if (configured === true) {
+        if (configured.operators === true) {
           throw new JITError("INVALID_QUERY", `Filter field ${JSON.stringify(field)} only allows equality`);
         }
         for (const [operator, value] of Object.entries(raw)) {
           const kind = operator.startsWith("$") ? operator.slice(1) : operator;
-          if (!configured.includes(kind)) {
+          if (!configured.operators.includes(kind)) {
             throw new JITError(
               "INVALID_QUERY",
               `Filter operator ${JSON.stringify(kind)} is not allowed for ${JSON.stringify(field)}`
             );
           }
-          conditions.push({ kind, path: field.split("."), value });
+          conditions.push({ kind, path: configured.path, value });
+          chargeCqrsCondition(boundary, conditions.length, budget, queryOperatorCost(kind));
         }
-      } else conditions.push({ kind: "eq", path: field.split("."), value: raw });
+      } else {
+        conditions.push({ kind: "eq", path: configured.path, value: raw });
+        chargeCqrsCondition(boundary, conditions.length, budget, QUERY_COST_WEIGHTS.equality);
+      }
     }
-    if (conditions.length > boundary.limits.maxConditions) {
-      throw new JITError("INVALID_QUERY", "API query filter exceeds the configured condition limit");
-    }
-    return normalizeCqrsTail(source, boundary, conditions);
+    return normalizeCqrsTail(source, boundary, conditions, budget);
   };
 }
-function normalizeCqrsTail(source, boundary, filter) {
+function chargeCqrsCondition(boundary, produced, budget, cost) {
+  if (produced > boundary.limits.maxConditions) {
+    throw new JITError("INVALID_QUERY", "API query filter exceeds the configured condition limit");
+  }
+  budget.cost += cost;
+  if (budget.cost > boundary.limits.maxCost) {
+    throw new JITError("INVALID_QUERY", "API query exceeds the configured complexity budget");
+  }
+}
+function normalizeCqrsTail(source, boundary, filter, budget = { cost: 0 }) {
   const select = normalizeCqrsSelect(source, boundary);
   const { pagination } = boundary;
   const allowedSort = new Set(pagination?.type === "cursor" ? pagination.by : boundary.sorting);
@@ -21423,6 +21573,10 @@ function normalizeCqrsTail(source, boundary, filter) {
   }
   if (sort2.length > boundary.limits.maxSortFields) {
     throw new JITError("INVALID_QUERY", "API query sort exceeds the configured structural limit");
+  }
+  budget.cost += QUERY_COST_WEIGHTS.sort * sort2.length;
+  if (budget.cost > boundary.limits.maxCost) {
+    throw new JITError("INVALID_QUERY", "API query exceeds the configured complexity budget");
   }
   if (!pagination) return { filter, sort: sort2, ...select === void 0 ? {} : { select } };
   if (pagination.type === "cursor") {
@@ -21458,6 +21612,9 @@ function normalizeCqrsTail(source, boundary, filter) {
   const offset = (page - 1) * limit;
   if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > pagination.maxLimit || !Number.isSafeInteger(offset)) {
     throw new JITError("INVALID_QUERY", "Invalid offset pagination");
+  }
+  if (offset > pagination.maxOffset) {
+    throw new JITError("INVALID_QUERY", "API query offset exceeds the configured pagination limit");
   }
   return {
     filter,
@@ -21504,7 +21661,12 @@ function decodeCqrsCursor(value, size) {
     throw new JITError("INVALID_QUERY", "Malformed cursor");
   }
 }
-function emitCqrsInputParser(fields, maxFilters, sortFields = [], pagination, maxConditions = maxFilters, maxSortFields = 3, selectFields = [], maxSelectFields = 30) {
+function emitCqrsInputParser(boundary) {
+  const fields = queryBoundaryFilters(boundary);
+  const { maxFilters, maxConditions, maxSortFields, maxSelectFields } = boundary.limits;
+  const sortFields = boundary.sorting;
+  const selectFields = boundary.projection;
+  const pagination = boundary.pagination ?? void 0;
   const allowedFields = fields.map(([field]) => JSON.stringify(field));
   const inputFields = [
     "filter",
@@ -21517,6 +21679,13 @@ function emitCqrsInputParser(fields, maxFilters, sortFields = [], pagination, ma
     1,
     ...fields.map(([, configured]) => configured === true ? 1 : configured.length * 2)
   );
+  const worstConditions = fields.reduce(
+    (total, [, configured]) => total + (configured === true ? 1 : configured.length * 2),
+    0
+  );
+  const countGuarded = worstConditions > maxConditions;
+  const costGuarded = queryBoundaryMaxCost(boundary) > boundary.limits.maxCost;
+  const guard = (cost) => `${countGuarded ? ` if (j > ${maxConditions}) return __reference(input);` : ""}${costGuarded ? ` cost += ${cost}; if (cost > ${boundary.limits.maxCost}) return __reference(input);` : ""}`;
   const fieldBodies = fields.map(([field, configured]) => {
     const access2 = `[${JSON.stringify(field)}]`;
     const operators = configured === true ? [] : configured;
@@ -21524,21 +21693,21 @@ function emitCqrsInputParser(fields, maxFilters, sortFields = [], pagination, ma
       const kind = JSON.stringify(operator);
       const path = JSON.stringify(field.split("."));
       return [
-        `if (raw[${JSON.stringify(`$${operator}`)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(`$${operator}`)}] }; }`,
-        `if (raw[${JSON.stringify(operator)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(operator)}] }; }`
+        `if (raw[${JSON.stringify(`$${operator}`)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(`$${operator}`)}] };${guard(queryOperatorCost(operator))} }`,
+        `if (raw[${JSON.stringify(operator)}] !== undefined) { matched += 1; out[j++] = { kind: ${kind}, path: ${path}, value: raw[${JSON.stringify(operator)}] };${guard(queryOperatorCost(operator))} }`
       ];
     }).join(" ");
-    return `if (filter${access2} !== undefined) { const raw = filter${access2}; if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) { ${operatorBodies ? `let matched = 0; ${operatorBodies} if (Object.keys(raw).length !== matched) return __reference(input);` : "return __reference(input);"} } else out[j++] = { kind: "eq", path: ${JSON.stringify(field.split("."))}, value: raw }; }`;
+    return `if (filter${access2} !== undefined) { const raw = filter${access2}; if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) { ${operatorBodies ? `let matched = 0; ${operatorBodies} if (Object.keys(raw).length !== matched) return __reference(input);` : "return __reference(input);"} } else { out[j++] = { kind: "eq", path: ${JSON.stringify(field.split("."))}, value: raw };${guard(QUERY_COST_WEIGHTS.equality)} } }`;
   });
   const allowedSort = sortFields.map((field) => JSON.stringify(field));
   const allowedSelect = selectFields.map((field) => JSON.stringify(field));
   const selectSource = `const selectText = input.fields; let select; if (selectText !== undefined) { if (typeof selectText !== "string" || selectText.length === 0) return __reference(input); const selected = selectText.split(","); if (selected.length > ${maxSelectFields}) return __reference(input); const seen = new Set(); for (let i = 0; i < selected.length; i++) { const field = selected[i]; if (field.length === 0 || seen.has(field) || (${allowedSelect.map((field) => `field !== ${field}`).join(" && ") || "true"})) return __reference(input); seen.add(field); } select = selected; }`;
-  const sortSource = `const sortText = input.sort; let sort = []; if (sortText !== undefined) { if (typeof sortText !== "string" || sortText.length === 0) return __reference(input); const tokens = sortText.split(","); if (tokens.length > ${maxSortFields}) return __reference(input); const seen = new Set(); sort = new Array(tokens.length); for (let i = 0; i < tokens.length; i++) { const token = tokens[i]; const descending = token.charCodeAt(0) === 45; const field = descending ? token.slice(1) : token; if (field.length === 0 || seen.has(field) || (${allowedSort.map((field) => `field !== ${field}`).join(" && ") || "true"})) return __reference(input); seen.add(field); sort[i] = { path: [field], direction: descending ? "desc" : "asc" }; } }`;
-  const paginationSource = !pagination ? "return select === undefined ? { filter: out, sort } : { filter: out, sort, select };" : pagination.type === "offset" ? `const page = typeof input.page === "number" ? input.page : 1; const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; const offset = (page - 1) * limit; if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > ${pagination.maxLimit} || !Number.isSafeInteger(offset)) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "offset", offset, limit } } : { filter: out, sort, select, pagination: { kind: "offset", offset, limit } };` : `if (typeof sortText === "string" && sortText.length > 0 && sortText !== ${JSON.stringify(pagination.by.join(","))}) return __reference(input); sort = ${JSON.stringify(pagination.by.map((field) => ({ path: [field], direction: "asc" })))}; const afterText = input.after; const beforeText = input.before; if (afterText !== undefined && beforeText !== undefined) return __reference(input); const after = afterText === undefined ? undefined : __decodeCursor(afterText, ${pagination.by.length}); const before = beforeText === undefined ? undefined : __decodeCursor(beforeText, ${pagination.by.length}); const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; if (!Number.isInteger(limit) || limit < 1 || limit > ${pagination.maxLimit}) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } } : { filter: out, sort, select, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } };`;
-  return `return function parse(input) { if (input === null || typeof input !== "object" || Array.isArray(input)) return __reference(input); const inputKeys = Object.keys(input); for (let i = 0; i < inputKeys.length; i++) { if (${inputFields.map((field) => `inputKeys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } let out; if (input.filter === undefined) out = []; else { const filter = input.filter; if (filter === null || typeof filter !== "object" || Array.isArray(filter)) return __reference(input); const keys = Object.keys(filter); if (keys.length > ${maxFilters}) return __reference(input); for (let i = 0; i < keys.length; i++) { if (${allowedFields.map((field) => `keys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } out = new Array(keys.length * ${conditionCapacity}); let j = 0; ${fieldBodies.join(" ")} if (j > ${maxConditions}) return __reference(input); if (j !== out.length) out.length = j; } ${selectSource} ${sortSource} ${paginationSource} };`;
+  const sortSource = `const sortText = input.sort; let sort = []; if (sortText !== undefined) { if (typeof sortText !== "string" || sortText.length === 0) return __reference(input); const tokens = sortText.split(","); if (tokens.length > ${maxSortFields}) return __reference(input); const seen = new Set(); sort = new Array(tokens.length); for (let i = 0; i < tokens.length; i++) { const token = tokens[i]; const descending = token.charCodeAt(0) === 45; const field = descending ? token.slice(1) : token; if (field.length === 0 || seen.has(field) || (${allowedSort.map((field) => `field !== ${field}`).join(" && ") || "true"})) return __reference(input); seen.add(field); sort[i] = { path: [field], direction: descending ? "desc" : "asc" }; } }${costGuarded ? ` cost += ${QUERY_COST_WEIGHTS.sort} * sort.length; if (cost > ${boundary.limits.maxCost}) return __reference(input);` : ""}`;
+  const paginationSource = !pagination ? "return select === undefined ? { filter: out, sort } : { filter: out, sort, select };" : pagination.type === "offset" ? `const page = typeof input.page === "number" ? input.page : 1; const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; const offset = (page - 1) * limit; if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > ${pagination.maxLimit} || !Number.isSafeInteger(offset) || offset > ${pagination.maxOffset}) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "offset", offset, limit } } : { filter: out, sort, select, pagination: { kind: "offset", offset, limit } };` : `if (typeof sortText === "string" && sortText.length > 0 && sortText !== ${JSON.stringify(pagination.by.join(","))}) return __reference(input); sort = ${JSON.stringify(pagination.by.map((field) => ({ path: [field], direction: "asc" })))}; const afterText = input.after; const beforeText = input.before; if (afterText !== undefined && beforeText !== undefined) return __reference(input); const after = afterText === undefined ? undefined : __decodeCursor(afterText, ${pagination.by.length}); const before = beforeText === undefined ? undefined : __decodeCursor(beforeText, ${pagination.by.length}); const limit = typeof input.limit === "number" ? input.limit : ${pagination.defaultLimit}; if (!Number.isInteger(limit) || limit < 1 || limit > ${pagination.maxLimit}) return __reference(input); return select === undefined ? { filter: out, sort, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } } : { filter: out, sort, select, pagination: { kind: "cursor", limit, ...(after === undefined ? {} : { after }), ...(before === undefined ? {} : { before }) } };`;
+  return `return function parse(input) { if (input === null || typeof input !== "object" || Array.isArray(input)) return __reference(input); const inputKeys = Object.keys(input); for (let i = 0; i < inputKeys.length; i++) { if (${inputFields.map((field) => `inputKeys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } ${costGuarded ? "let cost = 0; " : ""}let out; if (input.filter === undefined) out = []; else { const filter = input.filter; if (filter === null || typeof filter !== "object" || Array.isArray(filter)) return __reference(input); const keys = Object.keys(filter); if (keys.length > ${maxFilters}) return __reference(input); for (let i = 0; i < keys.length; i++) { if (${allowedFields.map((field) => `keys[i] !== ${field}`).join(" && ") || "true"}) return __reference(input); } out = new Array(keys.length * ${conditionCapacity}); let j = 0; ${fieldBodies.join(" ")} if (j !== out.length) out.length = j; } ${selectSource} ${sortSource} ${paginationSource} };`;
 }
-function emitCqrsAotParserSource(...args) {
-  const parser = emitCqrsInputParser(...args).split("return __reference(input);").join('throw new Error("Invalid API query input");').split("__decodeCursor").join("decodeCursor");
+function emitCqrsAotParserSource(boundary) {
+  const parser = emitCqrsInputParser(boundary).split("return __reference(input);").join('throw new Error("Invalid API query input");').split("__decodeCursor").join("decodeCursor");
   return `function decodeCursor(value, size) { if (typeof value !== "string") throw new Error("Malformed cursor"); try { const bytes = atob(value); let escaped = ""; for (let i = 0; i < bytes.length; i++) escaped += "%" + bytes.charCodeAt(i).toString(16).padStart(2, "0"); const decoded = JSON.parse(decodeURIComponent(escaped)); if (!Array.isArray(decoded) || decoded.length !== size) throw new Error("Malformed cursor"); return decoded; } catch { throw new Error("Malformed cursor"); } } ${parser}`;
 }
 function aggregateSpec(op, key) {

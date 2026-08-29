@@ -362,6 +362,7 @@ describe("JIT AOT generate", () => {
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly ListUsers: {
         readonly parse: (input: unknown) => unknown;
+        readonly explain: () => unknown;
         readonly "~query": { readonly version: number };
       };
     };
@@ -370,6 +371,7 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(source).not.toContain("__reference");
     expect(generated.ListUsers["~query"].version).toBe(1);
+    expect(generated.ListUsers.explain()).toEqual(ListUsers.explain());
     expect(generated.ListUsers.parse({ filter: { age: { $gte: 18 } } })).toEqual({
       filter: [{ kind: "gte", path: ["age"], value: 18 }],
       sort: [],
@@ -383,6 +385,32 @@ describe("JIT AOT generate", () => {
     expect(() => generated.ListUsers.parse({ sort: 42 })).toThrow(/invalid API query input/i);
     expect(() => generated.ListUsers.parse({ unknown: true })).toThrow(/invalid API query input/i);
     expect(() => generated.ListUsers.parse({ page: Number.MAX_SAFE_INTEGER, limit: 100 })).toThrow(
+      /invalid API query input/i
+    );
+    expect(() => generated.ListUsers.parse({ page: 1_000, limit: 100 })).toThrow(/invalid API query input/i);
+  });
+
+  it("carries the semantic budget into the generated boundary parser", async () => {
+    const User = JIT.object({ age: JIT.number(), name: JIT.string() });
+    const Bounded = JIT.api.query(User, {
+      filter: { age: ["gte", "lte"] },
+      sort: ["name", "age"],
+      limits: { maxCost: 5 },
+    });
+
+    const result = AOT.generate({ artifacts: { Bounded }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Bounded: {
+        readonly parse: (input: unknown) => unknown;
+        readonly explain: () => { readonly cost: { readonly budget: number } };
+      };
+    };
+    const affordable = { filter: { age: { $gte: 18 } }, sort: "name" };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.Bounded.explain().cost.budget).toBe(5);
+    expect(generated.Bounded.parse(affordable)).toEqual(JIT.api.parse(Bounded)(affordable));
+    expect(() => generated.Bounded.parse({ filter: { age: { $gte: 18, $lte: 30 } }, sort: "name" })).toThrow(
       /invalid API query input/i
     );
   });

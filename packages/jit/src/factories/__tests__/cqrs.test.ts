@@ -578,6 +578,104 @@ describe("JIT.cqrs", () => {
     expect(() => JIT.api.parse(JIT.api.query(User, {}))({ fields: "id" })).toThrow(/sparse fields/i);
   });
 
+  it("reports what the boundary permits and what it may cost", () => {
+    const User = JIT.object({ id: JIT.string(), age: JIT.number(), name: JIT.string() });
+    const definition = JIT.api.query(User, {
+      filter: { id: true, age: ["gte", "lte"] },
+      sort: ["name", "age"],
+      select: ["id", "name"],
+      limits: { maxConditions: 4, maxSortFields: 2 },
+    });
+
+    expect(definition.explain()).toEqual({
+      fields: [
+        { path: "id", operators: ["eq"], cost: 1 },
+        { path: "age", operators: ["gte", "lte"], cost: 2 },
+      ],
+      projection: ["id", "name"],
+      sorting: ["name", "age"],
+      pagination: null,
+      limits: { maxFilters: 32, maxConditions: 4, maxSortFields: 2, maxSelectFields: 30, maxDepth: 3, maxCost: 14 },
+      cost: {
+        weights: { equality: 1, range: 2, sort: 3, relation: 5, collection: 8 },
+        sort: 3,
+        structural: 14,
+        budget: 14,
+      },
+    });
+    // An unconfigured budget is what the structural limits already permit, so it
+    // narrows nothing and the generated parser carries no cost counter.
+    const artifact = getArtifact(definition);
+    if (artifact?.kind !== "cqrs-input") throw new Error("missing boundary artifact");
+    expect(artifact.source).not.toContain("cost");
+    expect(JIT.api.parse(definition)({ filter: { age: { $gte: 1, $lte: 9 } }, sort: "name,age" })).toEqual({
+      filter: [
+        { kind: "gte", path: ["age"], value: 1 },
+        { kind: "lte", path: ["age"], value: 9 },
+      ],
+      sort: [
+        { path: ["name"], direction: "asc" },
+        { path: ["age"], direction: "asc" },
+      ],
+    });
+  });
+
+  it("abandons an over-budget request at the condition that breaks it", () => {
+    const User = JIT.object({ age: JIT.number(), score: JIT.number() });
+    const definition = JIT.api.query(User, {
+      filter: { age: ["gte"], score: ["gte"] },
+      limits: { maxCost: 1 },
+    });
+    const parse = JIT.api.parse(definition);
+    let ageReads = 0;
+    let scoreReads = 0;
+    const filter = {};
+    Object.defineProperty(filter, "age", {
+      enumerable: true,
+      get: () => {
+        ageReads += 1;
+        return { $gte: 18 };
+      },
+    });
+    Object.defineProperty(filter, "score", {
+      enumerable: true,
+      get: () => {
+        scoreReads += 1;
+        return { $gte: 5 };
+      },
+    });
+
+    expect(definition.explain().cost.budget).toBe(1);
+    expect(() => parse({ filter })).toThrow(/complexity budget/i);
+    expect(ageReads).toBeGreaterThan(0);
+    expect(scoreReads).toBe(0);
+    expect(() => JIT.api.query(User, { limits: { maxCost: -1 } })).toThrow(/maxCost/i);
+  });
+
+  it("charges ordering against the same budget in runtime and AOT parsers", () => {
+    const User = JIT.object({ age: JIT.number(), name: JIT.string() });
+    const definition = JIT.api.query(User, {
+      filter: { age: ["gte"] },
+      sort: ["name", "age"],
+      limits: { maxCost: 5 },
+    });
+    const runtime = JIT.api.parse(definition);
+    const artifact = getArtifact(definition);
+    if (artifact?.kind !== "cqrs-input") throw new Error("missing boundary artifact");
+    const aot = globalThis.Function(artifact.source)() as (value: unknown) => unknown;
+    const affordable = { filter: { age: { $gte: 18 } }, sort: "name" };
+    const overBudget = { filter: { age: { $gte: 18 } }, sort: "name,age" };
+
+    expect(artifact.source).toContain("cost");
+    expect(runtime(affordable)).toEqual({
+      filter: [{ kind: "gte", path: ["age"], value: 18 }],
+      sort: [{ path: ["name"], direction: "asc" }],
+    });
+    expect(aot(affordable)).toEqual(runtime(affordable));
+    expect(() => runtime(overBudget)).toThrow(/complexity budget/i);
+    expect(() => aot(overBudget)).toThrow(/invalid API query input/i);
+  });
+
   it("stops deep offset pagination before an adapter sees it", () => {
     const User = JIT.object({ name: JIT.string() });
     const bounded = JIT.api.parse(
