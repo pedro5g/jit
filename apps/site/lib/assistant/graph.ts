@@ -406,20 +406,22 @@ export const CONCEPTS: ConceptNode[] = [
     aliases: ["input", "output", "update", "default", "readonly", "hydrate", "hidratar", "atualização"],
     terms: ["input", "typeof", "update", "default", "readonly", "hydrate"],
     apis: ["parse", "update", "class"],
-    fact: "Input describes a boundary value before defaults are resolved, Typeof describes resolved state, and Update is an immutable patch that omits readonly fields. Runtime-class hydrate validates complete persisted state and never fills missing defaults.",
+    fact: "Input describes a boundary value before defaults are resolved, Typeof describes resolved state, and Update is an immutable patch that omits readonly fields. JIT.class is constructor-first; opting into factories closes direct construction, and hydrate never fills missing defaults.",
     factPt:
-      "Input descreve o valor de fronteira antes de resolver defaults, Typeof descreve o estado resolvido e Update é um patch imutável que omite campos readonly. O hydrate de runtime classes valida o estado persistido completo e nunca preenche defaults ausentes.",
+      "Input descreve o valor de fronteira antes de resolver defaults, Typeof descreve o estado resolvido e Update é um patch imutável que omite campos readonly. JIT.class usa construtor por padrão; ativar factories fecha a construção direta, e hydrate nunca preenche defaults ausentes.",
     mechanisms: [
       "A defaulted object property is optional in Input but required in Typeof.",
       "optional and nullish preserve undefined/null in the output; default resolves undefined to the configured value.",
       "Readonly remains effective through transparent wrappers such as readonly().default(), so it cannot reappear in Update.",
       "create accepts the boundary input and resolves defaults; hydrate rejects incomplete persisted state instead of manufacturing data.",
+      "JIT.class exposes direct new by default and no factory aliases; DDD Runtime Types expose create/hydrate and reject direct construction.",
     ],
     mechanismsPt: [
       "Uma propriedade de objeto com default é opcional em Input, mas obrigatória em Typeof.",
       "optional e nullish preservam undefined/null na saída; default resolve undefined para o valor configurado.",
       "Readonly continua efetivo através de wrappers transparentes como readonly().default(), então não reaparece em Update.",
       "create aceita o input de fronteira e resolve defaults; hydrate rejeita estado persistido incompleto em vez de fabricar dados.",
+      "JIT.class expõe new diretamente e nenhum alias de factory por padrão; Runtime Types DDD expõem create/hydrate e rejeitam construção direta.",
     ],
     example:
       'const User = JIT.object({ id: JIT.string().readonly().default("generated"), name: JIT.string() });\nconst parseUser = JIT.validate.parse(User);\n\nparseUser({ name: "Ada" }); // { id: "generated", name: "Ada" }',

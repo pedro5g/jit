@@ -280,6 +280,7 @@ interface ClassArtifact {
   readonly abstract: boolean;
   readonly frozen: boolean;
   readonly aggregate: boolean;
+  readonly construction: "constructor" | "factory";
   readonly capabilities: readonly string[];
   readonly factories: { readonly create: string | false; readonly hydrate: string | false };
   readonly accessors?:

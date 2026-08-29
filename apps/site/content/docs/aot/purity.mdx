@@ -29,8 +29,9 @@ const parseUser = (json) => {
 
 The second constructor argument is internal generated-code protocol: it tells
 the local class that its state has already been validated. It is never a public
-API and prevents a second validation traversal. Direct `new User(input)` and
-`User.create(input)` still validate their input normally.
+API and prevents a second validation traversal. Direct `new User(input)` still
+validates normally. A class configured with `.factories(...)` emits only those
+factories and rejects direct `new`.
 
 ## Explicit dependency boundary
 

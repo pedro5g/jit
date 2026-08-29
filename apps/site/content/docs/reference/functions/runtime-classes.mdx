@@ -5,9 +5,8 @@ description: Materialize a schema as a validated runtime class without reflectio
 
 ## Runtime classes
 
-`JIT.class(schema)` generates a class whose constructor assigns fields in schema
-order. `create()` resolves defaults and validates input; `hydrate()` validates
-persisted state. Both reuse one compiled validator.
+`JIT.class(schema)` generates a constructor-first class whose constructor
+assigns fields in schema order. It has no default factory aliases.
 
 ```ts
 const UserSchema = JIT.object({
@@ -17,7 +16,7 @@ const UserSchema = JIT.object({
 
 const User = JIT.class(UserSchema).use(JIT.class.equals, JIT.class.with);
 
-const ada = User.create({ name: "Ada" });
+const ada = new User({ name: "Ada" });
 const grace = ada.with({ name: "Grace" });
 
 ada.equals(grace); // false
@@ -45,17 +44,15 @@ const Account = JIT.class(
   },
 });
 
-const account = Account.create({ id: "a_1", passwordHash: "..." });
+const account = new Account({ id: "a_1", passwordHash: "..." });
 account.id; // "a_1"
 ```
 
 ## Construction factories
 
-Every generated class exposes the canonical `create(input)` and
-`hydrate(state)` factories. `create` resolves defaults; `hydrate` requires the
-complete persisted state and does not apply creation defaults. When an
-integration requires different names, `.factories(...)` changes them
-explicitly and removes the canonical aliases:
+Calling `.factories(...)` changes the class to factory-only construction.
+Creation resolves defaults; hydration requires complete persisted state and
+does not apply creation defaults. The configured names are the only aliases:
 
 ```ts
 const User = JIT.class(UserSchema).factories({
@@ -63,7 +60,9 @@ const User = JIT.class(UserSchema).factories({
   hydrate: "restore",
 });
 
-// The static factories are now named `make` and `restore`.
+User.make({ name: "Ada" });
+User.restore({ id: "u_1", name: "Ada" });
+// new User(...) is rejected by TypeScript and at runtime.
 ```
 
 Runtime and AOT preserve the same configured names.
@@ -98,7 +97,10 @@ Use `JIT.class.abstract(schema)` for a domain base. Its static factories use
 polymorphic `this`, so subclasses receive their own instance type.
 
 ```ts
-const UserBase = JIT.class.abstract(UserSchema);
+const UserBase = JIT.class.abstract(UserSchema).factories({
+  create: "create",
+  hydrate: "hydrate",
+});
 
 class User extends UserBase {
   greeting() {
@@ -205,4 +207,5 @@ the generated module contains a plain specialized class: validation,
 construction, selected capabilities, and aggregate event storage are emitted
 locally, with no JIT runtime import. Generated Domain Events preserve
 `create(payload)` and `hydrate(state)`; direct construction and `hydrate()` use
-the complete persisted event envelope.
+the complete persisted event envelope. Value Objects, Entities, Aggregate
+Roots, and Domain Events are factory-only by default.

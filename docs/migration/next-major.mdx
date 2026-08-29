@@ -44,9 +44,11 @@ type UserPatch = Update<typeof User>; // readonly fields removed
 type StoredUser = Hydrate<typeof User>; // complete persisted state
 ```
 
-`create`/`new` accepts `Input`. `hydrate` accepts `Hydrate` and intentionally
-does not resolve missing defaults. Treat a failed hydrate as a corrupt or
-incompatible persisted record rather than silently creating a new one.
+Direct `JIT.class` construction accepts `Input`. If `.factories(...)` is
+configured, its create factory accepts `Input`, direct `new` is closed, and its
+hydrate factory accepts `Hydrate` without resolving missing defaults. Treat a
+failed hydrate as a corrupt or incompatible persisted record rather than
+silently creating a new one.
 
 ## JSON and classes
 

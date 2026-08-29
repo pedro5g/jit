@@ -22,6 +22,8 @@ type ObjectSchema<TSchema extends ATS.AnyTypeSchema> = TSchema & {
 };
 
 const CLASS_TARGET = Symbol("jit.class.target");
+const INTERNAL_CONSTRUCT = Symbol("jit.class.construct");
+export type ConstructionMode = "constructor" | "factory";
 
 /** A generated runtime constructor backed by one object schema. */
 type CapabilityMethods<
@@ -61,6 +63,25 @@ export interface RuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS
   ): RuntimeClass<TSchema, TInstance & IdentityMethods>;
 }
 
+type RuntimeClassConstructionMembers = "create" | "hydrate" | "use" | "factories" | "accessors" | "identity";
+
+/** The default `JIT.class` surface: direct construction, no static factories. */
+export type ConstructorRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS.TypeofSchema<TSchema>> = (new (
+  input: Input<TSchema>
+) => TInstance) &
+  Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> & {
+    use<const TCapabilities extends readonly AnyClassCapability[]>(
+      ...capabilities: TCapabilities
+    ): ConstructorRuntimeClass<TSchema, TInstance & CapabilityMethods<TSchema, TInstance, TCapabilities>>;
+    factories<const TOptions extends FactoryOptions>(
+      options: TOptions
+    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
+    accessors(options: AccessorOptions<TSchema>): ConstructorRuntimeClass<TSchema, TInstance>;
+    identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
+      key: TKey
+    ): ConstructorRuntimeClass<TSchema, TInstance & IdentityMethods>;
+  };
+
 export interface FactoryOptions {
   readonly create?: string | false;
   readonly hydrate?: string | false;
@@ -84,28 +105,61 @@ export interface AccessorOptions<TSchema extends ATS.AnyTypeSchema> {
   readonly fields?: Partial<Record<Extract<keyof ATS.TypeofSchema<TSchema>, string>, FieldAccessorOptions>>;
 }
 
+type RuntimeConstructor<TInstance> = abstract new (...args: never[]) => TInstance;
+
 type FactoryMethods<TSchema extends ATS.AnyTypeSchema, TInstance, TOptions extends FactoryOptions> = (TOptions extends {
   readonly create: infer TName extends string;
 }
-  ? { [TKey in TName]: (input: Input<TSchema>) => TInstance }
+  ? {
+      [TKey in TName]: <TThis extends RuntimeConstructor<TInstance>>(
+        this: TThis,
+        input: Input<TSchema>
+      ) => InstanceType<TThis>;
+    }
   : TOptions extends { readonly create: false }
     ? {}
-    : { create(input: Input<TSchema>): TInstance }) &
+    : {
+        create<TThis extends RuntimeConstructor<TInstance>>(this: TThis, input: Input<TSchema>): InstanceType<TThis>;
+      }) &
   (TOptions extends { readonly hydrate: infer TName extends string }
-    ? { [TKey in TName]: (state: Hydrate<TSchema>) => TInstance }
+    ? {
+        [TKey in TName]: <TThis extends RuntimeConstructor<TInstance>>(
+          this: TThis,
+          state: Hydrate<TSchema>
+        ) => InstanceType<TThis>;
+      }
     : TOptions extends { readonly hydrate: false }
       ? {}
-      : { hydrate(state: Hydrate<TSchema>): TInstance });
+      : {
+          hydrate<TThis extends RuntimeConstructor<TInstance>>(
+            this: TThis,
+            state: Hydrate<TSchema>
+          ): InstanceType<TThis>;
+        });
 
 export type ConfiguredRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TOptions extends FactoryOptions,
-> = (new (
+> = (abstract new (
   input: Input<TSchema>
 ) => TInstance) &
-  Omit<RuntimeClass<TSchema, TInstance>, "create" | "hydrate" | "factories"> &
-  FactoryMethods<TSchema, TInstance, TOptions>;
+  Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> &
+  FactoryMethods<TSchema, TInstance, TOptions> & {
+    use<const TCapabilities extends readonly AnyClassCapability[]>(
+      ...capabilities: TCapabilities
+    ): ConfiguredRuntimeClass<TSchema, TInstance & CapabilityMethods<TSchema, TInstance, TCapabilities>, TOptions>;
+    factories<const TNext extends FactoryOptions>(options: TNext): ConfiguredRuntimeClass<TSchema, TInstance, TNext>;
+    accessors(options: AccessorOptions<TSchema>): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
+    identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
+      key: TKey
+    ): ConfiguredRuntimeClass<TSchema, TInstance & IdentityMethods, TOptions>;
+  };
+
+export type FactoryRuntimeClass<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance = ATS.TypeofSchema<TSchema>,
+> = ConfiguredRuntimeClass<TSchema, TInstance, {}>;
 
 type RuntimeClassTarget = RuntimeClass<ATS.AnyTypeSchema> & {
   readonly [CLASS_TARGET]: true;
@@ -130,7 +184,21 @@ export function getRuntimeClassTarget(value: unknown): RuntimeClassTarget | unde
 export type AbstractRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
-> = RuntimeClass<TSchema, TInstance>;
+> = (abstract new (
+  input: Input<TSchema>
+) => TInstance) &
+  Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> & {
+    use<const TCapabilities extends readonly AnyClassCapability[]>(
+      ...capabilities: TCapabilities
+    ): AbstractRuntimeClass<TSchema, TInstance & CapabilityMethods<TSchema, TInstance, TCapabilities>>;
+    factories<const TOptions extends FactoryOptions>(
+      options: TOptions
+    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
+    accessors(options: AccessorOptions<TSchema>): AbstractRuntimeClass<TSchema, TInstance>;
+    identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
+      key: TKey
+    ): AbstractRuntimeClass<TSchema, TInstance & IdentityMethods>;
+  };
 
 /** An immutable, tree-shakeable operation that installs one prototype capability. */
 export interface ClassCapability<TMethods extends object = object> {
@@ -192,7 +260,7 @@ type AggregateMethods<TSchema extends ATS.AnyTypeSchema> = AggregateProtectedMet
   restore(): void;
   readonly isDeleted: boolean;
 };
-type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = RuntimeClass<TSchema, TInstance> & {
+type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<TSchema, TInstance> & {
   timestamps(options: TimestampOptions<TSchema>): AggregateRuntimeClass<TSchema, TInstance>;
   softDelete(options: SoftDeleteOptions<TSchema>): AggregateRuntimeClass<TSchema, TInstance>;
   versioned(options: VersionedOptions<TSchema>): AggregateRuntimeClass<TSchema, TInstance>;
@@ -207,12 +275,20 @@ interface ClassWithCapability extends ClassCapability<object> {
  * class and shared by `create()` and `hydrate()`; no schema is traversed when
  * an instance is constructed.
  */
-function classFactory<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): RuntimeClass<TSchema> {
-  return createRuntimeClass(unwrapSchema(schema), false, false, false);
+function classFactory<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): ConstructorRuntimeClass<TSchema> {
+  return createRuntimeClass(
+    unwrapSchema(schema),
+    false,
+    false,
+    false,
+    "constructor"
+  ) as ConstructorRuntimeClass<TSchema>;
 }
 
 function abstractClass<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): AbstractRuntimeClass<TSchema> {
-  return createRuntimeClass(unwrapSchema(schema), true, false, false);
+  return createRuntimeClass(unwrapSchema(schema), true, false, false, "constructor");
 }
 
 function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
@@ -220,6 +296,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
   isAbstract: boolean,
   freezeInstances: boolean,
   aggregate: boolean,
+  construction: ConstructionMode,
   accessors?: ResolvedAccessors
 ): RuntimeClass<TSchema> {
   const resolved = resolveWrappers(schema).base;
@@ -232,30 +309,37 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
   const properties = Object.keys(objectSchema.def.props);
   const parse = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
+  const constructionState = { mode: construction };
   const classTarget = emitConstructor(
     properties,
     freezeInstances,
     aggregate,
     parse,
+    constructionState,
     accessors
   ) as RuntimeClass<TSchema>;
   const installedCapabilities: string[] = [];
   const installedCapabilityValues: AnyClassCapability[] = [];
-  let factoryNames: { create: string | false; hydrate: string | false } = { create: "create", hydrate: "hydrate" };
+  let factoryNames: { create: string | false; hydrate: string | false } =
+    construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false };
 
   function create<TThis extends RuntimeClass<TSchema>>(this: TThis, input: Input<TSchema>): InstanceType<TThis> {
     if (isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
     }
-    return new this(input) as InstanceType<TThis>;
+    return new (this as unknown as new (input: Input<TSchema>, token: symbol) => InstanceType<TThis>)(
+      input,
+      INTERNAL_CONSTRUCT
+    );
   }
 
   function hydrate<TThis extends RuntimeClass<TSchema>>(this: TThis, state: Hydrate<TSchema>): InstanceType<TThis> {
     if (isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
     }
-    return new (this as unknown as new (input: unknown, validated?: boolean) => InstanceType<TThis>)(
+    return new (this as unknown as new (input: unknown, token: symbol, validated?: boolean) => InstanceType<TThis>)(
       hydrateState(state),
+      INTERNAL_CONSTRUCT,
       true
     );
   }
@@ -269,8 +353,6 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         materialize: classTarget,
       }) as ATS.RuntimeTypeSchema<TSchema, ATS.TypeofSchema<TSchema>>,
     },
-    create: { configurable: true, enumerable: false, value: create },
-    hydrate: { configurable: true, enumerable: false, value: hydrate },
     use: {
       enumerable: false,
       value: (...capabilities: readonly AnyClassCapability[]) => {
@@ -290,6 +372,13 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           create: options.create === undefined ? factoryNames.create : options.create,
           hydrate: options.hydrate === undefined ? factoryNames.hydrate : options.hydrate,
         };
+        if (next.create === false && next.hydrate === false) {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory construction requires at least one create or hydrate factory"
+          );
+        }
+        constructionState.mode = "factory";
         installFactory(classTarget, factoryNames.create, next.create, create);
         installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
         factoryNames = next;
@@ -299,6 +388,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           abstract: isAbstract,
           frozen: freezeInstances,
           aggregate,
+          construction: constructionState.mode,
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors,
@@ -314,11 +404,12 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           isAbstract,
           freezeInstances,
           aggregate,
+          constructionState.mode,
           resolveAccessors(properties, options)
         );
 
         next.use(...installedCapabilityValues);
-        return next.factories(factoryNames) as RuntimeClass<TSchema>;
+        return constructionState.mode === "factory" ? (next.factories(factoryNames) as RuntimeClass<TSchema>) : next;
       },
     },
     identity: {
@@ -334,6 +425,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           abstract: isAbstract,
           frozen: freezeInstances,
           aggregate,
+          construction: constructionState.mode,
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors,
@@ -342,12 +434,15 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       },
     },
   });
+  installFactory(classTarget, false, factoryNames.create, create);
+  installFactory(classTarget, false, factoryNames.hydrate, hydrate);
   registerArtifact(classTarget, {
     kind: "class",
     schema,
     abstract: isAbstract,
     frozen: freezeInstances,
     aggregate,
+    construction: constructionState.mode,
     capabilities: installedCapabilities,
     factories: factoryNames,
     accessors,
@@ -375,6 +470,7 @@ function emitConstructor(
   freezeInstances: boolean,
   aggregate: boolean,
   parse: (input: unknown) => unknown,
+  construction: { mode: ConstructionMode },
   accessors?: ResolvedAccessors
 ): unknown {
   const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
@@ -396,9 +492,14 @@ function emitConstructor(
     return `this.${slot} = state${emitPropertyAccess("", property)};`;
   });
   const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
-  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, validated) { const state = validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
+  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
 
-  return globalThis.Function("__parse", source)(parse);
+  return globalThis.Function(
+    "__parse",
+    "__construct",
+    "__construction",
+    source
+  )(parse, INTERNAL_CONSTRUCT, construction);
 }
 
 function resolveAccessors<TSchema extends ATS.AnyTypeSchema>(
@@ -427,7 +528,7 @@ function resolveAccessorMember(key: string, member: AccessorVisibility | Accesso
 }
 
 export interface ClassFactory {
-  <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): RuntimeClass<TSchema>;
+  <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): ConstructorRuntimeClass<TSchema>;
   abstract<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): AbstractRuntimeClass<TSchema>;
   readonly equals: ClassCapability<EqualsMethods>;
   readonly hashCode: ClassCapability<HashCodeMethods>;
@@ -453,7 +554,10 @@ export const classType: ClassFactory = Object.assign(classFactory, {
       const update = compileUpdate(schema);
       definePrototype(prototype, "with", function withPatch(this: object, patch: UpdatePatch<unknown>) {
         const next = update(this, patch);
-        return new (this.constructor as new (state: object) => object)(next as object);
+        return new (this.constructor as new (state: object, token: symbol) => object)(
+          next as object,
+          INTERNAL_CONSTRUCT
+        );
       });
     });
     return Object.freeze({ ...base, __with: true as const });
@@ -488,14 +592,20 @@ export { classType as class };
 /** Immutable class preset with compiled structural equality and hash code. */
 export function valueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): RuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods> {
-  return createRuntimeClass(unwrapSchema(schema), false, true, false).use(classType.equals, classType.hashCode);
+): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods> {
+  return createRuntimeClass(unwrapSchema(schema), false, true, false, "factory").use(
+    classType.equals,
+    classType.hashCode
+  ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods>;
 }
 
 valueObject.abstract = function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): AbstractRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods> {
-  return createRuntimeClass(unwrapSchema(schema), true, true, false).use(classType.equals, classType.hashCode);
+): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods> {
+  return createRuntimeClass(unwrapSchema(schema), true, true, false, "factory").use(
+    classType.equals,
+    classType.hashCode
+  ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods>;
 };
 
 /** Entity preset: an abstract class with explicit identity semantics. */
@@ -505,8 +615,10 @@ export function entity<
 >(
   schema: SchemaInput<TSchema>,
   options: { readonly id: TKey }
-): RuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
-  return createRuntimeClass(unwrapSchema(schema), true, false, false).use(classType.identity(options.id));
+): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
+  return createRuntimeClass(unwrapSchema(schema), true, false, false, "factory").use(
+    classType.identity(options.id)
+  ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods>;
 }
 
 /** Abstract entity preset with ordered domain events and compiled in-place updates. */
@@ -518,9 +630,12 @@ export function aggregateRoot<
   options: { readonly id: TKey }
 ): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
   const unwrapped = unwrapSchema(schema);
-  const aggregate = createRuntimeClass(unwrapped, true, false, true).use(
+  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").use(
     classType.identity(options.id)
-  ) as AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>>;
+  ) as unknown as AggregateRuntimeClass<
+    TSchema,
+    ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>
+  >;
   const base = resolveWrappers(unwrapped).base as ATS.ObjectSchema;
   const fields = Object.keys(base.def.props);
   const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
@@ -687,7 +802,7 @@ export type DomainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string
   RuntimeClass<EventSchema<TPayload, TType, TVersion>, DomainEventState<TPayload, TType, TVersion>>,
   "create" | "hydrate"
 > &
-  (new (
+  (abstract new (
     input: Input<EventSchema<TPayload, TType, TVersion>>
   ) => DomainEventState<TPayload, TType, TVersion> & { readonly "~event": StandardEvent }) & {
     create(input: Input<TPayload>): DomainEventState<TPayload, TType, TVersion> & { readonly "~event": StandardEvent };
@@ -705,7 +820,11 @@ export function domainEvent<TPayload extends ATS.AnyTypeSchema, TType extends st
 ): DomainEvent<TPayload, TType, TVersion> {
   const payload = unwrapSchema(options.payload);
   const schema = createDomainEventSchema(payload, type, options.version);
-  const event = createRuntimeClass(schema, false, true, false) as unknown as DomainEvent<TPayload, TType, TVersion>;
+  const event = createRuntimeClass(schema, false, true, false, "factory") as unknown as DomainEvent<
+    TPayload,
+    TType,
+    TVersion
+  >;
   const createState = (
     event as unknown as {
       create(input: Input<typeof schema>): DomainEventState<TPayload, TType, TVersion>;
@@ -734,6 +853,7 @@ export function domainEvent<TPayload extends ATS.AnyTypeSchema, TType extends st
     abstract: false,
     frozen: true,
     aggregate: false,
+    construction: "factory",
     capabilities: [],
     factories: { create: "create", hydrate: "hydrate" },
     domainEvent: { type, version: options.version },

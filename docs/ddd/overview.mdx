@@ -12,4 +12,17 @@ Use the smallest semantic primitive that describes the domain:
 
 All five are SchemaLike. They can be passed directly to `JIT.validate.parse`, `JIT.json.parse`, `JIT.json.stringify`, mapping, and AOT generation.
 
-See the focused guides in this directory and [the architecture](../architecture.md).
+| Runtime Type | Default construction |
+| --- | --- |
+| `JIT.class` | direct `new` |
+| Value Object | `create` / `hydrate` factories |
+| Entity | `create` / `hydrate` factories |
+| Aggregate Root | `create` / `hydrate` factories |
+| Domain Event | `create` / `hydrate` factories |
+
+There is no dual default. Factory-built Runtime Types expose an abstract
+construct signature to TypeScript and guard their generated constructor with a
+module-private token at runtime.
+
+See [factories and construction](./factories-and-construction), the focused
+guides in this directory, and [the architecture](../architecture.md).

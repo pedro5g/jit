@@ -18679,7 +18679,7 @@ function emitModule(plan, options, layout) {
         const object2 = resolveObjectSchema(artifact.schema);
         const payload = object2 ? emitTypeScriptType(object2.def.props.payload, typeNames) : "unknown";
         const event = `${value} & { readonly "~event": { readonly version: 1; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly schemaVersion: ${artifact.domainEvent.version} } }`;
-        return `{ new (state: ${value}): ${event}; create(input: ${payload}): ${event}; hydrate(state: ${value}): ${event}; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly version: ${artifact.domainEvent.version} }`;
+        return `(abstract new (state: ${value}) => ${event}) & { create(input: ${payload}): ${event}; hydrate(state: ${value}): ${event}; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly version: ${artifact.domainEvent.version} }`;
       }
       const methods = [];
       const capabilities = new Set(artifact.capabilities);
@@ -18708,7 +18708,8 @@ function emitModule(plan, options, layout) {
         artifact.factories.create === false ? "" : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, input: unknown): InstanceType<TThis>;`,
         artifact.factories.hydrate === false ? "" : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${value}): InstanceType<TThis>;`
       ].filter(Boolean);
-      return `{ new (state: ${value}): ${instance}; ${factories.join(" ")} }`;
+      const construct2 = artifact.construction === "factory" ? `(abstract new (state: ${value}) => ${instance})` : `(new (state: ${value}) => ${instance})`;
+      return `${construct2} & { ${factories.join(" ")} }`;
     }
     return "unknown";
   }
@@ -18881,7 +18882,7 @@ function emitModule(plan, options, layout) {
       }
     }
     if (capabilities.has("with") && update2)
-      methods.push(`with(patch) { return new this.constructor(${update2}(this, patch)); }`);
+      methods.push(`with(patch) { return new this.constructor(${update2}(this, patch), __construct); }`);
     const identity = artifact.capabilities.find((capability2) => capability2.startsWith("identity:"));
     if (identity) {
       const key = JSON.stringify(identity.slice("identity:".length));
@@ -18912,10 +18913,12 @@ function emitModule(plan, options, layout) {
     const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
     const freeze = artifact.frozen ? " Object.freeze(this);" : "";
     const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
-    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data });` : "return new this(input);";
-    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data });` : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
-    const constructorSource = artifact.domainEvent ? `constructor(state) { ${assignments}${events}${freeze} }` : `constructor(input, validated) { const state = validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
+    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : "return new this(input, __construct);";
+    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
+    const constructionGuard = artifact.construction === "factory" ? 'if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ' : "";
+    const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push("  const __construct = Symbol();");
     if (helpers2.length > 0) js.push(`  ${helpers2.join("\n  ")}`);
     js.push(`  return class ${binding} {`);
     js.push(...[...slots.values()].map((slot) => `    ${slot};`));
@@ -24473,13 +24476,20 @@ function validateObjectKeys3(schema, keys, compilerName) {
 
 // ../../packages/jit/src/factories/class.ts
 var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
+var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
 function classFactory(schema) {
-  return createRuntimeClass(unwrapSchema(schema), false, false, false);
+  return createRuntimeClass(
+    unwrapSchema(schema),
+    false,
+    false,
+    false,
+    "constructor"
+  );
 }
 function abstractClass(schema) {
-  return createRuntimeClass(unwrapSchema(schema), true, false, false);
+  return createRuntimeClass(unwrapSchema(schema), true, false, false, "constructor");
 }
-function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, accessors) {
+function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, construction, accessors) {
   const resolved = resolveWrappers(schema).base;
   if (resolved.type !== TypeName.object) {
     throw new JITError("INVALID_OPERATION", "JIT.class() requires an object schema");
@@ -24488,21 +24498,26 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
   const properties = Object.keys(objectSchema.def.props);
   const parse3 = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
+  const constructionState = { mode: construction };
   const classTarget = emitConstructor(
     properties,
     freezeInstances,
     aggregate,
     parse3,
+    constructionState,
     accessors
   );
   const installedCapabilities = [];
   const installedCapabilityValues = [];
-  let factoryNames = { create: "create", hydrate: "hydrate" };
+  let factoryNames = construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false };
   function create(input) {
     if (isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
     }
-    return new this(input);
+    return new this(
+      input,
+      INTERNAL_CONSTRUCT
+    );
   }
   function hydrate(state3) {
     if (isAbstract && this === classTarget) {
@@ -24510,6 +24525,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
     }
     return new this(
       hydrateState(state3),
+      INTERNAL_CONSTRUCT,
       true
     );
   }
@@ -24522,8 +24538,6 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
         materialize: classTarget
       })
     },
-    create: { configurable: true, enumerable: false, value: create },
-    hydrate: { configurable: true, enumerable: false, value: hydrate },
     use: {
       enumerable: false,
       value: (...capabilities) => {
@@ -24543,6 +24557,13 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
           create: options.create === void 0 ? factoryNames.create : options.create,
           hydrate: options.hydrate === void 0 ? factoryNames.hydrate : options.hydrate
         };
+        if (next.create === false && next.hydrate === false) {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory construction requires at least one create or hydrate factory"
+          );
+        }
+        constructionState.mode = "factory";
         installFactory(classTarget, factoryNames.create, next.create, create);
         installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
         factoryNames = next;
@@ -24552,6 +24573,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
           abstract: isAbstract,
           frozen: freezeInstances,
           aggregate,
+          construction: constructionState.mode,
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -24567,10 +24589,11 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
           isAbstract,
           freezeInstances,
           aggregate,
+          constructionState.mode,
           resolveAccessors(properties, options)
         );
         next.use(...installedCapabilityValues);
-        return next.factories(factoryNames);
+        return constructionState.mode === "factory" ? next.factories(factoryNames) : next;
       }
     },
     identity: {
@@ -24586,6 +24609,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
           abstract: isAbstract,
           frozen: freezeInstances,
           aggregate,
+          construction: constructionState.mode,
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -24594,12 +24618,15 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, acce
       }
     }
   });
+  installFactory(classTarget, false, factoryNames.create, create);
+  installFactory(classTarget, false, factoryNames.hydrate, hydrate);
   registerArtifact(classTarget, {
     kind: "class",
     schema,
     abstract: isAbstract,
     frozen: freezeInstances,
     aggregate,
+    construction: constructionState.mode,
     capabilities: installedCapabilities,
     factories: factoryNames,
     accessors
@@ -24614,7 +24641,7 @@ function installFactory(classTarget, previous, next, factory) {
   }
   Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
 }
-function emitConstructor(properties, freezeInstances, aggregate, parse3, accessors) {
+function emitConstructor(properties, freezeInstances, aggregate, parse3, construction, accessors) {
   const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
   const slots = [];
   const definitions = [];
@@ -24632,8 +24659,13 @@ function emitConstructor(properties, freezeInstances, aggregate, parse3, accesso
     return `this.${slot} = state${emitPropertyAccess("", property)};`;
   });
   const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
-  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, validated) { const state = validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
-  return globalThis.Function("__parse", source)(parse3);
+  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
+  return globalThis.Function(
+    "__parse",
+    "__construct",
+    "__construction",
+    source
+  )(parse3, INTERNAL_CONSTRUCT, construction);
 }
 function resolveAccessors(properties, options) {
   return properties.map((key) => {
@@ -24670,7 +24702,10 @@ var classType = Object.assign(classFactory, {
       const update2 = compileUpdate(schema);
       definePrototype(prototype, "with", function withPatch(patch3) {
         const next = update2(this, patch3);
-        return new this.constructor(next);
+        return new this.constructor(
+          next,
+          INTERNAL_CONSTRUCT
+        );
       });
     });
     return Object.freeze({ ...base, __with: true });
@@ -24698,17 +24733,25 @@ var classType = Object.assign(classFactory, {
   }
 });
 function valueObject(schema) {
-  return createRuntimeClass(unwrapSchema(schema), false, true, false).use(classType.equals, classType.hashCode);
+  return createRuntimeClass(unwrapSchema(schema), false, true, false, "factory").use(
+    classType.equals,
+    classType.hashCode
+  );
 }
 valueObject.abstract = function abstractValueObject(schema) {
-  return createRuntimeClass(unwrapSchema(schema), true, true, false).use(classType.equals, classType.hashCode);
+  return createRuntimeClass(unwrapSchema(schema), true, true, false, "factory").use(
+    classType.equals,
+    classType.hashCode
+  );
 };
 function entity(schema, options) {
-  return createRuntimeClass(unwrapSchema(schema), true, false, false).use(classType.identity(options.id));
+  return createRuntimeClass(unwrapSchema(schema), true, false, false, "factory").use(
+    classType.identity(options.id)
+  );
 }
 function aggregateRoot(schema, options) {
   const unwrapped = unwrapSchema(schema);
-  const aggregate = createRuntimeClass(unwrapped, true, false, true).use(
+  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").use(
     classType.identity(options.id)
   );
   const base = resolveWrappers(unwrapped).base;
@@ -24858,7 +24901,7 @@ function aggregateRoot(schema, options) {
 function domainEvent(type, options) {
   const payload = unwrapSchema(options.payload);
   const schema = createDomainEventSchema(payload, type, options.version);
-  const event = createRuntimeClass(schema, false, true, false);
+  const event = createRuntimeClass(schema, false, true, false, "factory");
   const createState = event.create.bind(event);
   Object.defineProperties(event, {
     create: {
@@ -24881,6 +24924,7 @@ function domainEvent(type, options) {
     abstract: false,
     frozen: true,
     aggregate: false,
+    construction: "factory",
     capabilities: [],
     factories: { create: "create", hydrate: "hydrate" },
     domainEvent: { type, version: options.version }

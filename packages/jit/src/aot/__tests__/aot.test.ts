@@ -959,13 +959,6 @@ describe("JIT AOT generate", () => {
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly Money: {
-        new (input: {
-          amount: number;
-          currency: "BRL" | "USD";
-        }): {
-          equals(other: unknown): boolean;
-          hashCode(): number;
-        };
         create(input: { amount: number; currency: "BRL" | "USD" }): {
           equals(other: unknown): boolean;
           hashCode(): number;
@@ -974,7 +967,6 @@ describe("JIT AOT generate", () => {
     };
 
     const money = generated.Money.create({ amount: 10, currency: "BRL" });
-    const constructed = new generated.Money({ amount: 10, currency: "BRL" });
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("return class Money");
@@ -982,7 +974,13 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain("Money_equal(this, other)");
     expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(Object.isFrozen(money)).toBe(true);
-    expect(constructed.equals(money)).toBe(true);
+    expect(
+      () =>
+        new (generated.Money as unknown as new (input: unknown) => unknown)({
+          amount: 10,
+          currency: "BRL",
+        })
+    ).toThrow(/factory construction/i);
     expect(money.equals(generated.Money.create({ amount: 10, currency: "BRL" }))).toBe(true);
     expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
   });
@@ -1024,7 +1022,10 @@ describe("JIT AOT generate", () => {
   });
 
   it("should keep creation defaults out of AOT hydration", async () => {
-    const User = JIT.class(JIT.object({ id: JIT.string().default("generated"), name: JIT.string() }));
+    const User = JIT.class(JIT.object({ id: JIT.string().default("generated"), name: JIT.string() })).factories({
+      create: "create",
+      hydrate: "hydrate",
+    });
     const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly User: {
@@ -1167,13 +1168,16 @@ describe("JIT AOT generate", () => {
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly User: {
-        create(input: { id: string; name: string }): {
+        new (input: {
+          id: string;
+          name: string;
+        }): {
           id: string;
           name: string;
         };
       };
     };
-    const user = generated.User.create({ id: "u_1", name: "Ada" });
+    const user = new generated.User({ id: "u_1", name: "Ada" });
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toContain("#p0;");
@@ -1484,10 +1488,17 @@ describe("JIT AOT generate", () => {
           updatedAt: Date;
           deletedAt: Date | null;
         };
+        create(input: { id: string; updatedAt: Date; deletedAt: Date | null }): {
+          softDelete(): void;
+          restore(): void;
+          readonly isDeleted: boolean;
+          updatedAt: Date;
+          deletedAt: Date | null;
+        };
       };
     };
     class Order extends generated.OrderBase {}
-    const order = new Order({
+    const order = Order.create({
       id: "o_1",
       updatedAt: new Date(0),
       deletedAt: null,

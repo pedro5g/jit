@@ -773,7 +773,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         const payload = object ? emitTypeScriptType(object.def.props.payload, typeNames) : "unknown";
         const event = `${value} & { readonly "~event": { readonly version: 1; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly schemaVersion: ${artifact.domainEvent.version} } }`;
 
-        return `{ new (state: ${value}): ${event}; create(input: ${payload}): ${event}; hydrate(state: ${value}): ${event}; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly version: ${artifact.domainEvent.version} }`;
+        return `(abstract new (state: ${value}) => ${event}) & { create(input: ${payload}): ${event}; hydrate(state: ${value}): ${event}; readonly type: ${JSON.stringify(artifact.domainEvent.type)}; readonly version: ${artifact.domainEvent.version} }`;
       }
       const methods: string[] = [];
       const capabilities = new Set(artifact.capabilities);
@@ -806,7 +806,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           ? ""
           : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${value}): InstanceType<TThis>;`,
       ].filter(Boolean);
-      return `{ new (state: ${value}): ${instance}; ${factories.join(" ")} }`;
+      const construct =
+        artifact.construction === "factory"
+          ? `(abstract new (state: ${value}) => ${instance})`
+          : `(new (state: ${value}) => ${instance})`;
+      return `${construct} & { ${factories.join(" ")} }`;
     }
     return "unknown";
   }
@@ -1063,7 +1067,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       }
     }
     if (capabilities.has("with") && update)
-      methods.push(`with(patch) { return new this.constructor(${update}(this, patch)); }`);
+      methods.push(`with(patch) { return new this.constructor(${update}(this, patch), __construct); }`);
     const identity = artifact.capabilities.find((capability) => capability.startsWith("identity:"));
     if (identity) {
       const key = JSON.stringify(identity.slice("identity:".length));
@@ -1099,15 +1103,20 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); `
       : "";
     const create = artifact.domainEvent
-      ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data });`
-      : "return new this(input);";
+      ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);`
+      : "return new this(input, __construct);";
     const hydrate = artifact.domainEvent
-      ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data });`
-      : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data);`;
+      ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);`
+      : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
+    const constructionGuard =
+      artifact.construction === "factory"
+        ? 'if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); '
+        : "";
     const constructorSource = artifact.domainEvent
-      ? `constructor(state) { ${assignments}${events}${freeze} }`
-      : `constructor(input, validated) { const state = validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
+      ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }`
+      : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push("  const __construct = Symbol();");
     if (helpers.length > 0) js.push(`  ${helpers.join("\n  ")}`);
     js.push(`  return class ${binding} {`);
     js.push(...[...slots.values()].map((slot) => `    ${slot};`));

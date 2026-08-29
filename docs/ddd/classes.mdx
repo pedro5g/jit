@@ -1,6 +1,6 @@
 # Runtime classes
 
-Create and hydrate have different boundary semantics:
+`JIT.class` is constructor-first by default:
 
 ```ts
 const User = JIT.class(
@@ -10,12 +10,33 @@ const User = JIT.class(
   }),
 );
 
-const created = User.create({ name: "Ada" });
-const restored = User.hydrate({ id: "u_1", name: "Ada" });
+const user = new User({ name: "Ada" });
 ```
 
-`create()` accepts `JIT.Input<typeof Schema>` and resolves creation defaults. `hydrate()` accepts complete `JIT.Hydrate<typeof Schema>` state and never regenerates missing persisted values. Both preserve the subclass type when called on a derived class.
+No `create` or `hydrate` alias exists on that class. Opting into factories closes
+direct construction, so the Runtime Type still has one canonical boundary:
 
-Use `.factories({ create, hydrate })` only to configure the two factory names. Use `.accessors(...)` for visibility/storage policy and `.use(...)` for explicit capabilities such as `JIT.class.equals`, `hashCode`, `diff`, and `with`. Compiled helpers live on the constructor/prototype, never per instance.
+```ts
+const User = JIT.class(UserSchema).factories({
+  create: "make",
+  hydrate: "restore",
+});
 
-`JIT.class.abstract(schema)` prevents direct creation and hydration while preserving inherited static factories for concrete subclasses.
+const created = User.make({ name: "Ada" });
+const restored = User.restore({ id: "u_1", name: "Ada" });
+// new User(...) // type error; runtime also rejects it
+```
+
+The create factory accepts `JIT.Input<typeof Schema>` and resolves creation
+defaults. Hydration accepts complete `JIT.Hydrate<typeof Schema>` state and
+never regenerates missing persisted values. Both preserve the subclass type
+when called on a derived class.
+
+Use `.factories({ create, hydrate })` to enter factory mode and configure its
+names. At least one factory must remain enabled. Use `.accessors(...)` for
+visibility/storage policy and `.use(...)` for explicit capabilities such as
+`JIT.class.equals`, `hashCode`, `diff`, and `with`. Compiled helpers live on the
+constructor/prototype, never per instance.
+
+`JIT.class.abstract(schema)` is an abstract constructor-first base. Configure
+factories explicitly when its concrete subclasses should be factory-built.

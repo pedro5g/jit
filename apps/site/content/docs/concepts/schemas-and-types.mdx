@@ -45,10 +45,11 @@ type ChangeUser = Update<typeof User>;
 // { name?: string; nickname?: string; note?: string | null }
 ```
 
-`JIT.class(schema).create(input)` accepts `Input`; `hydrate(state)` accepts the
-complete persisted state. Hydration validates invariants but never fills a
-missing default, which prevents a truncated stored record from silently becoming
-a newly-created entity.
+`new (JIT.class(schema))(input)` accepts `Input`. When a class opts into
+`.factories(...)`, its create factory accepts `Input` and its hydrate factory
+accepts complete persisted state. Hydration validates invariants but never
+fills a missing default, which prevents a truncated stored record from silently
+becoming a newly-created entity.
 
 ## Object transforms
 

@@ -23,10 +23,44 @@ describe("JIT.class", () => {
     expect("new" in Registered).toBe(false);
   });
 
+  it("exposes exactly one canonical construction boundary", () => {
+    const Plain = JIT.class(JIT.object({ value: JIT.string() }));
+    const Factory = JIT.class(JIT.object({ value: JIT.string() })).factories({ create: "create", hydrate: "hydrate" });
+    const Value = JIT.ddd.valueObject(JIT.object({ value: JIT.string() }));
+    const Entity = JIT.ddd.entity(JIT.object({ id: JIT.string() }), { id: "id" });
+
+    expect(new Plain({ value: "plain" })).toBeInstanceOf(Plain);
+    expect("create" in Plain).toBe(false);
+    expect(Factory.create({ value: "factory" })).toBeInstanceOf(Factory);
+    expect(Value.create({ value: "vo" })).toBeInstanceOf(Value);
+    expect(
+      () =>
+        new (Factory as unknown as new (input: unknown) => unknown)({
+          value: "direct",
+        })
+    ).toThrow(/factory construction/i);
+    expect(() => new (Value as unknown as new (input: unknown) => unknown)({ value: "direct" })).toThrow(
+      /factory construction/i
+    );
+    expect(() => new (Entity as unknown as new (input: unknown) => unknown)({ id: "direct" })).toThrow(
+      /factory construction/i
+    );
+
+    if (Object.is(1, 2)) {
+      // @ts-expect-error constructor-first classes have no default factory
+      Plain.create({ value: "x" });
+      // @ts-expect-error factory-only Runtime Types cannot be directly constructed
+      new Factory({ value: "x" });
+      // @ts-expect-error DDD Value Objects are factory-only
+      new Value({ value: "x" });
+      // @ts-expect-error DDD Entities are factory-only
+      new Entity({ id: "x" });
+    }
+  });
+
   it("constructs instances in schema-field order after compiled validation", () => {
     const User = JIT.class(UserSchema);
-    const user = User.create({ name: "Ada" });
-    const constructed = new User({ name: "Ada" });
+    const user = new User({ name: "Ada" });
 
     expect(user).toBeInstanceOf(User);
     expect(user).toEqual({
@@ -35,7 +69,10 @@ describe("JIT.class", () => {
       createdAt: new Date(0),
     });
     expect(Object.keys(user)).toEqual(["id", "name", "createdAt"]);
-    expect(constructed).toEqual(user);
+    expect("create" in User).toBe(false);
+    expect("hydrate" in User).toBe(false);
+    // @ts-expect-error JIT.class has one constructor-first boundary by default
+    void User.create;
     expect(() => new User({ name: "x" })).toThrow(/at least 2 characters/i);
     expect(User.schema.def.innerType).toBe(UserSchema.schema);
     expectTypeOf(user).toEqualTypeOf<JIT.Typeof<typeof User>>();
@@ -46,7 +83,7 @@ describe("JIT.class", () => {
   it("materializes nested runtime classes through the compiled validator", () => {
     const Address = JIT.class(JIT.object({ city: JIT.string() }));
     const User = JIT.class(JIT.object({ name: JIT.string(), address: Address, addresses: JIT.array(Address) }));
-    const user = User.create({
+    const user = new User({
       name: "Ada",
       address: { city: "London" },
       addresses: [{ city: "London" }, { city: "Paris" }],
@@ -61,14 +98,14 @@ describe("JIT.class", () => {
   it("serializes runtime classes through their stable inner wire schema", () => {
     const Address = JIT.class(JIT.object({ city: JIT.string() }));
     const User = JIT.class(JIT.object({ name: JIT.string(), address: Address }));
-    const user = User.create({ name: "Ada", address: { city: "London" } });
+    const user = new User({ name: "Ada", address: { city: "London" } });
 
     expect(JIT.json.stringify(User)(user)).toBe('{"name":"Ada","address":{"city":"London"}}');
-    expect(JIT.json.stringify(JIT.array(Address))([Address.create({ city: "London" })])).toBe('[{"city":"London"}]');
+    expect(JIT.json.stringify(JIT.array(Address))([new Address({ city: "London" })])).toBe('[{"city":"London"}]');
   });
 
   it("hydrates validated state without applying a distinct construction path", () => {
-    const User = JIT.class(UserSchema);
+    const User = JIT.class(UserSchema).factories({ create: false, hydrate: "hydrate" });
     const state = { id: "u_1", name: "Grace", createdAt: new Date(1) };
 
     expect(User.hydrate(state)).toBeInstanceOf(User);
@@ -126,7 +163,7 @@ describe("JIT.class", () => {
       default: { field: "private", get: "public", set: "protected" },
       fields: { id: { set: false }, passwordHash: { get: "protected", set: "protected" } },
     });
-    const user = User.create({ id: "u_1", passwordHash: "secret" });
+    const user = new User({ id: "u_1", passwordHash: "secret" });
 
     expect(user.id).toBe("u_1");
     expect(Object.keys(user)).toEqual([]);
@@ -139,7 +176,7 @@ describe("JIT.class", () => {
   });
 
   it("preserves polymorphic static construction for subclasses", () => {
-    const UserBase = JIT.class.abstract(UserSchema);
+    const UserBase = JIT.class.abstract(UserSchema).factories({ create: "create", hydrate: "hydrate" });
 
     class User extends UserBase {
       greeting() {
@@ -175,7 +212,10 @@ describe("JIT.class", () => {
   });
 
   it("binds identity keys to the object schema", () => {
-    const UserBase = JIT.class.abstract(JIT.object({ id: JIT.string(), name: JIT.string() })).identity("id");
+    const UserBase = JIT.class
+      .abstract(JIT.object({ id: JIT.string(), name: JIT.string() }))
+      .identity("id")
+      .factories({ create: "create", hydrate: "hydrate" });
 
     class User extends UserBase {}
 
@@ -253,9 +293,9 @@ describe("JIT.class", () => {
       JIT.class.diff,
       JIT.class.identity("id")
     );
-    const ada = User.create({ name: "Ada" });
-    const same = User.create({ name: "Ada" });
-    const grace = User.create({ name: "Grace" });
+    const ada = new User({ name: "Ada" });
+    const same = new User({ name: "Ada" });
+    const grace = new User({ name: "Grace" });
 
     expect(ada.equals(same)).toBe(true);
     expect(ada.hashCode()).toBe(same.hashCode());
@@ -272,7 +312,7 @@ describe("JIT.class", () => {
         profile: JIT.object({ label: JIT.string() }),
       })
     ).use(JIT.class.with);
-    const ada = User.create({
+    const ada = new User({
       name: "Ada",
       profile: { label: "math" },
     });
@@ -299,7 +339,7 @@ describe("JIT.class", () => {
         }),
       })
     ).use(JIT.class.with);
-    const ada = User.create({ name: "Ada" });
+    const ada = new User({ name: "Ada" });
 
     validations = 0;
     expect(ada.with({ name: "Grace" })).toMatchObject({ name: "Grace" });
@@ -506,7 +546,6 @@ describe("JIT.class", () => {
       payload: JIT.object({ orderId: JIT.string().min(1) }),
     });
     const event = OrderConfirmed.create({ orderId: "o_1" });
-    const constructed = new OrderConfirmed({ type: "order.confirmed", version: 1, payload: { orderId: "o_1" } });
 
     expect(event).toBeInstanceOf(OrderConfirmed);
     expect(Object.isFrozen(event)).toBe(true);
@@ -518,7 +557,14 @@ describe("JIT.class", () => {
     expect(event.id).toEqual(expect.any(String));
     expect(event.occurredAt).toBeInstanceOf(Date);
     expect(event["~event"]).toEqual({ version: 1, type: "order.confirmed", schemaVersion: 1 });
-    expect(constructed).toMatchObject({ type: "order.confirmed", version: 1, payload: { orderId: "o_1" } });
+    expect(
+      () =>
+        new (OrderConfirmed as unknown as new (input: unknown) => unknown)({
+          type: "order.confirmed",
+          version: 1,
+          payload: { orderId: "o_1" },
+        })
+    ).toThrow(/factory construction/i);
     expect(JIT.validate.parse(OrderConfirmed)(event)).toBeInstanceOf(OrderConfirmed);
     const json = JIT.json.stringify(OrderConfirmed)(event);
     const restored = JIT.json.parse(OrderConfirmed).validate()(json);

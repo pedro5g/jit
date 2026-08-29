@@ -1,0 +1,57 @@
+# Factories and construction
+
+A Runtime Type has one canonical construction boundary.
+
+| Type | Default |
+| --- | --- |
+| `JIT.class(schema)` | `new Type(input)` |
+| `JIT.ddd.valueObject(schema)` | `Type.create(input)` / `Type.hydrate(state)` |
+| `JIT.ddd.entity(schema, ...)` | factories |
+| `JIT.ddd.aggregateRoot(schema, ...)` | factories |
+| `JIT.ddd.domainEvent(...)` | factories |
+
+This distinction is semantic, not cosmetic. Constructor mode has no default
+factory aliases. Factory mode is typed with an abstract construct signature and
+the generated constructor checks an internal token, so bypassing a domain
+factory fails at runtime too.
+
+## Opting a class into factories
+
+```ts
+const User = JIT.class(UserSchema).factories({
+  create: "make",
+  hydrate: "restore",
+});
+
+const created = User.make({ name: "Ada" });
+const restored = User.restore({ id: "u_1", name: "Ada" });
+```
+
+Calling `.factories(...)` changes the construction mode; it does not add a
+second path. Renamed aliases replace canonical names, and at least one factory
+must remain enabled.
+
+Factories are polymorphic. If an Entity or Aggregate Root base is subclassed,
+`Subclass.create(...)` and `Subclass.hydrate(...)` return the subclass.
+
+## Create and hydrate
+
+Create consumes the schema's input representation and may resolve defaults.
+Hydrate consumes complete persisted state and does not resolve creation
+defaults. This invariant is shared by runtime and standalone AOT output.
+
+The current class compiler retains its existing compiled validation semantics;
+the later opt-in validation policy is a separate concern from choosing the
+construction boundary.
+
+## Generated code and allocation
+
+Construction emits one shape-stable class. Factory mode adds one module-local
+token and direct static calls; it does not add a registry, descriptor lookup,
+or per-instance infrastructure. The token check is paid only by construction,
+not by instance methods. Runtime and AOT both use the same descriptor fields:
+construction mode, factory names, accessors, and installed capabilities.
+
+Direct construction remains the smallest path for ordinary `JIT.class`
+artifacts. DDD defaults to factories because identity, hydration, assertions,
+and future validation policies need one enforceable domain boundary.
