@@ -55,6 +55,13 @@ specialized function containing direct field and operator branches. It checks
 top-level keys, filters, conditions, projection, sorting and pagination while
 normalizing the request. Invalid input exits through the first failing check.
 
+Resolution produces an immutable internal `QueryBoundary` with normalized
+field paths, operator sets, projection, sorting, pagination and structural
+limits. Relation, collection and logical capabilities are present in the IR
+but closed in the current API. The runtime reference parser and generated
+parser source are both derived from this descriptor; it is consumed before the
+normal Query AST or physical planner sees the request.
+
 Successful parsing allocates only the semantic output it returns: condition,
 sort, projection and pagination data. It does not allocate an operator registry
 or walk the schema. Complexity is O(request keys + requested conditions); the
@@ -94,4 +101,3 @@ benchmark showing that it avoids material work.
 - Treat limits as amplification guards, not as estimates of database cost.
 - Dynamic database-loaded rule languages and storage-specific adapters are not
   part of this boundary.
-

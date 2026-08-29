@@ -1,5 +1,11 @@
 import { type BinaryArray, type BinaryRowSet, isBinaryArray, isBinaryRowSet } from "../compiler/binary-rowset.js";
 import { compileJoin, createJoinPlan, explainJoinPlan, type JoinPair, type LeftJoinPair } from "../compiler/join.js";
+import {
+  type QueryBoundary,
+  type QueryBoundaryPagination,
+  queryBoundaryFilters,
+  resolveQueryBoundary,
+} from "../compiler/query-boundary.js";
 import type {
   QueryAggregateOperator,
   QueryConditionNode,
@@ -155,24 +161,13 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
   };
 }
 
-type CqrsPagination =
-  | {
-      readonly type: "offset";
-      readonly defaultLimit: number;
-      readonly maxLimit: number;
-    }
-  | {
-      readonly type: "cursor";
-      readonly by: readonly string[];
-      readonly defaultLimit: number;
-      readonly maxLimit: number;
-    };
-
 export interface CqrsInput<TSchema extends ATS.AnyTypeSchema> {
   readonly schema: TSchema;
   readonly options: CqrsInputOptions<TSchema>;
   readonly "~query": StandardQueryInput;
 }
+
+const queryBoundaries = new WeakMap<object, QueryBoundary>();
 
 /** Structural dynamic-query definition that adapters may inspect without importing JIT. */
 export interface StandardQueryInput {
@@ -979,26 +974,43 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
     ...(frozenPagination === undefined ? {} : { pagination: frozenPagination }),
     ...(frozenLimits === undefined ? {} : { limits: frozenLimits }),
   }) as CqrsInputOptions<TSchema>;
+  const sourceFields = objectFields(unwrapped);
+  const boundary = resolveQueryBoundary({
+    sourceFields,
+    filters: Object.entries(frozenOptions.filter ?? {}).map(([path, operators]) => ({
+      path,
+      operators: operators as true | readonly string[],
+    })),
+    projection: frozenOptions.select ? sourceFields : [],
+    sorting: frozenOptions.sort ?? [],
+    ...(frozenPagination === undefined ? {} : { pagination: frozenPagination }),
+    limits: {
+      maxFilters,
+      maxConditions: frozenOptions.limits?.maxConditions ?? maxFilters,
+      maxSortFields: frozenOptions.limits?.maxSortFields ?? 3,
+      maxSelectFields: frozenOptions.limits?.maxSelectFields ?? 30,
+    },
+  });
   const definition: StandardQueryInput["definition"] = Object.freeze({
     source: Object.freeze({
       kind: "object" as const,
-      fields: Object.freeze(objectFields(unwrapped)),
+      fields: boundary.sourceFields,
     }),
-    filters: frozenFilter as Readonly<Record<string, true | readonly string[]>>,
-    projection: frozenOptions.select === true,
-    sorting: frozenSort as readonly string[],
-    ...(frozenPagination
+    filters: Object.freeze(Object.fromEntries(queryBoundaryFilters(boundary))),
+    projection: boundary.projection.length > 0,
+    sorting: boundary.sorting,
+    ...(boundary.pagination
       ? {
           pagination: Object.freeze({
-            ...frozenPagination,
-            ...(frozenPagination.type === "cursor" ? { by: Object.freeze([...frozenPagination.by]) } : {}),
+            ...boundary.pagination,
+            ...(boundary.pagination.type === "cursor" ? { by: boundary.pagination.by } : {}),
           }),
         }
       : {}),
     limits: Object.freeze({
-      maxConditions: frozenOptions.limits?.maxConditions ?? maxFilters,
-      maxSortFields: frozenOptions.limits?.maxSortFields ?? 3,
-      maxSelectFields: frozenOptions.limits?.maxSelectFields ?? 30,
+      maxConditions: boundary.limits.maxConditions,
+      maxSortFields: boundary.limits.maxSortFields,
+      maxSelectFields: boundary.limits.maxSelectFields,
     }),
   });
   const input = Object.freeze({
@@ -1006,18 +1018,19 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
     options: frozenOptions,
     "~query": Object.freeze({ version: 1 as const, definition }),
   });
+  queryBoundaries.set(input, boundary);
   registerArtifact(input, {
     kind: "cqrs-input",
     definition,
     source: emitCqrsAotParserSource(
-      Object.entries(frozenOptions.filter ?? {}) as [string, true | readonly string[]][],
-      frozenOptions.maxFilters ?? 32,
-      frozenOptions.sort ?? [],
-      frozenOptions.pagination,
-      frozenOptions.limits?.maxConditions ?? frozenOptions.maxFilters ?? 32,
-      frozenOptions.limits?.maxSortFields ?? 3,
-      frozenOptions.select ? objectFields(unwrapped) : [],
-      frozenOptions.limits?.maxSelectFields ?? 30
+      queryBoundaryFilters(boundary),
+      boundary.limits.maxFilters,
+      boundary.sorting,
+      boundary.pagination ?? undefined,
+      boundary.limits.maxConditions,
+      boundary.limits.maxSortFields,
+      boundary.projection,
+      boundary.limits.maxSelectFields
     ),
   });
   return input;
@@ -1025,17 +1038,18 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
 
 /** Reference normalizer for dynamic input; later lowered to specialized source. */
 export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {
-  const reference = cqrsParseReference(definition);
-  const fields = Object.entries(definition.options.filter ?? {}) as [string, true | readonly string[]][];
+  const boundary = queryBoundaries.get(definition);
+  if (!boundary) throw new JITError("INVALID_QUERY", "API query boundary is missing its semantic descriptor");
+  const reference = cqrsParseReference(boundary);
   const source = emitCqrsInputParser(
-    fields,
-    definition.options.maxFilters ?? 32,
-    definition.options.sort ?? [],
-    definition.options.pagination,
-    definition.options.limits?.maxConditions ?? definition.options.maxFilters ?? 32,
-    definition.options.limits?.maxSortFields ?? 3,
-    definition.options.select ? objectFields(definition.schema) : [],
-    definition.options.limits?.maxSelectFields ?? 30
+    queryBoundaryFilters(boundary),
+    boundary.limits.maxFilters,
+    boundary.sorting,
+    boundary.pagination ?? undefined,
+    boundary.limits.maxConditions,
+    boundary.limits.maxSortFields,
+    boundary.projection,
+    boundary.limits.maxSelectFields
   );
   const parser = globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor) as (
     input: unknown
@@ -1051,7 +1065,7 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
   return parser;
 }
 
-function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput<TSchema>) {
+function cqrsParseReference(boundary: QueryBoundary) {
   return (input: unknown): ParsedCqrsInput => {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
       throw new JITError("INVALID_QUERY", "API query input must be an object");
@@ -1061,8 +1075,8 @@ function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsI
       "filter",
       "fields",
       "sort",
-      ...(definition.options.pagination?.type === "offset" ? ["page", "limit"] : []),
-      ...(definition.options.pagination?.type === "cursor" ? ["after", "before", "limit"] : []),
+      ...(boundary.pagination?.type === "offset" ? ["page", "limit"] : []),
+      ...(boundary.pagination?.type === "cursor" ? ["after", "before", "limit"] : []),
     ]);
     for (const key of Object.keys(source)) {
       if (!allowedInputKeys.has(key)) {
@@ -1070,13 +1084,15 @@ function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsI
       }
     }
     const filter = source.filter;
-    if (filter === undefined) return normalizeCqrsTail(source, definition, []);
+    if (filter === undefined) return normalizeCqrsTail(source, boundary, []);
     if (filter === null || typeof filter !== "object" || Array.isArray(filter)) {
       throw new JITError("INVALID_QUERY", "API query filter must be an object");
     }
-    const allowed: Readonly<Record<string, true | readonly string[] | undefined>> = definition.options.filter ?? {};
+    const allowed: Readonly<Record<string, true | readonly string[] | undefined>> = Object.fromEntries(
+      queryBoundaryFilters(boundary)
+    );
     const entries = Object.entries(filter as Record<string, unknown>);
-    if (entries.length > (definition.options.maxFilters ?? 32)) {
+    if (entries.length > boundary.limits.maxFilters) {
       throw new JITError("INVALID_QUERY", "API query filter exceeds the configured structural limit");
     }
     const conditions: CqrsInputCondition[] = [];
@@ -1100,21 +1116,21 @@ function cqrsParseReference<TSchema extends ATS.AnyTypeSchema>(definition: CqrsI
         }
       } else conditions.push({ kind: "eq", path: field.split("."), value: raw });
     }
-    if (conditions.length > (definition.options.limits?.maxConditions ?? definition.options.maxFilters ?? 32)) {
+    if (conditions.length > boundary.limits.maxConditions) {
       throw new JITError("INVALID_QUERY", "API query filter exceeds the configured condition limit");
     }
-    return normalizeCqrsTail(source, definition, conditions);
+    return normalizeCqrsTail(source, boundary, conditions);
   };
 }
 
-function normalizeCqrsTail<TSchema extends ATS.AnyTypeSchema>(
+function normalizeCqrsTail(
   source: Record<string, unknown>,
-  definition: CqrsInput<TSchema>,
+  boundary: QueryBoundary,
   filter: readonly CqrsInputCondition[]
 ): ParsedCqrsInput {
-  const select = normalizeCqrsSelect(source, definition);
-  const pagination = definition.options.pagination;
-  const allowedSort = new Set<string>(pagination?.type === "cursor" ? pagination.by : (definition.options.sort ?? []));
+  const select = normalizeCqrsSelect(source, boundary);
+  const { pagination } = boundary;
+  const allowedSort = new Set<string>(pagination?.type === "cursor" ? pagination.by : boundary.sorting);
   if (source.sort !== undefined && (typeof source.sort !== "string" || source.sort.length === 0)) {
     throw new JITError("INVALID_QUERY", "API query sort must be a non-empty string");
   }
@@ -1138,7 +1154,7 @@ function normalizeCqrsTail<TSchema extends ATS.AnyTypeSchema>(
     if (sortFields.has(field)) throw new JITError("INVALID_QUERY", `API query sort repeats ${JSON.stringify(field)}`);
     sortFields.add(field);
   }
-  if (sort.length > (definition.options.limits?.maxSortFields ?? 3)) {
+  if (sort.length > boundary.limits.maxSortFields) {
     throw new JITError("INVALID_QUERY", "API query sort exceeds the configured structural limit");
   }
   if (!pagination) return { filter, sort, ...(select === undefined ? {} : { select }) };
@@ -1191,20 +1207,17 @@ function normalizeCqrsTail<TSchema extends ATS.AnyTypeSchema>(
   };
 }
 
-function normalizeCqrsSelect<TSchema extends ATS.AnyTypeSchema>(
-  source: Record<string, unknown>,
-  definition: CqrsInput<TSchema>
-): readonly string[] | undefined {
+function normalizeCqrsSelect(source: Record<string, unknown>, boundary: QueryBoundary): readonly string[] | undefined {
   if (source.fields === undefined) return undefined;
-  if (!definition.options.select || typeof source.fields !== "string") {
+  if (boundary.projection.length === 0 || typeof source.fields !== "string") {
     throw new JITError("INVALID_QUERY", "API query sparse fields are not allowed");
   }
   if (source.fields.length === 0) throw new JITError("INVALID_QUERY", "API query select field cannot be empty");
   const fields = source.fields.split(",");
-  if (fields.length > (definition.options.limits?.maxSelectFields ?? 30)) {
+  if (fields.length > boundary.limits.maxSelectFields) {
     throw new JITError("INVALID_QUERY", "API query select exceeds the configured structural limit");
   }
-  const allowed = new Set(objectFields(definition.schema));
+  const allowed = new Set(boundary.projection);
   const selected = new Set<string>();
   for (const field of fields) {
     if (field.length === 0) throw new JITError("INVALID_QUERY", "API query select field cannot be empty");
@@ -1257,7 +1270,7 @@ export function emitCqrsInputParser(
   fields: readonly [string, true | readonly string[]][],
   maxFilters: number,
   sortFields: readonly string[] = [],
-  pagination?: CqrsPagination,
+  pagination?: QueryBoundaryPagination,
   maxConditions = maxFilters,
   maxSortFields = 3,
   selectFields: readonly string[] = [],

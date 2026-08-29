@@ -20254,6 +20254,36 @@ function fold(op, nodes) {
   return nodes.reduce((left, right) => ({ kind: "logical", op, left, right }));
 }
 
+// ../../packages/jit/src/compiler/query-boundary.ts
+function resolveQueryBoundary(input) {
+  const fields = input.filters.map(
+    ({ path, operators }) => Object.freeze({
+      path: Object.freeze(path.split(".")),
+      operators: Object.freeze(operators === true ? ["eq"] : [...operators])
+    })
+  );
+  const pagination = input.pagination === void 0 ? null : Object.freeze(
+    input.pagination.type === "cursor" ? { ...input.pagination, by: Object.freeze([...input.pagination.by]) } : { ...input.pagination }
+  );
+  return Object.freeze({
+    sourceFields: Object.freeze([...input.sourceFields]),
+    fields: Object.freeze(fields),
+    relations: Object.freeze([]),
+    collections: Object.freeze([]),
+    logical: Object.freeze({ and: false, or: false, not: false }),
+    projection: Object.freeze([...input.projection]),
+    sorting: Object.freeze([...input.sorting]),
+    pagination,
+    limits: Object.freeze({ ...input.limits })
+  });
+}
+function queryBoundaryFilters(boundary) {
+  return boundary.fields.map((field) => {
+    const path = field.path.join(".");
+    return field.operators.length === 1 && field.operators[0] === "eq" ? [path, true] : [path, field.operators];
+  });
+}
+
 // ../../packages/jit/src/factories/collection/collection.ts
 function array(element) {
   return /* @__PURE__ */ createBuilder(
@@ -20776,6 +20806,7 @@ function lowerRulePredicate(predicate, inputs, bindingOffset) {
 }
 
 // ../../packages/jit/src/factories/cqrs.ts
+var queryBoundaries = /* @__PURE__ */ new WeakMap();
 function cqrsQuery(schema) {
   if (isBinaryArray(schema) || isBinaryRowSet(schema)) return query(schema);
   const target = unwrapSchema(schema);
@@ -21212,24 +21243,41 @@ function cqrsInput(schema, options) {
     ...frozenPagination === void 0 ? {} : { pagination: frozenPagination },
     ...frozenLimits === void 0 ? {} : { limits: frozenLimits }
   });
-  const definition = Object.freeze({
-    source: Object.freeze({
-      kind: "object",
-      fields: Object.freeze(objectFields(unwrapped))
-    }),
-    filters: frozenFilter,
-    projection: frozenOptions.select === true,
-    sorting: frozenSort,
-    ...frozenPagination ? {
-      pagination: Object.freeze({
-        ...frozenPagination,
-        ...frozenPagination.type === "cursor" ? { by: Object.freeze([...frozenPagination.by]) } : {}
-      })
-    } : {},
-    limits: Object.freeze({
+  const sourceFields = objectFields(unwrapped);
+  const boundary = resolveQueryBoundary({
+    sourceFields,
+    filters: Object.entries(frozenOptions.filter ?? {}).map(([path, operators]) => ({
+      path,
+      operators
+    })),
+    projection: frozenOptions.select ? sourceFields : [],
+    sorting: frozenOptions.sort ?? [],
+    ...frozenPagination === void 0 ? {} : { pagination: frozenPagination },
+    limits: {
+      maxFilters,
       maxConditions: frozenOptions.limits?.maxConditions ?? maxFilters,
       maxSortFields: frozenOptions.limits?.maxSortFields ?? 3,
       maxSelectFields: frozenOptions.limits?.maxSelectFields ?? 30
+    }
+  });
+  const definition = Object.freeze({
+    source: Object.freeze({
+      kind: "object",
+      fields: boundary.sourceFields
+    }),
+    filters: Object.freeze(Object.fromEntries(queryBoundaryFilters(boundary))),
+    projection: boundary.projection.length > 0,
+    sorting: boundary.sorting,
+    ...boundary.pagination ? {
+      pagination: Object.freeze({
+        ...boundary.pagination,
+        ...boundary.pagination.type === "cursor" ? { by: boundary.pagination.by } : {}
+      })
+    } : {},
+    limits: Object.freeze({
+      maxConditions: boundary.limits.maxConditions,
+      maxSortFields: boundary.limits.maxSortFields,
+      maxSelectFields: boundary.limits.maxSelectFields
     })
   });
   const input = Object.freeze({
@@ -21237,34 +21285,36 @@ function cqrsInput(schema, options) {
     options: frozenOptions,
     "~query": Object.freeze({ version: 1, definition })
   });
+  queryBoundaries.set(input, boundary);
   registerArtifact(input, {
     kind: "cqrs-input",
     definition,
     source: emitCqrsAotParserSource(
-      Object.entries(frozenOptions.filter ?? {}),
-      frozenOptions.maxFilters ?? 32,
-      frozenOptions.sort ?? [],
-      frozenOptions.pagination,
-      frozenOptions.limits?.maxConditions ?? frozenOptions.maxFilters ?? 32,
-      frozenOptions.limits?.maxSortFields ?? 3,
-      frozenOptions.select ? objectFields(unwrapped) : [],
-      frozenOptions.limits?.maxSelectFields ?? 30
+      queryBoundaryFilters(boundary),
+      boundary.limits.maxFilters,
+      boundary.sorting,
+      boundary.pagination ?? void 0,
+      boundary.limits.maxConditions,
+      boundary.limits.maxSortFields,
+      boundary.projection,
+      boundary.limits.maxSelectFields
     )
   });
   return input;
 }
 function cqrsParse(definition) {
-  const reference = cqrsParseReference(definition);
-  const fields = Object.entries(definition.options.filter ?? {});
+  const boundary = queryBoundaries.get(definition);
+  if (!boundary) throw new JITError("INVALID_QUERY", "API query boundary is missing its semantic descriptor");
+  const reference = cqrsParseReference(boundary);
   const source = emitCqrsInputParser(
-    fields,
-    definition.options.maxFilters ?? 32,
-    definition.options.sort ?? [],
-    definition.options.pagination,
-    definition.options.limits?.maxConditions ?? definition.options.maxFilters ?? 32,
-    definition.options.limits?.maxSortFields ?? 3,
-    definition.options.select ? objectFields(definition.schema) : [],
-    definition.options.limits?.maxSelectFields ?? 30
+    queryBoundaryFilters(boundary),
+    boundary.limits.maxFilters,
+    boundary.sorting,
+    boundary.pagination ?? void 0,
+    boundary.limits.maxConditions,
+    boundary.limits.maxSortFields,
+    boundary.projection,
+    boundary.limits.maxSelectFields
   );
   const parser = globalThis.Function("__reference", "__decodeCursor", source)(reference, decodeCqrsCursor);
   const artifact = getArtifact(definition);
@@ -21277,7 +21327,7 @@ function cqrsParse(definition) {
   }
   return parser;
 }
-function cqrsParseReference(definition) {
+function cqrsParseReference(boundary) {
   return (input) => {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
       throw new JITError("INVALID_QUERY", "API query input must be an object");
@@ -21287,8 +21337,8 @@ function cqrsParseReference(definition) {
       "filter",
       "fields",
       "sort",
-      ...definition.options.pagination?.type === "offset" ? ["page", "limit"] : [],
-      ...definition.options.pagination?.type === "cursor" ? ["after", "before", "limit"] : []
+      ...boundary.pagination?.type === "offset" ? ["page", "limit"] : [],
+      ...boundary.pagination?.type === "cursor" ? ["after", "before", "limit"] : []
     ]);
     for (const key of Object.keys(source)) {
       if (!allowedInputKeys.has(key)) {
@@ -21296,13 +21346,15 @@ function cqrsParseReference(definition) {
       }
     }
     const filter = source.filter;
-    if (filter === void 0) return normalizeCqrsTail(source, definition, []);
+    if (filter === void 0) return normalizeCqrsTail(source, boundary, []);
     if (filter === null || typeof filter !== "object" || Array.isArray(filter)) {
       throw new JITError("INVALID_QUERY", "API query filter must be an object");
     }
-    const allowed = definition.options.filter ?? {};
+    const allowed = Object.fromEntries(
+      queryBoundaryFilters(boundary)
+    );
     const entries = Object.entries(filter);
-    if (entries.length > (definition.options.maxFilters ?? 32)) {
+    if (entries.length > boundary.limits.maxFilters) {
       throw new JITError("INVALID_QUERY", "API query filter exceeds the configured structural limit");
     }
     const conditions = [];
@@ -21326,16 +21378,16 @@ function cqrsParseReference(definition) {
         }
       } else conditions.push({ kind: "eq", path: field.split("."), value: raw });
     }
-    if (conditions.length > (definition.options.limits?.maxConditions ?? definition.options.maxFilters ?? 32)) {
+    if (conditions.length > boundary.limits.maxConditions) {
       throw new JITError("INVALID_QUERY", "API query filter exceeds the configured condition limit");
     }
-    return normalizeCqrsTail(source, definition, conditions);
+    return normalizeCqrsTail(source, boundary, conditions);
   };
 }
-function normalizeCqrsTail(source, definition, filter) {
-  const select = normalizeCqrsSelect(source, definition);
-  const pagination = definition.options.pagination;
-  const allowedSort = new Set(pagination?.type === "cursor" ? pagination.by : definition.options.sort ?? []);
+function normalizeCqrsTail(source, boundary, filter) {
+  const select = normalizeCqrsSelect(source, boundary);
+  const { pagination } = boundary;
+  const allowedSort = new Set(pagination?.type === "cursor" ? pagination.by : boundary.sorting);
   if (source.sort !== void 0 && (typeof source.sort !== "string" || source.sort.length === 0)) {
     throw new JITError("INVALID_QUERY", "API query sort must be a non-empty string");
   }
@@ -21356,7 +21408,7 @@ function normalizeCqrsTail(source, definition, filter) {
     if (sortFields.has(field)) throw new JITError("INVALID_QUERY", `API query sort repeats ${JSON.stringify(field)}`);
     sortFields.add(field);
   }
-  if (sort2.length > (definition.options.limits?.maxSortFields ?? 3)) {
+  if (sort2.length > boundary.limits.maxSortFields) {
     throw new JITError("INVALID_QUERY", "API query sort exceeds the configured structural limit");
   }
   if (!pagination) return { filter, sort: sort2, ...select === void 0 ? {} : { select } };
@@ -21401,17 +21453,17 @@ function normalizeCqrsTail(source, definition, filter) {
     pagination: { kind: "offset", offset, limit }
   };
 }
-function normalizeCqrsSelect(source, definition) {
+function normalizeCqrsSelect(source, boundary) {
   if (source.fields === void 0) return void 0;
-  if (!definition.options.select || typeof source.fields !== "string") {
+  if (boundary.projection.length === 0 || typeof source.fields !== "string") {
     throw new JITError("INVALID_QUERY", "API query sparse fields are not allowed");
   }
   if (source.fields.length === 0) throw new JITError("INVALID_QUERY", "API query select field cannot be empty");
   const fields = source.fields.split(",");
-  if (fields.length > (definition.options.limits?.maxSelectFields ?? 30)) {
+  if (fields.length > boundary.limits.maxSelectFields) {
     throw new JITError("INVALID_QUERY", "API query select exceeds the configured structural limit");
   }
-  const allowed = new Set(objectFields(definition.schema));
+  const allowed = new Set(boundary.projection);
   const selected = /* @__PURE__ */ new Set();
   for (const field of fields) {
     if (field.length === 0) throw new JITError("INVALID_QUERY", "API query select field cannot be empty");

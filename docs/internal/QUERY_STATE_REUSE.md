@@ -40,14 +40,18 @@ define and AOT lowering.
   `cqrs-parser` artifacts are reconstructive;
 - the structural `~query` descriptor remains version 1.
 
-The existing parser is the implementation to migrate. It is not sufficient as
-the final `QueryBoundary` because its operators are `string[]`, `true` means a
-special equality shorthand, projection is all-or-nothing, and it has no
-explicit relation/collection/logical/cost model. Milestone 2 must introduce an
-immutable internal boundary descriptor around this implementation, then later
-parser milestones can add those capabilities without creating another query
-AST. Parsed predicates continue to lower to `QueryConditionNode` and standard
-V1 query data.
+The existing parser is the implementation to migrate. Milestone 2 introduced
+an immutable internal `QueryBoundary` containing normalized field/operator
+capabilities, projection, sorting, pagination and limits. Relations,
+collections and logical operations are represented as closed capabilities, so
+later milestones can open them explicitly without changing the Query AST. Both
+the reference parser and specialized source emitter now consume that
+descriptor. The V1 `~query` shape is derived separately and remains unchanged.
+
+The boundary is not yet final: public operator types are still `string[]`,
+`true` remains the equality shorthand, projection is all-or-nothing, and there
+is no cost model. Parsed predicates continue to lower to `QueryConditionNode`
+and standard V1 query data.
 
 ## Read dependencies
 
