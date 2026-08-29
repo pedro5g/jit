@@ -130,6 +130,105 @@ const price = Money.create({ amount: 10, currency: "BRL" });
 Object.isFrozen(price); // true
 ```
 
+## Scalar value objects
+
+A Value Object over a primitive schema is a real runtime object, never a
+primitive with methods bolted on. It exposes a readonly `value` and keeps its
+scalar form on the wire.
+
+```ts
+const Email = JIT.ddd.valueObject(JIT.string().email());
+const email = Email.create("ada@example.com");
+
+email.value; // "ada@example.com"
+email.equals(Email.hydrate("ada@example.com")); // true
+JSON.stringify({ email }); // {"email":"ada@example.com"}
+```
+
+Object Value Objects also answer `value`, returning the whole value, so both
+shapes read the same way.
+
+A scalar schema with a default infers the creation arity: when the whole input
+can be omitted, `create()` takes no argument at all.
+
+```ts
+const Slug = JIT.ddd.valueObject(JIT.string().default("generated"));
+
+Slug.create().value; // "generated"
+Slug.create("provided").value; // "provided"
+```
+
+## Unique identifiers
+
+`JIT.ddd.uniqueIdentifier()` is that scalar Value Object plus identifier
+metadata. With no argument it is a UUID string with a creation default:
+
+```ts
+const UserId = JIT.ddd.uniqueIdentifier();
+
+UserId.create().value; // a generated UUID
+UserId.hydrate("7f8f4f83-f3c7-4bad-9b73-a3b70f47d761").value; // the persisted one
+```
+
+Pass a schema for any other identifier representation:
+
+```ts
+const TicketId = JIT.ddd.uniqueIdentifier(JIT.int().positive());
+TicketId.create(42).value; // 42
+```
+
+The metadata means *identifier-like*, not *the identity of this entity*.
+`entity` and `aggregateRoot` infer their identity field only when exactly one
+field carries it; zero candidates and several candidates are both rejected,
+because an entity may legitimately hold another aggregate's id. Explicit
+`{ id: "..." }` always wins.
+
+```ts
+const UserId2 = JIT.ddd.uniqueIdentifier();
+const UserBase2 = JIT.ddd.entity(
+  JIT.object({ id: UserId2, name: JIT.string() }),
+);
+
+class User2 extends UserBase2 {}
+
+User2.create({ name: "Ada" }).id.value; // generated, id omitted at the boundary
+```
+
+### Boundary representations
+
+Four representations, and they are not interchangeable:
+
+| Representation | What it is |
+| --- | --- |
+| Create input | the scalar the boundary accepts; defaults may be omitted |
+| Hydrate input | the complete persisted scalar; defaults are never regenerated |
+| Runtime | the wrapper object, with `value`, `equals()` and `hashCode()` |
+| Wire | the scalar again — `JSON.stringify` never emits `{ "value": ... }` |
+
+Nested Runtime Types accept their **wire** representation and are materialized
+by the compiled validator at each known field and array element, so a wrapper
+instance is not what a factory takes:
+
+```ts
+const OrderBase = JIT.ddd.entity(
+  JIT.object({ id: JIT.ddd.uniqueIdentifier(), tags: JIT.array(UserId) }),
+);
+
+class Order extends OrderBase {}
+
+const order = Order.hydrate({
+  id: "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761",
+  tags: ["f63ca4d3-2b8f-49e6-80ff-0cedaf1e6504"],
+});
+
+order.tags[0].value; // materialized from the persisted scalar
+```
+
+Passing an already-built `UserId` is rejected on purpose. One boundary
+representation keeps `create`, `hydrate`, JSON and AOT saying the same thing,
+and avoids an `instanceof` test per field that a generated class in another
+module would fail anyway. Reach for `.value` when composing.
+
 ## Entities
 
 `JIT.ddd.entity(schema, { id })` creates an abstract base with identity semantics.

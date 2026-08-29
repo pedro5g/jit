@@ -960,6 +960,7 @@ describe("JIT AOT generate", () => {
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly Money: {
         create(input: { amount: number; currency: "BRL" | "USD" }): {
+          readonly value: { amount: number; currency: "BRL" | "USD" };
           equals(other: unknown): boolean;
           hashCode(): number;
         };
@@ -974,6 +975,7 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain("Money_equal(this, other)");
     expect(source).not.toContain('from "@jit-compiler/jit"');
     expect(Object.isFrozen(money)).toBe(true);
+    expect(money.value).toBe(money);
     expect(
       () =>
         new (generated.Money as unknown as new (input: unknown) => unknown)({
@@ -983,6 +985,66 @@ describe("JIT AOT generate", () => {
     ).toThrow(/factory construction/i);
     expect(money.equals(generated.Money.create({ amount: 10, currency: "BRL" }))).toBe(true);
     expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
+  });
+
+  it("should lower scalar value objects as standalone wrapper classes", async () => {
+    const Email = JIT.ddd.valueObject(JIT.string().email());
+    const result = AOT.generate({ groups: {}, artifacts: { Email }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Email: {
+        create(input: string): { readonly value: string; equals(other: unknown): boolean; hashCode(): number };
+        hydrate(input: string): { readonly value: string; equals(other: unknown): boolean; hashCode(): number };
+      };
+    };
+    const email = generated.Email.create("ada@example.com");
+    const restored = generated.Email.hydrate("ada@example.com");
+
+    expect(result.skipped).toEqual([]);
+    expect(email.value).toBe("ada@example.com");
+    expect(email.equals(restored)).toBe(true);
+    expect(email.hashCode()).toBe(restored.hashCode());
+    expect(Object.isFrozen(email)).toBe(true);
+    expect(JSON.stringify(email)).toBe('"ada@example.com"');
+    expect(source).toContain("this.value = state;");
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+  });
+
+  it("should co-emit identifiers used by nested entity materialization", async () => {
+    const UserId = JIT.ddd.uniqueIdentifier();
+    const UserBase = JIT.ddd.entity(JIT.object({ id: UserId, name: JIT.string() }));
+    const result = AOT.generate({ groups: {}, artifacts: { UserId, UserBase }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly UserId: abstract new (input: string) => { readonly value: string };
+      readonly UserBase: (abstract new (
+        input: unknown
+      ) => {
+        id: { readonly value: string };
+        name: string;
+        sameIdentity(other: unknown): boolean;
+      }) & {
+        create(input: { name: string }): {
+          id: { readonly value: string };
+          name: string;
+          sameIdentity(other: unknown): boolean;
+        };
+        hydrate(input: { id: string; name: string }): {
+          id: { readonly value: string };
+          name: string;
+          sameIdentity(other: unknown): boolean;
+        };
+      };
+    };
+    class User extends generated.UserBase {}
+    const id = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
+    const hydrated = User.hydrate({ id, name: "Ada" });
+    const sameIdentity = User.hydrate({ id, name: "Grace" });
+
+    expect(result.skipped).toEqual([]);
+    expect(hydrated.id).toBeInstanceOf(generated.UserId);
+    expect(hydrated.id.value).toBe(id);
+    expect(hydrated.sameIdentity(sameIdentity)).toBe(true);
+    expect(User.create({ name: "Ada" }).id).toBeInstanceOf(generated.UserId);
   });
 
   it("should preserve abstract value-object behavior in AOT subclasses", async () => {

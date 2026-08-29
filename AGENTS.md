@@ -319,6 +319,19 @@ query describes the request; facts on the collection decide the access path.
 - A change mask is meaningful only next to the `ChangeLayout` it was produced against, and is never a persistence format. Report the layout so compatibility can be checked rather than assumed.
 - Report a measurement that does not flatter the library as plainly as one that does.
 
+## Runtime Types And DDD Construction
+
+- Runtime types expose one canonical construction boundary. `JIT.class` defaults to direct construction; Value Objects, Entities and Aggregate Roots default to factory construction. Do not expose both `new` and factories by default.
+- Create semantics may resolve defaults. Hydrate semantics never regenerate persisted defaults.
+- Nested Runtime Types accept their boundary representation and materialize recursively through the shared validation/materialization lowering.
+- Scalar Value Objects are runtime objects with a readonly `value` accessor; never represent them as primitive intersections with methods.
+- Identity inference uses identifier metadata only when exactly one unambiguous candidate exists. Explicit identity always wins.
+- Factory validation and domain assertions are opt-in and add zero work to unconfigured classes.
+- Result policy is fixed at artifact declaration and reflected exactly in factory types.
+- Class capabilities reuse existing compiler plans; do not create separate clone, validation or diff engines for classes.
+- State collection mutation reuses access-path planning and the element `MutationPlan`.
+- Filtering, mapping and grouping remain CQRS concerns rather than state collection mutations.
+
 ## Feature Documentation
 
 Every public feature must add or update its `docs/features/*` document in the

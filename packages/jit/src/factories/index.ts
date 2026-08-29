@@ -45,6 +45,7 @@ export {
   type DomainEvent,
   type EventPublisher,
   type RuntimeClass,
+  type ScalarValueObject,
   type StandardEvent,
 } from "./class.js";
 export * from "./collection/index.js";

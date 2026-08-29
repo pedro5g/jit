@@ -219,6 +219,7 @@ class ValidatorEmitter {
         writer.line(`if (${holder} === undefined) {`);
         writer.indent(() => {
           writer.line(`${output} = ${defaultExpr};`);
+          if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
         });
         writer.line("} else {");
         writer.indent(emitValidated);

@@ -1,4 +1,4 @@
-import { aggregateRoot, domainEvent, entity, valueObject } from "./class.js";
+import { aggregateRoot, domainEvent, entity, uniqueIdentifier, valueObject } from "./class.js";
 
 /**
  * Domain-driven design presets.
@@ -21,4 +21,6 @@ export const ddd = Object.freeze({
   aggregateRoot,
   /** Immutable, versioned event; `create()` takes the payload. */
   domainEvent,
+  /** Scalar identifier Value Object; defaults to a generated UUID. */
+  uniqueIdentifier,
 });

@@ -190,15 +190,16 @@ function nextVar(context: SerializeContext, prefix: string): string {
 function emitAppend(context: SerializeContext, schema: ATS.AnyTypeSchema, valueExpr: string): void {
   const resolved = resolveSerializeWrappers(schema);
   const writer = context.writer;
+  const wireValue = resolved.valueRepresentation ? `${valueExpr}.value` : valueExpr;
 
   // A cycle participant is reached through its function, never inlined again.
   // Helper bodies start at `emitBaseAppend`, so a helper never calls itself
   // here before emitting anything.
   if (context.recursive.has(resolved.base)) {
-    const call = `${queueHelper(context, resolved.base)}(${valueExpr})`;
+    const call = `${queueHelper(context, resolved.base)}(${wireValue})`;
 
     if (resolved.nullable || resolved.optional) {
-      writer.line(`s += ${valueExpr} == null ? "null" : ${call};`);
+      writer.line(`s += ${wireValue} == null ? "null" : ${call};`);
     } else {
       writer.line(`s += ${call};`);
     }
@@ -207,19 +208,19 @@ function emitAppend(context: SerializeContext, schema: ATS.AnyTypeSchema, valueE
 
   if (resolved.nullable || resolved.optional) {
     // JSON emits null for both; optional object PROPS are skipped earlier.
-    writer.line(`if (${valueExpr} == null) {`);
+    writer.line(`if (${wireValue} == null) {`);
     writer.indent(() => {
       writer.line('s += "null";');
     });
     writer.line("} else {");
     writer.indent(() => {
-      emitBaseAppend(context, resolved.base, valueExpr);
+      emitBaseAppend(context, resolved.base, wireValue);
     });
     writer.line("}");
     return;
   }
 
-  emitBaseAppend(context, resolved.base, valueExpr);
+  emitBaseAppend(context, resolved.base, wireValue);
 }
 
 function emitBaseAppend(context: SerializeContext, schema: AnySchema, valueExpr: string): void {
@@ -421,12 +422,14 @@ interface ResolvedSerializeWrappers {
   readonly base: AnySchema;
   readonly optional: boolean;
   readonly nullable: boolean;
+  readonly valueRepresentation: boolean;
 }
 
 function resolveSerializeWrappers(schema: ATS.AnyTypeSchema): ResolvedSerializeWrappers {
   let current = schema as AnySchema;
   let optional = false;
   let nullable = false;
+  let valueRepresentation = false;
 
   while (true) {
     switch (current.type) {
@@ -451,13 +454,14 @@ function resolveSerializeWrappers(schema: ATS.AnyTypeSchema): ResolvedSerializeW
       case TypeName.pipe:
       case TypeName.transform:
       case TypeName.runtimeType:
+        valueRepresentation ||= (current.def as unknown as ATS.RuntimeTypeDef).representation === "value";
         current = current.def.innerType as AnySchema;
         continue;
       case TypeName.lazy:
         current = (current.def.getter as () => AnySchema)();
         continue;
       default:
-        return { base: current, optional, nullable };
+        return { base: current, optional, nullable, valueRepresentation };
     }
   }
 }

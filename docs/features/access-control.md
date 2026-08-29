@@ -25,13 +25,13 @@ const PostAccess = JIT.access(Post)
 
 const ability = PostAccess(user);
 
-ability.can("read");                    // no subject needed
+ability.can("read"); // no subject needed
 ability.can("update", post);
 ability.cannot("delete", post);
-ability.can("update", post, "title");   // one field
-ability.assert("update", post);         // returns post or throws AccessDeniedError
-ability.explain("update", post);        // diagnostic slow path
-ability.fields("read", post);           // subject-aware field materialization
+ability.can("update", post, "title"); // one field
+ability.assert("update", post); // returns post or throws AccessDeniedError
+ability.explain("update", post); // diagnostic slow path
+ability.fields("read", post); // subject-aware field materialization
 ```
 
 Field-scoped rules, with or without a condition:
@@ -39,7 +39,10 @@ Field-scoped rules, with or without a condition:
 ```ts
 JIT.access(Post)
   .actor(User)
-  .can("update", { fields: ["title"], when: (query, actor) => query.eq("authorId", actor.field("id")) })
+  .can("update", {
+    fields: ["title"],
+    when: (query, actor) => query.eq("authorId", actor.field("id")),
+  })
   .cannot("update", { fields: ["body"] });
 ```
 
@@ -76,7 +79,9 @@ Definition files cannot execute an AccessPlan to build an ability. The reconstru
 ```ts
 const readPosts = JIT.cqrs.query(Post).authorize(PostAccess, "read", actor);
 const projectPost = JIT.project(Post).authorize(PostAccess, "read", actor);
-const updatePost = JIT.state.patch.apply(Post).authorize(PostAccess, "update", actor);
+const updatePost = JIT.state.patch
+  .apply(Post)
+  .authorize(PostAccess, "update", actor);
 ```
 
 ## 4. Semantics
@@ -159,28 +164,28 @@ The declaration lowers to the switch and nothing else — no rule array, matcher
 
 ## 11. Runtime/AOT parity
 
-`JIT.access` exists on `@jit-compiler/jit/runtime` and `@jit-compiler/jit/define` with the same signature, registers a reconstructive `access-plan` artifact, and is covered by the runtime/define/AOT parity matrix — which compares what the abilities *answer*, across permitted, denied and undeclared actions.
+`JIT.access` exists on `@jit-compiler/jit/runtime` and `@jit-compiler/jit/define` with the same signature, registers a reconstructive `access-plan` artifact, and is covered by the runtime/define/AOT parity matrix — which compares what the abilities _answer_, across permitted, denied and undeclared actions.
 
 ## 12. Benchmarks
 
 Latest extension run: Node 22.22.3, Apple M1, 100,000 checks/rows per iteration. Reproduce with `pnpm bench:access`. The generic competitor scans rules and condition keys at runtime.
 
-| Scenario                          | Generic rule scan | Handwritten check | JIT runtime |
-| --------------------------------- | ----------------: | ----------------: | ----------: |
-| 1 action, 1 unconditional rule    |         711.14 µs |         566.40 µs | **48.13 µs** |
-| ownership + deny override         |           5.69 ms |         674.38 µs | **641.41 µs** |
-| 8 actions, 20 rules, last action  |           4.91 ms |         574.09 µs | **566.74 µs** |
-| field rule                        |                 — |         566.58 µs | **563.88 µs** |
+| Scenario                         | Generic rule scan | Handwritten check |   JIT runtime |
+| -------------------------------- | ----------------: | ----------------: | ------------: |
+| 1 action, 1 unconditional rule   |         711.14 µs |         566.40 µs |  **48.13 µs** |
+| ownership + deny override        |           5.69 ms |         674.38 µs | **641.41 µs** |
+| 8 actions, 20 rules, last action |           4.91 ms |         574.09 µs | **566.74 µs** |
+| field rule                       |                 — |         566.58 µs | **563.88 µs** |
 
 Heap per check iteration stayed about **96–467 B** for compiled checks against **5.34–10.68 MB** for generic conditional scans.
 
 Composed results from the same run:
 
-| Composition, 100,000 rows | JIT | Comparison | Heap JIT / comparison |
-| --- | ---: | ---: | ---: |
-| CQRS ownership + deny | 307.08 µs | 977.07 µs `filter(ability.can)`; 286.09 µs handwritten | 781.32 KB / 818.49 KB / 818.45 KB |
-| conditional projection | 3.15 ms | 3.20 ms handwritten | 5.93 MB / 4.83 MB |
-| authorized title patch | 1.25 ms | 2.33 ms handwritten check + spread | 6.10 MB / 9.16 MB |
+| Composition, 100,000 rows |       JIT |                                             Comparison |             Heap JIT / comparison |
+| ------------------------- | --------: | -----------------------------------------------------: | --------------------------------: |
+| CQRS ownership + deny     | 307.08 µs | 977.07 µs `filter(ability.can)`; 286.09 µs handwritten | 781.32 KB / 818.49 KB / 818.45 KB |
+| conditional projection    |   3.15 ms |                                    3.20 ms handwritten |                 5.93 MB / 4.83 MB |
+| authorized title patch    |   1.25 ms |                     2.33 ms handwritten check + spread |                 6.10 MB / 9.16 MB |
 
 The CQRS compiler removes callback/ability dispatch, runs 3.18× faster than `filter(ability.can)`, and is within 7.3% of the handwritten loop while allocating slightly less in this run. Authorized projection is within 1.6% of handwritten throughput; its sparse conditional shape used 23% more measured heap. The specialized patch avoids enough copying to run 1.86× faster with one-third less heap than the spread baseline.
 
@@ -198,7 +203,7 @@ Conditions compare a subject field against a literal or an actor field. That cov
 
 Rules are fixed at declaration. Permissions that arrive from a database at run time are a different problem, and this is not the tool for them.
 
-Field scoping answers both *may this field be touched* and composition constraints. `fields(action)` is conservative without a subject; `fields(action, subject)` evaluates conditional rules. CQRS intersects its output with the fields guaranteed safe for every returned row, while `JIT.project(...).authorize(...)` performs subject-aware conditional projection.
+Field scoping answers both _may this field be touched_ and composition constraints. `fields(action)` is conservative without a subject; `fields(action, subject)` evaluates conditional rules. CQRS intersects its output with the fields guaranteed safe for every returned row, while `JIT.project(...).authorize(...)` performs subject-aware conditional projection.
 
 ## 14. Best practices
 

@@ -38,13 +38,15 @@ type InputTuple<TItems extends readonly AnyTypeSchema[]> = TItems extends readon
 /** Whether a field may be omitted from an object input. */
 export type AcceptsMissing<TSchema extends AnyTypeSchema> = TSchema["type"] extends "optional" | "nullish" | "default"
   ? true
-  : TSchema extends ReadonlySchema<infer TInner>
+  : TSchema extends RuntimeTypeSchema<infer TInner, unknown, "object" | "value", boolean>
     ? AcceptsMissing<TInner>
-    : TSchema extends BrandSchema<infer TInner>
+    : TSchema extends ReadonlySchema<infer TInner>
       ? AcceptsMissing<TInner>
-      : TSchema extends RefineSchema<infer TInner>
+      : TSchema extends BrandSchema<infer TInner>
         ? AcceptsMissing<TInner>
-        : false;
+        : TSchema extends RefineSchema<infer TInner>
+          ? AcceptsMissing<TInner>
+          : false;
 
 type InputRequiredShape<TShape extends SchemaShape> = {
   -readonly [TKey in keyof TShape as AcceptsMissing<TShape[TKey]> extends true ? never : TKey]: InputOfSchema<
@@ -67,7 +69,7 @@ export type InputShape<TShape extends SchemaShape> = Simplify<InputRequiredShape
  * the output type, so it remains correct for nested object defaults.
  */
 export type InputOfSchema<TSchema extends AnyTypeSchema> =
-  TSchema extends RuntimeTypeSchema<infer TInner>
+  TSchema extends RuntimeTypeSchema<infer TInner, unknown, "object" | "value", boolean>
     ? InputOfSchema<TInner>
     : TSchema extends ObjectSchema<infer TShape>
       ? InputShape<TShape>

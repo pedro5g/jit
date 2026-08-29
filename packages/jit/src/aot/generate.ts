@@ -73,7 +73,7 @@ import {
   sortPlanType,
   standaloneType,
 } from "./artifact-types.js";
-import { emitTypeScriptType } from "./emit-type.js";
+import { acceptsMissingBoundary, emitBoundaryType, emitTypeScriptType } from "./emit-type.js";
 import { serializeCallback } from "./serialize-callback.js";
 
 /** One declaration the generator could not build, and why. */
@@ -783,6 +783,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         methods.push(
           'diff(other: unknown): ({ readonly type: "add" | "update"; readonly path: readonly PropertyKey[]; readonly value: unknown } | { readonly type: "remove"; readonly path: readonly PropertyKey[] })[];'
         );
+      if (capabilities.has("value")) methods.push(`readonly value: Readonly<${value}>;`);
       if (capabilities.has("with")) {
         methods.push(`with(patch: ${classUpdateType(artifact.schema)}): this;`);
       }
@@ -797,14 +798,20 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         if (artifact.mutation?.deletedAt !== undefined)
           mixins.push("{ softDelete(): void; restore(): void; readonly isDeleted: boolean }");
       }
-      const instance = mixins.length === 0 ? value : `${value} & ${mixins.join(" & ")}`;
+      const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
+      const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
+      const createInput = emitBoundaryType(artifact.schema, "create", typeNames);
+      const hydrateInput = emitBoundaryType(artifact.schema, "hydrate", typeNames);
+      const createParameters = acceptsMissingBoundary(artifact.schema)
+        ? `...args: [] | [input: ${createInput}]`
+        : `input: ${createInput}`;
       const factories = [
         artifact.factories.create === false
           ? ""
-          : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, input: unknown): InstanceType<TThis>;`,
+          : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, ${createParameters}): InstanceType<TThis>;`,
         artifact.factories.hydrate === false
           ? ""
-          : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${value}): InstanceType<TThis>;`,
+          : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${hydrateInput}): InstanceType<TThis>;`,
       ].filter(Boolean);
       const construct =
         artifact.construction === "factory"
@@ -951,8 +958,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     assertedType: string | undefined
   ): EmittedBinding | undefined {
     const base = resolveObjectSchema(artifact.schema);
+    const valueRepresentation = artifact.representation === "value";
 
-    if (!base) {
+    if (!base && !valueRepresentation) {
       skipped.push({
         schema: reportName,
         operation: "class",
@@ -962,7 +970,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     }
     const validator = emitValidatorBinding(
       binding,
-      artifact.domainEvent ? base.def.props.payload : artifact.schema,
+      artifact.domainEvent ? (base as ATS.ObjectSchema).def.props.payload : artifact.schema,
       reportName,
       "class",
       {
@@ -984,7 +992,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const helpers: string[] = [];
     const methods: string[] = [];
     const capabilities = new Set(artifact.capabilities);
-    const fields = Object.keys(base.def.props);
+    const fields = valueRepresentation ? ["value"] : Object.keys((base as ATS.ObjectSchema).def.props);
     const accessorByKey = new Map(artifact.accessors?.map((accessor) => [accessor.key, accessor]));
     const slots = new Map<string, string>();
     let slotIndex = 0;
@@ -1011,20 +1019,28 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
 
     if (capabilities.has("equals")) {
-      const body = tryEmit(reportName, "class.equals", skipped, () => emitEqualMethodBody(artifact.schema));
-      if (!body) return undefined;
-      if (body.includes("__getIndex")) needsRuntimeGetIndex = true;
-      if (body.includes("__hash")) {
-        const hash = internalIdentifier(`${binding}_equal_hash`);
-        if (!emitHashBinding(hash, artifact.schema, reportName)) return undefined;
-        helpers.push(`const __hash = ${hash};`);
+      if (valueRepresentation) {
+        const equal = internalIdentifier(`${binding}_equal`);
+        const source = tryEmit(reportName, "class.equals", skipped, () => emitEqualSource(artifact.schema));
+        if (!source) return undefined;
+        helpers.push(`const ${equal} = ${asExpression(source, "equal")};`);
+        methods.push(`equals(other) { return other instanceof ${binding} && ${equal}(this.value, other.value); }`);
+      } else {
+        const body = tryEmit(reportName, "class.equals", skipped, () => emitEqualMethodBody(artifact.schema));
+        if (!body) return undefined;
+        if (body.includes("__getIndex")) needsRuntimeGetIndex = true;
+        if (body.includes("__hash")) {
+          const hash = internalIdentifier(`${binding}_equal_hash`);
+          if (!emitHashBinding(hash, artifact.schema, reportName)) return undefined;
+          helpers.push(`const __hash = ${hash};`);
+        }
+        methods.push(`equals(other) { ${body} }`);
       }
-      methods.push(`equals(other) { ${body} }`);
     }
     if (capabilities.has("hashCode")) {
       const hash = internalIdentifier(`${binding}_hash`);
       if (!emitHashBinding(hash, artifact.schema, reportName)) return undefined;
-      methods.push(`hashCode() { return ${hash}(this); }`);
+      methods.push(`hashCode() { return ${hash}(${valueRepresentation ? "this.value" : "this"}); }`);
     }
     if (capabilities.has("diff")) {
       const source = tryEmit(reportName, "class.diff", skipped, () => emitDiffSource(artifact.schema));
@@ -1033,12 +1049,15 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       helpers.push(`const ${diff} = ${asExpression(source, "diff")};`);
       methods.push(`diff(other) { return ${diff}(this, other); }`);
     }
+    if (capabilities.has("value")) methods.push("get value() { return this; }");
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update: string | undefined;
     let aggregateUpdateBody: string | undefined;
     if (needsUpdate) {
       if (artifact.aggregate) {
-        const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
+        const readonlyFields = fields.filter(
+          (field) => resolveWrappers((base as ATS.ObjectSchema).def.props[field]).readonly
+        );
         const mutation = buildAggregateMutationPlan({
           fields,
           readonlyFields,
@@ -1048,12 +1067,14 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         const updates = new Map<string, string | null>();
         for (let index = 0; index < mutation.mutableFields.length; index++) {
           const field = mutation.mutableFields[index];
-          if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
+          if (isPrimitiveLikeSchema(resolveWrappers((base as ATS.ObjectSchema).def.props[field]).base)) {
             updates.set(field, null);
             continue;
           }
           const fieldUpdate = internalIdentifier(`${binding}_update_${index}`);
-          const source = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(base.def.props[field]));
+          const source = tryEmit(reportName, "class.update", skipped, () =>
+            emitUpdateSource((base as ATS.ObjectSchema).def.props[field])
+          );
           if (!source) return undefined;
           helpers.push(`const ${fieldUpdate} = ${asExpression(source, "update")};`);
           updates.set(field, fieldUpdate);
@@ -1070,11 +1091,27 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       methods.push(`with(patch) { return new this.constructor(${update}(this, patch), __construct); }`);
     const identity = artifact.capabilities.find((capability) => capability.startsWith("identity:"));
     if (identity) {
-      const key = JSON.stringify(identity.slice("identity:".length));
-      methods.push(
-        `identity() { return this[${key}]; }`,
-        `sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this[${key}], other[${key}]); }`
-      );
+      const identityField = identity.slice("identity:".length);
+      const key = JSON.stringify(identityField);
+      const identitySchema = (base as ATS.ObjectSchema).def.props[identityField];
+      const runtimeIdentity = identitySchema?.type === TypeName.runtimeType ? identitySchema : undefined;
+      if (runtimeIdentity && (runtimeIdentity.def as ATS.RuntimeTypeDef).representation === "value") {
+        const equal = internalIdentifier(`${binding}_identity_equal`);
+        const source = tryEmit(reportName, "class.identity", skipped, () =>
+          emitEqualSource((runtimeIdentity.def as ATS.RuntimeTypeDef).innerType)
+        );
+        if (!source) return undefined;
+        helpers.push(`const ${equal} = ${asExpression(source, "equal")};`);
+        methods.push(
+          `identity() { return this[${key}]; }`,
+          `sameIdentity(other) { return typeof other === "object" && other !== null && ${equal}(this[${key}].value, other[${key}].value); }`
+        );
+      } else {
+        methods.push(
+          `identity() { return this[${key}]; }`,
+          `sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this[${key}], other[${key}]); }`
+        );
+      }
     }
     if (artifact.aggregate && aggregateUpdateBody) {
       methods.push(
@@ -1094,7 +1131,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         `get isDeleted() { return ${readField(deletedAt)} !== null; }`
       );
     }
-    const assignments = fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
+    const assignments = valueRepresentation
+      ? "this.value = state;"
+      : fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
     const events = artifact.aggregate
       ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });'
       : "";
@@ -1132,6 +1171,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         `    static ["~event"] = /*#__PURE__*/ Object.freeze({ version: 1, type: ${JSON.stringify(artifact.domainEvent.type)}, schemaVersion: ${artifact.domainEvent.version} });`,
         `    get ["~event"]() { return ${binding}["~event"]; }`
       );
+    if (valueRepresentation) js.push("    toJSON() { return this.value; }");
     js.push(...accessorDefinitions.map((definition) => `    ${definition}`));
     js.push(...methods.map((method) => `    ${method}`));
     js.push("  };");
@@ -1213,15 +1253,25 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
 
     if (!validator) return undefined;
 
-    const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
-
-    if (inlined === undefined) {
-      skipped.push({
-        schema: reportName,
-        operation,
-        reason: "refine/transform/default callbacks cannot be serialized ahead of time",
-      });
-      return undefined;
+    const inlined: string[] = [];
+    for (let index = 0; index < validator.bindings.names.length; index++) {
+      const name = validator.bindings.names[index] as string;
+      const value = validator.bindings.values[index];
+      const classBinding = classBindings.get(value);
+      if (classBinding !== undefined) {
+        inlined.push(`const ${name} = ${classBinding};`);
+        continue;
+      }
+      const literal = serializeBindingValue(value);
+      if (literal === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation,
+          reason: "refine/transform/default callbacks cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      inlined.push(`const ${name} = ${literal};`);
     }
 
     const validatorName = internalIdentifier(`${binding}_validator`);

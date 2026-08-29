@@ -16,3 +16,19 @@ before.sameIdentity(after); // true
 ```
 
 The entity preset is abstract: application code owns the concrete class and its behavior. `create()` is for new state; `hydrate()` is for complete persisted state. The identity field must be declared by the schema and remains part of the ordinary validation and transport representation.
+
+An explicit `{ id }` remains available and always wins. It may be omitted only when exactly one object field is a `JIT.ddd.uniqueIdentifier()` Runtime Type:
+
+```ts
+const UserId = JIT.ddd.uniqueIdentifier();
+const UserBase = JIT.ddd.entity(
+  JIT.object({ id: UserId, name: JIT.string() }),
+);
+
+class User extends UserBase {}
+
+const user = User.create({ name: "Ada" });
+user.id.value; // generated UUID
+```
+
+Zero candidates and multiple identifier candidates are rejected unless the identity field is explicit. This avoids guessing when an entity contains both its own ID and another aggregate's ID.

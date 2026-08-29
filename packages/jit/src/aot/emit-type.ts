@@ -143,9 +143,72 @@ function emitStructural(schema: ATS.AnyTypeSchema, emit: EmitChild): string {
       return emit((current.def.getter as () => ATS.AnyTypeSchema)());
     case TypeName.promise:
       return `Promise<${emit(current.def.innerType as ATS.AnyTypeSchema)}>`;
+    case TypeName.runtimeType: {
+      const value = emit(current.def.innerType as ATS.AnyTypeSchema);
+      return current.def.representation === "value"
+        ? `{ readonly value: ${value}; equals(other: unknown): boolean; hashCode(): number }`
+        : value;
+    }
     default:
       return "unknown";
   }
+}
+
+/** Emits the external create/hydrate representation instead of the materialized Runtime Type. */
+export function emitBoundaryType(
+  schema: ATS.AnyTypeSchema,
+  mode: "create" | "hydrate",
+  names?: ReadonlyMap<ATS.AnyTypeSchema, string>
+): string {
+  const emit = (current: ATS.AnyTypeSchema): string => {
+    const node = current as AnySchema;
+    if (node.type === TypeName.runtimeType) return emit(node.def.innerType as ATS.AnyTypeSchema);
+    if (node.type === TypeName.object) {
+      const props = node.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
+      const entries = Object.keys(props).map((key) => {
+        const property = props[key];
+        const safeKey = Parse.isValidIdentifier(key) ? key : JSON.stringify(key);
+        const optional = mode === "create" && acceptsMissingBoundary(property) ? "?" : "";
+        return `${safeKey}${optional}: ${emit(property)}`;
+      });
+      return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
+    }
+    if (node.type === TypeName.array) return `${wrapForSuffix(emit(node.def.element as ATS.AnyTypeSchema))}[]`;
+    if (node.type === TypeName.optional) return `${emit(node.def.innerType as ATS.AnyTypeSchema)} | undefined`;
+    if (node.type === TypeName.nullable) return `${emit(node.def.innerType as ATS.AnyTypeSchema)} | null`;
+    if (node.type === TypeName.nullish) return `${emit(node.def.innerType as ATS.AnyTypeSchema)} | null | undefined`;
+    if (
+      node.type === TypeName.default ||
+      node.type === TypeName.brand ||
+      node.type === TypeName.readonly ||
+      node.type === TypeName.refine ||
+      node.type === TypeName.coerce ||
+      node.type === TypeName.pipe ||
+      node.type === TypeName.transform
+    ) {
+      return emit(node.def.innerType as ATS.AnyTypeSchema);
+    }
+    if (node.type === TypeName.lazy) return emit((node.def.getter as () => ATS.AnyTypeSchema)());
+    return emitTypeScriptType(current, names);
+  };
+  return emit(schema);
+}
+
+export function acceptsMissingBoundary(schema: ATS.AnyTypeSchema): boolean {
+  const node = schema as AnySchema;
+  if (node.type === TypeName.optional || node.type === TypeName.nullish || node.type === TypeName.default) return true;
+  if (
+    node.type === TypeName.runtimeType ||
+    node.type === TypeName.brand ||
+    node.type === TypeName.readonly ||
+    node.type === TypeName.refine ||
+    node.type === TypeName.coerce ||
+    node.type === TypeName.pipe ||
+    node.type === TypeName.transform
+  ) {
+    return acceptsMissingBoundary(node.def.innerType as ATS.AnyTypeSchema);
+  }
+  return false;
 }
 
 function emitReadonlyType(schema: ATS.AnyTypeSchema, emit: EmitChild): string {

@@ -6114,6 +6114,7 @@ var ValidatorEmitter = class {
         writer.line(`if (${holder} === undefined) {`);
         writer.indent(() => {
           writer.line(`${output} = ${defaultExpr};`);
+          if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
         });
         writer.line("} else {");
         writer.indent(emitValidated);
@@ -9449,28 +9450,29 @@ function nextVar3(context, prefix) {
 function emitAppend(context, schema, valueExpr) {
   const resolved = resolveSerializeWrappers(schema);
   const writer = context.writer;
+  const wireValue = resolved.valueRepresentation ? `${valueExpr}.value` : valueExpr;
   if (context.recursive.has(resolved.base)) {
-    const call2 = `${queueHelper(context, resolved.base)}(${valueExpr})`;
+    const call2 = `${queueHelper(context, resolved.base)}(${wireValue})`;
     if (resolved.nullable || resolved.optional) {
-      writer.line(`s += ${valueExpr} == null ? "null" : ${call2};`);
+      writer.line(`s += ${wireValue} == null ? "null" : ${call2};`);
     } else {
       writer.line(`s += ${call2};`);
     }
     return;
   }
   if (resolved.nullable || resolved.optional) {
-    writer.line(`if (${valueExpr} == null) {`);
+    writer.line(`if (${wireValue} == null) {`);
     writer.indent(() => {
       writer.line('s += "null";');
     });
     writer.line("} else {");
     writer.indent(() => {
-      emitBaseAppend(context, resolved.base, valueExpr);
+      emitBaseAppend(context, resolved.base, wireValue);
     });
     writer.line("}");
     return;
   }
-  emitBaseAppend(context, resolved.base, valueExpr);
+  emitBaseAppend(context, resolved.base, wireValue);
 }
 function emitBaseAppend(context, schema, valueExpr) {
   const writer = context.writer;
@@ -9643,6 +9645,7 @@ function resolveSerializeWrappers(schema) {
   let current = schema;
   let optional3 = false;
   let nullable3 = false;
+  let valueRepresentation = false;
   while (true) {
     switch (current.type) {
       case TypeName.optional:
@@ -9666,13 +9669,14 @@ function resolveSerializeWrappers(schema) {
       case TypeName.pipe:
       case TypeName.transform:
       case TypeName.runtimeType:
+        valueRepresentation ||= current.def.representation === "value";
         current = current.def.innerType;
         continue;
       case TypeName.lazy:
         current = current.def.getter();
         continue;
       default:
-        return { base: current, optional: optional3, nullable: nullable3 };
+        return { base: current, optional: optional3, nullable: nullable3, valueRepresentation };
     }
   }
 }
@@ -17550,9 +17554,47 @@ function emitStructural(schema, emit) {
       return emit(current.def.getter());
     case TypeName.promise:
       return `Promise<${emit(current.def.innerType)}>`;
+    case TypeName.runtimeType: {
+      const value = emit(current.def.innerType);
+      return current.def.representation === "value" ? `{ readonly value: ${value}; equals(other: unknown): boolean; hashCode(): number }` : value;
+    }
     default:
       return "unknown";
   }
+}
+function emitBoundaryType(schema, mode, names) {
+  const emit = (current) => {
+    const node = current;
+    if (node.type === TypeName.runtimeType) return emit(node.def.innerType);
+    if (node.type === TypeName.object) {
+      const props = node.def.props;
+      const entries = Object.keys(props).map((key) => {
+        const property = props[key];
+        const safeKey = parse_exports.isValidIdentifier(key) ? key : JSON.stringify(key);
+        const optional3 = mode === "create" && acceptsMissingBoundary(property) ? "?" : "";
+        return `${safeKey}${optional3}: ${emit(property)}`;
+      });
+      return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
+    }
+    if (node.type === TypeName.array) return `${wrapForSuffix(emit(node.def.element))}[]`;
+    if (node.type === TypeName.optional) return `${emit(node.def.innerType)} | undefined`;
+    if (node.type === TypeName.nullable) return `${emit(node.def.innerType)} | null`;
+    if (node.type === TypeName.nullish) return `${emit(node.def.innerType)} | null | undefined`;
+    if (node.type === TypeName.default || node.type === TypeName.brand || node.type === TypeName.readonly || node.type === TypeName.refine || node.type === TypeName.coerce || node.type === TypeName.pipe || node.type === TypeName.transform) {
+      return emit(node.def.innerType);
+    }
+    if (node.type === TypeName.lazy) return emit(node.def.getter());
+    return emitTypeScriptType(current, names);
+  };
+  return emit(schema);
+}
+function acceptsMissingBoundary(schema) {
+  const node = schema;
+  if (node.type === TypeName.optional || node.type === TypeName.nullish || node.type === TypeName.default) return true;
+  if (node.type === TypeName.runtimeType || node.type === TypeName.brand || node.type === TypeName.readonly || node.type === TypeName.refine || node.type === TypeName.coerce || node.type === TypeName.pipe || node.type === TypeName.transform) {
+    return acceptsMissingBoundary(node.def.innerType);
+  }
+  return false;
 }
 function emitReadonlyType(schema, emit) {
   const current = schema;
@@ -18689,6 +18731,7 @@ function emitModule(plan, options, layout) {
         methods.push(
           'diff(other: unknown): ({ readonly type: "add" | "update"; readonly path: readonly PropertyKey[]; readonly value: unknown } | { readonly type: "remove"; readonly path: readonly PropertyKey[] })[];'
         );
+      if (capabilities.has("value")) methods.push(`readonly value: Readonly<${value}>;`);
       if (capabilities.has("with")) {
         methods.push(`with(patch: ${classUpdateType(artifact.schema)}): this;`);
       }
@@ -18703,10 +18746,14 @@ function emitModule(plan, options, layout) {
         if (artifact.mutation?.deletedAt !== void 0)
           mixins.push("{ softDelete(): void; restore(): void; readonly isDeleted: boolean }");
       }
-      const instance = mixins.length === 0 ? value : `${value} & ${mixins.join(" & ")}`;
+      const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
+      const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
+      const createInput = emitBoundaryType(artifact.schema, "create", typeNames);
+      const hydrateInput = emitBoundaryType(artifact.schema, "hydrate", typeNames);
+      const createParameters = acceptsMissingBoundary(artifact.schema) ? `...args: [] | [input: ${createInput}]` : `input: ${createInput}`;
       const factories = [
-        artifact.factories.create === false ? "" : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, input: unknown): InstanceType<TThis>;`,
-        artifact.factories.hydrate === false ? "" : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${value}): InstanceType<TThis>;`
+        artifact.factories.create === false ? "" : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, ${createParameters}): InstanceType<TThis>;`,
+        artifact.factories.hydrate === false ? "" : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${hydrateInput}): InstanceType<TThis>;`
       ].filter(Boolean);
       const construct2 = artifact.construction === "factory" ? `(abstract new (state: ${value}) => ${instance})` : `(new (state: ${value}) => ${instance})`;
       return `${construct2} & { ${factories.join(" ")} }`;
@@ -18775,7 +18822,8 @@ function emitModule(plan, options, layout) {
   }
   function emitClassArtifact(binding, declaration, artifact, reportName, type, assertedType) {
     const base = resolveObjectSchema(artifact.schema);
-    if (!base) {
+    const valueRepresentation = artifact.representation === "value";
+    if (!base && !valueRepresentation) {
       skipped.push({
         schema: reportName,
         operation: "class",
@@ -18804,7 +18852,7 @@ function emitModule(plan, options, layout) {
     const helpers2 = [];
     const methods = [];
     const capabilities = new Set(artifact.capabilities);
-    const fields = Object.keys(base.def.props);
+    const fields = valueRepresentation ? ["value"] : Object.keys(base.def.props);
     const accessorByKey = new Map(artifact.accessors?.map((accessor) => [accessor.key, accessor]));
     const slots = /* @__PURE__ */ new Map();
     let slotIndex = 0;
@@ -18826,20 +18874,28 @@ function emitModule(plan, options, layout) {
       return definitions;
     });
     if (capabilities.has("equals")) {
-      const body = tryEmit(reportName, "class.equals", skipped, () => emitEqualMethodBody(artifact.schema));
-      if (!body) return void 0;
-      if (body.includes("__getIndex")) needsRuntimeGetIndex = true;
-      if (body.includes("__hash")) {
-        const hash4 = internalIdentifier(`${binding}_equal_hash`);
-        if (!emitHashBinding(hash4, artifact.schema, reportName)) return void 0;
-        helpers2.push(`const __hash = ${hash4};`);
+      if (valueRepresentation) {
+        const equal3 = internalIdentifier(`${binding}_equal`);
+        const source2 = tryEmit(reportName, "class.equals", skipped, () => emitEqualSource(artifact.schema));
+        if (!source2) return void 0;
+        helpers2.push(`const ${equal3} = ${asExpression(source2, "equal")};`);
+        methods.push(`equals(other) { return other instanceof ${binding} && ${equal3}(this.value, other.value); }`);
+      } else {
+        const body = tryEmit(reportName, "class.equals", skipped, () => emitEqualMethodBody(artifact.schema));
+        if (!body) return void 0;
+        if (body.includes("__getIndex")) needsRuntimeGetIndex = true;
+        if (body.includes("__hash")) {
+          const hash4 = internalIdentifier(`${binding}_equal_hash`);
+          if (!emitHashBinding(hash4, artifact.schema, reportName)) return void 0;
+          helpers2.push(`const __hash = ${hash4};`);
+        }
+        methods.push(`equals(other) { ${body} }`);
       }
-      methods.push(`equals(other) { ${body} }`);
     }
     if (capabilities.has("hashCode")) {
       const hash4 = internalIdentifier(`${binding}_hash`);
       if (!emitHashBinding(hash4, artifact.schema, reportName)) return void 0;
-      methods.push(`hashCode() { return ${hash4}(this); }`);
+      methods.push(`hashCode() { return ${hash4}(${valueRepresentation ? "this.value" : "this"}); }`);
     }
     if (capabilities.has("diff")) {
       const source2 = tryEmit(reportName, "class.diff", skipped, () => emitDiffSource(artifact.schema));
@@ -18848,12 +18904,15 @@ function emitModule(plan, options, layout) {
       helpers2.push(`const ${diff3} = ${asExpression(source2, "diff")};`);
       methods.push(`diff(other) { return ${diff3}(this, other); }`);
     }
+    if (capabilities.has("value")) methods.push("get value() { return this; }");
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update2;
     let aggregateUpdateBody;
     if (needsUpdate) {
       if (artifact.aggregate) {
-        const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
+        const readonlyFields = fields.filter(
+          (field) => resolveWrappers(base.def.props[field]).readonly
+        );
         const mutation = buildAggregateMutationPlan({
           fields,
           readonlyFields,
@@ -18868,7 +18927,12 @@ function emitModule(plan, options, layout) {
             continue;
           }
           const fieldUpdate = internalIdentifier(`${binding}_update_${index2}`);
-          const source2 = tryEmit(reportName, "class.update", skipped, () => emitUpdateSource(base.def.props[field]));
+          const source2 = tryEmit(
+            reportName,
+            "class.update",
+            skipped,
+            () => emitUpdateSource(base.def.props[field])
+          );
           if (!source2) return void 0;
           helpers2.push(`const ${fieldUpdate} = ${asExpression(source2, "update")};`);
           updates.set(field, fieldUpdate);
@@ -18885,11 +18949,30 @@ function emitModule(plan, options, layout) {
       methods.push(`with(patch) { return new this.constructor(${update2}(this, patch), __construct); }`);
     const identity = artifact.capabilities.find((capability2) => capability2.startsWith("identity:"));
     if (identity) {
-      const key = JSON.stringify(identity.slice("identity:".length));
-      methods.push(
-        `identity() { return this[${key}]; }`,
-        `sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this[${key}], other[${key}]); }`
-      );
+      const identityField = identity.slice("identity:".length);
+      const key = JSON.stringify(identityField);
+      const identitySchema = base.def.props[identityField];
+      const runtimeIdentity = identitySchema?.type === TypeName.runtimeType ? identitySchema : void 0;
+      if (runtimeIdentity && runtimeIdentity.def.representation === "value") {
+        const equal3 = internalIdentifier(`${binding}_identity_equal`);
+        const source2 = tryEmit(
+          reportName,
+          "class.identity",
+          skipped,
+          () => emitEqualSource(runtimeIdentity.def.innerType)
+        );
+        if (!source2) return void 0;
+        helpers2.push(`const ${equal3} = ${asExpression(source2, "equal")};`);
+        methods.push(
+          `identity() { return this[${key}]; }`,
+          `sameIdentity(other) { return typeof other === "object" && other !== null && ${equal3}(this[${key}].value, other[${key}].value); }`
+        );
+      } else {
+        methods.push(
+          `identity() { return this[${key}]; }`,
+          `sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this[${key}], other[${key}]); }`
+        );
+      }
     }
     if (artifact.aggregate && aggregateUpdateBody) {
       methods.push(
@@ -18909,7 +18992,7 @@ function emitModule(plan, options, layout) {
         `get isDeleted() { return ${readField(deletedAt)} !== null; }`
       );
     }
-    const assignments = fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
+    const assignments = valueRepresentation ? "this.value = state;" : fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
     const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
     const freeze = artifact.frozen ? " Object.freeze(this);" : "";
     const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
@@ -18934,6 +19017,7 @@ function emitModule(plan, options, layout) {
         `    static ["~event"] = /*#__PURE__*/ Object.freeze({ version: 1, type: ${JSON.stringify(artifact.domainEvent.type)}, schemaVersion: ${artifact.domainEvent.version} });`,
         `    get ["~event"]() { return ${binding}["~event"]; }`
       );
+    if (valueRepresentation) js.push("    toJSON() { return this.value; }");
     js.push(...accessorDefinitions.map((definition) => `    ${definition}`));
     js.push(...methods.map((method) => `    ${method}`));
     js.push("  };");
@@ -18983,14 +19067,25 @@ function emitModule(plan, options, layout) {
       })
     );
     if (!validator) return void 0;
-    const inlined = inlineBindings(validator.bindings.names, validator.bindings.values);
-    if (inlined === void 0) {
-      skipped.push({
-        schema: reportName,
-        operation,
-        reason: "refine/transform/default callbacks cannot be serialized ahead of time"
-      });
-      return void 0;
+    const inlined = [];
+    for (let index2 = 0; index2 < validator.bindings.names.length; index2++) {
+      const name = validator.bindings.names[index2];
+      const value = validator.bindings.values[index2];
+      const classBinding = classBindings.get(value);
+      if (classBinding !== void 0) {
+        inlined.push(`const ${name} = ${classBinding};`);
+        continue;
+      }
+      const literal4 = serializeBindingValue(value);
+      if (literal4 === void 0) {
+        skipped.push({
+          schema: reportName,
+          operation,
+          reason: "refine/transform/default callbacks cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
+      inlined.push(`const ${name} = ${literal4};`);
     }
     const validatorName = internalIdentifier(`${binding}_validator`);
     js.push(`const ${validatorName} = /*#__PURE__*/ (() => {`);
@@ -24535,7 +24630,9 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
       enumerable: true,
       value: createSchema(TypeName.runtimeType, {
         innerType: schema,
-        materialize: classTarget
+        materialize: classTarget,
+        representation: "object",
+        identifier: false
       })
     },
     use: {
@@ -24574,6 +24671,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           frozen: freezeInstances,
           aggregate,
           construction: constructionState.mode,
+          representation: "object",
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -24610,6 +24708,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           frozen: freezeInstances,
           aggregate,
           construction: constructionState.mode,
+          representation: "object",
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -24627,6 +24726,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     frozen: freezeInstances,
     aggregate,
     construction: constructionState.mode,
+    representation: "object",
     capabilities: installedCapabilities,
     factories: factoryNames,
     accessors
@@ -24640,6 +24740,118 @@ function installFactory(classTarget, previous, next, factory) {
     throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
   }
   Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
+}
+function createScalarValueObject(schema, identifier2, isAbstract) {
+  const parse3 = compileValidator(schema).parse;
+  const hydrateState = compileHydrator(schema);
+  const equal3 = compileEqual(schema);
+  const hash4 = compileHash(schema);
+  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
+  const classTarget = globalThis.Function("__parse", "__construct", source)(parse3, INTERNAL_CONSTRUCT);
+  const installedCapabilities = ["equals", "hashCode"];
+  let factoryNames = {
+    create: "create",
+    hydrate: "hydrate"
+  };
+  function create(...args) {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
+    }
+    return new this(
+      args[0],
+      INTERNAL_CONSTRUCT
+    );
+  }
+  function hydrate(state3) {
+    return new this(
+      hydrateState(state3),
+      INTERNAL_CONSTRUCT,
+      true
+    );
+  }
+  const register = () => registerArtifact(classTarget, {
+    kind: "class",
+    schema,
+    abstract: isAbstract,
+    frozen: true,
+    aggregate: false,
+    construction: "factory",
+    representation: "value",
+    capabilities: installedCapabilities,
+    factories: factoryNames
+  });
+  Object.defineProperties(classTarget, {
+    [CLASS_TARGET]: { enumerable: false, value: true },
+    schema: {
+      enumerable: true,
+      value: createSchema(TypeName.runtimeType, {
+        innerType: schema,
+        materialize: classTarget,
+        representation: "value",
+        identifier: identifier2
+      })
+    },
+    create: { configurable: true, enumerable: false, value: create },
+    hydrate: { configurable: true, enumerable: false, value: hydrate },
+    use: {
+      enumerable: false,
+      value: (...capabilities) => {
+        for (const capability2 of capabilities) {
+          capability2.install(classTarget, schema);
+          installedCapabilities.push(capability2.kind);
+        }
+        register();
+        return classTarget;
+      }
+    },
+    factories: {
+      enumerable: false,
+      value: (options) => {
+        const next = {
+          create: options.create === void 0 ? factoryNames.create : options.create,
+          hydrate: options.hydrate === void 0 ? factoryNames.hydrate : options.hydrate
+        };
+        if (next.create === false && next.hydrate === false) {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory construction requires at least one create or hydrate factory"
+          );
+        }
+        installFactory(classTarget, factoryNames.create, next.create, create);
+        installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
+        factoryNames = next;
+        register();
+        return classTarget;
+      }
+    },
+    accessors: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Scalar Value Objects expose only their readonly value accessor");
+      }
+    },
+    identity: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Scalar Value Objects do not have object fields");
+      }
+    }
+  });
+  definePrototype(
+    classTarget.prototype,
+    "equals",
+    function equalsScalar(other) {
+      return other instanceof classTarget && equal3(this.value, other.value);
+    }
+  );
+  definePrototype(classTarget.prototype, "hashCode", function hashScalar() {
+    return hash4(this.value);
+  });
+  definePrototype(classTarget.prototype, "toJSON", function scalarToJson() {
+    return this.value;
+  });
+  register();
+  return classTarget;
 }
 function emitConstructor(properties, freezeInstances, aggregate, parse3, construction, accessors) {
   const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
@@ -24723,36 +24935,124 @@ var classType = Object.assign(classFactory, {
       if (!props || !(key in props)) {
         throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
       }
+      const runtimeIdentity = findRuntimeTypeSchema(props[key]);
+      const valueIdentity = runtimeIdentity?.def.representation === "value";
+      const equalIdentity = valueIdentity ? compileEqual(runtimeIdentity.def.innerType) : void 0;
       definePrototype(prototype, "identity", function identity() {
         return this[key];
       });
       definePrototype(prototype, "sameIdentity", function sameIdentity(other) {
-        return typeof other === "object" && other !== null && Object.is(this[key], other[key]);
+        if (typeof other !== "object" || other === null) return false;
+        const left = this[key];
+        const right = other[key];
+        if (!valueIdentity) return Object.is(left, right);
+        return typeof left === "object" && left !== null && typeof right === "object" && right !== null && equalIdentity(
+          left.value,
+          right.value
+        );
       });
     });
   }
 });
+var valueAccessorCapability = capability("value", (prototype) => {
+  Object.defineProperty(prototype, "value", {
+    configurable: false,
+    enumerable: false,
+    get() {
+      return this;
+    }
+  });
+});
 function valueObject(schema) {
-  return createRuntimeClass(unwrapSchema(schema), false, true, false, "factory").use(
-    classType.equals,
-    classType.hashCode
-  );
+  const unwrapped = unwrapSchema(schema);
+  const base = resolveWrappers(unwrapped).base;
+  if (base.type !== TypeName.object) {
+    if (!isPrimitiveLikeSchema(base)) {
+      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
+    }
+    return createScalarValueObject(unwrapped, false, false);
+  }
+  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
+  return "value" in base.def.props ? runtime.use(classType.equals, classType.hashCode) : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode);
 }
 valueObject.abstract = function abstractValueObject(schema) {
-  return createRuntimeClass(unwrapSchema(schema), true, true, false, "factory").use(
-    classType.equals,
-    classType.hashCode
-  );
+  const unwrapped = unwrapSchema(schema);
+  const base = resolveWrappers(unwrapped).base;
+  if (base.type !== TypeName.object) {
+    if (!isPrimitiveLikeSchema(base)) {
+      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
+    }
+    return createScalarValueObject(unwrapped, false, true);
+  }
+  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
+  return "value" in base.def.props ? runtime.use(classType.equals, classType.hashCode) : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode);
 };
-function entity(schema, options) {
-  return createRuntimeClass(unwrapSchema(schema), true, false, false, "factory").use(
-    classType.identity(options.id)
+function uniqueIdentifier(schema) {
+  const identifierSchema = schema === void 0 ? defaultTo(
+    createSchema(TypeName.string, {
+      checks: [{ kind: "uuid" }]
+    }),
+    createIdentifierValue
+  ) : unwrapSchema(schema);
+  const base = resolveWrappers(identifierSchema).base;
+  if (!isPrimitiveLikeSchema(base) || base.type === TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "JIT.ddd.uniqueIdentifier() requires a primitive-like schema");
+  }
+  return createScalarValueObject(identifierSchema, true, false);
+}
+function resolveIdentityKey(schema, explicit) {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "Entity identity requires an object schema");
+  }
+  if (explicit !== void 0) return explicit;
+  const candidates = Object.keys(base.def.props).filter(
+    (key) => isIdentifierSchema(base.def.props[key])
+  );
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 0) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      "Entity identity must be explicit when the schema has no unique identifier"
+    );
+  }
+  throw new JITError(
+    "INVALID_OPERATION",
+    "Entity identity must be explicit when the schema has multiple unique identifiers"
   );
 }
-function aggregateRoot(schema, options) {
+function isIdentifierSchema(schema) {
+  return findRuntimeTypeSchema(schema)?.def.identifier === true;
+}
+function findRuntimeTypeSchema(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.runtimeType) {
+      return current;
+    }
+    if (current.type === TypeName.lazy) {
+      current = current.def.getter();
+      continue;
+    }
+    if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.default || current.type === TypeName.brand || current.type === TypeName.readonly || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
+      current = current.def.innerType;
+      continue;
+    }
+    return void 0;
+  }
+}
+function entity(schema, ...args) {
   const unwrapped = unwrapSchema(schema);
+  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
+  return createRuntimeClass(unwrapped, true, false, false, "factory").use(
+    classType.identity(identity)
+  );
+}
+function aggregateRoot(schema, ...args) {
+  const unwrapped = unwrapSchema(schema);
+  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
   const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").use(
-    classType.identity(options.id)
+    classType.identity(identity)
   );
   const base = resolveWrappers(unwrapped).base;
   const fields = Object.keys(base.def.props);
@@ -24818,8 +25118,8 @@ function aggregateRoot(schema, options) {
   Object.defineProperty(aggregate, "softDelete", {
     configurable: false,
     enumerable: false,
-    value: (options2) => {
-      const field = options2.field;
+    value: (options) => {
+      const field = options.field;
       const schemaForField = base.def.props[field];
       const resolved = schemaForField && resolveWrappers(schemaForField);
       if (!resolved || resolved.base.type !== TypeName.date || !resolved.nullable) {
@@ -24856,8 +25156,8 @@ function aggregateRoot(schema, options) {
   Object.defineProperty(aggregate, "versioned", {
     configurable: false,
     enumerable: false,
-    value: (options2) => {
-      const field = options2.field;
+    value: (options) => {
+      const field = options.field;
       const schemaForField = base.def.props[field];
       const type = schemaForField && resolveWrappers(schemaForField).base.type;
       if (type !== TypeName.int && type !== TypeName.number) {
@@ -24925,6 +25225,7 @@ function domainEvent(type, options) {
     frozen: true,
     aggregate: false,
     construction: "factory",
+    representation: "object",
     capabilities: [],
     factories: { create: "create", hydrate: "hydrate" },
     domainEvent: { type, version: options.version }
@@ -24950,6 +25251,9 @@ function createDomainEventSchema(payload, type, version) {
 function createEventId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+function createIdentifierValue() {
+  return crypto.randomUUID();
 }
 function capability(kind, install) {
   return Object.freeze({
@@ -25044,7 +25348,9 @@ var ddd = Object.freeze({
   /** Abstract entity with controlled mutation and an ordered event buffer. */
   aggregateRoot,
   /** Immutable, versioned event; `create()` takes the payload. */
-  domainEvent
+  domainEvent,
+  /** Scalar identifier Value Object; defaults to a generated UUID. */
+  uniqueIdentifier
 });
 
 // ../../packages/jit/src/factories/dto.ts

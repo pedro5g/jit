@@ -429,6 +429,29 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { validation: 0.5, query: 0.2 },
   },
   {
+    id: "ddd-runtime-types",
+    aliases: ["value object", "entity", "identifier", "identificador", "ddd", "runtime type"],
+    terms: ["valueobject", "uniqueidentifier", "entity", "create", "hydrate", "wire", "identity"],
+    apis: ["ddd", "valueObject", "uniqueIdentifier", "entity", "aggregateRoot"],
+    fact: "DDD Runtime Types are factory-built objects: scalar Value Objects expose readonly value while keeping a scalar wire form, and unique identifier metadata infers entity identity only when exactly one candidate exists.",
+    factPt:
+      "Runtime Types DDD são objetos construídos por factory: Value Objects escalares expõem value readonly mantendo wire escalar, e metadata de identificador só infere a identidade da entidade quando existe exatamente um candidato.",
+    mechanisms: [
+      "create resolves defaults, including the default UUID from JIT.ddd.uniqueIdentifier(); hydrate requires persisted values and never regenerates them.",
+      "Nested Runtime Types accept scalar/object boundary values and the compiled validator materializes the wrapper directly at known fields and array elements.",
+      "AOT co-emits nested Runtime Classes and replaces materialization bindings with generated class names, leaving no schema walker or Runtime Type registry.",
+    ],
+    mechanismsPt: [
+      "create resolve defaults, incluindo o UUID padrão de JIT.ddd.uniqueIdentifier(); hydrate exige valores persistidos e nunca os regenera.",
+      "Runtime Types aninhados aceitam valores escalares/objetos na fronteira e o validator compilado materializa o wrapper diretamente nos fields e elementos de array conhecidos.",
+      "O AOT co-emite Runtime Classes aninhadas e substitui bindings de materialização pelos nomes das classes geradas, sem schema walker ou registry de Runtime Types.",
+    ],
+    example:
+      'const UserId = JIT.ddd.uniqueIdentifier();\nconst UserBase = JIT.ddd.entity(JIT.object({ id: UserId, name: JIT.string() }));\nclass User extends UserBase {}\n\nconst user = User.hydrate({ id: "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761", name: "Ada" });\nuser.id.value; // persisted scalar, materialized as UserId',
+    page: "/docs/reference/functions/runtime-classes#unique-identifiers",
+    edges: { "schema-boundaries": 0.8, aot: 0.4 },
+  },
+  {
     id: "query",
     aliases: ["query", "consulta", "filter", "filtro", "search", "buscar", "where", "sort", "ordenar", "aggregate"],
     terms: ["query", "filter", "projection", "orderby", "groupby", "iterator", "visitor", "fused", "physical plan"],

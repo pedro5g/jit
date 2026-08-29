@@ -205,10 +205,117 @@ describe("JIT.class", () => {
     expect(Object.isFrozen(money)).toBe(true);
     expect(money.equals(restored)).toBe(true);
     expect(money.hashCode()).toBe(restored.hashCode());
+    expect(money.value).toBe(money);
+    expect(money.value.amount).toBe(10);
     expect(() => MoneyBase.create({ amount: 10, currency: "BRL" })).toThrow(/abstract JIT class/i);
     expectTypeOf(money).toEqualTypeOf<Money>();
     expectTypeOf(money.equals).toBeFunction();
     expectTypeOf(money.hashCode).toBeFunction();
+    expectTypeOf(money.value.amount).toEqualTypeOf<number>();
+  });
+
+  it("represents scalar value objects as immutable runtime objects", () => {
+    const Email = JIT.ddd.valueObject(JIT.string().email());
+    const first = Email.create("ada@example.com");
+    const same = Email.hydrate("ada@example.com");
+    const different = Email.create("grace@example.com");
+
+    expect(first).toBeInstanceOf(Email);
+    expect(first.value).toBe("ada@example.com");
+    expect(first.equals(same)).toBe(true);
+    expect(first.equals(different)).toBe(false);
+    expect(first.hashCode()).toBe(same.hashCode());
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(JSON.stringify(first)).toBe('"ada@example.com"');
+    expect(JIT.json.stringify(Email)(first)).toBe('"ada@example.com"');
+    expectTypeOf(first.value).toEqualTypeOf<string>();
+    expectTypeOf(first.equals).toBeFunction();
+    expectTypeOf(first.hashCode).toBeFunction();
+    if (Object.is(1, 2)) {
+      // @ts-expect-error scalar Value Objects are factory-only
+      void new Email("ada@example.com");
+    }
+  });
+
+  it("infers zero-argument creation from a scalar schema default", () => {
+    const Identifier = JIT.ddd.valueObject(JIT.string().default("generated"));
+
+    expect(Identifier.create().value).toBe("generated");
+    expect(Identifier.create("provided").value).toBe("provided");
+  });
+
+  it("creates default and custom unique identifier Value Objects", () => {
+    const UserId = JIT.ddd.uniqueIdentifier();
+    const NumericId = JIT.ddd.uniqueIdentifier(JIT.int().positive());
+    const persisted = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
+
+    expect(UserId.create().value).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(UserId.create(persisted).value).toBe(persisted);
+    expect(UserId.hydrate(persisted).value).toBe(persisted);
+    expect(NumericId.create(42).value).toBe(42);
+    expect(() => NumericId.create(-1)).toThrow(/positive number/i);
+    expectTypeOf(UserId.create().value).toEqualTypeOf<string>();
+    expectTypeOf(NumericId.create(1).value).toEqualTypeOf<number>();
+  });
+
+  it("infers one identifier and materializes nested Runtime Types at both boundaries", () => {
+    const UserId = JIT.ddd.uniqueIdentifier();
+    const UserBase = JIT.ddd.entity(
+      JIT.object({
+        id: UserId,
+        name: JIT.string(),
+        aliases: JIT.array(UserId),
+      })
+    );
+    class User extends UserBase {}
+    const persisted = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
+    const alias = "f63ca4d3-2b8f-49e6-80ff-0cedaf1e6504";
+
+    const created = User.create({ name: "Ada", aliases: [alias] });
+    const hydrated = User.hydrate({ id: persisted, name: "Ada", aliases: [alias] });
+    const sameIdentity = User.hydrate({ id: persisted, name: "Grace", aliases: [] });
+
+    expect(created.id).toBeInstanceOf(UserId);
+    expect(created.id.value).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(created.aliases[0]).toBeInstanceOf(UserId);
+    expect(created.aliases[0].value).toBe(alias);
+    expect(hydrated.id).toBeInstanceOf(UserId);
+    expect(hydrated.id.value).toBe(persisted);
+    expect(hydrated.sameIdentity(sameIdentity)).toBe(true);
+    expect(JIT.json.stringify(User)(hydrated)).toBe(`{"id":"${persisted}","name":"Ada","aliases":["${alias}"]}`);
+    expect(() => User.hydrate({ name: "Ada", aliases: [] } as never)).toThrow();
+    expectTypeOf(created.id.value).toEqualTypeOf<string>();
+    expectTypeOf(hydrated.aliases[0]!.value).toEqualTypeOf<string>();
+    if (Object.is(1, 2)) {
+      // A creation default is not a persistence default: hydrate keeps the
+      // identifier required even though create may omit it.
+      // @ts-expect-error hydrate never regenerates a persisted default
+      User.hydrate({ name: "Ada", aliases: [] });
+      // The boundary takes the scalar wire value, not the wrapper.
+      User.create({ id: persisted, name: "Ada", aliases: [alias] });
+      // @ts-expect-error a nested Runtime Type is materialized, not supplied
+      User.create({ id: UserId.create(), name: "Ada", aliases: [] });
+    }
+  });
+
+  it("requires explicit identity when inference is absent or ambiguous", () => {
+    const UserId = JIT.ddd.uniqueIdentifier();
+    const TenantId = JIT.ddd.uniqueIdentifier();
+    const AmbiguousSchema = JIT.object({ id: UserId, tenantId: TenantId });
+    const PlainSchema = JIT.object({ id: JIT.string() });
+
+    expect(() => (JIT.ddd.entity as (schema: unknown) => unknown)(AmbiguousSchema)).toThrow(
+      /multiple unique identifiers/i
+    );
+    expect(() => (JIT.ddd.entity as (schema: unknown) => unknown)(PlainSchema)).toThrow(/no unique identifier/i);
+    expect(JIT.ddd.entity(AmbiguousSchema, { id: "id" }).schema).toBeDefined();
+    expect(JIT.ddd.entity(PlainSchema, { id: "id" }).schema).toBeDefined();
+    if (Object.is(1, 2)) {
+      // @ts-expect-error ambiguous identifier metadata requires an explicit field
+      JIT.ddd.entity(AmbiguousSchema);
+      // @ts-expect-error schemas without identifier metadata require an explicit field
+      JIT.ddd.entity(PlainSchema);
+    }
   });
 
   it("binds identity keys to the object schema", () => {
@@ -590,7 +697,7 @@ describe("JIT.class", () => {
 
 describe("JIT.ddd", () => {
   it("is the only place the domain presets are reachable from", () => {
-    expect(Object.keys(JIT.ddd)).toEqual(["valueObject", "entity", "aggregateRoot", "domainEvent"]);
+    expect(Object.keys(JIT.ddd)).toEqual(["valueObject", "entity", "aggregateRoot", "domainEvent", "uniqueIdentifier"]);
 
     // The presets are a vocabulary, not schema factories: they do not sit next
     // to JIT.string() where someone reaching for an entity has to scan past them.

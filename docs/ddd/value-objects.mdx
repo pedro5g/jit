@@ -12,8 +12,22 @@ const right = Money.hydrate({ amount: 10, currency: "BRL" });
 
 left.equals(right); // true
 left.hashCode() === right.hashCode(); // true
+left.value.amount; // 10
 ```
 
 Instances are frozen. Equality and hashing are schema-specialized and shared by the prototype. Choose a value object when replacement of the complete value is the valid domain operation; do not use it for an identity-bearing lifecycle.
+
+Scalar schemas are wrapped as real runtime objects rather than primitive intersections:
+
+```ts
+const Email = JIT.ddd.valueObject(JIT.string().email());
+const email = Email.create("ada@example.com");
+
+email.value; // string
+email.equals(Email.hydrate("ada@example.com")); // true
+JSON.stringify(email); // '"ada@example.com"'
+```
+
+The runtime wrapper and wire representation are intentionally different. A scalar Value Object exposes a readonly `value`, while JSON and persistence continue to use the underlying scalar. Object Value Objects also expose `value`; it returns the immutable instance without allocating a copy. If the object schema already declares a `value` field, that field remains canonical.
 
 `JIT.ddd.valueObject.abstract(schema)` supports domain-specific subclasses without allowing the base itself to be instantiated.

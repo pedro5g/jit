@@ -1,0 +1,33 @@
+# Unique identifiers
+
+`JIT.ddd.uniqueIdentifier()` creates an immutable scalar Value Object carrying identifier metadata:
+
+```ts
+const UserId = JIT.ddd.uniqueIdentifier();
+
+const generated = UserId.create();
+const restored = UserId.hydrate("7f8f4f83-f3c7-4bad-9b73-a3b70f47d761");
+
+generated.value; // string
+restored.value; // persisted UUID
+```
+
+The no-argument form uses a UUID string schema with a creation default backed by `crypto.randomUUID()`. Passing a schema creates a custom identifier representation:
+
+```ts
+const NumericId = JIT.ddd.uniqueIdentifier(JIT.int().positive());
+NumericId.create(42).value; // number
+```
+
+Identifier metadata means “identifier-like”, not automatically “the entity identity”. Entity and Aggregate Root presets infer identity only when exactly one field carries this metadata. Multiple identifier fields require `{ id: "..." }` explicitly.
+
+## Boundary model
+
+- Create input is the underlying scalar input; a defaulted identifier also supports `create()`.
+- Hydrate input is the complete persisted scalar and never runs the creation default.
+- Runtime is an immutable object with `value`, `equals()` and `hashCode()`.
+- Wire is the underlying scalar, not `{ value }`.
+
+Nested object fields and arrays accept scalar boundary values and are materialized directly into identifier instances by the compiled validator. Runtime and define declarations register the same reconstructive class descriptor. AOT co-emits the identifier class and rewrites nested materialization bindings to that standalone class; no Runtime Type registry or schema walker remains in generated code.
+
+Identifier creation is not a cryptographic key-management facility, a database uniqueness check, or an identity map. Uniqueness across persisted records remains an application/storage invariant.

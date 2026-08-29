@@ -1,6 +1,6 @@
 import { buildAggregateMutationPlan, emitAggregateMutationBody } from "../compiler/aggregate-mutation.js";
 import { compileDiff } from "../compiler/diff.js";
-import { compileEqualMethod } from "../compiler/equal.js";
+import { compileEqual, compileEqualMethod } from "../compiler/equal.js";
 import { compileHash } from "../compiler/hash.js";
 import { compileUpdate, type DiffChange, type UpdatePatch } from "../compiler/index.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
@@ -48,7 +48,7 @@ type UnionToIntersection<TValue> = (TValue extends unknown ? (value: TValue) => 
 
 export interface RuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS.TypeofSchema<TSchema>> {
   new (input: Input<TSchema>): TInstance;
-  readonly schema: ATS.RuntimeTypeSchema<TSchema, ATS.TypeofSchema<TSchema>>;
+  readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance>;
   create<TThis extends RuntimeClass<TSchema>>(this: TThis, input: Input<TSchema>): InstanceType<TThis>;
   hydrate<TThis extends RuntimeClass<TSchema>>(this: TThis, state: Hydrate<TSchema>): InstanceType<TThis>;
   use<const TCapabilities extends readonly AnyClassCapability[]>(
@@ -106,6 +106,8 @@ export interface AccessorOptions<TSchema extends ATS.AnyTypeSchema> {
 }
 
 type RuntimeConstructor<TInstance> = abstract new (...args: never[]) => TInstance;
+type CreateArguments<TSchema extends ATS.AnyTypeSchema> =
+  undefined extends Input<TSchema> ? [] | [input: Input<TSchema>] : [input: Input<TSchema>];
 
 type FactoryMethods<TSchema extends ATS.AnyTypeSchema, TInstance, TOptions extends FactoryOptions> = (TOptions extends {
   readonly create: infer TName extends string;
@@ -113,13 +115,16 @@ type FactoryMethods<TSchema extends ATS.AnyTypeSchema, TInstance, TOptions exten
   ? {
       [TKey in TName]: <TThis extends RuntimeConstructor<TInstance>>(
         this: TThis,
-        input: Input<TSchema>
+        ...args: CreateArguments<TSchema>
       ) => InstanceType<TThis>;
     }
   : TOptions extends { readonly create: false }
     ? {}
     : {
-        create<TThis extends RuntimeConstructor<TInstance>>(this: TThis, input: Input<TSchema>): InstanceType<TThis>;
+        create<TThis extends RuntimeConstructor<TInstance>>(
+          this: TThis,
+          ...args: CreateArguments<TSchema>
+        ): InstanceType<TThis>;
       }) &
   (TOptions extends { readonly hydrate: infer TName extends string }
     ? {
@@ -160,6 +165,10 @@ export type FactoryRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
 > = ConfiguredRuntimeClass<TSchema, TInstance, {}>;
+
+type IdentifierRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<TSchema, TInstance> & {
+  readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance, "value", true>;
+};
 
 type RuntimeClassTarget = RuntimeClass<ATS.AnyTypeSchema> & {
   readonly [CLASS_TARGET]: true;
@@ -224,6 +233,10 @@ type EqualsMethods = { equals(other: unknown): boolean };
 type HashCodeMethods = { hashCode(): number };
 type DiffMethods = { diff(other: unknown): DiffChange[] };
 type IdentityMethods = { sameIdentity(other: unknown): boolean; identity(): unknown };
+type ValueAccessor<TValue> = { readonly value: TValue };
+export interface ScalarValueObject<TValue> extends EqualsMethods, HashCodeMethods {
+  readonly value: TValue;
+}
 type DateKeys<TSchema extends ATS.AnyTypeSchema> = {
   [TKey in keyof ATS.TypeofSchema<TSchema>]: ATS.TypeofSchema<TSchema>[TKey] extends Date ? TKey : never;
 }[keyof ATS.TypeofSchema<TSchema>] &
@@ -351,6 +364,8 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       value: createSchema(TypeName.runtimeType, {
         innerType: schema,
         materialize: classTarget,
+        representation: "object",
+        identifier: false,
       }) as ATS.RuntimeTypeSchema<TSchema, ATS.TypeofSchema<TSchema>>,
     },
     use: {
@@ -389,6 +404,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           frozen: freezeInstances,
           aggregate,
           construction: constructionState.mode,
+          representation: "object",
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors,
@@ -426,6 +442,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           frozen: freezeInstances,
           aggregate,
           construction: constructionState.mode,
+          representation: "object",
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors,
@@ -443,6 +460,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     frozen: freezeInstances,
     aggregate,
     construction: constructionState.mode,
+    representation: "object",
     capabilities: installedCapabilities,
     factories: factoryNames,
     accessors,
@@ -463,6 +481,134 @@ function installFactory<TSchema extends ATS.AnyTypeSchema>(
     throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
   }
   Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
+}
+
+function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  identifier: boolean,
+  isAbstract: boolean
+): FactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>> {
+  const parse = compileValidator(schema).parse;
+  const hydrateState = compileHydrator(schema);
+  const equal = compileEqual(schema) as (left: unknown, right: unknown) => boolean;
+  const hash = compileHash(schema) as (value: unknown) => number;
+  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
+  const classTarget = globalThis.Function("__parse", "__construct", source)(parse, INTERNAL_CONSTRUCT) as RuntimeClass<
+    TSchema,
+    ScalarValueObject<ATS.TypeofSchema<TSchema>>
+  >;
+  const installedCapabilities = ["equals", "hashCode"];
+  let factoryNames: { create: string | false; hydrate: string | false } = {
+    create: "create",
+    hydrate: "hydrate",
+  };
+
+  function create<TThis extends RuntimeClass<TSchema>>(
+    this: TThis,
+    ...args: CreateArguments<TSchema>
+  ): InstanceType<TThis> {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
+    }
+    return new (this as unknown as new (input: Input<TSchema>, token: symbol) => InstanceType<TThis>)(
+      args[0] as Input<TSchema>,
+      INTERNAL_CONSTRUCT
+    );
+  }
+
+  function hydrate<TThis extends RuntimeClass<TSchema>>(this: TThis, state: Hydrate<TSchema>): InstanceType<TThis> {
+    return new (this as unknown as new (input: unknown, token: symbol, validated: boolean) => InstanceType<TThis>)(
+      hydrateState(state),
+      INTERNAL_CONSTRUCT,
+      true
+    );
+  }
+
+  const register = () =>
+    registerArtifact(classTarget, {
+      kind: "class",
+      schema,
+      abstract: isAbstract,
+      frozen: true,
+      aggregate: false,
+      construction: "factory",
+      representation: "value",
+      capabilities: installedCapabilities,
+      factories: factoryNames,
+    });
+
+  Object.defineProperties(classTarget, {
+    [CLASS_TARGET]: { enumerable: false, value: true },
+    schema: {
+      enumerable: true,
+      value: createSchema(TypeName.runtimeType, {
+        innerType: schema,
+        materialize: classTarget,
+        representation: "value",
+        identifier,
+      }) as ATS.RuntimeTypeSchema<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>,
+    },
+    create: { configurable: true, enumerable: false, value: create },
+    hydrate: { configurable: true, enumerable: false, value: hydrate },
+    use: {
+      enumerable: false,
+      value: (...capabilities: readonly AnyClassCapability[]) => {
+        for (const capability of capabilities) {
+          capability.install(classTarget, schema);
+          installedCapabilities.push(capability.kind);
+        }
+        register();
+        return classTarget;
+      },
+    },
+    factories: {
+      enumerable: false,
+      value: (options: FactoryOptions) => {
+        const next = {
+          create: options.create === undefined ? factoryNames.create : options.create,
+          hydrate: options.hydrate === undefined ? factoryNames.hydrate : options.hydrate,
+        };
+        if (next.create === false && next.hydrate === false) {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory construction requires at least one create or hydrate factory"
+          );
+        }
+        installFactory(classTarget, factoryNames.create, next.create, create);
+        installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
+        factoryNames = next;
+        register();
+        return classTarget;
+      },
+    },
+    accessors: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Scalar Value Objects expose only their readonly value accessor");
+      },
+    },
+    identity: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Scalar Value Objects do not have object fields");
+      },
+    },
+  });
+  definePrototype(
+    classTarget.prototype,
+    "equals",
+    function equalsScalar(this: ScalarValueObject<unknown>, other: unknown) {
+      return other instanceof classTarget && equal(this.value, (other as ScalarValueObject<unknown>).value);
+    }
+  );
+  definePrototype(classTarget.prototype, "hashCode", function hashScalar(this: ScalarValueObject<unknown>) {
+    return hash(this.value);
+  });
+  definePrototype(classTarget.prototype, "toJSON", function scalarToJson(this: ScalarValueObject<unknown>) {
+    return this.value;
+  });
+  register();
+  return classTarget as unknown as FactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
 }
 
 function emitConstructor(
@@ -576,12 +722,28 @@ export const classType: ClassFactory = Object.assign(classFactory, {
       if (!props || !(key in props)) {
         throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
       }
+      const runtimeIdentity = findRuntimeTypeSchema(props[key]);
+      const valueIdentity = runtimeIdentity?.def.representation === "value";
+      const equalIdentity = valueIdentity
+        ? (compileEqual(runtimeIdentity.def.innerType) as (left: unknown, right: unknown) => boolean)
+        : undefined;
       definePrototype(prototype, "identity", function identity(this: Record<string, unknown>) {
         return this[key];
       });
       definePrototype(prototype, "sameIdentity", function sameIdentity(this: Record<string, unknown>, other: unknown) {
+        if (typeof other !== "object" || other === null) return false;
+        const left = this[key];
+        const right = (other as Record<string, unknown>)[key];
+        if (!valueIdentity) return Object.is(left, right);
         return (
-          typeof other === "object" && other !== null && Object.is(this[key], (other as Record<string, unknown>)[key])
+          typeof left === "object" &&
+          left !== null &&
+          typeof right === "object" &&
+          right !== null &&
+          (equalIdentity as (left: unknown, right: unknown) => boolean)(
+            (left as ScalarValueObject<unknown>).value,
+            (right as ScalarValueObject<unknown>).value
+          )
         );
       });
     });
@@ -589,49 +751,185 @@ export const classType: ClassFactory = Object.assign(classFactory, {
 });
 export { classType as class };
 
+const valueAccessorCapability = capability<ValueAccessor<unknown>>("value", (prototype) => {
+  Object.defineProperty(prototype, "value", {
+    configurable: false,
+    enumerable: false,
+    get(this: unknown) {
+      return this;
+    },
+  });
+});
+
 /** Immutable class preset with compiled structural equality and hash code. */
 export function valueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods> {
-  return createRuntimeClass(unwrapSchema(schema), false, true, false, "factory").use(
-    classType.equals,
-    classType.hashCode
-  ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods>;
+): FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>> {
+  const unwrapped = unwrapSchema(schema);
+  const base = resolveWrappers(unwrapped).base;
+  if (base.type !== TypeName.object) {
+    if (!isPrimitiveLikeSchema(base)) {
+      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
+    }
+    return createScalarValueObject(unwrapped, false, false) as FactoryRuntimeClass<
+      TSchema,
+      ValueObjectInstance<TSchema>
+    >;
+  }
+  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
+  return (
+    "value" in (base as ATS.ObjectSchema).def.props
+      ? runtime.use(classType.equals, classType.hashCode)
+      : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode)
+  ) as FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
 }
+
+type ObjectValueAccessor<TValue extends object> = "value" extends keyof TValue
+  ? object
+  : ValueAccessor<Readonly<TValue>>;
+type ValueObjectInstance<TSchema extends ATS.AnyTypeSchema> =
+  ATS.TypeofSchema<TSchema> extends object
+    ? ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods & ObjectValueAccessor<ATS.TypeofSchema<TSchema>>
+    : ScalarValueObject<ATS.TypeofSchema<TSchema>>;
 
 valueObject.abstract = function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods> {
-  return createRuntimeClass(unwrapSchema(schema), true, true, false, "factory").use(
-    classType.equals,
-    classType.hashCode
-  ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods>;
+): FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>> {
+  const unwrapped = unwrapSchema(schema);
+  const base = resolveWrappers(unwrapped).base;
+  if (base.type !== TypeName.object) {
+    if (!isPrimitiveLikeSchema(base)) {
+      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
+    }
+    return createScalarValueObject(unwrapped, false, true) as FactoryRuntimeClass<
+      TSchema,
+      ValueObjectInstance<TSchema>
+    >;
+  }
+  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
+  return (
+    "value" in (base as ATS.ObjectSchema).def.props
+      ? runtime.use(classType.equals, classType.hashCode)
+      : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode)
+  ) as FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
 };
 
-/** Entity preset: an abstract class with explicit identity semantics. */
-export function entity<
-  TSchema extends ATS.AnyTypeSchema,
-  TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>,
->(
+type DefaultIdentifierSchema = ATS.DefaultSchema<ATS.StringSchema>;
+
+/** Creates a scalar identifier Value Object with identifier metadata. */
+export function uniqueIdentifier(): IdentifierRuntimeClass<DefaultIdentifierSchema, ScalarValueObject<string>>;
+export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>
+): IdentifierRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
+export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(schema?: SchemaInput<TSchema>): unknown {
+  const identifierSchema =
+    schema === undefined
+      ? Transform.default(
+          createSchema<string, "string", ATS.ChecksDef<ATS.StringCheck, readonly [ATS.StringCheck]>>(TypeName.string, {
+            checks: [{ kind: "uuid" }],
+          }),
+          createIdentifierValue
+        )
+      : unwrapSchema(schema);
+  const base = resolveWrappers(identifierSchema).base;
+  if (!isPrimitiveLikeSchema(base) || base.type === TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "JIT.ddd.uniqueIdentifier() requires a primitive-like schema");
+  }
+  return createScalarValueObject(identifierSchema, true, false);
+}
+
+type IdentityKeys<TSchema extends ATS.AnyTypeSchema> =
+  TSchema extends ATS.ObjectSchema<infer TShape>
+    ? {
+        [TKey in keyof TShape]: TShape[TKey] extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "value", true>
+          ? TKey
+          : never;
+      }[keyof TShape] &
+        string
+    : never;
+type IsUnion<TValue, TWhole = TValue> = TValue extends unknown ? ([TWhole] extends [TValue] ? false : true) : never;
+type IdentityArguments<TSchema extends ATS.AnyTypeSchema> = [IdentityKeys<TSchema>] extends [never]
+  ? [options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
+  : IsUnion<IdentityKeys<TSchema>> extends true
+    ? [options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
+    : [options?: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }];
+
+function resolveIdentityKey(schema: ATS.AnyTypeSchema, explicit: string | undefined): string {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "Entity identity requires an object schema");
+  }
+  if (explicit !== undefined) return explicit;
+  const candidates = Object.keys((base as ATS.ObjectSchema).def.props).filter((key) =>
+    isIdentifierSchema((base as ATS.ObjectSchema).def.props[key])
+  );
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 0) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      "Entity identity must be explicit when the schema has no unique identifier"
+    );
+  }
+  throw new JITError(
+    "INVALID_OPERATION",
+    "Entity identity must be explicit when the schema has multiple unique identifiers"
+  );
+}
+
+function isIdentifierSchema(schema: ATS.AnyTypeSchema): boolean {
+  return findRuntimeTypeSchema(schema)?.def.identifier === true;
+}
+
+function findRuntimeTypeSchema(schema: ATS.AnyTypeSchema): ATS.RuntimeTypeSchema | undefined {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.runtimeType) {
+      return current as ATS.RuntimeTypeSchema;
+    }
+    if (current.type === TypeName.lazy) {
+      current = (current.def as ATS.LazyDef).getter();
+      continue;
+    }
+    if (
+      current.type === TypeName.optional ||
+      current.type === TypeName.nullable ||
+      current.type === TypeName.nullish ||
+      current.type === TypeName.default ||
+      current.type === TypeName.brand ||
+      current.type === TypeName.readonly ||
+      current.type === TypeName.refine ||
+      current.type === TypeName.coerce ||
+      current.type === TypeName.pipe ||
+      current.type === TypeName.transform
+    ) {
+      current = (current.def as ATS.InnerTypeDef).innerType;
+      continue;
+    }
+    return undefined;
+  }
+}
+
+/** Entity preset: an abstract class with explicit or unambiguous inferred identity semantics. */
+export function entity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  options: { readonly id: TKey }
+  ...args: IdentityArguments<TSchema>
 ): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
-  return createRuntimeClass(unwrapSchema(schema), true, false, false, "factory").use(
-    classType.identity(options.id)
+  const unwrapped = unwrapSchema(schema);
+  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
+  return createRuntimeClass(unwrapped, true, false, false, "factory").use(
+    classType.identity(identity)
   ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods>;
 }
 
 /** Abstract entity preset with ordered domain events and compiled in-place updates. */
-export function aggregateRoot<
-  TSchema extends ATS.AnyTypeSchema,
-  TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>,
->(
+export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  options: { readonly id: TKey }
+  ...args: IdentityArguments<TSchema>
 ): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
   const unwrapped = unwrapSchema(schema);
+  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
   const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").use(
-    classType.identity(options.id)
+    classType.identity(identity)
   ) as unknown as AggregateRuntimeClass<
     TSchema,
     ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>
@@ -854,6 +1152,7 @@ export function domainEvent<TPayload extends ATS.AnyTypeSchema, TType extends st
     frozen: true,
     aggregate: false,
     construction: "factory",
+    representation: "object",
     capabilities: [],
     factories: { create: "create", hydrate: "hydrate" },
     domainEvent: { type, version: options.version },
@@ -887,6 +1186,10 @@ function createDomainEventSchema<TPayload extends ATS.AnyTypeSchema, TType exten
 function createEventId(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
+function createIdentifierValue(): string {
+  return crypto.randomUUID();
 }
 
 function capability<TMethods extends object>(

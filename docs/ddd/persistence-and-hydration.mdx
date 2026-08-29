@@ -14,4 +14,20 @@ const restored = decode(json);
 
 Use `hydrate()` when loading trusted-format persisted state that must still satisfy the current schema. Use `create()` for new domain input. Never call `create()` as a hydration shortcut: doing so can regenerate identifiers, timestamps, or other defaults.
 
+Nested Runtime Types accept their boundary representation and materialize recursively:
+
+```ts
+const UserId = JIT.ddd.uniqueIdentifier();
+const UserBase = JIT.ddd.entity(
+  JIT.object({ id: UserId, aliases: JIT.array(UserId) }),
+);
+
+class User extends UserBase {}
+
+const user = User.hydrate({ id: persistedId, aliases: [oldId] });
+user.id.value === persistedId;
+```
+
+`create()` resolves nested defaults, so a defaulted identifier field may be omitted. `hydrate()` requires that same persisted field and never invokes its default. The compiler emits direct materialization at each known field/element; no generic schema walker runs per entity.
+
 AOT co-emits required Runtime Classes beside construction pipelines, producing import-free ordinary JavaScript. The generated module contains validators, assignments, factories, and selected capabilities but no JIT runtime import.

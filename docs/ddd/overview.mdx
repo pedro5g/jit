@@ -9,6 +9,7 @@ Use the smallest semantic primitive that describes the domain:
 - `JIT.ddd.entity(schema, { id })` adds identity semantics and is intended to be subclassed.
 - `JIT.ddd.aggregateRoot(schema, { id })` adds controlled internal mutation and an ordered domain-event buffer.
 - `JIT.ddd.domainEvent(type, { version, payload })` describes an immutable versioned fact.
+- `JIT.ddd.uniqueIdentifier(schema?)` creates an identifier-like scalar Value Object and defaults to a generated UUID.
 
 All five are SchemaLike. They can be passed directly to `JIT.validate.parse`, `JIT.json.parse`, `JIT.json.stringify`, mapping, and AOT generation.
 
