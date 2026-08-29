@@ -19,7 +19,7 @@ const UsersQuery = JIT.api.query(User, {
     status: ["eq", "in"],
     createdAt: ["gte", "lte", "between"],
   },
-  select: true,
+  select: ["id", "status", "createdAt"],
   sort: ["createdAt", "id"],
   pagination: {
     type: "cursor",
@@ -41,9 +41,8 @@ const request = parseUsersQuery(httpQuery);
 Only declared filter paths and sort fields exist to the request. `true` is the
 conservative equality-only shorthand. An operator object must name an
 explicitly listed operator. Unknown top-level keys, fields and operators are
-rejected rather than silently removed. Projection currently opts into declared
-model fields as a bounded sparse fieldset; an explicit projection allowlist is
-the next `QueryBoundary` stage.
+rejected rather than silently removed. Projection has its own explicit
+allowlist and remains bounded independently from the model shape.
 
 Relations, collection predicates and logical input are not inferred from a
 nested schema and are not exposed in the current boundary.

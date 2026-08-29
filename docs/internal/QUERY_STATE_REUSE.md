@@ -49,9 +49,10 @@ the reference parser and specialized source emitter now consume that
 descriptor. The V1 `~query` shape is derived separately and remains unchanged.
 
 The boundary is not yet final: public operator types are still `string[]`,
-`true` remains the equality shorthand, projection is all-or-nothing, and there
-is no cost model. Parsed predicates continue to lower to `QueryConditionNode`
-and standard V1 query data.
+`true` remains the equality shorthand, and there is no cost model. Projection
+now has an explicit allowlist rather than inheriting every model field. Parsed
+predicates continue to lower to `QueryConditionNode` and standard V1 query
+data.
 
 ## Read dependencies
 

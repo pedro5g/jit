@@ -340,9 +340,9 @@ adapter. `maxConditions` limits normalized filter operations and
 `maxSortFields` limits comma-separated ordering fields; both are enforced by
 the generated parser.
 
-Set `select: true` to permit sparse fieldsets such as `fields=id,name`. The
-parser checks every selected field against the model schema and can bound the
-fieldset with `limits.maxSelectFields`.
+Set `select: ["id", "name"]` to permit exactly that sparse fieldset. The
+parser rejects every other model field and can bound the fieldset with
+`limits.maxSelectFields`.
 
 Nested filter paths use an explicit dotted key and are normalized as a path in
 the standard request: `filter: { "profile.age": { $gte: 18 } }` becomes a

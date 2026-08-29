@@ -21140,8 +21140,8 @@ function cqrsInput(schema, options) {
   if (options.sort !== void 0 && !Array.isArray(options.sort)) {
     throw new JITError("INVALID_QUERY", "API query sort configuration must be an array");
   }
-  if (options.select !== void 0 && typeof options.select !== "boolean") {
-    throw new JITError("INVALID_QUERY", "API query select configuration must be boolean");
+  if (options.select !== void 0 && !Array.isArray(options.select)) {
+    throw new JITError("INVALID_QUERY", "API query select configuration must be an array");
   }
   const maxFilters = options.maxFilters ?? 32;
   const fields = new Set(objectFields(unwrapped));
@@ -21190,6 +21190,17 @@ function cqrsInput(schema, options) {
       throw new JITError("INVALID_QUERY", `API query sort configuration repeats ${JSON.stringify(field)}`);
     seenSort.add(field);
   }
+  const seenSelect = /* @__PURE__ */ new Set();
+  for (const field of options.select ?? []) {
+    if (!fields.has(field))
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query select field ${JSON.stringify(field)} is not declared by the model`
+      );
+    if (seenSelect.has(field))
+      throw new JITError("INVALID_QUERY", `API query select configuration repeats ${JSON.stringify(field)}`);
+    seenSelect.add(field);
+  }
   if (!Number.isSafeInteger(maxFilters) || maxFilters < 0) {
     throw new JITError("INVALID_QUERY", "API query maxFilters must be a non-negative safe integer");
   }
@@ -21229,6 +21240,7 @@ function cqrsInput(schema, options) {
     )
   );
   const frozenSort = Object.freeze([...options.sort ?? []]);
+  const frozenSelect = options.select === void 0 ? void 0 : Object.freeze([...options.select]);
   const frozenPagination = options.pagination ? Object.freeze(
     options.pagination.type === "cursor" ? {
       ...options.pagination,
@@ -21240,6 +21252,7 @@ function cqrsInput(schema, options) {
     ...options,
     ...frozenFilter === void 0 ? {} : { filter: frozenFilter },
     ...frozenSort === void 0 ? {} : { sort: frozenSort },
+    ...frozenSelect === void 0 ? {} : { select: frozenSelect },
     ...frozenPagination === void 0 ? {} : { pagination: frozenPagination },
     ...frozenLimits === void 0 ? {} : { limits: frozenLimits }
   });
@@ -21250,7 +21263,7 @@ function cqrsInput(schema, options) {
       path,
       operators
     })),
-    projection: frozenOptions.select ? sourceFields : [],
+    projection: frozenOptions.select ?? [],
     sorting: frozenOptions.sort ?? [],
     ...frozenPagination === void 0 ? {} : { pagination: frozenPagination },
     limits: {

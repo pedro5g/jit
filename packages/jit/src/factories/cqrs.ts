@@ -138,7 +138,7 @@ export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
       true | readonly string[]
     >
   >;
-  readonly select?: boolean;
+  readonly select?: readonly Extract<keyof ATS.TypeofSchema<TSchema>, string>[];
   readonly sort?: readonly Extract<keyof ATS.TypeofSchema<TSchema>, string>[];
   readonly pagination?:
     | {
@@ -862,8 +862,8 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   if (options.sort !== undefined && !Array.isArray(options.sort)) {
     throw new JITError("INVALID_QUERY", "API query sort configuration must be an array");
   }
-  if (options.select !== undefined && typeof options.select !== "boolean") {
-    throw new JITError("INVALID_QUERY", "API query select configuration must be boolean");
+  if (options.select !== undefined && !Array.isArray(options.select)) {
+    throw new JITError("INVALID_QUERY", "API query select configuration must be an array");
   }
   const maxFilters = options.maxFilters ?? 32;
   const fields = new Set(objectFields(unwrapped));
@@ -912,6 +912,17 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       throw new JITError("INVALID_QUERY", `API query sort configuration repeats ${JSON.stringify(field)}`);
     seenSort.add(field);
   }
+  const seenSelect = new Set<string>();
+  for (const field of options.select ?? []) {
+    if (!fields.has(field))
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query select field ${JSON.stringify(field)} is not declared by the model`
+      );
+    if (seenSelect.has(field))
+      throw new JITError("INVALID_QUERY", `API query select configuration repeats ${JSON.stringify(field)}`);
+    seenSelect.add(field);
+  }
   if (!Number.isSafeInteger(maxFilters) || maxFilters < 0) {
     throw new JITError("INVALID_QUERY", "API query maxFilters must be a non-negative safe integer");
   }
@@ -956,6 +967,10 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
     )
   ) as CqrsInputOptions<TSchema>["filter"];
   const frozenSort = Object.freeze([...(options.sort ?? [])]) as CqrsInputOptions<TSchema>["sort"];
+  const frozenSelect =
+    options.select === undefined
+      ? undefined
+      : (Object.freeze([...options.select]) as CqrsInputOptions<TSchema>["select"]);
   const frozenPagination = options.pagination
     ? Object.freeze(
         options.pagination.type === "cursor"
@@ -971,6 +986,7 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
     ...options,
     ...(frozenFilter === undefined ? {} : { filter: frozenFilter }),
     ...(frozenSort === undefined ? {} : { sort: frozenSort }),
+    ...(frozenSelect === undefined ? {} : { select: frozenSelect }),
     ...(frozenPagination === undefined ? {} : { pagination: frozenPagination }),
     ...(frozenLimits === undefined ? {} : { limits: frozenLimits }),
   }) as CqrsInputOptions<TSchema>;
@@ -981,7 +997,7 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       path,
       operators: operators as true | readonly string[],
     })),
-    projection: frozenOptions.select ? sourceFields : [],
+    projection: frozenOptions.select ?? [],
     sorting: frozenOptions.sort ?? [],
     ...(frozenPagination === undefined ? {} : { pagination: frozenPagination }),
     limits: {

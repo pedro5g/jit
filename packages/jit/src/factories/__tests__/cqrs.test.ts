@@ -399,7 +399,7 @@ describe("JIT.cqrs", () => {
         age: ["gte", "lte", "between"],
         status: ["eq", "in"],
       },
-      select: true,
+      select: ["name", "age", "status"],
       sort: ["name", "age"],
       pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
     });
@@ -521,10 +521,11 @@ describe("JIT.cqrs", () => {
 
   it("normalizes bounded sparse fieldsets against the schema", () => {
     const User = JIT.object({ id: JIT.string(), name: JIT.string(), email: JIT.string() });
-    const parse = JIT.api.parse(JIT.api.query(User, { select: true, limits: { maxSelectFields: 2 } }));
+    const parse = JIT.api.parse(JIT.api.query(User, { select: ["id", "name"], limits: { maxSelectFields: 2 } }));
 
     expect(parse({ fields: "id,name" })).toEqual({ filter: [], sort: [], select: ["id", "name"] });
     expect(() => parse({ fields: "id,name,email" })).toThrow(/select exceeds/i);
+    expect(() => parse({ fields: "email" })).toThrow(/select field/i);
     expect(() => parse({ fields: "password" })).toThrow(/select field/i);
     expect(() => parse({ fields: "id,id" })).toThrow(/repeats/i);
     expect(() => parse({ fields: "id," })).toThrow(/empty|not allowed/i);
@@ -544,6 +545,13 @@ describe("JIT.cqrs", () => {
 
   it("validates static parser configuration before generating source", () => {
     const User = JIT.object({ name: JIT.string() });
+    const invalidProjectionTypes = () => {
+      // @ts-expect-error public projection fields are model keys
+      JIT.api.query(User, { select: ["missing"] });
+      // @ts-expect-error public projection is an explicit allowlist
+      JIT.api.query(User, { select: true });
+    };
+    void invalidProjectionTypes;
     expect(() => JIT.api.query(User, { maxFilters: -1 })).toThrow(/maxFilters/i);
     expect(() =>
       JIT.api.query(User, {
@@ -558,6 +566,9 @@ describe("JIT.cqrs", () => {
     expect(() => JIT.api.query(User, { limits: { maxSortFields: -1 } })).toThrow(/structural limits/i);
     expect(() => JIT.api.query(User, { filter: { missing: true } as never })).toThrow(/not declared/i);
     expect(() => JIT.api.query(User, { sort: ["missing"] as never })).toThrow(/not declared/i);
+    expect(() => JIT.api.query(User, { select: ["missing"] as never })).toThrow(/not declared/i);
+    expect(() => JIT.api.query(User, { select: ["name", "name"] })).toThrow(/repeats/i);
+    expect(() => JIT.api.query(User, { select: true as never })).toThrow(/must be an array/i);
     expect(() => JIT.api.query(User, { sort: ["name", "name"] })).toThrow(/repeats/i);
     expect(() => JIT.api.query(User, { filter: { name: ["eq", "eq"] } })).toThrow(/repeats operator/i);
     expect(() => JIT.api.query(User, { filter: { name: [] } })).toThrow(/empty operator list/i);
@@ -572,10 +583,12 @@ describe("JIT.cqrs", () => {
   it("snapshots nested configuration before compiling the parser", () => {
     const User = JIT.object({ age: JIT.number() });
     const operators = ["gte"];
-    const input = JIT.api.query(User, { filter: { age: operators } });
+    const selected = ["age"] as const;
+    const input = JIT.api.query(User, { filter: { age: operators }, select: selected });
 
     operators.push("lte");
     expect(input.options.filter?.age).toEqual(["gte"]);
+    expect(input.options.select).toEqual(["age"]);
     expect(() => (input.options.filter?.age as string[]).push("lte")).toThrow();
     expect(JIT.api.parse(input)({ filter: { age: { $gte: 18 } } })).toEqual({
       filter: [{ kind: "gte", path: ["age"], value: 18 }],
@@ -635,7 +648,7 @@ describe("JIT.cqrs", () => {
     const input = JIT.api.query(User, {
       filter: { age: ["gte", "lte"], name: true },
       sort: ["age", "name"],
-      select: true,
+      select: ["age", "name"],
       pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
     });
     const runtime = JIT.api.parse(input);

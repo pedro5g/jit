@@ -353,7 +353,7 @@ describe("JIT AOT generate", () => {
     const ListUsers = JIT.api.query(User, {
       filter: { id: true, age: ["gte"] },
       sort: ["id", "age"],
-      select: true,
+      select: ["id", "age"],
       pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
     });
 
