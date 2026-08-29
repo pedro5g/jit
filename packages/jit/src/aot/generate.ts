@@ -680,6 +680,24 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return emitReconcilePlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
+    if (artifact.kind === "derived-plan") {
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      for (const equal of artifact.equalSources) {
+        js.push(`  const ${equal.name} = ${asExpression(equal.source, "equal")};`);
+      }
+      if (artifact.memo) {
+        js.push(`  const memo = ${artifact.source};`);
+        js.push(`  const __layout = Object.freeze(${JSON.stringify(artifact.layout)});`);
+        js.push('  Object.defineProperty(memo, "layout", { value: () => __layout });');
+        js.push('  Object.defineProperty(memo, "accepts", { value: (other) => other.id === __layout.id });');
+        js.push("  return memo;");
+      } else {
+        js.push(...indentBlock(artifact.source));
+        js.push("  return select;");
+      }
+      js.push("})();");
+      return { binding, type };
+    }
 
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
 
@@ -712,6 +730,12 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "collection-mutation-plan") {
       const value = namedType(artifact.schema, typeNames);
       return `(value: ${value}, params: Readonly<Record<string, unknown>>) => ${value}`;
+    }
+    if (artifact.kind === "derived-plan") {
+      const state = namedType(artifact.schema, typeNames);
+      return artifact.memo
+        ? `((state: ${state}, mask?: number | bigint) => unknown) & { layout(): unknown; accepts(layout: { readonly id: string }): boolean }`
+        : `(state: ${state}) => unknown`;
     }
     if (artifact.kind === "mutation-plan") {
       const value = namedType(artifact.schema, typeNames);

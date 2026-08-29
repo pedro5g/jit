@@ -25,6 +25,7 @@ work and for production performance. Each page explains:
 - [Mutation planner](./mutation-planner.md)
 - [Collection mutations](./collection-mutations.md)
 - [Mutation changes](./mutation-changes.md)
+- [Derived state](./derived-state.md)
 - [Sort and ordering plans](./sort.md)
 - [Indexing](./indexing.md)
 - [Physical query planning](./physical-query-planning.md)

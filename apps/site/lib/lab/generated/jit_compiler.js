@@ -18596,6 +18596,24 @@ function emitModule(plan, options, layout) {
       return emitReconcilePlanArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "class")
       return emitClassArtifact(binding, declaration, artifact, reportName, type, assertedClassType);
+    if (artifact.kind === "derived-plan") {
+      js.push(`${declaration} /*#__PURE__*/ (() => {`);
+      for (const equal3 of artifact.equalSources) {
+        js.push(`  const ${equal3.name} = ${asExpression(equal3.source, "equal")};`);
+      }
+      if (artifact.memo) {
+        js.push(`  const memo = ${artifact.source};`);
+        js.push(`  const __layout = Object.freeze(${JSON.stringify(artifact.layout)});`);
+        js.push('  Object.defineProperty(memo, "layout", { value: () => __layout });');
+        js.push('  Object.defineProperty(memo, "accepts", { value: (other) => other.id === __layout.id });');
+        js.push("  return memo;");
+      } else {
+        js.push(...indentBlock(artifact.source));
+        js.push("  return select;");
+      }
+      js.push("})();");
+      return { binding, type };
+    }
     const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
     if (inlined === void 0) {
       skipped.push({
@@ -18624,6 +18642,10 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "collection-mutation-plan") {
       const value = namedType(artifact.schema, typeNames);
       return `(value: ${value}, params: Readonly<Record<string, unknown>>) => ${value}`;
+    }
+    if (artifact.kind === "derived-plan") {
+      const state3 = namedType(artifact.schema, typeNames);
+      return artifact.memo ? `((state: ${state3}, mask?: number | bigint) => unknown) & { layout(): unknown; accepts(layout: { readonly id: string }): boolean }` : `(state: ${state3}) => unknown`;
     }
     if (artifact.kind === "mutation-plan") {
       const value = namedType(artifact.schema, typeNames);
@@ -26427,6 +26449,196 @@ function compileCollectionMutation(schema, descriptor, bindings) {
   return mutate;
 }
 
+// ../../packages/jit/src/compiler/derive.ts
+var SCALAR_TYPES2 = /* @__PURE__ */ new Set([
+  "string",
+  "number",
+  "int",
+  "bigint",
+  "boolean",
+  "literal",
+  "enum",
+  "symbol",
+  "undefined",
+  "null",
+  "date"
+]);
+function resolveDerivedDescriptor(schema, paths, layout) {
+  if (paths.length === 0) {
+    throw new JITError("INVALID_OPERATION", "JIT.state.derive().select() needs at least one path");
+  }
+  const tree = buildProjectionTree(schema, paths, "JIT.state.derive()");
+  const keys = /* @__PURE__ */ new Set();
+  const dependencies = tree.paths.map((path) => {
+    const segments = path.split(".");
+    const key = segments[segments.length - 1];
+    if (keys.has(key)) {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `JIT.state.derive() selects ${JSON.stringify(path)} into ${JSON.stringify(key)}, which another path already takes`
+      );
+    }
+    keys.add(key);
+    const leaf = leafSchema3(tree, path);
+    return Object.freeze({
+      path,
+      segments: Object.freeze(segments),
+      key,
+      // A date is compared by reference here on purpose: a state that replaced
+      // a Date instance replaced the value, which is what a selector sees.
+      structural: !SCALAR_TYPES2.has(resolveWrappers(leaf).base.type),
+      schema: leaf
+    });
+  });
+  let mask3 = layout.representation === "bigint" ? 0n : 0;
+  for (const dependency of dependencies) {
+    const bit = changeLayoutBitFor(layout, dependency.segments);
+    if (bit === void 0) continue;
+    mask3 = layout.representation === "bigint" ? mask3 | 1n << BigInt(bit) : mask3 | 1 << bit;
+  }
+  return Object.freeze({ schema, dependencies, layout, mask: mask3 });
+}
+function derivedEqualBindings(descriptor) {
+  const bindings = [];
+  descriptor.dependencies.forEach((dependency, index2) => {
+    if (!dependency.structural) return;
+    bindings.push({ name: `__derivedEqual${index2}`, source: emitEqualSource(dependency.schema) });
+  });
+  return bindings;
+}
+function emitDerivedSource(descriptor) {
+  const writer = new CodeWriter();
+  writer.line("function select(state) {");
+  writer.indent(() => {
+    const entries = descriptor.dependencies.map(
+      (dependency) => `${emitObjectKey(dependency.key)}: ${readPath4("state", dependency)}`
+    );
+    writer.line(`return { ${entries.join(", ")} };`);
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function emitDerivedMemoSource(descriptor) {
+  const writer = new CodeWriter();
+  const zero = emitChangeZero(descriptor.layout);
+  const maskLiteral = descriptor.layout.representation === "bigint" ? `${descriptor.mask}n` : `${descriptor.mask}`;
+  writer.line("(() => {");
+  writer.indent(() => {
+    writer.line("const unset = {};");
+    writer.line("let previousState = unset;");
+    writer.line("let result;");
+    descriptor.dependencies.forEach((_, index2) => writer.line(`let previous${index2} = unset;`));
+    writer.line("function memo(state, mask) {");
+    writer.indent(() => {
+      writer.line("if (state === previousState) return result;");
+      writer.line(
+        `if (mask !== undefined && previousState !== unset && (mask & ${maskLiteral}) === ${zero}) {`
+      );
+      writer.indent(() => {
+        writer.line("previousState = state;");
+        writer.line("return result;");
+      });
+      writer.line("}");
+      descriptor.dependencies.forEach((dependency, index2) => {
+        writer.line(`const next${index2} = ${readPath4("state", dependency)};`);
+      });
+      const same = descriptor.dependencies.map(
+        (dependency, index2) => dependency.structural ? `previous${index2} !== unset && __derivedEqual${index2}(next${index2}, previous${index2})` : `next${index2} === previous${index2}`
+      );
+      writer.line(`if (previousState !== unset && ${same.join(" && ")}) {`);
+      writer.indent(() => {
+        writer.line("previousState = state;");
+        writer.line("return result;");
+      });
+      writer.line("}");
+      descriptor.dependencies.forEach((_, index2) => writer.line(`previous${index2} = next${index2};`));
+      writer.line("previousState = state;");
+      const entries = descriptor.dependencies.map(
+        (dependency, index2) => `${emitObjectKey(dependency.key)}: next${index2}`
+      );
+      writer.line(`result = { ${entries.join(", ")} };`);
+      writer.line("return result;");
+    });
+    writer.line("}");
+    writer.line("return memo;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function derivedCacheKey(descriptor, memo) {
+  return `derive:${memo ? "memo" : "select"}:${descriptor.layout.id}:${descriptor.dependencies.map((dependency) => dependency.path).join(",")}`;
+}
+function readPath4(source, dependency) {
+  return dependency.segments.reduce(
+    (carrier, segment, index2) => index2 === 0 ? emitPropertyAccess(carrier, segment) : `${carrier}?.${optionalSegment3(segment)}`,
+    source
+  );
+}
+function optionalSegment3(segment) {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment) ? segment : `[${JSON.stringify(segment)}]`;
+}
+function leafSchema3(tree, path) {
+  const dot = path.indexOf(".");
+  const head = dot === -1 ? path : path.slice(0, dot);
+  const node = tree.nodes.find((candidate) => candidate.key === head);
+  if (dot === -1) return node.schema;
+  return leafSchema3(node.children, path.slice(dot + 1));
+}
+
+// ../../packages/jit/src/factories/derive.ts
+function derive(schema, options) {
+  const unwrapped = unwrapSchema(schema);
+  const layout = options?.layout ?? resolveChangeLayout(unwrapped);
+  return Object.freeze({
+    select: (...paths) => createDerived(unwrapped, paths, layout)
+  });
+}
+function createDerived(schema, paths, layout) {
+  const descriptor = resolveDerivedDescriptor(schema, paths, layout);
+  const explanation = Object.freeze({
+    reads: Object.freeze(descriptor.dependencies.map((dependency) => dependency.path)),
+    layout,
+    mask: descriptor.mask
+  });
+  const select = compileDerived(schema, descriptor, false);
+  Object.defineProperties(select, {
+    explain: { enumerable: false, value: () => explanation },
+    layout: { enumerable: false, value: () => layout },
+    memo: {
+      enumerable: false,
+      value: () => {
+        const memo = compileDerived(schema, descriptor, true);
+        Object.defineProperties(memo, {
+          layout: { enumerable: false, value: () => layout },
+          accepts: { enumerable: false, value: (other) => other.id === layout.id }
+        });
+        return memo;
+      }
+    }
+  });
+  return select;
+}
+function compileDerived(schema, descriptor, memo) {
+  const bindings = derivedEqualBindings(descriptor);
+  const source = memo ? emitDerivedMemoSource(descriptor) : emitDerivedSource(descriptor);
+  const compiled = globalThis.Function(
+    ...bindings.map((binding) => binding.name),
+    memo ? `return ${source};` : `${source}
+return select;`
+  )(...bindings.map((binding) => globalThis.Function(`return ${binding.source};`)()));
+  registerArtifact(compiled, {
+    kind: "derived-plan",
+    schema,
+    source,
+    memo,
+    equalSources: bindings.map((binding) => ({ name: binding.name, source: binding.source })),
+    layout: descriptor.layout,
+    reads: descriptor.dependencies.map((dependency) => dependency.path),
+    cacheKey: derivedCacheKey(descriptor, memo)
+  });
+  return compiled;
+}
+
 // ../../packages/jit/src/factories/patch.ts
 var patch = Object.freeze({
   /**
@@ -26728,6 +26940,7 @@ var state = Object.freeze({
   update,
   patch,
   collection,
+  derive,
   reconcile,
   watch,
   watchedList

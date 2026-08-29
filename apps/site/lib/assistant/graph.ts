@@ -570,6 +570,39 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { query: 0.8, compilation: 0.5, aot: 0.3 },
   },
   {
+    id: "derived-state",
+    aliases: [
+      "derived state",
+      "selector",
+      "memo",
+      "memoization",
+      "reselect",
+      "state derive",
+      "seletor derivado",
+      "memoizacao",
+      "memoização",
+    ],
+    terms: ["derive", "select", "memo", "dependency", "change mask", "layout"],
+    apis: ["state"],
+    fact: "JIT.state.derive declares which fields a computation reads, so its memo asks whether anything it reads changed instead of whether the input object changed — and with a mutation's change mask it answers without reading the state at all.",
+    factPt:
+      "JIT.state.derive declara quais campos uma computação lê, então seu memo pergunta se algo que ela lê mudou em vez de perguntar se o objeto de entrada mudou — e com a máscara de mudança de uma mutação responde sem nem ler o state.",
+    mechanisms: [
+      "Dependencies are inferred from select(...); there is no dependsOn list to keep in sync. The memo answers three questions cheapest first: same state reference, then the change mask, then the dependencies themselves — scalars by !== and structural fields by the schema's compiled equality. The whole state is never compared.",
+      "The mask must describe the transition from the state the selector last saw. Both sides report a ChangeLayout, so selector.accepts(mutation.layout()) says whether they agree on what a bit means. The cache holds a single previous result in its own closure; there is no global registry.",
+      "A hand-written closure over two scalars is faster per call than the compiled memo, because comparing two strings is already almost free. The compiled memo wins where the comparison it replaces costs something: structural dependencies, and recomputation avoided end to end.",
+    ],
+    mechanismsPt: [
+      "As dependências são inferidas de select(...); não existe lista dependsOn para manter sincronizada. O memo responde três perguntas da mais barata para a mais cara: mesma referência de state, depois a máscara de mudança, depois as dependências — escalares por !== e campos estruturais pela equality compilada do schema. O state inteiro nunca é comparado.",
+      "A máscara precisa descrever a transição a partir do state que o seletor viu por último. Os dois lados informam um ChangeLayout, então selector.accepts(mutation.layout()) diz se concordam sobre o que um bit significa. O cache guarda um único resultado anterior no próprio closure; não há registry global.",
+      "Um closure escrito à mão sobre dois escalares é mais rápido por chamada que o memo compilado, porque comparar duas strings já é quase de graça. O memo compilado ganha onde a comparação que ele substitui custa algo: dependências estruturais e recomputação evitada de ponta a ponta.",
+    ],
+    example:
+      'const AppState = JIT.object({\n  user: JIT.object({ name: JIT.string(), status: JIT.string() }),\n  cart: JIT.object({ items: JIT.number() }),\n});\n\nconst selectHeader = JIT.state.derive(AppState).select("user.name", "user.status").memo();\n\nconst state = { user: { name: "Ada", status: "active" }, cart: { items: 2 } };\nconst header = selectHeader(state);\nselectHeader({ ...state, cart: { items: 3 } }) === header;',
+    page: "/docs/reference/functions/state#derived-state",
+    edges: { update: 0.6, changed: 0.6, "collection-mutation": 0.4 },
+  },
+  {
     id: "collection-mutation",
     aliases: [
       "collection mutation",

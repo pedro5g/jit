@@ -390,6 +390,34 @@ describe("JIT AOT generate", () => {
     expect(() => generated.ListUsers.parse({ page: 1_000, limit: 100 })).toThrow(/invalid API query input/i);
   });
 
+  it("emits a derived selector and its memo without a dependency runtime", async () => {
+    const AppState = JIT.object({
+      user: JIT.object({ name: JIT.string(), tags: JIT.array(JIT.string()) }),
+      cart: JIT.object({ items: JIT.number() }),
+    });
+    const Header = JIT.state.derive(AppState).select("user.name", "user.tags");
+    const HeaderMemo = Header.memo();
+
+    const result = AOT.generate({ artifacts: { Header, HeaderMemo }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Header: (state: unknown) => unknown;
+      readonly HeaderMemo: ((state: unknown, mask?: number) => unknown) & { layout(): { readonly id: string } };
+    };
+    const state = { user: { name: "Ada", tags: ["math"] }, cart: { items: 2 } };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(generated.Header(state)).toEqual(Header(state));
+    expect(generated.HeaderMemo.layout().id).toBe(HeaderMemo.layout().id);
+    const first = generated.HeaderMemo(state);
+    // Unrelated change, structurally equal dependency, and the mask shortcut.
+    expect(generated.HeaderMemo({ ...state, cart: { items: 3 } })).toBe(first);
+    expect(generated.HeaderMemo({ ...state, user: { ...state.user, tags: ["math"] } })).toBe(first);
+    expect(generated.HeaderMemo({ ...state, cart: { items: 9 } }, 2)).toBe(first);
+    expect(generated.HeaderMemo({ ...state, user: { ...state.user, name: "Grace" } })).not.toBe(first);
+  });
+
   it("emits the requested mutation channels in one generated pass", async () => {
     const User = JIT.object({
       id: JIT.string(),

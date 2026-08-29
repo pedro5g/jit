@@ -192,6 +192,18 @@ interface CollectionMutationPlanArtifact {
   readonly explanation: unknown;
 }
 
+/** One derived computation and the fields it reads. */
+interface DerivedPlanArtifact {
+  readonly kind: "derived-plan";
+  readonly schema: import("../core/ats/index.js").AnyTypeSchema;
+  readonly source: string;
+  readonly memo: boolean;
+  readonly equalSources: readonly { readonly name: string; readonly source: string }[];
+  readonly layout: import("../compiler/change-layout.js").ChangeLayout;
+  readonly reads: readonly string[];
+  readonly cacheKey: string;
+}
+
 interface CqrsAuthorizedParserArtifact {
   readonly kind: "cqrs-authorized-parser";
   readonly definition: unknown;
@@ -290,6 +302,7 @@ export type CompiledArtifact =
   | CqrsAuthorizedParserArtifact
   | MutationPlanArtifact
   | CollectionMutationPlanArtifact
+  | DerivedPlanArtifact
   | SortPlanArtifact
   | JoinPlanArtifact
   | IndexPlanArtifact

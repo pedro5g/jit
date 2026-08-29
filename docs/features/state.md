@@ -79,6 +79,17 @@ const renameUser = JIT.state
 `explain()` reports the chosen path and, separately, that rebuilding the array
 is `O(n)` whatever found the row.
 
+## Derived state
+
+`derive(AppState).select(...)` declares what a computation reads, so its memo
+can ask whether anything it reads changed rather than whether the input object
+changed — and, given a mutation's change mask, answer without reading the state
+at all. See [Derived state](./derived-state.md).
+
+```ts
+const selectHeader = JIT.state.derive(AppState).select("user.name", "user.status").memo();
+```
+
 ## Performance and tradeoffs
 
 The namespace migration itself made no speed claim and changed no generated

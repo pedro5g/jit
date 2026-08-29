@@ -88,6 +88,7 @@ remain when their semantics require them.
 | Declared patch (mutation plan) | yes | yes    | yes            | one copy-on-write function; declared values inline or the artifact is skipped |
 | Collection mutation       | yes     | yes    | yes            | one function carrying its access path; upsert equality inlined as a local helper |
 | Mutation result channels  | yes     | yes    | yes            | mask, forward and inverse patch in the same pass; the layout ships as a frozen constant |
+| Derived state             | yes     | yes    | yes            | selector, memo closure factory and structural equality helpers; no projection-tree runtime |
 | sort / ordering plans     | yes     | yes    | yes            | descriptor stays off the compiled plan           |
 | index plans               | yes     | yes    | yes            | cache helper emitted only when an index is       |
 | physical query access     | yes     | yes    | yes            | strategy is compiled in; never in `~query`       |

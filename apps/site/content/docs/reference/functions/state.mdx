@@ -12,6 +12,7 @@ description: Canonical namespace for immutable updates, patches, reconciliation 
 | `patch.merge` | Apply JSON Merge Patch semantics |
 | `patch.json` | Apply RFC 6902 operations |
 | `collection` | Mutate a collection immutably through a planned access path |
+| `derive` | Memoize a computation on the fields it actually reads |
 | `reconcile` | Compare keyed collection snapshots with selective sinks |
 | `watch` | Compile stateless collection change detection |
 | `watchedList` | Track changes in one stateful aggregate collection |
@@ -41,6 +42,36 @@ const renameMember = JIT.state
 renameMember([{ id: 1, name: "Ada" }], { key: 1, name: "Grace" });
 renameMember.explain().physical.strategy; // "CachedIndexLookup"
 ```
+
+## Derived state
+
+Memoization normally asks whether the input object changed. Any immutable
+update produces a new object, so a selector over `user.name` is invalidated by
+a change to `cart.items` it never reads. `derive` declares what a computation
+reads, so its memo asks the narrower question — and given a mutation's change
+mask, answers it without reading the state at all.
+
+```ts
+const AppState = JIT.object({
+  user: JIT.object({ name: JIT.string(), status: JIT.string() }),
+  cart: JIT.object({ items: JIT.number() }),
+});
+const selectHeader = JIT.state.derive(AppState).select("user.name", "user.status").memo();
+
+const state = { user: { name: "Ada", status: "active" }, cart: { items: 2 } };
+const header = selectHeader(state);
+selectHeader({ ...state, cart: { items: 3 } }) === header; // true
+```
+
+Dependencies are inferred from the selection, so there is no `dependsOn` list
+to keep in sync. Scalars are compared with `!==` and structural fields with the
+schema's own equality; the whole state is never compared.
+
+The optional second argument is a change mask, normally the `changed` channel
+of a mutation result. It must describe the transition from the state the
+selector last saw. Both sides report their layout, so
+`selectHeader.accepts(mutate.layout())` says whether the two agree on what a
+bit means.
 
 See [Update](./update), [Patch](./patch),
 [Collection mutations](./update#collection-mutations), [Reconcile](./reconcile),
