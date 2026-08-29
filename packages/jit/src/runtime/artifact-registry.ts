@@ -315,6 +315,7 @@ interface ClassArtifact {
       readonly failures: readonly {
         readonly rule: string | undefined;
         readonly field: string | undefined;
+        readonly code: string;
         readonly message: string;
         readonly error?: unknown;
       }[];

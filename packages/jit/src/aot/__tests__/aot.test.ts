@@ -1076,7 +1076,11 @@ describe("JIT AOT generate", () => {
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly Money: {
-        create(input: unknown): { ok: boolean; value?: { amount: number }; error?: { rule?: string } };
+        create(input: unknown): {
+          ok: boolean;
+          value?: { amount: number };
+          error?: { rule?: string; issues?: readonly unknown[] };
+        };
         hydrate(input: unknown): { ok: boolean };
       };
     };
@@ -1092,6 +1096,10 @@ describe("JIT AOT generate", () => {
     const rejected = generated.Money.create({ amount: -1, currency: "BRL" });
     expect(rejected.ok).toBe(false);
     expect(rejected.error?.rule).toBe("non-negative");
+    // The generated module reports the same issues the runtime host does.
+    expect(rejected.error?.issues).toEqual(
+      (Money.create({ amount: -1, currency: "BRL" }) as { error: { issues: unknown } }).error.issues
+    );
     expect(generated.Money.create({ amount: "x", currency: "BRL" }).ok).toBe(false);
     expect(generated.Money.hydrate({ amount: -1, currency: "BRL" }).ok).toBe(false);
   });

@@ -628,9 +628,14 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   /** Email format; pass a RegExp to override the default pattern (e.g. `JIT.regexes.rfc5322Email`). */
   email(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
   email(pattern: RegExp, message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
+  email(options: {
+    readonly pattern?: RegExp;
+    readonly message?: string;
+  }): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
   /** RFC 9562/4122 UUID; pass a version (1-8) to pin it. */
   uuid(message?: string): Builder<TSchema>;
   uuid(version: number, message?: string): Builder<TSchema>;
+  uuid(options: { readonly version?: number; readonly message?: string }): Builder<TSchema>;
   url(message?: string): Builder<TSchema>;
   httpUrl(message?: string): Builder<TSchema>;
   jwt(message?: string): Builder<TSchema>;
@@ -664,21 +669,28 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   e164(message?: string): Builder<TSchema>;
   hex(message?: string): Builder<TSchema>;
   date(message?: string): Builder<TSchema>;
+  /** The delimiter takes the first position, so a message goes second. */
   mac(delimiter?: string, message?: string): Builder<TSchema>;
-  time(options?: Regexes.TimeOptions, message?: string): Builder<TSchema>;
-  datetime(options?: Regexes.DatetimeOptions, message?: string): Builder<TSchema>;
+  time(optionsOrMessage?: Regexes.TimeOptions | string, message?: string): Builder<TSchema>;
+  datetime(optionsOrMessage?: Regexes.DatetimeOptions | string, message?: string): Builder<TSchema>;
   /** Hash digest format, e.g. `.digest("sha256", "base64url")`. */
-  digest(algorithm: Regexes.HashAlgorithm, encoding?: Regexes.HashEncoding, message?: string): Builder<TSchema>;
+  digest(
+    algorithm: Regexes.HashAlgorithm,
+    encodingOrMessage?: Regexes.HashEncoding | (string & {}),
+    message?: string
+  ): Builder<TSchema>;
   /**
    * Formats parsed strings through a `#` mask. By default non-digits are
    * stripped first, so `.format("###.###.###-##")` accepts raw CPF digits.
    */
   format<const TPattern extends string>(
     pattern: TPattern & ValidFormatPattern<TPattern>,
-    options?: {
-      readonly mode?: StringMaskMode;
-      readonly stripNonDigits?: boolean;
-    },
+    optionsOrMessage?:
+      | {
+          readonly mode?: StringMaskMode;
+          readonly stripNonDigits?: boolean;
+        }
+      | string,
     message?: string
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"format", StringMaskSpec>>>;
   cpf(message?: string): Builder<TSchema>;

@@ -1021,17 +1021,24 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           });
           return undefined;
         }
-        const details = JSON.stringify({
-          ...(failure.rule === undefined ? {} : { rule: failure.rule }),
-          ...(failure.field === undefined ? {} : { field: failure.field }),
-        });
         lines.push(
+          `  const __issue${index} = Object.freeze(${JSON.stringify({
+            path: failure.field ?? "",
+            code: failure.code,
+            expected: failure.rule ?? "a domain invariant",
+            message: failure.message,
+          })});`,
           custom === undefined
-            ? `  const __fail${index} = () => new DomainAssertionError(${JSON.stringify(failure.message)}, ${details});`
+            ? `  const __fail${index} = () => undefined;`
             : `  const __fail${index} = (value) => (${custom})(value, ${JSON.stringify({ ...failure, error: undefined })});`
         );
       }
       lines.push(...indentBlock(assertions.source));
+      // One error carries every invariant that did not hold, matching the
+      // runtime host exactly.
+      lines.push(
+        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path || undefined, issues: outcome.issues }); };'
+      );
     }
     return lines;
   }
@@ -1263,7 +1270,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const assertionCall =
       policy?.assertions === undefined
         ? ""
-        : "const failure = __assert(result.data); if (failure !== undefined) return __failure(failure); ";
+        : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome)); ";
     const policyCreate =
       policy === undefined || !policy.create
         ? undefined
@@ -2595,6 +2602,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       '    this.code = "ASSERTION_FAILED";',
       "    this.rule = details?.rule;",
       "    this.field = details?.field;",
+      "    this.issues = details?.issues ?? [];",
       "    this.path = details?.field === undefined ? undefined : [details.field];",
       "  }",
       "}"

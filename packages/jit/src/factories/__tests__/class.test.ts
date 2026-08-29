@@ -421,6 +421,63 @@ describe("JIT.class", () => {
       expect(Money.create(valid).ok).toBe(true);
     });
 
+    it("collects every invariant that did not hold, as issues", () => {
+      const Money = JIT.ddd
+        .valueObject(JIT.object({ amount: JIT.number(), fee: JIT.number() }))
+        .validate({ result: "result" })
+        .assert((query) => query.gte("amount", 0), { code: "negative_amount", message: "Amount cannot be negative" })
+        .assert((query) => query.gte("fee", 0), { code: "negative_fee" });
+      const rejected = Money.create({ amount: -1, fee: -2 });
+
+      expect(rejected.ok).toBe(false);
+      if (rejected.ok !== false) throw new Error("expected a rejection");
+      const error = rejected.error as DomainAssertionError;
+      // Independent invariants are independent answers, the way sibling schema
+      // failures are, and they arrive in the same shape.
+      expect(error.issues).toEqual([
+        { path: "amount", code: "negative_amount", expected: "amount", message: "Amount cannot be negative" },
+        {
+          path: "fee",
+          code: "negative_fee",
+          expected: "fee",
+          message: 'the assertion on "fee" does not hold',
+        },
+      ]);
+      expect(error.rule).toBe("amount");
+      expect(Money.create({ amount: 0, fee: 0 }).ok).toBe(true);
+    });
+
+    it("does not run an assertion over data the schema already rejected", () => {
+      const Money = JIT.ddd
+        .valueObject(JIT.object({ amount: JIT.number() }))
+        .validate({ result: "result" })
+        .assert((query) => query.gte("amount", 0));
+      const rejected = Money.create({ amount: "x" } as never);
+
+      expect(rejected.ok).toBe(false);
+      // A domain invariant over a value that is not even a number would be
+      // noise; only the schema failure is reported.
+      expect(rejected.ok === false && rejected.error).toBeInstanceOf(JITValidationError);
+    });
+
+    it("collects every schema failure a factory input has", () => {
+      const User = JIT.ddd
+        .valueObject(JIT.object({ name: JIT.string().min(2, "Name is too short"), email: JIT.string().email() }))
+        .validate({ result: "result" });
+      const rejected = User.create({ name: "", email: "x" });
+
+      expect(rejected.ok).toBe(false);
+      if (rejected.ok !== false) throw new Error("expected a rejection");
+      // The factory uses the ordinary validation plan, so it reports what
+      // safeParse reports — not the first failure it happened to reach.
+      expect((rejected.error as JITValidationError).issues.map((issue) => issue.path)).toEqual(["name", "email"]);
+      expect((rejected.error as JITValidationError).issues[0]?.message).toBe("Name is too short");
+      expect(JIT.validate.safeParse(User.schema)({ name: "", email: "x" })).toEqual({
+        success: false,
+        issues: (rejected.error as JITValidationError).issues,
+      });
+    });
+
     it("refuses an assertion where there are no fields to name", () => {
       const Email = JIT.ddd.valueObject(JIT.string().email());
 

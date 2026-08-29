@@ -2,7 +2,10 @@ import { buildAggregateMutationPlan, emitAggregateMutationBody } from "../compil
 import {
   type AssertionDescriptor,
   type AssertionErrorFactory,
+  type AssertionIssue,
+  assertionError,
   assertionFailures,
+  assertionIssues,
   emitAssertionSource,
   resolveAssertionDescriptor,
 } from "../compiler/assertion.js";
@@ -55,6 +58,8 @@ export interface FactoryValidationOptions {
 export interface AssertionOptions {
   /** Identifier reported by the failure; defaults to the field the condition names. */
   readonly rule?: string;
+  /** Machine-readable issue code; defaults to `custom`. */
+  readonly code?: string;
   readonly message?: string;
   /** Builds the error this assertion produces; defaults to `DomainAssertionError`. */
   readonly error?: AssertionErrorFactory;
@@ -66,6 +71,11 @@ export type FactoryOutcome<TInstance, TMode extends FactoryResultMode, TError> =
   : TMode extends "tuple"
     ? readonly [TError, undefined] | readonly [undefined, TInstance]
     : TInstance;
+
+interface AssertionOutcome {
+  readonly error?: unknown;
+  readonly issues?: readonly AssertionIssue[];
+}
 
 interface FactoryPolicyState {
   mode: FactoryResultMode;
@@ -104,14 +114,25 @@ function compileAssertions(policy: FactoryPolicyState): void {
     return;
   }
   const failures = assertionFailures(policy.assertions, policy.assertionErrors);
+  const issues = assertionIssues(policy.assertions);
   const bindings = policy.assertions.flatMap((descriptor) => descriptor.bindings);
   const bindingNames = bindings.map((_, index) => `__q${index}`);
   const failureNames = failures.map((_, index) => `__fail${index}`);
-  policy.assert = globalThis.Function(
+  const issueNames = issues.map((_, index) => `__issue${index}`);
+  const guard = globalThis.Function(
     ...bindingNames,
     ...failureNames,
+    ...issueNames,
     `${emitAssertionSource(policy.assertions)}\nreturn __assert;`
-  )(...bindings, ...failures) as (value: unknown) => unknown;
+  )(...bindings, ...failures, ...issues) as (value: unknown) => AssertionOutcome | undefined;
+
+  policy.assert = (value: unknown) => {
+    const outcome = guard(value);
+    if (outcome === undefined) return undefined;
+    // A declared error type is reported as it is; otherwise every invariant
+    // that did not hold travels in one error, the way schema issues do.
+    return outcome.error ?? assertionError(outcome.issues ?? []);
+  };
 }
 
 function policySuccess(policy: FactoryPolicyState, value: unknown): unknown {
@@ -156,6 +177,7 @@ function policyArtifact(policy: FactoryPolicyState): { readonly policy?: ClassPo
               failures: policy.assertions.map((descriptor, index) => ({
                 rule: descriptor.rule,
                 field: descriptor.field,
+                code: descriptor.code,
                 message: descriptor.message,
                 ...(policy.assertionErrors[index] === undefined ? {} : { error: policy.assertionErrors[index] }),
               })),
@@ -198,6 +220,7 @@ function applyAssertion(
       condition,
       bindings: builder.bindings,
       ...(options?.rule === undefined ? {} : { rule: options.rule }),
+      ...(options?.code === undefined ? {} : { code: options.code }),
       ...(options?.message === undefined ? {} : { message: options.message }),
     })
   );

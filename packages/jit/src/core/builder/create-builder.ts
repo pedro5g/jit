@@ -348,16 +348,32 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "regex", value, message }));
   },
 
-  email(this: RuntimeBuilder, regexOrMessage?: RegExp | string, message?: string): AnyBuilder {
-    const override = regexOrMessage instanceof RegExp ? regexOrMessage : undefined;
-    const text = typeof regexOrMessage === "string" ? regexOrMessage : message;
+  // Two dimensions, so an options object exists beside the shorthand: a lone
+  // string is still the message, and nobody has to remember an argument order.
+  email(
+    this: RuntimeBuilder,
+    patternOrMessageOrOptions?: RegExp | string | { readonly pattern?: RegExp; readonly message?: string },
+    message?: string
+  ): AnyBuilder {
+    const options = isCheckOptions<{ readonly pattern?: RegExp; readonly message?: string }>(patternOrMessageOrOptions);
+    const override =
+      options?.pattern ?? (patternOrMessageOrOptions instanceof RegExp ? patternOrMessageOrOptions : undefined);
+    const text =
+      options?.message ?? (typeof patternOrMessageOrOptions === "string" ? patternOrMessageOrOptions : message);
 
     return createBuilder(appendCheck(this.schema, { kind: "email", value: override, message: text }));
   },
 
-  uuid(this: RuntimeBuilder, versionOrMessage?: number | string, message?: string): AnyBuilder {
-    const version = typeof versionOrMessage === "number" ? versionOrMessage : undefined;
-    const text = typeof versionOrMessage === "string" ? versionOrMessage : message;
+  uuid(
+    this: RuntimeBuilder,
+    versionOrMessageOrOptions?: number | string | { readonly version?: number; readonly message?: string },
+    message?: string
+  ): AnyBuilder {
+    const options = isCheckOptions<{ readonly version?: number; readonly message?: string }>(versionOrMessageOrOptions);
+    const version =
+      options?.version ?? (typeof versionOrMessageOrOptions === "number" ? versionOrMessageOrOptions : undefined);
+    const text =
+      options?.message ?? (typeof versionOrMessageOrOptions === "string" ? versionOrMessageOrOptions : message);
 
     return createBuilder(
       appendCheck(this.schema, { kind: "uuid", value: version ? Regexes.uuid(version) : undefined, message: text })
@@ -570,37 +586,50 @@ const baseBuilderPrototype = {
     return createBuilder(appendCheck(this.schema, { kind: "emoji", value: Regexes.emoji(), message }));
   },
 
+  // The delimiter is itself a string, so this is the one check where the
+  // message cannot take the first position: `.mac(undefined, "…")`.
   mac(this: RuntimeBuilder, delimiter?: string, message?: string): AnyBuilder {
     return createBuilder(appendCheck(this.schema, { kind: "mac", value: Regexes.mac(delimiter), message }));
   },
 
-  time(this: RuntimeBuilder, options?: Regexes.TimeOptions, message?: string): AnyBuilder {
-    return createBuilder(appendCheck(this.schema, { kind: "time", value: Regexes.time(options ?? {}), message }));
+  time(this: RuntimeBuilder, optionsOrMessage?: Regexes.TimeOptions | string, message?: string): AnyBuilder {
+    const options = typeof optionsOrMessage === "string" ? undefined : optionsOrMessage;
+    const text = typeof optionsOrMessage === "string" ? optionsOrMessage : message;
+
+    return createBuilder(appendCheck(this.schema, { kind: "time", value: Regexes.time(options ?? {}), message: text }));
   },
 
-  datetime(this: RuntimeBuilder, options?: Regexes.DatetimeOptions, message?: string): AnyBuilder {
+  datetime(this: RuntimeBuilder, optionsOrMessage?: Regexes.DatetimeOptions | string, message?: string): AnyBuilder {
+    const options = typeof optionsOrMessage === "string" ? undefined : optionsOrMessage;
+    const text = typeof optionsOrMessage === "string" ? optionsOrMessage : message;
+
     return createBuilder(
-      appendCheck(this.schema, { kind: "datetime", value: Regexes.datetime(options ?? {}), message })
+      appendCheck(this.schema, { kind: "datetime", value: Regexes.datetime(options ?? {}), message: text })
     );
   },
 
   digest(
     this: RuntimeBuilder,
     algorithm: Regexes.HashAlgorithm,
-    encoding?: Regexes.HashEncoding,
+    encodingOrMessage?: Regexes.HashEncoding | string,
     message?: string
   ): AnyBuilder {
+    const encoding = isHashEncoding(encodingOrMessage) ? encodingOrMessage : undefined;
+    const text = isHashEncoding(encodingOrMessage) ? message : (encodingOrMessage ?? message);
+
     return createBuilder(
-      appendCheck(this.schema, { kind: "digest", value: Regexes.hash(algorithm, encoding), message })
+      appendCheck(this.schema, { kind: "digest", value: Regexes.hash(algorithm, encoding), message: text })
     );
   },
 
   format(
     this: RuntimeBuilder,
     pattern: string,
-    options?: { readonly mode?: StringMaskMode; readonly stripNonDigits?: boolean },
+    optionsOrMessage?: { readonly mode?: StringMaskMode; readonly stripNonDigits?: boolean } | string,
     message?: string
   ): AnyBuilder {
+    const options = typeof optionsOrMessage === "string" ? undefined : optionsOrMessage;
+    const text = typeof optionsOrMessage === "string" ? optionsOrMessage : message;
     const mode = options?.mode ?? "transform";
 
     return createBuilder(
@@ -611,7 +640,7 @@ const baseBuilderPrototype = {
           mode,
           stripNonDigits: options?.stripNonDigits ?? mode === "transform",
         },
-        message,
+        message: text,
       })
     );
   },
@@ -950,6 +979,20 @@ function attachStandardSchemaGetter(prototype: object): void {
       return getStandardSchema(this.schema);
     },
   });
+}
+
+function isCheckOptions<TOptions extends object>(value: unknown): TOptions | undefined {
+  return typeof value === "object" && value !== null && !(value instanceof RegExp) ? (value as TOptions) : undefined;
+}
+
+/**
+ * `hex`, `base64` and `base64url` are the only strings in that position that
+ * mean an encoding; anything else there is a message.
+ */
+const HASH_ENCODINGS: ReadonlySet<string> = new Set(["hex", "base64", "base64url"]);
+
+function isHashEncoding(value: unknown): value is Regexes.HashEncoding {
+  return typeof value === "string" && HASH_ENCODINGS.has(value);
 }
 
 export function createBuilder<TSchema extends AnyTypeSchema>(schema: TSchema): Builder<TSchema> {
