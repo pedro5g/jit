@@ -66,6 +66,9 @@ describe("PipelineAST", () => {
       expectTypeOf<PipelineAST.QueryValueNode["kind"]>().toEqualTypeOf<"field" | "literal" | "binding" | "param">();
       expectTypeOf<PipelineAST.QueryConditionNode["kind"]>().toEqualTypeOf<"compare" | "logical" | "not">();
       expectTypeOf<PipelineAST.QueryCompareOperator>().toEqualTypeOf<"eq" | "neq" | "gt" | "gte" | "lt" | "lte">();
+      expectTypeOf<PipelineAST.QueryOperatorsFor<boolean>>().toEqualTypeOf<"eq" | "neq">();
+      expectTypeOf<PipelineAST.QueryOperatorsFor<number>>().toEqualTypeOf<PipelineAST.QueryCompareOperator>();
+      expectTypeOf<PipelineAST.QueryOperatorsFor<{ id: string }>>().toEqualTypeOf<never>();
       expectTypeOf<PipelineAST.UpdateNode>().toEqualTypeOf<PipelineAST.UpdateSetNode>();
       expectTypeOf<PipelineAST.UpdateSetNode["kind"]>().toEqualTypeOf<"set">();
       expectTypeOf<PipelineAST.TransformNode["kind"]>().toEqualTypeOf<"transform:object">();

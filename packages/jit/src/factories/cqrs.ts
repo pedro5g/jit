@@ -6,10 +6,13 @@ import {
   queryBoundaryFilters,
   resolveQueryBoundary,
 } from "../compiler/query-boundary.js";
+import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import type {
   QueryAggregateOperator,
+  QueryCompareOperator,
   QueryConditionNode,
   QueryJoinKind,
+  QueryOperatorsFor,
   QueryPipelineNode,
   QueryValueNode,
 } from "../core/ast/index.js";
@@ -130,14 +133,19 @@ export type StandardQueryCondition =
     }
   | { readonly kind: "not"; readonly inner: StandardQueryCondition };
 
+type QueryBoundaryOperators<TValue> = [QueryOperatorsFor<TValue>] extends [never]
+  ? never
+  : true | readonly QueryOperatorsFor<TValue>[];
+
 export interface CqrsInputOptions<TSchema extends ATS.AnyTypeSchema> {
-  readonly filter?: Partial<
-    Record<
-      | Extract<keyof ATS.TypeofSchema<TSchema>, string>
-      | `${Extract<keyof ATS.TypeofSchema<TSchema>, string>}.${string}`,
-      true | readonly string[]
-    >
-  >;
+  readonly filter?: Partial<{
+    readonly [TKey in Extract<keyof ATS.TypeofSchema<TSchema>, string>]: QueryBoundaryOperators<
+      ATS.TypeofSchema<TSchema>[TKey]
+    >;
+  }> &
+    Partial<
+      Record<`${Extract<keyof ATS.TypeofSchema<TSchema>, string>}.${string}`, true | readonly QueryCompareOperator[]>
+    >;
   readonly select?: readonly Extract<keyof ATS.TypeofSchema<TSchema>, string>[];
   readonly sort?: readonly Extract<keyof ATS.TypeofSchema<TSchema>, string>[];
   readonly pagination?:
@@ -780,16 +788,39 @@ function objectFields(schema: ATS.AnyTypeSchema): string[] {
   return object.type === "object" ? Object.keys((object.def as ATS.ObjectDef).props) : [];
 }
 
-function isSchemaPath(schema: ATS.AnyTypeSchema, path: string): boolean {
+function schemaAtPath(schema: ATS.AnyTypeSchema, path: string): ATS.AnyTypeSchema | undefined {
   let current = schema;
   for (const key of path.split(".")) {
-    if (current.type === "runtimeType") current = (current.def as ATS.RuntimeTypeDef).innerType;
-    if (current.type !== "object") return false;
+    current = resolveWrappers(current).base;
+    if (current.type !== "object") return undefined;
     const next = (current.def as ATS.ObjectDef).props[key];
-    if (!next) return false;
+    if (!next) return undefined;
     current = next;
   }
-  return true;
+  return resolveWrappers(current).base;
+}
+
+const EQUALITY_QUERY_OPERATORS = Object.freeze(["eq", "neq"] satisfies readonly QueryCompareOperator[]);
+const ORDERED_QUERY_OPERATORS = Object.freeze([
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+] satisfies readonly QueryCompareOperator[]);
+
+function queryOperatorsForSchema(schema: ATS.AnyTypeSchema): readonly QueryCompareOperator[] {
+  const base = resolveWrappers(schema).base;
+  if (base.type === "boolean" || base.type === "null" || base.type === "undefined") return EQUALITY_QUERY_OPERATORS;
+  if (["string", "number", "int", "bigint", "date", "templateLiteral", "enum"].includes(base.type)) {
+    return ORDERED_QUERY_OPERATORS;
+  }
+  if (base.type === "literal") {
+    const value = (base.def as ATS.LiteralDef).value;
+    return typeof value === "boolean" || value === null ? EQUALITY_QUERY_OPERATORS : ORDERED_QUERY_OPERATORS;
+  }
+  return Object.freeze([]);
 }
 
 function toStandardCondition(condition: QueryConditionNode, bindings: readonly unknown[]): StandardQueryCondition {
@@ -868,11 +899,19 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
   const maxFilters = options.maxFilters ?? 32;
   const fields = new Set(objectFields(unwrapped));
   for (const [field, operators] of Object.entries(options.filter ?? {})) {
-    if (!isSchemaPath(unwrapped, field))
+    const fieldSchema = schemaAtPath(unwrapped, field);
+    if (!fieldSchema)
       throw new JITError(
         "INVALID_QUERY",
         `API query filter field ${JSON.stringify(field)} is not declared by the model`
       );
+    const supportedOperators = queryOperatorsForSchema(fieldSchema);
+    if (supportedOperators.length === 0) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(field)} is not a scalar query field`
+      );
+    }
     if (operators !== true && !Array.isArray(operators)) {
       throw new JITError(
         "INVALID_QUERY",
@@ -888,7 +927,7 @@ export function cqrsInput<TSchema extends ATS.AnyTypeSchema>(
       }
       const seen = new Set<string>();
       for (const operator of operators) {
-        if (typeof operator !== "string" || operator.length === 0 || operator.startsWith("$")) {
+        if (typeof operator !== "string" || !supportedOperators.includes(operator as QueryCompareOperator)) {
           throw new JITError(
             "INVALID_QUERY",
             `API query filter field ${JSON.stringify(field)} has an invalid operator`

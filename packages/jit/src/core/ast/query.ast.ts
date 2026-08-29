@@ -1,5 +1,19 @@
 export type QueryCompareOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
 
+/** Operators supported by the shared Query AST for one inferred field value. */
+export type QueryOperatorsFor<TValue> = [NonNullable<TValue>] extends [never]
+  ? "eq" | "neq"
+  : NonNullable<TValue> extends boolean
+    ? "eq" | "neq"
+    : NonNullable<TValue> extends string | number | bigint | Date
+      ? QueryCompareOperator
+      : never;
+
+/** Model keys on which a particular shared Query operator is meaningful. */
+export type QueryKeysForOperator<TModel, TOperator extends QueryCompareOperator> = {
+  [TKey in Extract<keyof TModel, string>]-?: TOperator extends QueryOperatorsFor<TModel[TKey]> ? TKey : never;
+}[Extract<keyof TModel, string>];
+
 export interface QueryFieldNode {
   readonly kind: "field";
   readonly key: string;

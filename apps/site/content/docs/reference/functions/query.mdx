@@ -325,7 +325,10 @@ before a backend adapter sees them.
 
 `filter: { field: true }` is the equality shorthand and accepts only a direct
 value. Declare an operator list such as `filter: { age: ["gte", "lte"] }` to
-accept operator objects. Top-level arrays, unknown request keys, malformed or
+accept operator objects. The list comes from the shared Query AST: scalar
+ordered fields support `eq`, `neq`, `gt`, `gte`, `lt` and `lte`; booleans only
+support `eq` and `neq`; object and collection fields cannot be exposed as flat
+filters. Top-level arrays, unknown request keys, malformed or
 repeated sort/select fields, undeclared fields, and undeclared operators are
 rejected identically by runtime and AOT parsers. Offset pagination also rejects
 page/limit combinations whose computed offset is not a safe integer.

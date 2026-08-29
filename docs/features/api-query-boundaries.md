@@ -16,8 +16,8 @@ deny-by-default and compiles a parser; it does not create another query engine.
 const UsersQuery = JIT.api.query(User, {
   filter: {
     id: true,
-    status: ["eq", "in"],
-    createdAt: ["gte", "lte", "between"],
+    status: ["eq", "neq"],
+    createdAt: ["gte", "lte"],
   },
   select: ["id", "status", "createdAt"],
   sort: ["createdAt", "id"],
@@ -43,6 +43,13 @@ conservative equality-only shorthand. An operator object must name an
 explicitly listed operator. Unknown top-level keys, fields and operators are
 rejected rather than silently removed. Projection has its own explicit
 allowlist and remains bounded independently from the model shape.
+
+The operator type is shared with the Query AST rather than copied into an API
+registry. Ordered scalar fields support `eq`, `neq`, `gt`, `gte`, `lt` and
+`lte`; booleans support only `eq` and `neq`. Objects and collections cannot be
+exposed as flat scalar filters. Operations such as `in`, `between`,
+`startsWith` and `contains` are not accepted until the shared Query AST and all
+of its lowerings support them.
 
 Relations, collection predicates and logical input are not inferred from a
 nested schema and are not exposed in the current boundary.

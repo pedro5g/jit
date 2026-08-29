@@ -320,6 +320,19 @@ describe("JIT.cqrs", () => {
     query.orderBy("missing");
     // @ts-expect-error sum accepts numeric fields only
     query.sum("name");
+
+    const Flag = JIT.object({ active: JIT.boolean(), metadata: JIT.object({ source: JIT.string() }) });
+    const invalidOperatorTypes = () => {
+      JIT.cqrs.query(Flag).filter((condition) => {
+        // @ts-expect-error ordered comparisons do not accept boolean fields
+        return condition.gte("active", true);
+      });
+      JIT.cqrs.query(Flag).filter((condition) => {
+        // @ts-expect-error equality does not expose object fields as scalar predicates
+        return condition.eq("metadata", { source: "api" });
+      });
+    };
+    void invalidOperatorTypes;
   });
 
   it("registers typed parameters in the existing query program", () => {
@@ -396,8 +409,8 @@ describe("JIT.cqrs", () => {
     const input = JIT.api.query(User, {
       filter: {
         name: true,
-        age: ["gte", "lte", "between"],
-        status: ["eq", "in"],
+        age: ["gte", "lte"],
+        status: ["eq", "neq"],
       },
       select: ["name", "age", "status"],
       sort: ["name", "age"],
@@ -409,7 +422,7 @@ describe("JIT.cqrs", () => {
       version: 1,
       definition: {
         source: { kind: "object", fields: ["name", "age", "status"] },
-        filters: { name: true, age: ["gte", "lte", "between"], status: ["eq", "in"] },
+        filters: { name: true, age: ["gte", "lte"], status: ["eq", "neq"] },
         projection: true,
         sorting: ["name", "age"],
         pagination: { type: "offset", defaultLimit: 20, maxLimit: 100 },
@@ -552,6 +565,14 @@ describe("JIT.cqrs", () => {
       JIT.api.query(User, { select: true });
     };
     void invalidProjectionTypes;
+    const Flags = JIT.object({ active: JIT.boolean(), metadata: JIT.object({ source: JIT.string() }) });
+    const invalidOperatorTypes = () => {
+      // @ts-expect-error boolean fields only support equality operators
+      JIT.api.query(Flags, { filter: { active: ["gte"] } });
+      // @ts-expect-error object fields are not scalar query fields
+      JIT.api.query(Flags, { filter: { metadata: true } });
+    };
+    void invalidOperatorTypes;
     expect(() => JIT.api.query(User, { maxFilters: -1 })).toThrow(/maxFilters/i);
     expect(() =>
       JIT.api.query(User, {
@@ -572,7 +593,9 @@ describe("JIT.cqrs", () => {
     expect(() => JIT.api.query(User, { sort: ["name", "name"] })).toThrow(/repeats/i);
     expect(() => JIT.api.query(User, { filter: { name: ["eq", "eq"] } })).toThrow(/repeats operator/i);
     expect(() => JIT.api.query(User, { filter: { name: [] } })).toThrow(/empty operator list/i);
-    expect(() => JIT.api.query(User, { filter: { name: ["$eq"] } })).toThrow(/invalid operator/i);
+    expect(() => JIT.api.query(User, { filter: { name: ["$eq"] } as never })).toThrow(/invalid operator/i);
+    expect(() => JIT.api.query(Flags, { filter: { active: ["gte"] } as never })).toThrow(/invalid operator/i);
+    expect(() => JIT.api.query(Flags, { filter: { metadata: true } as never })).toThrow(/scalar query field/i);
     expect(() =>
       JIT.api.query(User, {
         pagination: { type: "cursor", by: ["name", "name"], defaultLimit: 10, maxLimit: 20 },
@@ -582,7 +605,7 @@ describe("JIT.cqrs", () => {
 
   it("snapshots nested configuration before compiling the parser", () => {
     const User = JIT.object({ age: JIT.number() });
-    const operators = ["gte"];
+    const operators: ("gte" | "lte")[] = ["gte"];
     const selected = ["age"] as const;
     const input = JIT.api.query(User, { filter: { age: operators }, select: selected });
 

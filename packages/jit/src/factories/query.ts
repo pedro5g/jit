@@ -30,6 +30,7 @@ import type {
   QueryCompareNode,
   QueryCompareOperator,
   QueryConditionNode,
+  QueryKeysForOperator,
   QueryNode,
   QueryPipelineNode,
   QueryValueNode,
@@ -100,18 +101,27 @@ type IterableElement<TValue> = TValue extends Iterable<infer TElement> ? TElemen
  * @template TElement - The collection element type being filtered.
  */
 export interface QueryConditionBuilder<TElement> {
-  eq<TKey extends Extract<keyof TElement, string>>(key: TKey, value: QueryComparable<TElement[TKey]>): QueryCompareNode;
-  neq<TKey extends Extract<keyof TElement, string>>(
+  eq<TKey extends QueryKeysForOperator<TElement, "eq">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
-  gt<TKey extends Extract<keyof TElement, string>>(key: TKey, value: QueryComparable<TElement[TKey]>): QueryCompareNode;
-  gte<TKey extends Extract<keyof TElement, string>>(
+  neq<TKey extends QueryKeysForOperator<TElement, "neq">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
-  lt<TKey extends Extract<keyof TElement, string>>(key: TKey, value: QueryComparable<TElement[TKey]>): QueryCompareNode;
-  lte<TKey extends Extract<keyof TElement, string>>(
+  gt<TKey extends QueryKeysForOperator<TElement, "gt">>(
+    key: TKey,
+    value: QueryComparable<TElement[TKey]>
+  ): QueryCompareNode;
+  gte<TKey extends QueryKeysForOperator<TElement, "gte">>(
+    key: TKey,
+    value: QueryComparable<TElement[TKey]>
+  ): QueryCompareNode;
+  lt<TKey extends QueryKeysForOperator<TElement, "lt">>(
+    key: TKey,
+    value: QueryComparable<TElement[TKey]>
+  ): QueryCompareNode;
+  lte<TKey extends QueryKeysForOperator<TElement, "lte">>(
     key: TKey,
     value: QueryComparable<TElement[TKey]>
   ): QueryCompareNode;
