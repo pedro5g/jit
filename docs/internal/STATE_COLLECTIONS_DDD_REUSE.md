@@ -74,12 +74,12 @@ uses the complete output of the inner schema. The validator emitter already
 recognizes `runtimeType` and materializes it through its registered constructor,
 including nested object/array traversal.
 
-Important current mismatch: create and direct construction always validate and
-resolve defaults, while the new contract requires factory validation to be
-opt-in. Hydration uses `compileHydrator`, which disables create-default
-resolution, and this distinction must be preserved. Consolidation should build
-on the existing validator/materialization emitter rather than add Entity- or
-VO-specific walkers.
+Create and direct construction always validate and resolve defaults; hydration
+uses `compileHydrator`, which disables create-default resolution. That
+distinction is preserved. Materialization was built on the existing
+validator/materialization emitter rather than adding Entity- or VO-specific
+walkers, so a nested Runtime Type is materialized at the known field and array
+element by the same pass that validates it.
 
 ## Value Objects and identity
 
@@ -95,6 +95,29 @@ the existing `class.identity(key)` capability. No identifier metadata exists.
 `uniqueIdentifier` should therefore introduce one immutable metadata marker on
 the Runtime Type descriptor, then identity inference may select a field only
 when exactly one candidate exists. Explicit `{ id }` continues to override.
+
+## Factory policies and assertions
+
+Both boundaries already parse: `create` through `compileValidator`, `hydrate`
+through `compileHydrator` with defaults disabled. Defaults and nested Runtime
+Type materialization come from that pass, so validation cannot be skipped
+without changing what a factory produces. `.validate()` therefore selects the
+**failure channel** and the phases it covers, not whether the schema is
+checked; `compileSafeHydrator` exposes the same hydrate pass with issues
+instead of an exception so the two share one compiled function.
+
+Assertions reuse `createConditionBuilder` and `emitQueryConditionSource`: an
+invariant is generated comparisons, not a stored callback, and the guard is
+absent when nothing was declared. Failures travel through the factory policy
+rather than choosing their own shape.
+
+The policy rides on the existing `class` artifact and is re-registered when
+`.validate()`/`.assert()` mutate it, so AOT emits the same shaping, the same
+error construction and the same guard. A custom error factory is a callback:
+unserializable ones skip the artifact with a reason.
+
+`clone` is a capability over the existing `ClonePlan`, off by default for the
+reasons the DDD docs give.
 
 ## Existing compiler plans to reuse
 

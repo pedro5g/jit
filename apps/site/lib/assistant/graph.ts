@@ -429,6 +429,40 @@ export const CONCEPTS: ConceptNode[] = [
     edges: { validation: 0.5, query: 0.2 },
   },
   {
+    id: "ddd-policies",
+    aliases: [
+      "validation policy",
+      "result",
+      "either",
+      "tuple",
+      "assertion",
+      "invariant",
+      "assercao",
+      "asserção",
+      "invariante",
+      "clone",
+    ],
+    terms: ["validate", "assert", "result", "tuple", "throw", "clone", "invariant"],
+    apis: ["ddd", "class", "valueObject", "entity"],
+    fact: "A factory already parses its input, so .validate() chooses how a rejection is reported rather than whether validation runs; .assert() adds domain invariants written in the shared condition builder, and both are absent from an unconfigured class.",
+    factPt:
+      "Uma factory já faz parse da entrada, então .validate() escolhe como uma rejeição é reportada, não se a validação acontece; .assert() adiciona invariantes de domínio escritas no condition builder compartilhado, e ambos são ausentes numa classe não configurada.",
+    mechanisms: [
+      "The result policy is fixed at declaration and reflected in the factory type: throw returns the instance, result returns { ok, value } or { ok, error }, and tuple returns [error, undefined] or [undefined, value].",
+      "Assertions become comparisons in the generated source, run after schema validation and before materialization, and report through the factory result policy rather than deciding their own. DomainAssertionError carries rule and field, never the rejected value.",
+      "clone is an opt-in capability reusing the shared clone plan; a Value Object does not get one, and an Aggregate Root copy starts with an empty event queue.",
+    ],
+    mechanismsPt: [
+      "A política de resultado é fixada na declaração e refletida no tipo da factory: throw devolve a instância, result devolve { ok, value } ou { ok, error }, e tuple devolve [error, undefined] ou [undefined, value].",
+      "Assertions viram comparações na fonte gerada, rodam depois da validação de schema e antes da materialização, e reportam pela política de resultado da factory em vez de decidir a sua. DomainAssertionError carrega rule e field, nunca o valor rejeitado.",
+      "clone é uma capability opcional que reusa o clone plan compartilhado; um Value Object não recebe uma, e a cópia de um Aggregate Root começa com a fila de eventos vazia.",
+    ],
+    example:
+      'const Money = JIT.ddd\n  .valueObject(JIT.object({ amount: JIT.number() }))\n  .validate({ result: "result" })\n  .assert((query) => query.gte("amount", 0), { rule: "non-negative" });\n\nconst outcome = Money.create({ amount: -1 });\noutcome.ok;',
+    page: "/docs/reference/functions/runtime-classes#validation-policies",
+    edges: { "ddd-runtime-types": 0.8, validation: 0.5 },
+  },
+  {
     id: "ddd-runtime-types",
     aliases: ["value object", "entity", "identifier", "identificador", "ddd", "runtime type"],
     terms: ["valueobject", "uniqueidentifier", "entity", "create", "hydrate", "wire", "identity"],

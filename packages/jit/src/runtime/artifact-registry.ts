@@ -294,6 +294,26 @@ interface ClassArtifact {
     | undefined;
   readonly mutation?: { readonly updatedAt?: string; readonly version?: string; readonly deletedAt?: string };
   readonly domainEvent?: { readonly type: string; readonly version: number };
+  /** Failure policy and domain invariants, present only when configured. */
+  readonly policy?: {
+    readonly result: "throw" | "result" | "tuple";
+    readonly create: boolean;
+    readonly hydrate: boolean;
+    /** Bound error factory; AOT skips the artifact when it cannot be serialized. */
+    readonly error?: unknown;
+    /** One generated guard over the validated state; absent without assertions. */
+    readonly assertions?: {
+      readonly source: string;
+      readonly bindingNames: readonly string[];
+      readonly bindingValues: readonly unknown[];
+      readonly failures: readonly {
+        readonly rule: string | undefined;
+        readonly field: string | undefined;
+        readonly message: string;
+        readonly error?: unknown;
+      }[];
+    };
+  };
 }
 
 export type CompiledArtifact =

@@ -1,0 +1,119 @@
+# Validation and assertions
+
+Two different questions, answered separately.
+
+**Schema validation** asks whether a value has the declared shape. **A domain
+assertion** asks whether the domain permits that value at all. A negative
+`amount` is a perfectly well-formed number; it is not a permissible price.
+
+## What runs by default
+
+A factory already parses its input — it must, because defaults and nested
+Runtime Types are resolved by that same compiled pass. Without configuration
+`create()` and `hydrate()` behave exactly as they always have: one parse, and a
+`JITValidationError` when it fails.
+
+`.validate()` does not turn validation on. **It chooses how a rejection is
+reported**, and which factories that choice applies to. A class that never
+calls it carries no policy on its artifact, and the module AOT generates from
+it is byte-for-byte what it was before policies existed.
+
+## Result policies
+
+The choice belongs to the artifact, never to the call, so the factory's
+signature says exactly which shape a caller receives.
+
+```ts
+const Money = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
+
+const outcome = Money.create({ amount: 10, currency: "BRL" });
+if (outcome.ok) outcome.value.amount;
+else outcome.error;
+```
+
+| `result` | `create(input)` returns |
+| --- | --- |
+| `"throw"` (default) | the instance, or throws |
+| `"result"` | `{ ok: true; value }` or `{ ok: false; error }` |
+| `"tuple"` | `[undefined, value]` or `[error, undefined]` |
+
+The tuple puts the error first so it destructures the way callers read it:
+
+```ts
+const [error, money] = JIT.ddd
+  .valueObject(MoneySchema)
+  .validate({ result: "tuple" })
+  .create(input);
+```
+
+It is `Result`, not `Either`: the shape is a discriminated union, and it does
+not imply the rest of the conventions `Either` carries with it.
+
+Pass `error` to build your own, and `create` / `hydrate` to leave one phase on
+the built-in throwing path:
+
+```ts
+JIT.ddd.entity(UserSchema).validate({
+  result: "result",
+  error: (issues) => new InvalidUser(issues),
+  hydrate: false,
+});
+```
+
+## Assertions
+
+An invariant is written in the same condition builder a query filter or an
+access rule uses. It is not a callback the factory calls: it becomes a
+comparison in the generated source.
+
+```ts
+const Money = JIT.ddd
+  .valueObject(MoneySchema)
+  .assert((query) => query.gte("amount", 0));
+
+Money.create({ amount: -1, currency: "BRL" });
+// DomainAssertionError: the assertion on "amount" does not hold
+```
+
+`DomainAssertionError` carries `rule` and `field` — what a caller can act on —
+and never the rejected value, which would put domain data into a log by
+default. Name the rule, the message or the error when the default is not what
+you want to show:
+
+```ts
+.assert((query) => query.gte("amount", 0), {
+  rule: "non-negative",
+  error: () => new NegativeMoneyError(),
+})
+```
+
+Assertions run after schema validation and before the instance is built, on
+data the parse already produced. They report through **the factory's result
+policy**, not their own: whether a failure throws or comes back as a value is
+one decision for the artifact, not one per invariant.
+
+```text
+input → defaults → schema validation → domain assertions → materialization → policy
+```
+
+A class with no assertions has no guard at all, in the runtime and in the
+generated module.
+
+## Runtime, define and AOT
+
+The policy travels on the class artifact. `jit generate` emits the result
+shaping, the error construction and each invariant as local source, with
+`JITValidationError` and `DomainAssertionError` inlined. A custom error factory
+is a callback like any other: when it cannot be reconstructed the artifact is
+**skipped with a reason** rather than generated with a silently different
+failure.
+
+## Non-goals
+
+- Validation is not skippable. Defaults and nested Runtime Types come from the
+  parse, so removing it would change what a factory produces, not just how fast
+  it produces it.
+- An assertion is not a general predicate. Conditions that need arbitrary code
+  belong in the domain method that raises them, where they can say why.
+- A result policy does not travel per call. Two call sites of the same factory
+  cannot disagree about what a failure looks like.

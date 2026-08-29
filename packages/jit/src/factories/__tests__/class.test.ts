@@ -1,4 +1,6 @@
+import { DomainAssertionError, JITValidationError } from "../../errors/index.js";
 import { JIT } from "../../index.js";
+import { getArtifact } from "../../runtime/artifact-registry.js";
 
 describe("JIT.class", () => {
   const UserSchema = JIT.object({
@@ -316,6 +318,190 @@ describe("JIT.class", () => {
       // @ts-expect-error schemas without identifier metadata require an explicit field
       JIT.ddd.entity(PlainSchema);
     }
+  });
+
+  describe("factory result policies and assertions", () => {
+    const MoneySchema = JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) });
+    const valid = { amount: 10, currency: "BRL" } as const;
+    const invalid = { amount: "x", currency: "BRL" } as never;
+
+    it("costs nothing until a policy is configured", () => {
+      const Money = JIT.ddd.valueObject(MoneySchema);
+      const artifact = getArtifact(Money as object);
+
+      expect(Money.create(valid).amount).toBe(10);
+      expect(() => Money.create(invalid)).toThrow(JITValidationError);
+      // No policy on the artifact means no policy in the generated module.
+      expect(artifact?.kind === "class" && artifact.policy).toBeUndefined();
+    });
+
+    it("reports a rejected input in the shape the artifact declared", () => {
+      const Throwing = JIT.ddd.valueObject(MoneySchema).validate();
+      const Result = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
+      const Tuple = JIT.ddd.valueObject(MoneySchema).validate({ result: "tuple" });
+
+      expect(() => Throwing.create(invalid)).toThrow(JITValidationError);
+      expect(Throwing.create(valid).amount).toBe(10);
+
+      const ok = Result.create(valid);
+      const bad = Result.create(invalid);
+      expect(ok.ok).toBe(true);
+      expect(ok.ok === true && ok.value.amount).toBe(10);
+      expect(bad.ok).toBe(false);
+      expect(bad.ok === false && bad.error).toBeInstanceOf(JITValidationError);
+
+      const [noError, value] = Tuple.create(valid);
+      const [error, noValue] = Tuple.create(invalid);
+      expect(noError).toBeUndefined();
+      expect(value?.amount).toBe(10);
+      expect(error).toBeInstanceOf(JITValidationError);
+      expect(noValue).toBeUndefined();
+
+      expectTypeOf(Throwing.create(valid)).toHaveProperty("amount");
+      expectTypeOf(Result.create(valid)).toHaveProperty("ok");
+      expectTypeOf(Tuple.create(valid)).toHaveProperty(0);
+    });
+
+    it("covers hydration and lets a phase keep the built-in behavior", () => {
+      const Both = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
+      const CreateOnly = JIT.ddd.valueObject(MoneySchema).validate({ result: "result", hydrate: false });
+
+      expect(Both.hydrate(invalid).ok).toBe(false);
+      expect(Both.hydrate(valid).ok).toBe(true);
+      // hydrate was left out of the policy, so it keeps throwing.
+      expect(() => CreateOnly.hydrate(invalid)).toThrow(JITValidationError);
+      expect(CreateOnly.create(invalid).ok).toBe(false);
+    });
+
+    it("builds the error the artifact configured", () => {
+      class InvalidMoney extends Error {}
+      const Money = JIT.ddd
+        .valueObject(MoneySchema)
+        .validate({ result: "result", error: (issues) => new InvalidMoney(issues[0]?.message) });
+      const rejected = Money.create(invalid);
+
+      expect(rejected.ok).toBe(false);
+      expect(rejected.ok === false && rejected.error).toBeInstanceOf(InvalidMoney);
+      expectTypeOf(rejected).toHaveProperty("ok");
+      if (rejected.ok === false) expectTypeOf(rejected.error).toEqualTypeOf<InvalidMoney>();
+    });
+
+    it("compiles a domain invariant from the shared condition builder", () => {
+      const Money = JIT.ddd.valueObject(MoneySchema).assert((query) => query.gte("amount", 0));
+      const artifact = getArtifact(Money as object);
+
+      expect(Money.create(valid).amount).toBe(10);
+      expect(() => Money.create({ amount: -1, currency: "BRL" })).toThrow(DomainAssertionError);
+      try {
+        Money.create({ amount: -1, currency: "BRL" });
+      } catch (error) {
+        expect((error as DomainAssertionError).field).toBe("amount");
+        expect((error as DomainAssertionError).rule).toBe("amount");
+      }
+      // The invariant is generated source, not a stored callback.
+      if (artifact?.kind !== "class") throw new Error("expected a class artifact");
+      expect(artifact.policy?.assertions?.source).toContain("value.amount >=");
+      // A domain assertion is not a schema failure: the two report differently.
+      expect(() => Money.create(invalid)).toThrow(JITValidationError);
+    });
+
+    it("lets an assertion name its own rule and build its own error", () => {
+      class NegativeMoney extends Error {}
+      const Money = JIT.ddd
+        .valueObject(MoneySchema)
+        .validate({ result: "result" })
+        .assert((query) => query.gte("amount", 0), {
+          rule: "non-negative",
+          error: () => new NegativeMoney("negative"),
+        });
+      const rejected = Money.create({ amount: -1, currency: "BRL" });
+
+      expect(rejected.ok).toBe(false);
+      expect(rejected.ok === false && rejected.error).toBeInstanceOf(NegativeMoney);
+      expect(Money.create(valid).ok).toBe(true);
+    });
+
+    it("refuses an assertion where there are no fields to name", () => {
+      const Email = JIT.ddd.valueObject(JIT.string().email());
+
+      expect(() => (Email as unknown as { assert(fn: unknown): unknown }).assert(() => undefined)).toThrow(
+        /object fields/i
+      );
+    });
+
+    it("applies the policy to entities and their subclasses", () => {
+      const UserBase = JIT.ddd
+        .entity(JIT.object({ id: JIT.string(), age: JIT.number() }), { id: "id" })
+        .validate({ result: "result" })
+        .assert((query) => query.gte("age", 18), { rule: "adult" });
+      class User extends UserBase {}
+
+      const ok = User.create({ id: "u_1", age: 20 });
+      const tooYoung = User.create({ id: "u_1", age: 10 });
+
+      expect(ok.ok === true && ok.value).toBeInstanceOf(User);
+      expect(tooYoung.ok).toBe(false);
+      expect(tooYoung.ok === false && (tooYoung.error as { rule?: string }).rule).toBe("adult");
+    });
+  });
+
+  describe("clone capability", () => {
+    const Schema = JIT.object({ id: JIT.string(), tags: JIT.array(JIT.string()) });
+
+    it("copies state through the shared clone plan", () => {
+      const User = JIT.class(Schema).use(JIT.class.clone);
+      const user = new User({ id: "u_1", tags: ["a"] });
+      const copy = user.clone();
+
+      expect(copy).toEqual(user);
+      expect(copy).not.toBe(user);
+      expect(copy).toBeInstanceOf(User);
+      // A clone is a copy of the state, not a shared reference to it.
+      expect(copy.tags).not.toBe(user.tags);
+      // `clone` returns the instance type, the way `with` does.
+      expectTypeOf(copy).toHaveProperty("tags");
+      expectTypeOf(user.clone).toBeFunction();
+    });
+
+    it("is absent until it is asked for", () => {
+      const Plain = JIT.class(Schema);
+      const Email = JIT.ddd.valueObject(JIT.string().email());
+
+      expect("clone" in new Plain({ id: "u_1", tags: [] })).toBe(false);
+      // A Value Object is its value; copying one answers nothing.
+      expect("clone" in Email.create("ada@example.com")).toBe(false);
+    });
+
+    it("preserves entity identity and starts an aggregate copy with no events", () => {
+      const EntityBase = JIT.ddd.entity(Schema, { id: "id" }).use(JIT.class.clone);
+      class Member extends EntityBase {}
+      const member = Member.create({ id: "u_1", tags: ["a"] });
+      const memberCopy = member.clone();
+
+      // Two objects claiming to be the same entity: the reason this is opt-in.
+      expect(memberCopy.sameIdentity(member)).toBe(true);
+      expect(memberCopy).not.toBe(member);
+
+      const OrderBase = JIT.ddd
+        .aggregateRoot(JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"]) }), {
+          id: "id",
+        })
+        .use(JIT.class.clone);
+      class Order extends OrderBase {
+        confirm() {
+          this.update({ status: "confirmed" });
+          this.raise({ type: "order.confirmed" });
+        }
+      }
+      const order = Order.create({ id: "o_1", status: "draft" });
+      order.confirm();
+      const orderCopy = order.clone();
+
+      expect(order.peekEvents()).toHaveLength(1);
+      expect(orderCopy.status).toBe("confirmed");
+      // The pending events belong to the transition that raised them.
+      expect(orderCopy.peekEvents()).toHaveLength(0);
+    });
   });
 
   it("binds identity keys to the object schema", () => {

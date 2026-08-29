@@ -91,6 +91,77 @@ const user = User.create({ id: "u_1", name: "Ada" });
 user.identity; // "u_1"
 ```
 
+## Validation policies
+
+A factory already parses its input — defaults and nested Runtime Types come
+from that same pass — so `.validate()` does not turn validation on. It chooses
+**how a rejection is reported**, and the choice belongs to the artifact rather
+than to the call, so the factory's signature says which shape a caller gets.
+
+```ts
+const Money = JIT.ddd.valueObject(
+  JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) }),
+).validate({ result: "result" });
+
+const outcome = Money.create({ amount: 10, currency: "BRL" });
+outcome.ok === true && outcome.value.amount; // 10
+```
+
+| `result` | `create(input)` returns |
+| --- | --- |
+| `"throw"` (default) | the instance, or throws `JITValidationError` |
+| `"result"` | `{ ok: true; value }` or `{ ok: false; error }` |
+| `"tuple"` | `[undefined, value]` or `[error, undefined]` |
+
+The tuple puts the error first so it destructures the way callers read it.
+Pass `error` to build your own, and `create` / `hydrate` to leave one phase on
+the built-in throwing path. A class that never calls `.validate()` carries no
+policy at all, in the runtime and in the generated module.
+
+## Domain assertions
+
+An invariant is written in the same condition builder a query filter uses, so
+it becomes a comparison in the generated source rather than a callback the
+factory keeps.
+
+```ts
+const Price = JIT.ddd
+  .valueObject(JIT.object({ amount: JIT.number() }))
+  .assert((query) => query.gte("amount", 0), { rule: "non-negative" });
+
+try {
+  Price.create({ amount: -1 });
+} catch (error) {
+  (error as { rule?: string }).rule; // "non-negative"
+}
+```
+
+`DomainAssertionError` carries `rule` and `field` and never the rejected value.
+Assertions run after schema validation and before the instance is built, and
+report through the factory's result policy — whether a failure throws or comes
+back as a value is one decision for the artifact, not one per invariant.
+
+## Cloning
+
+`clone` is a capability, not a default. Copying a Value Object answers nothing
+— the value *is* the identity — and copying an Entity produces two objects
+claiming to be the same one, which the domain has to decide rather than
+inherit.
+
+```ts
+const Session = JIT.class(
+  JIT.object({ id: JIT.string(), tags: JIT.array(JIT.string()) }),
+).use(JIT.class.clone);
+
+const session = new Session({ id: "s_1", tags: ["a"] });
+const copy = session.clone();
+copy.tags === session.tags; // false — the state is copied
+```
+
+It reuses the shared clone plan; there is no separate clone engine for classes.
+An Aggregate Root's copy starts with an empty event queue: the pending events
+belong to the transition that raised them, not to a copy of the state.
+
 ## Abstract classes
 
 Use `JIT.class.abstract(schema)` for a domain base. Its static factories use

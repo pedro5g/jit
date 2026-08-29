@@ -326,7 +326,8 @@ query describes the request; facts on the collection decide the access path.
 - Nested Runtime Types accept their boundary representation and materialize recursively through the shared validation/materialization lowering.
 - Scalar Value Objects are runtime objects with a readonly `value` accessor; never represent them as primitive intersections with methods.
 - Identity inference uses identifier metadata only when exactly one unambiguous candidate exists. Explicit identity always wins.
-- Factory validation and domain assertions are opt-in and add zero work to unconfigured classes.
+- Factory validation and domain assertions are opt-in and add zero work to unconfigured classes. `.validate()` selects the failure channel and the phases it covers; it does not decide whether the schema is checked, because defaults and nested Runtime Type materialization come from that same parse.
+- A domain assertion reports through the factory's result policy, never its own. An assertion error carries the rule and the field, never the rejected value.
 - Result policy is fixed at artifact declaration and reflected exactly in factory types.
 - Class capabilities reuse existing compiler plans; do not create separate clone, validation or diff engines for classes.
 - State collection mutation reuses access-path planning and the element `MutationPlan`.

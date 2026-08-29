@@ -158,6 +158,16 @@ var AccessDeniedError = class extends JITError {
   }
 };
 
+// ../../packages/jit/src/errors/assertion-error.ts
+var DomainAssertionError = class extends JITError {
+  constructor(message, details) {
+    super("ASSERTION_FAILED", message, details?.field === void 0 ? {} : { path: [details.field] });
+    this.name = "DomainAssertionError";
+    this.rule = details?.rule;
+    this.field = details?.field;
+  }
+};
+
 // ../../packages/jit/src/errors/validation-error.ts
 var JITValidationError = class extends JITError {
   constructor(issues) {
@@ -7985,18 +7995,28 @@ function compileHydrator(schema, options) {
     schema,
     "hydrator",
     () => {
+      const safeParse = compileSafeHydrator(schema, options);
+      return (state3) => {
+        const result = safeParse(state3);
+        if (result.success) return result.data;
+        throw new JITValidationError(result.issues);
+      };
+    },
+    options
+  );
+}
+function compileSafeHydrator(schema, options) {
+  return getCompileCached(
+    schema,
+    "hydrator:safe",
+    () => {
       const emitted = emitValidator(schema, {
         is: false,
         safeParse: true,
         safeParseAsync: false,
         resolveDefaults: false
       });
-      const safeParse = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).safeParse;
-      return (state3) => {
-        const result = safeParse(state3);
-        if (result.success) return result.data;
-        throw new JITValidationError(result.issues);
-      };
+      return globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).safeParse;
     },
     options
   );
@@ -18295,6 +18315,7 @@ function emitModule(plan, options, layout) {
   let needsRuntimeGetIndex = false;
   let needsRuntimeCachedIndex = false;
   let needsValidationError = false;
+  let needsAssertionError = false;
   let needsHashHelpers = false;
   let needsHashCache = false;
   let needsJsonPatchHelpers = false;
@@ -18727,6 +18748,7 @@ function emitModule(plan, options, layout) {
       const capabilities = new Set(artifact.capabilities);
       if (capabilities.has("equals")) methods.push("equals(other: unknown): boolean;");
       if (capabilities.has("hashCode")) methods.push("hashCode(): number;");
+      if (capabilities.has("clone")) methods.push(`clone(): ${value};`);
       if (capabilities.has("diff"))
         methods.push(
           'diff(other: unknown): ({ readonly type: "add" | "update"; readonly path: readonly PropertyKey[]; readonly value: unknown } | { readonly type: "remove"; readonly path: readonly PropertyKey[] })[];'
@@ -18820,6 +18842,58 @@ function emitModule(plan, options, layout) {
     js.push("})();");
     return { binding, type };
   }
+  function emitClassPolicy(policy, reportName) {
+    const lines = [];
+    const errorBinding = policy.error === void 0 ? void 0 : serializeBindingValue(policy.error);
+    if (policy.error !== void 0 && errorBinding === void 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.validate",
+        reason: "the configured error factory cannot be serialized ahead of time"
+      });
+      return void 0;
+    }
+    lines.push(
+      `  const __error = ${errorBinding ?? "(issues) => new JITValidationError(issues)"};`,
+      policy.result === "result" ? "  const __success = (value) => ({ ok: true, value });" : policy.result === "tuple" ? "  const __success = (value) => [undefined, value];" : "  const __success = (value) => value;",
+      policy.result === "result" ? "  const __failure = (error) => ({ ok: false, error });" : policy.result === "tuple" ? "  const __failure = (error) => [error, undefined];" : "  const __failure = (error) => { throw error; };"
+    );
+    if (policy.result === "throw") needsValidationError = true;
+    const assertions = policy.assertions;
+    if (assertions !== void 0) {
+      const inlined = inlineBindings(assertions.bindingNames, assertions.bindingValues);
+      if (inlined === void 0) {
+        skipped.push({
+          schema: reportName,
+          operation: "class.assert",
+          reason: "an assertion value cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
+      lines.push(...inlined.map((line) => `  ${line}`));
+      needsAssertionError = true;
+      for (const [index2, failure] of assertions.failures.entries()) {
+        const custom2 = failure.error === void 0 ? void 0 : serializeBindingValue(failure.error);
+        if (failure.error !== void 0 && custom2 === void 0) {
+          skipped.push({
+            schema: reportName,
+            operation: "class.assert",
+            reason: "an assertion error factory cannot be serialized ahead of time"
+          });
+          return void 0;
+        }
+        const details = JSON.stringify({
+          ...failure.rule === void 0 ? {} : { rule: failure.rule },
+          ...failure.field === void 0 ? {} : { field: failure.field }
+        });
+        lines.push(
+          custom2 === void 0 ? `  const __fail${index2} = () => new DomainAssertionError(${JSON.stringify(failure.message)}, ${details});` : `  const __fail${index2} = (value) => (${custom2})(value, ${JSON.stringify({ ...failure, error: void 0 })});`
+        );
+      }
+      lines.push(...indentBlock(assertions.source));
+    }
+    return lines;
+  }
   function emitClassArtifact(binding, declaration, artifact, reportName, type, assertedType) {
     const base = resolveObjectSchema(artifact.schema);
     const valueRepresentation = artifact.representation === "value";
@@ -18903,6 +18977,13 @@ function emitModule(plan, options, layout) {
       const diff3 = internalIdentifier(`${binding}_diff`);
       helpers2.push(`const ${diff3} = ${asExpression(source2, "diff")};`);
       methods.push(`diff(other) { return ${diff3}(this, other); }`);
+    }
+    if (capabilities.has("clone")) {
+      const source2 = tryEmit(reportName, "class.clone", skipped, () => emitCloneSource(artifact.schema));
+      if (!source2) return void 0;
+      const clone3 = internalIdentifier(`${binding}_clone`);
+      helpers2.push(`const ${clone3} = ${asExpression(source2, "clone")};`);
+      methods.push(`clone() { return new this.constructor(${clone3}(this), __construct, true); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
     const needsUpdate = artifact.aggregate || capabilities.has("with");
@@ -18996,12 +19077,21 @@ function emitModule(plan, options, layout) {
     const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
     const freeze = artifact.frozen ? " Object.freeze(this);" : "";
     const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
-    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : "return new this(input, __construct);";
-    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
+    const policy = artifact.policy;
+    const assertionCall = policy?.assertions === void 0 ? "" : "const failure = __assert(result.data); if (failure !== undefined) return __failure(failure); ";
+    const policyCreate = policy === void 0 || !policy.create ? void 0 : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
+    const policyHydrate = policy === void 0 || !policy.hydrate ? void 0 : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
+    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? "return new this(input, __construct);";
+    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : policyHydrate ?? `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
     const constructionGuard = artifact.construction === "factory" ? 'if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ' : "";
     const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push("  const __construct = Symbol();");
+    if (policy !== void 0) {
+      const policyLines = emitClassPolicy(policy, reportName);
+      if (policyLines === void 0) return void 0;
+      js.push(...policyLines);
+    }
     if (helpers2.length > 0) js.push(`  ${helpers2.join("\n  ")}`);
     js.push(`  return class ${binding} {`);
     js.push(...[...slots.values()].map((slot) => `    ${slot};`));
@@ -20023,6 +20113,20 @@ function emitModule(plan, options, layout) {
     return emitTypeScriptType(schema, typeNames);
   }
   const helpers = [];
+  if (needsAssertionError) {
+    helpers.push(
+      "class DomainAssertionError extends Error {",
+      "  constructor(message, details) {",
+      "    super(message);",
+      '    this.name = "DomainAssertionError";',
+      '    this.code = "ASSERTION_FAILED";',
+      "    this.rule = details?.rule;",
+      "    this.field = details?.field;",
+      "    this.path = details?.field === undefined ? undefined : [details.field];",
+      "  }",
+      "}"
+    );
+  }
   if (needsValidationError) {
     helpers.push(
       "class JITValidationError extends Error {",
@@ -23563,6 +23667,57 @@ function canonical(schema) {
   return compileCanonical(unwrapSchema(schema));
 }
 
+// ../../packages/jit/src/compiler/assertion.ts
+function resolveAssertionDescriptor(input) {
+  const fields = conditionFields(input.condition, /* @__PURE__ */ new Set());
+  const field = fields.size === 1 ? [...fields][0] : void 0;
+  const rule = input.rule ?? field;
+  return Object.freeze({
+    condition: input.condition,
+    bindings: Object.freeze([...input.bindings]),
+    rule,
+    message: input.message ?? (rule === void 0 ? "a domain assertion does not hold" : `the assertion on ${JSON.stringify(rule)} does not hold`),
+    field
+  });
+}
+function emitAssertionSource(descriptors) {
+  const writer = new CodeWriter();
+  writer.line("function __assert(value) {");
+  writer.indent(() => {
+    descriptors.forEach((descriptor, index2) => {
+      const test = emitQueryConditionSource(descriptor.condition, { fieldBase: "value", paramBase: "value" });
+      writer.line(`if (!(${test})) return __fail${index2}(value);`);
+    });
+    writer.line("return undefined;");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function assertionFailures(descriptors, errors) {
+  return descriptors.map((descriptor, index2) => {
+    const custom2 = errors[index2];
+    if (custom2 === void 0) {
+      const failure = Object.freeze({
+        ...descriptor.rule === void 0 ? {} : { rule: descriptor.rule },
+        ...descriptor.field === void 0 ? {} : { field: descriptor.field }
+      });
+      return () => new DomainAssertionError(descriptor.message, failure);
+    }
+    return (value) => custom2(value, descriptor);
+  });
+}
+function conditionFields(condition, into) {
+  if (condition.kind === "logical") {
+    conditionFields(condition.left, into);
+    conditionFields(condition.right, into);
+    return into;
+  }
+  if (condition.kind === "not") return conditionFields(condition.inner, into);
+  if (condition.left.kind === "field") into.add(condition.left.key);
+  if (condition.right.kind === "field") into.add(condition.right.key);
+  return into;
+}
+
 // ../../packages/jit/src/compiler/codec.ts
 function compileCodec(schema, options) {
   const version = options?.version ?? 1;
@@ -24572,6 +24727,98 @@ function validateObjectKeys3(schema, keys, compilerName) {
 // ../../packages/jit/src/factories/class.ts
 var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
 var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
+function createPolicyState() {
+  return {
+    mode: "throw",
+    error: void 0,
+    create: true,
+    hydrate: true,
+    configured: false,
+    assertions: [],
+    assertionErrors: [],
+    assert: void 0
+  };
+}
+function compileAssertions(policy) {
+  if (policy.assertions.length === 0) {
+    policy.assert = void 0;
+    return;
+  }
+  const failures = assertionFailures(policy.assertions, policy.assertionErrors);
+  const bindings = policy.assertions.flatMap((descriptor) => descriptor.bindings);
+  const bindingNames = bindings.map((_, index2) => `__q${index2}`);
+  const failureNames = failures.map((_, index2) => `__fail${index2}`);
+  policy.assert = globalThis.Function(
+    ...bindingNames,
+    ...failureNames,
+    `${emitAssertionSource(policy.assertions)}
+return __assert;`
+  )(...bindings, ...failures);
+}
+function policySuccess(policy, value) {
+  if (policy.mode === "result") return { ok: true, value };
+  if (policy.mode === "tuple") return [void 0, value];
+  return value;
+}
+function policyFailure(policy, error) {
+  if (policy.mode === "result") return { ok: false, error };
+  if (policy.mode === "tuple") return [error, void 0];
+  throw error;
+}
+function policyError(policy, issues) {
+  return policy.error === void 0 ? new JITValidationError(issues) : policy.error(issues);
+}
+function policyArtifact(policy) {
+  if (!policy.configured) return {};
+  const bindings = policy.assertions.flatMap((descriptor) => descriptor.bindings);
+  return {
+    policy: {
+      result: policy.mode,
+      create: policy.create,
+      hydrate: policy.hydrate,
+      ...policy.error === void 0 ? {} : { error: policy.error },
+      ...policy.assertions.length === 0 ? {} : {
+        assertions: {
+          source: emitAssertionSource(policy.assertions),
+          bindingNames: bindings.map((_, index2) => `__q${index2}`),
+          bindingValues: bindings,
+          failures: policy.assertions.map((descriptor, index2) => ({
+            rule: descriptor.rule,
+            field: descriptor.field,
+            message: descriptor.message,
+            ...policy.assertionErrors[index2] === void 0 ? {} : { error: policy.assertionErrors[index2] }
+          }))
+        }
+      }
+    }
+  };
+}
+function applyValidationPolicy(policy, options) {
+  policy.configured = true;
+  if (options?.result !== void 0) policy.mode = options.result;
+  if (options?.error !== void 0) policy.error = options.error;
+  if (options?.create !== void 0) policy.create = options.create;
+  if (options?.hydrate !== void 0) policy.hydrate = options.hydrate;
+}
+function applyAssertion(policy, schema, predicate, options) {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "Assertions describe object fields; a scalar schema has none to name");
+  }
+  const builder2 = createConditionBuilder(policy.assertions.reduce((total, item) => total + item.bindings.length, 0));
+  const condition = predicate(builder2.builder);
+  policy.assertions.push(
+    resolveAssertionDescriptor({
+      condition,
+      bindings: builder2.bindings,
+      ...options?.rule === void 0 ? {} : { rule: options.rule },
+      ...options?.message === void 0 ? {} : { message: options.message }
+    })
+  );
+  policy.assertionErrors.push(options?.error);
+  policy.configured = true;
+  compileAssertions(policy);
+}
 function classFactory(schema) {
   return createRuntimeClass(
     unwrapSchema(schema),
@@ -24594,6 +24841,30 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
   const parse3 = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
   const constructionState = { mode: construction };
+  const policy = createPolicyState();
+  let safeParse;
+  let safeHydrate;
+  const policySafeParse = () => {
+    safeParse ??= compileValidatorSelection(schema, ["safeParse"]).safeParse;
+    return safeParse;
+  };
+  const policySafeHydrate = () => {
+    safeHydrate ??= compileSafeHydrator(schema);
+    return safeHydrate;
+  };
+  const registerClass = () => registerArtifact(classTarget, {
+    kind: "class",
+    schema,
+    abstract: isAbstract,
+    frozen: freezeInstances,
+    aggregate,
+    construction: constructionState.mode,
+    representation: "object",
+    ...policyArtifact(policy),
+    capabilities: installedCapabilities,
+    factories: factoryNames,
+    accessors
+  });
   const classTarget = emitConstructor(
     properties,
     freezeInstances,
@@ -24609,20 +24880,31 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     if (isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
     }
-    return new this(
-      input,
-      INTERNAL_CONSTRUCT
-    );
+    const construct2 = this;
+    if (!policy.configured || !policy.create) return new construct2(input, INTERNAL_CONSTRUCT);
+    const parsed = policySafeParse()(input);
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    if (policy.assert !== void 0) {
+      const failure = policy.assert(parsed.data);
+      if (failure !== void 0) return policyFailure(policy, failure);
+    }
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
   }
   function hydrate(state3) {
     if (isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
     }
-    return new this(
-      hydrateState(state3),
-      INTERNAL_CONSTRUCT,
-      true
-    );
+    const construct2 = this;
+    if (!policy.configured || !policy.hydrate) {
+      return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
+    }
+    const parsed = policySafeHydrate()(state3);
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    if (policy.assert !== void 0) {
+      const failure = policy.assert(parsed.data);
+      if (failure !== void 0) return policyFailure(policy, failure);
+    }
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
   }
   Object.defineProperties(classTarget, {
     [CLASS_TARGET]: { enumerable: false, value: true },
@@ -24643,6 +24925,22 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           installedCapabilities.push(capability2.kind);
           installedCapabilityValues.push(capability2);
         }
+        return classTarget;
+      }
+    },
+    validate: {
+      enumerable: false,
+      value: (options) => {
+        applyValidationPolicy(policy, options);
+        registerClass();
+        return classTarget;
+      }
+    },
+    assert: {
+      enumerable: false,
+      value: (predicate, options) => {
+        applyAssertion(policy, schema, predicate, options);
+        registerClass();
         return classTarget;
       }
     },
@@ -24672,6 +24970,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           aggregate,
           construction: constructionState.mode,
           representation: "object",
+          ...policyArtifact(policy),
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -24709,6 +25008,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           aggregate,
           construction: constructionState.mode,
           representation: "object",
+          ...policyArtifact(policy),
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -24719,18 +25019,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
   });
   installFactory(classTarget, false, factoryNames.create, create);
   installFactory(classTarget, false, factoryNames.hydrate, hydrate);
-  registerArtifact(classTarget, {
-    kind: "class",
-    schema,
-    abstract: isAbstract,
-    frozen: freezeInstances,
-    aggregate,
-    construction: constructionState.mode,
-    representation: "object",
-    capabilities: installedCapabilities,
-    factories: factoryNames,
-    accessors
-  });
+  registerClass();
   return classTarget;
 }
 function installFactory(classTarget, previous, next, factory) {
@@ -24744,6 +25033,9 @@ function installFactory(classTarget, previous, next, factory) {
 function createScalarValueObject(schema, identifier2, isAbstract) {
   const parse3 = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
+  const policy = createPolicyState();
+  let safeParse;
+  let safeHydrate;
   const equal3 = compileEqual(schema);
   const hash4 = compileHash(schema);
   const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
@@ -24757,17 +25049,22 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     if (isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
     }
-    return new this(
-      args[0],
-      INTERNAL_CONSTRUCT
-    );
+    const construct2 = this;
+    if (!policy.configured || !policy.create) return new construct2(args[0], INTERNAL_CONSTRUCT);
+    safeParse ??= compileValidatorSelection(schema, ["safeParse"]).safeParse;
+    const parsed = safeParse(args[0]);
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
   }
   function hydrate(state3) {
-    return new this(
-      hydrateState(state3),
-      INTERNAL_CONSTRUCT,
-      true
-    );
+    const construct2 = this;
+    if (!policy.configured || !policy.hydrate) {
+      return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
+    }
+    safeHydrate ??= compileSafeHydrator(schema);
+    const parsed = safeHydrate(state3);
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
   }
   const register = () => registerArtifact(classTarget, {
     kind: "class",
@@ -24777,6 +25074,7 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     aggregate: false,
     construction: "factory",
     representation: "value",
+    ...policyArtifact(policy),
     capabilities: installedCapabilities,
     factories: factoryNames
   });
@@ -24828,6 +25126,20 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
       enumerable: false,
       value: () => {
         throw new JITError("INVALID_OPERATION", "Scalar Value Objects expose only their readonly value accessor");
+      }
+    },
+    validate: {
+      enumerable: false,
+      value: (options) => {
+        applyValidationPolicy(policy, options);
+        register();
+        return classTarget;
+      }
+    },
+    assert: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Assertions describe object fields; refine the scalar schema instead");
       }
     },
     identity: {
@@ -24928,6 +25240,19 @@ var classType = Object.assign(classFactory, {
       return diff3(this, other);
     });
   }),
+  clone: (() => {
+    const base = capability("clone", (prototype, schema) => {
+      const clone3 = compileClone(schema);
+      definePrototype(prototype, "clone", function cloneInstance() {
+        return new this.constructor(
+          clone3(this),
+          INTERNAL_CONSTRUCT,
+          true
+        );
+      });
+    });
+    return Object.freeze({ ...base, __clone: true });
+  })(),
   identity(key) {
     return capability(`identity:${key}`, (prototype, schema) => {
       const base = resolveWrappers(schema).base;

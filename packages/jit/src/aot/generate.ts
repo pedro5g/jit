@@ -281,6 +281,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   let needsRuntimeGetIndex = false;
   let needsRuntimeCachedIndex = false;
   let needsValidationError = false;
+  let needsAssertionError = false;
   let needsHashHelpers = false;
   let needsHashCache = false;
   let needsJsonPatchHelpers = false;
@@ -779,6 +780,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const capabilities = new Set(artifact.capabilities);
       if (capabilities.has("equals")) methods.push("equals(other: unknown): boolean;");
       if (capabilities.has("hashCode")) methods.push("hashCode(): number;");
+      if (capabilities.has("clone")) methods.push(`clone(): ${value};`);
       if (capabilities.has("diff"))
         methods.push(
           'diff(other: unknown): ({ readonly type: "add" | "update"; readonly path: readonly PropertyKey[]; readonly value: unknown } | { readonly type: "remove"; readonly path: readonly PropertyKey[] })[];'
@@ -949,6 +951,82 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   }
 
   /** Lowers a class descriptor into a plain class expression with no engine dependency. */
+  /**
+   * Emits the failure policy as local helpers.
+   *
+   * The result shape, the error construction and each invariant become plain
+   * source in the module. A custom error factory is a callback like any other:
+   * when it cannot be reconstructed the artifact is skipped with a reason
+   * rather than generated with a silently different failure.
+   */
+  function emitClassPolicy(
+    policy: NonNullable<Extract<CompiledArtifact, { readonly kind: "class" }>["policy"]>,
+    reportName: string
+  ): string[] | undefined {
+    const lines: string[] = [];
+    const errorBinding = policy.error === undefined ? undefined : serializeBindingValue(policy.error);
+
+    if (policy.error !== undefined && errorBinding === undefined) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.validate",
+        reason: "the configured error factory cannot be serialized ahead of time",
+      });
+      return undefined;
+    }
+    lines.push(
+      `  const __error = ${errorBinding ?? "(issues) => new JITValidationError(issues)"};`,
+      policy.result === "result"
+        ? "  const __success = (value) => ({ ok: true, value });"
+        : policy.result === "tuple"
+          ? "  const __success = (value) => [undefined, value];"
+          : "  const __success = (value) => value;",
+      policy.result === "result"
+        ? "  const __failure = (error) => ({ ok: false, error });"
+        : policy.result === "tuple"
+          ? "  const __failure = (error) => [error, undefined];"
+          : "  const __failure = (error) => { throw error; };"
+    );
+    if (policy.result === "throw") needsValidationError = true;
+
+    const assertions = policy.assertions;
+    if (assertions !== undefined) {
+      const inlined = inlineBindings(assertions.bindingNames, assertions.bindingValues);
+      if (inlined === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "class.assert",
+          reason: "an assertion value cannot be serialized ahead of time",
+        });
+        return undefined;
+      }
+      lines.push(...inlined.map((line) => `  ${line}`));
+      needsAssertionError = true;
+      for (const [index, failure] of assertions.failures.entries()) {
+        const custom = failure.error === undefined ? undefined : serializeBindingValue(failure.error);
+        if (failure.error !== undefined && custom === undefined) {
+          skipped.push({
+            schema: reportName,
+            operation: "class.assert",
+            reason: "an assertion error factory cannot be serialized ahead of time",
+          });
+          return undefined;
+        }
+        const details = JSON.stringify({
+          ...(failure.rule === undefined ? {} : { rule: failure.rule }),
+          ...(failure.field === undefined ? {} : { field: failure.field }),
+        });
+        lines.push(
+          custom === undefined
+            ? `  const __fail${index} = () => new DomainAssertionError(${JSON.stringify(failure.message)}, ${details});`
+            : `  const __fail${index} = (value) => (${custom})(value, ${JSON.stringify({ ...failure, error: undefined })});`
+        );
+      }
+      lines.push(...indentBlock(assertions.source));
+    }
+    return lines;
+  }
+
   function emitClassArtifact(
     binding: string,
     declaration: string,
@@ -1049,6 +1127,15 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       helpers.push(`const ${diff} = ${asExpression(source, "diff")};`);
       methods.push(`diff(other) { return ${diff}(this, other); }`);
     }
+    if (capabilities.has("clone")) {
+      const source = tryEmit(reportName, "class.clone", skipped, () => emitCloneSource(artifact.schema));
+      if (!source) return undefined;
+      const clone = internalIdentifier(`${binding}_clone`);
+      helpers.push(`const ${clone} = ${asExpression(source, "clone")};`);
+      // An aggregate's pending events belong to the transition that raised
+      // them; a copy of the state starts with an empty queue.
+      methods.push(`clone() { return new this.constructor(${clone}(this), __construct, true); }`);
+    }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update: string | undefined;
@@ -1141,12 +1228,29 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const abstractGuard = artifact.abstract
       ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); `
       : "";
+    // A configured policy needs the issues rather than an exception, so the
+    // factory validates first and constructs a value it already trusts. An
+    // unconfigured class keeps the constructor-validating shape it had.
+    const policy = artifact.policy;
+    const assertionCall =
+      policy?.assertions === undefined
+        ? ""
+        : "const failure = __assert(result.data); if (failure !== undefined) return __failure(failure); ";
+    const policyCreate =
+      policy === undefined || !policy.create
+        ? undefined
+        : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
+    const policyHydrate =
+      policy === undefined || !policy.hydrate
+        ? undefined
+        : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
     const create = artifact.domainEvent
       ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);`
-      : "return new this(input, __construct);";
+      : (policyCreate ?? "return new this(input, __construct);");
     const hydrate = artifact.domainEvent
       ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);`
-      : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
+      : (policyHydrate ??
+        `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`);
     const constructionGuard =
       artifact.construction === "factory"
         ? 'if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); '
@@ -1156,6 +1260,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push("  const __construct = Symbol();");
+    if (policy !== undefined) {
+      const policyLines = emitClassPolicy(policy, reportName);
+      if (policyLines === undefined) return undefined;
+      js.push(...policyLines);
+    }
     if (helpers.length > 0) js.push(`  ${helpers.join("\n  ")}`);
     js.push(`  return class ${binding} {`);
     js.push(...[...slots.values()].map((slot) => `    ${slot};`));
@@ -2449,6 +2558,20 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   // engine is loaded in production, and cold start pays only this file.
   const helpers: string[] = [];
 
+  if (needsAssertionError) {
+    helpers.push(
+      "class DomainAssertionError extends Error {",
+      "  constructor(message, details) {",
+      "    super(message);",
+      '    this.name = "DomainAssertionError";',
+      '    this.code = "ASSERTION_FAILED";',
+      "    this.rule = details?.rule;",
+      "    this.field = details?.field;",
+      "    this.path = details?.field === undefined ? undefined : [details.field];",
+      "  }",
+      "}"
+    );
+  }
   if (needsValidationError) {
     helpers.push(
       "class JITValidationError extends Error {",

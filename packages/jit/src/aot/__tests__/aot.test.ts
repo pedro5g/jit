@@ -987,6 +987,72 @@ describe("JIT AOT generate", () => {
     expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
   });
 
+  it("should lower the clone capability through the shared clone plan", async () => {
+    const Schema = JIT.object({ id: JIT.string(), tags: JIT.array(JIT.string()) });
+    const User = JIT.class(Schema).use(JIT.class.clone);
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: new (input: {
+        id: string;
+        tags: string[];
+      }) => {
+        readonly tags: string[];
+        clone(): { readonly tags: string[] };
+      };
+    };
+    const user = new generated.User({ id: "u_1", tags: ["a"] });
+    const copy = user.clone();
+
+    expect(result.skipped).toEqual([]);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(copy).toEqual(user);
+    expect(copy).not.toBe(user);
+    expect(copy.tags).not.toBe(user.tags);
+  });
+
+  it("should lower a factory result policy and its assertions", async () => {
+    const MoneySchema = JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) });
+    const Money = JIT.ddd
+      .valueObject(MoneySchema)
+      .validate({ result: "result" })
+      .assert((query) => query.gte("amount", 0), { rule: "non-negative" });
+    const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Money: {
+        create(input: unknown): { ok: boolean; value?: { amount: number }; error?: { rule?: string } };
+        hydrate(input: unknown): { ok: boolean };
+      };
+    };
+
+    expect(result.skipped).toEqual([]);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    // The invariant is generated source, not a callback carried into the module.
+    expect(source).toContain("value.amount >=");
+    expect(source).toContain("class DomainAssertionError extends Error");
+    expect(generated.Money.create({ amount: 10, currency: "BRL" })).toEqual(
+      Money.create({ amount: 10, currency: "BRL" })
+    );
+    const rejected = generated.Money.create({ amount: -1, currency: "BRL" });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error?.rule).toBe("non-negative");
+    expect(generated.Money.create({ amount: "x", currency: "BRL" }).ok).toBe(false);
+    expect(generated.Money.hydrate({ amount: -1, currency: "BRL" }).ok).toBe(false);
+  });
+
+  it("should skip a class whose configured error factory cannot be serialized", () => {
+    const external = { label: "external" };
+    const Money = JIT.ddd
+      .valueObject(JIT.object({ amount: JIT.number() }))
+      .validate({ result: "result", error: () => new Error(external.label) });
+    const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
+
+    expect(result.skipped).toEqual([
+      { schema: "Money", operation: "class.validate", reason: expect.stringContaining("error factory") },
+    ]);
+  });
+
   it("should lower scalar value objects as standalone wrapper classes", async () => {
     const Email = JIT.ddd.valueObject(JIT.string().email());
     const result = AOT.generate({ groups: {}, artifacts: { Email }, outDir });

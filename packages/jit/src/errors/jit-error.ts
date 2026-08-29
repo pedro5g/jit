@@ -24,7 +24,8 @@ export type JITErrorCode =
   | "UNSUPPORTED_SCHEMA"
   | "READONLY_FIELD"
   | "REFINE_FAILED"
-  | "VALIDATION_FAILED";
+  | "VALIDATION_FAILED"
+  | "ASSERTION_FAILED";
 
 /**
  * Optional structured details attached to a `JITError`.

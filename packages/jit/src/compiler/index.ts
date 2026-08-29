@@ -5,6 +5,7 @@ export {
 export * from "./access.js";
 export * from "./access-path.js";
 export * from "./aggregate-mutation.js";
+export * from "./assertion.js";
 export * from "./binary-rowset.js";
 export * from "./cache-key.js";
 export * from "./canonical.js";

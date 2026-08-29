@@ -107,20 +107,41 @@ export function compileHydrator<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "hydrator",
     () => {
-      const emitted = emitValidator(schema, {
-        is: false,
-        safeParse: true,
-        safeParseAsync: false,
-        resolveDefaults: false,
-      });
-      const safeParse = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values)
-        .safeParse as (value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>;
+      const safeParse = compileSafeHydrator(schema, options);
 
       return (state: unknown) => {
         const result = safeParse(state);
         if (result.success) return result.data;
         throw new JITValidationError(result.issues);
       };
+    },
+    options
+  );
+}
+
+/**
+ * The same persisted-state boundary, reporting issues instead of throwing.
+ *
+ * A configured factory result policy needs the issues, not an exception, so
+ * both boundaries share one compiled pass rather than validating twice.
+ */
+export function compileSafeHydrator<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): (state: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>> {
+  return getCompileCached(
+    schema,
+    "hydrator:safe",
+    () => {
+      const emitted = emitValidator(schema, {
+        is: false,
+        safeParse: true,
+        safeParseAsync: false,
+        resolveDefaults: false,
+      });
+      return globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).safeParse as (
+        value: unknown
+      ) => SafeParseResult<ATS.TypeofSchema<TSchema>>;
     },
     options
   );
