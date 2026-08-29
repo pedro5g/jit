@@ -330,6 +330,10 @@ query describes the request; facts on the collection decide the access path.
 - A domain assertion reports through the factory's result policy, never its own. An assertion error carries the rule and the field, never the rejected value.
 - Result policy is fixed at artifact declaration and reflected exactly in factory types.
 - Class capabilities reuse existing compiler plans; do not create separate clone, validation or diff engines for classes.
+- Class and DDD capabilities attach through `.extends()`; do not reintroduce `.use()` for prototype capabilities.
+- Custom extensions live on the prototype and never allocate a method per instance, and there is no dispatcher between a call and its body.
+- An extension name may not shadow a schema accessor, a factory, the constructor or an installed capability. There is no override escape hatch.
+- Built-in extensions are reconstructive AOT capabilities. An application method is re-emitted from its own source only when `this` is the sole free name; anything else skips the artifact with a reason and is never silently dropped.
 - State collection mutation reuses access-path planning and the element `MutationPlan`.
 - Filtering, mapping and grouping remain CQRS concerns rather than state collection mutations.
 

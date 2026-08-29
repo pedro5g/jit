@@ -243,6 +243,23 @@ const cloneCategory = JIT.clone(Category);
 const diffCategory = JIT.compare.diff(Category);
 ```
 
+## `.use()` became `.extends()`
+
+Capabilities are attached with `.extends()`, which also takes application-owned
+methods. The operation is now *extending the prototype*, not *enabling an
+internal flag*, and one name for it is enough.
+
+```ts
+// before
+JIT.class(UserSchema).use(JIT.class.equals, JIT.class.hashCode);
+
+// after
+JIT.class(UserSchema).extends(JIT.class.equals, JIT.class.hashCode);
+```
+
+The rename is scoped to the Runtime Class and DDD builders. A `.use()`
+elsewhere in the API is a different operation and is unchanged.
+
 ## Runtime classes have one construction boundary
 
 A generated class used to answer to `new`, `create()` and `hydrate()` at once.

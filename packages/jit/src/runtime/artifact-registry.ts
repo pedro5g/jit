@@ -283,6 +283,12 @@ interface ClassArtifact {
   readonly construction: "constructor" | "factory";
   readonly representation: "object" | "value";
   readonly capabilities: readonly string[];
+  /** Application-owned prototype members added through `.extends({...})`. */
+  readonly methods?: readonly {
+    readonly name: string;
+    readonly kind: "method" | "get" | "set";
+    readonly source: Function;
+  }[];
   readonly factories: { readonly create: string | false; readonly hydrate: string | false };
   readonly accessors?:
     | readonly {

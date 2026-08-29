@@ -34,9 +34,10 @@ when called on a derived class.
 
 Use `.factories({ create, hydrate })` to enter factory mode and configure its
 names. At least one factory must remain enabled. Use `.accessors(...)` for
-visibility/storage policy and `.use(...)` for explicit capabilities such as
-`JIT.class.equals`, `hashCode`, `diff`, and `with`. Compiled helpers live on the
-constructor/prototype, never per instance.
+visibility/storage policy and `.extends(...)` for capabilities such as
+`JIT.class.equals`, `hashCode`, `diff`, `clone` and `with`, and for
+application-owned methods. Compiled helpers and extension methods live on the
+prototype, never per instance.
 
 `JIT.class.abstract(schema)` is an abstract constructor-first base. Configure
 factories explicitly when its concrete subclasses should be factory-built.

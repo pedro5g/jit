@@ -119,6 +119,23 @@ const CALLBACK_GLOBALS = new Set([
  * recreate lexical closures, native functions, bound functions or `this`.
  */
 export function serializeCallback(value: Function): string | undefined {
+  return serializeFunction(value, false);
+}
+
+/**
+ * The same conservative serializer, for a function that will live on a
+ * prototype.
+ *
+ * `this` is rejected in a callback because nothing would bind it. In a method
+ * it is the receiver, bound by the call rather than captured from a scope, so
+ * it is the one free name that stays correct once the body is re-emitted
+ * somewhere else. Every other closure reference is still refused.
+ */
+export function serializeMethod(value: Function): string | undefined {
+  return serializeFunction(value, true);
+}
+
+function serializeFunction(value: Function, allowThis: boolean): string | undefined {
   let source = Function.prototype.toString.call(value).trim();
 
   if (source.includes("[native code]") || source.startsWith("function bound ")) return undefined;
@@ -136,7 +153,7 @@ export function serializeCallback(value: Function): string | undefined {
     return undefined;
   }
 
-  if (hasUnsupportedClosureReferences(source)) return undefined;
+  if (hasUnsupportedClosureReferences(source, allowThis)) return undefined;
 
   return `(${source})`;
 }
@@ -145,11 +162,16 @@ export function serializeCallback(value: Function): string | undefined {
  * Conservative free-identifier check. Rejecting an unusual callback is safer
  * than emitting a module that fails later with a hidden ReferenceError.
  */
-function hasUnsupportedClosureReferences(source: string): boolean {
-  if (/\b(?:this|super)\b/.test(source)) return true;
+function hasUnsupportedClosureReferences(source: string, allowThis = false): boolean {
+  if (/\bsuper\b/.test(source)) return true;
+  if (!allowThis && /\bthis\b/.test(source)) return true;
 
   const code = maskCallbackLiterals(source);
   const locals = new Set<string>(["arguments"]);
+
+  // `this` is the receiver a prototype method is called with, not a name the
+  // body captured, so it stays legal exactly where a receiver exists.
+  if (allowThis) locals.add("this");
 
   for (const match of code.matchAll(/\bfunction(?:\s*\*)?\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^()]*)\)/g)) {
     if ((match[2] ?? "").includes("=")) return true;
@@ -312,7 +334,11 @@ function isArrowFunctionSource(source: string): boolean {
 }
 
 function normalizeMethodSource(source: string): string {
-  const match = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(source);
+  // An accessor's own source keeps its `get`/`set` prefix; the body is the
+  // same function once the prefix is dropped.
+  const accessor = /^(?:get|set)\s+/.exec(source);
+  const body = accessor ? source.slice(accessor[0].length) : source;
+  const match = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(body);
 
   if (!match) return "";
 

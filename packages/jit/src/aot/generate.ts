@@ -74,7 +74,7 @@ import {
   standaloneType,
 } from "./artifact-types.js";
 import { acceptsMissingBoundary, emitBoundaryType, emitTypeScriptType } from "./emit-type.js";
-import { serializeCallback } from "./serialize-callback.js";
+import { serializeCallback, serializeMethod } from "./serialize-callback.js";
 
 /** One declaration the generator could not build, and why. */
 export interface SkippedOperation {
@@ -792,6 +792,15 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       if (artifact.capabilities.some((capability) => capability.startsWith("identity:"))) {
         methods.push("identity(): unknown;", "sameIdentity(other: unknown): boolean;");
       }
+      // A serialized method carries its arity but not its types. The generated
+      // declaration says so rather than inventing a signature; the TypeScript
+      // output format infers the real one from the emitted body.
+      for (const method of artifact.methods ?? []) {
+        const name = classMemberName(method.name);
+        if (method.kind === "get") methods.push(`readonly ${name}: unknown;`);
+        else if (method.kind === "set") methods.push(`${name}: unknown;`);
+        else methods.push(`${name}(...args: never[]): unknown;`);
+      }
       const mixins: string[] = [];
       if (methods.length > 0) mixins.push(`{ ${methods.join(" ")} }`);
       if (artifact.aggregate) {
@@ -1137,6 +1146,25 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       methods.push(`clone() { return new this.constructor(${clone}(this), __construct, true); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
+    // Application-owned methods are re-emitted from their own source. `this`
+    // is the receiver a prototype call supplies, so it survives the move; a
+    // body that reaches for anything else in its module cannot, and the
+    // artifact is skipped rather than generated with a name that is not there.
+    for (const method of artifact.methods ?? []) {
+      const source = serializeMethod(method.source);
+      if (source === undefined) {
+        skipped.push({
+          schema: reportName,
+          operation: "class.extends",
+          reason: `the ${JSON.stringify(method.name)} extension references values outside its own body`,
+        });
+        return undefined;
+      }
+      const name = classMemberName(method.name);
+      if (method.kind === "get") methods.push(`get ${name}() { return ${source}.call(this); }`);
+      else if (method.kind === "set") methods.push(`set ${name}(value) { ${source}.call(this, value); }`);
+      else methods.push(`${name}(...args) { return ${source}.apply(this, args); }`);
+    }
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update: string | undefined;
     let aggregateUpdateBody: string | undefined;

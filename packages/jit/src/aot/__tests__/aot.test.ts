@@ -987,9 +987,64 @@ describe("JIT AOT generate", () => {
     expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
   });
 
+  it("should re-emit application methods added through .extends", async () => {
+    const Schema = JIT.object({ id: JIT.string(), name: JIT.string() });
+    const User = JIT.class(Schema)
+      .extends(JIT.class.equals)
+      .extends({
+        displayName() {
+          return this.name.toUpperCase();
+        },
+        sameAs(other: unknown) {
+          return this.equals(other);
+        },
+        get initial() {
+          return this.name[0];
+        },
+      });
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: new (input: {
+        id: string;
+        name: string;
+      }) => {
+        displayName(): string;
+        sameAs(other: unknown): boolean;
+        readonly initial: string;
+      };
+    };
+    const first = new generated.User({ id: "u_1", name: "Ada" });
+    const second = new generated.User({ id: "u_1", name: "Ada" });
+
+    expect(result.skipped).toEqual([]);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(first.displayName()).toBe("ADA");
+    expect(first.sameAs(second)).toBe(true);
+    expect(first.initial).toBe("A");
+    // Still one function on the prototype, not one per instance.
+    expect(first.displayName).toBe(second.displayName);
+    expect(source).toContain("get initial()");
+  });
+
+  it("should skip a class whose extension reaches outside its own body", () => {
+    const outside = { suffix: "!" };
+    const Loud = JIT.class(JIT.object({ name: JIT.string() })).extends({
+      shout() {
+        return this.name + outside.suffix;
+      },
+    });
+    const result = AOT.generate({ groups: {}, artifacts: { Loud }, outDir });
+
+    // Never silently dropped: the build says which member it could not carry.
+    expect(result.skipped).toEqual([
+      { schema: "Loud", operation: "class.extends", reason: expect.stringContaining('"shout"') },
+    ]);
+  });
+
   it("should lower the clone capability through the shared clone plan", async () => {
     const Schema = JIT.object({ id: JIT.string(), tags: JIT.array(JIT.string()) });
-    const User = JIT.class(Schema).use(JIT.class.clone);
+    const User = JIT.class(Schema).extends(JIT.class.clone);
     const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {

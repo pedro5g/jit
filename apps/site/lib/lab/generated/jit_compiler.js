@@ -18056,6 +18056,12 @@ var CALLBACK_GLOBALS = /* @__PURE__ */ new Set([
   "WeakSet"
 ]);
 function serializeCallback(value) {
+  return serializeFunction(value, false);
+}
+function serializeMethod(value) {
+  return serializeFunction(value, true);
+}
+function serializeFunction(value, allowThis) {
   let source = Function.prototype.toString.call(value).trim();
   if (source.includes("[native code]") || source.startsWith("function bound ")) return void 0;
   if (!isFunctionExpressionSource(source) && !isArrowFunctionSource(source)) {
@@ -18067,13 +18073,15 @@ function serializeCallback(value) {
   } catch {
     return void 0;
   }
-  if (hasUnsupportedClosureReferences(source)) return void 0;
+  if (hasUnsupportedClosureReferences(source, allowThis)) return void 0;
   return `(${source})`;
 }
-function hasUnsupportedClosureReferences(source) {
-  if (/\b(?:this|super)\b/.test(source)) return true;
+function hasUnsupportedClosureReferences(source, allowThis = false) {
+  if (/\bsuper\b/.test(source)) return true;
+  if (!allowThis && /\bthis\b/.test(source)) return true;
   const code = maskCallbackLiterals(source);
   const locals = /* @__PURE__ */ new Set(["arguments"]);
+  if (allowThis) locals.add("this");
   for (const match2 of code.matchAll(/\bfunction(?:\s*\*)?\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^()]*)\)/g)) {
     if ((match2[2] ?? "").includes("=")) return true;
     if (match2[1]) locals.add(match2[1]);
@@ -18217,7 +18225,9 @@ function isArrowFunctionSource(source) {
   return /^(?:async\s+)?(?:[A-Za-z_$][A-Za-z0-9_$]*|\([^)]*\))\s*=>/.test(source);
 }
 function normalizeMethodSource(source) {
-  const match2 = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(source);
+  const accessor = /^(?:get|set)\s+/.exec(source);
+  const body = accessor ? source.slice(accessor[0].length) : source;
+  const match2 = /^(async\s+)?(\*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\([\s\S]*)$/.exec(body);
   if (!match2) return "";
   const asyncPrefix = match2[1] ?? "";
   const generator = match2[2] ? "*" : "";
@@ -18760,6 +18770,12 @@ function emitModule(plan, options, layout) {
       if (artifact.capabilities.some((capability2) => capability2.startsWith("identity:"))) {
         methods.push("identity(): unknown;", "sameIdentity(other: unknown): boolean;");
       }
+      for (const method of artifact.methods ?? []) {
+        const name = classMemberName(method.name);
+        if (method.kind === "get") methods.push(`readonly ${name}: unknown;`);
+        else if (method.kind === "set") methods.push(`${name}: unknown;`);
+        else methods.push(`${name}(...args: never[]): unknown;`);
+      }
       const mixins = [];
       if (methods.length > 0) mixins.push(`{ ${methods.join(" ")} }`);
       if (artifact.aggregate) {
@@ -18986,6 +19002,21 @@ function emitModule(plan, options, layout) {
       methods.push(`clone() { return new this.constructor(${clone3}(this), __construct, true); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
+    for (const method of artifact.methods ?? []) {
+      const source2 = serializeMethod(method.source);
+      if (source2 === void 0) {
+        skipped.push({
+          schema: reportName,
+          operation: "class.extends",
+          reason: `the ${JSON.stringify(method.name)} extension references values outside its own body`
+        });
+        return void 0;
+      }
+      const name = classMemberName(method.name);
+      if (method.kind === "get") methods.push(`get ${name}() { return ${source2}.call(this); }`);
+      else if (method.kind === "set") methods.push(`set ${name}(value) { ${source2}.call(this, value); }`);
+      else methods.push(`${name}(...args) { return ${source2}.apply(this, args); }`);
+    }
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update2;
     let aggregateUpdateBody;
@@ -24871,6 +24902,22 @@ function applyAssertion(policy, schema, predicate, options) {
   policy.configured = true;
   compileAssertions(policy);
 }
+var SCALAR_MEMBERS = /* @__PURE__ */ new Set(["value", "equals", "hashCode", "toJSON"]);
+var RESERVED_EXTENSION_NAMES = /* @__PURE__ */ new Set([
+  "constructor",
+  "schema",
+  "create",
+  "hydrate",
+  "extends",
+  "factories",
+  "accessors",
+  "identity",
+  "validate",
+  "assert"
+]);
+function isClassCapability(value) {
+  return typeof value === "object" && value !== null && typeof value.install === "function" && typeof value.kind === "string";
+}
 function classFactory(schema) {
   return createRuntimeClass(
     unwrapSchema(schema),
@@ -24914,6 +24961,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     representation: "object",
     ...policyArtifact(policy),
     capabilities: installedCapabilities,
+    ...installedMethods.length === 0 ? {} : { methods: installedMethods },
     factories: factoryNames,
     accessors
   });
@@ -24927,6 +24975,9 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
   );
   const installedCapabilities = [];
   const installedCapabilityValues = [];
+  const installedMethods = [];
+  const installedMethodNames = /* @__PURE__ */ new Set();
+  const schemaNames = new Set(properties);
   let factoryNames = construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false };
   function create(input) {
     if (isAbstract && this === classTarget) {
@@ -24969,14 +25020,23 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
         identifier: false
       })
     },
-    use: {
+    extends: {
       enumerable: false,
-      value: (...capabilities) => {
-        for (const capability2 of capabilities) {
-          capability2.install(classTarget, schema);
-          installedCapabilities.push(capability2.kind);
-          installedCapabilityValues.push(capability2);
+      value: (...extensions) => {
+        for (const extension of extensions) {
+          if (isClassCapability(extension)) {
+            const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
+            extension.install(classTarget, schema);
+            for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
+              if (!before.has(name)) installedMethodNames.add(name);
+            }
+            installedCapabilities.push(extension.kind);
+            installedCapabilityValues.push(extension);
+            continue;
+          }
+          installedMethods.push(...installMethods(classTarget, extension, schemaNames, installedMethodNames));
         }
+        registerClass();
         return classTarget;
       }
     },
@@ -25023,6 +25083,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           construction: constructionState.mode,
           representation: "object",
           ...policyArtifact(policy),
+          ...installedMethods.length === 0 ? {} : { methods: installedMethods },
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -25041,7 +25102,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           constructionState.mode,
           resolveAccessors(properties, options)
         );
-        next.use(...installedCapabilityValues);
+        next.extends(...installedCapabilityValues);
         return constructionState.mode === "factory" ? next.factories(factoryNames) : next;
       }
     },
@@ -25061,6 +25122,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           construction: constructionState.mode,
           representation: "object",
           ...policyArtifact(policy),
+          ...installedMethods.length === 0 ? {} : { methods: installedMethods },
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors
@@ -25093,6 +25155,8 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
   const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
   const classTarget = globalThis.Function("__parse", "__construct", source)(parse3, INTERNAL_CONSTRUCT);
   const installedCapabilities = ["equals", "hashCode"];
+  const installedMethods = [];
+  const installedMethodNames = new Set(SCALAR_MEMBERS);
   let factoryNames = {
     create: "create",
     hydrate: "hydrate"
@@ -25128,6 +25192,7 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     representation: "value",
     ...policyArtifact(policy),
     capabilities: installedCapabilities,
+    ...installedMethods.length === 0 ? {} : { methods: installedMethods },
     factories: factoryNames
   });
   Object.defineProperties(classTarget, {
@@ -25143,12 +25208,20 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     },
     create: { configurable: true, enumerable: false, value: create },
     hydrate: { configurable: true, enumerable: false, value: hydrate },
-    use: {
+    extends: {
       enumerable: false,
-      value: (...capabilities) => {
-        for (const capability2 of capabilities) {
-          capability2.install(classTarget, schema);
-          installedCapabilities.push(capability2.kind);
+      value: (...extensions) => {
+        for (const extension of extensions) {
+          if (isClassCapability(extension)) {
+            const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
+            extension.install(classTarget, schema);
+            for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
+              if (!before.has(name)) installedMethodNames.add(name);
+            }
+            installedCapabilities.push(extension.kind);
+            continue;
+          }
+          installedMethods.push(...installMethods(classTarget, extension, SCALAR_MEMBERS, installedMethodNames));
         }
         register();
         return classTarget;
@@ -25350,7 +25423,7 @@ function valueObject(schema) {
     return createScalarValueObject(unwrapped, false, false);
   }
   const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
-  return "value" in base.def.props ? runtime.use(classType.equals, classType.hashCode) : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode);
+  return "value" in base.def.props ? runtime.extends(classType.equals, classType.hashCode) : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode);
 }
 valueObject.abstract = function abstractValueObject(schema) {
   const unwrapped = unwrapSchema(schema);
@@ -25362,7 +25435,7 @@ valueObject.abstract = function abstractValueObject(schema) {
     return createScalarValueObject(unwrapped, false, true);
   }
   const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
-  return "value" in base.def.props ? runtime.use(classType.equals, classType.hashCode) : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode);
+  return "value" in base.def.props ? runtime.extends(classType.equals, classType.hashCode) : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode);
 };
 function uniqueIdentifier(schema) {
   const identifierSchema = schema === void 0 ? defaultTo(
@@ -25421,14 +25494,14 @@ function findRuntimeTypeSchema(schema) {
 function entity(schema, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  return createRuntimeClass(unwrapped, true, false, false, "factory").use(
+  return createRuntimeClass(unwrapped, true, false, false, "factory").extends(
     classType.identity(identity)
   );
 }
 function aggregateRoot(schema, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").use(
+  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").extends(
     classType.identity(identity)
   );
   const base = resolveWrappers(unwrapped).base;
@@ -25639,6 +25712,33 @@ function capability(kind, install) {
       install(classTarget.prototype, schema);
     }
   });
+}
+function installMethods(classTarget, methods, taken, installed) {
+  const recorded = [];
+  for (const name of Object.keys(methods)) {
+    if (RESERVED_EXTENSION_NAMES.has(name) || taken.has(name) || installed.has(name)) {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `Class extension ${JSON.stringify(name)} would shadow an existing member; rename it`
+      );
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(methods, name);
+    if (descriptor === void 0) continue;
+    if (descriptor.get === void 0 && descriptor.set === void 0 && typeof descriptor.value !== "function") {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
+      );
+    }
+    Object.defineProperty(classTarget.prototype, name, { ...descriptor, enumerable: false, configurable: false });
+    installed.add(name);
+    if (descriptor.get !== void 0) recorded.push({ name, kind: "get", source: descriptor.get });
+    if (descriptor.set !== void 0) recorded.push({ name, kind: "set", source: descriptor.set });
+    if (descriptor.get === void 0 && descriptor.set === void 0) {
+      recorded.push({ name, kind: "method", source: descriptor.value });
+    }
+  }
+  return recorded;
 }
 function definePrototype(prototype, key, value) {
   Object.defineProperty(prototype, key, { configurable: false, enumerable: false, value, writable: false });

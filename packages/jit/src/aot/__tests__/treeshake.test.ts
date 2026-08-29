@@ -538,8 +538,8 @@ describe("JIT AOT tree-shaking (real bundler proof)", () => {
 
   it("should emit only configured class capabilities and drop unused classes", async () => {
     const Shape = JIT.object({ id: JIT.string(), value: JIT.number() });
-    const Comparable = JIT.class(Shape).use(JIT.class.equals);
-    const Hashable = JIT.class(Shape).use(JIT.class.hashCode);
+    const Comparable = JIT.class(Shape).extends(JIT.class.equals);
+    const Hashable = JIT.class(Shape).extends(JIT.class.hashCode);
 
     AOT.generate({ groups: {}, artifacts: { Comparable, Hashable }, outDir });
     const generated = readFileSync(join(outDir, "index.js"), "utf8");

@@ -209,11 +209,57 @@ function applyAssertion(
 }
 
 /** A generated runtime constructor backed by one object schema. */
-type CapabilityMethods<
+/**
+ * One argument of `.extends()`: a built-in capability or an object of methods.
+ *
+ * The object is typed with `ThisType` of the instance the class already has,
+ * so a body reads its own fields and its already-installed capabilities and
+ * nothing else. A name the instance already carries is rejected here rather
+ * than shadowing something at run time.
+ */
+export type ClassExtensionArgs<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
-  TCapabilities extends readonly AnyClassCapability[],
-> = UnionToIntersection<MethodsForCapability<TCapabilities[number], TSchema, TInstance>>;
+  TExtensions extends readonly AnyClassExtension[],
+> = {
+  [TKey in keyof TExtensions]: TExtensions[TKey] extends AnyClassCapability
+    ? TExtensions[TKey]
+    : TExtensions[TKey] &
+        // The built-ins named in the same call are part of `this`, so a method
+        // may use a capability it was declared beside.
+        ThisType<TInstance & CapabilitiesInCall<TSchema, TInstance, TExtensions>> & {
+          readonly [TName in keyof TInstance]?: never;
+        };
+};
+
+type CapabilitiesInCall<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TExtensions extends readonly AnyClassExtension[],
+> = UnionToIntersection<
+  TExtensions[number] extends infer TExtension
+    ? TExtension extends AnyClassCapability
+      ? MethodsForCapability<TExtension, TSchema, TInstance>
+      : never
+    : never
+>;
+
+type AnyClassExtension = AnyClassCapability | ClassMethodsInput;
+
+/** Methods an extension contributes, keeping declared signatures intact. */
+type MethodsForExtension<
+  TExtension,
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+> = TExtension extends AnyClassCapability
+  ? MethodsForCapability<TExtension, TSchema, TInstance>
+  : { -readonly [TKey in keyof TExtension]: TExtension[TKey] };
+
+type ExtensionMethods<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TExtensions extends readonly AnyClassExtension[],
+> = UnionToIntersection<MethodsForExtension<TExtensions[number], TSchema, TInstance>>;
 type MethodsForCapability<
   TCapability,
   TSchema extends ATS.AnyTypeSchema,
@@ -236,9 +282,9 @@ export interface RuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS
   readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance>;
   create<TThis extends RuntimeClass<TSchema>>(this: TThis, input: Input<TSchema>): InstanceType<TThis>;
   hydrate<TThis extends RuntimeClass<TSchema>>(this: TThis, state: Hydrate<TSchema>): InstanceType<TThis>;
-  use<const TCapabilities extends readonly AnyClassCapability[]>(
-    ...capabilities: TCapabilities
-  ): RuntimeClass<TSchema, TInstance & CapabilityMethods<TSchema, TInstance, TCapabilities>>;
+  extends<const TExtensions extends readonly AnyClassExtension[]>(
+    ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
+  ): RuntimeClass<TSchema, TInstance & ExtensionMethods<TSchema, TInstance, TExtensions>>;
   factories<const TOptions extends FactoryOptions>(
     options: TOptions
   ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
@@ -258,7 +304,7 @@ export interface RuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS
 type RuntimeClassConstructionMembers =
   | "create"
   | "hydrate"
-  | "use"
+  | "extends"
   | "factories"
   | "accessors"
   | "identity"
@@ -270,9 +316,9 @@ export type ConstructorRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance
   input: Input<TSchema>
 ) => TInstance) &
   Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> & {
-    use<const TCapabilities extends readonly AnyClassCapability[]>(
-      ...capabilities: TCapabilities
-    ): ConstructorRuntimeClass<TSchema, TInstance & CapabilityMethods<TSchema, TInstance, TCapabilities>>;
+    extends<const TExtensions extends readonly AnyClassExtension[]>(
+      ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
+    ): ConstructorRuntimeClass<TSchema, TInstance & ExtensionMethods<TSchema, TInstance, TExtensions>>;
     factories<const TOptions extends FactoryOptions>(
       options: TOptions
     ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
@@ -369,11 +415,11 @@ export type ConfiguredRuntimeClass<
 ) => TInstance) &
   Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> &
   FactoryMethods<TSchema, TInstance, TOptions, TMode, TError> & {
-    use<const TCapabilities extends readonly AnyClassCapability[]>(
-      ...capabilities: TCapabilities
+    extends<const TExtensions extends readonly AnyClassExtension[]>(
+      ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
     ): ConfiguredRuntimeClass<
       TSchema,
-      TInstance & CapabilityMethods<TSchema, TInstance, TCapabilities>,
+      TInstance & ExtensionMethods<TSchema, TInstance, TExtensions>,
       TOptions,
       TMode,
       TError
@@ -442,9 +488,9 @@ export type AbstractRuntimeClass<
   input: Input<TSchema>
 ) => TInstance) &
   Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> & {
-    use<const TCapabilities extends readonly AnyClassCapability[]>(
-      ...capabilities: TCapabilities
-    ): AbstractRuntimeClass<TSchema, TInstance & CapabilityMethods<TSchema, TInstance, TCapabilities>>;
+    extends<const TExtensions extends readonly AnyClassExtension[]>(
+      ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
+    ): AbstractRuntimeClass<TSchema, TInstance & ExtensionMethods<TSchema, TInstance, TExtensions>>;
     factories<const TOptions extends FactoryOptions>(
       options: TOptions
     ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
@@ -459,6 +505,40 @@ export interface ClassCapability<TMethods extends object = object> {
   readonly kind: string;
   install(classTarget: Function, schema: ATS.AnyTypeSchema): void;
   readonly __methods?: TMethods;
+}
+
+/**
+ * Application-owned methods installed on the generated prototype.
+ *
+ * One function per name, shared by every instance. There is no dispatcher: a
+ * call reaches the prototype the way it reaches a hand-written class method.
+ */
+export type ClassMethodsInput = Readonly<Record<string, unknown>>;
+
+/** Names a custom extension may not take, whatever the schema declares. */
+/** A scalar Value Object is its value; those members are already taken. */
+const SCALAR_MEMBERS: ReadonlySet<string> = new Set(["value", "equals", "hashCode", "toJSON"]);
+
+const RESERVED_EXTENSION_NAMES: ReadonlySet<string> = new Set([
+  "constructor",
+  "schema",
+  "create",
+  "hydrate",
+  "extends",
+  "factories",
+  "accessors",
+  "identity",
+  "validate",
+  "assert",
+]);
+
+function isClassCapability(value: unknown): value is AnyClassCapability {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { install?: unknown }).install === "function" &&
+    typeof (value as { kind?: unknown }).kind === "string"
+  );
 }
 
 /** Minimal application-owned event publisher contract. */
@@ -597,6 +677,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       representation: "object",
       ...policyArtifact(policy),
       capabilities: installedCapabilities,
+      ...(installedMethods.length === 0 ? {} : { methods: installedMethods }),
       factories: factoryNames,
       accessors,
     });
@@ -610,6 +691,13 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
   ) as RuntimeClass<TSchema>;
   const installedCapabilities: string[] = [];
   const installedCapabilityValues: AnyClassCapability[] = [];
+  const installedMethods: {
+    readonly name: string;
+    readonly kind: "method" | "get" | "set";
+    readonly source: Function;
+  }[] = [];
+  const installedMethodNames = new Set<string>();
+  const schemaNames: ReadonlySet<string> = new Set(properties);
   let factoryNames: { create: string | false; hydrate: string | false } =
     construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false };
 
@@ -666,14 +754,26 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         identifier: false,
       }) as ATS.RuntimeTypeSchema<TSchema, ATS.TypeofSchema<TSchema>>,
     },
-    use: {
+    extends: {
       enumerable: false,
-      value: (...capabilities: readonly AnyClassCapability[]) => {
-        for (const capability of capabilities) {
-          capability.install(classTarget, schema);
-          installedCapabilities.push(capability.kind);
-          installedCapabilityValues.push(capability);
+      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput)[]) => {
+        for (const extension of extensions) {
+          if (isClassCapability(extension)) {
+            // The names a capability defines are read back from the prototype
+            // rather than from a table, so a later extension collides with a
+            // clear message instead of a raw redefinition error.
+            const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
+            extension.install(classTarget, schema);
+            for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
+              if (!before.has(name)) installedMethodNames.add(name);
+            }
+            installedCapabilities.push(extension.kind);
+            installedCapabilityValues.push(extension);
+            continue;
+          }
+          installedMethods.push(...installMethods(classTarget, extension, schemaNames, installedMethodNames));
         }
+        registerClass();
         return classTarget;
       },
     },
@@ -720,6 +820,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           construction: constructionState.mode,
           representation: "object",
           ...policyArtifact(policy),
+          ...(installedMethods.length === 0 ? {} : { methods: installedMethods }),
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors,
@@ -739,7 +840,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           resolveAccessors(properties, options)
         );
 
-        next.use(...installedCapabilityValues);
+        next.extends(...installedCapabilityValues);
         return constructionState.mode === "factory" ? (next.factories(factoryNames) as RuntimeClass<TSchema>) : next;
       },
     },
@@ -759,6 +860,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           construction: constructionState.mode,
           representation: "object",
           ...policyArtifact(policy),
+          ...(installedMethods.length === 0 ? {} : { methods: installedMethods }),
           capabilities: installedCapabilities,
           factories: factoryNames,
           accessors,
@@ -806,6 +908,12 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     ScalarValueObject<ATS.TypeofSchema<TSchema>>
   >;
   const installedCapabilities = ["equals", "hashCode"];
+  const installedMethods: {
+    readonly name: string;
+    readonly kind: "method" | "get" | "set";
+    readonly source: Function;
+  }[] = [];
+  const installedMethodNames = new Set<string>(SCALAR_MEMBERS);
   let factoryNames: { create: string | false; hydrate: string | false } = {
     create: "create",
     hydrate: "hydrate",
@@ -858,6 +966,7 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       representation: "value",
       ...policyArtifact(policy),
       capabilities: installedCapabilities,
+      ...(installedMethods.length === 0 ? {} : { methods: installedMethods }),
       factories: factoryNames,
     });
 
@@ -874,12 +983,20 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     },
     create: { configurable: true, enumerable: false, value: create },
     hydrate: { configurable: true, enumerable: false, value: hydrate },
-    use: {
+    extends: {
       enumerable: false,
-      value: (...capabilities: readonly AnyClassCapability[]) => {
-        for (const capability of capabilities) {
-          capability.install(classTarget, schema);
-          installedCapabilities.push(capability.kind);
+      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput)[]) => {
+        for (const extension of extensions) {
+          if (isClassCapability(extension)) {
+            const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
+            extension.install(classTarget, schema);
+            for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
+              if (!before.has(name)) installedMethodNames.add(name);
+            }
+            installedCapabilities.push(extension.kind);
+            continue;
+          }
+          installedMethods.push(...installMethods(classTarget, extension, SCALAR_MEMBERS, installedMethodNames));
         }
         register();
         return classTarget;
@@ -1140,8 +1257,8 @@ export function valueObject<TSchema extends ATS.AnyTypeSchema>(
   const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
   return (
     "value" in (base as ATS.ObjectSchema).def.props
-      ? runtime.use(classType.equals, classType.hashCode)
-      : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode)
+      ? runtime.extends(classType.equals, classType.hashCode)
+      : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode)
   ) as FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
 }
 
@@ -1170,8 +1287,8 @@ valueObject.abstract = function abstractValueObject<TSchema extends ATS.AnyTypeS
   const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
   return (
     "value" in (base as ATS.ObjectSchema).def.props
-      ? runtime.use(classType.equals, classType.hashCode)
-      : runtime.use(valueAccessorCapability, classType.equals, classType.hashCode)
+      ? runtime.extends(classType.equals, classType.hashCode)
+      : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode)
   ) as FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
 };
 
@@ -1277,7 +1394,7 @@ export function entity<TSchema extends ATS.AnyTypeSchema>(
 ): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  return createRuntimeClass(unwrapped, true, false, false, "factory").use(
+  return createRuntimeClass(unwrapped, true, false, false, "factory").extends(
     classType.identity(identity)
   ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods>;
 }
@@ -1289,7 +1406,7 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
 ): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").use(
+  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").extends(
     classType.identity(identity)
   ) as unknown as AggregateRuntimeClass<
     TSchema,
@@ -1563,6 +1680,48 @@ function capability<TMethods extends object>(
       install(classTarget.prototype, schema);
     },
   });
+}
+
+/**
+ * Installs one application-owned method object on the prototype.
+ *
+ * Descriptors are copied rather than values, so a getter stays a getter and a
+ * setter stays a setter. Every name is checked first: an extension that
+ * shadowed a schema field, a factory or an installed capability would look
+ * like it worked and quietly change what the class means.
+ */
+function installMethods(
+  classTarget: Function,
+  methods: ClassMethodsInput,
+  taken: ReadonlySet<string>,
+  installed: Set<string>
+): { readonly name: string; readonly kind: "method" | "get" | "set"; readonly source: Function }[] {
+  const recorded: { name: string; kind: "method" | "get" | "set"; source: Function }[] = [];
+
+  for (const name of Object.keys(methods)) {
+    if (RESERVED_EXTENSION_NAMES.has(name) || taken.has(name) || installed.has(name)) {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `Class extension ${JSON.stringify(name)} would shadow an existing member; rename it`
+      );
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(methods, name);
+    if (descriptor === undefined) continue;
+    if (descriptor.get === undefined && descriptor.set === undefined && typeof descriptor.value !== "function") {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
+      );
+    }
+    Object.defineProperty(classTarget.prototype, name, { ...descriptor, enumerable: false, configurable: false });
+    installed.add(name);
+    if (descriptor.get !== undefined) recorded.push({ name, kind: "get", source: descriptor.get });
+    if (descriptor.set !== undefined) recorded.push({ name, kind: "set", source: descriptor.set });
+    if (descriptor.get === undefined && descriptor.set === undefined) {
+      recorded.push({ name, kind: "method", source: descriptor.value as Function });
+    }
+  }
+  return recorded;
 }
 
 function definePrototype(prototype: object, key: string, value: Function): void {

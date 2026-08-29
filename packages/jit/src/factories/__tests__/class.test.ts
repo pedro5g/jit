@@ -445,11 +445,127 @@ describe("JIT.class", () => {
     });
   });
 
+  describe("class extensions", () => {
+    const UserSchema = JIT.object({ id: JIT.string(), name: JIT.string(), status: JIT.string() });
+
+    it("installs application methods on the prototype, not on each instance", () => {
+      const User = JIT.class(UserSchema).extends({
+        displayName() {
+          return this.name.toUpperCase();
+        },
+      });
+      const first = new User({ id: "u_1", name: "Ada", status: "active" });
+      const second = new User({ id: "u_2", name: "Grace", status: "active" });
+
+      expect(first.displayName()).toBe("ADA");
+      // One function, shared: an extension is not an instance field.
+      expect(first.displayName).toBe(second.displayName);
+      expect(Object.getOwnPropertyNames(first)).not.toContain("displayName");
+      expectTypeOf(first.displayName()).toEqualTypeOf<string>();
+    });
+
+    it("types `this` from the instance the class already has", () => {
+      const User = JIT.class(UserSchema)
+        .extends(JIT.class.equals, JIT.class.clone)
+        .extends({
+          sameAs(other: unknown) {
+            return this.equals(other);
+          },
+          copyName() {
+            return this.clone().name;
+          },
+          missing() {
+            // @ts-expect-error the instance has no such field
+            return this.nope;
+          },
+        });
+      const user = new User({ id: "u_1", name: "Ada", status: "active" });
+
+      expect(user.sameAs(new User({ id: "u_1", name: "Ada", status: "active" }))).toBe(true);
+      expect(user.copyName()).toBe("Ada");
+      expectTypeOf(user.sameAs).toBeFunction();
+    });
+
+    it("composes a built-in and an object in one call", () => {
+      const Bucketed = JIT.class(UserSchema).extends(JIT.class.hashCode, {
+        bucket() {
+          return this.hashCode() % 8;
+        },
+      });
+
+      expect(typeof new Bucketed({ id: "u_1", name: "Ada", status: "active" }).bucket()).toBe("number");
+    });
+
+    it("keeps getters as getters and infers generic methods", () => {
+      const User = JIT.class(UserSchema).extends({
+        get initial() {
+          return this.name[0];
+        },
+        mapName<TValue>(map: (name: string) => TValue) {
+          return map(this.name);
+        },
+      });
+      const user = new User({ id: "u_1", name: "Ada", status: "active" });
+
+      expect(user.initial).toBe("A");
+      expect(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(user), "initial")?.get).toBeDefined();
+      expect(user.mapName((name) => name.length)).toBe(3);
+      expectTypeOf(user.mapName((name) => name.length)).toEqualTypeOf<number>();
+    });
+
+    it("refuses a name that already means something", () => {
+      // A silent shadow would look like it worked and change what the class is.
+      expect(() => JIT.class(UserSchema).extends({ name() {} } as never)).toThrow(/would shadow/i);
+      expect(() => JIT.class(UserSchema).extends({ create() {} } as never)).toThrow(/would shadow/i);
+      expect(() =>
+        JIT.class(UserSchema)
+          .extends(JIT.class.equals)
+          .extends({ equals() {} } as never)
+      ).toThrow(/would shadow/i);
+      expect(() => JIT.class(UserSchema).extends({ notAFunction: 1 } as never)).toThrow(
+        /method, a getter or a setter/i
+      );
+      if (Object.is(1, 2)) {
+        // @ts-expect-error a schema field cannot be redeclared as a method
+        JIT.class(UserSchema).extends({ name() {} });
+      }
+    });
+
+    it("extends DDD presets and survives subclassing", () => {
+      const MoneyBase = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() })).extends({
+        isZero() {
+          return this.amount === 0;
+        },
+      });
+      const UserBase = JIT.ddd.entity(UserSchema, { id: "id" }).extends({
+        isActive() {
+          return this.status === "active";
+        },
+      });
+      class User extends UserBase {}
+
+      expect(MoneyBase.create({ amount: 0, currency: "BRL" }).isZero()).toBe(true);
+      expect(User.create({ id: "u_1", name: "Ada", status: "active" }).isActive()).toBe(true);
+      expect(User.create({ id: "u_1", name: "Ada", status: "idle" }).isActive()).toBe(false);
+    });
+
+    it("extends a scalar value object without touching its own members", () => {
+      const Email = JIT.ddd.valueObject(JIT.string().email()).extends({
+        domain() {
+          return this.value.split("@")[1];
+        },
+      });
+
+      expect(Email.create("ada@example.com").domain()).toBe("example.com");
+      expect(() => JIT.ddd.valueObject(JIT.string()).extends({ value() {} } as never)).toThrow(/would shadow/i);
+    });
+  });
+
   describe("clone capability", () => {
     const Schema = JIT.object({ id: JIT.string(), tags: JIT.array(JIT.string()) });
 
     it("copies state through the shared clone plan", () => {
-      const User = JIT.class(Schema).use(JIT.class.clone);
+      const User = JIT.class(Schema).extends(JIT.class.clone);
       const user = new User({ id: "u_1", tags: ["a"] });
       const copy = user.clone();
 
@@ -473,7 +589,7 @@ describe("JIT.class", () => {
     });
 
     it("preserves entity identity and starts an aggregate copy with no events", () => {
-      const EntityBase = JIT.ddd.entity(Schema, { id: "id" }).use(JIT.class.clone);
+      const EntityBase = JIT.ddd.entity(Schema, { id: "id" }).extends(JIT.class.clone);
       class Member extends EntityBase {}
       const member = Member.create({ id: "u_1", tags: ["a"] });
       const memberCopy = member.clone();
@@ -486,7 +602,7 @@ describe("JIT.class", () => {
         .aggregateRoot(JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"]) }), {
           id: "id",
         })
-        .use(JIT.class.clone);
+        .extends(JIT.class.clone);
       class Order extends OrderBase {
         confirm() {
           this.update({ status: "confirmed" });
@@ -580,7 +696,7 @@ describe("JIT.class", () => {
   });
 
   it("adds structural capabilities through immutable descriptors on the prototype", () => {
-    const User = JIT.class(UserSchema).use(
+    const User = JIT.class(UserSchema).extends(
       JIT.class.equals,
       JIT.class.hashCode,
       JIT.class.diff,
@@ -604,7 +720,7 @@ describe("JIT.class", () => {
         name: JIT.string(),
         profile: JIT.object({ label: JIT.string() }),
       })
-    ).use(JIT.class.with);
+    ).extends(JIT.class.with);
     const ada = new User({
       name: "Ada",
       profile: { label: "math" },
@@ -631,7 +747,7 @@ describe("JIT.class", () => {
           return true;
         }),
       })
-    ).use(JIT.class.with);
+    ).extends(JIT.class.with);
     const ada = new User({ name: "Ada" });
 
     validations = 0;

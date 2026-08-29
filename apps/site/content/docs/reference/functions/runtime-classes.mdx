@@ -14,7 +14,7 @@ const UserSchema = JIT.object({
   name: JIT.string().min(2),
 });
 
-const User = JIT.class(UserSchema).use(JIT.class.equals, JIT.class.with);
+const User = JIT.class(UserSchema).extends(JIT.class.equals, JIT.class.with);
 
 const ada = new User({ name: "Ada" });
 const grace = ada.with({ name: "Grace" });
@@ -23,9 +23,60 @@ ada.equals(grace); // false
 ```
 
 Capabilities are explicit, installed once on the prototype, and reuse the
-structural compilers: `equals`, `hashCode`, `diff`, `with`, and
+structural compilers: `equals`, `hashCode`, `diff`, `clone`, `with`, and
 `identity("field")`. `with` accepts the schema-derived update patch type; readonly
 schema fields cannot be patched and are preserved by the compiled update.
+
+## Extensions
+
+`.extends()` takes built-in capabilities, application-owned methods, or both.
+Everything it installs lives on the prototype: one function shared by every
+instance, reached the way a hand-written class method is reached. There is no
+dispatcher between the call and the body.
+
+```ts
+const Member = JIT.class(UserSchema)
+  .extends(JIT.class.equals, JIT.class.clone)
+  .extends({
+    displayName() {
+      return this.name.toUpperCase();
+    },
+    sameAs(other: unknown) {
+      return this.equals(other);
+    },
+    get initial() {
+      return this.name[0];
+    },
+  });
+
+const member = new Member({ name: "Ada" });
+member.displayName(); // "ADA"
+member.initial; // "A"
+```
+
+`this` is the instance the class already has — its schema fields and the
+capabilities installed before, including ones named in the same call:
+
+```ts
+const Bucketed = JIT.class(UserSchema).extends(JIT.class.hashCode, {
+  bucket() {
+    return this.hashCode() % 8;
+  },
+});
+```
+
+Property descriptors are preserved, so a getter stays a getter. Generic methods
+keep their inference, and the methods become part of the instance type.
+
+A name that already means something is refused, in the types and at run time:
+a schema field, a factory, `constructor`, or a capability installed earlier. A
+silent shadow would look like it worked and change what the class is. There is
+no `override` escape hatch — an extension is meant to be additive.
+
+```ts
+JIT.class(UserSchema).extends({ name() {} });
+// JITError: Class extension "name" would shadow an existing member; rename it
+```
 
 ## Accessors
 
@@ -151,7 +202,7 @@ inherit.
 ```ts
 const Session = JIT.class(
   JIT.object({ id: JIT.string(), tags: JIT.array(JIT.string()) }),
-).use(JIT.class.clone);
+).extends(JIT.class.clone);
 
 const session = new Session({ id: "s_1", tags: ["a"] });
 const copy = session.clone();
@@ -379,6 +430,13 @@ locally, with no JIT runtime import. Generated Domain Events preserve
 `create(payload)` and `hydrate(state)`; direct construction and `hydrate()` use
 the complete persisted event envelope. Value Objects, Entities, Aggregate
 Roots, and Domain Events are factory-only by default.
+
+A built-in capability is fully reconstructive. An application method is
+re-emitted from its own source: `this` is the receiver a prototype call
+supplies, so it survives the move, but a body that reaches for anything else in
+its module cannot — such an artifact is **skipped with a reason** naming the
+member, never generated without it. Method source is never rebuilt from a
+serialized closure that captured something.
 
 Everything on this page reaches the generated module: the construction token,
 the scalar wrapper with its `value` accessor and scalar wire form, the nested
