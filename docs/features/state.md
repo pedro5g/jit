@@ -68,7 +68,7 @@ become faster. `explain()` reports which strategy it got.
 finds the row comes from the collection's own facts rather than from the call:
 a cached index for `.keyed()`, a binary search for `.ordered()` and unique, and
 an early-exit scan otherwise. See
-[Collection mutations](./collection-mutations.md).
+[State collections](./state-collections.md).
 
 ```ts
 const renameUser = JIT.state
@@ -111,4 +111,3 @@ known schema and explicit mutation intent to compile copy-on-write code.
 - Validate untrusted patches before applying them.
 - History management, side effects and a reactive application framework are
   not responsibilities of `JIT.state`.
-

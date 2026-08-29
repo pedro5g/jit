@@ -40,6 +40,7 @@ export type OperationDescriptor =
         | "project"
         | "changed"
         | "patch"
+        | "state.collection"
         | "cacheKey"
         | "canonical"
         | "access"

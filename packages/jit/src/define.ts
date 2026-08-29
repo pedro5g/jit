@@ -17,7 +17,7 @@ import type { Clone } from "./compiler/clone.js";
 import type { CompiledCodec } from "./compiler/codec.js";
 import { type CsvDescriptor, type CsvOptions, resolveCsvDescriptor } from "./compiler/csv.js";
 import type { Diff } from "./compiler/diff.js";
-import type { Equal } from "./compiler/equal.js";
+import { type Equal, emitEqualSource } from "./compiler/equal.js";
 import type { ExecutionPlan, ExecutionStage } from "./compiler/execution-plan.js";
 import type { Format } from "./compiler/format.js";
 import type { Hash } from "./compiler/hash.js";
@@ -29,6 +29,12 @@ import type { Mask } from "./compiler/mask.js";
 import { resolveMatchDescriptor } from "./compiler/match.js";
 import { appendMigrationEdge, createMigrationDescriptor, type MigrationDescriptor } from "./compiler/migration.js";
 import type { Mock } from "./compiler/mock.js";
+import {
+  type CollectionMutationDescriptor,
+  collectionMutationCacheKey,
+  emitCollectionMutationSource,
+  explainCollectionMutation,
+} from "./compiler/mutation/index.js";
 import {
   appendNdjsonFilter,
   createNdjsonDescriptor,
@@ -58,6 +64,11 @@ import { unwrapSchema } from "./core/builder/index.js";
 import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/host.js";
 import { JITError } from "./errors/index.js";
 import type { Ability, AccessBuilder, AccessPlan } from "./factories/access.js";
+import {
+  type CollectionMutation,
+  type CollectionMutationHost,
+  createCollectionState,
+} from "./factories/collection-state.js";
 import {
   type AuthorizedApiRequest,
   type CqrsInput,
@@ -1337,8 +1348,62 @@ const api = Object.freeze({
   authorize: defineApiAuthorize,
 });
 
+function defineCollectionMutation<TRow, TParams>(
+  schema: ATS.AnyTypeSchema,
+  descriptor: CollectionMutationDescriptor,
+  bindings: readonly unknown[]
+): CollectionMutation<TRow, TParams> {
+  const source = emitCollectionMutationSource(descriptor);
+  const names = bindings.map((_, index) => `__q${index}`);
+  const needsEqual =
+    descriptor.kind === "upsert" ||
+    descriptor.kind === "replaceAt" ||
+    descriptor.kind === "replaceByKey" ||
+    descriptor.kind === "replaceWhere";
+  const explanation = explainCollectionMutation(descriptor);
+  const stub = function aotCollectionMutation(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as unknown as CollectionMutation<TRow, TParams>;
+
+  Object.defineProperties(stub, {
+    explain: { enumerable: false, value: () => explanation },
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: collectionMutationCacheKey(descriptor),
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "state.collection" },
+      } satisfies ArtifactDescriptor,
+    },
+  });
+  registerArtifact(stub, {
+    kind: "collection-mutation-plan",
+    schema,
+    source,
+    bindingNames: names,
+    bindingValues: bindings,
+    equalSource: needsEqual ? emitEqualSource((schema.def as ATS.ElementDef).element) : undefined,
+    cacheKey: collectionMutationCacheKey(descriptor),
+    explanation,
+  });
+  return stub;
+}
+
+const buildCollectionState = createCollectionState as (
+  schema: SchemaInput<ATS.ArraySchema<ATS.AnyTypeSchema>>,
+  compile: CollectionMutationHost
+) => unknown;
+const defineCollection = ((schema: SchemaInput<ATS.ArraySchema>) =>
+  buildCollectionState(
+    schema as SchemaInput<ATS.ArraySchema<ATS.AnyTypeSchema>>,
+    defineCollectionMutation
+  )) as typeof RuntimeJIT.state.collection;
+
 const state = Object.freeze({
   ...RuntimeJIT.state,
+  collection: defineCollection,
   patch,
   reconcile: defineReconcile,
 });

@@ -23,7 +23,7 @@ work and for production performance. Each page explains:
 - [API query boundaries](./api-query-boundaries.md)
 - [Compiled state](./state.md)
 - [Mutation planner](./mutation-planner.md)
-- [Collection mutations](./collection-mutations.md)
+- [State collections](./state-collections.md)
 - [Mutation changes](./mutation-changes.md)
 - [Derived state](./derived-state.md)
 - [Sort and ordering plans](./sort.md)

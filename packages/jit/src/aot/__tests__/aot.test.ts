@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { JIT as DefineJIT } from "../../define.js";
 import { AOT, JIT } from "../../index.js";
 
 describe("JIT AOT generate", () => {
@@ -459,14 +460,48 @@ describe("JIT AOT generate", () => {
       .collection(Users)
       .updateByKey({ key: "id", patch: { name: JIT.cqrs.param("name") } });
     const RemoveMember = JIT.state.collection(Users).removeByKey({ key: "id" });
+    const ReplaceMember = JIT.state.collection(Users).replaceByKey({ key: "id" });
     const UpsertMember = JIT.state.collection(Users).upsert({ key: "id" });
+    const InsertMember = JIT.state.collection(Users).insertAt();
+    const RemoveAt = JIT.state.collection(Users).removeAt();
+    const ReplaceAt = JIT.state.collection(Users).replaceAt();
+    const UpdateAt = JIT.state.collection(Users).updateAt({ patch: { name: JIT.cqrs.param("name") } });
+    const SwapMembers = JIT.state.collection(Users).swap();
+    const MoveMember = JIT.state.collection(Users).move();
+    const TruncateMembers = JIT.state.collection(Users).truncate();
+    const ReplaceWhere = JIT.state.collection(Users).replaceWhere((query) => query.eq("id", JIT.cqrs.param("id")));
 
-    const result = AOT.generate({ artifacts: { RenameMember, RemoveMember, UpsertMember }, outDir });
+    const result = AOT.generate({
+      artifacts: {
+        RenameMember,
+        RemoveMember,
+        ReplaceMember,
+        UpsertMember,
+        InsertMember,
+        RemoveAt,
+        ReplaceAt,
+        UpdateAt,
+        SwapMembers,
+        MoveMember,
+        TruncateMembers,
+        ReplaceWhere,
+      },
+      outDir,
+    });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly RenameMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
       readonly RemoveMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly ReplaceMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
       readonly UpsertMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly InsertMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly RemoveAt: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly ReplaceAt: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly UpdateAt: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly SwapMembers: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly MoveMember: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly TruncateMembers: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
+      readonly ReplaceWhere: (value: unknown, params: Readonly<Record<string, unknown>>) => unknown;
     };
     const rows = [
       { id: "a", name: "Ada" },
@@ -480,9 +515,52 @@ describe("JIT AOT generate", () => {
       RenameMember(rows, { key: "b", name: "Bee" })
     );
     expect(generated.RemoveMember(rows, { key: "a" })).toEqual(RemoveMember(rows, { key: "a" }));
+    expect(generated.ReplaceMember(rows, { key: "b", row: { id: "b", name: "Bee" } })).toEqual(
+      ReplaceMember(rows, { key: "b", row: { id: "b", name: "Bee" } })
+    );
+    const inserted = { id: "x", name: "X" };
+    expect(generated.InsertMember(rows, { index: 1, row: inserted })).toEqual(
+      InsertMember(rows, { index: 1, row: inserted })
+    );
+    expect(generated.RemoveAt(rows, { index: 1 })).toEqual(RemoveAt(rows, { index: 1 }));
+    expect(generated.ReplaceAt(rows, { index: 1, row: inserted })).toEqual(
+      ReplaceAt(rows, { index: 1, row: inserted })
+    );
+    expect(generated.UpdateAt(rows, { index: 1, name: "Bee" })).toEqual(UpdateAt(rows, { index: 1, name: "Bee" }));
+    expect(generated.SwapMembers(rows, { a: 0, b: 1 })).toEqual(SwapMembers(rows, { a: 0, b: 1 }));
+    expect(generated.MoveMember(rows, { from: 0, to: 1 })).toEqual(MoveMember(rows, { from: 0, to: 1 }));
+    expect(generated.TruncateMembers(rows, { length: 1 })).toEqual(TruncateMembers(rows, { length: 1 }));
+    expect(generated.ReplaceWhere(rows, { id: "a", row: { id: "a", name: "Grace" } })).toEqual(
+      ReplaceWhere(rows, { id: "a", row: { id: "a", name: "Grace" } })
+    );
     // The upsert no-op test is specialized equality, inlined into the module.
     expect(generated.UpsertMember(rows, { key: "b", row: { id: "b", name: "Bob" } })).toBe(rows);
     expect(generated.RenameMember(rows, { key: "b", name: "Bob" })).toBe(rows);
+  });
+
+  it("declares state collection mutations without compiling an executable runtime artifact", async () => {
+    const Item = DefineJIT.object({ id: DefineJIT.string(), name: DefineJIT.string() });
+    const Items = DefineJIT.array(Item).keyed("id");
+    const InsertAt = DefineJIT.state.collection(Items).insertAt();
+    const UpdateAt = DefineJIT.state.collection(Items).updateAt({ patch: { name: DefineJIT.cqrs.param("name") } });
+
+    expect(() => InsertAt([], { index: 0, row: { id: "a", name: "Ada" } })).toThrow(
+      /cannot be executed from definition files/i
+    );
+
+    const result = AOT.generate({ artifacts: { InsertAt, UpdateAt }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly InsertAt: typeof InsertAt;
+      readonly UpdateAt: typeof UpdateAt;
+    };
+    const rows = [{ id: "a", name: "Ada" }];
+
+    expect(result.skipped).toHaveLength(0);
+    expect(generated.InsertAt(rows, { index: 1, row: { id: "b", name: "Bob" } })).toEqual([
+      rows[0],
+      { id: "b", name: "Bob" },
+    ]);
+    expect(generated.UpdateAt(rows, { index: 0, name: "Grace" })).toEqual([{ id: "a", name: "Grace" }]);
   });
 
   it("emits a declared patch as one copy-on-write function", async () => {

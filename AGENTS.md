@@ -140,6 +140,26 @@ Legacy schemas may still use fields such as `item`, `props`, `schemas`, `literal
   hydration use the complete event envelope. Rename factories only through an
   explicit `.factories(...)` call.
 
+Runtime types expose one canonical construction boundary. `JIT.class` defaults
+to direct construction; DDD value objects, entities, and aggregate roots
+default to factory construction. Do not expose both direct `new` and factories
+by default. Create semantics may resolve defaults; hydrate semantics never
+regenerate persisted defaults.
+
+Nested Runtime Types accept their boundary representation and materialize
+recursively. Scalar Value Objects are runtime objects with a readonly `value`
+accessor, never primitive intersections with methods. Identity inference may
+use identifier metadata only when exactly one unambiguous candidate exists.
+
+Factory validation and domain assertions are opt-in and add zero work to
+unconfigured classes. A factory result policy is fixed at artifact declaration
+and reflected exactly in its types. Class capabilities reuse existing compiler
+plans; do not create separate clone, validate, or diff engines for classes.
+
+State collection mutation reuses shared AccessPath planning and the element's
+MutationPlan. Do not implement collection filtering, mapping, or grouping under
+state when CQRS already owns those semantics.
+
 ## Tests
 
 - Use Vitest.

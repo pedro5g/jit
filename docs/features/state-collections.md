@@ -1,8 +1,8 @@
-# Collection Mutations
+# State Collections
 
 ## Problem
 
-This is not an array API. `updateByKey`, `removeByKey` and `upsert` say what
+This is not an array API. `updateByKey`, `removeByKey`, `replaceByKey`, and `upsert` say what
 should happen to a row; **which algorithm finds that row is decided from the
 collection's declared facts**, by the same planner queries and lookups use.
 
@@ -15,6 +15,25 @@ const renameUser = JIT.state
 
 renameUser(users, { key: "u_1", name: "Grace" });
 ```
+
+Positional intent is compiled by the same artifact surface:
+
+```ts
+const Items = JIT.state.collection(JIT.array(Item));
+
+const insert = Items.insertAt();
+const update = Items.updateAt({ patch: { status: JIT.cqrs.param("status") } });
+const move = Items.move();
+
+insert(items, { index: 2, row: nextItem });
+update(items, { index: 2, status: "ready" });
+move(items, { from: 2, to: 0 });
+```
+
+The complete positional surface is `append`, `prepend`, `insertAt`,
+`removeAt`, `replaceAt`, `updateAt`, `swap`, `move`, and `truncate`. Invalid or
+non-integer positions return the original collection. `insertAt` accepts the
+end position; the other indexed operations require an existing slot.
 
 Declare `.ordered("id").uniqueBy("id")` instead and the same code binary-searches
 rather than scans. Nothing about the call changes.
@@ -75,9 +94,21 @@ mix finding the target with building the result.
 An ordered `upsert` inserts at the position the search reported, so the
 collection is still ordered afterwards.
 
+Positional operations do no search and report `DirectPosition` in `explain()`.
+Insertion, removal, movement, and truncation allocate one exact-sized array
+only after their bounds/no-op checks. `updateAt` first runs the element's shared
+`MutationPlan`; when that plan returns the original element, the collection is
+also returned unchanged. `replaceAt` uses compiled equality, so a structurally
+equal replacement is a no-op even when it is a different object reference.
+
+`move` copies ranges directly and never creates the intermediate arrays that
+two `splice` calls imply. `swap` copies once, and returns the original array for
+the same position or the same two element references.
+
 ## Selecting by predicate
 
-When identity is not the question, `updateWhere` and `removeWhere` select rows
+When identity is not the question, `updateWhere`, `removeWhere`, and
+`replaceWhere` select rows
 with the **shared query condition** — the same builder `JIT.cqrs.query` uses.
 There is no separate mutation predicate language:
 
@@ -168,14 +199,34 @@ invalidated, runs within noise of the keyed path at every size. That comparison
 is marked *not comparable* in the benchmark for exactly that reason: it is the
 ceiling, not a competitor.
 
+The same benchmark measures every positional operation at 8, 64, 1 000,
+10 000, and 100 000 elements, with idiomatic JavaScript, a handwritten ceiling,
+runtime JIT, standalone AOT, heap, and GC samples. Representative results from
+the same machine at 100 000 elements:
+
+| Operation | Runtime JIT | AOT | Idiomatic baseline | Handwritten |
+| --- | ---: | ---: | ---: | ---: |
+| `updateAt` | 406 µs | 402 µs | 405 µs | 409 µs |
+| `move` | 503 µs | 496 µs | 423 µs (`slice` + two `splice`) | 512 µs |
+| `truncate` | 258 µs | 265 µs | 210 µs (`slice`) | 260 µs |
+
+These measurements are deliberately not a blanket speed claim. Direct loops
+avoid intermediate collection allocations and stay near the handwritten
+ceiling, but V8's native `slice`/`splice` paths can be faster for large arrays.
+The persisted report records allocation as well as time; future physical
+selection should only replace the current one-allocation strategy when the
+full size/allocation regime supports it.
+
 ## Runtime, define and AOT
 
 Each mutation registers a reconstructive `collection-mutation-plan` artifact
 carrying its source, its bindings and its resolved access path. `jit generate`
 emits it as one import-free function; the upsert's structural no-op test is
 schema-specialized equality inlined as a local helper, and the index cache
-helper is emitted once per module. Runtime, define and AOT produce the same
-function.
+helper is emitted once per module. The define host builds the same semantic
+descriptor without calling `new Function`; attempting to execute that
+descriptor fails until generation. Runtime, define, and AOT preserve the same
+observable contract.
 
 ## Best practices and non-goals
 
@@ -188,4 +239,6 @@ function.
   return the original array.
 - Prefer `updateByKey` over `updateWhere` when the question really is identity:
   it needs no predicate and no condition to evaluate.
+- Use CQRS for `map`, `filter`, and `groupBy`; state collections own immutable
+  mutation, not collection querying.
 - Rekey, reposition, and Map/Set mutation are not part of this milestone.

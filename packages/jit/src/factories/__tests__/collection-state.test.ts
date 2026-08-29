@@ -66,6 +66,19 @@ describe("JIT.state.collection", () => {
     expect(sourceOf(remove)).toContain("new Array(len - 1)");
   });
 
+  it.each(strategies)("replaces one row by key on the %s path", (_label, schema) => {
+    const replace = JIT.state.collection(schema).replaceByKey({ key: "id" });
+    const replacement = { id: "b", name: "Bee", score: 9 };
+
+    expect(replace(rows, { key: "missing", row: replacement })).toBe(rows);
+    expect(replace(rows, { key: "b", row: { id: "b", name: "Bob", score: 2 } })).toBe(rows);
+    const next = replace(rows, { key: "b", row: replacement });
+    expect(next).toEqual([rows[0], replacement, rows[2]]);
+    expect(next[0]).toBe(rows[0]);
+    expect(next[2]).toBe(rows[2]);
+    expect(sourceOf(replace)).toContain("__equal(row, next)");
+  });
+
   it("upserts through the access path and keeps an ordered collection ordered", () => {
     const keyed = JIT.state.collection(Keyed).upsert({ key: "id" });
     const ordered = JIT.state.collection(Ordered).upsert({ key: "id" });
@@ -94,6 +107,109 @@ describe("JIT.state.collection", () => {
     expect(prepend(rows, { row })).toEqual([row, ...rows]);
     expect(append([], { row })).toEqual([row]);
     expect(sourceOf(append)).not.toContain("find(");
+  });
+
+  it("performs positional insertion and removal with one exact-sized result", () => {
+    const Items = JIT.state.collection(JIT.array(JIT.number()));
+    const insert = Items.insertAt();
+    const remove = Items.removeAt();
+    const value = [1, 2, 3] as const;
+
+    expect(insert(value, { index: 0, row: 0 })).toEqual([0, 1, 2, 3]);
+    expect(insert(value, { index: 2, row: 9 })).toEqual([1, 2, 9, 3]);
+    expect(insert(value, { index: 3, row: 4 })).toEqual([1, 2, 3, 4]);
+    expect(remove(value, { index: 0 })).toEqual([2, 3]);
+    expect(remove(value, { index: 1 })).toEqual([1, 3]);
+    expect(remove(value, { index: 2 })).toEqual([1, 2]);
+
+    for (const index of [-1, 4, 1.5, Number.NaN]) {
+      expect(insert(value, { index, row: 9 })).toBe(value);
+      expect(remove(value, { index })).toBe(value);
+    }
+    expect(sourceOf(insert)).toContain("new Array(len + 1)");
+    expect(sourceOf(remove)).toContain("new Array(len - 1)");
+    expect(sourceOf(insert)).not.toMatch(/\.slice\(|\.splice\(|\.concat\(/);
+    expect(sourceOf(remove)).not.toMatch(/\.slice\(|\.splice\(|\.filter\(/);
+  });
+
+  it("replaces by position with schema equality and retains no-op references", () => {
+    const Values = JIT.state.collection(JIT.array(User));
+    const replace = Values.replaceAt();
+    const equal = { id: "b", name: "Bob", score: 2 };
+    const replacement = { id: "b", name: "Bee", score: 2 };
+
+    expect(replace(rows, { index: 1, row: equal })).toBe(rows);
+    const next = replace(rows, { index: 1, row: replacement });
+    expect(next).toEqual([rows[0], replacement, rows[2]]);
+    expect(next[0]).toBe(rows[0]);
+    expect(next[2]).toBe(rows[2]);
+    expect(replace(rows, { index: 3, row: replacement })).toBe(rows);
+    expect(sourceOf(replace)).toContain("__equal(row, next)");
+  });
+
+  it("updates one element through its shared MutationPlan", () => {
+    const update = JIT.state.collection(Plain).updateAt({
+      patch: { name: JIT.cqrs.param("name") },
+    });
+
+    expect(update(rows, { index: 1, name: "Bob" })).toBe(rows);
+    expect(update(rows, { index: -1, name: "Bee" })).toBe(rows);
+    const next = update(rows, { index: 1, name: "Bee" });
+    expect(next[0]).toBe(rows[0]);
+    expect(next[1]).toEqual({ id: "b", name: "Bee", score: 2 });
+    expect(next[2]).toBe(rows[2]);
+    expect(sourceOf(update).indexOf("if (next === row) return value;")).toBeLessThan(
+      sourceOf(update).indexOf("value.slice()")
+    );
+  });
+
+  it("swaps and moves slots without intermediate collection operations", () => {
+    const Items = JIT.state.collection(JIT.array(JIT.number()));
+    const swap = Items.swap();
+    const move = Items.move();
+    const value = [0, 1, 2, 3] as const;
+
+    expect(swap(value, { a: 0, b: 3 })).toEqual([3, 1, 2, 0]);
+    expect(swap(value, { a: 2, b: 2 })).toBe(value);
+    expect(swap(value, { a: -1, b: 2 })).toBe(value);
+    expect(move(value, { from: 0, to: 3 })).toEqual([1, 2, 3, 0]);
+    expect(move(value, { from: 3, to: 1 })).toEqual([0, 3, 1, 2]);
+    expect(move(value, { from: 1, to: 1 })).toBe(value);
+    expect(move(value, { from: 4, to: 0 })).toBe(value);
+    expect(sourceOf(move)).not.toMatch(/\.splice\(|\.slice\(|\.copyWithin\(/);
+  });
+
+  it("truncates only to a shorter valid length", () => {
+    const truncate = JIT.state.collection(JIT.array(JIT.number())).truncate();
+    const value = [1, 2, 3] as const;
+
+    expect(truncate(value, { length: 0 })).toEqual([]);
+    expect(truncate(value, { length: 2 })).toEqual([1, 2]);
+    expect(truncate(value, { length: 3 })).toBe(value);
+    expect(truncate(value, { length: 9 })).toBe(value);
+    expect(truncate(value, { length: -1 })).toBe(value);
+    expect(truncate(value, { length: 1.5 })).toBe(value);
+    expect(sourceOf(truncate)).toContain("new Array(length)");
+  });
+
+  it("reports positional intent separately from key access planning", () => {
+    const insert = JIT.state.collection(Keyed).insertAt();
+    const update = JIT.state.collection(Keyed).updateAt({ patch: { name: "Ada" } });
+
+    expect(insert.explain().physical.strategy).toBe("DirectPosition");
+    expect(insert.explain().mutation).toMatchObject({
+      changesLength: true,
+      changesOrder: true,
+      preservesKeyed: false,
+      preservesOrdering: false,
+    });
+    expect(update.explain().mutation).toMatchObject({
+      changesLength: false,
+      changesOrder: false,
+      preservesKeyed: true,
+      preservesOrdering: true,
+      writes: [["name"]],
+    });
   });
 
   it("selects rows by the shared query condition", () => {
@@ -147,6 +263,34 @@ describe("JIT.state.collection", () => {
     expect(drop(rows, { name: "absent" })).toBe(rows);
   });
 
+  it("can stop removeWhere after its first match", () => {
+    const value = [
+      { id: "a", name: "same", score: 1 },
+      { id: "b", name: "same", score: 2 },
+      { id: "c", name: "other", score: 3 },
+    ];
+    const removeFirst = JIT.state.collection(Plain).removeWhere((query) => query.eq("name", "same"), { mode: "first" });
+
+    expect(removeFirst(value, {})).toEqual([value[1], value[2]]);
+    expect(sourceOf(removeFirst)).toContain("break;");
+    expect(sourceOf(removeFirst)).not.toContain("removed++");
+  });
+
+  it("replaces predicate matches through the shared condition and access path", () => {
+    const replacement = { id: "b", name: "Bee", score: 9 };
+    const replaceAll = JIT.state.collection(Plain).replaceWhere((query) => query.gte("score", JIT.cqrs.param("score")));
+    const replaceKey = JIT.state.collection(Keyed).replaceWhere((query) => query.eq("id", JIT.cqrs.param("id")));
+
+    const next = replaceAll(rows, { score: 2, row: replacement });
+    expect(next).toEqual([rows[0], replacement, replacement]);
+    expect(next[0]).toBe(rows[0]);
+    expect(replaceAll(rows, { score: 9, row: replacement })).toBe(rows);
+    expect(replaceKey.explain().physical.strategy).toBe("CachedIndexLookup");
+    expect(replaceKey(rows, { id: "b", row: { id: "b", name: "Bob", score: 2 } })).toBe(rows);
+    expect(replaceKey(rows, { id: "missing", row: replacement })).toBe(rows);
+    expect(sourceOf(replaceAll)).not.toMatch(/\.map\(|\.filter\(/);
+  });
+
   it("refuses a patch that would invalidate the facts the search rests on", () => {
     expect(() => JIT.state.collection(Keyed).updateByKey({ key: "id", patch: { id: JIT.cqrs.param("id") } })).toThrow(
       /identity key/i
@@ -188,6 +332,50 @@ describe("JIT.state.collection", () => {
         }
       }),
       { numRuns: 150 }
+    );
+  });
+
+  it("agrees with positional reference implementations", () => {
+    const Items = JIT.state.collection(JIT.array(JIT.number()));
+    const insert = Items.insertAt();
+    const remove = Items.removeAt();
+    const move = Items.move();
+
+    fc.assert(
+      fc.property(
+        fc.array(fc.integer(), { maxLength: 40 }),
+        fc.integer(),
+        fc.integer(),
+        fc.integer(),
+        (value, a, b, item) => {
+          const expectedInsert =
+            Number.isInteger(a) && a >= 0 && a <= value.length
+              ? [...value.slice(0, a), item, ...value.slice(a)]
+              : value;
+          const expectedRemove =
+            Number.isInteger(a) && a >= 0 && a < value.length ? [...value.slice(0, a), ...value.slice(a + 1)] : value;
+          let expectedMove: readonly number[] = value;
+          if (
+            Number.isInteger(a) &&
+            Number.isInteger(b) &&
+            a >= 0 &&
+            b >= 0 &&
+            a < value.length &&
+            b < value.length &&
+            a !== b
+          ) {
+            const copy = [...value];
+            const [moved] = copy.splice(a, 1);
+            copy.splice(b, 0, moved as number);
+            expectedMove = copy;
+          }
+
+          expect(insert(value, { index: a, row: item })).toEqual(expectedInsert);
+          expect(remove(value, { index: a })).toEqual(expectedRemove);
+          expect(move(value, { from: a, to: b })).toEqual(expectedMove);
+        }
+      ),
+      { numRuns: 200 }
     );
   });
 

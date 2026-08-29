@@ -20226,247 +20226,809 @@ function isGeneratedJson(path) {
   }
 }
 
-// ../../packages/jit/src/core/host.ts
-var AOT_ARTIFACT = /* @__PURE__ */ Symbol.for("@jit/aot-artifact");
-
-// ../../packages/jit/src/compiler/api-authorization.ts
-function resolveApiAuthorization(boundary, descriptor, action) {
-  if (!descriptor.actions.includes(action)) {
-    throw new JITError("INVALID_QUERY", `API query authorization action ${JSON.stringify(action)} has no access rule`);
-  }
-  const composed = composeAccessCondition(descriptor, action);
-  if (composed.kind === "deny") {
-    return Object.freeze({
-      fields: Object.freeze([]),
-      conditionSource: void 0,
-      bindings: Object.freeze([]),
-      denied: true
-    });
-  }
-  const allowed = accessProjectionFields(descriptor, action);
-  const fields = allowed === void 0 ? void 0 : Object.freeze([...allowed]);
-  if (fields !== void 0 && fields.length === 0) {
-    return Object.freeze({ fields, conditionSource: void 0, bindings: Object.freeze([]), denied: true });
-  }
-  for (const field of boundary.fields) {
-    if (fields !== void 0 && !fields.includes(field.path[0])) {
-      throw new JITError(
-        "INVALID_QUERY",
-        `API query filter field ${JSON.stringify(field.path.join("."))} is not readable by access action ${JSON.stringify(action)}`
-      );
+// ../../packages/jit/src/compiler/change-layout.ts
+function resolveChangeLayout(schema, paths) {
+  return changeLayoutOf(resolveChangedDescriptor(schema, paths ?? allFieldPaths(schema, "JIT.compare.changed()")));
+}
+function changeLayoutOf(descriptor) {
+  const paths = descriptor.fields.map((field) => field.path);
+  return Object.freeze({
+    paths: Object.freeze(paths),
+    representation: descriptor.representation,
+    id: `${descriptor.representation}:${paths.join(",")}`
+  });
+}
+function changeLayoutBitFor(layout, path) {
+  const written = path.join(".");
+  let best;
+  let bestLength = -1;
+  for (let index2 = 0; index2 < layout.paths.length; index2++) {
+    const candidate = layout.paths[index2];
+    if (candidate !== written && !written.startsWith(`${candidate}.`)) continue;
+    if (candidate.length > bestLength) {
+      best = index2;
+      bestLength = candidate.length;
     }
   }
-  if (composed.condition === void 0) {
-    return Object.freeze({ fields, conditionSource: void 0, bindings: Object.freeze([]), denied: false });
-  }
-  const bindings = [];
-  const conditionSource = emitStandardCondition(composed.condition, bindings);
-  return Object.freeze({ fields, conditionSource, bindings: Object.freeze(bindings), denied: false });
+  return best;
 }
-function emitApiAuthorizationBody(authorization, action) {
-  const deny = `throw new __AccessDeniedError(${JSON.stringify(action)}, undefined, "access-denied", undefined);`;
-  if (authorization.denied) return deny;
-  const parts = [];
-  const { fields } = authorization;
-  if (fields !== void 0) {
-    const readable = fields.map((field) => JSON.stringify(field));
-    const unreadable = (value) => readable.map((field) => `${value} !== ${field}`).join(" && ") || "true";
-    parts.push(
-      `const sort = request.sort; for (let i = 0; i < sort.length; i++) { const field = sort[i].path[0]; if (${unreadable(
-        "field"
-      )}) { ${deny} } }`
-    );
-    parts.push(
-      `let select = request.select; if (select === undefined) select = ${JSON.stringify(fields)}; else { const kept = []; for (let i = 0; i < select.length; i++) { const field = select[i]; if (!(${unreadable("field")})) kept[kept.length] = field; } if (kept.length === 0) { ${deny} } select = kept; }`
-    );
-  } else {
-    parts.push("const sort = request.sort;");
-    parts.push("const select = request.select;");
-  }
-  parts.push(
-    'const conditions = request.filter; let filter; for (let i = 0; i < conditions.length; i++) { const condition = conditions[i]; const compare = { kind: "compare", operator: condition.kind, left: { kind: "field", path: condition.path }, right: { kind: "literal", value: condition.value } }; filter = filter === undefined ? compare : { kind: "logical", operator: "and", left: filter, right: compare }; }'
-  );
-  if (authorization.conditionSource !== void 0) {
-    parts.push(
-      `const guard = ${authorization.conditionSource}; filter = filter === undefined ? guard : { kind: "logical", operator: "and", left: filter, right: guard };`
-    );
-  }
-  parts.push(
-    "const pagination = request.pagination; return { ...(filter === undefined ? {} : { filter }), sort, ...(select === undefined ? {} : { select }), ...(pagination === undefined ? {} : { pagination }) };"
-  );
-  return parts.join(" ");
+function emitChangeBit(layout, bit) {
+  return layout.representation === "bigint" ? `(1n << ${bit}n)` : `${1 << bit}`;
 }
-function emitStandardCondition(condition, bindings) {
-  if (condition.kind === "logical") {
-    return `{ kind: "logical", operator: ${JSON.stringify(condition.op)}, left: ${emitStandardCondition(
-      condition.left,
-      bindings
-    )}, right: ${emitStandardCondition(condition.right, bindings)} }`;
-  }
-  if (condition.kind === "not") return `{ kind: "not", inner: ${emitStandardCondition(condition.inner, bindings)} }`;
-  return `{ kind: "compare", operator: ${JSON.stringify(condition.op)}, left: ${emitStandardValue(
-    condition.left,
-    bindings
-  )}, right: ${emitStandardValue(condition.right, bindings)} }`;
-}
-function emitStandardValue(value, bindings) {
-  if (value.kind === "field") return `{ kind: "field", path: ${JSON.stringify([value.key])} }`;
-  if (value.kind === "literal") {
-    bindings.push(value.value);
-    return `{ kind: "literal", value: __q${bindings.length - 1} }`;
-  }
-  if (value.kind === "param") return `{ kind: "literal", value: ${emitPropertyAccess("actor", value.name)} }`;
-  return `{ kind: "binding", name: ${JSON.stringify(value.name)} }`;
+function emitChangeZero(layout) {
+  return layout.representation === "bigint" ? "0n" : "0";
 }
 
-// ../../packages/jit/src/compiler/query-cost.ts
-var QUERY_COST_WEIGHTS = Object.freeze({
-  equality: 1,
-  range: 2,
-  sort: 3,
-  relation: 5,
-  collection: 8
-});
-function queryOperatorCost(operator) {
-  return operator === "eq" || operator === "neq" ? QUERY_COST_WEIGHTS.equality : QUERY_COST_WEIGHTS.range;
-}
-function queryFieldCost(operators) {
-  let cost = 0;
-  for (let index2 = 0; index2 < operators.length; index2++) {
-    const operator = operators[index2];
-    const operatorCost = queryOperatorCost(operator);
-    if (operatorCost > cost) cost = operatorCost;
-  }
-  return cost;
-}
-function queryBoundaryConditionCosts(fields) {
-  const costs = [];
-  for (const field of fields) {
-    if (field.shorthand) {
-      costs.push(QUERY_COST_WEIGHTS.equality);
+// ../../packages/jit/src/compiler/mutation/mutation-plan.ts
+function buildMutationPlan(schema, writes, bindings) {
+  const resolved = [];
+  const byPath = /* @__PURE__ */ new Map();
+  for (const write of writes) {
+    const leaf = resolveMutationPath(schema, write.path);
+    const key = write.path.join(".");
+    const previous = byPath.get(key);
+    const node = Object.freeze({
+      kind: "set",
+      path: Object.freeze([...write.path]),
+      value: write.value,
+      schema: leaf
+    });
+    if (previous === void 0) {
+      byPath.set(key, resolved.length);
+      resolved.push(node);
       continue;
     }
-    for (const operator of field.operators) {
-      const cost = queryOperatorCost(operator);
-      costs.push(cost, cost);
-    }
+    resolved[previous] = node;
   }
-  return costs.sort((left, right) => right - left);
-}
-function queryBoundaryMaxCost(input) {
-  const costs = queryBoundaryConditionCosts(input.fields);
-  let total = 0;
-  const affordable = Math.min(costs.length, input.limits.maxConditions);
-  for (let index2 = 0; index2 < affordable; index2++) total += costs[index2];
-  const orderable = input.pagination?.type === "cursor" ? input.pagination.by.length : input.sorting.length;
-  return total + QUERY_COST_WEIGHTS.sort * Math.min(orderable, input.limits.maxSortFields);
-}
-function explainQueryBoundary(boundary) {
+  const params = [];
+  for (const write of resolved) {
+    if (write.value.kind === "param" && !params.includes(write.value.name)) params.push(write.value.name);
+  }
   return Object.freeze({
-    fields: Object.freeze(
-      boundary.fields.map(
-        (field) => Object.freeze({
-          path: field.path.join("."),
-          operators: field.operators,
-          cost: queryFieldCost(field.operators)
-        })
-      )
-    ),
-    projection: boundary.projection,
-    sorting: boundary.sorting,
-    pagination: boundary.pagination,
-    limits: boundary.limits,
-    cost: Object.freeze({
-      weights: QUERY_COST_WEIGHTS,
-      sort: QUERY_COST_WEIGHTS.sort,
-      structural: queryBoundaryMaxCost(boundary),
-      budget: boundary.limits.maxCost
-    })
+    schema,
+    writes: Object.freeze(resolved),
+    dependencies: Object.freeze({
+      // A declared write reads the field it overwrites, because the mutation
+      // compares before it allocates.
+      reads: Object.freeze(resolved.map((write) => write.path)),
+      writes: Object.freeze(resolved.map((write) => write.path))
+    }),
+    params: Object.freeze(params),
+    bindings: Object.freeze([...bindings]),
+    root: resolved.length === 0 ? void 0 : planLevels(schema, resolved)
   });
 }
-
-// ../../packages/jit/src/compiler/query-boundary.ts
-function resolveQueryBoundary(input) {
-  const fields = input.filters.map(({ path, operators }) => {
-    const segments = path.split(".");
-    if (segments.length > input.limits.maxDepth) {
+function isSpecializableMutation(schema, paths) {
+  for (const path of paths) {
+    if (path.length === 0) return false;
+    let current = schema;
+    for (let index2 = 0; index2 < path.length; index2++) {
+      const wrappers = resolveWrappers(current);
+      if (index2 > 0 && (wrappers.optional || wrappers.nullable)) return false;
+      if (wrappers.base.type !== TypeName.object) return false;
+      if (hasDefault2(current)) return false;
+      const next = wrappers.base.def.props[path[index2]];
+      if (next === void 0) return false;
+      if (resolveWrappers(next).readonly) return false;
+      current = next;
+    }
+    if (!isAssignedLeaf(current)) return false;
+  }
+  return true;
+}
+function isAssignedLeaf(schema) {
+  if (hasDefault2(schema)) return false;
+  let program;
+  try {
+    program = buildUpdateIR(schema);
+  } catch {
+    return false;
+  }
+  if (program.helpers.length > 0) return false;
+  const node = program.body;
+  if (node.kind === "reuse" || node.kind === "date") return true;
+  return node.kind === "guard" && node.inner.kind === "reuse";
+}
+function isDateLeaf(schema) {
+  return resolveWrappers(schema).base.type === TypeName.date;
+}
+function hasDefault2(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.default) return true;
+    const inner = current.def.innerType;
+    if (inner === void 0) return false;
+    current = inner;
+  }
+}
+function resolveMutationPath(schema, path) {
+  let current = schema;
+  for (const key of path) {
+    const base = resolveWrappers(current).base;
+    if (base.type !== TypeName.object) {
+      throw new JITError("INVALID_UPDATE", `Mutation path ${JSON.stringify(path.join("."))} leaves the object shape`);
+    }
+    const next = base.def.props[key];
+    if (next === void 0) {
       throw new JITError(
-        "INVALID_QUERY",
-        `API query filter field ${JSON.stringify(path)} exceeds the configured traversal depth`
+        "INVALID_UPDATE",
+        `Mutation path ${JSON.stringify(path.join("."))} is not declared by the schema`
       );
     }
-    return Object.freeze({
-      path: Object.freeze(segments),
-      operators: Object.freeze(operators === true ? ["eq"] : [...operators]),
-      shorthand: operators === true
-    });
-  });
-  const pagination = input.pagination === void 0 ? null : Object.freeze(
-    input.pagination.type === "cursor" ? { ...input.pagination, by: Object.freeze([...input.pagination.by]) } : { ...input.pagination }
-  );
-  const shape = {
-    sourceFields: Object.freeze([...input.sourceFields]),
-    fields: Object.freeze(fields),
-    relations: Object.freeze([]),
-    collections: Object.freeze([]),
-    logical: Object.freeze({ and: false, or: false, not: false }),
-    projection: Object.freeze([...input.projection]),
-    sorting: Object.freeze([...input.sorting]),
-    pagination
-  };
-  const structural = queryBoundaryMaxCost({ ...shape, limits: input.limits });
-  const maxCost = input.limits.maxCost ?? structural;
-  if (!Number.isSafeInteger(maxCost) || maxCost < 0) {
-    throw new JITError("INVALID_QUERY", "API query maxCost must be a non-negative safe integer");
+    current = next;
   }
-  return Object.freeze({
-    ...shape,
-    limits: Object.freeze({ ...input.limits, maxCost })
-  });
+  return current;
 }
-function queryBoundaryFilters(boundary) {
-  return boundary.fields.map((field) => [field.path.join("."), field.shorthand ? true : field.operators]);
+function planLevels(schema, writes) {
+  const root = { path: [], schema, writes: /* @__PURE__ */ new Map(), children: /* @__PURE__ */ new Map() };
+  for (const write of writes) {
+    let level = root;
+    for (let index2 = 0; index2 < write.path.length - 1; index2++) {
+      const key = write.path[index2];
+      let child = level.children.get(key);
+      if (child === void 0) {
+        const base = resolveWrappers(level.schema).base;
+        child = {
+          path: write.path.slice(0, index2 + 1),
+          schema: base.def.props[key],
+          writes: /* @__PURE__ */ new Map(),
+          children: /* @__PURE__ */ new Map()
+        };
+        level.children.set(key, child);
+      }
+      level = child;
+    }
+    level.writes.set(write.path[write.path.length - 1], write);
+  }
+  const freeze = (draft) => Object.freeze({
+    path: Object.freeze([...draft.path]),
+    schema: draft.schema,
+    props: Object.freeze(Object.keys(resolveWrappers(draft.schema).base.def.props)),
+    writes: draft.writes,
+    children: new Map([...draft.children].map(([key, child]) => [key, freeze(child)]))
+  });
+  return freeze(root);
 }
 
-// ../../packages/jit/src/factories/collection/collection.ts
-function array(element) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.array, {
-      element: unwrapSchema(element)
-    })
-  );
+// ../../packages/jit/src/compiler/mutation/emit-mutation.ts
+function emitMutationBody(plan, outputs = {}) {
+  const writer = new CodeWriter();
+  const channels = outputs.changed !== void 0 || outputs.patch === true || outputs.inverse === true;
+  if (plan.root === void 0) {
+    writer.line(channels ? `return ${emitEmptyResult(outputs)};` : "return value;");
+    return writer.toString();
+  }
+  for (const name of plan.params) {
+    writer.line(`const ${paramVar(name)} = params${emitPropertyAccess("", name)};`);
+  }
+  for (const [key, child] of plan.root.children) emitLevel(writer, child, emitPropertyAccess("value", key), outputs);
+  const changed3 = emitLevelTests(writer, plan.root, "value");
+  writer.line(`const root_changed = ${changed3};`);
+  if (!channels) {
+    writer.line("if (!root_changed) return value;");
+    writer.line(`return ${emitReplacement(plan.root, "value")};`);
+    return writer.toString();
+  }
+  writer.line(`if (!root_changed) return ${emitEmptyResult(outputs)};`);
+  emitOutputs(writer, plan.root, "value", outputs);
+  writer.line(`return ${emitResult(plan.root, `${emitReplacement(plan.root, "value")}`, outputs)};`);
+  return writer.toString();
 }
-function set(element) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.set, {
-      element: unwrapSchema(element)
-    })
-  );
+function emitLevel(writer, level, source, outputs) {
+  const name = levelVar(level);
+  const current = `${name}_value`;
+  writer.line(`const ${current} = ${source};`);
+  for (const [key, child] of level.children) emitLevel(writer, child, emitPropertyAccess(current, key), outputs);
+  const changed3 = emitLevelTests(writer, level, current);
+  writer.line(`const ${name}_changed = ${changed3};`);
+  writer.line(`let ${name}_next = ${current};`);
+  writer.line(`if (${name}_changed) ${name}_next = ${emitReplacement(level, current)};`);
 }
-function map(key, value) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.map, {
-      key: unwrapSchema(key),
-      value: unwrapSchema(value)
-    })
-  );
+function emitLevelTests(writer, level, current) {
+  const tests = [];
+  for (const [key, write] of level.writes) {
+    const next = `${levelVar(level)}_${safeName(key)}`;
+    const previous = `${next}_previous`;
+    writer.line(`const ${previous} = ${emitPropertyAccess(current, key)};`);
+    writer.line(`const ${next} = ${emitWriteValue(write, previous)};`);
+    tests.push(`${next} !== ${previous}`);
+  }
+  for (const child of level.children.values()) tests.push(`${levelVar(child)}_changed`);
+  return tests.join(" || ");
 }
-function record(key, value) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.record, {
-      key: unwrapSchema(key),
-      value: unwrapSchema(value)
-    })
-  );
+function emitReplacement(level, current) {
+  const entries = level.props.map((prop) => {
+    if (level.writes.has(prop)) return `${emitObjectKey(prop)}: ${levelVar(level)}_${safeName(prop)}`;
+    const child = level.children.get(prop);
+    if (child !== void 0) return `${emitObjectKey(prop)}: ${levelVar(child)}_next`;
+    return `${emitObjectKey(prop)}: ${emitPropertyAccess(current, prop)}`;
+  });
+  return `{ ${entries.join(", ")} }`;
 }
-function tuple(...items) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.tuple, {
-      items: items.map(unwrapSchema),
-      rest: void 0
-    })
-  );
+function emitOutputs(writer, root, current, outputs) {
+  const layout = outputs.changed;
+  if (layout !== void 0) {
+    writer.line(`let mask = ${emitChangeZero(layout)};`);
+    emitMaskBits(writer, root, layout);
+  }
+  if (outputs.patch === true || outputs.inverse === true) emitPatchLevels(writer, root, current, outputs);
 }
+function emitMaskBits(writer, level, layout) {
+  for (const [key, write] of level.writes) {
+    const bit = changeLayoutBitFor(layout, write.path);
+    if (bit === void 0) continue;
+    const next = `${levelVar(level)}_${safeName(key)}`;
+    writer.line(`if (${next} !== ${next}_previous) mask |= ${emitChangeBit(layout, bit)};`);
+  }
+  for (const child of level.children.values()) emitMaskBits(writer, child, layout);
+}
+function emitPatchLevels(writer, level, current, outputs) {
+  for (const [key, child] of level.children) emitPatchLevels(writer, child, emitPropertyAccess(current, key), outputs);
+  const name = levelVar(level);
+  const channels = [
+    ...outputs.patch === true ? ["patch"] : [],
+    ...outputs.inverse === true ? ["inverse"] : []
+  ];
+  for (const channel of channels) writer.line(`const ${name}_${channel} = {};`);
+  for (const [key, write] of level.writes) {
+    void write;
+    const next = `${name}_${safeName(key)}`;
+    writer.line(`if (${next} !== ${next}_previous) {`);
+    writer.indent(() => {
+      if (outputs.patch === true) writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${next};`);
+      if (outputs.inverse === true) writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${next}_previous;`);
+    });
+    writer.line("}");
+  }
+  for (const [key, child] of level.children) {
+    const childName3 = levelVar(child);
+    writer.line(`if (${childName3}_changed) {`);
+    writer.indent(() => {
+      if (outputs.patch === true) {
+        writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${childName3}_patch;`);
+      }
+      if (outputs.inverse === true) {
+        writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${childName3}_inverse;`);
+      }
+    });
+    writer.line("}");
+  }
+}
+function emitResult(root, valueSource, outputs) {
+  const entries = [`value: ${valueSource}`];
+  if (outputs.changed !== void 0) entries.push("changed: mask");
+  if (outputs.patch === true) entries.push(`patch: ${levelVar(root)}_patch`);
+  if (outputs.inverse === true) entries.push(`inverse: ${levelVar(root)}_inverse`);
+  return `{ ${entries.join(", ")} }`;
+}
+function emitEmptyResult(outputs) {
+  const entries = ["value"];
+  if (outputs.changed !== void 0) entries.push(`changed: ${emitChangeZero(outputs.changed)}`);
+  if (outputs.patch === true) entries.push("patch: undefined");
+  if (outputs.inverse === true) entries.push("inverse: undefined");
+  return `{ ${entries.join(", ")} }`;
+}
+function emitWriteValue(write, previous) {
+  const source = emitValueSource(write.value);
+  if (isDateLeaf(write.schema)) {
+    return `${source} === undefined || Object.is(${source}, ${previous}) || ${previous}.getTime() === ${source}.getTime() ? ${previous} : new Date(${source}.getTime())`;
+  }
+  return `${source} === undefined || Object.is(${source}, ${previous}) ? ${previous} : ${source}`;
+}
+function emitValueSource(value) {
+  return value.kind === "param" ? paramVar(value.name) : `__q${value.index}`;
+}
+function paramVar(name) {
+  return `__p_${safeName(name)}`;
+}
+function levelVar(level) {
+  return level.path.length === 0 ? "root" : `l_${level.path.map(safeName).join("_")}`;
+}
+function safeName(key) {
+  return key.replace(/[^A-Za-z0-9_$]/g, "_");
+}
+
+// ../../packages/jit/src/compiler/mutation/collection-mutation.ts
+var POSITIONAL_KINDS = /* @__PURE__ */ new Set([
+  "append",
+  "prepend",
+  "insertAt",
+  "removeAt",
+  "replaceAt",
+  "updateAt",
+  "swap",
+  "move",
+  "truncate"
+]);
+function resolveCollectionMutation(schema, kind, key, row, condition, mode = "all") {
+  if (kind === "updateWhere" || kind === "removeWhere" || kind === "replaceWhere") {
+    return resolveWhereMutation(schema, kind, condition, row, mode);
+  }
+  if (POSITIONAL_KINDS.has(kind)) return resolvePositionalMutation(schema, kind, row);
+  const object2 = resolveRowObjectSchema(schema, "state.collection");
+  const resolved = key ?? resolveIndexKeysFromFacts(schema)?.[0];
+  if (!resolved) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      "JIT.state.collection() needs a key: declare one with .keyed()/.indexBy()/.uniqueBy(), or name it"
+    );
+  }
+  const field = resolveRowField(object2, resolved, "state.collection");
+  const choice = resolveKeyedAccessChoice(schema, resolved);
+  const ordered = resolveOrderingKey(schema);
+  if (row !== void 0) assertFactsPreserved(row, resolved, ordered);
+  return Object.freeze({
+    kind,
+    key: resolved,
+    descriptor: resolveIndexDescriptor(
+      schema,
+      [resolved],
+      choice.strategy === "CachedIndexLookup" ? "position" : "unique"
+    ),
+    choice,
+    date: resolveScalarKeyKind(field, resolved, "state.collection") === "date",
+    ...row === void 0 ? {} : { row },
+    ...ordered === void 0 ? {} : { orderedBy: ordered },
+    probe: "params.key",
+    facts: mutationFacts(kind, row),
+    mode
+  });
+}
+function resolvePositionalMutation(schema, kind, row) {
+  if (row !== void 0) {
+    assertFactsPreserved(row, resolveIndexKeysFromFacts(schema)?.[0] ?? "", resolveOrderingKey(schema));
+  }
+  return Object.freeze({
+    kind,
+    key: "",
+    descriptor: Object.freeze({
+      keys: Object.freeze([]),
+      shape: "unique",
+      uniqueByFact: false
+    }),
+    choice: Object.freeze({
+      strategy: "EarlyExitScan",
+      reason: "a positional mutation addresses array slots directly",
+      complexity: "O(1)",
+      facts: Object.freeze([]),
+      direction: "asc"
+    }),
+    date: false,
+    probe: "",
+    ...row === void 0 ? {} : { row },
+    facts: mutationFacts(kind, row),
+    mode: "all"
+  });
+}
+function mutationFacts(kind, row) {
+  const changesLength = [
+    "append",
+    "prepend",
+    "insertAt",
+    "removeAt",
+    "truncate",
+    "removeByKey",
+    "upsert",
+    "removeWhere"
+  ].includes(kind);
+  const changesOrder = [
+    "prepend",
+    "insertAt",
+    "removeAt",
+    "swap",
+    "move",
+    "truncate",
+    "removeByKey",
+    "upsert",
+    "removeWhere"
+  ].includes(kind);
+  const preservesKeyed = [
+    "removeAt",
+    "updateAt",
+    "swap",
+    "move",
+    "truncate",
+    "updateByKey",
+    "removeByKey",
+    "updateWhere",
+    "removeWhere"
+  ].includes(kind);
+  const preservesOrdering = [
+    "removeAt",
+    "updateAt",
+    "truncate",
+    "updateByKey",
+    "removeByKey",
+    "updateWhere",
+    "removeWhere"
+  ].includes(kind);
+  return Object.freeze({
+    reads: Object.freeze(row?.dependencies.reads ?? []),
+    writes: Object.freeze(row?.dependencies.writes ?? [Object.freeze([])]),
+    changesLength,
+    changesOrder,
+    changesIdentity: kind === "replaceAt" || kind === "replaceByKey" || kind === "replaceWhere" || kind === "upsert",
+    preservesKeyed,
+    preservesOrdering
+  });
+}
+function resolveWhereMutation(schema, kind, condition, row, mode) {
+  const object2 = resolveRowObjectSchema(schema, "state.collection");
+  const equality = singleKeyEquality(condition);
+  const lifted = equality ? resolveKeyedAccessChoice(schema, equality.key) : void 0;
+  const ordered = resolveOrderingKey(schema);
+  if (row !== void 0 && equality !== void 0) assertFactsPreserved(row, equality.key, ordered);
+  if (equality === void 0 || lifted === void 0 || lifted.strategy === "EarlyExitScan") {
+    return Object.freeze({
+      kind,
+      key: "",
+      descriptor: Object.freeze({
+        keys: Object.freeze([]),
+        shape: "unique",
+        uniqueByFact: false
+      }),
+      choice: Object.freeze({
+        strategy: "EarlyExitScan",
+        reason: "the predicate can match more than one row, so every row is visited",
+        complexity: "O(n)",
+        facts: Object.freeze([]),
+        direction: "asc"
+      }),
+      date: false,
+      condition,
+      probe: "",
+      ...row === void 0 ? {} : { row },
+      ...ordered === void 0 ? {} : { orderedBy: ordered },
+      facts: mutationFacts(kind, row),
+      mode
+    });
+  }
+  const field = resolveRowField(object2, equality.key, "state.collection");
+  const date3 = resolveScalarKeyKind(field, equality.key, "state.collection") === "date";
+  const probe = emitQueryValueSource(equality.probe, {
+    fieldBase: "row",
+    paramBase: "params"
+  });
+  return Object.freeze({
+    kind,
+    key: equality.key,
+    descriptor: resolveIndexDescriptor(
+      schema,
+      [equality.key],
+      lifted.strategy === "CachedIndexLookup" ? "position" : "unique"
+    ),
+    choice: lifted,
+    date: date3,
+    condition,
+    probe: date3 ? `(${probe} == null ? ${probe} : ${probe}.getTime())` : probe,
+    ...row === void 0 ? {} : { row },
+    ...ordered === void 0 ? {} : { orderedBy: ordered },
+    facts: mutationFacts(kind, row),
+    mode
+  });
+}
+function resolveOrderingKey(schema) {
+  const hints = resolveHints(schema);
+  const ordered = hints.order ?? hints.collection?.ordered;
+  const key = ordered?.key;
+  return typeof key === "string" ? key : void 0;
+}
+function assertFactsPreserved(row, key, ordered) {
+  for (const write of row.writes) {
+    if (write.path.length === 1 && write.path[0] === key) {
+      throw new JITError(
+        "INVALID_UPDATE",
+        `updateByKey() cannot write the identity key ${JSON.stringify(key)}; remove and insert the row instead`
+      );
+    }
+    if (ordered !== void 0 && write.path.length === 1 && write.path[0] === ordered) {
+      throw new JITError(
+        "INVALID_UPDATE",
+        `updateByKey() cannot write the ordering key ${JSON.stringify(ordered)}; the collection would no longer be ordered`
+      );
+    }
+  }
+}
+function explainCollectionMutation(descriptor) {
+  const positional = POSITIONAL_KINDS.has(descriptor.kind);
+  return Object.freeze({
+    operation: descriptor.kind,
+    key: descriptor.key,
+    physical: Object.freeze({
+      strategy: positional ? "DirectPosition" : descriptor.choice.strategy,
+      reason: descriptor.choice.reason,
+      complexity: descriptor.choice.complexity,
+      facts: descriptor.choice.facts
+    }),
+    // Finding the row can be O(1) or O(log n); rebuilding the array cannot.
+    // Saying so is the honest half of the claim.
+    copy: "O(n)",
+    mutation: descriptor.facts
+  });
+}
+function collectionMutationCacheKey(descriptor) {
+  return `collection:${descriptor.kind}:${descriptor.mode}:${descriptor.choice.strategy}:${descriptor.key}:${descriptor.date}:${descriptor.choice.direction}`;
+}
+function emitFindPosition(descriptor) {
+  const shape = {
+    signature: "value, params",
+    probe: descriptor.date && descriptor.probe === "params.key" ? "(params.key == null ? params.key : params.key.getTime())" : descriptor.probe,
+    answers: "position"
+  };
+  if (descriptor.choice.strategy === "CachedIndexLookup") return emitCachedIndexLookup(descriptor.descriptor, shape);
+  if (descriptor.choice.strategy === "BinarySearch") {
+    return emitBinarySearch(descriptor.key, descriptor.descriptor, descriptor.choice.direction, shape);
+  }
+  return emitEarlyExitScan(descriptor.key, descriptor.descriptor, shape);
+}
+function emitCollectionMutationSource(descriptor) {
+  const writer = new CodeWriter();
+  writer.line("(() => {");
+  writer.indent(() => {
+    if (needsPositionFinder(descriptor)) writer.line(`const find = ${emitFindPosition(descriptor)};`);
+    writer.line("function mutate(value, params) {");
+    writer.indent(() => emitBody(writer, descriptor));
+    writer.line("}");
+    writer.line("return mutate;");
+  });
+  writer.line("})()");
+  return writer.toString();
+}
+function needsPositionFinder(descriptor) {
+  if (POSITIONAL_KINDS.has(descriptor.kind)) return false;
+  if (descriptor.kind !== "updateWhere" && descriptor.kind !== "removeWhere" && descriptor.kind !== "replaceWhere")
+    return true;
+  return descriptor.choice.strategy !== "EarlyExitScan";
+}
+function emitBody(writer, descriptor) {
+  if (descriptor.kind === "append" || descriptor.kind === "prepend") {
+    emitInsertEnd(writer, descriptor.kind);
+    return;
+  }
+  if (descriptor.kind === "insertAt") {
+    emitInsertAt(writer);
+    return;
+  }
+  if (descriptor.kind === "removeAt") {
+    emitPositionalRemoveAt(writer);
+    return;
+  }
+  if (descriptor.kind === "replaceAt" || descriptor.kind === "updateAt") {
+    writer.line("const at = params.index;");
+    writer.line("if (!Number.isInteger(at) || at < 0 || at >= value.length) return value;");
+    emitReplaceAt(writer, descriptor, "row");
+    return;
+  }
+  if (descriptor.kind === "swap") {
+    emitSwap(writer);
+    return;
+  }
+  if (descriptor.kind === "move") {
+    emitMove(writer);
+    return;
+  }
+  if (descriptor.kind === "truncate") {
+    emitTruncate(writer);
+    return;
+  }
+  if (descriptor.kind === "updateWhere" || descriptor.kind === "removeWhere" || descriptor.kind === "replaceWhere") {
+    if (descriptor.choice.strategy === "EarlyExitScan") {
+      if (descriptor.kind === "updateWhere") emitUpdateWhereScan(writer, descriptor);
+      else if (descriptor.kind === "removeWhere") {
+        if (descriptor.mode === "first") emitRemoveWhereFirst(writer, descriptor);
+        else emitRemoveWhereScan(writer, descriptor);
+      } else emitReplaceWhereScan(writer, descriptor);
+      return;
+    }
+    writer.line("const at = find(value, params);");
+    writer.line("if (at < 0) return value;");
+    if (descriptor.kind === "removeWhere") emitRemoveAt(writer);
+    else emitReplaceAt(writer, descriptor, "row");
+    return;
+  }
+  writer.line("const at = find(value, params);");
+  if (descriptor.kind === "removeByKey") {
+    writer.line("if (at < 0) return value;");
+    emitRemoveAt(writer);
+    return;
+  }
+  if (descriptor.kind === "updateByKey" || descriptor.kind === "replaceByKey") {
+    writer.line("if (at < 0) return value;");
+    emitReplaceAt(writer, descriptor, "row");
+    return;
+  }
+  emitUpsert(writer);
+}
+function emitReplaceAt(writer, descriptor, rowVar) {
+  writer.line(`const ${rowVar} = value[at];`);
+  writer.line("const next = (() => {");
+  writer.indent(() => {
+    writer.line(`const value = ${rowVar};`);
+    if (descriptor.row === void 0) writer.line("return params.row;");
+    else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
+  });
+  writer.line("})();");
+  writer.line(
+    descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere" ? `if (__equal(${rowVar}, next)) return value;` : `if (next === ${rowVar}) return value;`
+  );
+  writer.line("const out = value.slice();");
+  writer.line("out[at] = next;");
+  writer.line("return out;");
+}
+function emitRemoveAt(writer) {
+  writer.line("const len = value.length;");
+  writer.line("const out = new Array(len - 1);");
+  writer.line("for (let i = 0; i < at; i++) out[i] = value[i];");
+  writer.line("for (let i = at + 1; i < len; i++) out[i - 1] = value[i];");
+  writer.line("return out;");
+}
+function emitInsertAt(writer) {
+  writer.line("const at = params.index;");
+  writer.line("const len = value.length;");
+  writer.line("if (!Number.isInteger(at) || at < 0 || at > len) return value;");
+  writer.line("const out = new Array(len + 1);");
+  writer.line("for (let i = 0; i < at; i++) out[i] = value[i];");
+  writer.line("out[at] = params.row;");
+  writer.line("for (let i = at; i < len; i++) out[i + 1] = value[i];");
+  writer.line("return out;");
+}
+function emitPositionalRemoveAt(writer) {
+  writer.line("const at = params.index;");
+  writer.line("if (!Number.isInteger(at) || at < 0 || at >= value.length) return value;");
+  emitRemoveAt(writer);
+}
+function emitSwap(writer) {
+  writer.line("const a = params.a;");
+  writer.line("const b = params.b;");
+  writer.line("const len = value.length;");
+  writer.line(
+    "if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a >= len || b >= len || a === b || value[a] === value[b]) return value;"
+  );
+  writer.line("const out = value.slice();");
+  writer.line("out[a] = value[b];");
+  writer.line("out[b] = value[a];");
+  writer.line("return out;");
+}
+function emitMove(writer) {
+  writer.line("const from = params.from;");
+  writer.line("const to = params.to;");
+  writer.line("const len = value.length;");
+  writer.line(
+    "if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= len || to >= len || from === to) return value;"
+  );
+  writer.line("const out = new Array(len);");
+  writer.line("if (from < to) {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < from; i++) out[i] = value[i];");
+    writer.line("for (let i = from; i < to; i++) out[i] = value[i + 1];");
+    writer.line("out[to] = value[from];");
+    writer.line("for (let i = to + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < to; i++) out[i] = value[i];");
+    writer.line("out[to] = value[from];");
+    writer.line("for (let i = to + 1; i <= from; i++) out[i] = value[i - 1];");
+    writer.line("for (let i = from + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("}");
+  writer.line("return out;");
+}
+function emitTruncate(writer) {
+  writer.line("const length = params.length;");
+  writer.line("const len = value.length;");
+  writer.line("if (!Number.isInteger(length) || length < 0 || length >= len) return value;");
+  writer.line("const out = new Array(length);");
+  writer.line("for (let i = 0; i < length; i++) out[i] = value[i];");
+  writer.line("return out;");
+}
+function emitUpsert(writer) {
+  writer.line("if (at >= 0) {");
+  writer.indent(() => {
+    writer.line("const row = value[at];");
+    writer.line("const next = params.row;");
+    writer.line("if (__equal(row, next)) return value;");
+    writer.line("const out = value.slice();");
+    writer.line("out[at] = next;");
+    writer.line("return out;");
+  });
+  writer.line("}");
+  writer.line("const insertion = ~at;");
+  writer.line("const len = value.length;");
+  writer.line("const out = new Array(len + 1);");
+  writer.line("for (let i = 0; i < insertion; i++) out[i] = value[i];");
+  writer.line("out[insertion] = params.row;");
+  writer.line("for (let i = insertion; i < len; i++) out[i + 1] = value[i];");
+  writer.line("return out;");
+}
+function emitUpdateWhereScan(writer, descriptor) {
+  writer.line("const len = value.length;");
+  writer.line("let out = null;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
+    writer.line("const next = (() => {");
+    writer.indent(() => {
+      writer.line("const value = row;");
+      if (descriptor.row === void 0) writer.line("return params.row;");
+      else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
+    });
+    writer.line("})();");
+    writer.line("if (next === row) continue;");
+    writer.line("if (out === null) out = value.slice();");
+    writer.line("out[i] = next;");
+  });
+  writer.line("}");
+  writer.line("return out === null ? value : out;");
+}
+function emitReplaceWhereScan(writer, descriptor) {
+  writer.line("const len = value.length;");
+  writer.line("let out = null;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
+    writer.line("if (__equal(row, params.row)) continue;");
+    writer.line("if (out === null) out = value.slice();");
+    writer.line("out[i] = params.row;");
+  });
+  writer.line("}");
+  writer.line("return out === null ? value : out;");
+}
+function emitRemoveWhereScan(writer, descriptor) {
+  const predicate = emitPredicate(descriptor);
+  writer.line("const len = value.length;");
+  writer.line("let removed = 0;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (${predicate}) removed++;`);
+  });
+  writer.line("}");
+  writer.line("if (removed === 0) return value;");
+  writer.line("const out = new Array(len - removed);");
+  writer.line("let j = 0;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${predicate})) out[j++] = row;`);
+  });
+  writer.line("}");
+  writer.line("return out;");
+}
+function emitRemoveWhereFirst(writer, descriptor) {
+  writer.line("let at = -1;");
+  writer.line("for (let i = 0; i < value.length; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (${emitPredicate(descriptor)}) { at = i; break; }`);
+  });
+  writer.line("}");
+  writer.line("if (at < 0) return value;");
+  emitRemoveAt(writer);
+}
+function emitPredicate(descriptor) {
+  return emitQueryConditionSource(descriptor.condition, {
+    fieldBase: "row",
+    paramBase: "params"
+  });
+}
+function emitInsertEnd(writer, kind) {
+  writer.line("const len = value.length;");
+  writer.line("const out = new Array(len + 1);");
+  if (kind === "append") {
+    writer.line("for (let i = 0; i < len; i++) out[i] = value[i];");
+    writer.line("out[len] = params.row;");
+  } else {
+    writer.line("out[0] = params.row;");
+    writer.line("for (let i = 0; i < len; i++) out[i + 1] = value[i];");
+  }
+  writer.line("return out;");
+}
+
+// ../../packages/jit/src/core/host.ts
+var AOT_ARTIFACT = /* @__PURE__ */ Symbol.for("@jit/aot-artifact");
 
 // ../../packages/jit/src/factories/query.ts
 var QUERY_PROGRAMS = /* @__PURE__ */ new WeakMap();
@@ -20947,6 +21509,877 @@ function lowerRulePredicate(predicate, inputs, bindingOffset) {
   if (lowered.kind === "always") return { condition: void 0, bindings: lowered.bindings };
   if (lowered.kind === "never") return { condition: IMPOSSIBLE, bindings: lowered.bindings };
   return { condition: lowered.condition, bindings: lowered.bindings };
+}
+
+// ../../packages/jit/src/runtime/update/reactive-update.ts
+function createReactiveUpdate(initial, updater, createDiff, options = {}) {
+  let value = initial;
+  let version = 0;
+  let batchDepth = 0;
+  let batchPrevious;
+  let hasBatchPrevious = false;
+  let pendingPrevious;
+  let hasPendingPrevious = false;
+  let scheduled = false;
+  let disposed = false;
+  let diff3;
+  const listeners = /* @__PURE__ */ new Set();
+  const pathBuckets = /* @__PURE__ */ new Map();
+  const selections = /* @__PURE__ */ new Set();
+  const scheduler = options.schedule ?? "sync";
+  const report = (error) => {
+    if (options.onError) {
+      options.onError(error);
+      return;
+    }
+    throw error;
+  };
+  const invoke = (listener) => {
+    if (!options.onError) {
+      listener();
+      return;
+    }
+    try {
+      listener();
+    } catch (error) {
+      report(error);
+    }
+  };
+  const notify = (previous, current) => {
+    if (disposed || Object.is(previous, current)) return;
+    const eventVersion = version;
+    let cachedChanges;
+    const event = {
+      previous,
+      value: current,
+      version: eventVersion,
+      get changes() {
+        if (cachedChanges) return cachedChanges;
+        diff3 ??= createDiff();
+        cachedChanges = diff3(previous, current).map((change) => ({
+          type: change.type,
+          path: change.path,
+          previous: readPath3(previous, change.path),
+          value: readPath3(current, change.path)
+        }));
+        return cachedChanges;
+      }
+    };
+    for (const listener of listeners) invoke(() => listener(event));
+    for (const bucket of pathBuckets.values()) {
+      const before = readPath3(previous, bucket.path);
+      const after = readPath3(current, bucket.path);
+      for (const entry of bucket.listeners) {
+        if (entry.equals(before, after)) continue;
+        const pathEvent = {
+          path: bucket.path,
+          previous: before,
+          value: after,
+          rootPrevious: previous,
+          root: current,
+          version: eventVersion
+        };
+        invoke(() => entry.listener(pathEvent));
+      }
+    }
+    for (const entry of selections) {
+      const before = entry.selector(previous);
+      const after = entry.selector(current);
+      if (entry.equals(before, after)) continue;
+      const selectionEvent = {
+        previous: before,
+        value: after,
+        rootPrevious: previous,
+        root: current,
+        version: eventVersion
+      };
+      invoke(() => entry.listener(selectionEvent));
+    }
+  };
+  const flush = () => {
+    if (!scheduled || !hasPendingPrevious) return;
+    const previous = pendingPrevious;
+    scheduled = false;
+    pendingPrevious = void 0;
+    hasPendingPrevious = false;
+    notify(previous, value);
+  };
+  const enqueue = (previous) => {
+    if (batchDepth > 0) {
+      if (!hasBatchPrevious) {
+        batchPrevious = previous;
+        hasBatchPrevious = true;
+      }
+      return;
+    }
+    if (scheduler === "sync") {
+      notify(previous, value);
+      return;
+    }
+    if (!hasPendingPrevious) {
+      pendingPrevious = previous;
+      hasPendingPrevious = true;
+    }
+    if (scheduled) return;
+    scheduled = true;
+    if (scheduler === "microtask") queueMicrotask(flush);
+    else scheduler(flush);
+  };
+  const set2 = (next) => {
+    if (disposed || Object.is(value, next)) return value;
+    const previous = value;
+    value = next;
+    version++;
+    enqueue(previous);
+    return value;
+  };
+  const controller = {
+    get value() {
+      return value;
+    },
+    get version() {
+      return version;
+    },
+    update(input) {
+      return set2(updater(value, input));
+    },
+    set: set2,
+    subscribe(listener, subscribeOptions = {}) {
+      if (disposed) return () => void 0;
+      listeners.add(listener);
+      if (subscribeOptions.immediate) {
+        const immediate = {
+          previous: value,
+          value,
+          version,
+          changes: []
+        };
+        invoke(() => listener(immediate));
+      }
+      return () => listeners.delete(listener);
+    },
+    watch(path, listener, watchOptions = {}) {
+      if (disposed) return () => void 0;
+      const normalized = normalizePath(path);
+      const key = JSON.stringify(normalized);
+      let bucket = pathBuckets.get(key);
+      if (!bucket) {
+        bucket = { path: normalized, listeners: /* @__PURE__ */ new Set() };
+        pathBuckets.set(key, bucket);
+      }
+      const entry = {
+        listener: (event) => listener(
+          event
+        ),
+        equals: watchOptions.equals ?? Object.is
+      };
+      bucket.listeners.add(entry);
+      if (watchOptions.immediate) {
+        const selected = readPath3(value, normalized);
+        invoke(
+          () => listener({
+            path: normalized,
+            previous: selected,
+            value: selected,
+            rootPrevious: value,
+            root: value,
+            version
+          })
+        );
+      }
+      return () => {
+        bucket?.listeners.delete(entry);
+        if (bucket?.listeners.size === 0) pathBuckets.delete(key);
+      };
+    },
+    select(selector, listener, selectOptions = {}) {
+      if (disposed) return () => void 0;
+      const entry = {
+        selector,
+        listener: (event) => listener(event),
+        equals: selectOptions.equals ?? Object.is
+      };
+      selections.add(entry);
+      if (selectOptions.immediate) {
+        const selected = selector(value);
+        invoke(
+          () => listener({
+            previous: selected,
+            value: selected,
+            rootPrevious: value,
+            root: value,
+            version
+          })
+        );
+      }
+      return () => selections.delete(entry);
+    },
+    batch(run) {
+      batchDepth++;
+      try {
+        run(controller);
+      } finally {
+        batchDepth--;
+        if (batchDepth === 0 && hasBatchPrevious) {
+          const previous = batchPrevious;
+          batchPrevious = void 0;
+          hasBatchPrevious = false;
+          enqueue(previous);
+        }
+      }
+      return value;
+    },
+    flush,
+    dispose() {
+      disposed = true;
+      listeners.clear();
+      pathBuckets.clear();
+      selections.clear();
+      pendingPrevious = void 0;
+      hasPendingPrevious = false;
+      batchPrevious = void 0;
+      hasBatchPrevious = false;
+      scheduled = false;
+    }
+  };
+  return controller;
+}
+function normalizePath(path) {
+  if (typeof path !== "string") return Object.freeze([...path]);
+  if (path === "") return Object.freeze([]);
+  return Object.freeze(
+    path.split(".").map((part) => part !== "" && String(Number(part)) === part ? Number(part) : part)
+  );
+}
+function readPath3(value, path) {
+  let current = value;
+  for (let index2 = 0; index2 < path.length; index2++) {
+    if (current === null || current === void 0) return void 0;
+    current = current[path[index2]];
+  }
+  return current;
+}
+
+// ../../packages/jit/src/factories/update.ts
+function update(schema, ...args) {
+  const unwrapped = unwrapSchema(schema);
+  assertUpdateable2(unwrapped);
+  const compiled = compileUpdate(unwrapped);
+  const run = ((current, updateInput) => {
+    const patch3 = typeof updateInput === "function" ? captureDraftPatch(updateInput) : updateInput;
+    return compiled(current, patch3);
+  });
+  installUpdateMethods(run, unwrapped);
+  if (args.length === 0) {
+    registerArtifact(run, { kind: "operation", schema: unwrapped, op: "update" });
+    return run;
+  }
+  return run(args[0], args[1]);
+}
+function installUpdateMethods(run, schema) {
+  Object.defineProperties(run, {
+    compile: {
+      enumerable: false,
+      value: () => run
+    },
+    patch: {
+      enumerable: false,
+      value: (template) => createCompiledPatch(run, schema, template)
+    },
+    reactive: {
+      enumerable: false,
+      value: (initial, options) => createReactiveUpdate(initial, run, () => compileDiff(schema), options)
+    },
+    authorize: {
+      enumerable: false,
+      value: (ability, action, actor) => {
+        const context = resolveAccessContext(ability, actor);
+        if (context === void 0) {
+          throw new JITError("INVALID_OPERATION", "update.authorize() requires an ability created by JIT.access()");
+        }
+        const guard = compileAccessMutationGuard(context, action);
+        const authorized = ((current, input) => {
+          const patch3 = typeof input === "function" ? captureDraftPatch(input) : input;
+          guard(current, patch3);
+          return run(current, patch3);
+        });
+        installUpdateMethods(authorized, schema);
+        registerArtifact(authorized, {
+          kind: "authorized-update-plan",
+          schema,
+          descriptor: context.descriptor,
+          actor: context.actor,
+          action
+        });
+        return authorized;
+      }
+    }
+  });
+}
+function createCompiledPatch(run, schema, template) {
+  const bindings = [];
+  const writes = collectPatchWrites(schema, template, [], bindings);
+  const specialized = writes !== void 0 && isSpecializableMutation(
+    schema,
+    writes.map((write) => write.path)
+  );
+  const plan = specialized ? buildMutationPlan(schema, writes, bindings) : void 0;
+  const explanation = Object.freeze({
+    strategy: plan === void 0 ? "generic" : "specialized",
+    reads: Object.freeze((plan?.dependencies.reads ?? []).map((path) => path.join("."))),
+    writes: Object.freeze((plan?.dependencies.writes ?? []).map((path) => path.join("."))),
+    params: Object.freeze([...plan?.params ?? []])
+  });
+  return {
+    explain: () => explanation,
+    result: (channels) => {
+      if (plan === void 0) {
+        throw new JITError(
+          "INVALID_UPDATE",
+          "result() needs a specialized mutation; explain().strategy reports why this patch stayed generic"
+        );
+      }
+      const outputs = resolveMutationOutputs(schema, channels);
+      return {
+        explain: () => explanation,
+        compile: () => compileMutation(schema, plan, explanation, outputs)
+      };
+    },
+    compile: () => {
+      if (plan === void 0) {
+        return (current, params) => run(current, materializeParamPatch(template, params));
+      }
+      return compileMutation(schema, plan, explanation, {});
+    }
+  };
+}
+function resolveMutationOutputs(schema, channels) {
+  const changed3 = channels.changed === void 0 || channels.changed === false ? void 0 : resolveChangeLayout(schema, Array.isArray(channels.changed) ? channels.changed : void 0);
+  return Object.freeze({
+    ...changed3 === void 0 ? {} : { changed: changed3 },
+    ...channels.patch === true ? { patch: true } : {},
+    ...channels.inverse === true ? { inverse: true } : {}
+  });
+}
+function compileMutation(schema, plan, explanation, outputs) {
+  const source = emitMutationSource(plan, outputs);
+  const names = plan.bindings.map((_, index2) => `__q${index2}`);
+  const mutate = globalThis.Function(...names, source)(...plan.bindings);
+  Object.defineProperty(mutate, "layout", { enumerable: false, value: () => outputs.changed });
+  registerArtifact(mutate, {
+    kind: "mutation-plan",
+    schema,
+    source,
+    bindingNames: names,
+    bindingValues: plan.bindings,
+    reads: explanation.reads,
+    writes: explanation.writes,
+    params: explanation.params,
+    ...outputs.changed === void 0 ? {} : { layout: outputs.changed }
+  });
+  return mutate;
+}
+function emitMutationSource(plan, outputs = {}) {
+  return `return function mutate(value, params) {
+${emitMutationBody(plan, outputs)}};`;
+}
+function collectPatchWrites(schema, template, path, bindings) {
+  if (template === null || typeof template !== "object" || Array.isArray(template) || isParamRef(template)) {
+    if (path.length === 0) return void 0;
+    if (isParamRef(template)) return [{ path, value: { kind: "param", name: template.name } }];
+    bindings.push(template);
+    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
+  }
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    if (path.length === 0) return void 0;
+    bindings.push(template);
+    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
+  }
+  const props = base.def.props;
+  const out = [];
+  for (const key of Object.keys(template)) {
+    const child = props[key];
+    if (child === void 0) return void 0;
+    const nested = collectPatchWrites(
+      child,
+      template[key],
+      [...path, key],
+      bindings
+    );
+    if (nested === void 0) return void 0;
+    out.push(...nested);
+  }
+  return out;
+}
+function materializeParamPatch(template, params) {
+  if (isParamRef(template)) return params[template.name];
+  if (Array.isArray(template)) return template.map((value) => materializeParamPatch(value, params));
+  if (template !== null && typeof template === "object") {
+    const out = {};
+    for (const key of Object.keys(template)) {
+      out[key] = materializeParamPatch(template[key], params);
+    }
+    return out;
+  }
+  return template;
+}
+function isParamRef(value) {
+  return value !== null && typeof value === "object" && value.__jitQueryValue === "param";
+}
+function captureDraftPatch(recipe) {
+  const writes = [];
+  const proxies = /* @__PURE__ */ new Map();
+  const createDraft = (path) => {
+    const cacheKey3 = path.map(String).join("\0");
+    const cached = proxies.get(cacheKey3);
+    if (cached) return cached;
+    const draft = new Proxy(
+      {},
+      {
+        get(_target, key) {
+          if (typeof key === "symbol") return void 0;
+          return createDraft([...path, key]);
+        },
+        set(_target, key, value) {
+          if (typeof key === "symbol") {
+            throw new JITError("INVALID_UPDATE", "Draft updates do not support symbol keys");
+          }
+          writes[writes.length] = { path: [...path, key], value };
+          return true;
+        }
+      }
+    );
+    proxies.set(cacheKey3, draft);
+    return draft;
+  };
+  recipe(createDraft([]));
+  return materializePatch(writes);
+}
+function materializePatch(writes) {
+  const root = {};
+  for (const write of writes) {
+    let current = root;
+    for (let index2 = 0; index2 < write.path.length; index2++) {
+      const segment = write.path[index2];
+      const key = normalizeKey(segment);
+      const isLast = index2 === write.path.length - 1;
+      if (isLast) {
+        current[key] = write.value;
+        continue;
+      }
+      const nextSegment = write.path[index2 + 1];
+      const existing = current[key];
+      if (existing === void 0) {
+        const next = isArrayKey(nextSegment) ? [] : {};
+        current[key] = next;
+        current = next;
+      } else {
+        current = existing;
+      }
+    }
+  }
+  return root;
+}
+function normalizeKey(key) {
+  if (typeof key === "number") return key;
+  if (typeof key === "string" && key !== "" && String(Number(key)) === key) return Number(key);
+  return String(key);
+}
+function isArrayKey(key) {
+  return typeof key === "number" || typeof key === "string" && key !== "" && String(Number(key)) === key;
+}
+function assertUpdateable2(schema) {
+  if (schema.type === TypeName.readonly) {
+    throw new JITError("READONLY_FIELD", "Cannot compile updates for readonly schemas");
+  }
+  if (schema.type === TypeName.lazy) {
+    assertUpdateable2(schema.def.getter());
+    return;
+  }
+  if (hasInnerType2(schema)) {
+    assertUpdateable2(schema.def.innerType);
+    return;
+  }
+  if (schema.type === TypeName.object) {
+    const objectSchema = schema;
+    for (const child of Object.values(objectSchema.def.props)) {
+      assertUpdateable2(child);
+    }
+  }
+}
+function hasInnerType2(schema) {
+  return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
+}
+
+// ../../packages/jit/src/factories/collection-state.ts
+function collection(schema) {
+  return createCollectionState(
+    schema,
+    compileCollectionMutation
+  );
+}
+function createCollectionState(schema, compile) {
+  const unwrapped = unwrapSchema(schema);
+  if (unwrapped.type !== TypeName.array) {
+    throw new JITError("UNSUPPORTED_SCHEMA", "JIT.state.collection() requires an array schema");
+  }
+  const state3 = {
+    schema: unwrapped,
+    updateByKey: (options) => {
+      const rowSchema = resolveRowObjectSchema(unwrapped, "state.collection");
+      const bindings = [];
+      const writes = collectPatchWrites(rowSchema, options.patch, [], bindings);
+      if (writes === void 0 || !isSpecializableMutation(
+        rowSchema,
+        writes.map((write) => write.path)
+      )) {
+        throw new JITError(
+          "INVALID_UPDATE",
+          "updateByKey() patches a row field by field; a leaf the deep-partial update merges is not supported yet"
+        );
+      }
+      const plan = buildMutationPlan(rowSchema, writes, bindings);
+      return compile(unwrapped, resolveCollectionMutation(unwrapped, "updateByKey", options.key, plan), plan.bindings);
+    },
+    removeByKey: (options) => compile(unwrapped, resolveCollectionMutation(unwrapped, "removeByKey", options?.key), []),
+    replaceByKey: (options) => compile(unwrapped, resolveCollectionMutation(unwrapped, "replaceByKey", options?.key), []),
+    upsert: (options) => compile(unwrapped, resolveCollectionMutation(unwrapped, "upsert", options?.key), []),
+    append: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "append", void 0), []),
+    prepend: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "prepend", void 0), []),
+    insertAt: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "insertAt", void 0), []),
+    removeAt: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "removeAt", void 0), []),
+    replaceAt: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "replaceAt", void 0), []),
+    updateAt: (options) => {
+      const rowSchema = resolveRowObjectSchema(unwrapped, "state.collection");
+      const bindings = [];
+      const writes = collectPatchWrites(rowSchema, options.patch, [], bindings);
+      if (writes === void 0 || !isSpecializableMutation(
+        rowSchema,
+        writes.map((write) => write.path)
+      )) {
+        throw new JITError(
+          "INVALID_UPDATE",
+          "updateAt() patches a row field by field; a leaf the deep-partial update merges is not supported yet"
+        );
+      }
+      const plan = buildMutationPlan(rowSchema, writes, bindings);
+      return compile(unwrapped, resolveCollectionMutation(unwrapped, "updateAt", void 0, plan), plan.bindings);
+    },
+    swap: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "swap", void 0), []),
+    move: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "move", void 0), []),
+    truncate: () => compile(unwrapped, resolveCollectionMutation(unwrapped, "truncate", void 0), []),
+    updateWhere: (predicate, patch3) => {
+      const rowSchema = resolveRowObjectSchema(unwrapped, "state.collection");
+      const bindings = [];
+      const writes = collectPatchWrites(rowSchema, patch3, [], bindings);
+      if (writes === void 0 || !isSpecializableMutation(
+        rowSchema,
+        writes.map((write) => write.path)
+      )) {
+        throw new JITError(
+          "INVALID_UPDATE",
+          "updateWhere() patches a row field by field; a leaf the deep-partial update merges is not supported yet"
+        );
+      }
+      const plan = buildMutationPlan(rowSchema, writes, bindings);
+      const condition = createConditionBuilder(plan.bindings.length);
+      const node = predicate(condition.builder);
+      return compile(unwrapped, resolveCollectionMutation(unwrapped, "updateWhere", void 0, plan, node), [
+        ...plan.bindings,
+        ...condition.bindings
+      ]);
+    },
+    removeWhere: (predicate, options) => {
+      const condition = createConditionBuilder(0);
+      const node = predicate(condition.builder);
+      return compile(
+        unwrapped,
+        resolveCollectionMutation(unwrapped, "removeWhere", void 0, void 0, node, options?.mode ?? "all"),
+        condition.bindings
+      );
+    },
+    replaceWhere: (predicate) => {
+      const condition = createConditionBuilder(0);
+      const node = predicate(condition.builder);
+      return compile(
+        unwrapped,
+        resolveCollectionMutation(unwrapped, "replaceWhere", void 0, void 0, node),
+        condition.bindings
+      );
+    }
+  };
+  return Object.freeze(state3);
+}
+function compileCollectionMutation(schema, descriptor, bindings) {
+  const elementSchema = schema.def.element;
+  const source = emitCollectionMutationSource(descriptor);
+  const names = bindings.map((_, index2) => `__q${index2}`);
+  const needsEqual = descriptor.kind === "upsert" || descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere";
+  const equal3 = needsEqual ? compileEqual(elementSchema) : void 0;
+  const mutate = globalThis.Function(
+    "__cachedIndex",
+    "__equal",
+    ...names,
+    `return ${source};`
+  )(getCachedIndex, equal3, ...bindings);
+  const explanation = explainCollectionMutation(descriptor);
+  Object.defineProperty(mutate, "explain", {
+    enumerable: false,
+    value: () => explanation
+  });
+  registerArtifact(mutate, {
+    kind: "collection-mutation-plan",
+    schema,
+    source,
+    bindingNames: names,
+    bindingValues: bindings,
+    // The upsert no-op test is schema-specialized equality, emitted as a local
+    // helper by AOT rather than carried as a runtime binding.
+    equalSource: needsEqual ? emitEqualSource(elementSchema) : void 0,
+    cacheKey: collectionMutationCacheKey(descriptor),
+    explanation
+  });
+  return mutate;
+}
+
+// ../../packages/jit/src/compiler/api-authorization.ts
+function resolveApiAuthorization(boundary, descriptor, action) {
+  if (!descriptor.actions.includes(action)) {
+    throw new JITError("INVALID_QUERY", `API query authorization action ${JSON.stringify(action)} has no access rule`);
+  }
+  const composed = composeAccessCondition(descriptor, action);
+  if (composed.kind === "deny") {
+    return Object.freeze({
+      fields: Object.freeze([]),
+      conditionSource: void 0,
+      bindings: Object.freeze([]),
+      denied: true
+    });
+  }
+  const allowed = accessProjectionFields(descriptor, action);
+  const fields = allowed === void 0 ? void 0 : Object.freeze([...allowed]);
+  if (fields !== void 0 && fields.length === 0) {
+    return Object.freeze({ fields, conditionSource: void 0, bindings: Object.freeze([]), denied: true });
+  }
+  for (const field of boundary.fields) {
+    if (fields !== void 0 && !fields.includes(field.path[0])) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(field.path.join("."))} is not readable by access action ${JSON.stringify(action)}`
+      );
+    }
+  }
+  if (composed.condition === void 0) {
+    return Object.freeze({ fields, conditionSource: void 0, bindings: Object.freeze([]), denied: false });
+  }
+  const bindings = [];
+  const conditionSource = emitStandardCondition(composed.condition, bindings);
+  return Object.freeze({ fields, conditionSource, bindings: Object.freeze(bindings), denied: false });
+}
+function emitApiAuthorizationBody(authorization, action) {
+  const deny = `throw new __AccessDeniedError(${JSON.stringify(action)}, undefined, "access-denied", undefined);`;
+  if (authorization.denied) return deny;
+  const parts = [];
+  const { fields } = authorization;
+  if (fields !== void 0) {
+    const readable = fields.map((field) => JSON.stringify(field));
+    const unreadable = (value) => readable.map((field) => `${value} !== ${field}`).join(" && ") || "true";
+    parts.push(
+      `const sort = request.sort; for (let i = 0; i < sort.length; i++) { const field = sort[i].path[0]; if (${unreadable(
+        "field"
+      )}) { ${deny} } }`
+    );
+    parts.push(
+      `let select = request.select; if (select === undefined) select = ${JSON.stringify(fields)}; else { const kept = []; for (let i = 0; i < select.length; i++) { const field = select[i]; if (!(${unreadable("field")})) kept[kept.length] = field; } if (kept.length === 0) { ${deny} } select = kept; }`
+    );
+  } else {
+    parts.push("const sort = request.sort;");
+    parts.push("const select = request.select;");
+  }
+  parts.push(
+    'const conditions = request.filter; let filter; for (let i = 0; i < conditions.length; i++) { const condition = conditions[i]; const compare = { kind: "compare", operator: condition.kind, left: { kind: "field", path: condition.path }, right: { kind: "literal", value: condition.value } }; filter = filter === undefined ? compare : { kind: "logical", operator: "and", left: filter, right: compare }; }'
+  );
+  if (authorization.conditionSource !== void 0) {
+    parts.push(
+      `const guard = ${authorization.conditionSource}; filter = filter === undefined ? guard : { kind: "logical", operator: "and", left: filter, right: guard };`
+    );
+  }
+  parts.push(
+    "const pagination = request.pagination; return { ...(filter === undefined ? {} : { filter }), sort, ...(select === undefined ? {} : { select }), ...(pagination === undefined ? {} : { pagination }) };"
+  );
+  return parts.join(" ");
+}
+function emitStandardCondition(condition, bindings) {
+  if (condition.kind === "logical") {
+    return `{ kind: "logical", operator: ${JSON.stringify(condition.op)}, left: ${emitStandardCondition(
+      condition.left,
+      bindings
+    )}, right: ${emitStandardCondition(condition.right, bindings)} }`;
+  }
+  if (condition.kind === "not") return `{ kind: "not", inner: ${emitStandardCondition(condition.inner, bindings)} }`;
+  return `{ kind: "compare", operator: ${JSON.stringify(condition.op)}, left: ${emitStandardValue(
+    condition.left,
+    bindings
+  )}, right: ${emitStandardValue(condition.right, bindings)} }`;
+}
+function emitStandardValue(value, bindings) {
+  if (value.kind === "field") return `{ kind: "field", path: ${JSON.stringify([value.key])} }`;
+  if (value.kind === "literal") {
+    bindings.push(value.value);
+    return `{ kind: "literal", value: __q${bindings.length - 1} }`;
+  }
+  if (value.kind === "param") return `{ kind: "literal", value: ${emitPropertyAccess("actor", value.name)} }`;
+  return `{ kind: "binding", name: ${JSON.stringify(value.name)} }`;
+}
+
+// ../../packages/jit/src/compiler/query-cost.ts
+var QUERY_COST_WEIGHTS = Object.freeze({
+  equality: 1,
+  range: 2,
+  sort: 3,
+  relation: 5,
+  collection: 8
+});
+function queryOperatorCost(operator) {
+  return operator === "eq" || operator === "neq" ? QUERY_COST_WEIGHTS.equality : QUERY_COST_WEIGHTS.range;
+}
+function queryFieldCost(operators) {
+  let cost = 0;
+  for (let index2 = 0; index2 < operators.length; index2++) {
+    const operator = operators[index2];
+    const operatorCost = queryOperatorCost(operator);
+    if (operatorCost > cost) cost = operatorCost;
+  }
+  return cost;
+}
+function queryBoundaryConditionCosts(fields) {
+  const costs = [];
+  for (const field of fields) {
+    if (field.shorthand) {
+      costs.push(QUERY_COST_WEIGHTS.equality);
+      continue;
+    }
+    for (const operator of field.operators) {
+      const cost = queryOperatorCost(operator);
+      costs.push(cost, cost);
+    }
+  }
+  return costs.sort((left, right) => right - left);
+}
+function queryBoundaryMaxCost(input) {
+  const costs = queryBoundaryConditionCosts(input.fields);
+  let total = 0;
+  const affordable = Math.min(costs.length, input.limits.maxConditions);
+  for (let index2 = 0; index2 < affordable; index2++) total += costs[index2];
+  const orderable = input.pagination?.type === "cursor" ? input.pagination.by.length : input.sorting.length;
+  return total + QUERY_COST_WEIGHTS.sort * Math.min(orderable, input.limits.maxSortFields);
+}
+function explainQueryBoundary(boundary) {
+  return Object.freeze({
+    fields: Object.freeze(
+      boundary.fields.map(
+        (field) => Object.freeze({
+          path: field.path.join("."),
+          operators: field.operators,
+          cost: queryFieldCost(field.operators)
+        })
+      )
+    ),
+    projection: boundary.projection,
+    sorting: boundary.sorting,
+    pagination: boundary.pagination,
+    limits: boundary.limits,
+    cost: Object.freeze({
+      weights: QUERY_COST_WEIGHTS,
+      sort: QUERY_COST_WEIGHTS.sort,
+      structural: queryBoundaryMaxCost(boundary),
+      budget: boundary.limits.maxCost
+    })
+  });
+}
+
+// ../../packages/jit/src/compiler/query-boundary.ts
+function resolveQueryBoundary(input) {
+  const fields = input.filters.map(({ path, operators }) => {
+    const segments = path.split(".");
+    if (segments.length > input.limits.maxDepth) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(path)} exceeds the configured traversal depth`
+      );
+    }
+    return Object.freeze({
+      path: Object.freeze(segments),
+      operators: Object.freeze(operators === true ? ["eq"] : [...operators]),
+      shorthand: operators === true
+    });
+  });
+  const pagination = input.pagination === void 0 ? null : Object.freeze(
+    input.pagination.type === "cursor" ? { ...input.pagination, by: Object.freeze([...input.pagination.by]) } : { ...input.pagination }
+  );
+  const shape = {
+    sourceFields: Object.freeze([...input.sourceFields]),
+    fields: Object.freeze(fields),
+    relations: Object.freeze([]),
+    collections: Object.freeze([]),
+    logical: Object.freeze({ and: false, or: false, not: false }),
+    projection: Object.freeze([...input.projection]),
+    sorting: Object.freeze([...input.sorting]),
+    pagination
+  };
+  const structural = queryBoundaryMaxCost({ ...shape, limits: input.limits });
+  const maxCost = input.limits.maxCost ?? structural;
+  if (!Number.isSafeInteger(maxCost) || maxCost < 0) {
+    throw new JITError("INVALID_QUERY", "API query maxCost must be a non-negative safe integer");
+  }
+  return Object.freeze({
+    ...shape,
+    limits: Object.freeze({ ...input.limits, maxCost })
+  });
+}
+function queryBoundaryFilters(boundary) {
+  return boundary.fields.map((field) => [field.path.join("."), field.shorthand ? true : field.operators]);
+}
+
+// ../../packages/jit/src/factories/collection/collection.ts
+function array(element) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.array, {
+      element: unwrapSchema(element)
+    })
+  );
+}
+function set(element) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.set, {
+      element: unwrapSchema(element)
+    })
+  );
+}
+function map(key, value) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.map, {
+      key: unwrapSchema(key),
+      value: unwrapSchema(value)
+    })
+  );
+}
+function record(key, value) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.record, {
+      key: unwrapSchema(key),
+      value: unwrapSchema(value)
+    })
+  );
+}
+function tuple(...items) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.tuple, {
+      items: items.map(unwrapSchema),
+      rest: void 0
+    })
+  );
 }
 
 // ../../packages/jit/src/factories/cqrs.ts
@@ -25260,1195 +26693,6 @@ function createSortPlan(schema, criteria) {
   return compiled;
 }
 
-// ../../packages/jit/src/compiler/change-layout.ts
-function resolveChangeLayout(schema, paths) {
-  return changeLayoutOf(resolveChangedDescriptor(schema, paths ?? allFieldPaths(schema, "JIT.compare.changed()")));
-}
-function changeLayoutOf(descriptor) {
-  const paths = descriptor.fields.map((field) => field.path);
-  return Object.freeze({
-    paths: Object.freeze(paths),
-    representation: descriptor.representation,
-    id: `${descriptor.representation}:${paths.join(",")}`
-  });
-}
-function changeLayoutBitFor(layout, path) {
-  const written = path.join(".");
-  let best;
-  let bestLength = -1;
-  for (let index2 = 0; index2 < layout.paths.length; index2++) {
-    const candidate = layout.paths[index2];
-    if (candidate !== written && !written.startsWith(`${candidate}.`)) continue;
-    if (candidate.length > bestLength) {
-      best = index2;
-      bestLength = candidate.length;
-    }
-  }
-  return best;
-}
-function emitChangeBit(layout, bit) {
-  return layout.representation === "bigint" ? `(1n << ${bit}n)` : `${1 << bit}`;
-}
-function emitChangeZero(layout) {
-  return layout.representation === "bigint" ? "0n" : "0";
-}
-
-// ../../packages/jit/src/compiler/mutation/mutation-plan.ts
-function buildMutationPlan(schema, writes, bindings) {
-  const resolved = [];
-  const byPath = /* @__PURE__ */ new Map();
-  for (const write of writes) {
-    const leaf = resolveMutationPath(schema, write.path);
-    const key = write.path.join(".");
-    const previous = byPath.get(key);
-    const node = Object.freeze({
-      kind: "set",
-      path: Object.freeze([...write.path]),
-      value: write.value,
-      schema: leaf
-    });
-    if (previous === void 0) {
-      byPath.set(key, resolved.length);
-      resolved.push(node);
-      continue;
-    }
-    resolved[previous] = node;
-  }
-  const params = [];
-  for (const write of resolved) {
-    if (write.value.kind === "param" && !params.includes(write.value.name)) params.push(write.value.name);
-  }
-  return Object.freeze({
-    schema,
-    writes: Object.freeze(resolved),
-    dependencies: Object.freeze({
-      // A declared write reads the field it overwrites, because the mutation
-      // compares before it allocates.
-      reads: Object.freeze(resolved.map((write) => write.path)),
-      writes: Object.freeze(resolved.map((write) => write.path))
-    }),
-    params: Object.freeze(params),
-    bindings: Object.freeze([...bindings]),
-    root: resolved.length === 0 ? void 0 : planLevels(schema, resolved)
-  });
-}
-function isSpecializableMutation(schema, paths) {
-  for (const path of paths) {
-    if (path.length === 0) return false;
-    let current = schema;
-    for (let index2 = 0; index2 < path.length; index2++) {
-      const wrappers = resolveWrappers(current);
-      if (index2 > 0 && (wrappers.optional || wrappers.nullable)) return false;
-      if (wrappers.base.type !== TypeName.object) return false;
-      if (hasDefault2(current)) return false;
-      const next = wrappers.base.def.props[path[index2]];
-      if (next === void 0) return false;
-      if (resolveWrappers(next).readonly) return false;
-      current = next;
-    }
-    if (!isAssignedLeaf(current)) return false;
-  }
-  return true;
-}
-function isAssignedLeaf(schema) {
-  if (hasDefault2(schema)) return false;
-  let program;
-  try {
-    program = buildUpdateIR(schema);
-  } catch {
-    return false;
-  }
-  if (program.helpers.length > 0) return false;
-  const node = program.body;
-  if (node.kind === "reuse" || node.kind === "date") return true;
-  return node.kind === "guard" && node.inner.kind === "reuse";
-}
-function isDateLeaf(schema) {
-  return resolveWrappers(schema).base.type === TypeName.date;
-}
-function hasDefault2(schema) {
-  let current = schema;
-  while (true) {
-    if (current.type === TypeName.default) return true;
-    const inner = current.def.innerType;
-    if (inner === void 0) return false;
-    current = inner;
-  }
-}
-function resolveMutationPath(schema, path) {
-  let current = schema;
-  for (const key of path) {
-    const base = resolveWrappers(current).base;
-    if (base.type !== TypeName.object) {
-      throw new JITError("INVALID_UPDATE", `Mutation path ${JSON.stringify(path.join("."))} leaves the object shape`);
-    }
-    const next = base.def.props[key];
-    if (next === void 0) {
-      throw new JITError(
-        "INVALID_UPDATE",
-        `Mutation path ${JSON.stringify(path.join("."))} is not declared by the schema`
-      );
-    }
-    current = next;
-  }
-  return current;
-}
-function planLevels(schema, writes) {
-  const root = { path: [], schema, writes: /* @__PURE__ */ new Map(), children: /* @__PURE__ */ new Map() };
-  for (const write of writes) {
-    let level = root;
-    for (let index2 = 0; index2 < write.path.length - 1; index2++) {
-      const key = write.path[index2];
-      let child = level.children.get(key);
-      if (child === void 0) {
-        const base = resolveWrappers(level.schema).base;
-        child = {
-          path: write.path.slice(0, index2 + 1),
-          schema: base.def.props[key],
-          writes: /* @__PURE__ */ new Map(),
-          children: /* @__PURE__ */ new Map()
-        };
-        level.children.set(key, child);
-      }
-      level = child;
-    }
-    level.writes.set(write.path[write.path.length - 1], write);
-  }
-  const freeze = (draft) => Object.freeze({
-    path: Object.freeze([...draft.path]),
-    schema: draft.schema,
-    props: Object.freeze(Object.keys(resolveWrappers(draft.schema).base.def.props)),
-    writes: draft.writes,
-    children: new Map([...draft.children].map(([key, child]) => [key, freeze(child)]))
-  });
-  return freeze(root);
-}
-
-// ../../packages/jit/src/compiler/mutation/emit-mutation.ts
-function emitMutationBody(plan, outputs = {}) {
-  const writer = new CodeWriter();
-  const channels = outputs.changed !== void 0 || outputs.patch === true || outputs.inverse === true;
-  if (plan.root === void 0) {
-    writer.line(channels ? `return ${emitEmptyResult(outputs)};` : "return value;");
-    return writer.toString();
-  }
-  for (const name of plan.params) {
-    writer.line(`const ${paramVar(name)} = params${emitPropertyAccess("", name)};`);
-  }
-  for (const [key, child] of plan.root.children) emitLevel(writer, child, emitPropertyAccess("value", key), outputs);
-  const changed3 = emitLevelTests(writer, plan.root, "value");
-  writer.line(`const root_changed = ${changed3};`);
-  if (!channels) {
-    writer.line("if (!root_changed) return value;");
-    writer.line(`return ${emitReplacement(plan.root, "value")};`);
-    return writer.toString();
-  }
-  writer.line(`if (!root_changed) return ${emitEmptyResult(outputs)};`);
-  emitOutputs(writer, plan.root, "value", outputs);
-  writer.line(`return ${emitResult(plan.root, `${emitReplacement(plan.root, "value")}`, outputs)};`);
-  return writer.toString();
-}
-function emitLevel(writer, level, source, outputs) {
-  const name = levelVar(level);
-  const current = `${name}_value`;
-  writer.line(`const ${current} = ${source};`);
-  for (const [key, child] of level.children) emitLevel(writer, child, emitPropertyAccess(current, key), outputs);
-  const changed3 = emitLevelTests(writer, level, current);
-  writer.line(`const ${name}_changed = ${changed3};`);
-  writer.line(`let ${name}_next = ${current};`);
-  writer.line(`if (${name}_changed) ${name}_next = ${emitReplacement(level, current)};`);
-}
-function emitLevelTests(writer, level, current) {
-  const tests = [];
-  for (const [key, write] of level.writes) {
-    const next = `${levelVar(level)}_${safeName(key)}`;
-    const previous = `${next}_previous`;
-    writer.line(`const ${previous} = ${emitPropertyAccess(current, key)};`);
-    writer.line(`const ${next} = ${emitWriteValue(write, previous)};`);
-    tests.push(`${next} !== ${previous}`);
-  }
-  for (const child of level.children.values()) tests.push(`${levelVar(child)}_changed`);
-  return tests.join(" || ");
-}
-function emitReplacement(level, current) {
-  const entries = level.props.map((prop) => {
-    if (level.writes.has(prop)) return `${emitObjectKey(prop)}: ${levelVar(level)}_${safeName(prop)}`;
-    const child = level.children.get(prop);
-    if (child !== void 0) return `${emitObjectKey(prop)}: ${levelVar(child)}_next`;
-    return `${emitObjectKey(prop)}: ${emitPropertyAccess(current, prop)}`;
-  });
-  return `{ ${entries.join(", ")} }`;
-}
-function emitOutputs(writer, root, current, outputs) {
-  const layout = outputs.changed;
-  if (layout !== void 0) {
-    writer.line(`let mask = ${emitChangeZero(layout)};`);
-    emitMaskBits(writer, root, layout);
-  }
-  if (outputs.patch === true || outputs.inverse === true) emitPatchLevels(writer, root, current, outputs);
-}
-function emitMaskBits(writer, level, layout) {
-  for (const [key, write] of level.writes) {
-    const bit = changeLayoutBitFor(layout, write.path);
-    if (bit === void 0) continue;
-    const next = `${levelVar(level)}_${safeName(key)}`;
-    writer.line(`if (${next} !== ${next}_previous) mask |= ${emitChangeBit(layout, bit)};`);
-  }
-  for (const child of level.children.values()) emitMaskBits(writer, child, layout);
-}
-function emitPatchLevels(writer, level, current, outputs) {
-  for (const [key, child] of level.children) emitPatchLevels(writer, child, emitPropertyAccess(current, key), outputs);
-  const name = levelVar(level);
-  const channels = [
-    ...outputs.patch === true ? ["patch"] : [],
-    ...outputs.inverse === true ? ["inverse"] : []
-  ];
-  for (const channel of channels) writer.line(`const ${name}_${channel} = {};`);
-  for (const [key, write] of level.writes) {
-    void write;
-    const next = `${name}_${safeName(key)}`;
-    writer.line(`if (${next} !== ${next}_previous) {`);
-    writer.indent(() => {
-      if (outputs.patch === true) writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${next};`);
-      if (outputs.inverse === true) writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${next}_previous;`);
-    });
-    writer.line("}");
-  }
-  for (const [key, child] of level.children) {
-    const childName3 = levelVar(child);
-    writer.line(`if (${childName3}_changed) {`);
-    writer.indent(() => {
-      if (outputs.patch === true) {
-        writer.line(`${name}_patch${emitPropertyAccess("", key)} = ${childName3}_patch;`);
-      }
-      if (outputs.inverse === true) {
-        writer.line(`${name}_inverse${emitPropertyAccess("", key)} = ${childName3}_inverse;`);
-      }
-    });
-    writer.line("}");
-  }
-}
-function emitResult(root, valueSource, outputs) {
-  const entries = [`value: ${valueSource}`];
-  if (outputs.changed !== void 0) entries.push("changed: mask");
-  if (outputs.patch === true) entries.push(`patch: ${levelVar(root)}_patch`);
-  if (outputs.inverse === true) entries.push(`inverse: ${levelVar(root)}_inverse`);
-  return `{ ${entries.join(", ")} }`;
-}
-function emitEmptyResult(outputs) {
-  const entries = ["value"];
-  if (outputs.changed !== void 0) entries.push(`changed: ${emitChangeZero(outputs.changed)}`);
-  if (outputs.patch === true) entries.push("patch: undefined");
-  if (outputs.inverse === true) entries.push("inverse: undefined");
-  return `{ ${entries.join(", ")} }`;
-}
-function emitWriteValue(write, previous) {
-  const source = emitValueSource(write.value);
-  if (isDateLeaf(write.schema)) {
-    return `${source} === undefined || Object.is(${source}, ${previous}) || ${previous}.getTime() === ${source}.getTime() ? ${previous} : new Date(${source}.getTime())`;
-  }
-  return `${source} === undefined || Object.is(${source}, ${previous}) ? ${previous} : ${source}`;
-}
-function emitValueSource(value) {
-  return value.kind === "param" ? paramVar(value.name) : `__q${value.index}`;
-}
-function paramVar(name) {
-  return `__p_${safeName(name)}`;
-}
-function levelVar(level) {
-  return level.path.length === 0 ? "root" : `l_${level.path.map(safeName).join("_")}`;
-}
-function safeName(key) {
-  return key.replace(/[^A-Za-z0-9_$]/g, "_");
-}
-
-// ../../packages/jit/src/compiler/mutation/collection-mutation.ts
-function resolveCollectionMutation(schema, kind, key, row, condition) {
-  const object2 = resolveRowObjectSchema(schema, "state.collection");
-  if (kind === "updateWhere" || kind === "removeWhere") {
-    return resolveWhereMutation(schema, kind, condition, row);
-  }
-  if (kind === "append" || kind === "prepend") {
-    return Object.freeze({
-      kind,
-      key: "",
-      descriptor: Object.freeze({ keys: Object.freeze([]), shape: "unique", uniqueByFact: false }),
-      choice: Object.freeze({
-        strategy: "EarlyExitScan",
-        reason: "an insertion at either end reaches no row",
-        complexity: "O(n)",
-        facts: Object.freeze([]),
-        direction: "asc"
-      }),
-      date: false,
-      probe: "params.key"
-    });
-  }
-  const resolved = key ?? resolveIndexKeysFromFacts(schema)?.[0];
-  if (!resolved) {
-    throw new JITError(
-      "UNSUPPORTED_SCHEMA",
-      "JIT.state.collection() needs a key: declare one with .keyed()/.indexBy()/.uniqueBy(), or name it"
-    );
-  }
-  const field = resolveRowField(object2, resolved, "state.collection");
-  const choice = resolveKeyedAccessChoice(schema, resolved);
-  const ordered = resolveOrderingKey(schema);
-  if (row !== void 0) assertFactsPreserved(row, resolved, ordered);
-  return Object.freeze({
-    kind,
-    key: resolved,
-    descriptor: resolveIndexDescriptor(
-      schema,
-      [resolved],
-      choice.strategy === "CachedIndexLookup" ? "position" : "unique"
-    ),
-    choice,
-    date: resolveScalarKeyKind(field, resolved, "state.collection") === "date",
-    ...row === void 0 ? {} : { row },
-    ...ordered === void 0 ? {} : { orderedBy: ordered },
-    probe: "params.key"
-  });
-}
-function resolveWhereMutation(schema, kind, condition, row) {
-  const object2 = resolveRowObjectSchema(schema, "state.collection");
-  const equality = singleKeyEquality(condition);
-  const lifted = equality ? resolveKeyedAccessChoice(schema, equality.key) : void 0;
-  const ordered = resolveOrderingKey(schema);
-  if (row !== void 0 && equality !== void 0) assertFactsPreserved(row, equality.key, ordered);
-  if (equality === void 0 || lifted === void 0 || lifted.strategy === "EarlyExitScan") {
-    return Object.freeze({
-      kind,
-      key: "",
-      descriptor: Object.freeze({ keys: Object.freeze([]), shape: "unique", uniqueByFact: false }),
-      choice: Object.freeze({
-        strategy: "EarlyExitScan",
-        reason: "the predicate can match more than one row, so every row is visited",
-        complexity: "O(n)",
-        facts: Object.freeze([]),
-        direction: "asc"
-      }),
-      date: false,
-      condition,
-      probe: "",
-      ...row === void 0 ? {} : { row },
-      ...ordered === void 0 ? {} : { orderedBy: ordered }
-    });
-  }
-  const field = resolveRowField(object2, equality.key, "state.collection");
-  const date3 = resolveScalarKeyKind(field, equality.key, "state.collection") === "date";
-  const probe = emitQueryValueSource(equality.probe, { fieldBase: "row", paramBase: "params" });
-  return Object.freeze({
-    kind,
-    key: equality.key,
-    descriptor: resolveIndexDescriptor(
-      schema,
-      [equality.key],
-      lifted.strategy === "CachedIndexLookup" ? "position" : "unique"
-    ),
-    choice: lifted,
-    date: date3,
-    condition,
-    probe: date3 ? `(${probe} == null ? ${probe} : ${probe}.getTime())` : probe,
-    ...row === void 0 ? {} : { row },
-    ...ordered === void 0 ? {} : { orderedBy: ordered }
-  });
-}
-function resolveOrderingKey(schema) {
-  const hints = resolveHints(schema);
-  const ordered = hints.order ?? hints.collection?.ordered;
-  const key = ordered?.key;
-  return typeof key === "string" ? key : void 0;
-}
-function assertFactsPreserved(row, key, ordered) {
-  for (const write of row.writes) {
-    if (write.path.length === 1 && write.path[0] === key) {
-      throw new JITError(
-        "INVALID_UPDATE",
-        `updateByKey() cannot write the identity key ${JSON.stringify(key)}; remove and insert the row instead`
-      );
-    }
-    if (ordered !== void 0 && write.path.length === 1 && write.path[0] === ordered) {
-      throw new JITError(
-        "INVALID_UPDATE",
-        `updateByKey() cannot write the ordering key ${JSON.stringify(ordered)}; the collection would no longer be ordered`
-      );
-    }
-  }
-}
-function explainCollectionMutation(descriptor) {
-  return Object.freeze({
-    operation: descriptor.kind,
-    key: descriptor.key,
-    physical: Object.freeze({
-      strategy: descriptor.choice.strategy,
-      reason: descriptor.choice.reason,
-      complexity: descriptor.choice.complexity,
-      facts: descriptor.choice.facts
-    }),
-    // Finding the row can be O(1) or O(log n); rebuilding the array cannot.
-    // Saying so is the honest half of the claim.
-    copy: "O(n)"
-  });
-}
-function collectionMutationCacheKey(descriptor) {
-  return `collection:${descriptor.kind}:${descriptor.choice.strategy}:${descriptor.key}:${descriptor.date}:${descriptor.choice.direction}`;
-}
-function emitFindPosition(descriptor) {
-  const shape = {
-    signature: "value, params",
-    probe: descriptor.date && descriptor.probe === "params.key" ? "(params.key == null ? params.key : params.key.getTime())" : descriptor.probe,
-    answers: "position"
-  };
-  if (descriptor.choice.strategy === "CachedIndexLookup") return emitCachedIndexLookup(descriptor.descriptor, shape);
-  if (descriptor.choice.strategy === "BinarySearch") {
-    return emitBinarySearch(descriptor.key, descriptor.descriptor, descriptor.choice.direction, shape);
-  }
-  return emitEarlyExitScan(descriptor.key, descriptor.descriptor, shape);
-}
-function emitCollectionMutationSource(descriptor) {
-  const writer = new CodeWriter();
-  writer.line("(() => {");
-  writer.indent(() => {
-    if (needsPositionFinder(descriptor)) writer.line(`const find = ${emitFindPosition(descriptor)};`);
-    writer.line("function mutate(value, params) {");
-    writer.indent(() => emitBody(writer, descriptor));
-    writer.line("}");
-    writer.line("return mutate;");
-  });
-  writer.line("})()");
-  return writer.toString();
-}
-function needsPositionFinder(descriptor) {
-  if (descriptor.kind === "append" || descriptor.kind === "prepend") return false;
-  if (descriptor.kind !== "updateWhere" && descriptor.kind !== "removeWhere") return true;
-  return descriptor.choice.strategy !== "EarlyExitScan";
-}
-function emitBody(writer, descriptor) {
-  if (descriptor.kind === "append" || descriptor.kind === "prepend") {
-    emitInsertEnd(writer, descriptor.kind);
-    return;
-  }
-  if (descriptor.kind === "updateWhere" || descriptor.kind === "removeWhere") {
-    if (descriptor.choice.strategy === "EarlyExitScan") {
-      if (descriptor.kind === "updateWhere") emitUpdateWhereScan(writer, descriptor);
-      else emitRemoveWhereScan(writer, descriptor);
-      return;
-    }
-    writer.line("const at = find(value, params);");
-    writer.line("if (at < 0) return value;");
-    if (descriptor.kind === "removeWhere") emitRemoveAt(writer);
-    else emitReplaceAt(writer, descriptor, "row");
-    return;
-  }
-  writer.line("const at = find(value, params);");
-  if (descriptor.kind === "removeByKey") {
-    writer.line("if (at < 0) return value;");
-    emitRemoveAt(writer);
-    return;
-  }
-  if (descriptor.kind === "updateByKey") {
-    writer.line("if (at < 0) return value;");
-    emitReplaceAt(writer, descriptor, "row");
-    return;
-  }
-  emitUpsert(writer);
-}
-function emitReplaceAt(writer, descriptor, rowVar) {
-  writer.line(`const ${rowVar} = value[at];`);
-  writer.line("const next = (() => {");
-  writer.indent(() => {
-    writer.line(`const value = ${rowVar};`);
-    if (descriptor.row === void 0) writer.line("return params.row;");
-    else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
-  });
-  writer.line("})();");
-  writer.line(`if (next === ${rowVar}) return value;`);
-  writer.line("const out = value.slice();");
-  writer.line("out[at] = next;");
-  writer.line("return out;");
-}
-function emitRemoveAt(writer) {
-  writer.line("const len = value.length;");
-  writer.line("const out = new Array(len - 1);");
-  writer.line("for (let i = 0; i < at; i++) out[i] = value[i];");
-  writer.line("for (let i = at + 1; i < len; i++) out[i - 1] = value[i];");
-  writer.line("return out;");
-}
-function emitUpsert(writer) {
-  writer.line("if (at >= 0) {");
-  writer.indent(() => {
-    writer.line("const row = value[at];");
-    writer.line("const next = params.row;");
-    writer.line("if (__equal(row, next)) return value;");
-    writer.line("const out = value.slice();");
-    writer.line("out[at] = next;");
-    writer.line("return out;");
-  });
-  writer.line("}");
-  writer.line("const insertion = ~at;");
-  writer.line("const len = value.length;");
-  writer.line("const out = new Array(len + 1);");
-  writer.line("for (let i = 0; i < insertion; i++) out[i] = value[i];");
-  writer.line("out[insertion] = params.row;");
-  writer.line("for (let i = insertion; i < len; i++) out[i + 1] = value[i];");
-  writer.line("return out;");
-}
-function emitUpdateWhereScan(writer, descriptor) {
-  writer.line("const len = value.length;");
-  writer.line("let out = null;");
-  writer.line("for (let i = 0; i < len; i++) {");
-  writer.indent(() => {
-    writer.line("const row = value[i];");
-    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
-    writer.line("const next = (() => {");
-    writer.indent(() => {
-      writer.line("const value = row;");
-      if (descriptor.row === void 0) writer.line("return params.row;");
-      else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
-    });
-    writer.line("})();");
-    writer.line("if (next === row) continue;");
-    writer.line("if (out === null) out = value.slice();");
-    writer.line("out[i] = next;");
-  });
-  writer.line("}");
-  writer.line("return out === null ? value : out;");
-}
-function emitRemoveWhereScan(writer, descriptor) {
-  const predicate = emitPredicate(descriptor);
-  writer.line("const len = value.length;");
-  writer.line("let removed = 0;");
-  writer.line("for (let i = 0; i < len; i++) {");
-  writer.indent(() => {
-    writer.line("const row = value[i];");
-    writer.line(`if (${predicate}) removed++;`);
-  });
-  writer.line("}");
-  writer.line("if (removed === 0) return value;");
-  writer.line("const out = new Array(len - removed);");
-  writer.line("let j = 0;");
-  writer.line("for (let i = 0; i < len; i++) {");
-  writer.indent(() => {
-    writer.line("const row = value[i];");
-    writer.line(`if (!(${predicate})) out[j++] = row;`);
-  });
-  writer.line("}");
-  writer.line("return out;");
-}
-function emitPredicate(descriptor) {
-  return emitQueryConditionSource(descriptor.condition, {
-    fieldBase: "row",
-    paramBase: "params"
-  });
-}
-function emitInsertEnd(writer, kind) {
-  writer.line("const len = value.length;");
-  writer.line("const out = new Array(len + 1);");
-  if (kind === "append") {
-    writer.line("for (let i = 0; i < len; i++) out[i] = value[i];");
-    writer.line("out[len] = params.row;");
-  } else {
-    writer.line("out[0] = params.row;");
-    writer.line("for (let i = 0; i < len; i++) out[i + 1] = value[i];");
-  }
-  writer.line("return out;");
-}
-
-// ../../packages/jit/src/runtime/update/reactive-update.ts
-function createReactiveUpdate(initial, updater, createDiff, options = {}) {
-  let value = initial;
-  let version = 0;
-  let batchDepth = 0;
-  let batchPrevious;
-  let hasBatchPrevious = false;
-  let pendingPrevious;
-  let hasPendingPrevious = false;
-  let scheduled = false;
-  let disposed = false;
-  let diff3;
-  const listeners = /* @__PURE__ */ new Set();
-  const pathBuckets = /* @__PURE__ */ new Map();
-  const selections = /* @__PURE__ */ new Set();
-  const scheduler = options.schedule ?? "sync";
-  const report = (error) => {
-    if (options.onError) {
-      options.onError(error);
-      return;
-    }
-    throw error;
-  };
-  const invoke = (listener) => {
-    if (!options.onError) {
-      listener();
-      return;
-    }
-    try {
-      listener();
-    } catch (error) {
-      report(error);
-    }
-  };
-  const notify = (previous, current) => {
-    if (disposed || Object.is(previous, current)) return;
-    const eventVersion = version;
-    let cachedChanges;
-    const event = {
-      previous,
-      value: current,
-      version: eventVersion,
-      get changes() {
-        if (cachedChanges) return cachedChanges;
-        diff3 ??= createDiff();
-        cachedChanges = diff3(previous, current).map((change) => ({
-          type: change.type,
-          path: change.path,
-          previous: readPath3(previous, change.path),
-          value: readPath3(current, change.path)
-        }));
-        return cachedChanges;
-      }
-    };
-    for (const listener of listeners) invoke(() => listener(event));
-    for (const bucket of pathBuckets.values()) {
-      const before = readPath3(previous, bucket.path);
-      const after = readPath3(current, bucket.path);
-      for (const entry of bucket.listeners) {
-        if (entry.equals(before, after)) continue;
-        const pathEvent = {
-          path: bucket.path,
-          previous: before,
-          value: after,
-          rootPrevious: previous,
-          root: current,
-          version: eventVersion
-        };
-        invoke(() => entry.listener(pathEvent));
-      }
-    }
-    for (const entry of selections) {
-      const before = entry.selector(previous);
-      const after = entry.selector(current);
-      if (entry.equals(before, after)) continue;
-      const selectionEvent = {
-        previous: before,
-        value: after,
-        rootPrevious: previous,
-        root: current,
-        version: eventVersion
-      };
-      invoke(() => entry.listener(selectionEvent));
-    }
-  };
-  const flush = () => {
-    if (!scheduled || !hasPendingPrevious) return;
-    const previous = pendingPrevious;
-    scheduled = false;
-    pendingPrevious = void 0;
-    hasPendingPrevious = false;
-    notify(previous, value);
-  };
-  const enqueue = (previous) => {
-    if (batchDepth > 0) {
-      if (!hasBatchPrevious) {
-        batchPrevious = previous;
-        hasBatchPrevious = true;
-      }
-      return;
-    }
-    if (scheduler === "sync") {
-      notify(previous, value);
-      return;
-    }
-    if (!hasPendingPrevious) {
-      pendingPrevious = previous;
-      hasPendingPrevious = true;
-    }
-    if (scheduled) return;
-    scheduled = true;
-    if (scheduler === "microtask") queueMicrotask(flush);
-    else scheduler(flush);
-  };
-  const set2 = (next) => {
-    if (disposed || Object.is(value, next)) return value;
-    const previous = value;
-    value = next;
-    version++;
-    enqueue(previous);
-    return value;
-  };
-  const controller = {
-    get value() {
-      return value;
-    },
-    get version() {
-      return version;
-    },
-    update(input) {
-      return set2(updater(value, input));
-    },
-    set: set2,
-    subscribe(listener, subscribeOptions = {}) {
-      if (disposed) return () => void 0;
-      listeners.add(listener);
-      if (subscribeOptions.immediate) {
-        const immediate = {
-          previous: value,
-          value,
-          version,
-          changes: []
-        };
-        invoke(() => listener(immediate));
-      }
-      return () => listeners.delete(listener);
-    },
-    watch(path, listener, watchOptions = {}) {
-      if (disposed) return () => void 0;
-      const normalized = normalizePath(path);
-      const key = JSON.stringify(normalized);
-      let bucket = pathBuckets.get(key);
-      if (!bucket) {
-        bucket = { path: normalized, listeners: /* @__PURE__ */ new Set() };
-        pathBuckets.set(key, bucket);
-      }
-      const entry = {
-        listener: (event) => listener(
-          event
-        ),
-        equals: watchOptions.equals ?? Object.is
-      };
-      bucket.listeners.add(entry);
-      if (watchOptions.immediate) {
-        const selected = readPath3(value, normalized);
-        invoke(
-          () => listener({
-            path: normalized,
-            previous: selected,
-            value: selected,
-            rootPrevious: value,
-            root: value,
-            version
-          })
-        );
-      }
-      return () => {
-        bucket?.listeners.delete(entry);
-        if (bucket?.listeners.size === 0) pathBuckets.delete(key);
-      };
-    },
-    select(selector, listener, selectOptions = {}) {
-      if (disposed) return () => void 0;
-      const entry = {
-        selector,
-        listener: (event) => listener(event),
-        equals: selectOptions.equals ?? Object.is
-      };
-      selections.add(entry);
-      if (selectOptions.immediate) {
-        const selected = selector(value);
-        invoke(
-          () => listener({
-            previous: selected,
-            value: selected,
-            rootPrevious: value,
-            root: value,
-            version
-          })
-        );
-      }
-      return () => selections.delete(entry);
-    },
-    batch(run) {
-      batchDepth++;
-      try {
-        run(controller);
-      } finally {
-        batchDepth--;
-        if (batchDepth === 0 && hasBatchPrevious) {
-          const previous = batchPrevious;
-          batchPrevious = void 0;
-          hasBatchPrevious = false;
-          enqueue(previous);
-        }
-      }
-      return value;
-    },
-    flush,
-    dispose() {
-      disposed = true;
-      listeners.clear();
-      pathBuckets.clear();
-      selections.clear();
-      pendingPrevious = void 0;
-      hasPendingPrevious = false;
-      batchPrevious = void 0;
-      hasBatchPrevious = false;
-      scheduled = false;
-    }
-  };
-  return controller;
-}
-function normalizePath(path) {
-  if (typeof path !== "string") return Object.freeze([...path]);
-  if (path === "") return Object.freeze([]);
-  return Object.freeze(
-    path.split(".").map((part) => part !== "" && String(Number(part)) === part ? Number(part) : part)
-  );
-}
-function readPath3(value, path) {
-  let current = value;
-  for (let index2 = 0; index2 < path.length; index2++) {
-    if (current === null || current === void 0) return void 0;
-    current = current[path[index2]];
-  }
-  return current;
-}
-
-// ../../packages/jit/src/factories/update.ts
-function update(schema, ...args) {
-  const unwrapped = unwrapSchema(schema);
-  assertUpdateable2(unwrapped);
-  const compiled = compileUpdate(unwrapped);
-  const run = ((current, updateInput) => {
-    const patch3 = typeof updateInput === "function" ? captureDraftPatch(updateInput) : updateInput;
-    return compiled(current, patch3);
-  });
-  installUpdateMethods(run, unwrapped);
-  if (args.length === 0) {
-    registerArtifact(run, { kind: "operation", schema: unwrapped, op: "update" });
-    return run;
-  }
-  return run(args[0], args[1]);
-}
-function installUpdateMethods(run, schema) {
-  Object.defineProperties(run, {
-    compile: {
-      enumerable: false,
-      value: () => run
-    },
-    patch: {
-      enumerable: false,
-      value: (template) => createCompiledPatch(run, schema, template)
-    },
-    reactive: {
-      enumerable: false,
-      value: (initial, options) => createReactiveUpdate(initial, run, () => compileDiff(schema), options)
-    },
-    authorize: {
-      enumerable: false,
-      value: (ability, action, actor) => {
-        const context = resolveAccessContext(ability, actor);
-        if (context === void 0) {
-          throw new JITError("INVALID_OPERATION", "update.authorize() requires an ability created by JIT.access()");
-        }
-        const guard = compileAccessMutationGuard(context, action);
-        const authorized = ((current, input) => {
-          const patch3 = typeof input === "function" ? captureDraftPatch(input) : input;
-          guard(current, patch3);
-          return run(current, patch3);
-        });
-        installUpdateMethods(authorized, schema);
-        registerArtifact(authorized, {
-          kind: "authorized-update-plan",
-          schema,
-          descriptor: context.descriptor,
-          actor: context.actor,
-          action
-        });
-        return authorized;
-      }
-    }
-  });
-}
-function createCompiledPatch(run, schema, template) {
-  const bindings = [];
-  const writes = collectPatchWrites(schema, template, [], bindings);
-  const specialized = writes !== void 0 && isSpecializableMutation(
-    schema,
-    writes.map((write) => write.path)
-  );
-  const plan = specialized ? buildMutationPlan(schema, writes, bindings) : void 0;
-  const explanation = Object.freeze({
-    strategy: plan === void 0 ? "generic" : "specialized",
-    reads: Object.freeze((plan?.dependencies.reads ?? []).map((path) => path.join("."))),
-    writes: Object.freeze((plan?.dependencies.writes ?? []).map((path) => path.join("."))),
-    params: Object.freeze([...plan?.params ?? []])
-  });
-  return {
-    explain: () => explanation,
-    result: (channels) => {
-      if (plan === void 0) {
-        throw new JITError(
-          "INVALID_UPDATE",
-          "result() needs a specialized mutation; explain().strategy reports why this patch stayed generic"
-        );
-      }
-      const outputs = resolveMutationOutputs(schema, channels);
-      return {
-        explain: () => explanation,
-        compile: () => compileMutation(schema, plan, explanation, outputs)
-      };
-    },
-    compile: () => {
-      if (plan === void 0) {
-        return (current, params) => run(current, materializeParamPatch(template, params));
-      }
-      return compileMutation(schema, plan, explanation, {});
-    }
-  };
-}
-function resolveMutationOutputs(schema, channels) {
-  const changed3 = channels.changed === void 0 || channels.changed === false ? void 0 : resolveChangeLayout(schema, Array.isArray(channels.changed) ? channels.changed : void 0);
-  return Object.freeze({
-    ...changed3 === void 0 ? {} : { changed: changed3 },
-    ...channels.patch === true ? { patch: true } : {},
-    ...channels.inverse === true ? { inverse: true } : {}
-  });
-}
-function compileMutation(schema, plan, explanation, outputs) {
-  const source = emitMutationSource(plan, outputs);
-  const names = plan.bindings.map((_, index2) => `__q${index2}`);
-  const mutate = globalThis.Function(...names, source)(...plan.bindings);
-  Object.defineProperty(mutate, "layout", { enumerable: false, value: () => outputs.changed });
-  registerArtifact(mutate, {
-    kind: "mutation-plan",
-    schema,
-    source,
-    bindingNames: names,
-    bindingValues: plan.bindings,
-    reads: explanation.reads,
-    writes: explanation.writes,
-    params: explanation.params,
-    ...outputs.changed === void 0 ? {} : { layout: outputs.changed }
-  });
-  return mutate;
-}
-function emitMutationSource(plan, outputs = {}) {
-  return `return function mutate(value, params) {
-${emitMutationBody(plan, outputs)}};`;
-}
-function collectPatchWrites(schema, template, path, bindings) {
-  if (template === null || typeof template !== "object" || Array.isArray(template) || isParamRef(template)) {
-    if (path.length === 0) return void 0;
-    if (isParamRef(template)) return [{ path, value: { kind: "param", name: template.name } }];
-    bindings.push(template);
-    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
-  }
-  const base = resolveWrappers(schema).base;
-  if (base.type !== TypeName.object) {
-    if (path.length === 0) return void 0;
-    bindings.push(template);
-    return [{ path, value: { kind: "binding", index: bindings.length - 1 } }];
-  }
-  const props = base.def.props;
-  const out = [];
-  for (const key of Object.keys(template)) {
-    const child = props[key];
-    if (child === void 0) return void 0;
-    const nested = collectPatchWrites(
-      child,
-      template[key],
-      [...path, key],
-      bindings
-    );
-    if (nested === void 0) return void 0;
-    out.push(...nested);
-  }
-  return out;
-}
-function materializeParamPatch(template, params) {
-  if (isParamRef(template)) return params[template.name];
-  if (Array.isArray(template)) return template.map((value) => materializeParamPatch(value, params));
-  if (template !== null && typeof template === "object") {
-    const out = {};
-    for (const key of Object.keys(template)) {
-      out[key] = materializeParamPatch(template[key], params);
-    }
-    return out;
-  }
-  return template;
-}
-function isParamRef(value) {
-  return value !== null && typeof value === "object" && value.__jitQueryValue === "param";
-}
-function captureDraftPatch(recipe) {
-  const writes = [];
-  const proxies = /* @__PURE__ */ new Map();
-  const createDraft = (path) => {
-    const cacheKey3 = path.map(String).join("\0");
-    const cached = proxies.get(cacheKey3);
-    if (cached) return cached;
-    const draft = new Proxy(
-      {},
-      {
-        get(_target, key) {
-          if (typeof key === "symbol") return void 0;
-          return createDraft([...path, key]);
-        },
-        set(_target, key, value) {
-          if (typeof key === "symbol") {
-            throw new JITError("INVALID_UPDATE", "Draft updates do not support symbol keys");
-          }
-          writes[writes.length] = { path: [...path, key], value };
-          return true;
-        }
-      }
-    );
-    proxies.set(cacheKey3, draft);
-    return draft;
-  };
-  recipe(createDraft([]));
-  return materializePatch(writes);
-}
-function materializePatch(writes) {
-  const root = {};
-  for (const write of writes) {
-    let current = root;
-    for (let index2 = 0; index2 < write.path.length; index2++) {
-      const segment = write.path[index2];
-      const key = normalizeKey(segment);
-      const isLast = index2 === write.path.length - 1;
-      if (isLast) {
-        current[key] = write.value;
-        continue;
-      }
-      const nextSegment = write.path[index2 + 1];
-      const existing = current[key];
-      if (existing === void 0) {
-        const next = isArrayKey(nextSegment) ? [] : {};
-        current[key] = next;
-        current = next;
-      } else {
-        current = existing;
-      }
-    }
-  }
-  return root;
-}
-function normalizeKey(key) {
-  if (typeof key === "number") return key;
-  if (typeof key === "string" && key !== "" && String(Number(key)) === key) return Number(key);
-  return String(key);
-}
-function isArrayKey(key) {
-  return typeof key === "number" || typeof key === "string" && key !== "" && String(Number(key)) === key;
-}
-function assertUpdateable2(schema) {
-  if (schema.type === TypeName.readonly) {
-    throw new JITError("READONLY_FIELD", "Cannot compile updates for readonly schemas");
-  }
-  if (schema.type === TypeName.lazy) {
-    assertUpdateable2(schema.def.getter());
-    return;
-  }
-  if (hasInnerType2(schema)) {
-    assertUpdateable2(schema.def.innerType);
-    return;
-  }
-  if (schema.type === TypeName.object) {
-    const objectSchema = schema;
-    for (const child of Object.values(objectSchema.def.props)) {
-      assertUpdateable2(child);
-    }
-  }
-}
-function hasInnerType2(schema) {
-  return schema.type === TypeName.optional || schema.type === TypeName.nullable || schema.type === TypeName.nullish || schema.type === TypeName.default || schema.type === TypeName.brand || schema.type === TypeName.transform || schema.type === TypeName.pipe || schema.type === TypeName.refine || schema.type === TypeName.coerce || schema.type === TypeName.promise;
-}
-
-// ../../packages/jit/src/factories/collection-state.ts
-function collection(schema) {
-  const unwrapped = unwrapSchema(schema);
-  if (unwrapped.type !== TypeName.array) {
-    throw new JITError("UNSUPPORTED_SCHEMA", "JIT.state.collection() requires an array schema");
-  }
-  const rowSchema = resolveRowObjectSchema(unwrapped, "state.collection");
-  const state3 = {
-    schema: unwrapped,
-    updateByKey: (options) => {
-      const bindings = [];
-      const writes = collectPatchWrites(rowSchema, options.patch, [], bindings);
-      if (writes === void 0 || !isSpecializableMutation(
-        rowSchema,
-        writes.map((write) => write.path)
-      )) {
-        throw new JITError(
-          "INVALID_UPDATE",
-          "updateByKey() patches a row field by field; a leaf the deep-partial update merges is not supported yet"
-        );
-      }
-      const plan = buildMutationPlan(rowSchema, writes, bindings);
-      return compileCollectionMutation(
-        unwrapped,
-        resolveCollectionMutation(unwrapped, "updateByKey", options.key, plan),
-        plan.bindings
-      );
-    },
-    removeByKey: (options) => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "removeByKey", options?.key), []),
-    upsert: (options) => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "upsert", options?.key), []),
-    append: () => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "append", void 0), []),
-    prepend: () => compileCollectionMutation(unwrapped, resolveCollectionMutation(unwrapped, "prepend", void 0), []),
-    updateWhere: (predicate, patch3) => {
-      const bindings = [];
-      const writes = collectPatchWrites(rowSchema, patch3, [], bindings);
-      if (writes === void 0 || !isSpecializableMutation(
-        rowSchema,
-        writes.map((write) => write.path)
-      )) {
-        throw new JITError(
-          "INVALID_UPDATE",
-          "updateWhere() patches a row field by field; a leaf the deep-partial update merges is not supported yet"
-        );
-      }
-      const plan = buildMutationPlan(rowSchema, writes, bindings);
-      const condition = createConditionBuilder(plan.bindings.length);
-      const node = predicate(condition.builder);
-      return compileCollectionMutation(
-        unwrapped,
-        resolveCollectionMutation(unwrapped, "updateWhere", void 0, plan, node),
-        [...plan.bindings, ...condition.bindings]
-      );
-    },
-    removeWhere: (predicate) => {
-      const condition = createConditionBuilder(0);
-      const node = predicate(condition.builder);
-      return compileCollectionMutation(
-        unwrapped,
-        resolveCollectionMutation(unwrapped, "removeWhere", void 0, void 0, node),
-        condition.bindings
-      );
-    }
-  };
-  return Object.freeze(state3);
-}
-function compileCollectionMutation(schema, descriptor, bindings) {
-  const rowSchema = resolveRowObjectSchema(schema, "state.collection");
-  const source = emitCollectionMutationSource(descriptor);
-  const names = bindings.map((_, index2) => `__q${index2}`);
-  const equal3 = descriptor.kind === "upsert" ? compileEqual(rowSchema) : void 0;
-  const mutate = globalThis.Function(
-    "__cachedIndex",
-    "__equal",
-    ...names,
-    `return ${source};`
-  )(getCachedIndex, equal3, ...bindings);
-  const explanation = explainCollectionMutation(descriptor);
-  Object.defineProperty(mutate, "explain", { enumerable: false, value: () => explanation });
-  registerArtifact(mutate, {
-    kind: "collection-mutation-plan",
-    schema,
-    source,
-    bindingNames: names,
-    bindingValues: bindings,
-    // The upsert no-op test is schema-specialized equality, emitted as a local
-    // helper by AOT rather than carried as a runtime binding.
-    equalSource: descriptor.kind === "upsert" ? emitEqualSource(rowSchema) : void 0,
-    cacheKey: collectionMutationCacheKey(descriptor),
-    explanation
-  });
-  return mutate;
-}
-
 // ../../packages/jit/src/compiler/derive.ts
 var SCALAR_TYPES2 = /* @__PURE__ */ new Set([
   "string",
@@ -26527,13 +26771,13 @@ function emitDerivedMemoSource(descriptor) {
     writer.line("const unset = {};");
     writer.line("let previousState = unset;");
     writer.line("let result;");
-    descriptor.dependencies.forEach((_, index2) => writer.line(`let previous${index2} = unset;`));
+    descriptor.dependencies.forEach((_, index2) => {
+      writer.line(`let previous${index2} = unset;`);
+    });
     writer.line("function memo(state, mask) {");
     writer.indent(() => {
       writer.line("if (state === previousState) return result;");
-      writer.line(
-        `if (mask !== undefined && previousState !== unset && (mask & ${maskLiteral}) === ${zero}) {`
-      );
+      writer.line(`if (mask !== undefined && previousState !== unset && (mask & ${maskLiteral}) === ${zero}) {`);
       writer.indent(() => {
         writer.line("previousState = state;");
         writer.line("return result;");
@@ -26551,7 +26795,9 @@ function emitDerivedMemoSource(descriptor) {
         writer.line("return result;");
       });
       writer.line("}");
-      descriptor.dependencies.forEach((_, index2) => writer.line(`previous${index2} = next${index2};`));
+      descriptor.dependencies.forEach((_, index2) => {
+        writer.line(`previous${index2} = next${index2};`);
+      });
       writer.line("previousState = state;");
       const entries = descriptor.dependencies.map(
         (dependency, index2) => `${emitObjectKey(dependency.key)}: next${index2}`
@@ -28072,8 +28318,47 @@ var api2 = Object.freeze({
   parse: defineApiParse,
   authorize: defineApiAuthorize
 });
+function defineCollectionMutation(schema, descriptor, bindings) {
+  const source = emitCollectionMutationSource(descriptor);
+  const names = bindings.map((_, index2) => `__q${index2}`);
+  const needsEqual = descriptor.kind === "upsert" || descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere";
+  const explanation = explainCollectionMutation(descriptor);
+  const stub = function aotCollectionMutation() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperties(stub, {
+    explain: { enumerable: false, value: () => explanation },
+    [AOT_ARTIFACT]: {
+      value: {
+        artifactId: collectionMutationCacheKey(descriptor),
+        schemaId: schema.type,
+        operation: { kind: "operation", op: "state.collection" }
+      }
+    }
+  });
+  registerArtifact(stub, {
+    kind: "collection-mutation-plan",
+    schema,
+    source,
+    bindingNames: names,
+    bindingValues: bindings,
+    equalSource: needsEqual ? emitEqualSource(schema.def.element) : void 0,
+    cacheKey: collectionMutationCacheKey(descriptor),
+    explanation
+  });
+  return stub;
+}
+var buildCollectionState = createCollectionState;
+var defineCollection = ((schema) => buildCollectionState(
+  schema,
+  defineCollectionMutation
+));
 var state2 = Object.freeze({
   ...state,
+  collection: defineCollection,
   patch: patch2,
   reconcile: defineReconcile
 });

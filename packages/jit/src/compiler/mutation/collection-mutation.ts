@@ -21,11 +21,32 @@ import type { MutationPlan } from "./mutation-plan.js";
 export type CollectionMutationKind =
   | "updateByKey"
   | "removeByKey"
+  | "replaceByKey"
   | "upsert"
   | "append"
   | "prepend"
+  | "insertAt"
+  | "removeAt"
+  | "replaceAt"
+  | "updateAt"
+  | "swap"
+  | "move"
+  | "truncate"
   | "updateWhere"
-  | "removeWhere";
+  | "removeWhere"
+  | "replaceWhere";
+
+export type CollectionMutationMode = "first" | "all";
+
+export interface CollectionMutationFacts {
+  readonly reads: readonly (readonly string[])[];
+  readonly writes: readonly (readonly string[])[];
+  readonly changesLength: boolean;
+  readonly changesOrder: boolean;
+  readonly changesIdentity: boolean;
+  readonly preservesKeyed: boolean;
+  readonly preservesOrdering: boolean;
+}
 
 /**
  * One immutable mutation of a collection, and the path it reaches a row by.
@@ -50,20 +71,35 @@ export interface CollectionMutationDescriptor {
   readonly condition?: QueryConditionNode;
   /** Expression the access path matches the key against. */
   readonly probe: string;
+  readonly facts: CollectionMutationFacts;
+  readonly mode: CollectionMutationMode;
 }
 
 export interface CollectionMutationExplain {
   readonly operation: CollectionMutationKind;
   readonly key: string;
   readonly physical: {
-    readonly strategy: KeyedAccessChoice["strategy"];
+    readonly strategy: KeyedAccessChoice["strategy"] | "DirectPosition";
     readonly reason: string;
     readonly complexity: KeyedAccessChoice["complexity"];
     readonly facts: readonly string[];
   };
   /** Complexity of materializing the result, which copying does not escape. */
   readonly copy: "O(1)" | "O(n)";
+  readonly mutation: CollectionMutationFacts;
 }
+
+const POSITIONAL_KINDS: ReadonlySet<CollectionMutationKind> = new Set([
+  "append",
+  "prepend",
+  "insertAt",
+  "removeAt",
+  "replaceAt",
+  "updateAt",
+  "swap",
+  "move",
+  "truncate",
+]);
 
 /**
  * Resolves the key and access path for one collection mutation.
@@ -76,30 +112,14 @@ export function resolveCollectionMutation(
   kind: CollectionMutationKind,
   key: string | undefined,
   row?: MutationPlan,
-  condition?: QueryConditionNode
+  condition?: QueryConditionNode,
+  mode: CollectionMutationMode = "all"
 ): CollectionMutationDescriptor {
+  if (kind === "updateWhere" || kind === "removeWhere" || kind === "replaceWhere") {
+    return resolveWhereMutation(schema, kind, condition as QueryConditionNode, row, mode);
+  }
+  if (POSITIONAL_KINDS.has(kind)) return resolvePositionalMutation(schema, kind, row);
   const object = resolveRowObjectSchema(schema, "state.collection");
-  if (kind === "updateWhere" || kind === "removeWhere") {
-    return resolveWhereMutation(schema, kind, condition as QueryConditionNode, row);
-  }
-  // An insertion at either end reaches no row, so it needs no key and no
-  // access path; it is here for the copy plan alone.
-  if (kind === "append" || kind === "prepend") {
-    return Object.freeze({
-      kind,
-      key: "",
-      descriptor: Object.freeze({ keys: Object.freeze([]), shape: "unique" as const, uniqueByFact: false }),
-      choice: Object.freeze({
-        strategy: "EarlyExitScan" as const,
-        reason: "an insertion at either end reaches no row",
-        complexity: "O(n)" as const,
-        facts: Object.freeze([]),
-        direction: "asc" as const,
-      }),
-      date: false,
-      probe: "params.key",
-    });
-  }
   const resolved = key ?? resolveIndexKeysFromFacts(schema)?.[0];
 
   if (!resolved) {
@@ -126,6 +146,92 @@ export function resolveCollectionMutation(
     ...(row === undefined ? {} : { row }),
     ...(ordered === undefined ? {} : { orderedBy: ordered }),
     probe: "params.key",
+    facts: mutationFacts(kind, row),
+    mode,
+  });
+}
+
+function resolvePositionalMutation(
+  schema: ATS.AnyTypeSchema,
+  kind: CollectionMutationKind,
+  row: MutationPlan | undefined
+): CollectionMutationDescriptor {
+  if (row !== undefined) {
+    assertFactsPreserved(row, resolveIndexKeysFromFacts(schema)?.[0] ?? "", resolveOrderingKey(schema));
+  }
+  return Object.freeze({
+    kind,
+    key: "",
+    descriptor: Object.freeze({
+      keys: Object.freeze([]),
+      shape: "unique" as const,
+      uniqueByFact: false,
+    }),
+    choice: Object.freeze({
+      strategy: "EarlyExitScan" as const,
+      reason: "a positional mutation addresses array slots directly",
+      complexity: "O(1)" as const,
+      facts: Object.freeze([]),
+      direction: "asc" as const,
+    }),
+    date: false,
+    probe: "",
+    ...(row === undefined ? {} : { row }),
+    facts: mutationFacts(kind, row),
+    mode: "all",
+  });
+}
+
+function mutationFacts(kind: CollectionMutationKind, row?: MutationPlan): CollectionMutationFacts {
+  const changesLength = [
+    "append",
+    "prepend",
+    "insertAt",
+    "removeAt",
+    "truncate",
+    "removeByKey",
+    "upsert",
+    "removeWhere",
+  ].includes(kind);
+  const changesOrder = [
+    "prepend",
+    "insertAt",
+    "removeAt",
+    "swap",
+    "move",
+    "truncate",
+    "removeByKey",
+    "upsert",
+    "removeWhere",
+  ].includes(kind);
+  const preservesKeyed = [
+    "removeAt",
+    "updateAt",
+    "swap",
+    "move",
+    "truncate",
+    "updateByKey",
+    "removeByKey",
+    "updateWhere",
+    "removeWhere",
+  ].includes(kind);
+  const preservesOrdering = [
+    "removeAt",
+    "updateAt",
+    "truncate",
+    "updateByKey",
+    "removeByKey",
+    "updateWhere",
+    "removeWhere",
+  ].includes(kind);
+  return Object.freeze({
+    reads: Object.freeze(row?.dependencies.reads ?? []),
+    writes: Object.freeze(row?.dependencies.writes ?? [Object.freeze([])]),
+    changesLength,
+    changesOrder,
+    changesIdentity: kind === "replaceAt" || kind === "replaceByKey" || kind === "replaceWhere" || kind === "upsert",
+    preservesKeyed,
+    preservesOrdering,
   });
 }
 
@@ -140,9 +246,10 @@ export function resolveCollectionMutation(
  */
 function resolveWhereMutation(
   schema: ATS.AnyTypeSchema,
-  kind: "updateWhere" | "removeWhere",
+  kind: "updateWhere" | "removeWhere" | "replaceWhere",
   condition: QueryConditionNode,
-  row: MutationPlan | undefined
+  row: MutationPlan | undefined,
+  mode: CollectionMutationMode
 ): CollectionMutationDescriptor {
   const object = resolveRowObjectSchema(schema, "state.collection");
   const equality = singleKeyEquality(condition);
@@ -154,7 +261,11 @@ function resolveWhereMutation(
     return Object.freeze({
       kind,
       key: "",
-      descriptor: Object.freeze({ keys: Object.freeze([]), shape: "unique" as const, uniqueByFact: false }),
+      descriptor: Object.freeze({
+        keys: Object.freeze([]),
+        shape: "unique" as const,
+        uniqueByFact: false,
+      }),
       choice: Object.freeze({
         strategy: "EarlyExitScan" as const,
         reason: "the predicate can match more than one row, so every row is visited",
@@ -167,12 +278,17 @@ function resolveWhereMutation(
       probe: "",
       ...(row === undefined ? {} : { row }),
       ...(ordered === undefined ? {} : { orderedBy: ordered }),
+      facts: mutationFacts(kind, row),
+      mode,
     });
   }
 
   const field = resolveRowField(object, equality.key, "state.collection");
   const date = resolveScalarKeyKind(field, equality.key, "state.collection") === "date";
-  const probe = emitQueryValueSource(equality.probe, { fieldBase: "row", paramBase: "params" });
+  const probe = emitQueryValueSource(equality.probe, {
+    fieldBase: "row",
+    paramBase: "params",
+  });
 
   return Object.freeze({
     kind,
@@ -188,6 +304,8 @@ function resolveWhereMutation(
     probe: date ? `(${probe} == null ? ${probe} : ${probe}.getTime())` : probe,
     ...(row === undefined ? {} : { row }),
     ...(ordered === undefined ? {} : { orderedBy: ordered }),
+    facts: mutationFacts(kind, row),
+    mode,
   });
 }
 
@@ -225,11 +343,12 @@ function assertFactsPreserved(row: MutationPlan, key: string, ordered: string | 
 }
 
 export function explainCollectionMutation(descriptor: CollectionMutationDescriptor): CollectionMutationExplain {
+  const positional = POSITIONAL_KINDS.has(descriptor.kind);
   return Object.freeze({
     operation: descriptor.kind,
     key: descriptor.key,
     physical: Object.freeze({
-      strategy: descriptor.choice.strategy,
+      strategy: positional ? "DirectPosition" : descriptor.choice.strategy,
       reason: descriptor.choice.reason,
       complexity: descriptor.choice.complexity,
       facts: descriptor.choice.facts,
@@ -237,11 +356,12 @@ export function explainCollectionMutation(descriptor: CollectionMutationDescript
     // Finding the row can be O(1) or O(log n); rebuilding the array cannot.
     // Saying so is the honest half of the claim.
     copy: "O(n)" as const,
+    mutation: descriptor.facts,
   });
 }
 
 export function collectionMutationCacheKey(descriptor: CollectionMutationDescriptor): string {
-  return `collection:${descriptor.kind}:${descriptor.choice.strategy}:${descriptor.key}:${descriptor.date}:${descriptor.choice.direction}`;
+  return `collection:${descriptor.kind}:${descriptor.mode}:${descriptor.choice.strategy}:${descriptor.key}:${descriptor.date}:${descriptor.choice.direction}`;
 }
 
 /** Emits the position finder for one mutation, from the shared access path. */
@@ -286,8 +406,9 @@ export function emitCollectionMutationSource(descriptor: CollectionMutationDescr
 }
 
 function needsPositionFinder(descriptor: CollectionMutationDescriptor): boolean {
-  if (descriptor.kind === "append" || descriptor.kind === "prepend") return false;
-  if (descriptor.kind !== "updateWhere" && descriptor.kind !== "removeWhere") return true;
+  if (POSITIONAL_KINDS.has(descriptor.kind)) return false;
+  if (descriptor.kind !== "updateWhere" && descriptor.kind !== "removeWhere" && descriptor.kind !== "replaceWhere")
+    return true;
   return descriptor.choice.strategy !== "EarlyExitScan";
 }
 
@@ -296,10 +417,39 @@ function emitBody(writer: CodeWriter, descriptor: CollectionMutationDescriptor):
     emitInsertEnd(writer, descriptor.kind);
     return;
   }
-  if (descriptor.kind === "updateWhere" || descriptor.kind === "removeWhere") {
+  if (descriptor.kind === "insertAt") {
+    emitInsertAt(writer);
+    return;
+  }
+  if (descriptor.kind === "removeAt") {
+    emitPositionalRemoveAt(writer);
+    return;
+  }
+  if (descriptor.kind === "replaceAt" || descriptor.kind === "updateAt") {
+    writer.line("const at = params.index;");
+    writer.line("if (!Number.isInteger(at) || at < 0 || at >= value.length) return value;");
+    emitReplaceAt(writer, descriptor, "row");
+    return;
+  }
+  if (descriptor.kind === "swap") {
+    emitSwap(writer);
+    return;
+  }
+  if (descriptor.kind === "move") {
+    emitMove(writer);
+    return;
+  }
+  if (descriptor.kind === "truncate") {
+    emitTruncate(writer);
+    return;
+  }
+  if (descriptor.kind === "updateWhere" || descriptor.kind === "removeWhere" || descriptor.kind === "replaceWhere") {
     if (descriptor.choice.strategy === "EarlyExitScan") {
       if (descriptor.kind === "updateWhere") emitUpdateWhereScan(writer, descriptor);
-      else emitRemoveWhereScan(writer, descriptor);
+      else if (descriptor.kind === "removeWhere") {
+        if (descriptor.mode === "first") emitRemoveWhereFirst(writer, descriptor);
+        else emitRemoveWhereScan(writer, descriptor);
+      } else emitReplaceWhereScan(writer, descriptor);
       return;
     }
     writer.line("const at = find(value, params);");
@@ -315,7 +465,7 @@ function emitBody(writer: CodeWriter, descriptor: CollectionMutationDescriptor):
     emitRemoveAt(writer);
     return;
   }
-  if (descriptor.kind === "updateByKey") {
+  if (descriptor.kind === "updateByKey" || descriptor.kind === "replaceByKey") {
     writer.line("if (at < 0) return value;");
     emitReplaceAt(writer, descriptor, "row");
     return;
@@ -335,7 +485,11 @@ function emitReplaceAt(writer: CodeWriter, descriptor: CollectionMutationDescrip
   writer.line("})();");
   // A row that did not change means the collection did not change, so the
   // original array is returned rather than copied.
-  writer.line(`if (next === ${rowVar}) return value;`);
+  writer.line(
+    descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere"
+      ? `if (__equal(${rowVar}, next)) return value;`
+      : `if (next === ${rowVar}) return value;`
+  );
   writer.line("const out = value.slice();");
   writer.line("out[at] = next;");
   writer.line("return out;");
@@ -348,6 +502,71 @@ function emitRemoveAt(writer: CodeWriter): void {
   writer.line("const out = new Array(len - 1);");
   writer.line("for (let i = 0; i < at; i++) out[i] = value[i];");
   writer.line("for (let i = at + 1; i < len; i++) out[i - 1] = value[i];");
+  writer.line("return out;");
+}
+
+function emitInsertAt(writer: CodeWriter): void {
+  writer.line("const at = params.index;");
+  writer.line("const len = value.length;");
+  writer.line("if (!Number.isInteger(at) || at < 0 || at > len) return value;");
+  writer.line("const out = new Array(len + 1);");
+  writer.line("for (let i = 0; i < at; i++) out[i] = value[i];");
+  writer.line("out[at] = params.row;");
+  writer.line("for (let i = at; i < len; i++) out[i + 1] = value[i];");
+  writer.line("return out;");
+}
+
+function emitPositionalRemoveAt(writer: CodeWriter): void {
+  writer.line("const at = params.index;");
+  writer.line("if (!Number.isInteger(at) || at < 0 || at >= value.length) return value;");
+  emitRemoveAt(writer);
+}
+
+function emitSwap(writer: CodeWriter): void {
+  writer.line("const a = params.a;");
+  writer.line("const b = params.b;");
+  writer.line("const len = value.length;");
+  writer.line(
+    "if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a >= len || b >= len || a === b || value[a] === value[b]) return value;"
+  );
+  writer.line("const out = value.slice();");
+  writer.line("out[a] = value[b];");
+  writer.line("out[b] = value[a];");
+  writer.line("return out;");
+}
+
+function emitMove(writer: CodeWriter): void {
+  writer.line("const from = params.from;");
+  writer.line("const to = params.to;");
+  writer.line("const len = value.length;");
+  writer.line(
+    "if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= len || to >= len || from === to) return value;"
+  );
+  writer.line("const out = new Array(len);");
+  writer.line("if (from < to) {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < from; i++) out[i] = value[i];");
+    writer.line("for (let i = from; i < to; i++) out[i] = value[i + 1];");
+    writer.line("out[to] = value[from];");
+    writer.line("for (let i = to + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("} else {");
+  writer.indent(() => {
+    writer.line("for (let i = 0; i < to; i++) out[i] = value[i];");
+    writer.line("out[to] = value[from];");
+    writer.line("for (let i = to + 1; i <= from; i++) out[i] = value[i - 1];");
+    writer.line("for (let i = from + 1; i < len; i++) out[i] = value[i];");
+  });
+  writer.line("}");
+  writer.line("return out;");
+}
+
+function emitTruncate(writer: CodeWriter): void {
+  writer.line("const length = params.length;");
+  writer.line("const len = value.length;");
+  writer.line("if (!Number.isInteger(length) || length < 0 || length >= len) return value;");
+  writer.line("const out = new Array(length);");
+  writer.line("for (let i = 0; i < length; i++) out[i] = value[i];");
   writer.line("return out;");
 }
 
@@ -402,6 +621,22 @@ function emitUpdateWhereScan(writer: CodeWriter, descriptor: CollectionMutationD
   writer.line("return out === null ? value : out;");
 }
 
+/** Replaces every selected row, allocating only after a semantic change. */
+function emitReplaceWhereScan(writer: CodeWriter, descriptor: CollectionMutationDescriptor): void {
+  writer.line("const len = value.length;");
+  writer.line("let out = null;");
+  writer.line("for (let i = 0; i < len; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
+    writer.line("if (__equal(row, params.row)) continue;");
+    writer.line("if (out === null) out = value.slice();");
+    writer.line("out[i] = params.row;");
+  });
+  writer.line("}");
+  writer.line("return out === null ? value : out;");
+}
+
 /**
  * Removes every row the predicate selects.
  *
@@ -430,6 +665,19 @@ function emitRemoveWhereScan(writer: CodeWriter, descriptor: CollectionMutationD
   });
   writer.line("}");
   writer.line("return out;");
+}
+
+/** Finds only the first selected slot, then performs the specialized removal. */
+function emitRemoveWhereFirst(writer: CodeWriter, descriptor: CollectionMutationDescriptor): void {
+  writer.line("let at = -1;");
+  writer.line("for (let i = 0; i < value.length; i++) {");
+  writer.indent(() => {
+    writer.line("const row = value[i];");
+    writer.line(`if (${emitPredicate(descriptor)}) { at = i; break; }`);
+  });
+  writer.line("}");
+  writer.line("if (at < 0) return value;");
+  emitRemoveAt(writer);
 }
 
 function emitPredicate(descriptor: CollectionMutationDescriptor): string {
