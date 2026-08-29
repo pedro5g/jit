@@ -42,8 +42,9 @@ describe("QueryCost", () => {
   });
 
   it("counts both operator spellings and only one shorthand equality", () => {
-    expect(queryBoundaryConditionCosts([{ operators: ["eq"] }])).toEqual([1]);
-    expect(queryBoundaryConditionCosts([{ operators: ["gte", "eq"] }])).toEqual([2, 2, 1, 1]);
+    expect(queryBoundaryConditionCosts([{ operators: ["eq"], shorthand: true }])).toEqual([1]);
+    expect(queryBoundaryConditionCosts([{ operators: ["eq"], shorthand: false }])).toEqual([1, 1]);
+    expect(queryBoundaryConditionCosts([{ operators: ["gte", "eq"], shorthand: false }])).toEqual([2, 2, 1, 1]);
   });
 
   it("bounds the worst request by the condition and ordering limits", () => {

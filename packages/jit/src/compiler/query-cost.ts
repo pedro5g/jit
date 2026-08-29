@@ -42,11 +42,11 @@ export function queryFieldCost(operators: readonly string[]): number {
  * equality shorthand accepts a direct value only, and yields one.
  */
 export function queryBoundaryConditionCosts(
-  fields: readonly { readonly operators: readonly string[] }[]
+  fields: readonly { readonly operators: readonly string[]; readonly shorthand: boolean }[]
 ): readonly number[] {
   const costs: number[] = [];
   for (const field of fields) {
-    if (field.operators.length === 1 && field.operators[0] === "eq") {
+    if (field.shorthand) {
       costs.push(QUERY_COST_WEIGHTS.equality);
       continue;
     }
@@ -66,7 +66,7 @@ export function queryBoundaryConditionCosts(
  * declared limits accept.
  */
 export function queryBoundaryMaxCost(input: {
-  readonly fields: readonly { readonly operators: readonly string[] }[];
+  readonly fields: readonly { readonly operators: readonly string[]; readonly shorthand: boolean }[];
   readonly relations: readonly unknown[];
   readonly collections: readonly unknown[];
   readonly sorting: readonly string[];

@@ -390,6 +390,42 @@ describe("JIT AOT generate", () => {
     expect(() => generated.ListUsers.parse({ page: 1_000, limit: 100 })).toThrow(/invalid API query input/i);
   });
 
+  it("emits one effective-request parser for a boundary intersected with access", async () => {
+    const Post = JIT.object({ id: JIT.number(), authorId: JIT.number(), published: JIT.boolean() });
+    const Actor = JIT.object({ id: JIT.number() });
+    const Listing = JIT.api.query(Post, {
+      filter: { published: true },
+      select: ["id", "authorId", "published"],
+      sort: ["id", "authorId"],
+    });
+    const AuthorizedListing = JIT.api.authorize(
+      Listing,
+      JIT.access(Post)
+        .actor(Actor)
+        .can("read", {
+          fields: ["id", "published"],
+          when: (query, actor) => query.or(query.eq("published", true), query.eq("authorId", actor.field("id"))),
+        }),
+      "read"
+    );
+
+    const result = AOT.generate({ artifacts: { AuthorizedListing }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly AuthorizedListing: (input: unknown, actor?: unknown) => unknown;
+    };
+    const request = { filter: { published: true }, fields: "id,authorId", sort: "id" };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+    expect(source).not.toContain("__reference");
+    // The actor's own predicate and projection are applied, and the request's
+    // unreadable field is dropped rather than reaching the adapter.
+    expect(generated.AuthorizedListing(request, { id: 7 })).toEqual(AuthorizedListing(request, { id: 7 }));
+    expect((generated.AuthorizedListing(request, { id: 7 }) as { select: readonly string[] }).select).toEqual(["id"]);
+    expect(() => generated.AuthorizedListing({ sort: "authorId" }, { id: 7 })).toThrow(/access denied/i);
+  });
+
   it("carries the semantic budget into the generated boundary parser", async () => {
     const User = JIT.object({ age: JIT.number(), name: JIT.string() });
     const Bounded = JIT.api.query(User, {

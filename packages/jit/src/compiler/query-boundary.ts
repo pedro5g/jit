@@ -5,6 +5,14 @@ import { queryBoundaryMaxCost } from "./query-cost.js";
 export interface QueryBoundaryField {
   readonly path: readonly string[];
   readonly operators: readonly string[];
+  /**
+   * True when the field was declared with the `true` shorthand.
+   *
+   * The shorthand accepts a direct value only. Declaring `["eq"]` allows the
+   * same operator through an operator object as well, so the two cannot be
+   * told apart by the operator list alone.
+   */
+  readonly shorthand: boolean;
 }
 
 export interface QueryBoundaryRelation {
@@ -90,6 +98,7 @@ export function resolveQueryBoundary(input: QueryBoundaryInput): QueryBoundary {
     return Object.freeze({
       path: Object.freeze(segments),
       operators: Object.freeze(operators === true ? ["eq"] : [...operators]),
+      shorthand: operators === true,
     });
   });
   const pagination =
@@ -127,8 +136,5 @@ export function resolveQueryBoundary(input: QueryBoundaryInput): QueryBoundary {
 export function queryBoundaryFilters(
   boundary: QueryBoundary
 ): readonly [path: string, operators: true | readonly string[]][] {
-  return boundary.fields.map((field) => {
-    const path = field.path.join(".");
-    return field.operators.length === 1 && field.operators[0] === "eq" ? [path, true] : [path, field.operators];
-  });
+  return boundary.fields.map((field) => [field.path.join("."), field.shorthand ? true : field.operators]);
 }

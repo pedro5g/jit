@@ -83,6 +83,16 @@ describe("runtime and define entrypoints", () => {
       .select("name");
     const runtimeInputParser = RuntimeJIT.api.parse(RuntimeJIT.api.query(RuntimeUser, { filter: { id: true } }));
     const defineInputParser = DefineJIT.api.parse(DefineJIT.api.query(DefineUser, { filter: { id: true } }));
+    const runtimeAuthorizedParser = RuntimeJIT.api.authorize(
+      RuntimeJIT.api.query(RuntimeUser, { filter: { id: true } }),
+      RuntimeJIT.access(RuntimeUser).can("read", (query) => query.eq("id", 1)),
+      "read"
+    );
+    const defineAuthorizedParser = DefineJIT.api.authorize(
+      DefineJIT.api.query(DefineUser, { filter: { id: true } }),
+      DefineJIT.access(DefineUser).can("read", (query) => query.eq("id", 1)),
+      "read"
+    );
     const runtimeSorted = RuntimeJIT.sort(RuntimeUser).by("name", "desc").thenBy("id");
     const defineSorted = DefineJIT.sort(DefineUser).by("name", "desc").thenBy("id");
     const runtimeIndexed = RuntimeJIT.index(RuntimeJIT.array(RuntimeUser)).by("id");
@@ -238,6 +248,12 @@ describe("runtime and define entrypoints", () => {
         name: "parseUserQuery",
         runtime: runtimeInputParser as UnknownArtifact,
         define: defineInputParser as UnknownArtifact,
+        args: [{ filter: { id: 1 } }],
+      },
+      {
+        name: "authorizeUserQuery",
+        runtime: runtimeAuthorizedParser as UnknownArtifact,
+        define: defineAuthorizedParser as UnknownArtifact,
         args: [{ filter: { id: 1 } }],
       },
       {

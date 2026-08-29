@@ -1221,19 +1221,17 @@ function compileAccess(descriptor, options) {
   registerArtifact(compiled, { kind: "access-plan", schema: descriptor.subject, descriptor });
   return compiled;
 }
-function lowerAccessToQueryCondition(context, action, bindingOffset) {
-  const plan = actionPlan(context.descriptor, action);
+function composeAccessCondition(descriptor, action) {
+  const plan = actionPlan(descriptor, action);
   const cans = plan?.allow ?? [];
   const cannots = (plan?.deny ?? []).filter((rule) => rule.fields === void 0);
   if (cans.length === 0 || cannots.some((rule) => rule.condition === void 0)) {
-    return Object.freeze({ kind: "deny", bindings: Object.freeze([]) });
+    return Object.freeze({ kind: "deny" });
   }
   const allowConditions = cans.map((rule) => rule.condition);
   const denyConditions = cannots.map((rule) => rule.condition).filter(isCondition);
-  const allowAlways = allowConditions.some((condition2) => condition2 === void 0);
-  if (allowAlways && denyConditions.length === 0) {
-    return Object.freeze({ kind: "allow", bindings: Object.freeze([]) });
-  }
+  const allowAlways = allowConditions.some((condition) => condition === void 0);
+  if (allowAlways && denyConditions.length === 0) return Object.freeze({ kind: "allow" });
   let semantic = allowAlways ? truth(true) : joinConditions("or", allowConditions.filter(isCondition));
   if (denyConditions.length > 0) {
     semantic = {
@@ -1243,8 +1241,13 @@ function lowerAccessToQueryCondition(context, action, bindingOffset) {
       right: { kind: "not", inner: joinConditions("or", denyConditions) }
     };
   }
+  return Object.freeze({ kind: "condition", condition: semantic });
+}
+function lowerAccessToQueryCondition(context, action, bindingOffset) {
+  const composed = composeAccessCondition(context.descriptor, action);
+  if (composed.condition === void 0) return Object.freeze({ kind: composed.kind, bindings: Object.freeze([]) });
   const values = [];
-  const condition = bindActorRefs(semantic, context.actor, bindingOffset, values);
+  const condition = bindActorRefs(composed.condition, context.actor, bindingOffset, values);
   return Object.freeze({ kind: "condition", condition, bindings: Object.freeze(values) });
 }
 function compileAccessMutationGuard(context, action) {
@@ -18333,6 +18336,8 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "cqrs-authorized-parser")
+      return emitCqrsAuthorizedParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
@@ -18545,6 +18550,7 @@ function emitModule(plan, options, layout) {
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown; readonly explain: () => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
+    if (artifact.kind === "cqrs-authorized-parser") return "(input: unknown, actor?: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
@@ -19161,6 +19167,32 @@ function emitModule(plan, options, layout) {
     js.push(
       `  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse, explain: () => explanation });`
     );
+    js.push("})();");
+    return { binding, type };
+  }
+  function emitCqrsAuthorizedParserArtifact(binding, declaration, artifact, reportName, type) {
+    const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
+    if (inlined === void 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-authorize",
+        reason: "an access rule value cannot be serialized ahead of time"
+      });
+      return void 0;
+    }
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...inlined.map((line) => `  ${line}`));
+    js.push("  class __AccessDeniedError extends Error {");
+    js.push("    constructor(action, field, reason) {");
+    js.push('      super("Access denied for action " + JSON.stringify(action));');
+    js.push('      this.name = "AccessDeniedError";');
+    js.push('      this.code = "ACCESS_DENIED";');
+    js.push("      this.action = action;");
+    js.push("      this.field = field;");
+    js.push("      this.reason = reason;");
+    js.push("    }");
+    js.push("  }");
+    js.push(...indentBlock(artifact.source));
     js.push("})();");
     return { binding, type };
   }
@@ -20097,173 +20129,94 @@ function isGeneratedJson(path) {
 // ../../packages/jit/src/core/host.ts
 var AOT_ARTIFACT = /* @__PURE__ */ Symbol.for("@jit/aot-artifact");
 
-// ../../packages/jit/src/factories/index.ts
-var factories_exports = {};
-__export(factories_exports, {
-  KeyedWatchedList: () => KeyedWatchedList,
-  WatchedList: () => WatchedList,
-  access: () => access,
-  any: () => any,
-  api: () => api,
-  array: () => array,
-  bigint: () => bigint2,
-  binary: () => binary2,
-  boolean: () => boolean2,
-  brand: () => brand2,
-  cacheKey: () => cacheKey,
-  canonical: () => canonical,
-  class: () => classType,
-  clone: () => clone,
-  codec: () => codec,
-  coerce: () => coerce2,
-  compare: () => compare2,
-  cqrs: () => cqrs,
-  csv: () => csv,
-  custom: () => custom,
-  date: () => date2,
-  ddd: () => ddd,
-  default: () => defaultTo2,
-  discriminatedUnion: () => discriminatedUnion,
-  dto: () => dto,
-  enum: () => nativeEnum,
-  file: () => file,
-  format: () => format,
-  from: () => from,
-  function: () => functionSchema,
-  index: () => index,
-  instanceOf: () => instanceOf,
-  int: () => int,
-  intersection: () => intersection,
-  iso: () => iso,
-  json: () => json,
-  jsonSchema: () => jsonSchema,
-  lazy: () => lazy,
-  literal: () => literal3,
-  lookup: () => lookup,
-  map: () => map2,
-  mapSchema: () => map,
-  match: () => match,
-  migrate: () => migrate,
-  mock: () => mock,
-  nan: () => nan,
-  ndjson: () => ndjson,
-  never: () => never,
-  not: () => not2,
-  null: () => nullType,
-  nullable: () => nullable2,
-  nullish: () => nullish2,
-  number: () => number2,
-  object: () => object,
-  ops: () => ops,
-  optional: () => optional2,
-  pipe: () => pipe2,
-  process: () => process,
-  project: () => project,
-  promise: () => promise2,
-  readonly: () => readonly2,
-  record: () => record,
-  refine: () => refine2,
-  regex: () => regex,
-  regexes: () => regexes_exports,
-  rules: () => rules,
-  security: () => security,
-  set: () => set,
-  sort: () => sort,
-  state: () => state,
-  stream: () => stream,
-  string: () => string,
-  symbol: () => symbol,
-  templateLiteral: () => templateLiteral,
-  templateLiterals: () => templateLiteral,
-  temporal: () => temporal,
-  transform: () => transform2,
-  tuple: () => tuple,
-  undefined: () => undefinedType,
-  union: () => union2,
-  unknown: () => unknown,
-  validate: () => validate,
-  void: () => voidType,
-  xor: () => xor
-});
-
-// ../../packages/jit/src/factories/json-schema.ts
-var jsonSchema = Object.freeze({
-  to(schema, options) {
-    return compileJsonSchema(unwrapSchema(schema), options);
-  },
-  from(document, options) {
-    return createBuilder(compileSchemaFromJson(document, options));
+// ../../packages/jit/src/compiler/api-authorization.ts
+function resolveApiAuthorization(boundary, descriptor, action) {
+  if (!descriptor.actions.includes(action)) {
+    throw new JITError("INVALID_QUERY", `API query authorization action ${JSON.stringify(action)} has no access rule`);
   }
-});
-
-// ../../packages/jit/src/factories/access.ts
-function access(schema) {
-  return createPlan(unwrapSchema(schema), void 0, []);
-}
-function createPlan(subject, actor, rules2) {
-  const descriptor = resolveAccessDescriptor(subject, actor, rules2);
-  const compiled = compileAccess(descriptor);
-  const plan = ((actorValue) => {
-    const ability = compiled(actorValue);
-    registerAccessAbility(ability, descriptor, actorValue);
-    return ability;
-  });
-  const add = (effect) => (action, rule) => createPlan(subject, actor, [...rules2, toRule(effect, action, rule)]);
-  Object.defineProperties(plan, {
-    actor: { value: (next) => createPlan(subject, unwrapSchema(next), rules2) },
-    can: { value: add("can") },
-    cannot: { value: add("cannot") },
-    actions: { value: descriptor.actions },
-    fields: { value: (action) => unconditionalFields(descriptor, action) }
-  });
-  registerArtifact(plan, { kind: "access-plan", schema: subject, descriptor });
-  return plan;
-}
-function toRule(effect, action, rule) {
-  if (rule === void 0) return { effect, action };
-  if (typeof rule === "function") {
-    return {
-      effect,
-      action,
-      condition: rule(CONDITION, ACTOR)
-    };
+  const composed = composeAccessCondition(descriptor, action);
+  if (composed.kind === "deny") {
+    return Object.freeze({
+      fields: Object.freeze([]),
+      conditionSource: void 0,
+      bindings: Object.freeze([]),
+      denied: true
+    });
   }
-  const options = rule;
-  return {
-    effect,
-    action,
-    fields: options.fields,
-    metadata: options.id === void 0 && options.reason === void 0 ? void 0 : Object.freeze({
-      ...options.id === void 0 ? {} : { id: options.id },
-      ...options.reason === void 0 ? {} : { reason: options.reason }
-    }),
-    condition: options.when === void 0 ? void 0 : options.when(CONDITION, ACTOR)
-  };
+  const allowed = accessProjectionFields(descriptor, action);
+  const fields = allowed === void 0 ? void 0 : Object.freeze([...allowed]);
+  if (fields !== void 0 && fields.length === 0) {
+    return Object.freeze({ fields, conditionSource: void 0, bindings: Object.freeze([]), denied: true });
+  }
+  for (const field of boundary.fields) {
+    if (fields !== void 0 && !fields.includes(field.path[0])) {
+      throw new JITError(
+        "INVALID_QUERY",
+        `API query filter field ${JSON.stringify(field.path.join("."))} is not readable by access action ${JSON.stringify(action)}`
+      );
+    }
+  }
+  if (composed.condition === void 0) {
+    return Object.freeze({ fields, conditionSource: void 0, bindings: Object.freeze([]), denied: false });
+  }
+  const bindings = [];
+  const conditionSource = emitStandardCondition(composed.condition, bindings);
+  return Object.freeze({ fields, conditionSource, bindings: Object.freeze(bindings), denied: false });
 }
-var CONDITION = Object.freeze({
-  ...Object.fromEntries(
-    ["eq", "neq", "gt", "gte", "lt", "lte"].map((op) => [
-      op,
-      (key, value) => ({
-        kind: "compare",
-        op,
-        left: { kind: "field", key },
-        right: isActorRef(value) ? value : { kind: "literal", value }
-      })
-    ])
-  ),
-  and: (...nodes) => fold("and", nodes),
-  or: (...nodes) => fold("or", nodes),
-  not: (inner) => ({ kind: "not", inner })
-});
-var ACTOR = Object.freeze({
-  field: (key) => ({ kind: "param", name: key })
-});
-function isActorRef(value) {
-  return typeof value === "object" && value !== null && value.kind === "param";
+function emitApiAuthorizationBody(authorization, action) {
+  const deny = `throw new __AccessDeniedError(${JSON.stringify(action)}, undefined, "access-denied", undefined);`;
+  if (authorization.denied) return deny;
+  const parts = [];
+  const { fields } = authorization;
+  if (fields !== void 0) {
+    const readable = fields.map((field) => JSON.stringify(field));
+    const unreadable = (value) => readable.map((field) => `${value} !== ${field}`).join(" && ") || "true";
+    parts.push(
+      `const sort = request.sort; for (let i = 0; i < sort.length; i++) { const field = sort[i].path[0]; if (${unreadable(
+        "field"
+      )}) { ${deny} } }`
+    );
+    parts.push(
+      `let select = request.select; if (select === undefined) select = ${JSON.stringify(fields)}; else { const kept = []; for (let i = 0; i < select.length; i++) { const field = select[i]; if (!(${unreadable("field")})) kept[kept.length] = field; } if (kept.length === 0) { ${deny} } select = kept; }`
+    );
+  } else {
+    parts.push("const sort = request.sort;");
+    parts.push("const select = request.select;");
+  }
+  parts.push(
+    'const conditions = request.filter; let filter; for (let i = 0; i < conditions.length; i++) { const condition = conditions[i]; const compare = { kind: "compare", operator: condition.kind, left: { kind: "field", path: condition.path }, right: { kind: "literal", value: condition.value } }; filter = filter === undefined ? compare : { kind: "logical", operator: "and", left: filter, right: compare }; }'
+  );
+  if (authorization.conditionSource !== void 0) {
+    parts.push(
+      `const guard = ${authorization.conditionSource}; filter = filter === undefined ? guard : { kind: "logical", operator: "and", left: filter, right: guard };`
+    );
+  }
+  parts.push(
+    "const pagination = request.pagination; return { ...(filter === undefined ? {} : { filter }), sort, ...(select === undefined ? {} : { select }), ...(pagination === undefined ? {} : { pagination }) };"
+  );
+  return parts.join(" ");
 }
-function fold(op, nodes) {
-  return nodes.reduce((left, right) => ({ kind: "logical", op, left, right }));
+function emitStandardCondition(condition, bindings) {
+  if (condition.kind === "logical") {
+    return `{ kind: "logical", operator: ${JSON.stringify(condition.op)}, left: ${emitStandardCondition(
+      condition.left,
+      bindings
+    )}, right: ${emitStandardCondition(condition.right, bindings)} }`;
+  }
+  if (condition.kind === "not") return `{ kind: "not", inner: ${emitStandardCondition(condition.inner, bindings)} }`;
+  return `{ kind: "compare", operator: ${JSON.stringify(condition.op)}, left: ${emitStandardValue(
+    condition.left,
+    bindings
+  )}, right: ${emitStandardValue(condition.right, bindings)} }`;
+}
+function emitStandardValue(value, bindings) {
+  if (value.kind === "field") return `{ kind: "field", path: ${JSON.stringify([value.key])} }`;
+  if (value.kind === "literal") {
+    bindings.push(value.value);
+    return `{ kind: "literal", value: __q${bindings.length - 1} }`;
+  }
+  if (value.kind === "param") return `{ kind: "literal", value: ${emitPropertyAccess("actor", value.name)} }`;
+  return `{ kind: "binding", name: ${JSON.stringify(value.name)} }`;
 }
 
 // ../../packages/jit/src/compiler/query-cost.ts
@@ -20289,7 +20242,7 @@ function queryFieldCost(operators) {
 function queryBoundaryConditionCosts(fields) {
   const costs = [];
   for (const field of fields) {
-    if (field.operators.length === 1 && field.operators[0] === "eq") {
+    if (field.shorthand) {
       costs.push(QUERY_COST_WEIGHTS.equality);
       continue;
     }
@@ -20344,7 +20297,8 @@ function resolveQueryBoundary(input) {
     }
     return Object.freeze({
       path: Object.freeze(segments),
-      operators: Object.freeze(operators === true ? ["eq"] : [...operators])
+      operators: Object.freeze(operators === true ? ["eq"] : [...operators]),
+      shorthand: operators === true
     });
   });
   const pagination = input.pagination === void 0 ? null : Object.freeze(
@@ -20371,10 +20325,7 @@ function resolveQueryBoundary(input) {
   });
 }
 function queryBoundaryFilters(boundary) {
-  return boundary.fields.map((field) => {
-    const path = field.path.join(".");
-    return field.operators.length === 1 && field.operators[0] === "eq" ? [path, true] : [path, field.operators];
-  });
+  return boundary.fields.map((field) => [field.path.join("."), field.shorthand ? true : field.operators]);
 }
 
 // ../../packages/jit/src/factories/collection/collection.ts
@@ -20849,14 +20800,14 @@ function createConditionBuilder(startIndex) {
       gte: (key, value) => compare3("gte", key, value),
       lt: (key, value) => compare3("lt", key, value),
       lte: (key, value) => compare3("lte", key, value),
-      and: (left, right, ...rest) => fold2("and", left, right, rest),
-      or: (left, right, ...rest) => fold2("or", left, right, rest),
+      and: (left, right, ...rest) => fold("and", left, right, rest),
+      or: (left, right, ...rest) => fold("or", left, right, rest),
       not: (inner) => ({ kind: "not", inner })
     }
   };
 }
-function fold2(op, left, right, rest) {
-  const tail = rest.length === 0 ? right : fold2(op, right, rest[0], rest.slice(1));
+function fold(op, left, right, rest) {
+  const tail = rest.length === 0 ? right : fold(op, right, rest[0], rest.slice(1));
   return { kind: "logical", op, left, right: tail };
 }
 function mergeParamNames(current, shape) {
@@ -21472,6 +21423,57 @@ function cqrsParse(definition) {
   }
   return parser;
 }
+function cqrsAuthorize(definition, ability, action) {
+  const resolved = resolveCqrsAuthorization(definition, ability, action);
+  const compiled = globalThis.Function(
+    "__reference",
+    "__decodeCursor",
+    "__AccessDeniedError",
+    ...resolved.artifact.bindingNames,
+    emitCqrsAuthorizedParser(emitCqrsInputParser(resolved.boundary), resolved.authorization, action)
+  )(
+    cqrsParseReference(resolved.boundary),
+    decodeCqrsCursor,
+    AccessDeniedError,
+    ...resolved.artifact.bindingValues
+  );
+  const bound = resolved.actor;
+  const authorize = bound === void 0 ? compiled : (input) => compiled(input, bound);
+  registerArtifact(authorize, resolved.artifact);
+  return authorize;
+}
+function resolveCqrsAuthorization(definition, ability, action) {
+  const boundary = queryBoundaries.get(definition);
+  if (!boundary) throw new JITError("INVALID_QUERY", "API query boundary is missing its semantic descriptor");
+  const context = resolveAccessContext(ability);
+  if (!context) {
+    throw new JITError("INVALID_QUERY", "JIT.api.authorize() requires an access plan or a compiled ability");
+  }
+  const definitionArtifact = getArtifact(definition);
+  if (definitionArtifact?.kind !== "cqrs-input") {
+    throw new JITError("INVALID_QUERY", "API query boundary is missing reconstructive parser metadata");
+  }
+  const authorization = resolveApiAuthorization(boundary, context.descriptor, action);
+  return {
+    boundary,
+    authorization,
+    actor: context.actor,
+    artifact: Object.freeze({
+      kind: "cqrs-authorized-parser",
+      definition: definitionArtifact.definition,
+      source: emitCqrsAuthorizedParser(emitCqrsAotParserSource(boundary), authorization, action),
+      bindingNames: Object.freeze(authorization.bindings.map((_, index2) => `__q${index2}`)),
+      bindingValues: authorization.bindings
+    })
+  };
+}
+function emitCqrsAuthorizedParser(parserSource, authorization, action) {
+  const parser = parserSource.replace("return function parse", "const parse = function parse");
+  return `${parser} return function authorize(input, actor) { const request = parse(input); ${emitApiAuthorizationBody(
+    authorization,
+    action
+  )} };`;
+}
 function cqrsParseReference(boundary) {
   const shorthand = queryBoundaryFilters(boundary);
   const allowed = new Map(
@@ -21731,10 +21733,180 @@ var cqrs = Object.freeze({
   max: (key) => aggregateSpec("max", key)
 });
 
+// ../../packages/jit/src/factories/index.ts
+var factories_exports = {};
+__export(factories_exports, {
+  KeyedWatchedList: () => KeyedWatchedList,
+  WatchedList: () => WatchedList,
+  access: () => access,
+  any: () => any,
+  api: () => api,
+  array: () => array,
+  bigint: () => bigint2,
+  binary: () => binary2,
+  boolean: () => boolean2,
+  brand: () => brand2,
+  cacheKey: () => cacheKey,
+  canonical: () => canonical,
+  class: () => classType,
+  clone: () => clone,
+  codec: () => codec,
+  coerce: () => coerce2,
+  compare: () => compare2,
+  cqrs: () => cqrs,
+  csv: () => csv,
+  custom: () => custom,
+  date: () => date2,
+  ddd: () => ddd,
+  default: () => defaultTo2,
+  discriminatedUnion: () => discriminatedUnion,
+  dto: () => dto,
+  enum: () => nativeEnum,
+  file: () => file,
+  format: () => format,
+  from: () => from,
+  function: () => functionSchema,
+  index: () => index,
+  instanceOf: () => instanceOf,
+  int: () => int,
+  intersection: () => intersection,
+  iso: () => iso,
+  json: () => json,
+  jsonSchema: () => jsonSchema,
+  lazy: () => lazy,
+  literal: () => literal3,
+  lookup: () => lookup,
+  map: () => map2,
+  mapSchema: () => map,
+  match: () => match,
+  migrate: () => migrate,
+  mock: () => mock,
+  nan: () => nan,
+  ndjson: () => ndjson,
+  never: () => never,
+  not: () => not2,
+  null: () => nullType,
+  nullable: () => nullable2,
+  nullish: () => nullish2,
+  number: () => number2,
+  object: () => object,
+  ops: () => ops,
+  optional: () => optional2,
+  pipe: () => pipe2,
+  process: () => process,
+  project: () => project,
+  promise: () => promise2,
+  readonly: () => readonly2,
+  record: () => record,
+  refine: () => refine2,
+  regex: () => regex,
+  regexes: () => regexes_exports,
+  rules: () => rules,
+  security: () => security,
+  set: () => set,
+  sort: () => sort,
+  state: () => state,
+  stream: () => stream,
+  string: () => string,
+  symbol: () => symbol,
+  templateLiteral: () => templateLiteral,
+  templateLiterals: () => templateLiteral,
+  temporal: () => temporal,
+  transform: () => transform2,
+  tuple: () => tuple,
+  undefined: () => undefinedType,
+  union: () => union2,
+  unknown: () => unknown,
+  validate: () => validate,
+  void: () => voidType,
+  xor: () => xor
+});
+
+// ../../packages/jit/src/factories/json-schema.ts
+var jsonSchema = Object.freeze({
+  to(schema, options) {
+    return compileJsonSchema(unwrapSchema(schema), options);
+  },
+  from(document, options) {
+    return createBuilder(compileSchemaFromJson(document, options));
+  }
+});
+
+// ../../packages/jit/src/factories/access.ts
+function access(schema) {
+  return createPlan(unwrapSchema(schema), void 0, []);
+}
+function createPlan(subject, actor, rules2) {
+  const descriptor = resolveAccessDescriptor(subject, actor, rules2);
+  const compiled = compileAccess(descriptor);
+  const plan = ((actorValue) => {
+    const ability = compiled(actorValue);
+    registerAccessAbility(ability, descriptor, actorValue);
+    return ability;
+  });
+  const add = (effect) => (action, rule) => createPlan(subject, actor, [...rules2, toRule(effect, action, rule)]);
+  Object.defineProperties(plan, {
+    actor: { value: (next) => createPlan(subject, unwrapSchema(next), rules2) },
+    can: { value: add("can") },
+    cannot: { value: add("cannot") },
+    actions: { value: descriptor.actions },
+    fields: { value: (action) => unconditionalFields(descriptor, action) }
+  });
+  registerArtifact(plan, { kind: "access-plan", schema: subject, descriptor });
+  return plan;
+}
+function toRule(effect, action, rule) {
+  if (rule === void 0) return { effect, action };
+  if (typeof rule === "function") {
+    return {
+      effect,
+      action,
+      condition: rule(CONDITION, ACTOR)
+    };
+  }
+  const options = rule;
+  return {
+    effect,
+    action,
+    fields: options.fields,
+    metadata: options.id === void 0 && options.reason === void 0 ? void 0 : Object.freeze({
+      ...options.id === void 0 ? {} : { id: options.id },
+      ...options.reason === void 0 ? {} : { reason: options.reason }
+    }),
+    condition: options.when === void 0 ? void 0 : options.when(CONDITION, ACTOR)
+  };
+}
+var CONDITION = Object.freeze({
+  ...Object.fromEntries(
+    ["eq", "neq", "gt", "gte", "lt", "lte"].map((op) => [
+      op,
+      (key, value) => ({
+        kind: "compare",
+        op,
+        left: { kind: "field", key },
+        right: isActorRef(value) ? value : { kind: "literal", value }
+      })
+    ])
+  ),
+  and: (...nodes) => fold2("and", nodes),
+  or: (...nodes) => fold2("or", nodes),
+  not: (inner) => ({ kind: "not", inner })
+});
+var ACTOR = Object.freeze({
+  field: (key) => ({ kind: "param", name: key })
+});
+function isActorRef(value) {
+  return typeof value === "object" && value !== null && value.kind === "param";
+}
+function fold2(op, nodes) {
+  return nodes.reduce((left, right) => ({ kind: "logical", op, left, right }));
+}
+
 // ../../packages/jit/src/factories/api.ts
 var api = Object.freeze({
   query: cqrsInput,
-  parse: cqrsParse
+  parse: cqrsParse,
+  authorize: cqrsAuthorize
 });
 
 // ../../packages/jit/src/factories/cache-key.ts
@@ -26808,9 +26980,28 @@ function defineApiParse(definition) {
   });
   return stub;
 }
+function defineApiAuthorize(definition, ability, action) {
+  const resolved = resolveCqrsAuthorization(definition, ability, action);
+  const stub = function aotCqrsAuthorizedParser() {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  };
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: "cqrs:authorize",
+      schemaId: definition.schema.type,
+      operation: { kind: "query" }
+    }
+  });
+  registerArtifact(stub, resolved.artifact);
+  return stub;
+}
 var api2 = Object.freeze({
   query: api.query,
-  parse: defineApiParse
+  parse: defineApiParse,
+  authorize: defineApiAuthorize
 });
 var state2 = Object.freeze({
   ...state,

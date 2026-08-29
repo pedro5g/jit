@@ -432,6 +432,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "cqrs-input") return emitCqrsInputArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "cqrs-parser")
       return emitCqrsParserArtifact(binding, declaration, artifact, reportName, type);
+    if (artifact.kind === "cqrs-authorized-parser")
+      return emitCqrsAuthorizedParserArtifact(binding, declaration, artifact, reportName, type);
     if (artifact.kind === "sort-plan") return emitSortPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "index-plan") return emitIndexPlanArtifact(binding, declaration, artifact, type);
     if (artifact.kind === "lookup-plan") return emitLookupPlanArtifact(binding, declaration, artifact, type);
@@ -659,6 +661,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.kind === "cqrs-input")
       return '{ readonly "~query": unknown; readonly parse: (input: unknown) => unknown; readonly explain: () => unknown }';
     if (artifact.kind === "cqrs-parser") return "(input: unknown) => unknown";
+    if (artifact.kind === "cqrs-authorized-parser") return "(input: unknown, actor?: unknown) => unknown";
     if (artifact.kind === "sort-plan") return sortPlanType(artifact, typeNames);
     if (artifact.kind === "index-plan") return indexPlanType(artifact, typeNames);
     if (artifact.kind === "lookup-plan") return lookupPlanType(artifact, typeNames);
@@ -1513,6 +1516,39 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     js.push(
       `  return Object.freeze({ "~query": Object.freeze({ version: 1, definition: ${definition} }), parse, explain: () => explanation });`
     );
+    js.push("})();");
+    return { binding, type };
+  }
+
+  function emitCqrsAuthorizedParserArtifact(
+    binding: string,
+    declaration: string,
+    artifact: Extract<CompiledArtifact, { readonly kind: "cqrs-authorized-parser" }>,
+    reportName: string,
+    type: string
+  ): EmittedBinding | undefined {
+    const inlined = inlineBindings(artifact.bindingNames, artifact.bindingValues);
+    if (inlined === undefined) {
+      skipped.push({
+        schema: reportName,
+        operation: "cqrs-authorize",
+        reason: "an access rule value cannot be serialized ahead of time",
+      });
+      return undefined;
+    }
+    js.push(`${declaration} /*#__PURE__*/ (() => {`);
+    js.push(...inlined.map((line) => `  ${line}`));
+    js.push("  class __AccessDeniedError extends Error {");
+    js.push("    constructor(action, field, reason) {");
+    js.push('      super("Access denied for action " + JSON.stringify(action));');
+    js.push('      this.name = "AccessDeniedError";');
+    js.push('      this.code = "ACCESS_DENIED";');
+    js.push("      this.action = action;");
+    js.push("      this.field = field;");
+    js.push("      this.reason = reason;");
+    js.push("    }");
+    js.push("  }");
+    js.push(...indentBlock(artifact.source));
     js.push("})();");
     return { binding, type };
   }

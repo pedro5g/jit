@@ -141,12 +141,56 @@ sort, projection and pagination data. It does not allocate an operator registry
 or walk the schema. Complexity is O(request keys + requested conditions); the
 configured limits bound both terms before an adapter receives the request.
 
+## Authorization intersection
+
+A boundary says what a consumer may express. Access says what one actor may
+reach. The effective request is their intersection:
+
+```ts
+const readPosts = JIT.access(Post)
+  .actor(Actor)
+  .can("read", {
+    fields: ["id", "authorId", "published"],
+    when: (query, actor) =>
+      query.or(query.eq("published", true), query.eq("authorId", actor.field("id"))),
+  });
+
+const authorizeListing = JIT.api.authorize(PostsQuery, readPosts, "read");
+const effective = authorizeListing(httpQuery, actor);
+```
+
+The result is an ordinary request: the consumer's predicate and the actor's row
+predicate joined with `and`, a projection narrowed to what both allowlists
+permit, the ordering, and the pagination. **No access node reaches the
+adapter** — the actor's own values arrive as literals, and the rules stay
+behind.
+
+The two boundaries fail differently, on purpose:
+
+- a field the API never exposed is **rejected** — a request must not be
+  silently corrected;
+- a field the actor cannot read is **removed** from the projection, because
+  not seeing it is the normal outcome of authorization;
+- an ordering field the actor cannot read is **refused**: ordering by a hidden
+  column reports on it;
+- a filter over a field the actor cannot read is refused when the boundary is
+  built, not per request. Such a filter is an oracle: it answers questions
+  about a hidden column one request at a time.
+
+The plan resolves once. Only the actor's own values are read per request, so a
+request costs one parse and one predicate construction rather than a walk over
+the rule set. Passing an already-compiled ability binds its actor, and the
+request argument is then unnecessary.
+
 ## Runtime, define, AOT and `~query`
 
-`JIT.api` has the same `query`/`parse`/`explain` surface on runtime and define
-hosts. The definition and parser register reconstructive artifacts. AOT emits an
-import-free parser, the V1 structural descriptor and the same frozen
-explanation; no builder, schema walker or JIT import remains.
+`JIT.api` has the same `query`/`parse`/`authorize`/`explain` surface on runtime
+and define hosts. The definition, parser and authorized parser register
+reconstructive artifacts. AOT emits an import-free parser, the V1 structural
+descriptor and the same frozen explanation; an authorized boundary becomes one
+generated function that parses and intersects in a single call, with the access
+error class inlined. No builder, schema walker, rule set or JIT import
+remains.
 
 The boundary descriptor is consumed before query optimization. Parsed
 conditions normalize to the shared query representation. The structural

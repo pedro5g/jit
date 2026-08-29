@@ -84,6 +84,7 @@ remain when their semantics require them.
 | eager CQRS query          | yes     | yes    | yes            | define artifacts are deliberately non-executable |
 | iterator/visitor query    | yes     | yes    | yes            | backend is part of the query artifact            |
 | API query boundary/parser | yes     | yes    | yes            | `~query` stays V1; `explain()` ships as a frozen constant |
+| API query authorization   | yes     | yes    | yes            | one generated parse-and-intersect function; rule values inline or the artifact is skipped |
 | sort / ordering plans     | yes     | yes    | yes            | descriptor stays off the compiled plan           |
 | index plans               | yes     | yes    | yes            | cache helper emitted only when an index is       |
 | physical query access     | yes     | yes    | yes            | strategy is compiled in; never in `~query`       |

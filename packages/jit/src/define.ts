@@ -58,7 +58,14 @@ import { unwrapSchema } from "./core/builder/index.js";
 import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/host.js";
 import { JITError } from "./errors/index.js";
 import type { Ability, AccessBuilder, AccessPlan } from "./factories/access.js";
-import type { CqrsInput, CqrsQuery, CqrsQueryFor, ParsedCqrsInput } from "./factories/cqrs.js";
+import {
+  type AuthorizedApiRequest,
+  type CqrsInput,
+  type CqrsQuery,
+  type CqrsQueryFor,
+  type ParsedCqrsInput,
+  resolveCqrsAuthorization,
+} from "./factories/cqrs.js";
 import type { CsvNamespace, CsvParsePlan, CsvSchemaOptions, CsvStringifyPlan } from "./factories/csv.js";
 import type { CallableArtifact, ExecutionArtifact, SchemaArtifact } from "./factories/execution.js";
 import * as RuntimeJIT from "./factories/index.js";
@@ -1301,9 +1308,33 @@ function defineApiParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInput
   return stub;
 }
 
+function defineApiAuthorize<TSchema extends ATS.AnyTypeSchema, TAction extends string, TActor>(
+  definition: CqrsInput<TSchema>,
+  ability: Parameters<typeof RuntimeJIT.api.authorize<TSchema, TAction, TActor>>[1],
+  action: TAction
+) {
+  const resolved = resolveCqrsAuthorization(definition, ability as object, action);
+  const stub = function aotCqrsAuthorizedParser(): never {
+    throw new JITError(
+      "JIT_AOT_001_ARTIFACT_EXECUTED",
+      "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead."
+    );
+  } as (input: unknown, actor?: TActor) => AuthorizedApiRequest;
+  Object.defineProperty(stub, AOT_ARTIFACT, {
+    value: {
+      artifactId: "cqrs:authorize",
+      schemaId: definition.schema.type,
+      operation: { kind: "query" },
+    } satisfies ArtifactDescriptor,
+  });
+  registerArtifact(stub, resolved.artifact);
+  return stub;
+}
+
 const api = Object.freeze({
   query: RuntimeJIT.api.query,
   parse: defineApiParse,
+  authorize: defineApiAuthorize,
 });
 
 const state = Object.freeze({

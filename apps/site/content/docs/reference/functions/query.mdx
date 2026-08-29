@@ -379,3 +379,39 @@ const ListUsers = JIT.api.query(Users, {
 const parseListUsers = JIT.api.parse(ListUsers);
 // parseListUsers({ after: opaqueCursor, limit: 10 })
 ```
+
+#### Effective queries
+
+`JIT.api.authorize(definition, plan, action)` intersects a boundary with one
+actor's access and returns the effective request: the consumer's predicate and
+the actor's row predicate joined with `and`, a projection narrowed to what both
+allowlists permit, plus the ordering and pagination. No access node reaches the
+adapter — the actor's values arrive as literals.
+
+The two boundaries fail differently. A field the API never exposed is rejected;
+a field the actor cannot read is removed from the projection; an ordering field
+the actor cannot read is refused, and a filter over a field the actor cannot
+read is refused when the boundary is built, since it would answer questions
+about a hidden column one request at a time.
+
+```ts
+const Posts = JIT.object({
+  id: JIT.number(),
+  authorId: JIT.number(),
+  published: JIT.boolean(),
+});
+const Author = JIT.object({ id: JIT.number() });
+const ListPosts = JIT.api.query(Posts, {
+  filter: { published: true },
+  select: ["id", "authorId", "published"],
+});
+const readPosts = JIT.access(Posts)
+  .actor(Author)
+  .can("read", {
+    fields: ["id", "published"],
+    when: (query, actor) => query.or(query.eq("published", true), query.eq("authorId", actor.field("id"))),
+  });
+
+const authorizeListPosts = JIT.api.authorize(ListPosts, readPosts, "read");
+authorizeListPosts({ fields: "id,authorId" }, { id: 7 }).select; // ["id"]
+```

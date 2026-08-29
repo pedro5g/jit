@@ -18,8 +18,8 @@ describe("QueryBoundary", () => {
     expect(boundary).toEqual({
       sourceFields: ["id", "name", "createdAt"],
       fields: [
-        { path: ["id"], operators: ["eq"] },
-        { path: ["createdAt"], operators: ["gte", "lte"] },
+        { path: ["id"], operators: ["eq"], shorthand: true },
+        { path: ["createdAt"], operators: ["gte", "lte"], shorthand: false },
       ],
       relations: [],
       collections: [],
@@ -37,6 +37,15 @@ describe("QueryBoundary", () => {
       ["id", true],
       ["createdAt", ["gte", "lte"]],
     ]);
+    // Declaring ["eq"] is not the shorthand: it also accepts an operator object.
+    const explicit = resolveQueryBoundary({
+      sourceFields: ["id"],
+      filters: [{ path: "id", operators: ["eq"] }],
+      projection: [],
+      sorting: [],
+      limits: { maxFilters: 1, maxConditions: 2, maxSortFields: 0, maxSelectFields: 0, maxDepth: 1 },
+    });
+    expect(queryBoundaryFilters(explicit)).toEqual([["id", ["eq"]]]);
   });
 
   it("keeps undeclared traversal and logical capabilities closed", () => {

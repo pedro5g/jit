@@ -1,3 +1,5 @@
+import { resolveAccessContext } from "../compiler/access.js";
+import { emitApiAuthorizationBody, resolveApiAuthorization } from "../compiler/api-authorization.js";
 import { type BinaryArray, type BinaryRowSet, isBinaryArray, isBinaryRowSet } from "../compiler/binary-rowset.js";
 import { compileJoin, createJoinPlan, explainJoinPlan, type JoinPair, type LeftJoinPair } from "../compiler/join.js";
 import { type QueryBoundary, queryBoundaryFilters, resolveQueryBoundary } from "../compiler/query-boundary.js";
@@ -21,8 +23,8 @@ import type {
 import type * as ATS from "../core/ats/index.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
-import { JITError } from "../errors/index.js";
-import { getArtifact, registerArtifact } from "../runtime/artifact-registry.js";
+import { AccessDeniedError, JITError } from "../errors/index.js";
+import { type CompiledArtifact, getArtifact, registerArtifact } from "../runtime/artifact-registry.js";
 import { array } from "./collection/collection.js";
 import {
   type BinaryQueryBuilder,
@@ -225,6 +227,23 @@ export interface CqrsInputCondition {
   readonly path: readonly string[];
   readonly value: unknown;
 }
+/**
+ * One request after the boundary and the actor's access have both been applied.
+ *
+ * The filter is the portable condition of the V1 protocol: the request's own
+ * predicate and the actor's row predicate joined with `and`. No access node
+ * crosses this boundary — an adapter receives an ordinary query.
+ */
+export interface AuthorizedApiRequest {
+  readonly filter?: StandardQueryCondition;
+  readonly select?: readonly string[];
+  readonly sort: readonly {
+    readonly path: readonly string[];
+    readonly direction: "asc" | "desc";
+  }[];
+  readonly pagination?: ParsedCqrsInput["pagination"];
+}
+
 export interface ParsedCqrsInput {
   readonly filter: readonly CqrsInputCondition[];
   readonly select?: readonly string[];
@@ -1142,6 +1161,93 @@ export function cqrsParse<TSchema extends ATS.AnyTypeSchema>(definition: CqrsInp
     });
   }
   return parser;
+}
+
+/**
+ * Compiles the effective request one actor may make of a public boundary.
+ *
+ * The plan resolves once: which fields the action can read, and the shape of
+ * its row predicate. Only the actor's own values are read per request, so a
+ * request costs one parse and one predicate construction rather than a walk
+ * over the rule set.
+ */
+export function cqrsAuthorize<TSchema extends ATS.AnyTypeSchema, TAction extends string, TActor>(
+  definition: CqrsInput<TSchema>,
+  ability:
+    | import("./access.js").Ability<Row<TSchema>, TAction>
+    | import("./access.js").AccessPlan<Row<TSchema>, TActor, TAction>,
+  action: TAction
+): (input: unknown, actor?: TActor) => AuthorizedApiRequest {
+  const resolved = resolveCqrsAuthorization(definition, ability as object, action);
+  const compiled = globalThis.Function(
+    "__reference",
+    "__decodeCursor",
+    "__AccessDeniedError",
+    ...resolved.artifact.bindingNames,
+    emitCqrsAuthorizedParser(emitCqrsInputParser(resolved.boundary), resolved.authorization, action)
+  )(cqrsParseReference(resolved.boundary), decodeCqrsCursor, AccessDeniedError, ...resolved.artifact.bindingValues) as (
+    input: unknown,
+    actor?: unknown
+  ) => AuthorizedApiRequest;
+  const bound = resolved.actor;
+  const authorize =
+    bound === undefined ? compiled : (input: unknown) => compiled(input, bound as Readonly<Record<string, unknown>>);
+  registerArtifact(authorize, resolved.artifact);
+  return authorize;
+}
+
+/**
+ * The static half of `authorize`, shared by the runtime and define hosts.
+ *
+ * A define file must not compile, so the artifact it registers is produced
+ * here rather than by executing the compiled parser.
+ */
+export function resolveCqrsAuthorization(
+  definition: { readonly "~query": StandardQueryInput },
+  ability: object,
+  action: string
+): {
+  readonly boundary: QueryBoundary;
+  readonly authorization: import("../compiler/api-authorization.js").ApiAuthorization;
+  readonly actor: unknown;
+  readonly artifact: Extract<CompiledArtifact, { readonly kind: "cqrs-authorized-parser" }>;
+} {
+  const boundary = queryBoundaries.get(definition);
+  if (!boundary) throw new JITError("INVALID_QUERY", "API query boundary is missing its semantic descriptor");
+  const context = resolveAccessContext(ability);
+  if (!context) {
+    throw new JITError("INVALID_QUERY", "JIT.api.authorize() requires an access plan or a compiled ability");
+  }
+  const definitionArtifact = getArtifact(definition);
+  if (definitionArtifact?.kind !== "cqrs-input") {
+    throw new JITError("INVALID_QUERY", "API query boundary is missing reconstructive parser metadata");
+  }
+  const authorization = resolveApiAuthorization(boundary, context.descriptor, action);
+  return {
+    boundary,
+    authorization,
+    actor: context.actor,
+    artifact: Object.freeze({
+      kind: "cqrs-authorized-parser" as const,
+      definition: definitionArtifact.definition,
+      source: emitCqrsAuthorizedParser(emitCqrsAotParserSource(boundary), authorization, action),
+      bindingNames: Object.freeze(authorization.bindings.map((_, index) => `__q${index}`)),
+      bindingValues: authorization.bindings,
+    }),
+  };
+}
+
+/** Wraps one specialized request parser with the actor intersection. */
+export function emitCqrsAuthorizedParser(
+  parserSource: string,
+  authorization: import("../compiler/api-authorization.js").ApiAuthorization,
+  action: string
+): string {
+  const parser = parserSource.replace("return function parse", "const parse = function parse");
+  return `${parser} return function authorize(input, actor) { const request = parse(input); ${emitApiAuthorizationBody(
+    authorization,
+    action
+  )} };`;
 }
 
 function cqrsParseReference(boundary: QueryBoundary) {

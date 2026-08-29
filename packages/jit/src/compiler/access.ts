@@ -52,6 +52,12 @@ export interface LoweredAccessCondition {
   readonly bindings: readonly unknown[];
 }
 
+/** The same answer before actor values are bound; `param` nodes are intact. */
+export interface ComposedAccessCondition {
+  readonly kind: "allow" | "deny" | "condition";
+  readonly condition?: QueryConditionNode;
+}
+
 const ACCESS_ABILITIES = new WeakMap<object, AccessAbilityContext>();
 
 export function registerAccessAbility(ability: object, descriptor: AccessDescriptor, actor: unknown): void {
@@ -349,28 +355,29 @@ export function compileAccess<TActor, TAbility>(
 }
 
 /** Lowers an actor-bound action to an ordinary query predicate. */
-export function lowerAccessToQueryCondition(
-  context: AccessAbilityContext,
-  action: string,
-  bindingOffset: number
-): LoweredAccessCondition {
-  const plan = actionPlan(context.descriptor, action);
+/**
+ * Composes the row predicate one action authorizes, before any actor exists.
+ *
+ * A public query boundary compiles against the plan and binds the actor per
+ * request, so composition and binding are separate steps of the same lowering
+ * rather than two implementations of the same rules.
+ */
+export function composeAccessCondition(descriptor: AccessDescriptor, action: string): ComposedAccessCondition {
+  const plan = actionPlan(descriptor, action);
   const cans = plan?.allow ?? [];
   // A field-only prohibition must not reject the complete row. This is the
   // same unfocused-check rule used by `can(action, subject)`.
   const cannots = (plan?.deny ?? []).filter((rule) => rule.fields === undefined);
 
   if (cans.length === 0 || cannots.some((rule) => rule.condition === undefined)) {
-    return Object.freeze({ kind: "deny", bindings: Object.freeze([]) });
+    return Object.freeze({ kind: "deny" });
   }
 
   const allowConditions = cans.map((rule) => rule.condition);
   const denyConditions = cannots.map((rule) => rule.condition).filter(isCondition);
   const allowAlways = allowConditions.some((condition) => condition === undefined);
 
-  if (allowAlways && denyConditions.length === 0) {
-    return Object.freeze({ kind: "allow", bindings: Object.freeze([]) });
-  }
+  if (allowAlways && denyConditions.length === 0) return Object.freeze({ kind: "allow" });
 
   let semantic = allowAlways ? truth(true) : joinConditions("or", allowConditions.filter(isCondition));
   if (denyConditions.length > 0) {
@@ -381,9 +388,19 @@ export function lowerAccessToQueryCondition(
       right: { kind: "not", inner: joinConditions("or", denyConditions) },
     };
   }
+  return Object.freeze({ kind: "condition", condition: semantic });
+}
+
+export function lowerAccessToQueryCondition(
+  context: AccessAbilityContext,
+  action: string,
+  bindingOffset: number
+): LoweredAccessCondition {
+  const composed = composeAccessCondition(context.descriptor, action);
+  if (composed.condition === undefined) return Object.freeze({ kind: composed.kind, bindings: Object.freeze([]) });
 
   const values: unknown[] = [];
-  const condition = bindActorRefs(semantic, context.actor, bindingOffset, values);
+  const condition = bindActorRefs(composed.condition, context.actor, bindingOffset, values);
   return Object.freeze({ kind: "condition", condition, bindings: Object.freeze(values) });
 }
 

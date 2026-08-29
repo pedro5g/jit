@@ -578,6 +578,152 @@ describe("JIT.cqrs", () => {
     expect(() => JIT.api.parse(JIT.api.query(User, {}))({ fields: "id" })).toThrow(/sparse fields/i);
   });
 
+  describe("effective queries", () => {
+    const Post = JIT.object({
+      id: JIT.number(),
+      authorId: JIT.number(),
+      published: JIT.boolean(),
+      moderationNote: JIT.string(),
+    });
+    const Actor = JIT.object({ id: JIT.number() });
+    const readable = JIT.access(Post)
+      .actor(Actor)
+      .can("read", {
+        fields: ["id", "authorId", "published"],
+        when: (query, actor) => query.or(query.eq("published", true), query.eq("authorId", actor.field("id"))),
+      });
+    const Listing = JIT.api.query(Post, {
+      filter: { published: true, authorId: ["eq"] },
+      select: ["id", "authorId", "published"],
+      sort: ["id"],
+      pagination: { type: "offset", defaultLimit: 10, maxLimit: 50 },
+    });
+
+    it("joins the request predicate with the actor predicate", () => {
+      const authorize = JIT.api.authorize(Listing, readable, "read");
+
+      expect(authorize({ filter: { published: true } }, { id: 7 })).toEqual({
+        filter: {
+          kind: "logical",
+          operator: "and",
+          left: {
+            kind: "compare",
+            operator: "eq",
+            left: { kind: "field", path: ["published"] },
+            right: { kind: "literal", value: true },
+          },
+          right: {
+            kind: "logical",
+            operator: "or",
+            left: {
+              kind: "compare",
+              operator: "eq",
+              left: { kind: "field", path: ["published"] },
+              right: { kind: "literal", value: true },
+            },
+            right: {
+              kind: "compare",
+              operator: "eq",
+              left: { kind: "field", path: ["authorId"] },
+              right: { kind: "literal", value: 7 },
+            },
+          },
+        },
+        sort: [],
+        select: ["id", "authorId", "published"],
+        pagination: { kind: "offset", offset: 0, limit: 10 },
+      });
+    });
+
+    it("narrows the projection to the intersection of both allowlists", () => {
+      const authorize = JIT.api.authorize(Listing, readable, "read");
+
+      // The request asks for two of the three fields the boundary exposes and
+      // the actor may read both, so both survive.
+      expect(authorize({ fields: "id,authorId" }, { id: 7 }).select).toEqual(["id", "authorId"]);
+      // A field the boundary never exposed is rejected rather than removed.
+      expect(() => authorize({ fields: "moderationNote" }, { id: 7 })).toThrow(/select field/i);
+    });
+
+    it("removes fields the actor cannot read from an otherwise valid request", () => {
+      const partial = JIT.access(Post)
+        .actor(Actor)
+        .can("read", { fields: ["id"] });
+      const OpenListing = JIT.api.query(Post, { select: ["id", "authorId", "published"], sort: ["id"] });
+      const authorize = JIT.api.authorize(OpenListing, partial, "read");
+
+      expect(authorize({ fields: "id,authorId" }, { id: 7 }).select).toEqual(["id"]);
+      expect(authorize({}, { id: 7 }).select).toEqual(["id"]);
+      expect(() => authorize({ sort: "id" }, { id: 7 })).not.toThrow();
+    });
+
+    it("refuses ordering and filtering on a field the actor cannot read", () => {
+      const partial = JIT.access(Post)
+        .actor(Actor)
+        .can("read", { fields: ["id"] });
+      const Ordered = JIT.api.query(Post, { select: ["id"], sort: ["id", "authorId"] });
+
+      expect(() => JIT.api.authorize(Ordered, partial, "read")({ sort: "authorId" }, { id: 7 })).toThrow(
+        /access denied/i
+      );
+      expect(() => JIT.api.authorize(Listing, partial, "read")).toThrow(/not readable by access action/i);
+    });
+
+    it("refuses every request when the action authorizes nothing", () => {
+      // An unconditional prohibition removes every permission the action had.
+      const revoked = JIT.access(Post)
+        .actor(Actor)
+        .can("read", (query) => query.eq("published", true))
+        .cannot("read");
+      const authorize = JIT.api.authorize(Listing, revoked, "read");
+
+      expect(() => authorize({}, { id: 7 })).toThrow(/access denied/i);
+      expect(() => JIT.api.authorize(Listing, JIT.access(Post).actor(Actor).can("write"), "read" as never)).toThrow(
+        /has no access rule/i
+      );
+      expect(() => JIT.api.authorize(Listing, {} as never, "read")).toThrow(/access plan or a compiled ability/i);
+    });
+
+    it("uses the bound actor when a compiled ability is given", () => {
+      const authorize = JIT.api.authorize(Listing, readable({ id: 3 }), "read");
+      const effective = authorize({});
+
+      expect(effective.filter).toEqual({
+        kind: "logical",
+        operator: "or",
+        left: {
+          kind: "compare",
+          operator: "eq",
+          left: { kind: "field", path: ["published"] },
+          right: { kind: "literal", value: true },
+        },
+        right: {
+          kind: "compare",
+          operator: "eq",
+          left: { kind: "field", path: ["authorId"] },
+          right: { kind: "literal", value: 3 },
+        },
+      });
+    });
+
+    it("keeps the effective request identical in the import-free parser", () => {
+      const authorize = JIT.api.authorize(Listing, readable, "read");
+      const artifact = getArtifact(authorize);
+      if (artifact?.kind !== "cqrs-authorized-parser") throw new Error("missing authorized parser artifact");
+      class AccessDenied extends Error {}
+      const aot = globalThis.Function(
+        ...artifact.bindingNames,
+        "__AccessDeniedError",
+        artifact.source
+      )(...artifact.bindingValues, AccessDenied) as (input: unknown, actor?: unknown) => unknown;
+      const request = { filter: { authorId: { $eq: 2 } }, fields: "id,published", sort: "id", page: 2, limit: 5 };
+
+      expect(artifact.source).not.toContain("__reference");
+      expect(aot(request, { id: 7 })).toEqual(authorize(request, { id: 7 }));
+      expect(() => aot({ fields: "moderationNote" }, { id: 7 })).toThrow(/invalid API query input/i);
+    });
+  });
+
   it("reports what the boundary permits and what it may cost", () => {
     const User = JIT.object({ id: JIT.string(), age: JIT.number(), name: JIT.string() });
     const definition = JIT.api.query(User, {

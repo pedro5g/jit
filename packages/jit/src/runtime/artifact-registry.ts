@@ -163,6 +163,15 @@ interface CqrsInputArtifact {
   readonly explanation: unknown;
 }
 
+interface CqrsAuthorizedParserArtifact {
+  readonly kind: "cqrs-authorized-parser";
+  readonly definition: unknown;
+  /** Import-free function-body source that returns the effective-request parser. */
+  readonly source: string;
+  readonly bindingNames: readonly string[];
+  readonly bindingValues: readonly unknown[];
+}
+
 interface CqrsParserArtifact {
   readonly kind: "cqrs-parser";
   readonly definition: unknown;
@@ -249,6 +258,7 @@ export type CompiledArtifact =
   | QueryPlanArtifact
   | CqrsInputArtifact
   | CqrsParserArtifact
+  | CqrsAuthorizedParserArtifact
   | SortPlanArtifact
   | JoinPlanArtifact
   | IndexPlanArtifact

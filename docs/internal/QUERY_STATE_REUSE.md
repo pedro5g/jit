@@ -48,8 +48,10 @@ later milestones can open them explicitly without changing the Query AST. Both
 the reference parser and specialized source emitter now consume that
 descriptor. The V1 `~query` shape is derived separately and remains unchanged.
 
-The boundary is not yet final: `true` remains the equality shorthand and
-relations, collections and logical input remain closed. Operator types now come from the shared Query AST; construction
+The boundary is not yet final: relations, collections and logical input remain
+closed. The `true` shorthand is now a distinct capability in the IR rather than
+an operator list that happens to be `["eq"]`, so declaring `["eq"]` keeps
+accepting an operator object. Operator types now come from the shared Query AST; construction
 also rejects non-scalar fields and operators incompatible with the schema.
 Projection has an explicit allowlist rather than inheriting every model field.
 Operations absent from the Query AST (`in`, `between`, string search) remain
@@ -59,7 +61,10 @@ while the descriptor is resolved and `maxOffset` while a request is normalized,
 and neither reaches `~query` V1. `QueryCost` adds the semantic budget over
 those counters: weights live in `compiler/query-cost.ts`, the default budget is
 the worst request the structural limits already allow, and a guard that cannot
-fire is not emitted. Both source emitters take the descriptor as
+fire is not emitted. `resolveApiAuthorization` intersects the boundary with one
+access action: the readable field set and the row predicate resolve against the
+plan once, and only the actor's own values are read per request. The effective
+request is ordinary V1 data — no access node reaches an adapter. Both source emitters take the descriptor as
 their only argument, so a limit cannot land in one parser and miss the other.
 Parsed predicates continue to lower to `QueryConditionNode` and standard V1
 query data.
