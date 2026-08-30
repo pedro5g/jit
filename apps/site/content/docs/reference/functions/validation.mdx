@@ -62,7 +62,7 @@ check has a bound worth reporting:
 const Account = JIT.object({ name: JIT.string().min(3, "Name is too short") });
 const [issue] = (JIT.validate.safeParse(Account)({ name: "" }) as { issues: readonly unknown[] }).issues;
 
-issue; // { path: "name", code: "too_small", expected: "length >= 3", message: "Name is too short", params: { minimum: 3, inclusive: true } }
+issue; // { path: ["name"], code: "too_small", expected: "length >= 3", message: "Name is too short", params: { minimum: 3, inclusive: true } }
 ```
 
 Branch on `code`. `message` is presentation, and every check that can fail lets
@@ -78,6 +78,20 @@ Messages are static strings, never callbacks: a code plus `params` is what
 translation actually needs, and it keeps the diagnostic path free of bindings
 AOT would have to reconstruct. A custom message never reaches boolean
 validation — `is` emits identical source with or without one.
+
+Paths are structured readonly property-key arrays. For example, the third
+item's `email` field is `["items", 2, "email"]`, preserving numeric indices for
+form and protocol adapters without reparsing a display string.
+
+Use an explicit issue budget for large untrusted payloads:
+
+```ts
+const safeParseUser = JIT.validate.safeParse(User, { maxIssues: 100 });
+```
+
+The generated validator exits when the hundredth issue is emitted. It never
+collects the remainder and slices it, while the default remains collect-all.
+`parse`, async validation, and class/DDD validation accept the same option.
 
 ## Canonical paths
 

@@ -75,13 +75,19 @@ const result = safeParseUser(input);
 
 if (!result.success) {
   for (const issue of result.issues) {
-    fields.set(issue.path, issue.message);
+    fields.set(issue.path.join("."), issue.message);
   }
 }
 ```
 
 Use stable `code` values for program behavior and custom `message` text for
-users. `path` is a root-relative string suitable for logs/forms.
+users. `path` is a root-relative readonly `PropertyKey[]`; array positions stay
+numeric and no consumer has to parse a formatted path string.
+
+For large untrusted inputs, `JIT.validate.safeParse(Schema, { maxIssues: 100 })`
+and the equivalent `parse`, async and factory options stop traversal at the
+limit. Without the option diagnostics continue to collect all independent
+issues.
 
 ## Transforming parsers
 
@@ -107,6 +113,15 @@ physical fusion boundaries.
 Frameworks can call `schema["~standard"].validate(value)`. JIT's adapter uses
 the already compiled validator, so interoperability does not introduce a
 generic validation layer.
+
+## Measured cost
+
+On Node 22.17.1 / Ryzen 7 5800H, `pnpm bench:validate` measured standalone AOT
+`safeParse` at 50.41 ns / 312 B for one issue and 95.14 ns / 856 B for five.
+The equivalent handwritten five-field validator measured 62.96 ns and 80.96
+ns. Custom messages stayed within noise of default messages. `maxIssues: 2`
+reduced the five-error AOT sample to 448 B but took 185 ns on the tiny object;
+it is a memory/DoS bound for large invalid inputs, not a small-input speedup.
 
 ## Security notes
 

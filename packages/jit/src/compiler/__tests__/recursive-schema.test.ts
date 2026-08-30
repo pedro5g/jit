@@ -36,7 +36,7 @@ describe("JIT recursive schemas", () => {
     expect(bad.success).toBe(false);
     if (!bad.success) {
       // The path survives the recursive call rather than resetting at each level.
-      expect(bad.issues[0].path).toBe("children[0].children[0].value");
+      expect(bad.issues[0].path).toEqual(["children", 0, "children", 0, "value"]);
     }
   });
 

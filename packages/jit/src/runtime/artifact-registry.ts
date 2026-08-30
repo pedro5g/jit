@@ -242,6 +242,7 @@ interface ValidatorArtifact {
   readonly kind: "validator";
   readonly schema: ATS.AnyTypeSchema;
   readonly op: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync";
+  readonly maxIssues?: number;
 }
 
 interface OperationArtifact {
@@ -305,6 +306,7 @@ interface ClassArtifact {
     readonly result: "throw" | "result" | "tuple";
     readonly create: boolean;
     readonly hydrate: boolean;
+    readonly maxIssues?: number;
     /** Bound error factory; AOT skips the artifact when it cannot be serialized. */
     readonly error?: unknown;
     /** One generated guard over the validated state; absent without assertions. */

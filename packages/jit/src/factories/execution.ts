@@ -245,7 +245,8 @@ export function binaryDecode<TSchema extends ATS.AnyTypeSchema>(
 /** A standalone schema operation, represented in the shared plan vocabulary. */
 export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues"
+  operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues",
+  options?: { readonly maxIssues?: number }
 ): CallableArtifact<FunctionLike> {
   const unwrapped = unwrapSchema(schema);
   const output = operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value";
@@ -265,6 +266,7 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
       output,
       schema: unwrapped,
       operation,
+      ...(options?.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
       requires: [],
       provides: operation === "is" ? [] : ["schema-validated"],
       effects: THROWING_EFFECTS,
@@ -276,15 +278,16 @@ export function validationArtifact<TSchema extends ATS.AnyTypeSchema>(
       case "is":
         return compileValidatorSelection(unwrapped, ["is"] as const).is as FunctionLike;
       case "parse":
-        return compileValidatorSelection(unwrapped, ["parse"] as const).parse as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["parse"] as const, options).parse as FunctionLike;
       case "safeParse":
-        return compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["safeParse"] as const, options).safeParse as FunctionLike;
       case "parseAsync":
-        return compileValidatorSelection(unwrapped, ["parseAsync"] as const).parseAsync as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["parseAsync"] as const, options).parseAsync as FunctionLike;
       case "safeParseAsync":
-        return compileValidatorSelection(unwrapped, ["safeParseAsync"] as const).safeParseAsync as FunctionLike;
+        return compileValidatorSelection(unwrapped, ["safeParseAsync"] as const, options)
+          .safeParseAsync as FunctionLike;
       case "issues": {
-        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"] as const).safeParse;
+        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"] as const, options).safeParse;
 
         return function* issues(value: unknown) {
           const result = safeParse(value);
@@ -346,8 +349,11 @@ function pipelineStandardSchema(artifact: FunctionLike): StandardSchemaProps<unk
       try {
         return { value: (artifact as (input: unknown) => unknown)(value) };
       } catch (error) {
-        const issues = (error as { readonly issues?: readonly { readonly message: string; readonly path?: string }[] })
-          .issues;
+        const issues = (
+          error as {
+            readonly issues?: readonly { readonly message: string; readonly path: readonly PropertyKey[] }[];
+          }
+        ).issues;
 
         // Only a validation failure is a Standard Schema result; anything
         // else (malformed JSON, a decoder error) is a real exception.
@@ -355,7 +361,9 @@ function pipelineStandardSchema(artifact: FunctionLike): StandardSchemaProps<unk
         return {
           issues: issues.map((issue) => ({
             message: issue.message,
-            ...(issue.path ? { path: issue.path.split(".").filter(Boolean) } : {}),
+            ...(issue.path.length === 0
+              ? {}
+              : { path: issue.path.map((segment) => (typeof segment === "symbol" ? String(segment) : segment)) }),
           })),
         };
       }

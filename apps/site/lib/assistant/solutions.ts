@@ -174,16 +174,17 @@ if (isUser(payload)) {
 }
 
 // boundary: you need to tell the caller what was wrong
-const parseUser = JIT.validate.safeParse(User);
+const parseUser = JIT.validate.safeParse(User, { maxIssues: 100 });
 const result = parseUser(payload);
 if (!result.success) {
-  result.issues; // each issue carries a path, a code and a message
+  result.issues; // path is PropertyKey[]; code drives logic; message is presentation
 }`,
     why: [
       "`is` is a type predicate: it returns a boolean, allocates nothing, and stops at the first failing check.",
       "`safeParse` leads with that same allocation-free check wherever the schema cannot rebuild its input, and only pays for the annotated traversal when it actually has to report something.",
       "Checks inside both are ordered cheapest-first — typeof, then null, then numeric range, then length, then regex — so a value that fails on its type costs one comparison.",
       "Use `is` where you only need a yes or no, and `safeParse` where the caller needs the reason. Paying for issues you never read is the cost being described.",
+      "At large untrusted boundaries, maxIssues bounds allocation and stops traversal at the limit rather than slicing a fully collected vector.",
     ],
     page: "/docs/runtime/validation",
   },

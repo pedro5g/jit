@@ -31,6 +31,8 @@ const CONCEPTS = `What jit is, always true:
 - CQRS queries describe semantics; schema and collection facts choose physical access paths such as scans, cached indexes, binary search, joins and distinct strategies. Those private strategy names never enter ~query.
 - JIT.access compiles default-deny can/cannot rules. authorize() lowers those rules into CQRS, projection, update, or patch plans; access-specific nodes never enter ~query.
 - JIT.migrate compiles literal schema versions into one switch. JIT.csv and JIT.ndjson are schema-directed incremental transport plans; JIT.ndjson can fuse where/select into its output sink.
+- Validation has one plan with two physical paths: is is fail-fast and issue-free; parse and safeParse collect all independent issues with structured PropertyKey[] paths, unless maxIssues explicitly bounds the traversal. Every failing check accepts a static custom message without changing its code.
+- Runtime Class capabilities and application methods attach through .extends() and live directly on the prototype. Built-ins are reconstructive AOT; arbitrary JavaScript methods make standalone AOT skip the complete class with a reason and are never serialized with Function#toString.
 - Schemas are written with \`import { JIT } from "@jit-compiler/jit/runtime"\`. A file that AOT generation reads imports from "@jit-compiler/jit/define" instead.
 - "Run" and "Generate" are the two BUTTONS in the site's workspace. They are not methods and there is no .run() or .generate() — never write one.`;
 

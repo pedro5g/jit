@@ -49,6 +49,8 @@ export type FactoryResultMode = "throw" | "result" | "tuple";
 /** The failure channel and the phases it covers. */
 export interface FactoryValidationOptions {
   readonly result?: FactoryResultMode;
+  /** Stops diagnostic validation as soon as this many issues have been emitted. */
+  readonly maxIssues?: number;
   /** Builds the error a rejected input produces; defaults to `JITValidationError`. */
   readonly error?: (issues: readonly ValidationIssue[]) => unknown;
   readonly create?: boolean;
@@ -83,6 +85,7 @@ interface FactoryPolicyState {
   create: boolean;
   hydrate: boolean;
   configured: boolean;
+  maxIssues: number | undefined;
   assertions: AssertionDescriptor[];
   assertionErrors: (AssertionErrorFactory | undefined)[];
   assert: ((value: unknown) => unknown) | undefined;
@@ -95,6 +98,7 @@ function createPolicyState(): FactoryPolicyState {
     create: true,
     hydrate: true,
     configured: false,
+    maxIssues: undefined,
     assertions: [],
     assertionErrors: [],
     assert: undefined,
@@ -123,7 +127,7 @@ function compileAssertions(policy: FactoryPolicyState): void {
     ...bindingNames,
     ...failureNames,
     ...issueNames,
-    `${emitAssertionSource(policy.assertions)}\nreturn __assert;`
+    `${emitAssertionSource(policy.assertions, policy.maxIssues)}\nreturn __assert;`
   )(...bindings, ...failures, ...issues) as (value: unknown) => AssertionOutcome | undefined;
 
   policy.assert = (value: unknown) => {
@@ -166,12 +170,13 @@ function policyArtifact(policy: FactoryPolicyState): { readonly policy?: ClassPo
       result: policy.mode,
       create: policy.create,
       hydrate: policy.hydrate,
+      ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
       ...(policy.error === undefined ? {} : { error: policy.error }),
       ...(policy.assertions.length === 0
         ? {}
         : {
             assertions: {
-              source: emitAssertionSource(policy.assertions),
+              source: emitAssertionSource(policy.assertions, policy.maxIssues),
               bindingNames: bindings.map((_, index) => `__q${index}`),
               bindingValues: bindings,
               failures: policy.assertions.map((descriptor, index) => ({
@@ -195,11 +200,16 @@ type SafeParse<TValue> =
 
 /** Applies `.validate(...)` to a policy shared by every factory of one class. */
 function applyValidationPolicy(policy: FactoryPolicyState, options: FactoryValidationOptions | undefined): void {
+  if (options?.maxIssues !== undefined && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
+    throw new RangeError("maxIssues must be a positive safe integer");
+  }
   policy.configured = true;
   if (options?.result !== undefined) policy.mode = options.result;
   if (options?.error !== undefined) policy.error = options.error;
   if (options?.create !== undefined) policy.create = options.create;
   if (options?.hydrate !== undefined) policy.hydrate = options.hydrate;
+  if (options?.maxIssues !== undefined) policy.maxIssues = options.maxIssues;
+  if (policy.assertions.length > 0) compileAssertions(policy);
 }
 
 /** Appends one invariant and recompiles the guard the factories run. */
@@ -680,13 +690,15 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
   let safeParse: ((input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
   let safeHydrate: ((state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
   const policySafeParse = () => {
-    safeParse ??= compileValidatorSelection(schema, ["safeParse"]).safeParse as (
-      input: unknown
-    ) => SafeParse<ATS.TypeofSchema<TSchema>>;
+    safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
+      ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
+    }).safeParse as (input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
     return safeParse;
   };
   const policySafeHydrate = () => {
-    safeHydrate ??= compileSafeHydrator(schema) as (state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
+    safeHydrate ??= compileSafeHydrator(schema, {
+      ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
+    }) as (state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
     return safeHydrate;
   };
   const registerClass = () =>
@@ -955,9 +967,9 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       validated?: boolean
     ) => InstanceType<TThis>;
     if (!policy.configured || !policy.create) return new construct(args[0], INTERNAL_CONSTRUCT);
-    safeParse ??= compileValidatorSelection(schema, ["safeParse"]).safeParse as (
-      input: unknown
-    ) => SafeParse<ATS.TypeofSchema<TSchema>>;
+    safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
+      ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
+    }).safeParse as (input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
     const parsed = safeParse(args[0]);
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
     return policySuccess(policy, new construct(parsed.data, INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
@@ -972,7 +984,9 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     if (!policy.configured || !policy.hydrate) {
       return new construct(hydrateState(state), INTERNAL_CONSTRUCT, true);
     }
-    safeHydrate ??= compileSafeHydrator(schema) as (state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
+    safeHydrate ??= compileSafeHydrator(schema, {
+      ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
+    }) as (state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
     const parsed = safeHydrate(state);
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
     return policySuccess(policy, new construct(parsed.data, INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;

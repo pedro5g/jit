@@ -65,7 +65,12 @@ function emitCheckParams(params: CheckParams): string {
 /** Static-when-possible issue path; loops switch it to a dynamic expression. */
 interface PathRef {
   readonly kind: "static" | "dynamic";
+  /** JavaScript expression evaluating to `readonly PropertyKey[]`. */
   readonly source: string;
+  /** Present while every segment is known to the compiler. */
+  readonly segments?: readonly ATS.IssuePathSegment[];
+  /** Segment expressions known in the current emitter; avoids nested spread arrays in loops. */
+  readonly parts?: readonly string[];
 }
 
 export interface ValidatorBindings {
@@ -94,7 +99,8 @@ class ValidatorEmitter {
     private mode: "is" | "parse",
     private awaited = false,
     readonly resolveDefaults = true,
-    readonly materializeRuntimeTypes = true
+    readonly materializeRuntimeTypes = true,
+    private readonly maxIssues: number | undefined = undefined
   ) {
     this.rootMode = mode;
   }
@@ -281,9 +287,7 @@ class ValidatorEmitter {
     }
 
     const output = this.nextVar("o");
-    const pathSource = path.kind === "static" ? emitLiteral(path.source) : path.source;
-
-    writer.line(`const ${output} = ${this.awaited ? "await " : ""}${name}(${valueExpr}, issues, ${pathSource});`);
+    writer.line(`const ${output} = ${this.awaited ? "await " : ""}${name}(${valueExpr}, issues, ${path.source});`);
     return output;
   }
 
@@ -304,7 +308,7 @@ class ValidatorEmitter {
     if (this.mode === "is") {
       this.writer.line(`function ${name}(value) {`);
       this.writer.indent(() => {
-        this.emitInline(schema, "value", { kind: "static", source: "" });
+        this.emitInline(schema, "value", rootPath());
         this.writer.line("return true;");
       });
       this.writer.line("}");
@@ -356,15 +360,15 @@ class ValidatorEmitter {
       return;
     }
 
-    const pathSource = path.kind === "static" ? emitLiteral(path.source) : path.source;
     const receivedPart = received ? `, received: ${received}` : "";
     // A bound only reaches an issue when the check actually declares one, so
     // no issue carries an empty object nobody asked for.
     const paramsPart = params === undefined ? "" : `, params: ${emitCheckParams(params)}`;
 
     writer.line(
-      `issues[issues.length] = { path: ${pathSource}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
+      `(issues ||= [])[issues.length] = { path: ${path.source}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
     );
+    if (this.maxIssues !== undefined) writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
   }
 
   /** Type guard + checks + children for the unwrapped base schema. */
@@ -1422,7 +1426,7 @@ class ValidatorEmitter {
         if (build) this.writer.line(`${out} = new Array(${value}.length);`);
 
         items.forEach((item, position) => {
-          const itemOut = this.emitNode(item, `${value}[${position}]`, staticChild(path, `[${position}]`));
+          const itemOut = this.emitNode(item, `${value}[${position}]`, staticChild(path, position));
 
           if (build) this.writer.line(`${out}[${position}] = ${itemOut};`);
         });
@@ -1465,7 +1469,7 @@ class ValidatorEmitter {
         if (build) this.writer.line(`${out} = new Set();`);
         this.writer.line(`for (const ${item} of ${value}) {`);
         this.writer.indent(() => {
-          const elementOut = this.emitNode(element, item, staticChild(path, "[element]"));
+          const elementOut = this.emitNode(element, item, staticChild(path, "element"));
 
           if (build) this.writer.line(`${out}.add(${elementOut});`);
         });
@@ -1498,8 +1502,8 @@ class ValidatorEmitter {
         if (build) this.writer.line(`${out} = new Map();`);
         this.writer.line(`for (const ${entry} of ${value}) {`);
         this.writer.indent(() => {
-          const keyOut = this.emitNode(keySchema, `${entry}[0]`, staticChild(path, "[key]"));
-          const valueOut = this.emitNode(valueSchema, `${entry}[1]`, staticChild(path, "[value]"));
+          const keyOut = this.emitNode(keySchema, `${entry}[0]`, staticChild(path, "key"));
+          const valueOut = this.emitNode(valueSchema, `${entry}[1]`, staticChild(path, "value"));
 
           if (build) this.writer.line(`${out}.set(${keyOut}, ${valueOut});`);
         });
@@ -1751,7 +1755,7 @@ class ValidatorEmitter {
     this.awaited = false;
     this.writer.line(`function ${name}(value) {`);
     this.writer.indent(() => {
-      this.emitNode(option, "value", { kind: "static", source: "" });
+      this.emitNode(option, "value", rootPath());
       this.writer.line("return true;");
     });
     this.writer.line("}");
@@ -1935,67 +1939,54 @@ function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
-function staticChild(path: PathRef, segment: string): PathRef {
-  const joiner = segment.startsWith("[") ? "" : path.source === "" ? "" : ".";
+function rootPath(): PathRef {
+  return { kind: "static", source: "[]", segments: [], parts: [] };
+}
 
+function staticChild(path: PathRef, segment: ATS.IssuePathSegment): PathRef {
+  const literal = emitLiteral(segment);
   if (path.kind === "static") {
-    return { kind: "static", source: `${path.source}${joiner}${segment}` };
+    const segments = [...(path.segments ?? []), segment];
+
+    return { kind: "static", source: JSON.stringify(segments), segments, parts: [...(path.parts ?? []), literal] };
   }
 
-  // A dynamic prefix is only known at run time — inside a recursive helper it
-  // is "" at the root and a real path deeper down — so the separator is
-  // decided there too. The expression is only evaluated when reporting an
-  // issue, so this costs nothing on the accepting path.
-  if (segment.startsWith("[")) {
-    return { kind: "dynamic", source: `${path.source} + ${emitLiteral(segment)}` };
-  }
-
-  return {
-    kind: "dynamic",
-    source: `(${path.source} ? ${path.source} + ${emitLiteral(`.${segment}`)} : ${emitLiteral(segment)})`,
-  };
+  if (path.parts !== undefined) return dynamicPath([...path.parts, literal]);
+  return { kind: "dynamic", source: `[...${path.source}, ${literal}]` };
 }
 
 function dynamicChild(path: PathRef, indexVar: string): PathRef {
-  const prefix = path.kind === "static" ? emitLiteral(`${path.source}[`) : `${path.source} + "["`;
-
-  return { kind: "dynamic", source: `${prefix} + ${indexVar} + "]"` };
+  if (path.parts !== undefined) return dynamicPath([...path.parts, indexVar]);
+  return { kind: "dynamic", source: `[...${path.source}, ${indexVar}]` };
 }
 
 function dynamicKeyChild(path: PathRef, keyExpr: string): PathRef {
-  const prefix =
-    path.kind === "static" ? emitLiteral(path.source === "" ? "" : `${path.source}.`) : `${path.source} + "."`;
-
-  return { kind: "dynamic", source: `${prefix} + ${keyExpr}` };
+  if (path.parts !== undefined) return dynamicPath([...path.parts, keyExpr]);
+  return { kind: "dynamic", source: `[...${path.source}, ${keyExpr}]` };
 }
 
 function appendIssuePath(path: PathRef, segments: readonly ATS.IssuePathSegment[] | undefined): PathRef {
   if (!segments || segments.length === 0) return path;
 
-  const suffix = issuePathSuffix(segments, path.source !== "");
-
   if (path.kind === "static") {
-    return { kind: "static", source: `${path.source}${suffix}` };
+    const next = [...(path.segments ?? []), ...segments];
+
+    return {
+      kind: "static",
+      source: JSON.stringify(next),
+      segments: next,
+      parts: next.map((segment) => emitLiteral(segment)),
+    };
   }
 
-  return { kind: "dynamic", source: `${path.source} + ${emitLiteral(suffix)}` };
+  if (path.parts !== undefined) {
+    return dynamicPath([...path.parts, ...segments.map((segment) => emitLiteral(segment))]);
+  }
+  return { kind: "dynamic", source: `[...${path.source}, ...${JSON.stringify(segments)}]` };
 }
 
-function issuePathSuffix(segments: readonly ATS.IssuePathSegment[], hasBase: boolean): string {
-  let suffix = "";
-  let base = hasBase;
-
-  for (const segment of segments) {
-    if (typeof segment === "number") {
-      suffix += `[${segment}]`;
-      base = true;
-      continue;
-    }
-
-    suffix += `${base ? "." : ""}${segment}`;
-    base = true;
-  }
-  return suffix;
+function dynamicPath(parts: readonly string[]): PathRef {
+  return { kind: "dynamic", source: `[${parts.join(", ")}]`, parts };
 }
 
 function literalTag(option: ATS.AnyTypeSchema, discriminator: string): string | number | undefined {
@@ -2336,6 +2327,8 @@ export interface EmitValidatorOptions {
   readonly resolveDefaults?: boolean;
   /** Leave Runtime Type construction to an explicit execution `construct` stage. */
   readonly materializeRuntimeTypes?: boolean;
+  /** Stop the diagnostic traversal as soon as this many issues exist. */
+  readonly maxIssues?: number;
 }
 
 /**
@@ -2436,28 +2429,43 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const emitSafeParseAsync = options.safeParseAsync ?? true;
   const resolveDefaults = options.resolveDefaults ?? true;
   const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
+  const maxIssues = options.maxIssues;
   const freezesOutput = rootHasReadonly(schema);
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter: ValidatorEmitter | undefined;
 
   if (emitSafeParse) {
-    const emitter = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes);
+    const emitter = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes, maxIssues);
 
     emitter.markRecursive(recursive);
 
     parseEmitter = emitter;
     emitter.writer.line("function safeParse(value) {");
     emitter.writer.indent(() => {
-      emitter.writer.line("const issues = [];");
-      const output = emitter.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter.writer.line(recursive.size === 0 ? "let issues;" : "let issues = [];");
+      if (maxIssues !== undefined) emitter.writer.line("try {");
+      let output = "";
+      const emitBody = () => {
+        output = emitter.emitNode(schema, "value", rootPath());
 
-      emitter.writer.line("if (issues.length !== 0) {");
-      emitter.writer.indent(() => {
-        emitter.writer.line("return { success: false, issues: issues };");
-      });
-      emitter.writer.line("}");
-      if (freezesOutput) emitFreezeOutput(emitter.writer, output);
-      emitter.writer.line(`return { success: true, data: ${output} };`);
+        emitter.writer.line("if (issues !== undefined) {");
+        emitter.writer.indent(() => {
+          emitter.writer.line("return { success: false, issues: issues };");
+        });
+        emitter.writer.line("}");
+        if (freezesOutput) emitFreezeOutput(emitter.writer, output);
+        emitter.writer.line(`return { success: true, data: ${output} };`);
+      };
+      if (maxIssues === undefined) emitBody();
+      else {
+        emitter.writer.indent(emitBody);
+        emitter.writer.line("} catch (error) {");
+        emitter.writer.indent(() => {
+          emitter.writer.line("if (error === __issueLimit) return { success: false, issues: issues };");
+          emitter.writer.line("throw error;");
+        });
+        emitter.writer.line("}");
+      }
     });
     emitter.writer.line("}");
   }
@@ -2467,7 +2475,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   let asyncEmitter: ValidatorEmitter | undefined;
 
   if (emitSafeParseAsync && containsPromise(schema)) {
-    const emitter = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes);
+    const emitter = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes, maxIssues);
 
     emitter.markRecursive(recursive);
 
@@ -2476,16 +2484,30 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
 
     emitter.writer.line("async function safeParseAsync(value) {");
     emitter.writer.indent(() => {
-      emitter.writer.line("const issues = [];");
-      const output = emitter.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter.writer.line(recursive.size === 0 ? "let issues;" : "let issues = [];");
+      if (maxIssues !== undefined) emitter.writer.line("try {");
+      let output = "";
+      const emitBody = () => {
+        output = emitter.emitNode(schema, "value", rootPath());
 
-      emitter.writer.line("if (issues.length !== 0) {");
-      emitter.writer.indent(() => {
-        emitter.writer.line("return { success: false, issues: issues };");
-      });
-      emitter.writer.line("}");
-      if (freezesOutput) emitFreezeOutput(emitter.writer, output);
-      emitter.writer.line(`return { success: true, data: ${output} };`);
+        emitter.writer.line("if (issues !== undefined) {");
+        emitter.writer.indent(() => {
+          emitter.writer.line("return { success: false, issues: issues };");
+        });
+        emitter.writer.line("}");
+        if (freezesOutput) emitFreezeOutput(emitter.writer, output);
+        emitter.writer.line(`return { success: true, data: ${output} };`);
+      };
+      if (maxIssues === undefined) emitBody();
+      else {
+        emitter.writer.indent(emitBody);
+        emitter.writer.line("} catch (error) {");
+        emitter.writer.indent(() => {
+          emitter.writer.line("if (error === __issueLimit) return { success: false, issues: issues };");
+          emitter.writer.line("throw error;");
+        });
+        emitter.writer.line("}");
+      }
     });
     emitter.writer.line("}");
   }
@@ -2504,7 +2526,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
 
     emitter.writer.line("function is(value) {");
     emitter.writer.indent(() => {
-      emitter.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter.emitNode(schema, "value", rootPath());
       emitter.writer.line("return true;");
     });
     emitter.writer.line("}");
@@ -2523,7 +2545,8 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
     ...(asyncEmitter ? ["safeParseAsync: safeParseAsync"] : []),
   ];
   const returned = `return { ${returnedEntries.join(", ")} };`;
-  const source = `${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`;
+  const limitSource = maxIssues === undefined ? "" : "const __issueLimit = {};\n";
+  const source = `${limitSource}${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`;
 
   return { source, bindings };
 }

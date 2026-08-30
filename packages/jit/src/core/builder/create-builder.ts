@@ -948,27 +948,16 @@ function createStandardSchema(schema: AnyTypeSchema): StandardSchemaProps<unknow
   };
 }
 
-function toStandardIssue(issue: { readonly message: string; readonly path: string }): StandardSchemaIssue {
-  const path = parseIssuePath(issue.path);
-
-  return path.length === 0 ? { message: issue.message } : { message: issue.message, path };
-}
-
-function parseIssuePath(path: string): readonly (string | number)[] {
-  if (path === "") return [];
-
-  const segments: (string | number)[] = [];
-  const regex = /([^.[\]]+)|\[(\d+)\]/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(path)) !== null) {
-    if (match[1] !== undefined) {
-      segments.push(match[1]);
-    } else if (match[2] !== undefined) {
-      segments.push(Number(match[2]));
-    }
-  }
-  return segments;
+function toStandardIssue(issue: {
+  readonly message: string;
+  readonly path: readonly PropertyKey[];
+}): StandardSchemaIssue {
+  return issue.path.length === 0
+    ? { message: issue.message }
+    : {
+        message: issue.message,
+        path: issue.path.map((segment) => (typeof segment === "symbol" ? String(segment) : segment)),
+      };
 }
 
 function attachStandardSchemaGetter(prototype: object): void {

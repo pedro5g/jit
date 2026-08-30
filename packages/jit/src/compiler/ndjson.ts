@@ -126,7 +126,7 @@ function emitRowParser(writer: CodeWriter, validator: string): void {
     writer.line(`const result = ${validator}.safeParse(parsed);`);
     writer.line("if (result.success) return result.data;");
     writer.line(
-      'throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: "line " + (row + 1) + (issue.path ? "." + issue.path : "") })));'
+      'throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: ["line " + (row + 1), ...issue.path] })));'
     );
   });
   writer.line("}");

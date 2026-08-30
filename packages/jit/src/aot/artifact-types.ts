@@ -412,11 +412,11 @@ function validatorType(op: Extract<CompiledArtifact, { readonly kind: "validator
     case "parse":
       return `(value: unknown) => ${valueType}`;
     case "safeParse":
-      return `(value: unknown) => { readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`;
+      return `(value: unknown) => { readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: readonly PropertyKey[]; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`;
     case "parseAsync":
       return `(value: unknown) => Promise<${valueType}>`;
     case "safeParseAsync":
-      return `(value: unknown) => Promise<{ readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }>`;
+      return `(value: unknown) => Promise<{ readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: readonly PropertyKey[]; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }>`;
   }
 }
 

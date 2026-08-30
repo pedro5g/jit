@@ -51,10 +51,12 @@ export type RuntimeCompiledFunction<TFunction extends (...args: never[]) => unkn
 /** Async validation, for schemas that contain promises or async refinements. */
 export interface AsyncValidateNamespace {
   parse<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>
+    schema: SchemaInput<TSchema>,
+    options?: ValidationDiagnosticOptions
   ): ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
   safeParse<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>
+    schema: SchemaInput<TSchema>,
+    options?: ValidationDiagnosticOptions
   ): ExecutionArtifact<unknown, Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>>;
 }
 
@@ -71,33 +73,54 @@ export interface ValidateNamespace {
     schema: SchemaInput<TSchema>
   ): StandardArtifact<(value: unknown) => value is ATS.TypeofSchema<TSchema>, ATS.TypeofSchema<TSchema>>;
   parse<TSchema extends ATS.AnyTypeSchema, TInstance>(
-    schema: RuntimeClass<TSchema, TInstance>
+    schema: RuntimeClass<TSchema, TInstance>,
+    options?: ValidationDiagnosticOptions
   ): ExecutionArtifact<unknown, TInstance>;
-  parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<unknown, TSchema>;
+  parse<TSchema extends ATS.AnyTypeSchema>(
+    schema: SchemaInput<TSchema>,
+    options?: ValidationDiagnosticOptions
+  ): SchemaArtifact<unknown, TSchema>;
   safeParse<TSchema extends ATS.AnyTypeSchema, TInstance>(
-    schema: RuntimeClass<TSchema, TInstance>
+    schema: RuntimeClass<TSchema, TInstance>,
+    options?: ValidationDiagnosticOptions
   ): StandardArtifact<(value: unknown) => SafeParseResult<TInstance>, TInstance>;
   safeParse<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>
+    schema: SchemaInput<TSchema>,
+    options?: ValidationDiagnosticOptions
   ): StandardArtifact<(value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>, ATS.TypeofSchema<TSchema>>;
   issues<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
   parseAsync<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>
+    schema: SchemaInput<TSchema>,
+    options?: ValidationDiagnosticOptions
   ): ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
   safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>
+    schema: SchemaInput<TSchema>,
+    options?: ValidationDiagnosticOptions
   ): ExecutionArtifact<unknown, Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>>;
   readonly async: AsyncValidateNamespace;
 }
 
-function parseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-  return validationArtifact(schema, "parseAsync") as ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
+export interface ValidationDiagnosticOptions {
+  readonly maxIssues?: number;
 }
 
-function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-  return validationArtifact(schema, "safeParseAsync") as ExecutionArtifact<
+function parseAsync<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  options?: ValidationDiagnosticOptions
+) {
+  return validationArtifact(schema, "parseAsync", options) as ExecutionArtifact<
+    unknown,
+    Promise<ATS.TypeofSchema<TSchema>>
+  >;
+}
+
+function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  options?: ValidationDiagnosticOptions
+) {
+  return validationArtifact(schema, "safeParseAsync", options) as ExecutionArtifact<
     unknown,
     Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
   >;
@@ -111,11 +134,11 @@ export const validate: ValidateNamespace = Object.freeze({
       ATS.TypeofSchema<TSchema>
     >;
   },
-  parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationArtifact(schema, "parse") as SchemaArtifact<unknown, TSchema>;
+  parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ValidationDiagnosticOptions) {
+    return validationArtifact(schema, "parse", options) as SchemaArtifact<unknown, TSchema>;
   },
-  safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationArtifact(schema, "safeParse") as StandardArtifact<
+  safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ValidationDiagnosticOptions) {
+    return validationArtifact(schema, "safeParse", options) as StandardArtifact<
       (value: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>>,
       ATS.TypeofSchema<TSchema>
     >;

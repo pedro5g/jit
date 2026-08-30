@@ -5,7 +5,8 @@ exports[`JIT AOT generate > co-emits Runtime Classes for AOT JSON construction p
 class JITValidationError extends Error {
   constructor(issues) {
     const first = issues[0];
-    super(first ? (first.path ? first.path + ": " : "") + first.message : "validation failed");
+    const path = first ? first.path.map((segment, index) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";
+    super(first ? (path === "" ? "" : path + ": ") + first.message : "validation failed");
     this.name = "JITValidationError";
     this.code = "VALIDATION_FAILED";
     this.issues = issues;
@@ -13,23 +14,23 @@ class JITValidationError extends Error {
 }
 const User_validator = /*#__PURE__*/ (() => {
   function safeParse(value) {
-    const issues = [];
+    let issues;
     let v1 = value;
     if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
-      issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v3 = v1.id;
       if (typeof v3 !== "string") {
-        issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
       } else {
       }
       let v5 = v1.name;
       if (typeof v5 !== "string") {
-        issues[issues.length] = { path: "name", code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
       } else {
       }
     }
-    if (issues.length !== 0) {
+    if (issues !== undefined) {
       return { success: false, issues: issues };
     }
     return { success: true, data: v1 };
@@ -38,23 +39,23 @@ const User_validator = /*#__PURE__*/ (() => {
 })();
 const User_validator_1 = /*#__PURE__*/ (() => {
   function safeParse(value) {
-    const issues = [];
+    let issues;
     let v1 = value;
     if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
-      issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v3 = v1.id;
       if (typeof v3 !== "string") {
-        issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
       } else {
       }
       let v5 = v1.name;
       if (typeof v5 !== "string") {
-        issues[issues.length] = { path: "name", code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
       } else {
       }
     }
-    if (issues.length !== 0) {
+    if (issues !== undefined) {
       return { success: false, issues: issues };
     }
     return { success: true, data: v1 };
@@ -69,25 +70,25 @@ const User = /*#__PURE__*/ (() => {
 })();
 const parseUser_validator = /*#__PURE__*/ (() => {
   function safeParse(value) {
-    const issues = [];
+    let issues;
     let v1 = value;
     let o2 = v1;
     if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
-      issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v3 = v1.id;
       if (typeof v3 !== "string") {
-        issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
       } else {
       }
       let v5 = v1.name;
       if (typeof v5 !== "string") {
-        issues[issues.length] = { path: "name", code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
       } else {
       }
     }
     o2 = v1;
-    if (issues.length !== 0) {
+    if (issues !== undefined) {
       return { success: false, issues: issues };
     }
     return { success: true, data: o2 };
@@ -107,7 +108,8 @@ export type User = { id: number; name: string };
 class JITValidationError extends Error {
   constructor(issues) {
     const first = issues[0];
-    super(first ? (first.path ? first.path + ": " : "") + first.message : "validation failed");
+    const path = first ? first.path.map((segment, index) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";
+    super(first ? (path === "" ? "" : path + ": ") + first.message : "validation failed");
     this.name = "JITValidationError";
     this.code = "VALIDATION_FAILED";
     this.issues = issues;
@@ -155,26 +157,26 @@ const User_parse_validator = /*#__PURE__*/ (() => {
     return true;
   }
   function safeParse(value) {
-    const issues = [];
+    let issues;
     let v1 = value;
     if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
-      issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v3 = v1.id;
       if (typeof v3 !== "number") {
-        issues[issues.length] = { path: "id", code: "expected_number", expected: "number", message: "expected number", received: typeof v3 };
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_number", expected: "number", message: "expected number", received: typeof v3 };
       } else {
         if ((v3 | 0) !== v3) {
-          issues[issues.length] = { path: "id", code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
+          (issues ||= [])[issues.length] = { path: ["id"], code: "not_int32", expected: "int32", message: "expected a 32-bit signed integer" };
         }
       }
       let v5 = v1.name;
       if (typeof v5 !== "string") {
-        issues[issues.length] = { path: "name", code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
       } else {
       }
     }
-    if (issues.length !== 0) {
+    if (issues !== undefined) {
       return { success: false, issues: issues };
     }
     return { success: true, data: v1 };
@@ -199,7 +201,8 @@ exports[`JIT AOT generate > should lower aggregate infrastructure into an extend
 class JITValidationError extends Error {
   constructor(issues) {
     const first = issues[0];
-    super(first ? (first.path ? first.path + ": " : "") + first.message : "validation failed");
+    const path = first ? first.path.map((segment, index) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";
+    super(first ? (path === "" ? "" : path + ": ") + first.message : "validation failed");
     this.name = "JITValidationError";
     this.code = "VALIDATION_FAILED";
     this.issues = issues;
@@ -208,12 +211,12 @@ class JITValidationError extends Error {
 const OrderBase_validator = /*#__PURE__*/ (() => {
   const __v0 = "o_1";
   function safeParse(value) {
-    const issues = [];
+    let issues;
     let v1 = value;
     let o2 = v1;
     let b3;
     if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
-      issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v4 = v1.id;
       let o5 = v4;
@@ -221,27 +224,27 @@ const OrderBase_validator = /*#__PURE__*/ (() => {
         o5 = __v0;
       } else {
         if (typeof v4 !== "string") {
-          issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+          (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
         } else {
         }
         o5 = v4;
       }
       let v6 = v1.status;
       if (v6 !== "draft" && v6 !== "confirmed") {
-        issues[issues.length] = { path: "status", code: "invalid_enum", expected: "draft | confirmed", message: "expected one of the enum values" };
+        (issues ||= [])[issues.length] = { path: ["status"], code: "invalid_enum", expected: "draft | confirmed", message: "expected one of the enum values" };
       }
       let v8 = v1.shipping;
       if (v8 === null || typeof v8 !== "object" || Array.isArray(v8)) {
-        issues[issues.length] = { path: "shipping", code: "expected_object", expected: "object", message: "expected object", received: typeof v8 };
+        (issues ||= [])[issues.length] = { path: ["shipping"], code: "expected_object", expected: "object", message: "expected object", received: typeof v8 };
       } else {
         let v10 = v8.city;
         if (typeof v10 !== "string") {
-          issues[issues.length] = { path: "shipping.city", code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
+          (issues ||= [])[issues.length] = { path: ["shipping","city"], code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
         } else {
         }
         let v12 = v8.country;
         if (typeof v12 !== "string") {
-          issues[issues.length] = { path: "shipping.country", code: "expected_string", expected: "string", message: "expected string", received: typeof v12 };
+          (issues ||= [])[issues.length] = { path: ["shipping","country"], code: "expected_string", expected: "string", message: "expected string", received: typeof v12 };
         } else {
         }
       }
@@ -249,7 +252,7 @@ const OrderBase_validator = /*#__PURE__*/ (() => {
     }
     if (b3 === undefined) { b3 = v1; }
     o2 = b3;
-    if (issues.length !== 0) {
+    if (issues !== undefined) {
       return { success: false, issues: issues };
     }
     return { success: true, data: o2 };
@@ -258,36 +261,36 @@ const OrderBase_validator = /*#__PURE__*/ (() => {
 })();
 const OrderBase_validator_1 = /*#__PURE__*/ (() => {
   function safeParse(value) {
-    const issues = [];
+    let issues;
     let v1 = value;
     let o2 = v1;
     let b3;
     if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
-      issues[issues.length] = { path: "", code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
     } else {
       let v4 = v1.id;
       let o5 = v4;
       if (typeof v4 !== "string") {
-        issues[issues.length] = { path: "id", code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
       } else {
       }
       o5 = v4;
       let v6 = v1.status;
       if (v6 !== "draft" && v6 !== "confirmed") {
-        issues[issues.length] = { path: "status", code: "invalid_enum", expected: "draft | confirmed", message: "expected one of the enum values" };
+        (issues ||= [])[issues.length] = { path: ["status"], code: "invalid_enum", expected: "draft | confirmed", message: "expected one of the enum values" };
       }
       let v8 = v1.shipping;
       if (v8 === null || typeof v8 !== "object" || Array.isArray(v8)) {
-        issues[issues.length] = { path: "shipping", code: "expected_object", expected: "object", message: "expected object", received: typeof v8 };
+        (issues ||= [])[issues.length] = { path: ["shipping"], code: "expected_object", expected: "object", message: "expected object", received: typeof v8 };
       } else {
         let v10 = v8.city;
         if (typeof v10 !== "string") {
-          issues[issues.length] = { path: "shipping.city", code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
+          (issues ||= [])[issues.length] = { path: ["shipping","city"], code: "expected_string", expected: "string", message: "expected string", received: typeof v10 };
         } else {
         }
         let v12 = v8.country;
         if (typeof v12 !== "string") {
-          issues[issues.length] = { path: "shipping.country", code: "expected_string", expected: "string", message: "expected string", received: typeof v12 };
+          (issues ||= [])[issues.length] = { path: ["shipping","country"], code: "expected_string", expected: "string", message: "expected string", received: typeof v12 };
         } else {
         }
       }
@@ -295,7 +298,7 @@ const OrderBase_validator_1 = /*#__PURE__*/ (() => {
     }
     if (b3 === undefined) { b3 = v1; }
     o2 = b3;
-    if (issues.length !== 0) {
+    if (issues !== undefined) {
       return { success: false, issues: issues };
     }
     return { success: true, data: o2 };

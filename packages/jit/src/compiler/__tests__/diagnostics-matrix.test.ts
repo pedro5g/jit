@@ -193,7 +193,7 @@ describe("validation operator diagnostics", () => {
     // and replacing one must never move the other.
     expect(custom?.code).toBe(base?.code);
     expect(custom?.expected).toBe(base?.expected);
-    expect(custom?.path).toBe("value");
+    expect(custom?.path).toEqual(["value"]);
   });
 
   it("collects independent failures and suppresses dependent ones", () => {
@@ -208,9 +208,9 @@ describe("validation operator diagnostics", () => {
     // Sibling fields are independent answers.
     expect(collected.success).toBe(false);
     expect(collected.success === false && collected.issues.map((issue) => issue.path)).toEqual([
-      "name",
-      "email",
-      "age",
+      ["name"],
+      ["email"],
+      ["age"],
     ]);
 
     // Several checks on one value are independent too, once its type holds.
@@ -226,7 +226,10 @@ describe("validation operator diagnostics", () => {
     const items = JIT.validate.safeParse(JIT.object({ items: JIT.array(JIT.number().min(0)) }))({
       items: [-1, 2, -3],
     });
-    expect(items.success === false && items.issues.map((issue) => issue.path)).toEqual(["items[0]", "items[2]"]);
+    expect(items.success === false && items.issues.map((issue) => issue.path)).toEqual([
+      ["items", 0],
+      ["items", 2],
+    ]);
   });
 
   it("gives a union one issue instead of every branch's", () => {
@@ -242,7 +245,7 @@ describe("validation operator diagnostics", () => {
 
     // Reporting every branch's failures would bury the one that matters.
     expect(union.success === false && union.issues).toEqual([
-      { path: "v", code: "invalid_union", expected: "union", message: "value matched no union option" },
+      { path: ["v"], code: "invalid_union", expected: "union", message: "value matched no union option" },
     ]);
     // An unknown discriminator is answered without validating any branch.
     expect(
@@ -250,7 +253,7 @@ describe("validation operator diagnostics", () => {
     ).toMatchObject({ issues: [{ code: "invalid_union" }] });
     // A matched branch reports its own issues, at its own path.
     const matched = JIT.validate.safeParse(Discriminated)({ v: { kind: "a", a: "x" } });
-    expect(matched.success === false && matched.issues.map((issue) => issue.path)).toEqual(["v.a"]);
+    expect(matched.success === false && matched.issues.map((issue) => issue.path)).toEqual([["v", "a"]]);
   });
 
   it("throws the issues it would have returned", () => {
@@ -265,6 +268,58 @@ describe("validation operator diagnostics", () => {
       // One throw, after collecting — not one throw per failure found.
       expect((error as JITValidationError).issues).toEqual(safe.success === false ? safe.issues : []);
     }
+  });
+
+  it("stops at maxIssues instead of collecting and slicing afterward", () => {
+    const Schema = JIT.object({
+      first: JIT.string(),
+      second: JIT.string(),
+      third: JIT.string(),
+    });
+    let secondRead = false;
+    const input = Object.defineProperties(
+      {},
+      {
+        first: { enumerable: true, get: () => 1 },
+        second: {
+          enumerable: true,
+          get: () => {
+            secondRead = true;
+            return 2;
+          },
+        },
+        third: { enumerable: true, get: () => 3 },
+      }
+    );
+    const safeParse = JIT.validate.safeParse(Schema, { maxIssues: 1 });
+    const parse = JIT.validate.parse(Schema, { maxIssues: 1 });
+    const result = safeParse(input);
+
+    expect(result.success === false && result.issues).toHaveLength(1);
+    expect(result.success === false && result.issues[0]?.path).toEqual(["first"]);
+    expect(secondRead).toBe(false);
+    expect(() => parse({ first: 1, second: 2, third: 3 })).toThrowError(
+      expect.objectContaining({ issues: [expect.objectContaining({ path: ["first"] })] })
+    );
+    expect(Compiler.emitValidatorSource(Schema.schema, { ops: ["safeParse"], maxIssues: 1 })).toContain(
+      "throw __issueLimit"
+    );
+    expect(Compiler.emitValidatorSource(Schema.schema, { ops: ["is"] })).not.toContain("__issueLimit");
+  });
+
+  it("allocates the issue vector lazily on non-recursive valid paths", () => {
+    const Schema = JIT.object({ name: JIT.string().min(2) });
+    const source = Compiler.emitValidatorSource(Schema.schema, { ops: ["safeParse"] });
+
+    expect(source).toContain("let issues;");
+    expect(source).toContain("(issues ||= [])");
+    expect(source).not.toContain("const issues = [];");
+    expect(JIT.validate.safeParse(Schema)({ name: "Ada" })).toEqual({ success: true, data: { name: "Ada" } });
+  });
+
+  it("rejects an invalid maxIssues declaration", () => {
+    expect(() => JIT.validate.safeParse(JIT.string(), { maxIssues: 0 })("x")).toThrow(/positive safe integer/);
+    expect(() => JIT.validate.parse(JIT.string(), { maxIssues: 1.5 })("x")).toThrow(/positive safe integer/);
   });
 
   it("carries the bound a translator needs, and nothing more", () => {

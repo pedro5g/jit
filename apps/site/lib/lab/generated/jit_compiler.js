@@ -173,13 +173,22 @@ var DomainAssertionError = class extends JITError {
 var JITValidationError = class extends JITError {
   constructor(issues) {
     const first = issues[0];
-    super("VALIDATION_FAILED", first ? `${first.path ? `${first.path}: ` : ""}${first.message}` : "validation failed", {
+    const path = first === void 0 ? "" : formatIssuePath(first.path);
+    super("VALIDATION_FAILED", first ? `${path === "" ? "" : `${path}: `}${first.message}` : "validation failed", {
       meta: issues
     });
     this.name = "JITValidationError";
     this.issues = issues;
   }
 };
+function formatIssuePath(path) {
+  let output = "";
+  for (const segment of path) {
+    if (typeof segment === "number") output += `[${segment}]`;
+    else output += `${output === "" ? "" : "."}${String(segment)}`;
+  }
+  return output;
+}
 
 // ../../packages/jit/src/runtime/cache/compile-cache.ts
 var cacheStore = /* @__PURE__ */ new WeakMap();
@@ -6010,11 +6019,12 @@ function emitCheckParams(params) {
 var EMAIL_REGEX = regexes_exports.email;
 var UUID_REGEX = /* @__PURE__ */ regexes_exports.uuid();
 var ValidatorEmitter = class {
-  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true) {
+  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true, maxIssues = void 0) {
     this.mode = mode;
     this.awaited = awaited;
     this.resolveDefaults = resolveDefaults;
     this.materializeRuntimeTypes = materializeRuntimeTypes;
+    this.maxIssues = maxIssues;
     this.writer = new CodeWriter();
     this.bindingNames = [];
     this.bindingValues = [];
@@ -6168,8 +6178,7 @@ var ValidatorEmitter = class {
       return holder;
     }
     const output = this.nextVar("o");
-    const pathSource = path.kind === "static" ? emitLiteral(path.source) : path.source;
-    writer.line(`const ${output} = ${this.awaited ? "await " : ""}${name}(${valueExpr}, issues, ${pathSource});`);
+    writer.line(`const ${output} = ${this.awaited ? "await " : ""}${name}(${valueExpr}, issues, ${path.source});`);
     return output;
   }
   recursiveHelper(schema) {
@@ -6182,7 +6191,7 @@ var ValidatorEmitter = class {
     if (this.mode === "is") {
       this.writer.line(`function ${name}(value) {`);
       this.writer.indent(() => {
-        this.emitInline(schema, "value", { kind: "static", source: "" });
+        this.emitInline(schema, "value", rootPath());
         this.writer.line("return true;");
       });
       this.writer.line("}");
@@ -6213,12 +6222,12 @@ var ValidatorEmitter = class {
       writer.line("return false;");
       return;
     }
-    const pathSource = path.kind === "static" ? emitLiteral(path.source) : path.source;
     const receivedPart = received ? `, received: ${received}` : "";
     const paramsPart = params === void 0 ? "" : `, params: ${emitCheckParams(params)}`;
     writer.line(
-      `issues[issues.length] = { path: ${pathSource}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
+      `(issues ||= [])[issues.length] = { path: ${path.source}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
     );
+    if (this.maxIssues !== void 0) writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
   }
   /** Type guard + checks + children for the unwrapped base schema. */
   emitBase(unwrapped, value, path) {
@@ -7156,7 +7165,7 @@ var ValidatorEmitter = class {
         );
         if (build) this.writer.line(`${out} = new Array(${value}.length);`);
         items.forEach((item, position) => {
-          const itemOut = this.emitNode(item, `${value}[${position}]`, staticChild(path, `[${position}]`));
+          const itemOut = this.emitNode(item, `${value}[${position}]`, staticChild(path, position));
           if (build) this.writer.line(`${out}[${position}] = ${itemOut};`);
         });
         if (rest) {
@@ -7190,7 +7199,7 @@ var ValidatorEmitter = class {
         if (build) this.writer.line(`${out} = new Set();`);
         this.writer.line(`for (const ${item} of ${value}) {`);
         this.writer.indent(() => {
-          const elementOut = this.emitNode(element, item, staticChild(path, "[element]"));
+          const elementOut = this.emitNode(element, item, staticChild(path, "element"));
           if (build) this.writer.line(`${out}.add(${elementOut});`);
         });
         this.writer.line("}");
@@ -7217,8 +7226,8 @@ var ValidatorEmitter = class {
         if (build) this.writer.line(`${out} = new Map();`);
         this.writer.line(`for (const ${entry} of ${value}) {`);
         this.writer.indent(() => {
-          const keyOut = this.emitNode(keySchema, `${entry}[0]`, staticChild(path, "[key]"));
-          const valueOut = this.emitNode(valueSchema, `${entry}[1]`, staticChild(path, "[value]"));
+          const keyOut = this.emitNode(keySchema, `${entry}[0]`, staticChild(path, "key"));
+          const valueOut = this.emitNode(valueSchema, `${entry}[1]`, staticChild(path, "value"));
           if (build) this.writer.line(`${out}.set(${keyOut}, ${valueOut});`);
         });
         this.writer.line("}");
@@ -7422,7 +7431,7 @@ var ValidatorEmitter = class {
     this.awaited = false;
     this.writer.line(`function ${name}(value) {`);
     this.writer.indent(() => {
-      this.emitNode(option, "value", { kind: "static", source: "" });
+      this.emitNode(option, "value", rootPath());
       this.writer.line("return true;");
     });
     this.writer.line("}");
@@ -7571,48 +7580,44 @@ function templateLiteralSchemaSource(schema) {
 function escapeRegExp(value) {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
+function rootPath() {
+  return { kind: "static", source: "[]", segments: [], parts: [] };
+}
 function staticChild(path, segment) {
-  const joiner = segment.startsWith("[") ? "" : path.source === "" ? "" : ".";
+  const literal4 = emitLiteral(segment);
   if (path.kind === "static") {
-    return { kind: "static", source: `${path.source}${joiner}${segment}` };
+    const segments = [...path.segments ?? [], segment];
+    return { kind: "static", source: JSON.stringify(segments), segments, parts: [...path.parts ?? [], literal4] };
   }
-  if (segment.startsWith("[")) {
-    return { kind: "dynamic", source: `${path.source} + ${emitLiteral(segment)}` };
-  }
-  return {
-    kind: "dynamic",
-    source: `(${path.source} ? ${path.source} + ${emitLiteral(`.${segment}`)} : ${emitLiteral(segment)})`
-  };
+  if (path.parts !== void 0) return dynamicPath([...path.parts, literal4]);
+  return { kind: "dynamic", source: `[...${path.source}, ${literal4}]` };
 }
 function dynamicChild(path, indexVar) {
-  const prefix = path.kind === "static" ? emitLiteral(`${path.source}[`) : `${path.source} + "["`;
-  return { kind: "dynamic", source: `${prefix} + ${indexVar} + "]"` };
+  if (path.parts !== void 0) return dynamicPath([...path.parts, indexVar]);
+  return { kind: "dynamic", source: `[...${path.source}, ${indexVar}]` };
 }
 function dynamicKeyChild(path, keyExpr) {
-  const prefix = path.kind === "static" ? emitLiteral(path.source === "" ? "" : `${path.source}.`) : `${path.source} + "."`;
-  return { kind: "dynamic", source: `${prefix} + ${keyExpr}` };
+  if (path.parts !== void 0) return dynamicPath([...path.parts, keyExpr]);
+  return { kind: "dynamic", source: `[...${path.source}, ${keyExpr}]` };
 }
 function appendIssuePath(path, segments) {
   if (!segments || segments.length === 0) return path;
-  const suffix = issuePathSuffix(segments, path.source !== "");
   if (path.kind === "static") {
-    return { kind: "static", source: `${path.source}${suffix}` };
+    const next = [...path.segments ?? [], ...segments];
+    return {
+      kind: "static",
+      source: JSON.stringify(next),
+      segments: next,
+      parts: next.map((segment) => emitLiteral(segment))
+    };
   }
-  return { kind: "dynamic", source: `${path.source} + ${emitLiteral(suffix)}` };
+  if (path.parts !== void 0) {
+    return dynamicPath([...path.parts, ...segments.map((segment) => emitLiteral(segment))]);
+  }
+  return { kind: "dynamic", source: `[...${path.source}, ...${JSON.stringify(segments)}]` };
 }
-function issuePathSuffix(segments, hasBase) {
-  let suffix = "";
-  let base = hasBase;
-  for (const segment of segments) {
-    if (typeof segment === "number") {
-      suffix += `[${segment}]`;
-      base = true;
-      continue;
-    }
-    suffix += `${base ? "." : ""}${segment}`;
-    base = true;
-  }
-  return suffix;
+function dynamicPath(parts) {
+  return { kind: "dynamic", source: `[${parts.join(", ")}]`, parts };
 }
 function literalTag(option, discriminator) {
   const base = unwrapPassthrough(option);
@@ -7932,44 +7937,73 @@ function emitValidator(schema, options = {}) {
   const emitSafeParseAsync = options.safeParseAsync ?? true;
   const resolveDefaults = options.resolveDefaults ?? true;
   const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
+  const maxIssues = options.maxIssues;
   const freezesOutput = rootHasReadonly(schema);
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter;
   if (emitSafeParse) {
-    const emitter2 = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes);
+    const emitter2 = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes, maxIssues);
     emitter2.markRecursive(recursive);
     parseEmitter = emitter2;
     emitter2.writer.line("function safeParse(value) {");
     emitter2.writer.indent(() => {
-      emitter2.writer.line("const issues = [];");
-      const output = emitter2.emitNode(schema, "value", { kind: "static", source: "" });
-      emitter2.writer.line("if (issues.length !== 0) {");
-      emitter2.writer.indent(() => {
-        emitter2.writer.line("return { success: false, issues: issues };");
-      });
-      emitter2.writer.line("}");
-      if (freezesOutput) emitFreezeOutput(emitter2.writer, output);
-      emitter2.writer.line(`return { success: true, data: ${output} };`);
+      emitter2.writer.line(recursive.size === 0 ? "let issues;" : "let issues = [];");
+      if (maxIssues !== void 0) emitter2.writer.line("try {");
+      let output = "";
+      const emitBody2 = () => {
+        output = emitter2.emitNode(schema, "value", rootPath());
+        emitter2.writer.line("if (issues !== undefined) {");
+        emitter2.writer.indent(() => {
+          emitter2.writer.line("return { success: false, issues: issues };");
+        });
+        emitter2.writer.line("}");
+        if (freezesOutput) emitFreezeOutput(emitter2.writer, output);
+        emitter2.writer.line(`return { success: true, data: ${output} };`);
+      };
+      if (maxIssues === void 0) emitBody2();
+      else {
+        emitter2.writer.indent(emitBody2);
+        emitter2.writer.line("} catch (error) {");
+        emitter2.writer.indent(() => {
+          emitter2.writer.line("if (error === __issueLimit) return { success: false, issues: issues };");
+          emitter2.writer.line("throw error;");
+        });
+        emitter2.writer.line("}");
+      }
     });
     emitter2.writer.line("}");
   }
   let asyncEmitter;
   if (emitSafeParseAsync && containsPromise(schema)) {
-    const emitter2 = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes);
+    const emitter2 = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes, maxIssues);
     emitter2.markRecursive(recursive);
     asyncEmitter = emitter2;
     for (const value of parseEmitter?.bindings().values ?? []) emitter2.bind(value);
     emitter2.writer.line("async function safeParseAsync(value) {");
     emitter2.writer.indent(() => {
-      emitter2.writer.line("const issues = [];");
-      const output = emitter2.emitNode(schema, "value", { kind: "static", source: "" });
-      emitter2.writer.line("if (issues.length !== 0) {");
-      emitter2.writer.indent(() => {
-        emitter2.writer.line("return { success: false, issues: issues };");
-      });
-      emitter2.writer.line("}");
-      if (freezesOutput) emitFreezeOutput(emitter2.writer, output);
-      emitter2.writer.line(`return { success: true, data: ${output} };`);
+      emitter2.writer.line(recursive.size === 0 ? "let issues;" : "let issues = [];");
+      if (maxIssues !== void 0) emitter2.writer.line("try {");
+      let output = "";
+      const emitBody2 = () => {
+        output = emitter2.emitNode(schema, "value", rootPath());
+        emitter2.writer.line("if (issues !== undefined) {");
+        emitter2.writer.indent(() => {
+          emitter2.writer.line("return { success: false, issues: issues };");
+        });
+        emitter2.writer.line("}");
+        if (freezesOutput) emitFreezeOutput(emitter2.writer, output);
+        emitter2.writer.line(`return { success: true, data: ${output} };`);
+      };
+      if (maxIssues === void 0) emitBody2();
+      else {
+        emitter2.writer.indent(emitBody2);
+        emitter2.writer.line("} catch (error) {");
+        emitter2.writer.indent(() => {
+          emitter2.writer.line("if (error === __issueLimit) return { success: false, issues: issues };");
+          emitter2.writer.line("throw error;");
+        });
+        emitter2.writer.line("}");
+      }
     });
     emitter2.writer.line("}");
   }
@@ -7981,7 +8015,7 @@ function emitValidator(schema, options = {}) {
     for (const value of (asyncEmitter ?? parseEmitter)?.bindings().values ?? []) emitter2.bind(value);
     emitter2.writer.line("function is(value) {");
     emitter2.writer.indent(() => {
-      emitter2.emitNode(schema, "value", { kind: "static", source: "" });
+      emitter2.emitNode(schema, "value", rootPath());
       emitter2.writer.line("return true;");
     });
     emitter2.writer.line("}");
@@ -8000,7 +8034,8 @@ function emitValidator(schema, options = {}) {
     ...asyncEmitter ? ["safeParseAsync: safeParseAsync"] : []
   ];
   const returned = `return { ${returnedEntries.join(", ")} };`;
-  const source = `${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`;
+  const limitSource = maxIssues === void 0 ? "" : "const __issueLimit = {};\n";
+  const source = `${limitSource}${helperSource}${functionSource}${functionSource.length > 0 ? "\n" : ""}${returned}`;
   return { source, bindings };
 }
 
@@ -8025,15 +8060,17 @@ function compileHydrator(schema, options) {
   );
 }
 function compileSafeHydrator(schema, options) {
+  validateMaxIssues(options?.maxIssues);
   return getCompileCached(
     schema,
-    "hydrator:safe",
+    `hydrator:safe:max=${options?.maxIssues ?? "all"}`,
     () => {
       const emitted = emitValidator(schema, {
         is: false,
         safeParse: true,
         safeParseAsync: false,
-        resolveDefaults: false
+        resolveDefaults: false,
+        ...options?.maxIssues === void 0 ? {} : { maxIssues: options.maxIssues }
       });
       return globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).safeParse;
     },
@@ -8042,13 +8079,17 @@ function compileSafeHydrator(schema, options) {
 }
 function compileValidatorSelection(schema, ops2, options) {
   const normalizedOps = normalizeValidatorOps(ops2);
+  validateMaxIssues(options?.maxIssues);
   const fastParse = canUseFastParse(schema) && (normalizedOps.includes("parse") || normalizedOps.includes("safeParse"));
-  const cacheKey3 = `validator:${normalizedOps.join(",")}`;
+  const cacheKey3 = `validator:${normalizedOps.join(",")}:max=${options?.maxIssues ?? "all"}`;
   return getCompileCached(
     schema,
     cacheKey3,
     () => {
-      const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps, fastParse));
+      const emitted = emitValidator(schema, {
+        ...emitOptionsForValidatorOps(normalizedOps, fastParse),
+        ...options?.maxIssues === void 0 ? {} : { maxIssues: options.maxIssues }
+      });
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values);
       const selection = {};
       const is = compiled.is;
@@ -8070,31 +8111,35 @@ function compileValidatorSelection(schema, ops2, options) {
       };
       if (normalizedOps.includes("is") && compiled.is) {
         selection.is = compiled.is;
-        registerValidatorArtifact(compiled.is, schema, "is");
+        registerValidatorArtifact(compiled.is, schema, "is", options?.maxIssues);
       }
       if (normalizedOps.includes("safeParse") && fastSafeParse) {
         selection.safeParse = fastSafeParse;
-        registerValidatorArtifact(fastSafeParse, schema, "safeParse");
+        registerValidatorArtifact(fastSafeParse, schema, "safeParse", options?.maxIssues);
       }
       if (normalizedOps.includes("parse")) {
         selection.parse = parse3;
-        registerValidatorArtifact(parse3, schema, "parse");
+        registerValidatorArtifact(parse3, schema, "parse", options?.maxIssues);
       }
       if (normalizedOps.includes("safeParseAsync") && safeParseAsync3) {
         selection.safeParseAsync = safeParseAsync3;
-        registerValidatorArtifact(safeParseAsync3, schema, "safeParseAsync");
+        registerValidatorArtifact(safeParseAsync3, schema, "safeParseAsync", options?.maxIssues);
       }
       if (normalizedOps.includes("parseAsync")) {
         selection.parseAsync = parseAsync3;
-        registerValidatorArtifact(parseAsync3, schema, "parseAsync");
+        registerValidatorArtifact(parseAsync3, schema, "parseAsync", options?.maxIssues);
       }
       return selection;
     },
     options
   );
 }
-function registerValidatorArtifact(fn, schema, op) {
-  registerArtifact(fn, { kind: "validator", schema, op });
+function registerValidatorArtifact(fn, schema, op, maxIssues) {
+  registerArtifact(fn, { kind: "validator", schema, op, ...maxIssues === void 0 ? {} : { maxIssues } });
+}
+function validateMaxIssues(value) {
+  if (value === void 0) return;
+  if (!Number.isSafeInteger(value) || value < 1) throw new RangeError("maxIssues must be a positive safe integer");
 }
 function normalizeValidatorOps(ops2) {
   const normalized = [];
@@ -8375,7 +8420,7 @@ function emitCsvRowParser(writer, descriptor, validator) {
     writer.line("});");
     writer.line("if (result.success) return result.data;");
     writer.line(
-      'throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: "[" + row + "]" + (issue.path ? "." + issue.path : "") })));'
+      "throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: [row, ...issue.path] })));"
     );
   });
   writer.line("}");
@@ -13488,7 +13533,7 @@ function emitRowParser(writer, validator) {
     writer.line(`const result = ${validator}.safeParse(parsed);`);
     writer.line("if (result.success) return result.data;");
     writer.line(
-      'throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: "line " + (row + 1) + (issue.path ? "." + issue.path : "") })));'
+      'throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: ["line " + (row + 1), ...issue.path] })));'
     );
   });
   writer.line("}");
@@ -17464,22 +17509,10 @@ function createStandardSchema(schema) {
   };
 }
 function toStandardIssue(issue) {
-  const path = parseIssuePath(issue.path);
-  return path.length === 0 ? { message: issue.message } : { message: issue.message, path };
-}
-function parseIssuePath(path) {
-  if (path === "") return [];
-  const segments = [];
-  const regex2 = /([^.[\]]+)|\[(\d+)\]/g;
-  let match2;
-  while ((match2 = regex2.exec(path)) !== null) {
-    if (match2[1] !== void 0) {
-      segments.push(match2[1]);
-    } else if (match2[2] !== void 0) {
-      segments.push(Number(match2[2]));
-    }
-  }
-  return segments;
+  return issue.path.length === 0 ? { message: issue.message } : {
+    message: issue.message,
+    path: issue.path.map((segment) => typeof segment === "symbol" ? String(segment) : segment)
+  };
 }
 function attachStandardSchemaGetter(prototype) {
   Object.defineProperty(prototype, "~standard", {
@@ -17906,11 +17939,11 @@ function validatorType(op, valueType) {
     case "parse":
       return `(value: unknown) => ${valueType}`;
     case "safeParse":
-      return `(value: unknown) => { readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`;
+      return `(value: unknown) => { readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: readonly PropertyKey[]; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }`;
     case "parseAsync":
       return `(value: unknown) => Promise<${valueType}>`;
     case "safeParseAsync":
-      return `(value: unknown) => Promise<{ readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: string; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }>`;
+      return `(value: unknown) => Promise<{ readonly success: true; readonly data: ${valueType} } | { readonly success: false; readonly issues: readonly { readonly path: readonly PropertyKey[]; readonly code: string; readonly expected: string; readonly message: string; readonly received?: string }[] }>`;
   }
 }
 function operationType(artifact, typeNames) {
@@ -18096,12 +18129,9 @@ var CALLBACK_GLOBALS = /* @__PURE__ */ new Set([
   "WeakSet"
 ]);
 function serializeCallback(value) {
-  return serializeFunction(value, false);
+  return serializeFunction(value);
 }
-function serializeMethod(value) {
-  return serializeFunction(value, true);
-}
-function serializeFunction(value, allowThis) {
+function serializeFunction(value) {
   let source = Function.prototype.toString.call(value).trim();
   if (source.includes("[native code]") || source.startsWith("function bound ")) return void 0;
   if (!isFunctionExpressionSource(source) && !isArrowFunctionSource(source)) {
@@ -18113,15 +18143,14 @@ function serializeFunction(value, allowThis) {
   } catch {
     return void 0;
   }
-  if (hasUnsupportedClosureReferences(source, allowThis)) return void 0;
+  if (hasUnsupportedClosureReferences(source)) return void 0;
   return `(${source})`;
 }
-function hasUnsupportedClosureReferences(source, allowThis = false) {
+function hasUnsupportedClosureReferences(source) {
   if (/\bsuper\b/.test(source)) return true;
-  if (!allowThis && /\bthis\b/.test(source)) return true;
+  if (/\bthis\b/.test(source)) return true;
   const code = maskCallbackLiterals(source);
   const locals = /* @__PURE__ */ new Set(["arguments"]);
-  if (allowThis) locals.add("this");
   for (const match2 of code.matchAll(/\bfunction(?:\s*\*)?\s*([A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^()]*)\)/g)) {
     if ((match2[2] ?? "").includes("=")) return true;
     if (match2[1]) locals.add(match2[1]);
@@ -18940,7 +18969,7 @@ function emitModule(plan, options, layout) {
         }
         lines.push(
           `  const __issue${index2} = Object.freeze(${JSON.stringify({
-            path: failure.field ?? "",
+            path: failure.field === void 0 ? [] : [failure.field],
             code: failure.code,
             expected: failure.rule ?? "a domain invariant",
             message: failure.message
@@ -18950,7 +18979,7 @@ function emitModule(plan, options, layout) {
       }
       lines.push(...indentBlock(assertions.source));
       lines.push(
-        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path || undefined, issues: outcome.issues }); };'
+        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };'
       );
     }
     return lines;
@@ -18966,6 +18995,15 @@ function emitModule(plan, options, layout) {
       });
       return void 0;
     }
+    const applicationMethods = artifact.methods ?? [];
+    if (applicationMethods.length > 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.extends",
+        reason: `application extension ${JSON.stringify(applicationMethods[0]?.name)} is a runtime binding and has no reconstructive AOT representation`
+      });
+      return void 0;
+    }
     const validator = emitValidatorBinding(
       binding,
       artifact.domainEvent ? base.def.props.payload : artifact.schema,
@@ -18973,14 +19011,16 @@ function emitModule(plan, options, layout) {
       "class",
       {
         is: false,
-        safeParse: true
+        safeParse: true,
+        ...artifact.policy?.maxIssues === void 0 ? {} : { maxIssues: artifact.policy.maxIssues }
       }
     );
     if (!validator) return void 0;
     const hydrateValidator = artifact.domainEvent ? validator : emitValidatorBinding(binding, artifact.schema, reportName, "class.hydrate", {
       is: false,
       safeParse: true,
-      resolveDefaults: false
+      resolveDefaults: false,
+      ...artifact.policy?.maxIssues === void 0 ? {} : { maxIssues: artifact.policy.maxIssues }
     });
     if (!hydrateValidator) return void 0;
     needsValidationError = true;
@@ -19047,21 +19087,6 @@ function emitModule(plan, options, layout) {
       methods.push(`clone() { return new this.constructor(${clone3}(this), __construct, true); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
-    for (const method of artifact.methods ?? []) {
-      const source2 = serializeMethod(method.source);
-      if (source2 === void 0) {
-        skipped.push({
-          schema: reportName,
-          operation: "class.extends",
-          reason: `the ${JSON.stringify(method.name)} extension references values outside its own body`
-        });
-        return void 0;
-      }
-      const name = classMemberName(method.name);
-      if (method.kind === "get") methods.push(`get ${name}() { return ${source2}.call(this); }`);
-      else if (method.kind === "set") methods.push(`set ${name}(value) { ${source2}.call(this, value); }`);
-      else methods.push(`${name}(...args) { return ${source2}.apply(this, args); }`);
-    }
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update2;
     let aggregateUpdateBody;
@@ -19202,7 +19227,8 @@ function emitModule(plan, options, layout) {
     const fastParse = (artifact.op === "parse" || artifact.op === "safeParse") && canUseFastParse(artifact.schema);
     const validatorName = emitValidatorBinding(binding, artifact.schema, reportName, artifact.op, {
       is: artifact.op === "is" || fastParse,
-      safeParse: artifact.op === "safeParse" || artifact.op === "parse"
+      safeParse: artifact.op === "safeParse" || artifact.op === "parse",
+      ...artifact.maxIssues === void 0 ? {} : { maxIssues: artifact.maxIssues }
     });
     if (!validatorName) return void 0;
     if (artifact.op === "is") {
@@ -19229,7 +19255,8 @@ function emitModule(plan, options, layout) {
         safeParse: selection.safeParse,
         safeParseAsync: false,
         ...selection.resolveDefaults === void 0 ? {} : { resolveDefaults: selection.resolveDefaults },
-        ...selection.materializeRuntimeTypes === void 0 ? {} : { materializeRuntimeTypes: selection.materializeRuntimeTypes }
+        ...selection.materializeRuntimeTypes === void 0 ? {} : { materializeRuntimeTypes: selection.materializeRuntimeTypes },
+        ...selection.maxIssues === void 0 ? {} : { maxIssues: selection.maxIssues }
       })
     );
     if (!validator) return void 0;
@@ -19679,7 +19706,8 @@ function emitModule(plan, options, layout) {
         is: validateStage.operation === "is" || fastParse,
         safeParse: validateStage.operation !== "is",
         ...constructBinding ? { materializeRuntimeTypes: false } : {},
-        ...constructArtifact?.domainEvent ? { resolveDefaults: false } : {}
+        ...constructArtifact?.domainEvent ? { resolveDefaults: false } : {},
+        ...validateStage.maxIssues === void 0 ? {} : { maxIssues: validateStage.maxIssues }
       });
       if (!validatorName) return void 0;
       if (validateStage.operation === "is") {
@@ -20209,7 +20237,8 @@ function emitModule(plan, options, layout) {
       "class JITValidationError extends Error {",
       "  constructor(issues) {",
       "    const first = issues[0];",
-      '    super(first ? (first.path ? first.path + ": " : "") + first.message : "validation failed");',
+      '    const path = first ? first.path.map((segment, index) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";',
+      '    super(first ? (path === "" ? "" : path + ": ") + first.message : "validation failed");',
       '    this.name = "JITValidationError";',
       '    this.code = "VALIDATION_FAILED";',
       "    this.issues = issues;",
@@ -23812,7 +23841,7 @@ function resolveAssertionDescriptor(input) {
     field
   });
 }
-function emitAssertionSource(descriptors) {
+function emitAssertionSource(descriptors, maxIssues) {
   const writer = new CodeWriter();
   writer.line("function __assert(value) {");
   writer.indent(() => {
@@ -23824,6 +23853,7 @@ function emitAssertionSource(descriptors) {
         writer.line(`const failure = __fail${index2}(value);`);
         writer.line("if (failure !== undefined) return { error: failure };");
         writer.line(`(issues ??= [])[issues.length] = __issue${index2};`);
+        if (maxIssues !== void 0) writer.line(`if (issues.length === ${maxIssues}) return { issues };`);
       });
       writer.line("}");
     });
@@ -23835,7 +23865,7 @@ function emitAssertionSource(descriptors) {
 function assertionIssues(descriptors) {
   return descriptors.map(
     (descriptor) => Object.freeze({
-      path: descriptor.field ?? "",
+      path: descriptor.field === void 0 ? [] : [descriptor.field],
       code: descriptor.code,
       expected: descriptor.rule ?? GENERIC_RULE,
       message: descriptor.message
@@ -23854,7 +23884,7 @@ function assertionError(issues) {
   const rule = first?.expected === GENERIC_RULE ? void 0 : first?.expected;
   return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", {
     ...rule === void 0 ? {} : { rule },
-    ...first?.path === void 0 || first.path === "" ? {} : { field: first.path },
+    ...first?.path[0] === void 0 ? {} : { field: String(first.path[0]) },
     issues
   });
 }
@@ -24120,7 +24150,8 @@ function emitExecutionPlan(plan) {
           safeParse: stage2.operation === "parse" || stage2.operation === "safeParse" || stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync" || stage2.operation === "issues",
           safeParseAsync: stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync",
           materializeRuntimeTypes: !constructNext,
-          resolveDefaults: !strictDomainEvent
+          resolveDefaults: !strictDomainEvent,
+          ...stage2.maxIssues === void 0 ? {} : { maxIssues: stage2.maxIssues }
         });
         const validatorName = emitBoundBlock(
           "validator",
@@ -24516,16 +24547,16 @@ function rootGate(schema) {
       return void 0;
   }
 }
-function structuralIssue(message, path = "") {
+function structuralIssue(message, path = []) {
   return { path, code: "invalid_json", expected: "well-formed JSON", message };
 }
-function throwStructural(message, path = "") {
+function throwStructural(message, path = []) {
   throw new JITValidationError([structuralIssue(message, path)]);
 }
 function prefixIssues(issues, prefix) {
   return issues.map((issue) => ({
     ...issue,
-    path: issue.path === "" ? prefix : `${prefix}${issue.path.startsWith("[") ? "" : "."}${issue.path}`
+    path: [prefix, ...issue.path]
   }));
 }
 function compileStream(schema, options = {}) {
@@ -24549,7 +24580,7 @@ function gateFirstChar(text, gateRef) {
     if (!gate.test(code)) {
       throw new JITValidationError([
         {
-          path: "",
+          path: [],
           code: "invalid_type",
           expected: gate.expected,
           message: `stream root must be ${gate.expected}`,
@@ -24577,17 +24608,17 @@ function createArrayStream(root, options) {
       try {
         parsed = JSON.parse(text);
       } catch {
-        throwStructural(`malformed JSON element at index ${items.length}`, `[${items.length}]`);
+        throwStructural(`malformed JSON element at index ${items.length}`, [items.length]);
       }
       const result = validator.safeParse(parsed);
       if (!result.success) {
-        throw new JITValidationError(prefixIssues(result.issues, `[${items.length}]`));
+        throw new JITValidationError(prefixIssues(result.issues, items.length));
       }
       const index2 = items.length;
       items.push(result.data);
       for (const check of checks) {
         if (check.kind === "max" && items.length > check.value) {
-          throwStructural(`expected at most ${check.value} items`, "");
+          throwStructural(`expected at most ${check.value} items`);
         }
       }
       options.onItem?.(result.data, index2);
@@ -24699,7 +24730,7 @@ function createNdjsonStream(schema, options) {
     try {
       parsed = JSON.parse(text);
     } catch {
-      throwStructural(`malformed JSON on line ${line}`, `line ${line}`);
+      throwStructural(`malformed JSON on line ${line}`, [`line ${line}`]);
     }
     const result = validator.safeParse(parsed);
     if (!result.success) {
@@ -24887,6 +24918,7 @@ function createPolicyState() {
     create: true,
     hydrate: true,
     configured: false,
+    maxIssues: void 0,
     assertions: [],
     assertionErrors: [],
     assert: void 0
@@ -24907,7 +24939,7 @@ function compileAssertions(policy) {
     ...bindingNames,
     ...failureNames,
     ...issueNames,
-    `${emitAssertionSource(policy.assertions)}
+    `${emitAssertionSource(policy.assertions, policy.maxIssues)}
 return __assert;`
   )(...bindings, ...failures, ...issues);
   policy.assert = (value) => {
@@ -24937,10 +24969,11 @@ function policyArtifact(policy) {
       result: policy.mode,
       create: policy.create,
       hydrate: policy.hydrate,
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues },
       ...policy.error === void 0 ? {} : { error: policy.error },
       ...policy.assertions.length === 0 ? {} : {
         assertions: {
-          source: emitAssertionSource(policy.assertions),
+          source: emitAssertionSource(policy.assertions, policy.maxIssues),
           bindingNames: bindings.map((_, index2) => `__q${index2}`),
           bindingValues: bindings,
           failures: policy.assertions.map((descriptor, index2) => ({
@@ -24956,11 +24989,16 @@ function policyArtifact(policy) {
   };
 }
 function applyValidationPolicy(policy, options) {
+  if (options?.maxIssues !== void 0 && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
+    throw new RangeError("maxIssues must be a positive safe integer");
+  }
   policy.configured = true;
   if (options?.result !== void 0) policy.mode = options.result;
   if (options?.error !== void 0) policy.error = options.error;
   if (options?.create !== void 0) policy.create = options.create;
   if (options?.hydrate !== void 0) policy.hydrate = options.hydrate;
+  if (options?.maxIssues !== void 0) policy.maxIssues = options.maxIssues;
+  if (policy.assertions.length > 0) compileAssertions(policy);
 }
 function applyAssertion(policy, schema, predicate, options) {
   const base = resolveWrappers(schema).base;
@@ -25024,11 +25062,15 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
   let safeParse;
   let safeHydrate;
   const policySafeParse = () => {
-    safeParse ??= compileValidatorSelection(schema, ["safeParse"]).safeParse;
+    safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    }).safeParse;
     return safeParse;
   };
   const policySafeHydrate = () => {
-    safeHydrate ??= compileSafeHydrator(schema);
+    safeHydrate ??= compileSafeHydrator(schema, {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    });
     return safeHydrate;
   };
   const registerClass = () => registerArtifact(classTarget, {
@@ -25247,7 +25289,9 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     }
     const construct2 = this;
     if (!policy.configured || !policy.create) return new construct2(args[0], INTERNAL_CONSTRUCT);
-    safeParse ??= compileValidatorSelection(schema, ["safeParse"]).safeParse;
+    safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    }).safeParse;
     const parsed = safeParse(args[0]);
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
     return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
@@ -25257,7 +25301,9 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     if (!policy.configured || !policy.hydrate) {
       return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
     }
-    safeHydrate ??= compileSafeHydrator(schema);
+    safeHydrate ??= compileSafeHydrator(schema, {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    });
     const parsed = safeHydrate(state3);
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
     return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
@@ -26688,7 +26734,7 @@ function binaryDecode(schema) {
   );
   return artifactForSchema(source, unwrapped);
 }
-function validationArtifact(schema, operation) {
+function validationArtifact(schema, operation, options) {
   const unwrapped = unwrapSchema(schema);
   const output = operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value";
   const plan = freezePlan2(unwrapped, [
@@ -26707,6 +26753,7 @@ function validationArtifact(schema, operation) {
       output,
       schema: unwrapped,
       operation,
+      ...options?.maxIssues === void 0 ? {} : { maxIssues: options.maxIssues },
       requires: [],
       provides: operation === "is" ? [] : ["schema-validated"],
       effects: THROWING_EFFECTS
@@ -26717,15 +26764,15 @@ function validationArtifact(schema, operation) {
       case "is":
         return compileValidatorSelection(unwrapped, ["is"]).is;
       case "parse":
-        return compileValidatorSelection(unwrapped, ["parse"]).parse;
+        return compileValidatorSelection(unwrapped, ["parse"], options).parse;
       case "safeParse":
-        return compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
+        return compileValidatorSelection(unwrapped, ["safeParse"], options).safeParse;
       case "parseAsync":
-        return compileValidatorSelection(unwrapped, ["parseAsync"]).parseAsync;
+        return compileValidatorSelection(unwrapped, ["parseAsync"], options).parseAsync;
       case "safeParseAsync":
-        return compileValidatorSelection(unwrapped, ["safeParseAsync"]).safeParseAsync;
+        return compileValidatorSelection(unwrapped, ["safeParseAsync"], options).safeParseAsync;
       case "issues": {
-        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"]).safeParse;
+        const safeParse = compileValidatorSelection(unwrapped, ["safeParse"], options).safeParse;
         return function* issues(value) {
           const result = safeParse(value);
           if (!result.success) yield* result.issues;
@@ -26769,7 +26816,7 @@ function pipelineStandardSchema(artifact) {
         return {
           issues: issues.map((issue) => ({
             message: issue.message,
-            ...issue.path ? { path: issue.path.split(".").filter(Boolean) } : {}
+            ...issue.path.length === 0 ? {} : { path: issue.path.map((segment) => typeof segment === "symbol" ? String(segment) : segment) }
           }))
         };
       }
@@ -27419,21 +27466,21 @@ var temporal = {
 };
 
 // ../../packages/jit/src/factories/runtime-ops.ts
-function parseAsync(schema) {
-  return validationArtifact(schema, "parseAsync");
+function parseAsync(schema, options) {
+  return validationArtifact(schema, "parseAsync", options);
 }
-function safeParseAsync(schema) {
-  return validationArtifact(schema, "safeParseAsync");
+function safeParseAsync(schema, options) {
+  return validationArtifact(schema, "safeParseAsync", options);
 }
 var validate = Object.freeze({
   is(schema) {
     return validationArtifact(schema, "is");
   },
-  parse(schema) {
-    return validationArtifact(schema, "parse");
+  parse(schema, options) {
+    return validationArtifact(schema, "parse", options);
   },
-  safeParse(schema) {
-    return validationArtifact(schema, "safeParse");
+  safeParse(schema, options) {
+    return validationArtifact(schema, "safeParse", options);
   },
   issues(schema) {
     return validationArtifact(schema, "issues");
@@ -28277,21 +28324,21 @@ var THROWING_EFFECTS2 = Object.freeze({
   mayAllocate: false,
   usesExternalBindings: false
 });
-function parseAsync2(schema) {
-  return validationStub(schema, "parseAsync");
+function parseAsync2(schema, options) {
+  return validationStub(schema, "parseAsync", options);
 }
-function safeParseAsync2(schema) {
-  return validationStub(schema, "safeParseAsync");
+function safeParseAsync2(schema, options) {
+  return validationStub(schema, "safeParseAsync", options);
 }
 var validate2 = Object.freeze({
   is(schema) {
     return validationStub(schema, "is");
   },
-  parse(schema) {
-    return validationStub(schema, "parse");
+  parse(schema, options) {
+    return validationStub(schema, "parse", options);
   },
-  safeParse(schema) {
-    return validationStub(schema, "safeParse");
+  safeParse(schema, options) {
+    return validationStub(schema, "safeParse", options);
   },
   issues(schema) {
     return validationStub(schema, "issues");
@@ -28453,12 +28500,13 @@ function hash3(schema) {
 function format2(schema) {
   return operationStub(schema, "format", "value");
 }
-function validationStub(schema, operation) {
+function validationStub(schema, operation, options) {
   return executionStub(schema, [
     stage("value", "value", "value"),
     {
       ...stage("validate", "value", operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value"),
       operation,
+      ...options?.maxIssues === void 0 ? {} : { maxIssues: options.maxIssues },
       provides: operation === "is" ? [] : ["schema-validated"]
     }
   ]);

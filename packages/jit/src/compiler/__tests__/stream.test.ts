@@ -41,7 +41,10 @@ describe("JIT streaming validation", () => {
 
         const issues = (error as Errors.JITValidationError).issues;
 
-        expect(issues.map((issue) => issue.path)).toEqual(["[1].id", "[1].name"]);
+        expect(issues.map((issue) => issue.path)).toEqual([
+          [1, "id"],
+          [1, "name"],
+        ]);
       }
 
       // A failed stream refuses further writes.

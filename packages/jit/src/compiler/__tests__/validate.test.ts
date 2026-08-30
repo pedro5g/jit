@@ -65,7 +65,7 @@ describe("JIT compiler validator", () => {
       const paths = result.issues.map((issue) => issue.path);
       const codes = result.issues.map((issue) => issue.code);
 
-      expect(paths).toEqual(["id", "name", "email", "role", "tags"]);
+      expect(paths).toEqual([["id"], ["name"], ["email"], ["role"], ["tags"]]);
       expect(codes).toEqual(["not_positive", "too_small", "invalid_format", "invalid_union", "too_big"]);
       expect(result.issues[0].expected).toBe("> 0");
       expect(result.issues[0].message).toContain("positive");
@@ -83,7 +83,10 @@ describe("JIT compiler validator", () => {
     expect(result.success).toBe(false);
 
     if (!result.success) {
-      expect(result.issues.map((issue) => issue.path)).toEqual(["[1].sku", "[1].qty"]);
+      expect(result.issues.map((issue) => issue.path)).toEqual([
+        [1, "sku"],
+        [1, "qty"],
+      ]);
       expect(result.issues[0].received).toBe("number");
     }
   });
@@ -205,13 +208,13 @@ describe("JIT compiler validator", () => {
     expect(mismatch.success).toBe(false);
     if (!mismatch.success) {
       expect(mismatch.issues).toHaveLength(1);
-      expect(mismatch.issues[0].path).toBe("confirmPassword");
+      expect(mismatch.issues[0].path).toEqual(["confirmPassword"]);
       expect(mismatch.issues[0].message).toBe("Passwords do not match");
     }
 
     expect(invalidBase.success).toBe(false);
     if (!invalidBase.success) {
-      expect(invalidBase.issues.map((issue) => issue.path)).toEqual(["password", "confirmPassword"]);
+      expect(invalidBase.issues.map((issue) => issue.path)).toEqual([["password"], ["confirmPassword"]]);
       expect(invalidBase.issues.some((issue) => issue.code === "custom")).toBe(false);
     }
   });
@@ -243,7 +246,7 @@ describe("JIT compiler validator", () => {
     expect(skipped.success).toBe(true);
     expect(missing.success).toBe(false);
     if (!missing.success) {
-      expect(missing.issues.map((issue) => issue.path)).toEqual(["cupom", "code"]);
+      expect(missing.issues.map((issue) => issue.path)).toEqual([["cupom"], ["code"]]);
       expect(missing.issues[0].code).toBe("expected_string");
       expect(missing.issues[0].message).toBe("O cupom é obrigatório");
     }
@@ -377,7 +380,7 @@ describe("JIT compiler validator", () => {
     expect(failed.success).toBe(false);
     if (!failed.success) {
       expect(failed.issues).toHaveLength(1);
-      expect(failed.issues[0].path).toBe("required");
+      expect(failed.issues[0].path).toEqual(["required"]);
       expect(failed.issues[0].code).toBe("expected_string");
     }
   });
@@ -414,7 +417,7 @@ describe("JIT compiler validator", () => {
     }
 
     expect(failed.success).toBe(false);
-    if (!failed.success) expect(failed.issues.map((issue) => issue.path)).toEqual(["cpf", "phone", "custom"]);
+    if (!failed.success) expect(failed.issues.map((issue) => issue.path)).toEqual([["cpf"], ["phone"], ["custom"]]);
   });
 
   it("should validate strict masks and omit output formatting from is", () => {
@@ -479,7 +482,7 @@ describe("JIT compiler validator", () => {
 
       expect(validationError.code).toBe("VALIDATION_FAILED");
       expect(validationError.issues).toHaveLength(1);
-      expect(validationError.issues[0].path).toBe("email");
+      expect(validationError.issues[0].path).toEqual(["email"]);
       expect(validationError.message).toContain("email");
     }
   });
@@ -520,7 +523,7 @@ describe("JIT compiler validator", () => {
     expect(bad.success).toBe(false);
     if (!bad.success) {
       expect(bad.issues.map((issue) => issue.code)).toEqual(["invalid_union", "invalid_format", "expected_number"]);
-      expect(bad.issues[2].path).toBe("meta[value]");
+      expect(bad.issues[2].path).toEqual(["meta", "value"]);
     }
   });
 
@@ -688,7 +691,7 @@ describe("JIT compiler validator", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.issues[0].path).toBe("extra");
+      expect(result.issues[0].path).toEqual(["extra"]);
       expect(result.issues[0].code).toBe("unknown_key");
     }
   });
@@ -724,7 +727,7 @@ describe("JIT compiler validator", () => {
 
     expect(failed.success).toBe(false);
     if (!failed.success) {
-      expect(failed.issues[0].path).toBe("tag");
+      expect(failed.issues[0].path).toEqual(["tag"]);
       expect(failed.issues[0].code).toBe("expected_string");
     }
   });

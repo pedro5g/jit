@@ -119,6 +119,7 @@ export function emitExecutionPlan(plan: ExecutionPlan): EmittedExecutionPlan {
           safeParseAsync: stage.operation === "parseAsync" || stage.operation === "safeParseAsync",
           materializeRuntimeTypes: !constructNext,
           resolveDefaults: !strictDomainEvent,
+          ...(stage.maxIssues === undefined ? {} : { maxIssues: stage.maxIssues }),
         });
         const validatorName = emitBoundBlock(
           "validator",

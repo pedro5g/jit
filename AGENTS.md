@@ -337,7 +337,7 @@ query describes the request; facts on the collection decide the access path.
 - Class and DDD capabilities attach through `.extends()`; do not reintroduce `.use()` for prototype capabilities.
 - Custom extensions live on the prototype and never allocate a method per instance, and there is no dispatcher between a call and its body.
 - An extension name may not shadow a schema accessor, a factory, the constructor or an installed capability. There is no override escape hatch.
-- Built-in extensions are reconstructive AOT capabilities. An application method is re-emitted from its own source only when `this` is the sole free name; anything else skips the artifact with a reason and is never silently dropped.
+- Built-in extensions are reconstructive AOT capabilities. Application methods are runtime bindings and make standalone AOT generation skip the complete class with a reason. Never reconstruct a custom method from `Function#toString`; a future portable method requires declarative IR or an explicit external-module binding contract.
 - State collection mutation reuses access-path planning and the element `MutationPlan`.
 - Filtering, mapping and grouping remain CQRS concerns rather than state collection mutations.
 

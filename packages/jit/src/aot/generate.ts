@@ -74,7 +74,7 @@ import {
   standaloneType,
 } from "./artifact-types.js";
 import { acceptsMissingBoundary, emitBoundaryType, emitTypeScriptType } from "./emit-type.js";
-import { serializeCallback, serializeMethod } from "./serialize-callback.js";
+import { serializeCallback } from "./serialize-callback.js";
 
 /** One declaration the generator could not build, and why. */
 export interface SkippedOperation {
@@ -1023,7 +1023,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         }
         lines.push(
           `  const __issue${index} = Object.freeze(${JSON.stringify({
-            path: failure.field ?? "",
+            path: failure.field === undefined ? [] : [failure.field],
             code: failure.code,
             expected: failure.rule ?? "a domain invariant",
             message: failure.message,
@@ -1037,7 +1037,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       // One error carries every invariant that did not hold, matching the
       // runtime host exactly.
       lines.push(
-        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path || undefined, issues: outcome.issues }); };'
+        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };'
       );
     }
     return lines;
@@ -1062,6 +1062,19 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
       return undefined;
     }
+    // Application methods are ordinary JavaScript runtime bindings. A
+    // function's source text is not a reconstructive artifact: it loses its
+    // lexical environment and can change meaning when moved to this module.
+    // Refuse the complete class before emitting any partial validator/helper.
+    const applicationMethods = artifact.methods ?? [];
+    if (applicationMethods.length > 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.extends",
+        reason: `application extension ${JSON.stringify(applicationMethods[0]?.name)} is a runtime binding and has no reconstructive AOT representation`,
+      });
+      return undefined;
+    }
     const validator = emitValidatorBinding(
       binding,
       artifact.domainEvent ? (base as ATS.ObjectSchema).def.props.payload : artifact.schema,
@@ -1070,6 +1083,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       {
         is: false,
         safeParse: true,
+        ...(artifact.policy?.maxIssues === undefined ? {} : { maxIssues: artifact.policy.maxIssues }),
       }
     );
 
@@ -1080,6 +1094,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           is: false,
           safeParse: true,
           resolveDefaults: false,
+          ...(artifact.policy?.maxIssues === undefined ? {} : { maxIssues: artifact.policy.maxIssues }),
         });
     if (!hydrateValidator) return undefined;
     needsValidationError = true;
@@ -1153,25 +1168,6 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       methods.push(`clone() { return new this.constructor(${clone}(this), __construct, true); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
-    // Application-owned methods are re-emitted from their own source. `this`
-    // is the receiver a prototype call supplies, so it survives the move; a
-    // body that reaches for anything else in its module cannot, and the
-    // artifact is skipped rather than generated with a name that is not there.
-    for (const method of artifact.methods ?? []) {
-      const source = serializeMethod(method.source);
-      if (source === undefined) {
-        skipped.push({
-          schema: reportName,
-          operation: "class.extends",
-          reason: `the ${JSON.stringify(method.name)} extension references values outside its own body`,
-        });
-        return undefined;
-      }
-      const name = classMemberName(method.name);
-      if (method.kind === "get") methods.push(`get ${name}() { return ${source}.call(this); }`);
-      else if (method.kind === "set") methods.push(`set ${name}(value) { ${source}.call(this, value); }`);
-      else methods.push(`${name}(...args) { return ${source}.apply(this, args); }`);
-    }
     const needsUpdate = artifact.aggregate || capabilities.has("with");
     let update: string | undefined;
     let aggregateUpdateBody: string | undefined;
@@ -1346,6 +1342,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const validatorName = emitValidatorBinding(binding, artifact.schema, reportName, artifact.op, {
       is: artifact.op === "is" || fastParse,
       safeParse: artifact.op === "safeParse" || artifact.op === "parse",
+      ...(artifact.maxIssues === undefined ? {} : { maxIssues: artifact.maxIssues }),
     });
 
     if (!validatorName) return undefined;
@@ -1381,6 +1378,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       readonly safeParse: boolean;
       readonly resolveDefaults?: boolean;
       readonly materializeRuntimeTypes?: boolean;
+      readonly maxIssues?: number;
     }
   ): string | undefined {
     const validator = tryEmit(reportName, operation, skipped, () =>
@@ -1392,6 +1390,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         ...(selection.materializeRuntimeTypes === undefined
           ? {}
           : { materializeRuntimeTypes: selection.materializeRuntimeTypes }),
+        ...(selection.maxIssues === undefined ? {} : { maxIssues: selection.maxIssues }),
       })
     );
 
@@ -1988,6 +1987,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         safeParse: validateStage.operation !== "is",
         ...(constructBinding ? { materializeRuntimeTypes: false } : {}),
         ...(constructArtifact?.domainEvent ? { resolveDefaults: false } : {}),
+        ...(validateStage.maxIssues === undefined ? {} : { maxIssues: validateStage.maxIssues }),
       });
 
       if (!validatorName) return undefined;
@@ -2613,7 +2613,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       "class JITValidationError extends Error {",
       "  constructor(issues) {",
       "    const first = issues[0];",
-      '    super(first ? (first.path ? first.path + ": " : "") + first.message : "validation failed");',
+      '    const path = first ? first.path.map((segment, index) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";',
+      '    super(first ? (path === "" ? "" : path + ": ") + first.message : "validation failed");',
       '    this.name = "JITValidationError";',
       '    this.code = "VALIDATION_FAILED";',
       "    this.issues = issues;",

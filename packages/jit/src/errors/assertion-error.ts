@@ -37,7 +37,7 @@ export class DomainAssertionError extends JITError {
 
 /** One assertion failure, in the same shape a validation issue takes. */
 export interface AssertionIssueLike {
-  readonly path: string;
+  readonly path: readonly PropertyKey[];
   readonly code: string;
   readonly expected: string;
   readonly message: string;

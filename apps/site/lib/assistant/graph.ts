@@ -239,14 +239,14 @@ export const CONCEPTS: ConceptNode[] = [
     mechanismsPt: [
       "`is` é um type predicate: retorna na primeira falha e não aloca nada.",
       "`parse` devolve a saída transformada ou lança JITValidationError; para um schema que não precisa reconstruir a entrada, ele reusa o caminho rápido do `is`.",
-      "`safeParse` devolve uma união de sucesso cuja falha carrega um vetor estruturado de issues — cada issue tem um path, um code e uma message.",
+      "`safeParse` coleta todas as falhas independentes; cada issue tem path estruturado como PropertyKey[], code estável, message e params opcionais. maxIssues limita a travessia antecipadamente.",
       "Sanitização e coerção rodam dentro da mesma passada especializada da validação, então o valor não é percorrido duas vezes.",
     ],
     fact: "JIT.validate.is is a type predicate that allocates nothing and returns on the first failure. JIT.validate.parse returns the output or throws. JIT.validate.safeParse returns a success union carrying a structured issue vector.",
     mechanisms: [
       "`is` is a type predicate: it returns on the first failure and allocates nothing.",
       "`parse` returns the transformed output or throws JITValidationError; for a schema that cannot rebuild its input it reuses the `is` fast path.",
-      "`safeParse` returns a success union whose failure carries a structured issue vector — each issue has a path, a code and a message.",
+      "`safeParse` collects every independent failure; each issue has a structured PropertyKey[] path, stable code, message and optional params. maxIssues bounds traversal early.",
       "Sanitization and coercion run inside the same specialized pass as validation, so a value is not traversed twice.",
     ],
     example:
@@ -461,6 +461,27 @@ export const CONCEPTS: ConceptNode[] = [
       'const Money = JIT.ddd\n  .valueObject(JIT.object({ amount: JIT.number() }))\n  .validate({ result: "result" })\n  .assert((query) => query.gte("amount", 0), { rule: "non-negative" });\n\nconst outcome = Money.create({ amount: -1 });\noutcome.ok;',
     page: "/docs/reference/functions/runtime-classes#validation-policies",
     edges: { "ddd-runtime-types": 0.8, validation: 0.5 },
+  },
+  {
+    id: "class-extensions",
+    aliases: ["class extension", "custom method", "prototype method", "extends", "capability"],
+    terms: ["class", "extends", "prototype", "method", "getter", "capability", "aot"],
+    apis: ["class", "ddd"],
+    fact: "Runtime Class and DDD capabilities attach through .extends(); built-ins and custom methods live directly on the prototype, with no per-instance function or call-time dispatcher.",
+    factPt:
+      "Capabilities de Runtime Class e DDD são anexadas por .extends(); built-ins e métodos customizados vivem diretamente no prototype, sem função por instância nem dispatcher na chamada.",
+    mechanisms: [
+      "Custom extension objects preserve method/getter descriptors and receive the current instance as a contextual typed this; names cannot shadow fields, factories or installed capabilities.",
+      "Built-in extensions are reconstructive AOT artifacts. Arbitrary JavaScript methods are runtime bindings, so standalone AOT skips the complete class with a class.extends reason instead of serializing Function#toString or dropping a member.",
+    ],
+    mechanismsPt: [
+      "Objetos de extensão preservam descriptors de methods/getters e recebem a instância atual como this tipado; nomes não podem sombrear fields, factories ou capabilities instaladas.",
+      "Extensions built-in são artifacts AOT reconstrutivos. Métodos JavaScript arbitrários são bindings runtime, então o AOT standalone pula a classe completa com razão class.extends em vez de serializar Function#toString ou omitir um membro.",
+    ],
+    example:
+      'const User = JIT.class(JIT.object({ name: JIT.string() })).extends({\n  displayName() {\n    return this.name.toUpperCase();\n  },\n});\n\nconst ada = new User({ name: "Ada" });\nada.displayName(); // "ADA"; method is shared on the prototype',
+    page: "/docs/reference/functions/runtime-classes#aot",
+    edges: { "ddd-runtime-types": 0.5, aot: 0.6 },
   },
   {
     id: "ddd-runtime-types",
@@ -881,14 +902,16 @@ export const CONCEPTS: ConceptNode[] = [
     factPt:
       "JIT.validate.parse lança JITValidationError quando falha. JIT.validate.safeParse devolve uma união de sucesso no lugar, e a falha carrega um vetor estruturado de issues onde cada issue tem um path, um code e uma message. JIT.validate.issues devolve esse vetor diretamente.",
     mechanisms: [
-      "An issue's `path` locates the offending field inside the value, which is what lets a form map an error back to an input.",
-      "`code` is the machine-readable reason and `message` the human one; a custom message can be passed to most checks as their last argument.",
+      "An issue's `path` is a readonly PropertyKey[] that preserves numeric collection positions, so a form can map an error without parsing display text.",
+      "`code` is the machine-readable reason and `message` the human one; every failing built-in check accepts a static custom message without changing its code.",
+      "Diagnostic validation collects all independent issues by default; maxIssues stops the generated traversal at the declared bound instead of collecting and slicing.",
       "`is` reports nothing at all — it returns on the first failure without building the vector, which is why it is the hot-path choice.",
       "Building the issue vector is the cost `safeParse` pays over `is`; where the schema cannot rebuild its input, `safeParse` leads with the allocation-free check first.",
     ],
     mechanismsPt: [
-      "O `path` de uma issue localiza o campo problemático dentro do valor, e é isso que permite a um formulário mapear o erro de volta para um input.",
-      "`code` é o motivo legível por máquina e `message` o legível por humano; uma mensagem customizada pode ser passada para a maioria dos checks como último argumento.",
+      "O `path` de uma issue é PropertyKey[] readonly e preserva índices numéricos, permitindo mapear o erro sem parsear texto de exibição.",
+      "`code` é o motivo legível por máquina e `message` o humano; todo check built-in que falha aceita mensagem estática sem mudar o code.",
+      "A validação diagnóstica coleta todas as falhas independentes por padrão; maxIssues interrompe a travessia gerada no limite, sem coletar e cortar depois.",
       "`is` não reporta nada — retorna na primeira falha sem montar o vetor, e é por isso que é a escolha de caminho quente.",
       "Montar o vetor de issues é o custo que `safeParse` paga a mais que `is`; onde o schema não precisa reconstruir a entrada, o `safeParse` começa pela checagem sem alocação.",
     ],

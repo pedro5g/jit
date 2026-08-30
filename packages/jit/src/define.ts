@@ -94,6 +94,7 @@ import {
 } from "./factories/query.js";
 import type { ReconcileChange, ReconcilePlan, ResolvedChannels } from "./factories/reconcile.js";
 import type { RuleOptions, RulesBuilder, RulesPlan } from "./factories/rules.js";
+import type { ValidationDiagnosticOptions } from "./factories/runtime-ops.js";
 import type { SortBuilder, SortPlan } from "./factories/sort.js";
 import { getArtifact, registerArtifact } from "./runtime/artifact-registry.js";
 
@@ -121,15 +122,21 @@ const THROWING_EFFECTS = Object.freeze({
   usesExternalBindings: false,
 });
 
-function parseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-  return validationStub(schema, "parseAsync") as unknown as ExecutionArtifact<
+function parseAsync<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  options?: ValidationDiagnosticOptions
+) {
+  return validationStub(schema, "parseAsync", options) as unknown as ExecutionArtifact<
     unknown,
     Promise<ATS.TypeofSchema<TSchema>>
   >;
 }
 
-function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-  return validationStub(schema, "safeParseAsync") as unknown as ExecutionArtifact<
+function safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  options?: ValidationDiagnosticOptions
+) {
+  return validationStub(schema, "safeParseAsync", options) as unknown as ExecutionArtifact<
     unknown,
     Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>
   >;
@@ -139,11 +146,11 @@ const validate = Object.freeze({
   is<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationStub(schema, "is") as DefineFunction<(value: unknown) => value is ATS.TypeofSchema<TSchema>>;
   },
-  parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationStub(schema, "parse") as unknown as SchemaArtifact<unknown, TSchema>;
+  parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ValidationDiagnosticOptions) {
+    return validationStub(schema, "parse", options) as unknown as SchemaArtifact<unknown, TSchema>;
   },
-  safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
-    return validationStub(schema, "safeParse") as unknown as ExecutionArtifact<
+  safeParse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>, options?: ValidationDiagnosticOptions) {
+    return validationStub(schema, "safeParse", options) as unknown as ExecutionArtifact<
       unknown,
       SafeParseResult<ATS.TypeofSchema<TSchema>>
     >;
@@ -366,13 +373,15 @@ function format<TSchema extends ATS.StringSchema>(schema: SchemaInput<TSchema>):
 
 function validationStub<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues"
+  operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues",
+  options?: ValidationDiagnosticOptions
 ): DefineFunction<(...args: never[]) => unknown> {
   return executionStub(schema, [
     stage("value", "value", "value"),
     {
       ...stage("validate", "value", operation === "is" ? "boolean" : operation === "issues" ? "issues" : "value"),
       operation,
+      ...(options?.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
       provides: operation === "is" ? [] : ["schema-validated"],
     } as ExecutionStage,
   ]);

@@ -96,18 +96,18 @@ function rootGate(schema: AnySchema): { test: (code: number) => boolean; expecte
   }
 }
 
-function structuralIssue(message: string, path = ""): ValidationIssue {
+function structuralIssue(message: string, path: readonly PropertyKey[] = []): ValidationIssue {
   return { path, code: "invalid_json", expected: "well-formed JSON", message };
 }
 
-function throwStructural(message: string, path = ""): never {
+function throwStructural(message: string, path: readonly PropertyKey[] = []): never {
   throw new JITValidationError([structuralIssue(message, path)]);
 }
 
-function prefixIssues(issues: readonly ValidationIssue[], prefix: string): ValidationIssue[] {
+function prefixIssues(issues: readonly ValidationIssue[], prefix: PropertyKey): ValidationIssue[] {
   return issues.map((issue) => ({
     ...issue,
-    path: issue.path === "" ? prefix : `${prefix}${issue.path.startsWith("[") ? "" : "."}${issue.path}`,
+    path: [prefix, ...issue.path],
   }));
 }
 
@@ -161,7 +161,7 @@ function gateFirstChar(text: string, gateRef: { pending: ReturnType<typeof rootG
     if (!gate.test(code)) {
       throw new JITValidationError([
         {
-          path: "",
+          path: [],
           code: "invalid_type",
           expected: gate.expected,
           message: `stream root must be ${gate.expected}`,
@@ -195,13 +195,13 @@ function createArrayStream<TSchema extends ATS.AnyTypeSchema>(
       try {
         parsed = JSON.parse(text);
       } catch {
-        throwStructural(`malformed JSON element at index ${items.length}`, `[${items.length}]`);
+        throwStructural(`malformed JSON element at index ${items.length}`, [items.length]);
       }
 
       const result = validator.safeParse(parsed);
 
       if (!result.success) {
-        throw new JITValidationError(prefixIssues(result.issues, `[${items.length}]`));
+        throw new JITValidationError(prefixIssues(result.issues, items.length));
       }
 
       const index = items.length;
@@ -210,7 +210,7 @@ function createArrayStream<TSchema extends ATS.AnyTypeSchema>(
       // Early max check: abort as soon as the stream exceeds the bound.
       for (const check of checks) {
         if (check.kind === "max" && items.length > (check.value as number)) {
-          throwStructural(`expected at most ${check.value} items`, "");
+          throwStructural(`expected at most ${check.value} items`);
         }
       }
       options.onItem?.(result.data, index);
@@ -345,7 +345,7 @@ function createNdjsonStream<TSchema extends ATS.AnyTypeSchema>(
     try {
       parsed = JSON.parse(text);
     } catch {
-      throwStructural(`malformed JSON on line ${line}`, `line ${line}`);
+      throwStructural(`malformed JSON on line ${line}`, [`line ${line}`]);
     }
 
     const result = validator.safeParse(parsed);

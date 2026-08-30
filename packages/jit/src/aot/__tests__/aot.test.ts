@@ -987,7 +987,7 @@ describe("JIT AOT generate", () => {
     expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
   });
 
-  it("should re-emit application methods added through .extends", async () => {
+  it("should reject application methods because function source is not an AOT artifact", () => {
     const Schema = JIT.object({ id: JIT.string(), name: JIT.string() });
     const User = JIT.class(Schema)
       .extends(JIT.class.equals)
@@ -1003,28 +1003,90 @@ describe("JIT AOT generate", () => {
         },
       });
     const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    expect(result.skipped).toEqual([
+      {
+        schema: "User",
+        operation: "class.extends",
+        reason: expect.stringContaining('"displayName"'),
+      },
+    ]);
+  });
+
+  it("should preserve a diagnostic issue limit in standalone AOT", async () => {
+    const Schema = JIT.object({ first: JIT.string(), second: JIT.string(), third: JIT.string() });
+    const Limited = JIT.validate.safeParse(Schema, { maxIssues: 2 });
+    const result = AOT.generate({ groups: {}, artifacts: { Limited }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
-      readonly User: new (input: {
-        id: string;
-        name: string;
-      }) => {
-        displayName(): string;
-        sameAs(other: unknown): boolean;
-        readonly initial: string;
-      };
+      readonly Limited: typeof Limited;
     };
-    const first = new generated.User({ id: "u_1", name: "Ada" });
-    const second = new generated.User({ id: "u_1", name: "Ada" });
+    const runtime = Limited({ first: 1, second: 2, third: 3 });
+    const aot = generated.Limited({ first: 1, second: 2, third: 3 });
 
     expect(result.skipped).toEqual([]);
-    expect(source).not.toContain('from "@jit-compiler/jit"');
-    expect(first.displayName()).toBe("ADA");
-    expect(first.sameAs(second)).toBe(true);
-    expect(first.initial).toBe("A");
-    // Still one function on the prototype, not one per instance.
-    expect(first.displayName).toBe(second.displayName);
-    expect(source).toContain("get initial()");
+    expect(aot).toEqual(runtime);
+    expect(aot.success === false && aot.issues).toHaveLength(2);
+    expect(source).toContain("throw __issueLimit");
+    expect(source).not.toContain(".slice(");
+  });
+
+  it("should preserve a define-host diagnostic issue limit in standalone AOT", async () => {
+    const Schema = DefineJIT.object({ first: DefineJIT.string(), second: DefineJIT.string() });
+    const Limited = DefineJIT.validate.safeParse(Schema, { maxIssues: 1 });
+    const result = AOT.generate({ groups: {}, artifacts: { Limited }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Limited: (value: unknown) => { readonly success: boolean; readonly issues?: readonly unknown[] };
+    };
+    const parsed = generated.Limited({ first: 1, second: 2 });
+
+    expect(result.skipped).toEqual([]);
+    expect(parsed.success).toBe(false);
+    expect(parsed.issues).toHaveLength(1);
+  });
+
+  it("should preserve a factory diagnostic issue limit in standalone AOT", async () => {
+    const Schema = JIT.object({ first: JIT.string(), second: JIT.string(), third: JIT.string() });
+    const Limited = JIT.ddd.valueObject(Schema).validate({ result: "result", maxIssues: 2 });
+    const result = AOT.generate({ groups: {}, artifacts: { Limited }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Limited: typeof Limited;
+    };
+    const input = { first: 1, second: 2, third: 3 } as never;
+    const runtime = Limited.create(input);
+    const aot = generated.Limited.create(input);
+
+    expect(result.skipped).toEqual([]);
+    expect(aot.ok).toBe(false);
+    expect(runtime.ok).toBe(false);
+    if (aot.ok || runtime.ok) throw new Error("expected both factories to reject the input");
+    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toEqual(
+      (runtime.error as { readonly issues: readonly unknown[] }).issues
+    );
+    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toHaveLength(2);
+  });
+
+  it("should preserve an assertion issue limit in standalone AOT", async () => {
+    const Limited = JIT.ddd
+      .valueObject(JIT.object({ a: JIT.number(), b: JIT.number(), c: JIT.number() }))
+      .assert((query) => query.gte("a", 0))
+      .assert((query) => query.gte("b", 0))
+      .assert((query) => query.gte("c", 0))
+      .validate({ result: "result", maxIssues: 2 });
+    const result = AOT.generate({ groups: {}, artifacts: { Limited }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Limited: typeof Limited;
+    };
+    const runtime = Limited.create({ a: -1, b: -1, c: -1 });
+    const aot = generated.Limited.create({ a: -1, b: -1, c: -1 });
+
+    expect(result.skipped).toEqual([]);
+    expect(runtime.ok).toBe(false);
+    expect(aot.ok).toBe(false);
+    if (runtime.ok || aot.ok) throw new Error("expected both factories to reject the assertions");
+    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toEqual(
+      (runtime.error as { readonly issues: readonly unknown[] }).issues
+    );
+    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toHaveLength(2);
   });
 
   it("should skip a class whose extension reaches outside its own body", () => {

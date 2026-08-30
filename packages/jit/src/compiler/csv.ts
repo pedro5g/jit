@@ -342,7 +342,7 @@ function emitCsvRowParser(writer: CodeWriter, descriptor: CsvDescriptor, validat
     writer.line("});");
     writer.line("if (result.success) return result.data;");
     writer.line(
-      'throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: "[" + row + "]" + (issue.path ? "." + issue.path : "") })));'
+      "throw new JITValidationError(result.issues.map((issue) => ({ ...issue, path: [row, ...issue.path] })));"
     );
   });
   writer.line("}");

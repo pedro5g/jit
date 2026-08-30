@@ -53,7 +53,7 @@ export function resolveAssertionDescriptor(input: AssertionInput): AssertionDesc
  * becomes a comparison in the generated source, and an artifact with no
  * assertions emits nothing at all.
  */
-export function emitAssertionSource(descriptors: readonly AssertionDescriptor[]): string {
+export function emitAssertionSource(descriptors: readonly AssertionDescriptor[], maxIssues?: number): string {
   const writer = new CodeWriter();
 
   writer.line("function __assert(value) {");
@@ -70,6 +70,7 @@ export function emitAssertionSource(descriptors: readonly AssertionDescriptor[])
         // A declared error type is not an issue; it is reported as it is.
         writer.line("if (failure !== undefined) return { error: failure };");
         writer.line(`(issues ??= [])[issues.length] = __issue${index};`);
+        if (maxIssues !== undefined) writer.line(`if (issues.length === ${maxIssues}) return { issues };`);
       });
       writer.line("}");
     });
@@ -83,7 +84,7 @@ export function emitAssertionSource(descriptors: readonly AssertionDescriptor[])
 export function assertionIssues(descriptors: readonly AssertionDescriptor[]): readonly AssertionIssue[] {
   return descriptors.map((descriptor) =>
     Object.freeze({
-      path: descriptor.field ?? "",
+      path: descriptor.field === undefined ? [] : [descriptor.field],
       code: descriptor.code,
       expected: descriptor.rule ?? GENERIC_RULE,
       message: descriptor.message,
@@ -105,7 +106,7 @@ export function assertionFailures(
 
 /** Same shape as a validation issue, so one list carries both kinds. */
 export interface AssertionIssue {
-  readonly path: string;
+  readonly path: readonly PropertyKey[];
   readonly code: string;
   readonly expected: string;
   readonly message: string;
@@ -120,7 +121,7 @@ export function assertionError(issues: readonly AssertionIssue[]): DomainAsserti
 
   return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", {
     ...(rule === undefined ? {} : { rule }),
-    ...(first?.path === undefined || first.path === "" ? {} : { field: first.path }),
+    ...(first?.path[0] === undefined ? {} : { field: String(first.path[0]) }),
     issues,
   });
 }

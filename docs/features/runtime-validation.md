@@ -82,7 +82,7 @@ failure it happened to reach.
 
 ```ts
 {
-  path: "name",
+  path: ["name"],
   code: "too_small",
   expected: "length >= 3",
   message: "Must contain at least 3 characters",
@@ -97,6 +97,9 @@ failure it happened to reach.
   one. A format check has nothing structured to add and omits the key rather
   than carrying an empty object, and no issue ever holds the rejected value —
   that is how a diagnostic ends up in a log with data in it.
+- **`path`** is a readonly sequence of property keys. Object fields remain
+  strings and collection positions remain numbers, so consumers never have to
+  parse a display string such as `items[2].name` back into structure.
 
 ### What is collected, and what is not
 
@@ -111,6 +114,17 @@ JIT.validate.safeParse(User)({ name: "", email: "abc", age: 12 });
 A failed prerequisite suppresses everything that depended on it. `name: 123`
 against `JIT.string().min(10).email()` reports one `invalid_type` — the length
 and the format have nothing to say about a number.
+
+For untrusted or very large payloads, cap diagnostic work explicitly:
+
+```ts
+const safeParseUser = JIT.validate.safeParse(User, { maxIssues: 100 });
+const parseUser = JIT.validate.parse(User, { maxIssues: 100 });
+```
+
+The generated traversal stops as soon as issue 100 is emitted; it does not
+collect the rest and slice afterward. The default remains collect-all. Async
+validation and class/DDD `.validate({ maxIssues })` use the same emitter.
 
 ### Custom messages
 
@@ -153,6 +167,9 @@ per-call schema dispatch and reduces branch noise in hot code.
 
 `is()` is allocation-light because it does not build issue objects. For valid
 data, `safeParse()` returns the original value when no output rebuild is needed.
+Issue arrays, path arrays, messages and parameter objects are created only on
+failure; dynamic collection paths are emitted as one array rather than a chain
+of intermediate concatenations.
 Transforms/defaults/coercions allocate only when the schema semantics require a
 new output.
 
@@ -188,3 +205,30 @@ clearest hot path.
   the hot path.
 - Avoid callback refinements in AOT declaration files unless they are meant to
   stay runtime-only; callbacks cannot be serialized safely into generated JS.
+
+## Measured diagnostics cost
+
+`pnpm bench:validate`, Node 22.17.1 on a Ryzen 7 5800H, compares runtime JIT,
+standalone AOT and a shape-specific handwritten validator. The harness samples
+both elapsed time and heap.
+
+| Five-field diagnostic case | Runtime JIT | JIT AOT | Handwritten | AOT heap/call |
+| --- | ---: | ---: | ---: | ---: |
+| `safeParse`, one issue | 59.79 ns | 50.41 ns | 62.96 ns | 312 B |
+| `safeParse`, five issues | 94.77 ns | 95.14 ns | 80.96 ns | 856 B |
+| `parse`, five issues | 7.01 µs | 6.27 µs | — | 1.77 kB |
+
+The handwritten diagnostic hard-codes the same five fields rather than walking
+a schema. JIT is faster for one issue and about 18% behind it for five in this
+capture; the ceiling changes with how much invalid work is reached. Throwing
+`parse` costs more because it constructs an `Error` and stack.
+
+Custom-message and default-message AOT validators were within measurement
+noise: 52.06/50.41 ns for one issue and 94.05/95.14 ns for five. Boolean AOT
+was 45.96 ns with messages versus 42.55 ns without, confirming that message
+literals never enter its emitted source or hot path.
+
+`maxIssues: 2` used about 448 B/call in AOT versus 856 B for all five issues,
+but took 185 ns versus 95 ns on this tiny object because terminating arbitrary
+nested traversal uses a caught internal sentinel. The option is a memory/DoS
+bound for large invalid inputs, not a small-input speed optimization.

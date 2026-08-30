@@ -431,12 +431,20 @@ locally, with no JIT runtime import. Generated Domain Events preserve
 the complete persisted event envelope. Value Objects, Entities, Aggregate
 Roots, and Domain Events are factory-only by default.
 
-A built-in capability is fully reconstructive. An application method is
-re-emitted from its own source: `this` is the receiver a prototype call
-supplies, so it survives the move, but a body that reaches for anything else in
-its module cannot — such an artifact is **skipped with a reason** naming the
-member, never generated without it. Method source is never rebuilt from a
-serialized closure that captured something.
+A built-in capability is fully reconstructive. An application method is an
+ordinary JavaScript runtime binding, not a reconstructive source artifact.
+Standalone AOT therefore **skips the complete class with a reason** naming the
+member; it never silently drops a method and never serializes one through
+`Function#toString`. Moving function text would discard its lexical environment
+and can silently change behavior. Supporting application methods in a future
+AOT release requires a declarative method IR or an explicit external-module
+binding contract.
+
+`pnpm bench:validate` measured a custom prototype call at 5.76 ns against 5.44
+ns for its handwritten class equivalent on Node 22.17.1 / Ryzen 7 5800H. Both
+sampled about 6.1 bytes per call: there is no runtime extension dispatcher.
+Custom-method AOT is intentionally not benchmarked because generation rejects
+that artifact instead of reconstructing it unsafely.
 
 Everything on this page reaches the generated module: the construction token,
 the scalar wrapper with its `value` accessor and scalar wire form, the nested

@@ -6,8 +6,8 @@ import { JITError } from "./jit-error.js";
  * form field mapping) without any translation layer.
  */
 export interface ValidationIssue {
-  /** Dot/bracket path from the root, e.g. `"items[2].name"`; `""` is the root. */
-  readonly path: string;
+  /** Structured path from the root, e.g. `["items", 2, "name"]`; `[]` is the root. */
+  readonly path: readonly PropertyKey[];
   /** Stable machine-readable code, e.g. `"expected_string"`, `"too_small"`. */
   readonly code: string;
   /** Human-readable description of the accepted shape, e.g. `"length >= 3"`. */
@@ -24,7 +24,7 @@ export interface ValidationIssue {
    * rather than carrying an empty object, and no issue ever holds the rejected
    * value: that is how a diagnostic ends up in a log with data in it.
    */
-  readonly params?: Readonly<Record<string, string | number | boolean | readonly (string | number)[]>>;
+  readonly params?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -37,10 +37,23 @@ export class JITValidationError extends JITError {
   constructor(issues: readonly ValidationIssue[]) {
     const first = issues[0];
 
-    super("VALIDATION_FAILED", first ? `${first.path ? `${first.path}: ` : ""}${first.message}` : "validation failed", {
+    const path = first === undefined ? "" : formatIssuePath(first.path);
+
+    super("VALIDATION_FAILED", first ? `${path === "" ? "" : `${path}: `}${first.message}` : "validation failed", {
       meta: issues,
     });
     this.name = "JITValidationError";
     this.issues = issues;
   }
+}
+
+/** Human-readable formatting is an error-message concern, not issue identity. */
+function formatIssuePath(path: readonly PropertyKey[]): string {
+  let output = "";
+
+  for (const segment of path) {
+    if (typeof segment === "number") output += `[${segment}]`;
+    else output += `${output === "" ? "" : "."}${String(segment)}`;
+  }
+  return output;
 }

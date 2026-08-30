@@ -8,6 +8,11 @@ export const VALIDATOR_OPS = ["is", "parse", "safeParse", "parseAsync", "safePar
 
 export type ValidatorOp = (typeof VALIDATOR_OPS)[number];
 
+export interface ValidationCompileOptions extends CompileCacheOptions {
+  /** Stops diagnostic validation after exactly this many issues. */
+  readonly maxIssues?: number;
+}
+
 /** Successful `safeParse` result carrying the (possibly transformed) data. */
 export interface SafeParseSuccess<T> {
   readonly success: true;
@@ -61,12 +66,15 @@ type MutableCompiledValidatorSelection<T> = {
  */
 export function emitValidatorSource(
   schema: ATS.AnyTypeSchema,
-  options?: { readonly ops?: readonly ValidatorOp[] }
+  options?: { readonly ops?: readonly ValidatorOp[]; readonly maxIssues?: number }
 ): string {
   const ops = options?.ops ?? VALIDATOR_OPS;
+  validateMaxIssues(options?.maxIssues);
 
-  return emitValidator(schema, emitOptionsForValidatorOps(ops, ops.includes("parse") && canUseFastParse(schema)))
-    .source;
+  return emitValidator(schema, {
+    ...emitOptionsForValidatorOps(ops, ops.includes("parse") && canUseFastParse(schema)),
+    ...(options?.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
+  }).source;
 }
 
 /**
@@ -89,7 +97,7 @@ export function emitValidatorSource(
  */
 export function compileValidator<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  options?: CompileCacheOptions
+  options?: ValidationCompileOptions
 ): CompiledValidator<ATS.TypeofSchema<TSchema>> {
   return compileValidatorSelection(schema, VALIDATOR_OPS, options) as CompiledValidator<ATS.TypeofSchema<TSchema>>;
 }
@@ -127,17 +135,19 @@ export function compileHydrator<TSchema extends ATS.AnyTypeSchema>(
  */
 export function compileSafeHydrator<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
-  options?: CompileCacheOptions
+  options?: ValidationCompileOptions
 ): (state: unknown) => SafeParseResult<ATS.TypeofSchema<TSchema>> {
+  validateMaxIssues(options?.maxIssues);
   return getCompileCached(
     schema,
-    "hydrator:safe",
+    `hydrator:safe:max=${options?.maxIssues ?? "all"}`,
     () => {
       const emitted = emitValidator(schema, {
         is: false,
         safeParse: true,
         safeParseAsync: false,
         resolveDefaults: false,
+        ...(options?.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
       });
       return globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).safeParse as (
         value: unknown
@@ -150,21 +160,25 @@ export function compileSafeHydrator<TSchema extends ATS.AnyTypeSchema>(
 export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, const TOps extends readonly ValidatorOp[]>(
   schema: TSchema,
   ops: TOps,
-  options?: CompileCacheOptions
+  options?: ValidationCompileOptions
 ): CompiledValidatorSelection<ATS.TypeofSchema<TSchema>, TOps> {
   type TValue = ATS.TypeofSchema<TSchema>;
   const normalizedOps = normalizeValidatorOps(ops);
+  validateMaxIssues(options?.maxIssues);
   // `is` is the allocation-free proof that a value is already valid. When the
   // schema cannot rebuild, both parse and safeParse can lead with it and skip
   // the issue-collecting traversal entirely on the common path.
   const fastParse = canUseFastParse(schema) && (normalizedOps.includes("parse") || normalizedOps.includes("safeParse"));
-  const cacheKey = `validator:${normalizedOps.join(",")}`;
+  const cacheKey = `validator:${normalizedOps.join(",")}:max=${options?.maxIssues ?? "all"}`;
 
   return getCompileCached(
     schema,
     cacheKey,
     () => {
-      const emitted = emitValidator(schema, emitOptionsForValidatorOps(normalizedOps, fastParse));
+      const emitted = emitValidator(schema, {
+        ...emitOptionsForValidatorOps(normalizedOps, fastParse),
+        ...(options?.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
+      });
       const compiled = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values) as {
         readonly is?: (value: unknown) => value is TValue;
         readonly safeParse?: (value: unknown) => SafeParseResult<TValue>;
@@ -201,23 +215,23 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
 
       if (normalizedOps.includes("is") && compiled.is) {
         selection.is = compiled.is;
-        registerValidatorArtifact(compiled.is, schema, "is");
+        registerValidatorArtifact(compiled.is, schema, "is", options?.maxIssues);
       }
       if (normalizedOps.includes("safeParse") && fastSafeParse) {
         selection.safeParse = fastSafeParse;
-        registerValidatorArtifact(fastSafeParse, schema, "safeParse");
+        registerValidatorArtifact(fastSafeParse, schema, "safeParse", options?.maxIssues);
       }
       if (normalizedOps.includes("parse")) {
         selection.parse = parse;
-        registerValidatorArtifact(parse, schema, "parse");
+        registerValidatorArtifact(parse, schema, "parse", options?.maxIssues);
       }
       if (normalizedOps.includes("safeParseAsync") && safeParseAsync) {
         selection.safeParseAsync = safeParseAsync;
-        registerValidatorArtifact(safeParseAsync, schema, "safeParseAsync");
+        registerValidatorArtifact(safeParseAsync, schema, "safeParseAsync", options?.maxIssues);
       }
       if (normalizedOps.includes("parseAsync")) {
         selection.parseAsync = parseAsync;
-        registerValidatorArtifact(parseAsync, schema, "parseAsync");
+        registerValidatorArtifact(parseAsync, schema, "parseAsync", options?.maxIssues);
       }
 
       return selection as CompiledValidatorSelection<TValue, TOps>;
@@ -229,9 +243,15 @@ export function compileValidatorSelection<TSchema extends ATS.AnyTypeSchema, con
 function registerValidatorArtifact<TSchema extends ATS.AnyTypeSchema>(
   fn: object,
   schema: TSchema,
-  op: ValidatorOp
+  op: ValidatorOp,
+  maxIssues?: number
 ): void {
-  registerArtifact(fn, { kind: "validator", schema, op });
+  registerArtifact(fn, { kind: "validator", schema, op, ...(maxIssues === undefined ? {} : { maxIssues }) });
+}
+
+function validateMaxIssues(value: number | undefined): void {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || value < 1) throw new RangeError("maxIssues must be a positive safe integer");
 }
 
 function normalizeValidatorOps(ops: readonly ValidatorOp[]): readonly ValidatorOp[] {

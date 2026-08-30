@@ -191,7 +191,7 @@ function registerValidationCase(
  * the other half: a schema carrying custom messages must not make the boolean
  * path or the valid path slower, because neither ever reads a message.
  */
-export function registerDiagnosticsScenarios(): void {
+export async function registerDiagnosticsScenarios(): Promise<void> {
   const Plain = JIT.object({
     name: JIT.string().min(2).max(64),
     email: JIT.string().email(),
@@ -218,6 +218,28 @@ export function registerDiagnosticsScenarios(): void {
   const safeParsePlain = JIT.validate.safeParse(Plain);
   const safeParseWithMessages = JIT.validate.safeParse(WithMessages);
   const parsePlain = JIT.validate.parse(Plain);
+  const limitedPlain = JIT.validate.safeParse(Plain, { maxIssues: 2 });
+  const diagnosticsOutDir = fileURLToPath(new URL("./.generated/diagnostics/", import.meta.url));
+
+  AOT.generate({
+    artifacts: {
+      Plain_is: isPlain,
+      Plain_safeParse: safeParsePlain,
+      Plain_parse: parsePlain,
+      Messages_is: isWithMessages,
+      Messages_safeParse: safeParseWithMessages,
+      Plain_limited: limitedPlain,
+    },
+    outDir: diagnosticsOutDir,
+  });
+  const aot = (await import(pathToFileURL(join(diagnosticsOutDir, "index.js")).href)) as {
+    readonly Plain_is: typeof isPlain;
+    readonly Plain_safeParse: typeof safeParsePlain;
+    readonly Plain_parse: typeof parsePlain;
+    readonly Messages_is: typeof isWithMessages;
+    readonly Messages_safeParse: typeof safeParseWithMessages;
+    readonly Plain_limited: typeof limitedPlain;
+  };
 
   const handwrittenIs = (value: typeof valid) =>
     typeof value === "object" &&
@@ -234,6 +256,65 @@ export function registerDiagnosticsScenarios(): void {
     value.nickname.length >= 2 &&
     typeof value.city === "string" &&
     value.city.length >= 2;
+  const handwrittenSafeParse = (value: typeof valid) => {
+    const issues: Array<{ path: readonly PropertyKey[]; code: string; expected: string; message: string }> = [];
+
+    if (typeof value.name !== "string")
+      issues.push({ path: ["name"], code: "expected_string", expected: "string", message: "expected string" });
+    else {
+      if (value.name.length < 2)
+        issues.push({
+          path: ["name"],
+          code: "too_small",
+          expected: "length >= 2",
+          message: "expected at least 2 characters",
+        });
+      if (value.name.length > 64)
+        issues.push({
+          path: ["name"],
+          code: "too_big",
+          expected: "length <= 64",
+          message: "expected at most 64 characters",
+        });
+    }
+    if (typeof value.email !== "string")
+      issues.push({ path: ["email"], code: "expected_string", expected: "string", message: "expected string" });
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email))
+      issues.push({ path: ["email"], code: "invalid_format", expected: "email", message: "expected a valid email" });
+    if (typeof value.age !== "number")
+      issues.push({ path: ["age"], code: "expected_number", expected: "number", message: "expected number" });
+    else {
+      if (!Number.isInteger(value.age))
+        issues.push({ path: ["age"], code: "not_integer", expected: "integer", message: "expected an integer" });
+      if (value.age < 0)
+        issues.push({
+          path: ["age"],
+          code: "too_small",
+          expected: ">= 0",
+          message: "expected a value greater than or equal to 0",
+        });
+      if (value.age > 150)
+        issues.push({
+          path: ["age"],
+          code: "too_big",
+          expected: "<= 150",
+          message: "expected a value less than or equal to 150",
+        });
+    }
+    for (const field of ["nickname", "city"] as const) {
+      const item = value[field];
+      if (typeof item !== "string")
+        issues.push({ path: [field], code: "expected_string", expected: "string", message: "expected string" });
+      else if (item.length < 2)
+        issues.push({
+          path: [field],
+          code: "too_small",
+          expected: "length >= 2",
+          message: "expected at least 2 characters",
+        });
+    }
+    return issues.length === 0 ? { success: true as const, data: value } : { success: false as const, issues };
+  };
 
   registerScenario({
     op: "diagnostics is",
@@ -242,7 +323,9 @@ export function registerDiagnosticsScenarios(): void {
     jit: isPlain,
     competitors: [
       { name: "handwritten", fn: handwrittenIs, biased: "hardcodes one shape and a looser email test" },
+      { name: "JIT AOT", fn: aot.Plain_is },
       { name: "custom messages in the schema", fn: isWithMessages },
+      { name: "custom messages AOT", fn: aot.Messages_is },
     ],
   });
 
@@ -260,7 +343,10 @@ export function registerDiagnosticsScenarios(): void {
     args: [valid],
     jit: safeParsePlain,
     competitors: [
+      { name: "handwritten optimized", fn: handwrittenSafeParse },
+      { name: "JIT AOT", fn: aot.Plain_safeParse },
       { name: "custom messages in the schema", fn: safeParseWithMessages },
+      { name: "custom messages AOT", fn: aot.Messages_safeParse },
       { name: "is", fn: isPlain, biased: "answers a boolean and builds no issue" },
     ],
   });
@@ -271,7 +357,10 @@ export function registerDiagnosticsScenarios(): void {
     args: [oneInvalid],
     jit: safeParsePlain,
     competitors: [
+      { name: "handwritten optimized", fn: handwrittenSafeParse },
+      { name: "JIT AOT", fn: aot.Plain_safeParse },
       { name: "custom messages in the schema", fn: safeParseWithMessages },
+      { name: "custom messages AOT", fn: aot.Messages_safeParse },
       { name: "is", fn: isPlain, biased: "stops at the first failure and builds no issue" },
     ],
   });
@@ -282,7 +371,10 @@ export function registerDiagnosticsScenarios(): void {
     args: [fiveInvalid],
     jit: safeParsePlain,
     competitors: [
+      { name: "handwritten optimized", fn: handwrittenSafeParse },
+      { name: "JIT AOT", fn: aot.Plain_safeParse },
       { name: "custom messages in the schema", fn: safeParseWithMessages },
+      { name: "custom messages AOT", fn: aot.Messages_safeParse },
       { name: "is", fn: isPlain, biased: "stops at the first failure and builds no issue" },
     ],
   });
@@ -307,7 +399,28 @@ export function registerDiagnosticsScenarios(): void {
       }
     }) as (...args: never[]) => unknown,
     competitors: [
+      {
+        name: "JIT AOT",
+        fn: ((value: unknown) => {
+          try {
+            return aot.Plain_parse(value as never);
+          } catch (error) {
+            return error;
+          }
+        }) as (...args: never[]) => unknown,
+      },
       { name: "safeParse", fn: safeParsePlain, biased: "returns the issues instead of building a stack trace" },
+    ],
+  });
+
+  registerScenario({
+    op: "diagnostics safeParse",
+    name: "five failures, maxIssues 2",
+    args: [fiveInvalid],
+    jit: limitedPlain,
+    competitors: [
+      { name: "JIT AOT", fn: aot.Plain_limited },
+      { name: "collect all", fn: safeParsePlain, biased: "constructs three additional issues" },
     ],
   });
 

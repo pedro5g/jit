@@ -55,10 +55,14 @@ the built-in throwing path:
 ```ts
 JIT.ddd.entity(UserSchema).validate({
   result: "result",
+  maxIssues: 100,
   error: (issues) => new InvalidUser(issues),
   hydrate: false,
 });
 ```
+
+`maxIssues` applies to schema issues and independent assertion issues alike.
+The compiled guard returns as soon as the declared bound is reached.
 
 ## Assertions
 
@@ -80,7 +84,7 @@ takes, so one list carries both kinds:
 
 ```ts
 error.issues;
-// [{ path: "amount", code: "negative_amount", expected: "amount", message: "Amount cannot be negative" }]
+// [{ path: ["amount"], code: "negative_amount", expected: "amount", message: "Amount cannot be negative" }]
 ```
 
 Independent invariants are independent answers: all of them are collected, the

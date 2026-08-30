@@ -435,9 +435,9 @@ describe("JIT.class", () => {
       // Independent invariants are independent answers, the way sibling schema
       // failures are, and they arrive in the same shape.
       expect(error.issues).toEqual([
-        { path: "amount", code: "negative_amount", expected: "amount", message: "Amount cannot be negative" },
+        { path: ["amount"], code: "negative_amount", expected: "amount", message: "Amount cannot be negative" },
         {
-          path: "fee",
+          path: ["fee"],
           code: "negative_fee",
           expected: "fee",
           message: 'the assertion on "fee" does not hold',
@@ -470,12 +470,44 @@ describe("JIT.class", () => {
       if (rejected.ok !== false) throw new Error("expected a rejection");
       // The factory uses the ordinary validation plan, so it reports what
       // safeParse reports — not the first failure it happened to reach.
-      expect((rejected.error as JITValidationError).issues.map((issue) => issue.path)).toEqual(["name", "email"]);
+      expect((rejected.error as JITValidationError).issues.map((issue) => issue.path)).toEqual([["name"], ["email"]]);
       expect((rejected.error as JITValidationError).issues[0]?.message).toBe("Name is too short");
       expect(JIT.validate.safeParse(User.schema)({ name: "", email: "x" })).toEqual({
         success: false,
         issues: (rejected.error as JITValidationError).issues,
       });
+    });
+
+    it("stops factory diagnostics at the declared issue limit", () => {
+      const User = JIT.ddd
+        .valueObject(
+          JIT.object({
+            name: JIT.string(),
+            email: JIT.string(),
+            status: JIT.string(),
+          })
+        )
+        .validate({ result: "result", maxIssues: 2 });
+      const rejected = User.create({ name: 1, email: 2, status: 3 } as never);
+      const hydrated = User.hydrate({ name: 1, email: 2, status: 3 } as never);
+
+      expect(rejected.ok === false && (rejected.error as JITValidationError).issues).toHaveLength(2);
+      expect(hydrated.ok === false && (hydrated.error as JITValidationError).issues).toHaveLength(2);
+      expect(() => JIT.ddd.valueObject(MoneySchema).validate({ maxIssues: 0 })).toThrow(/positive safe integer/);
+    });
+
+    it("applies the same issue limit to independent assertions", () => {
+      const Values = JIT.ddd
+        .valueObject(JIT.object({ a: JIT.number(), b: JIT.number(), c: JIT.number() }))
+        .assert((query) => query.gte("a", 0))
+        .assert((query) => query.gte("b", 0))
+        .assert((query) => query.gte("c", 0))
+        .validate({ result: "result", maxIssues: 2 });
+      const rejected = Values.create({ a: -1, b: -1, c: -1 });
+
+      expect(rejected.ok).toBe(false);
+      if (rejected.ok) throw new Error("expected an assertion rejection");
+      expect((rejected.error as DomainAssertionError).issues).toHaveLength(2);
     });
 
     it("refuses an assertion where there are no fields to name", () => {

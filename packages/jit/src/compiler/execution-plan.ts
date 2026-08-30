@@ -67,6 +67,7 @@ export interface ValidateStage extends StageDescriptor {
   readonly output: "value" | "boolean" | "issues";
   readonly schema: ATS.AnyTypeSchema;
   readonly operation: "is" | "parse" | "safeParse" | "parseAsync" | "safeParseAsync" | "issues";
+  readonly maxIssues?: number;
 }
 
 /** Materializes one already-validated wire value as a Runtime Class instance. */

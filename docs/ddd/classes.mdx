@@ -39,5 +39,43 @@ visibility/storage policy and `.extends(...)` for capabilities such as
 application-owned methods. Compiled helpers and extension methods live on the
 prototype, never per instance.
 
+Custom methods and getters preserve their descriptors and receive the current
+instance as a fully contextual `this`:
+
+```ts
+const User = JIT.class(UserSchema)
+  .extends(JIT.class.equals)
+  .extends({
+    displayName() {
+      return this.name;
+    },
+    sameAs(other: unknown) {
+      return this.equals(other);
+    },
+    get initial() {
+      return this.name[0];
+    },
+  });
+```
+
+Extension names cannot shadow schema accessors, factories, the constructor or
+an installed capability. Runtime installation uses the prototype directly;
+there is no extension registry or dispatcher, and two instances share the
+same function.
+
+Built-in extensions are reconstructive AOT capabilities. Arbitrary JavaScript
+methods are runtime bindings, not source artifacts: standalone AOT generation
+skips the complete class with a `class.extends` reason. JIT never serializes a
+method through `Function#toString`, because moving source would lose its lexical
+environment and could silently change behavior. A future AOT form requires a
+declarative method IR or an explicit external-module binding contract.
+
+`pnpm bench:validate` measures a custom prototype call at 5.76 ns against
+5.44 ns for the equivalent handwritten class method (Node 22.17.1, Ryzen 7
+5800H), with about 6.1 sampled bytes per call for both. There is no extension
+dispatcher. No custom-method AOT number is reported because that artifact is
+explicitly unsupported rather than unsafely reconstructed; built-in
+capabilities retain their normal runtime/AOT benchmarks.
+
 `JIT.class.abstract(schema)` is an abstract constructor-first base. Configure
 factories explicitly when its concrete subclasses should be factory-built.
