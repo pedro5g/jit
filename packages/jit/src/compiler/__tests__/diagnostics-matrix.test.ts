@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { JITValidationError } from "../../errors/index.js";
 import { Compiler, JIT } from "../../index.js";
 
 /**
@@ -193,6 +194,77 @@ describe("validation operator diagnostics", () => {
     expect(custom?.code).toBe(base?.code);
     expect(custom?.expected).toBe(base?.expected);
     expect(custom?.path).toBe("value");
+  });
+
+  it("collects independent failures and suppresses dependent ones", () => {
+    const User = JIT.object({
+      name: JIT.string().min(3),
+      email: JIT.string().email(),
+      age: JIT.number().min(18),
+    });
+    const safeParse = JIT.validate.safeParse(User);
+    const collected = safeParse({ name: "", email: "abc", age: 12 });
+
+    // Sibling fields are independent answers.
+    expect(collected.success).toBe(false);
+    expect(collected.success === false && collected.issues.map((issue) => issue.path)).toEqual([
+      "name",
+      "email",
+      "age",
+    ]);
+
+    // Several checks on one value are independent too, once its type holds.
+    const both = JIT.validate.safeParse(JIT.object({ v: JIT.string().min(10).email() }))({ v: "x" });
+    expect(both.success === false && both.issues.map((issue) => issue.code)).toEqual(["too_small", "invalid_format"]);
+
+    // A failed prerequisite silences what depended on it: length and format
+    // have nothing to say about a number.
+    const typed = JIT.validate.safeParse(JIT.object({ v: JIT.string().min(10).email() }))({ v: 123 });
+    expect(typed.success === false && typed.issues.map((issue) => issue.code)).toEqual(["expected_string"]);
+
+    // Array elements report per index.
+    const items = JIT.validate.safeParse(JIT.object({ items: JIT.array(JIT.number().min(0)) }))({
+      items: [-1, 2, -3],
+    });
+    expect(items.success === false && items.issues.map((issue) => issue.path)).toEqual(["items[0]", "items[2]"]);
+  });
+
+  it("gives a union one issue instead of every branch's", () => {
+    const union = JIT.validate.safeParse(JIT.object({ v: JIT.string().min(5).or(JIT.number().min(10)) }))({
+      v: true,
+    });
+    const Discriminated = JIT.object({
+      v: JIT.discriminatedUnion("kind", [
+        JIT.object({ kind: JIT.literal("a"), a: JIT.string().min(3) }),
+        JIT.object({ kind: JIT.literal("b"), b: JIT.number() }),
+      ]),
+    });
+
+    // Reporting every branch's failures would bury the one that matters.
+    expect(union.success === false && union.issues).toEqual([
+      { path: "v", code: "invalid_union", expected: "union", message: "value matched no union option" },
+    ]);
+    // An unknown discriminator is answered without validating any branch.
+    expect(
+      JIT.validate.safeParse(Discriminated)({ v: { kind: "z" } }) as { issues: readonly { code: string }[] }
+    ).toMatchObject({ issues: [{ code: "invalid_union" }] });
+    // A matched branch reports its own issues, at its own path.
+    const matched = JIT.validate.safeParse(Discriminated)({ v: { kind: "a", a: "x" } });
+    expect(matched.success === false && matched.issues.map((issue) => issue.path)).toEqual(["v.a"]);
+  });
+
+  it("throws the issues it would have returned", () => {
+    const User = JIT.object({ name: JIT.string().min(3), email: JIT.string().email() });
+    const input = { name: "", email: "abc" };
+    const safe = JIT.validate.safeParse(User)(input);
+
+    expect(() => JIT.validate.parse(User)(input)).toThrow(JITValidationError);
+    try {
+      JIT.validate.parse(User)(input);
+    } catch (error) {
+      // One throw, after collecting — not one throw per failure found.
+      expect((error as JITValidationError).issues).toEqual(safe.success === false ? safe.issues : []);
+    }
   });
 
   it("carries the bound a translator needs, and nothing more", () => {

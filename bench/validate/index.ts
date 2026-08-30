@@ -1,6 +1,7 @@
 import { runSuite } from "../shared/persist.js";
-import { registerValidateScenarios } from "./scenarios.js";
+import { registerDiagnosticsScenarios, registerValidateScenarios } from "./scenarios.js";
 
 await registerValidateScenarios();
+registerDiagnosticsScenarios();
 
 await runSuite("validate");

@@ -182,3 +182,165 @@ function registerValidationCase(
     ],
   });
 }
+
+/**
+ * What diagnostics cost, and what they must not cost.
+ *
+ * Collect-all does more work than fail-fast on invalid input — that is the
+ * trade a caller makes when they ask for every failure. What must stay true is
+ * the other half: a schema carrying custom messages must not make the boolean
+ * path or the valid path slower, because neither ever reads a message.
+ */
+export function registerDiagnosticsScenarios(): void {
+  const Plain = JIT.object({
+    name: JIT.string().min(2).max(64),
+    email: JIT.string().email(),
+    age: JIT.number().int32().min(0).max(150),
+    nickname: JIT.string().min(2),
+    city: JIT.string().min(2),
+  });
+  const WithMessages = JIT.object({
+    name: JIT.string().min(2, "Name must contain at least two characters").max(64, "Name is too long"),
+    email: JIT.string().email({ message: "That email address does not look valid" }),
+    age: JIT.number()
+      .int32("Age must be a 32-bit integer")
+      .min(0, "Age cannot be negative")
+      .max(150, "Age is too large"),
+    nickname: JIT.string().min(2, "Nickname must contain at least two characters"),
+    city: JIT.string().min(2, "City must contain at least two characters"),
+  });
+  const valid = { name: "Ada", email: "ada@example.com", age: 36, nickname: "ada", city: "London" };
+  const oneInvalid = { ...valid, email: "nope" };
+  const fiveInvalid = { name: "", email: "nope", age: -1, nickname: "", city: "" };
+
+  const isPlain = JIT.validate.is(Plain);
+  const isWithMessages = JIT.validate.is(WithMessages);
+  const safeParsePlain = JIT.validate.safeParse(Plain);
+  const safeParseWithMessages = JIT.validate.safeParse(WithMessages);
+  const parsePlain = JIT.validate.parse(Plain);
+
+  const handwrittenIs = (value: typeof valid) =>
+    typeof value === "object" &&
+    value !== null &&
+    typeof value.name === "string" &&
+    value.name.length >= 2 &&
+    value.name.length <= 64 &&
+    typeof value.email === "string" &&
+    value.email.includes("@") &&
+    typeof value.age === "number" &&
+    value.age >= 0 &&
+    value.age <= 150 &&
+    typeof value.nickname === "string" &&
+    value.nickname.length >= 2 &&
+    typeof value.city === "string" &&
+    value.city.length >= 2;
+
+  registerScenario({
+    op: "diagnostics is",
+    name: "valid, no custom messages",
+    args: [valid],
+    jit: isPlain,
+    competitors: [
+      { name: "handwritten", fn: handwrittenIs, biased: "hardcodes one shape and a looser email test" },
+      { name: "custom messages in the schema", fn: isWithMessages },
+    ],
+  });
+
+  registerScenario({
+    op: "diagnostics is",
+    name: "invalid, no custom messages",
+    args: [fiveInvalid],
+    jit: isPlain,
+    competitors: [{ name: "custom messages in the schema", fn: isWithMessages }],
+  });
+
+  registerScenario({
+    op: "diagnostics safeParse",
+    name: "valid",
+    args: [valid],
+    jit: safeParsePlain,
+    competitors: [
+      { name: "custom messages in the schema", fn: safeParseWithMessages },
+      { name: "is", fn: isPlain, biased: "answers a boolean and builds no issue" },
+    ],
+  });
+
+  registerScenario({
+    op: "diagnostics safeParse",
+    name: "one failure",
+    args: [oneInvalid],
+    jit: safeParsePlain,
+    competitors: [
+      { name: "custom messages in the schema", fn: safeParseWithMessages },
+      { name: "is", fn: isPlain, biased: "stops at the first failure and builds no issue" },
+    ],
+  });
+
+  registerScenario({
+    op: "diagnostics safeParse",
+    name: "five failures",
+    args: [fiveInvalid],
+    jit: safeParsePlain,
+    competitors: [
+      { name: "custom messages in the schema", fn: safeParseWithMessages },
+      { name: "is", fn: isPlain, biased: "stops at the first failure and builds no issue" },
+    ],
+  });
+
+  registerScenario({
+    op: "diagnostics parse",
+    name: "valid",
+    args: [valid],
+    jit: parsePlain,
+    competitors: [{ name: "safeParse", fn: safeParsePlain }],
+  });
+
+  registerScenario({
+    op: "diagnostics parse",
+    name: "five failures",
+    args: [fiveInvalid],
+    jit: ((value: unknown) => {
+      try {
+        return parsePlain(value as never);
+      } catch (error) {
+        return error;
+      }
+    }) as (...args: never[]) => unknown,
+    competitors: [
+      { name: "safeParse", fn: safeParsePlain, biased: "returns the issues instead of building a stack trace" },
+    ],
+  });
+
+  /**
+   * A prototype method installed by `.extends()` against a hand-written one.
+   *
+   * The claim is parity: there is no dispatcher between the call and the body,
+   * so after warm-up the two should be the same call.
+   */
+  const Shape = JIT.object({ id: JIT.string(), name: JIT.string() });
+  const Extended = JIT.class(Shape).extends({
+    displayName() {
+      return this.name.toUpperCase();
+    },
+  });
+  class Handwritten {
+    constructor(
+      readonly id: string,
+      readonly name: string
+    ) {}
+
+    displayName(): string {
+      return this.name.toUpperCase();
+    }
+  }
+  const extended = new Extended({ id: "u_1", name: "Ada" });
+  const handwritten = new Handwritten("u_1", "Ada");
+
+  registerScenario({
+    op: "class extension",
+    name: "prototype method call",
+    args: [extended],
+    jit: ((instance: typeof extended) => instance.displayName()) as (...args: never[]) => unknown,
+    competitors: [{ name: "handwritten class method", fn: () => handwritten.displayName() }],
+  });
+}
