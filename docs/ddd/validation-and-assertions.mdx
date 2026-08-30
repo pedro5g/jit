@@ -131,18 +131,23 @@ failure.
 
 | Factory | accepted input | rejected input |
 | --- | --- | --- |
-| no policy (throws) | 48 ns | 7.3 µs |
-| `result: "result"` | 42 ns | 6.6 µs |
-| `result: "result"` + one assertion | 47 ns | 6.9 µs |
+| runtime, no policy (throws) | 46 ns | 7.2 µs |
+| runtime, `result: "result"` | 43 ns | 6.6 µs |
+| runtime, result + one assertion | 49 ns | 6.8 µs |
+| AOT, no policy | 46 ns | — |
+| AOT, `result: "result"` | 58 ns | 5.9 µs |
+| AOT, result + one assertion | 49 ns | 5.8 µs |
 
-Two things worth reading twice. **A configured policy is not slower on the
-accepted path** — it validates once and constructs a value it already trusts,
-where the unconfigured factory validates inside the constructor. And a rejected
-input is *cheaper* under a result policy, because nothing builds a stack trace:
-throwing is the expensive part of failing, on every path measured.
+The stable accepted-path samples keep the configured assertion close to the
+unconfigured factory, because each validates once and constructs an already
+trusted value. Rejection remains microsecond work in every policy: result and
+tuple modes do not throw, but they still construct the configured typed
+`Error`, including its stack. AOT removes descriptor/runtime indirection and was
+the least expensive rejected path in this run.
 
-The assertion costs about five nanoseconds, which is what one generated
-comparison costs.
+The assertion itself is one generated comparison. Benchmark variance is larger
+than that comparison on such a short accepted path, so the suite reports the
+measurement instead of claiming a fixed nanosecond surcharge.
 
 ## Non-goals
 

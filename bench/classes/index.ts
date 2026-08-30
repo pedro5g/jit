@@ -1,4 +1,5 @@
 import { JIT } from "@jit-compiler/jit";
+import { loadAotArtifacts } from "../shared/aot.js";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
@@ -171,6 +172,7 @@ registerScenario({
  */
 const Email = JIT.ddd.valueObject(JIT.string().email());
 const UserId = JIT.ddd.uniqueIdentifier();
+const valueObjectAot = await loadAotArtifacts({ Email, UserId });
 
 class HandwrittenEmail {
   constructor(readonly value: string) {
@@ -186,6 +188,8 @@ const email = Email.create("ada@example.com");
 const sameEmail = Email.create("ada@example.com");
 const handwrittenEmail = new HandwrittenEmail("ada@example.com");
 const handwrittenSameEmail = new HandwrittenEmail("ada@example.com");
+const aotEmail = valueObjectAot.Email.create("ada@example.com");
+const aotSameEmail = valueObjectAot.Email.create("ada@example.com");
 
 registerScenario({
   op: "value object create",
@@ -198,6 +202,7 @@ registerScenario({
       fn: (input: string) => new HandwrittenEmail(input),
       biased: "wraps a trusted string without applying the schema's email validation",
     },
+    { name: "JIT AOT", fn: (input: string) => valueObjectAot.Email.create(input) },
   ],
 });
 
@@ -211,6 +216,10 @@ registerScenario({
       name: "handwritten wrapper",
       fn: () => handwrittenEmail.equals(handwrittenSameEmail),
     },
+    {
+      name: "JIT AOT",
+      fn: () => aotEmail.equals(aotSameEmail),
+    },
   ],
 });
 
@@ -219,7 +228,10 @@ registerScenario({
   name: "scalar value accessor",
   args: [email],
   jit: (instance: typeof email) => instance.value,
-  competitors: [{ name: "handwritten wrapper", fn: () => handwrittenEmail.value }],
+  competitors: [
+    { name: "handwritten wrapper", fn: () => handwrittenEmail.value },
+    { name: "JIT AOT", fn: () => aotEmail.value },
+  ],
 });
 
 const NestedBase = JIT.ddd.entity(
@@ -231,6 +243,8 @@ const NestedBase = JIT.ddd.entity(
   })
 );
 class NestedUser extends NestedBase {}
+const nestedAot = await loadAotArtifacts({ UserId, Email, NestedBase });
+class AotNestedUser extends nestedAot.NestedBase {}
 const persistedId = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
 const aliasId = "f63ca4d3-2b8f-49e6-80ff-0cedaf1e6504";
 const nestedState = { id: persistedId, name: "Ada", email: "ada@example.com", aliases: [aliasId] };
@@ -251,6 +265,7 @@ registerScenario({
       }),
       biased: "constructs trusted wrappers without applying schema validation",
     },
+    { name: "JIT AOT", fn: (state: typeof nestedState) => AotNestedUser.hydrate(state) },
   ],
 });
 
@@ -259,7 +274,12 @@ registerScenario({
   name: "defaulted nested identifier",
   args: [{ name: "Ada", email: "ada@example.com", aliases: [] }],
   jit: (input: { name: string; email: string; aliases: string[] }) => NestedUser.create(input),
-  competitors: [],
+  competitors: [
+    {
+      name: "JIT AOT",
+      fn: (input: { name: string; email: string; aliases: string[] }) => AotNestedUser.create(input),
+    },
+  ],
 });
 
 const PlainMoney = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
@@ -270,6 +290,7 @@ const AssertedMoney = JIT.ddd
   .valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }))
   .validate({ result: "result" })
   .assert((query) => query.gte("amount", 0));
+const policyAot = await loadAotArtifacts({ PlainMoney, ResultMoney, AssertedMoney });
 
 registerScenario({
   op: "factory policy",
@@ -279,6 +300,12 @@ registerScenario({
   competitors: [
     { name: "result policy", fn: (input: typeof moneyInput) => ResultMoney.create(input) },
     { name: "result policy + assertion", fn: (input: typeof moneyInput) => AssertedMoney.create(input) },
+    { name: "JIT AOT", fn: (input: typeof moneyInput) => policyAot.PlainMoney.create(input) },
+    { name: "JIT AOT result", fn: (input: typeof moneyInput) => policyAot.ResultMoney.create(input) },
+    {
+      name: "JIT AOT result + assertion",
+      fn: (input: typeof moneyInput) => policyAot.AssertedMoney.create(input),
+    },
   ],
 });
 
@@ -296,6 +323,11 @@ registerScenario({
   competitors: [
     { name: "result policy", fn: (input: unknown) => ResultMoney.create(input as typeof moneyInput) },
     { name: "result policy + assertion", fn: (input: unknown) => AssertedMoney.create(input as typeof moneyInput) },
+    { name: "JIT AOT result", fn: (input: unknown) => policyAot.ResultMoney.create(input as typeof moneyInput) },
+    {
+      name: "JIT AOT result + assertion",
+      fn: (input: unknown) => policyAot.AssertedMoney.create(input as typeof moneyInput),
+    },
   ],
 });
 

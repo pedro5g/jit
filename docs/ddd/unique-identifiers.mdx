@@ -34,20 +34,22 @@ Nested object fields and arrays accept scalar boundary values and are materializ
 
 `pnpm bench:classes`, Ryzen 7 5800H, Node 22:
 
-| | JIT | handwritten wrapper |
-| --- | --- | --- |
-| create a scalar Value Object | 97 ns | 36 ns¹ |
-| `equals` | 317 ps | 315 ps |
-| read `.value` | 439 ps | 451 ps |
-| hydrate an entity with two nested wrappers and an array of them | 465 ns | 109 ns¹ |
-| create the same entity, identifier defaulted | 338 ns | — |
+| | runtime JIT | AOT | handwritten wrapper |
+| --- | --- | --- | --- |
+| create a scalar Value Object | 93 ns | 104 ns | 38 ns¹ |
+| `equals` | 345 ps | 449 ps | 324 ps |
+| read `.value` | 448 ps | 429 ps | 445 ps |
+| hydrate an entity with two nested wrappers and an array of them | 295 ns | 491 ns | 120 ns¹ |
+| create the same entity, identifier defaulted | 353 ns | 718 ns | — |
 
 ¹ not comparable: the handwritten wrapper stores a trusted string and applies
 no schema validation.
 
-Reading a value and comparing two of them are at parity with a hand-written
-class — that is the whole cost of the wrapper representation once it exists.
-Construction is where the schema is actually checked, and the gap is that
-check, not the wrapper.
+Reading a value and comparing two of them remain sub-nanosecond operations in
+all three implementations. Construction is where the schema is actually
+checked, and the gap to the deliberately non-comparable handwritten wrapper is
+that check, not merely the object wrapper. The persisted benchmark result also
+records heap samples; timings above are one reproducible run rather than a
+claimed cross-machine constant.
 
 Identifier creation is not a cryptographic key-management facility, a database uniqueness check, or an identity map. Uniqueness across persisted records remains an application/storage invariant.
