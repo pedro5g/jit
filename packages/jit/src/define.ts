@@ -158,8 +158,6 @@ const validate = Object.freeze({
   issues<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationStub(schema, "issues") as unknown as ExecutionArtifact<unknown, IterableIterator<unknown>>;
   },
-  parseAsync,
-  safeParseAsync,
   async: Object.freeze({
     parse: parseAsync,
     safeParse: safeParseAsync,

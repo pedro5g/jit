@@ -35,7 +35,7 @@ else outcome.error;
 | --- | --- |
 | `"throw"` (default) | the instance, or throws |
 | `"result"` | `{ ok: true; value }` or `{ ok: false; error }` |
-| `"tuple"` | `[undefined, value]` or `[error, undefined]` |
+| `"tuple"` | `[null, value]` or `[error, null]` |
 
 The tuple puts the error first so it destructures the way callers read it:
 

@@ -369,7 +369,7 @@ export function executePlaygroundRequest(request: PlaygroundRequest): Playground
           | undefined;
         if (typeof createWatchedList !== "function") {
           throw new Error(
-            'define a `watchedList` factory, e.g. `const watchedList = (initial) => JIT.state.watchedList(Users, initial, { key: "id" })`'
+            'define a `watchedList` factory, e.g. `const watchedList = (initial) => JIT.ddd.watchedList(Users, initial, { key: "id" })`'
           );
         }
         run = () => {

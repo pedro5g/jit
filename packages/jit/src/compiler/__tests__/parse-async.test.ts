@@ -70,7 +70,7 @@ describe("JIT async validation", () => {
 
   it("should stop async diagnostics at maxIssues", async () => {
     const Task = JIT.object({ first: JIT.string().promise(), second: JIT.string().promise() });
-    const safeParse = JIT.validate.safeParseAsync(Task, { maxIssues: 1 });
+    const safeParse = JIT.validate.async.safeParse(Task, { maxIssues: 1 });
     const parse = JIT.validate.async.parse(Task, { maxIssues: 1 });
     const input = { first: Promise.resolve(1), second: Promise.resolve(2) };
     const result = await safeParse(input);

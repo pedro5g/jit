@@ -207,7 +207,7 @@ const Users = JIT.array(schema);`;
     const watchedList = execute(
       "watchedList",
       `${schema}
-const watchedList = (initial) => JIT.state.watchedList(Users, initial, { key: "id" });`,
+const watchedList = (initial) => JIT.ddd.watchedList(Users, initial, { key: "id" });`,
       previous,
       [
         { type: "remove", item: previous[1] },

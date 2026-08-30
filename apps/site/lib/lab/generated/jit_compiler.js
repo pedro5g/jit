@@ -18852,6 +18852,7 @@ function emitModule(plan, options, layout) {
         mixins.push(`__JitAggregate<${classUpdateType(artifact.schema)}>`);
         if (artifact.mutation?.deletedAt !== void 0)
           mixins.push("{ softDelete(): void; restore(): void; readonly isDeleted: boolean }");
+        if (artifact.mutation?.touchAt !== void 0) mixins.push("{ touch(): void }");
       }
       const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
       const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
@@ -18940,8 +18941,8 @@ function emitModule(plan, options, layout) {
     }
     lines.push(
       `  const __error = ${errorBinding ?? "(issues) => new JITValidationError(issues)"};`,
-      policy.result === "result" ? "  const __success = (value) => ({ ok: true, value });" : policy.result === "tuple" ? "  const __success = (value) => [undefined, value];" : "  const __success = (value) => value;",
-      policy.result === "result" ? "  const __failure = (error) => ({ ok: false, error });" : policy.result === "tuple" ? "  const __failure = (error) => [error, undefined];" : "  const __failure = (error) => { throw error; };"
+      policy.result === "result" ? "  const __success = (value) => ({ ok: true, value });" : policy.result === "tuple" ? "  const __success = (value) => [null, value];" : "  const __success = (value) => value;",
+      policy.result === "result" ? "  const __failure = (error) => ({ ok: false, error });" : policy.result === "tuple" ? "  const __failure = (error) => [error, null];" : "  const __failure = (error) => { throw error; };"
     );
     if (policy.result === "throw") needsValidationError = true;
     const assertions = policy.assertions;
@@ -19173,6 +19174,9 @@ function emitModule(plan, options, layout) {
         `restore() { ${writeField(deletedAt, "null")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
         `get isDeleted() { return ${readField(deletedAt)} !== null; }`
       );
+    }
+    if (artifact.aggregate && artifact.mutation?.touchAt !== void 0) {
+      methods.push(`touch() { ${writeField(artifact.mutation.touchAt, "new Date()")} }`);
     }
     const assignments = valueRepresentation ? "this.value = state;" : fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
     const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
@@ -24918,6 +24922,7 @@ function createPolicyState() {
     create: true,
     hydrate: true,
     configured: false,
+    validationConfigured: false,
     maxIssues: void 0,
     assertions: [],
     assertionErrors: [],
@@ -24950,12 +24955,12 @@ return __assert;`
 }
 function policySuccess(policy, value) {
   if (policy.mode === "result") return { ok: true, value };
-  if (policy.mode === "tuple") return [void 0, value];
+  if (policy.mode === "tuple") return [null, value];
   return value;
 }
 function policyFailure(policy, error) {
   if (policy.mode === "result") return { ok: false, error };
-  if (policy.mode === "tuple") return [error, void 0];
+  if (policy.mode === "tuple") return [error, null];
   throw error;
 }
 function policyError(policy, issues) {
@@ -24989,10 +24994,14 @@ function policyArtifact(policy) {
   };
 }
 function applyValidationPolicy(policy, options) {
+  if (policy.validationConfigured) {
+    throw new JITError("INVALID_OPERATION", "Factory validation is already configured for this Runtime Class");
+  }
   if (options?.maxIssues !== void 0 && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
     throw new RangeError("maxIssues must be a positive safe integer");
   }
   policy.configured = true;
+  policy.validationConfigured = true;
   if (options?.result !== void 0) policy.mode = options.result;
   if (options?.error !== void 0) policy.error = options.error;
   if (options?.create !== void 0) policy.create = options.create;
@@ -25028,6 +25037,7 @@ var RESERVED_EXTENSION_NAMES = /* @__PURE__ */ new Set([
   "hydrate",
   "extends",
   "factories",
+  "construction",
   "accessors",
   "identity",
   "validate",
@@ -25100,6 +25110,8 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
   const installedMethods = [];
   const installedMethodNames = /* @__PURE__ */ new Set();
   const schemaNames = new Set(properties);
+  let constructionConfigured = false;
+  let factoriesConfigured = false;
   let factoryNames = construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false };
   function create(input) {
     if (isAbstract && this === classTarget) {
@@ -25147,6 +25159,12 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
       value: (...extensions) => {
         for (const extension of extensions) {
           if (isClassCapability(extension)) {
+            if (installedCapabilities.includes(extension.kind)) {
+              throw new JITError(
+                "INVALID_OPERATION",
+                `Class capability ${JSON.stringify(extension.kind)} is already installed`
+              );
+            }
             const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
             extension.install(classTarget, schema);
             for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
@@ -25182,6 +25200,12 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
       configurable: true,
       enumerable: false,
       value: (options) => {
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
+        }
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
         const next = {
           create: options.create === void 0 ? factoryNames.create : options.create,
           hydrate: options.hydrate === void 0 ? factoryNames.hydrate : options.hydrate
@@ -25193,6 +25217,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           );
         }
         constructionState.mode = "factory";
+        factoriesConfigured = true;
         installFactory(classTarget, factoryNames.create, next.create, create);
         installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
         factoryNames = next;
@@ -25213,9 +25238,46 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
         return classTarget;
       }
     },
+    construction: {
+      enumerable: false,
+      value: (mode) => {
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
+        }
+        if (mode !== "constructor" && mode !== "factory") {
+          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
+        }
+        if (isAbstract && mode === "constructor") {
+          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
+        }
+        if (policy.configured) {
+          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+        }
+        constructionConfigured = true;
+        constructionState.mode = mode;
+        if (mode === "factory") {
+          const next = { create: "create", hydrate: "hydrate" };
+          installFactory(classTarget, factoryNames.create, next.create, create);
+          installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
+          factoryNames = next;
+        } else {
+          installFactory(classTarget, factoryNames.create, false, create);
+          installFactory(classTarget, factoryNames.hydrate, false, hydrate);
+          factoryNames = { create: false, hydrate: false };
+        }
+        registerClass();
+        return classTarget;
+      }
+    },
     accessors: {
       enumerable: false,
       value: (options) => {
+        if (accessors !== void 0) {
+          throw new JITError("INVALID_OPERATION", "Accessors are already configured for this Runtime Class");
+        }
         const next = createRuntimeClass(
           schema,
           isAbstract,
@@ -25231,6 +25293,9 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     identity: {
       enumerable: false,
       value: (key) => {
+        if (installedCapabilities.some((capability2) => capability2.startsWith("identity:"))) {
+          throw new JITError("INVALID_OPERATION", "Identity is already configured for this Runtime Class");
+        }
         const identity = classType.identity(key);
         identity.install(classTarget, schema);
         installedCapabilities.push(identity.kind);
@@ -25261,7 +25326,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
 function installFactory(classTarget, previous, next, factory) {
   if (previous !== false && previous !== next) Reflect.deleteProperty(classTarget, previous);
   if (next === false) return;
-  if (next === "schema" || next === "use" || next === "factories" || next === "accessors" || next === "identity") {
+  if (next === "schema" || next === "use" || next === "extends" || next === "factories" || next === "construction" || next === "accessors" || next === "identity" || next === "validate" || next === "assert") {
     throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
   }
   Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
@@ -25274,8 +25339,14 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
   let safeHydrate;
   const equal3 = compileEqual(schema);
   const hash4 = compileHash(schema);
-  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
-  const classTarget = globalThis.Function("__parse", "__construct", source)(parse3, INTERNAL_CONSTRUCT);
+  const constructionState = { mode: "factory" };
+  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
+  const classTarget = globalThis.Function(
+    "__parse",
+    "__construct",
+    "__construction",
+    source
+  )(parse3, INTERNAL_CONSTRUCT, constructionState);
   const installedCapabilities = ["equals", "hashCode"];
   const installedMethods = [];
   const installedMethodNames = new Set(SCALAR_MEMBERS);
@@ -25283,6 +25354,8 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     create: "create",
     hydrate: "hydrate"
   };
+  let constructionConfigured = false;
+  let factoriesConfigured = false;
   function create(...args) {
     if (isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
@@ -25314,7 +25387,7 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     abstract: isAbstract,
     frozen: true,
     aggregate: false,
-    construction: "factory",
+    construction: constructionState.mode,
     representation: "value",
     ...policyArtifact(policy),
     capabilities: installedCapabilities,
@@ -25339,6 +25412,12 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
       value: (...extensions) => {
         for (const extension of extensions) {
           if (isClassCapability(extension)) {
+            if (installedCapabilities.includes(extension.kind)) {
+              throw new JITError(
+                "INVALID_OPERATION",
+                `Class capability ${JSON.stringify(extension.kind)} is already installed`
+              );
+            }
             const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
             extension.install(classTarget, schema);
             for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
@@ -25356,6 +25435,12 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     factories: {
       enumerable: false,
       value: (options) => {
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
+        }
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
         const next = {
           create: options.create === void 0 ? factoryNames.create : options.create,
           hydrate: options.hydrate === void 0 ? factoryNames.hydrate : options.hydrate
@@ -25368,7 +25453,41 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
         }
         installFactory(classTarget, factoryNames.create, next.create, create);
         installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
+        factoriesConfigured = true;
         factoryNames = next;
+        register();
+        return classTarget;
+      }
+    },
+    construction: {
+      enumerable: false,
+      value: (mode) => {
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
+        }
+        if (mode !== "constructor" && mode !== "factory") {
+          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
+        }
+        if (isAbstract && mode === "constructor") {
+          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
+        }
+        if (policy.configured) {
+          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+        }
+        constructionConfigured = true;
+        constructionState.mode = mode;
+        if (mode === "factory") {
+          installFactory(classTarget, factoryNames.create, "create", create);
+          installFactory(classTarget, factoryNames.hydrate, "hydrate", hydrate);
+          factoryNames = { create: "create", hydrate: "hydrate" };
+        } else {
+          installFactory(classTarget, factoryNames.create, false, create);
+          installFactory(classTarget, factoryNames.hydrate, false, hydrate);
+          factoryNames = { create: false, hydrate: false };
+        }
         register();
         return classTarget;
       }
@@ -25551,7 +25670,7 @@ function valueObject(schema) {
   const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
   return "value" in base.def.props ? runtime.extends(classType.equals, classType.hashCode) : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode);
 }
-valueObject.abstract = function abstractValueObject(schema) {
+function abstractValueObject(schema) {
   const unwrapped = unwrapSchema(schema);
   const base = resolveWrappers(unwrapped).base;
   if (base.type !== TypeName.object) {
@@ -25562,7 +25681,7 @@ valueObject.abstract = function abstractValueObject(schema) {
   }
   const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
   return "value" in base.def.props ? runtime.extends(classType.equals, classType.hashCode) : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode);
-};
+}
 function uniqueIdentifier(schema) {
   const identifierSchema = schema === void 0 ? defaultTo(
     createSchema(TypeName.string, {
@@ -25617,17 +25736,23 @@ function findRuntimeTypeSchema(schema) {
     return void 0;
   }
 }
-function entity(schema, ...args) {
+function createEntity(schema, isAbstract, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  return createRuntimeClass(unwrapped, true, false, false, "factory").extends(
+  return createRuntimeClass(unwrapped, isAbstract, false, false, "factory").extends(
     classType.identity(identity)
   );
 }
-function aggregateRoot(schema, ...args) {
+function entity(schema, ...args) {
+  return createEntity(schema, false, ...args);
+}
+function abstractEntity(schema, ...args) {
+  return createEntity(schema, true, ...args);
+}
+function createAggregateRoot(schema, isAbstract, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").extends(
+  const aggregate = createRuntimeClass(unwrapped, isAbstract, false, true, "factory").extends(
     classType.identity(identity)
   );
   const base = resolveWrappers(unwrapped).base;
@@ -25649,8 +25774,12 @@ function aggregateRoot(schema, ...args) {
     updateValues.push(compileUpdate(base.def.props[field]));
   }
   let updatedAt;
+  let touchAt;
   let deletedAt;
   let version;
+  let timestampsConfigured = false;
+  let softDeleteConfigured = false;
+  let versionConfigured = false;
   const installMutation = () => {
     const mutation = buildAggregateMutationPlan({
       fields,
@@ -25673,6 +25802,9 @@ function aggregateRoot(schema, ...args) {
     configurable: false,
     enumerable: false,
     value: (timestamp) => {
+      if (timestampsConfigured) {
+        throw new JITError("INVALID_OPERATION", "Timestamps are already configured for this Aggregate Root");
+      }
       const field = timestamp.updatedAt;
       const schemaForField = base.def.props[field];
       if (!schemaForField || resolveWrappers(schemaForField).base.type !== TypeName.date) {
@@ -25681,10 +25813,16 @@ function aggregateRoot(schema, ...args) {
       if (timestamp.touch !== void 0 && timestamp.touch !== "mutation" && timestamp.touch !== "manual") {
         throw new JITError("INVALID_OPERATION", "Timestamp touch must be mutation or manual");
       }
+      timestampsConfigured = true;
+      touchAt = field;
       updatedAt = timestamp.touch === "manual" ? void 0 : field;
+      definePrototype(aggregate.prototype, "touch", function touch() {
+        this[field] = /* @__PURE__ */ new Date();
+      });
       installMutation();
       setClassMutationArtifact(aggregate, {
         ...updatedAt === void 0 ? {} : { updatedAt },
+        touchAt,
         ...deletedAt === void 0 ? {} : { deletedAt },
         ...version === void 0 ? {} : { version }
       });
@@ -25695,6 +25833,9 @@ function aggregateRoot(schema, ...args) {
     configurable: false,
     enumerable: false,
     value: (options) => {
+      if (softDeleteConfigured) {
+        throw new JITError("INVALID_OPERATION", "Soft delete is already configured for this Aggregate Root");
+      }
       const field = options.field;
       const schemaForField = base.def.props[field];
       const resolved = schemaForField && resolveWrappers(schemaForField);
@@ -25704,6 +25845,7 @@ function aggregateRoot(schema, ...args) {
           `Soft-delete field ${JSON.stringify(field)} must be a nullable Date schema`
         );
       }
+      softDeleteConfigured = true;
       deletedAt = field;
       definePrototype(aggregate.prototype, "softDelete", function softDelete() {
         const now = /* @__PURE__ */ new Date();
@@ -25723,6 +25865,7 @@ function aggregateRoot(schema, ...args) {
       });
       setClassMutationArtifact(aggregate, {
         ...updatedAt === void 0 ? {} : { updatedAt },
+        ...touchAt === void 0 ? {} : { touchAt },
         deletedAt,
         ...version === void 0 ? {} : { version }
       });
@@ -25733,6 +25876,9 @@ function aggregateRoot(schema, ...args) {
     configurable: false,
     enumerable: false,
     value: (options) => {
+      if (versionConfigured) {
+        throw new JITError("INVALID_OPERATION", "Versioning is already configured for this Aggregate Root");
+      }
       const field = options.field;
       const schemaForField = base.def.props[field];
       const type = schemaForField && resolveWrappers(schemaForField).base.type;
@@ -25742,10 +25888,12 @@ function aggregateRoot(schema, ...args) {
           `Version field ${JSON.stringify(field)} must be a number or int schema`
         );
       }
+      versionConfigured = true;
       version = field;
       installMutation();
       setClassMutationArtifact(aggregate, {
         ...updatedAt === void 0 ? {} : { updatedAt },
+        ...touchAt === void 0 ? {} : { touchAt },
         ...deletedAt === void 0 ? {} : { deletedAt },
         version
       });
@@ -25773,6 +25921,12 @@ function aggregateRoot(schema, ...args) {
     }
   );
   return aggregate;
+}
+function aggregateRoot(schema, ...args) {
+  return createAggregateRoot(schema, false, ...args);
+}
+function abstractAggregateRoot(schema, ...args) {
+  return createAggregateRoot(schema, true, ...args);
 }
 function domainEvent(type, options) {
   const payload = unwrapSchema(options.payload);
@@ -25942,18 +26096,272 @@ function stringify(schema, options) {
 }
 var csv = Object.freeze({ parse, stringify });
 
+// ../../packages/jit/src/runtime/watch/watched-list.ts
+var WatchedList = class {
+  /**
+   * Creates a watched list from an initial item snapshot.
+   *
+   * @param initialItems - The initial collection items.
+   * @param options - Identity and comparison options.
+   */
+  constructor(initialItems = [], options = {}) {
+    this.currentItems = [...initialItems];
+    this.initialItems = [...initialItems];
+    this.newItems = [];
+    this.removedItems = [];
+    this.updatedItems = [];
+    this.key = options.key;
+    this.compare = options.compare;
+  }
+  compareItems(left, right) {
+    if (this.compare) return this.compare(left, right);
+    if (this.key) return Object.is(left[this.key], right[this.key]);
+    return Object.is(left, right);
+  }
+  getItems() {
+    return this.currentItems;
+  }
+  getInitialItems() {
+    return this.initialItems;
+  }
+  getNewItems() {
+    return this.newItems;
+  }
+  getRemovedItems() {
+    return this.removedItems;
+  }
+  getUpdatedItems() {
+    return this.updatedItems;
+  }
+  isChanged() {
+    return this.newItems.length !== 0 || this.removedItems.length !== 0 || this.updatedItems.length !== 0;
+  }
+  exists(item) {
+    return this.findIndex(this.currentItems, item) !== -1;
+  }
+  add(item) {
+    const removedIndex = this.findIndex(this.removedItems, item);
+    if (removedIndex !== -1) this.removeAt(this.removedItems, removedIndex);
+    if (this.findIndex(this.newItems, item) === -1 && this.findIndex(this.initialItems, item) === -1) {
+      this.newItems[this.newItems.length] = item;
+    }
+    if (this.findIndex(this.currentItems, item) === -1) {
+      this.currentItems[this.currentItems.length] = item;
+    }
+  }
+  remove(item) {
+    const currentIndex = this.findIndex(this.currentItems, item);
+    if (currentIndex !== -1) this.removeAt(this.currentItems, currentIndex);
+    const newIndex = this.findIndex(this.newItems, item);
+    if (newIndex !== -1) {
+      this.removeAt(this.newItems, newIndex);
+      return;
+    }
+    if (this.findIndex(this.removedItems, item) === -1) {
+      this.removedItems[this.removedItems.length] = item;
+    }
+  }
+  update(items) {
+    const previousItems = this.currentItems;
+    const previousIndex = this.createIndex(previousItems);
+    const nextIndex = this.createIndex(items);
+    const newItems = [];
+    const removedItems = [];
+    const updatedItems = [];
+    for (let index2 = 0; index2 < items.length; index2++) {
+      const item = items[index2];
+      const previous = this.lookup(previousIndex, previousItems, item);
+      if (!previous) {
+        newItems[newItems.length] = item;
+      } else if (previous.item !== item) {
+        updatedItems[updatedItems.length] = { previous: previous.item, current: item };
+      }
+    }
+    for (let index2 = 0; index2 < previousItems.length; index2++) {
+      const item = previousItems[index2];
+      const next = this.lookup(nextIndex, items, item);
+      if (!next) removedItems[removedItems.length] = item;
+    }
+    this.currentItems = [...items];
+    this.newItems = newItems;
+    this.removedItems = removedItems;
+    this.updatedItems = updatedItems;
+  }
+  snapshot() {
+    return {
+      currentItems: this.currentItems,
+      initialItems: this.initialItems,
+      newItems: this.newItems,
+      removedItems: this.removedItems,
+      updatedItems: this.updatedItems,
+      isChanged: this.isChanged()
+    };
+  }
+  findIndex(items, item) {
+    if (this.key || !this.compare) {
+      const index2 = this.createIndex(items);
+      const found = this.lookup(index2, items, item);
+      return found?.index ?? -1;
+    }
+    for (let index2 = 0; index2 < items.length; index2++) {
+      if (this.compareItems(item, items[index2])) return index2;
+    }
+    return -1;
+  }
+  createIndex(items) {
+    if (this.compare && !this.key) return void 0;
+    const index2 = /* @__PURE__ */ new Map();
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+      const item = items[itemIndex];
+      index2.set(this.identityOf(item), { item, index: itemIndex });
+    }
+    return index2;
+  }
+  lookup(index2, items, item) {
+    if (index2) return index2.get(this.identityOf(item));
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+      const current = items[itemIndex];
+      if (this.compareItems(item, current)) return { item: current, index: itemIndex };
+    }
+    return void 0;
+  }
+  identityOf(item) {
+    return this.key ? item[this.key] : item;
+  }
+  removeAt(items, index2) {
+    for (let next = index2 + 1; next < items.length; next++) {
+      items[next - 1] = items[next];
+    }
+    items.length = items.length - 1;
+  }
+};
+var KeyedWatchedList = class extends WatchedList {
+  /**
+   * Creates an indexed watched list using a required identity key.
+   *
+   * @param initialItems - The initial collection items.
+   * @param options - Identity key and comparison options.
+   */
+  constructor(initialItems = [], options) {
+    super(initialItems, options);
+    this.currentIndex = /* @__PURE__ */ new Map();
+    this.initialIndex = /* @__PURE__ */ new Map();
+    this.newIndex = /* @__PURE__ */ new Map();
+    this.removedIndex = /* @__PURE__ */ new Map();
+    this.reindex(this.currentIndex, this.currentItems);
+    this.reindex(this.initialIndex, this.getInitialItems());
+  }
+  exists(item) {
+    return this.currentIndex.has(this.identityOf(item));
+  }
+  add(item) {
+    const id = this.identityOf(item);
+    const removed = this.removedIndex.get(id);
+    if (removed) {
+      this.removeAt(this.removedItems, removed.index);
+      this.reindex(this.removedIndex, this.removedItems);
+    }
+    if (!this.newIndex.has(id) && !this.initialIndex.has(id)) {
+      this.newItems[this.newItems.length] = item;
+      this.newIndex.set(id, { item, index: this.newItems.length - 1 });
+    }
+    if (!this.currentIndex.has(id)) {
+      this.currentItems[this.currentItems.length] = item;
+      this.currentIndex.set(id, { item, index: this.currentItems.length - 1 });
+    }
+  }
+  remove(item) {
+    const id = this.identityOf(item);
+    const current = this.currentIndex.get(id);
+    if (current) {
+      this.removeAt(this.currentItems, current.index);
+      this.reindex(this.currentIndex, this.currentItems);
+    }
+    const created = this.newIndex.get(id);
+    if (created) {
+      this.removeAt(this.newItems, created.index);
+      this.reindex(this.newIndex, this.newItems);
+      return;
+    }
+    if (!this.removedIndex.has(id)) {
+      this.removedItems[this.removedItems.length] = item;
+      this.removedIndex.set(id, { item, index: this.removedItems.length - 1 });
+    }
+  }
+  update(items) {
+    const previousItems = this.currentItems;
+    const previousIndex = this.currentIndex;
+    const nextIndex = /* @__PURE__ */ new Map();
+    const newItems = [];
+    const removedItems = [];
+    const updatedItems = [];
+    for (let index2 = 0; index2 < items.length; index2++) {
+      const item = items[index2];
+      const id = this.identityOf(item);
+      const previous = previousIndex.get(id);
+      nextIndex.set(id, { item, index: index2 });
+      if (!previous) {
+        newItems[newItems.length] = item;
+      } else if (previous.item !== item) {
+        updatedItems[updatedItems.length] = { previous: previous.item, current: item };
+      }
+    }
+    for (let index2 = 0; index2 < previousItems.length; index2++) {
+      const item = previousItems[index2];
+      const id = this.identityOf(item);
+      if (!nextIndex.has(id)) removedItems[removedItems.length] = item;
+    }
+    this.currentItems = [...items];
+    this.newItems = newItems;
+    this.removedItems = removedItems;
+    this.updatedItems = updatedItems;
+    this.reindex(this.currentIndex, this.currentItems);
+    this.reindex(this.newIndex, this.newItems);
+    this.reindex(this.removedIndex, this.removedItems);
+  }
+  reindex(index2, items) {
+    index2.clear();
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+      const item = items[itemIndex];
+      index2.set(this.identityOf(item), { item, index: itemIndex });
+    }
+  }
+};
+
+// ../../packages/jit/src/factories/watch.ts
+function watch(schema, options) {
+  return compileWatch(unwrapSchema(schema), options);
+}
+function watchedList(_schema, initialItems = [], options = {}) {
+  if (options.key) {
+    return new KeyedWatchedList(initialItems, {
+      ...options,
+      key: options.key
+    });
+  }
+  return new WatchedList(initialItems, options);
+}
+
 // ../../packages/jit/src/factories/ddd.ts
 var ddd = Object.freeze({
-  /** Structural equality, hashing and immutability. `.abstract` for a base. */
+  /** Structural equality, hashing and immutability. */
   valueObject,
-  /** Identity semantics; abstract, and meant to be subclassed. */
+  /** Concrete factory-first Runtime Type with identity semantics. */
   entity,
-  /** Abstract entity with controlled mutation and an ordered event buffer. */
+  /** Concrete Entity with controlled mutation and an ordered event buffer. */
   aggregateRoot,
   /** Immutable, versioned event; `create()` takes the payload. */
   domainEvent,
   /** Scalar identifier Value Object; defaults to a generated UUID. */
-  uniqueIdentifier
+  uniqueIdentifier,
+  /** A collection that tracks additions and removals by semantic identity. */
+  watchedList,
+  /** Explicit base types that cannot be created until subclassed. */
+  abstract: Object.freeze({
+    valueObject: abstractValueObject,
+    entity: abstractEntity,
+    aggregateRoot: abstractAggregateRoot
+  })
 });
 
 // ../../packages/jit/src/factories/dto.ts
@@ -27485,8 +27893,6 @@ var validate = Object.freeze({
   issues(schema) {
     return validationArtifact(schema, "issues");
   },
-  parseAsync,
-  safeParseAsync,
   async: Object.freeze({
     parse: parseAsync,
     safeParse: safeParseAsync
@@ -27889,252 +28295,6 @@ function unresolved(schema) {
   return (() => resolveReconcileDescriptor(schema, void 0, ALL_CHANNELS, "value", "result"));
 }
 
-// ../../packages/jit/src/runtime/watch/watched-list.ts
-var WatchedList = class {
-  /**
-   * Creates a watched list from an initial item snapshot.
-   *
-   * @param initialItems - The initial collection items.
-   * @param options - Identity and comparison options.
-   */
-  constructor(initialItems = [], options = {}) {
-    this.currentItems = [...initialItems];
-    this.initialItems = [...initialItems];
-    this.newItems = [];
-    this.removedItems = [];
-    this.updatedItems = [];
-    this.key = options.key;
-    this.compare = options.compare;
-  }
-  compareItems(left, right) {
-    if (this.compare) return this.compare(left, right);
-    if (this.key) return Object.is(left[this.key], right[this.key]);
-    return Object.is(left, right);
-  }
-  getItems() {
-    return this.currentItems;
-  }
-  getInitialItems() {
-    return this.initialItems;
-  }
-  getNewItems() {
-    return this.newItems;
-  }
-  getRemovedItems() {
-    return this.removedItems;
-  }
-  getUpdatedItems() {
-    return this.updatedItems;
-  }
-  isChanged() {
-    return this.newItems.length !== 0 || this.removedItems.length !== 0 || this.updatedItems.length !== 0;
-  }
-  exists(item) {
-    return this.findIndex(this.currentItems, item) !== -1;
-  }
-  add(item) {
-    const removedIndex = this.findIndex(this.removedItems, item);
-    if (removedIndex !== -1) this.removeAt(this.removedItems, removedIndex);
-    if (this.findIndex(this.newItems, item) === -1 && this.findIndex(this.initialItems, item) === -1) {
-      this.newItems[this.newItems.length] = item;
-    }
-    if (this.findIndex(this.currentItems, item) === -1) {
-      this.currentItems[this.currentItems.length] = item;
-    }
-  }
-  remove(item) {
-    const currentIndex = this.findIndex(this.currentItems, item);
-    if (currentIndex !== -1) this.removeAt(this.currentItems, currentIndex);
-    const newIndex = this.findIndex(this.newItems, item);
-    if (newIndex !== -1) {
-      this.removeAt(this.newItems, newIndex);
-      return;
-    }
-    if (this.findIndex(this.removedItems, item) === -1) {
-      this.removedItems[this.removedItems.length] = item;
-    }
-  }
-  update(items) {
-    const previousItems = this.currentItems;
-    const previousIndex = this.createIndex(previousItems);
-    const nextIndex = this.createIndex(items);
-    const newItems = [];
-    const removedItems = [];
-    const updatedItems = [];
-    for (let index2 = 0; index2 < items.length; index2++) {
-      const item = items[index2];
-      const previous = this.lookup(previousIndex, previousItems, item);
-      if (!previous) {
-        newItems[newItems.length] = item;
-      } else if (previous.item !== item) {
-        updatedItems[updatedItems.length] = { previous: previous.item, current: item };
-      }
-    }
-    for (let index2 = 0; index2 < previousItems.length; index2++) {
-      const item = previousItems[index2];
-      const next = this.lookup(nextIndex, items, item);
-      if (!next) removedItems[removedItems.length] = item;
-    }
-    this.currentItems = [...items];
-    this.newItems = newItems;
-    this.removedItems = removedItems;
-    this.updatedItems = updatedItems;
-  }
-  snapshot() {
-    return {
-      currentItems: this.currentItems,
-      initialItems: this.initialItems,
-      newItems: this.newItems,
-      removedItems: this.removedItems,
-      updatedItems: this.updatedItems,
-      isChanged: this.isChanged()
-    };
-  }
-  findIndex(items, item) {
-    if (this.key || !this.compare) {
-      const index2 = this.createIndex(items);
-      const found = this.lookup(index2, items, item);
-      return found?.index ?? -1;
-    }
-    for (let index2 = 0; index2 < items.length; index2++) {
-      if (this.compareItems(item, items[index2])) return index2;
-    }
-    return -1;
-  }
-  createIndex(items) {
-    if (this.compare && !this.key) return void 0;
-    const index2 = /* @__PURE__ */ new Map();
-    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-      const item = items[itemIndex];
-      index2.set(this.identityOf(item), { item, index: itemIndex });
-    }
-    return index2;
-  }
-  lookup(index2, items, item) {
-    if (index2) return index2.get(this.identityOf(item));
-    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-      const current = items[itemIndex];
-      if (this.compareItems(item, current)) return { item: current, index: itemIndex };
-    }
-    return void 0;
-  }
-  identityOf(item) {
-    return this.key ? item[this.key] : item;
-  }
-  removeAt(items, index2) {
-    for (let next = index2 + 1; next < items.length; next++) {
-      items[next - 1] = items[next];
-    }
-    items.length = items.length - 1;
-  }
-};
-var KeyedWatchedList = class extends WatchedList {
-  /**
-   * Creates an indexed watched list using a required identity key.
-   *
-   * @param initialItems - The initial collection items.
-   * @param options - Identity key and comparison options.
-   */
-  constructor(initialItems = [], options) {
-    super(initialItems, options);
-    this.currentIndex = /* @__PURE__ */ new Map();
-    this.initialIndex = /* @__PURE__ */ new Map();
-    this.newIndex = /* @__PURE__ */ new Map();
-    this.removedIndex = /* @__PURE__ */ new Map();
-    this.reindex(this.currentIndex, this.currentItems);
-    this.reindex(this.initialIndex, this.getInitialItems());
-  }
-  exists(item) {
-    return this.currentIndex.has(this.identityOf(item));
-  }
-  add(item) {
-    const id = this.identityOf(item);
-    const removed = this.removedIndex.get(id);
-    if (removed) {
-      this.removeAt(this.removedItems, removed.index);
-      this.reindex(this.removedIndex, this.removedItems);
-    }
-    if (!this.newIndex.has(id) && !this.initialIndex.has(id)) {
-      this.newItems[this.newItems.length] = item;
-      this.newIndex.set(id, { item, index: this.newItems.length - 1 });
-    }
-    if (!this.currentIndex.has(id)) {
-      this.currentItems[this.currentItems.length] = item;
-      this.currentIndex.set(id, { item, index: this.currentItems.length - 1 });
-    }
-  }
-  remove(item) {
-    const id = this.identityOf(item);
-    const current = this.currentIndex.get(id);
-    if (current) {
-      this.removeAt(this.currentItems, current.index);
-      this.reindex(this.currentIndex, this.currentItems);
-    }
-    const created = this.newIndex.get(id);
-    if (created) {
-      this.removeAt(this.newItems, created.index);
-      this.reindex(this.newIndex, this.newItems);
-      return;
-    }
-    if (!this.removedIndex.has(id)) {
-      this.removedItems[this.removedItems.length] = item;
-      this.removedIndex.set(id, { item, index: this.removedItems.length - 1 });
-    }
-  }
-  update(items) {
-    const previousItems = this.currentItems;
-    const previousIndex = this.currentIndex;
-    const nextIndex = /* @__PURE__ */ new Map();
-    const newItems = [];
-    const removedItems = [];
-    const updatedItems = [];
-    for (let index2 = 0; index2 < items.length; index2++) {
-      const item = items[index2];
-      const id = this.identityOf(item);
-      const previous = previousIndex.get(id);
-      nextIndex.set(id, { item, index: index2 });
-      if (!previous) {
-        newItems[newItems.length] = item;
-      } else if (previous.item !== item) {
-        updatedItems[updatedItems.length] = { previous: previous.item, current: item };
-      }
-    }
-    for (let index2 = 0; index2 < previousItems.length; index2++) {
-      const item = previousItems[index2];
-      const id = this.identityOf(item);
-      if (!nextIndex.has(id)) removedItems[removedItems.length] = item;
-    }
-    this.currentItems = [...items];
-    this.newItems = newItems;
-    this.removedItems = removedItems;
-    this.updatedItems = updatedItems;
-    this.reindex(this.currentIndex, this.currentItems);
-    this.reindex(this.newIndex, this.newItems);
-    this.reindex(this.removedIndex, this.removedItems);
-  }
-  reindex(index2, items) {
-    index2.clear();
-    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-      const item = items[itemIndex];
-      index2.set(this.identityOf(item), { item, index: itemIndex });
-    }
-  }
-};
-
-// ../../packages/jit/src/factories/watch.ts
-function watch(schema, options) {
-  return compileWatch(unwrapSchema(schema), options);
-}
-function watchedList(_schema, initialItems = [], options = {}) {
-  if (options.key) {
-    return new KeyedWatchedList(initialItems, {
-      ...options,
-      key: options.key
-    });
-  }
-  return new WatchedList(initialItems, options);
-}
-
 // ../../packages/jit/src/factories/state.ts
 var state = Object.freeze({
   update,
@@ -28142,8 +28302,7 @@ var state = Object.freeze({
   collection,
   derive,
   reconcile,
-  watch,
-  watchedList
+  watch
 });
 
 // ../../packages/jit/src/factories/stream.ts
@@ -28343,8 +28502,6 @@ var validate2 = Object.freeze({
   issues(schema) {
     return validationStub(schema, "issues");
   },
-  parseAsync: parseAsync2,
-  safeParseAsync: safeParseAsync2,
   async: Object.freeze({
     parse: parseAsync2,
     safeParse: safeParseAsync2

@@ -118,7 +118,7 @@ console.log(seen.join(","));
 
 `JIT.state.reconcile` compares two snapshots you already hold and decides by value.
 [`JIT.state.watch`](./watch) is the stateless keyed-change surface that reports
-updates by reference, and `JIT.state.watchedList` holds the state for you. Reach for
+updates by reference, and `JIT.ddd.watchedList` holds the state for you. Reach for
 reconcile when both snapshots are in hand and value equality is what "changed"
 should mean.
 

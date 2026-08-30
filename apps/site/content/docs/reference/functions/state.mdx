@@ -1,6 +1,6 @@
 ---
 title: State
-description: Canonical namespace for immutable updates, patches, reconciliation and collection watching.
+description: Canonical namespace for immutable updates, patches, reconciliation and stateless watching.
 ---
 
 `JIT.state` groups operations that describe how application state evolves:
@@ -15,7 +15,6 @@ description: Canonical namespace for immutable updates, patches, reconciliation 
 | `derive` | Memoize a computation on the fields it actually reads |
 | `reconcile` | Compare keyed collection snapshots with selective sinks |
 | `watch` | Compile stateless collection change detection |
-| `watchedList` | Track changes in one stateful aggregate collection |
 
 ```ts
 const User = JIT.object({ id: JIT.number(), name: JIT.string() });
@@ -76,3 +75,6 @@ bit means.
 See [Update](./update), [Patch](./patch),
 [Collection mutations](./update#collection-mutations), [Reconcile](./reconcile),
 and [Watch](./watch) for the individual contracts.
+
+Stateful aggregate-owned collection tracking is intentionally under
+`JIT.ddd.watchedList(...)`; it is not duplicated under `JIT.state`.

@@ -23,7 +23,7 @@ Use `watch` for two snapshots with no retained controller state.
 ## watchedList
 
 ```ts
-const members = JIT.state.watchedList(JIT.array(User), initialUsers, {
+const members = JIT.ddd.watchedList(JIT.array(User), initialUsers, {
   key: "id",
 });
 
@@ -63,7 +63,7 @@ const list = new JIT.WatchedList<string>(["a"]);
 ## KeyedWatchedList class
 
 `JIT.KeyedWatchedList` maintains keyed lookup behavior. The factory
-`JIT.state.watchedList(schema, items, { key })` selects it automatically and is
+`JIT.ddd.watchedList(schema, items, { key })` selects it automatically and is
 normally preferable.
 
 ## AOT

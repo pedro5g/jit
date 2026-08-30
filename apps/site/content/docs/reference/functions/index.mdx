@@ -13,14 +13,14 @@ documentation.
 
 | API               | Reference                                          | Purpose                                                                          |
 | ----------------- | -------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `JIT.validate`    | [Validation](./validation)                         | `is`, `parse`, `safeParse`, `issues`, `parseAsync`, `safeParseAsync`, `async`    |
+| `JIT.validate`    | [Validation](./validation)                         | `is`, `parse`, `safeParse`, `issues`, `async`                                    |
 | `JIT.compare`     | [Equal](./equal)                                   | `equal`, `diff`, `hash`, `changed`                                               |
 | `JIT.security`    | [Mask](./mask)                                     | `mask`, `sanitize`                                                               |
 | `JIT.json`        | [JSON](./json)                                     | `value`, `parse`, `stringify`, `stringifyChunks`                                 |
 | `JIT.binary`      | [Codec](./codec)                                   | `encode`, `decode`, `codec`                                                      |
 | `JIT.clone`       | [Clone](./clone)                                   | Shape-specialized deep clone                                                     |
 | `JIT.api`         | [Query](./query#public-query-boundaries)            | Deny-by-default public `query` definitions, compiled `parse` and `authorize`       |
-| `JIT.state`       | [State](./state)                                    | `update`, `patch`, `collection`, `derive`, `reconcile`, `watch`, `watchedList`    |
+| `JIT.state`       | [State](./state)                                    | `update`, `patch`, `collection`, `derive`, `reconcile`, `watch`                   |
 | `JIT.codec`       | [Codec](./codec)                                   | Two-way value conversion inside a schema                                         |
 | `JIT.jsonSchema`  | [JSON Schema](./json-schema)                       | `to` a document, `from` a document                                               |
 | `JIT.ops`         | [Value operations](./ops)                          | Declarative transform compiled into the output                                   |
@@ -45,7 +45,7 @@ documentation.
 | `JIT.ndjson`      | [NDJSON](./ndjson)                                 | Fused incremental NDJSON validation, filtering and projection                    |
 | `JIT.dto`         | [DTO](./dto)                                       | Application-boundary schema annotation                                           |
 | `JIT.class`       | [Runtime classes](./runtime-classes)               | Generated class, construction and capabilities                                   |
-| `JIT.ddd`         | [Runtime classes](./runtime-classes#ddd-factories) | `valueObject`, `entity`, `aggregateRoot`, `domainEvent`, `uniqueIdentifier`      |
+| `JIT.ddd`         | [Runtime classes](./runtime-classes#ddd-factories) | `valueObject`, `entity`, `aggregateRoot`, `domainEvent`, `uniqueIdentifier`, `watchedList`, `abstract` |
 
 ## Schema factories and composition
 
@@ -82,8 +82,8 @@ documentation.
 
 | API                    | Reference                                       | Prefer                          |
 | ---------------------- | ----------------------------------------------- | ------------------------------- |
-| `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)      | `JIT.state.watchedList()`             |
-| `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class) | `JIT.state.watchedList(..., { key })` |
+| `JIT.WatchedList`      | [Watch classes](./watch#watchedlist-class)      | `JIT.ddd.watchedList()`             |
+| `JIT.KeyedWatchedList` | [Watch classes](./watch#keyedwatchedlist-class) | `JIT.ddd.watchedList(..., { key })` |
 
 Low-level compilers (`compileEqual`, `compileNormalize`, emitters, IR passes)
 are not part of the `JIT` namespace. They live in the `Compiler` namespace of

@@ -151,9 +151,7 @@ describe("jit MCP server", () => {
       const surface = asTool(await callTool({ name: "jit_api_surface", arguments: {} }, projectDir));
 
       expect(surface.isError).toBeUndefined();
-      expect(surface.content[0].text).toContain(
-        "JIT.validate.{ async, is, issues, parse, parseAsync, safeParse, safeParseAsync }"
-      );
+      expect(surface.content[0].text).toContain("JIT.validate.{ async, is, issues, parse, safeParse }");
       expect(surface.content[0].text).toContain("JIT.compare.{ changed, diff, equal, hash }");
       expect(surface.content[0].text).toContain("A name that does not appear here does not exist");
     });

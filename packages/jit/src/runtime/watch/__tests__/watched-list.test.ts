@@ -85,7 +85,7 @@ describe("JIT WatchedList", () => {
     });
     const Users = JIT.array(User);
     const ada = { id: 1, name: "Ada" };
-    const list = JIT.state.watchedList(Users, [ada], { key: "id" });
+    const list = JIT.ddd.watchedList(Users, [ada], { key: "id" });
 
     expect(list).toBeInstanceOf(JIT.KeyedWatchedList);
     expect(list.exists({ id: 1, name: "Ada v2" })).toBe(true);

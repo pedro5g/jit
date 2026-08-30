@@ -63,7 +63,7 @@ ExecutionPlan and emits only the declared properties.
 const watchUsers = JIT.state.watch(JIT.array(User), { key: "id" });
 const changes = watchUsers(previousUsers, currentUsers);
 
-const members = JIT.state.watchedList(JIT.array(User), previousUsers, {
+const members = JIT.ddd.watchedList(JIT.array(User), previousUsers, {
   key: "id",
 });
 members.add(newUser);

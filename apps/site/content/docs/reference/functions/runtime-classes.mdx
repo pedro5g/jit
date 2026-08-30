@@ -118,6 +118,11 @@ User.restore({ id: "u_1", name: "Ada" });
 
 Runtime and AOT preserve the same configured names.
 
+Use `.construction("factory")` when canonical factory names are sufficient,
+or `.construction("constructor")` to opt a DDD Runtime Type into direct
+construction. The switch replaces the current boundary; it never exposes
+`new` and factories together, and it may be declared only once.
+
 ## DDD factories
 
 The domain-oriented factories live under `JIT.ddd`: `JIT.ddd.valueObject`,
@@ -131,7 +136,7 @@ and DTOs, JSON pipelines and AOT class artifacts build on it without any
 domain meaning attached.
 
 ```ts
-const UserBase = JIT.ddd.entity(
+const UserBase = JIT.ddd.abstract.entity(
   JIT.object({ id: JIT.string(), name: JIT.string() }),
   { id: "id" },
 );
@@ -162,12 +167,14 @@ outcome.ok === true && outcome.value.amount; // 10
 | --- | --- |
 | `"throw"` (default) | the instance, or throws `JITValidationError` |
 | `"result"` | `{ ok: true; value }` or `{ ok: false; error }` |
-| `"tuple"` | `[undefined, value]` or `[error, undefined]` |
+| `"tuple"` | `[null, value]` or `[error, null]` |
 
 The tuple puts the error first so it destructures the way callers read it.
 Pass `error` to build your own, and `create` / `hydrate` to leave one phase on
 the built-in throwing path. A class that never calls `.validate()` carries no
-policy at all, in the runtime and in the generated module.
+policy at all, in the runtime and in the generated module. The policy is a
+singleton declaration: after `.validate(...)`, the method is removed from the
+fluent type, and a repeated JavaScript call is rejected.
 
 ## Domain assertions
 
@@ -307,7 +314,7 @@ because an entity may legitimately hold another aggregate's id. Explicit
 
 ```ts
 const UserId2 = JIT.ddd.uniqueIdentifier();
-const UserBase2 = JIT.ddd.entity(
+const UserBase2 = JIT.ddd.abstract.entity(
   JIT.object({ id: UserId2, name: JIT.string() }),
 );
 
@@ -332,7 +339,7 @@ by the compiled validator at each known field and array element, so a wrapper
 instance is not what a factory takes:
 
 ```ts
-const OrderBase = JIT.ddd.entity(
+const OrderBase = JIT.ddd.abstract.entity(
   JIT.object({ id: JIT.ddd.uniqueIdentifier(), tags: JIT.array(UserId) }),
 );
 
@@ -353,11 +360,12 @@ module would fail anyway. Reach for `.value` when composing.
 
 ## Entities
 
-`JIT.ddd.entity(schema, { id })` creates an abstract base with identity semantics.
+`JIT.ddd.entity(schema, { id })` creates a concrete factory-first Runtime Type.
+Use `JIT.ddd.abstract.entity(...)` for a base that cannot itself be created.
 Identity is intentionally distinct from structural equality.
 
 ```ts
-const UserBase = JIT.ddd.entity(
+const UserBase = JIT.ddd.abstract.entity(
   JIT.object({ id: JIT.string(), name: JIT.string() }),
   { id: "id" },
 );
@@ -392,13 +400,14 @@ event["~event"].type; // "order.confirmed"
 
 ## Aggregate roots
 
-`JIT.ddd.aggregateRoot(schema, { id })` creates an abstract entity base with
-identity, an ordered pending-event queue, and a compiled in-place `update()`.
+`JIT.ddd.aggregateRoot(schema, { id })` creates a concrete aggregate. Use
+`JIT.ddd.abstract.aggregateRoot(...)` for a base with identity, an ordered
+pending-event queue, and a compiled in-place `update()`.
 Subclass methods express the domain transition, then raise the event that
 describes it. Readonly schema fields remain unavailable to `update()`.
 
 ```ts
-const OrderBase = JIT.ddd.aggregateRoot(
+const OrderBase = JIT.ddd.abstract.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
     status: JIT.enum(["draft", "confirmed"]),

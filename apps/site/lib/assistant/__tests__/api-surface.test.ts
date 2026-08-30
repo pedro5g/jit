@@ -18,15 +18,7 @@ describe("the reflected surface", () => {
   });
 
   it("carries the namespace members that the flat list never had", () => {
-    expect(surface.member("validate")?.members).toEqual([
-      "async",
-      "is",
-      "issues",
-      "parse",
-      "parseAsync",
-      "safeParse",
-      "safeParseAsync",
-    ]);
+    expect(surface.member("validate")?.members).toEqual(["async", "is", "issues", "parse", "safeParse"]);
     expect(surface.member("compare")?.members).toEqual(["changed", "diff", "equal", "hash"]);
     expect(surface.member("security")?.members).toEqual(["mask", "sanitize"]);
   });

@@ -130,6 +130,13 @@ Legacy schemas may still use fields such as `item`, `props`, `schemas`, `literal
   its named Runtime Class artifact is emitted in the same generated module.
 - Capabilities are immutable descriptors installed once on a prototype. Keep
   them tree-shakeable and do not add per-instance infrastructure for methods.
+- Runtime Types have one construction boundary. `JIT.class` defaults to
+  constructor mode, DDD presets default to factory mode, and
+  `.construction(...)` may replace that boundary but never add a second one.
+- Singleton class policies such as validation, construction, timestamps,
+  soft-delete and versioning must reject repeated configuration in both the
+  fluent type and runtime surface. Assertions and prototype extensions remain
+  repeatable because each invocation declares another independent item.
 - `valueObject`, `entity`, `aggregateRoot`, and `domainEvent` reuse Runtime
   Class machinery. Aggregates keep controlled mutation and an ordered event
   buffer; readonly schema fields stay out of patches. These DDD presets live
@@ -139,6 +146,8 @@ Legacy schemas may still use fields such as `item`, `props`, `schemas`, `literal
   Domain-event `create()` accepts payload input, while direct construction and
   hydration use the complete event envelope. Rename factories only through an
   explicit `.factories(...)` call.
+- Abstract DDD bases live only under `JIT.ddd.abstract`; watched aggregate
+  collections live only under `JIT.ddd.watchedList`.
 
 Runtime types expose one canonical construction boundary. `JIT.class` defaults
 to direct construction; DDD value objects, entities, and aggregate roots

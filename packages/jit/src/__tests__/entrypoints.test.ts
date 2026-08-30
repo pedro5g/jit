@@ -39,7 +39,17 @@ describe("runtime and define entrypoints", () => {
   it("should keep the public namespace shape one-to-one", () => {
     expect(Object.keys(DefineJIT).sort()).toEqual(Object.keys(RuntimeJIT).sort());
 
-    for (const namespace of ["api", "binary", "compare", "cqrs", "json", "security", "state", "validate"] as const) {
+    for (const namespace of [
+      "api",
+      "binary",
+      "compare",
+      "cqrs",
+      "ddd",
+      "json",
+      "security",
+      "state",
+      "validate",
+    ] as const) {
       expect(Object.keys(DefineJIT[namespace]).sort(), namespace).toEqual(Object.keys(RuntimeJIT[namespace]).sort());
     }
 
@@ -49,6 +59,10 @@ describe("runtime and define entrypoints", () => {
     }
     expect("input" in RuntimeJIT.cqrs).toBe(false);
     expect("parse" in RuntimeJIT.cqrs).toBe(false);
+    expect("watchedList" in RuntimeJIT.state).toBe(false);
+    expect(typeof RuntimeJIT.ddd.watchedList).toBe("function");
+    expect("parseAsync" in RuntimeJIT.validate).toBe(false);
+    expect("safeParseAsync" in RuntimeJIT.validate).toBe(false);
   });
 
   it("should verify registered runtime/define/AOT operations through one parity matrix", async () => {

@@ -30,4 +30,4 @@ JSON.stringify(email); // '"ada@example.com"'
 
 The runtime wrapper and wire representation are intentionally different. A scalar Value Object exposes a readonly `value`, while JSON and persistence continue to use the underlying scalar. Object Value Objects also expose `value`; it returns the immutable instance without allocating a copy. If the object schema already declares a `value` field, that field remains canonical.
 
-`JIT.ddd.valueObject.abstract(schema)` supports domain-specific subclasses without allowing the base itself to be instantiated.
+`JIT.ddd.abstract.valueObject(schema)` supports domain-specific subclasses without allowing the base itself to be instantiated.

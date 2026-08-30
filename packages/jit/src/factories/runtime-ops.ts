@@ -91,14 +91,6 @@ export interface ValidateNamespace {
   issues<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>
   ): ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
-  parseAsync<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>,
-    options?: ValidationDiagnosticOptions
-  ): ExecutionArtifact<unknown, Promise<ATS.TypeofSchema<TSchema>>>;
-  safeParseAsync<TSchema extends ATS.AnyTypeSchema>(
-    schema: SchemaInput<TSchema>,
-    options?: ValidationDiagnosticOptions
-  ): ExecutionArtifact<unknown, Promise<SafeParseResult<ATS.TypeofSchema<TSchema>>>>;
   readonly async: AsyncValidateNamespace;
 }
 
@@ -146,8 +138,6 @@ export const validate: ValidateNamespace = Object.freeze({
   issues<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>) {
     return validationArtifact(schema, "issues") as ExecutionArtifact<unknown, IterableIterator<ValidationIssue>>;
   },
-  parseAsync,
-  safeParseAsync,
   async: Object.freeze({
     parse: parseAsync,
     safeParse: safeParseAsync,

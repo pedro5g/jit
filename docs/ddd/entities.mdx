@@ -3,7 +3,7 @@
 Entities are compared by stable identity rather than by every field:
 
 ```ts
-const UserBase = JIT.ddd.entity(
+const UserBase = JIT.ddd.abstract.entity(
   JIT.object({ id: JIT.string().readonly(), name: JIT.string() }),
   { id: "id" },
 );
@@ -15,13 +15,18 @@ const after = User.hydrate({ id: "u_1", name: "Ada Lovelace" });
 before.sameIdentity(after); // true
 ```
 
-The entity preset is abstract: application code owns the concrete class and its behavior. `create()` is for new state; `hydrate()` is for complete persisted state. The identity field must be declared by the schema and remains part of the ordinary validation and transport representation.
+`JIT.ddd.entity(...)` creates a concrete factory-first Runtime Type. Use
+`JIT.ddd.abstract.entity(...)` when application code must own the concrete
+subclass. The abstract base rejects `create()`/`hydrate()` until invoked through
+a subclass. `create()` is for new state; `hydrate()` is for complete persisted
+state. The identity field must be declared by the schema and remains part of
+the ordinary validation and transport representation.
 
 An explicit `{ id }` remains available and always wins. It may be omitted only when exactly one object field is a `JIT.ddd.uniqueIdentifier()` Runtime Type:
 
 ```ts
 const UserId = JIT.ddd.uniqueIdentifier();
-const UserBase = JIT.ddd.entity(
+const UserBase = JIT.ddd.abstract.entity(
   JIT.object({ id: UserId, name: JIT.string() }),
 );
 

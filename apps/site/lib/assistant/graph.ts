@@ -448,12 +448,12 @@ export const CONCEPTS: ConceptNode[] = [
     factPt:
       "Uma factory já faz parse da entrada, então .validate() escolhe como uma rejeição é reportada, não se a validação acontece; .assert() adiciona invariantes de domínio escritas no condition builder compartilhado, e ambos são ausentes numa classe não configurada.",
     mechanisms: [
-      "The result policy is fixed at declaration and reflected in the factory type: throw returns the instance, result returns { ok, value } or { ok, error }, and tuple returns [error, undefined] or [undefined, value].",
+      "The result policy is fixed at declaration and reflected in the factory type: throw returns the instance, result returns { ok, value } or { ok, error }, and tuple returns [error, null] or [null, value].",
       "Assertions become comparisons in the generated source, run after schema validation and before materialization, and report through the factory result policy rather than deciding their own. DomainAssertionError carries rule and field, never the rejected value.",
       "clone is an opt-in capability reusing the shared clone plan; a Value Object does not get one, and an Aggregate Root copy starts with an empty event queue.",
     ],
     mechanismsPt: [
-      "A política de resultado é fixada na declaração e refletida no tipo da factory: throw devolve a instância, result devolve { ok, value } ou { ok, error }, e tuple devolve [error, undefined] ou [undefined, value].",
+      "A política de resultado é fixada na declaração e refletida no tipo da factory: throw devolve a instância, result devolve { ok, value } ou { ok, error }, e tuple devolve [error, null] ou [null, value].",
       "Assertions viram comparações na fonte gerada, rodam depois da validação de schema e antes da materialização, e reportam pela política de resultado da factory em vez de decidir a sua. DomainAssertionError carrega rule e field, nunca o valor rejeitado.",
       "clone é uma capability opcional que reusa o clone plan compartilhado; um Value Object não recebe uma, e a cópia de um Aggregate Root começa com a fila de eventos vazia.",
     ],
@@ -854,12 +854,12 @@ export const CONCEPTS: ConceptNode[] = [
     mechanisms: [
       "Only the paths a patch touches are rebuilt; every other subtree is the same object reference it was before, which is what makes an identity check enough to skip work downstream.",
       "There is no Proxy and no draft to finalize: the updater is generated from the known shape, so the patch is applied by direct field writes.",
-      "`JIT.state.watch` and `JIT.state.watchedList` cover keyed collection changes — stateless snapshot diffs and stateful aggregates respectively.",
+      "`JIT.state.watch` and `JIT.ddd.watchedList` cover keyed collection changes — stateless snapshot diffs and stateful aggregate collections respectively.",
     ],
     mechanismsPt: [
       "Só os caminhos que o patch toca são reconstruídos; toda outra subárvore continua sendo a mesma referência de antes, e é isso que faz uma comparação de identidade bastar para pular trabalho adiante.",
       "Não há Proxy nem draft para finalizar: o updater é gerado a partir do formato conhecido, então o patch é aplicado por escrita direta de campo.",
-      "`JIT.state.watch` e `JIT.state.watchedList` cobrem mudanças em coleções com chave — diffs de snapshot sem estado e agregados com estado, respectivamente.",
+      "`JIT.state.watch` e `JIT.ddd.watchedList` cobrem mudanças em coleções com chave — diffs de snapshot sem estado e coleções de agregado com estado, respectivamente.",
     ],
     example:
       'const User = JIT.object({\n  id: JIT.string(),\n  profile: JIT.object({ name: JIT.string(), city: JIT.string() }),\n});\n\nconst updateUser = JIT.state.update(User);\n\n// only the branches the patch touches are rebuilt\nconst next = updateUser(current, { profile: { name: "Grace" } });',

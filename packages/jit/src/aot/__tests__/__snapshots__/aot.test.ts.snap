@@ -326,8 +326,8 @@ const OrderBase = /*#__PURE__*/ (() => {
 });
   return class OrderBase {
     constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : (() => { const result = OrderBase_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this["id"] = state["id"]; this["status"] = state["status"]; this["shipping"] = state["shipping"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
-    static create(input) { if (this === OrderBase) throw new Error("Cannot create an instance of an abstract JIT class"); return new this(input, __construct); }
-    static hydrate(state) { if (this === OrderBase) throw new Error("Cannot create an instance of an abstract JIT class"); const result = OrderBase_validator_1.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true); }
+    static create(input) { return new this(input, __construct); }
+    static hydrate(state) { const result = OrderBase_validator_1.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true); }
     identity() { return this["id"]; }
     sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this["id"], other["id"]); }
     update(patch) { let changed = false;

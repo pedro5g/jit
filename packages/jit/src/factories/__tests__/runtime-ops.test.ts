@@ -24,8 +24,10 @@ describe("composable capability API", () => {
     expect(JIT.validate.is(User)(ada)).toBe(true);
     expect(JIT.validate.parse(User)).not.toBeUndefined();
     expect(JIT.validate.safeParse(User)(ada)).toMatchObject({ success: true });
-    expect(JIT.validate.parseAsync).toBeDefined();
-    expect(JIT.validate.safeParseAsync).toBeDefined();
+    expect(JIT.validate.async.parse).toBeDefined();
+    expect(JIT.validate.async.safeParse).toBeDefined();
+    expect(JIT.validate).not.toHaveProperty("parseAsync");
+    expect(JIT.validate).not.toHaveProperty("safeParseAsync");
   });
 
   it("compiles comparison through the compare namespace", () => {

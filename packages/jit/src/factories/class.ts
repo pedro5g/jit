@@ -71,7 +71,7 @@ export interface AssertionOptions {
 export type FactoryOutcome<TInstance, TMode extends FactoryResultMode, TError> = TMode extends "result"
   ? { readonly ok: true; readonly value: TInstance } | { readonly ok: false; readonly error: TError }
   : TMode extends "tuple"
-    ? readonly [TError, undefined] | readonly [undefined, TInstance]
+    ? readonly [TError, null] | readonly [null, TInstance]
     : TInstance;
 
 interface AssertionOutcome {
@@ -85,6 +85,7 @@ interface FactoryPolicyState {
   create: boolean;
   hydrate: boolean;
   configured: boolean;
+  validationConfigured: boolean;
   maxIssues: number | undefined;
   assertions: AssertionDescriptor[];
   assertionErrors: (AssertionErrorFactory | undefined)[];
@@ -98,6 +99,7 @@ function createPolicyState(): FactoryPolicyState {
     create: true,
     hydrate: true,
     configured: false,
+    validationConfigured: false,
     maxIssues: undefined,
     assertions: [],
     assertionErrors: [],
@@ -141,13 +143,13 @@ function compileAssertions(policy: FactoryPolicyState): void {
 
 function policySuccess(policy: FactoryPolicyState, value: unknown): unknown {
   if (policy.mode === "result") return { ok: true, value };
-  if (policy.mode === "tuple") return [undefined, value];
+  if (policy.mode === "tuple") return [null, value];
   return value;
 }
 
 function policyFailure(policy: FactoryPolicyState, error: unknown): never | unknown {
   if (policy.mode === "result") return { ok: false, error };
-  if (policy.mode === "tuple") return [error, undefined];
+  if (policy.mode === "tuple") return [error, null];
   throw error;
 }
 
@@ -200,10 +202,14 @@ type SafeParse<TValue> =
 
 /** Applies `.validate(...)` to a policy shared by every factory of one class. */
 function applyValidationPolicy(policy: FactoryPolicyState, options: FactoryValidationOptions | undefined): void {
+  if (policy.validationConfigured) {
+    throw new JITError("INVALID_OPERATION", "Factory validation is already configured for this Runtime Class");
+  }
   if (options?.maxIssues !== undefined && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
     throw new RangeError("maxIssues must be a positive safe integer");
   }
   policy.configured = true;
+  policy.validationConfigured = true;
   if (options?.result !== undefined) policy.mode = options.result;
   if (options?.error !== undefined) policy.error = options.error;
   if (options?.create !== undefined) policy.create = options.create;
@@ -321,6 +327,8 @@ export interface RuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS
   factories<const TOptions extends FactoryOptions>(
     options: TOptions
   ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
+  construction(mode: "constructor"): ConstructorRuntimeClass<TSchema, TInstance>;
+  construction(mode: "factory"): FactoryRuntimeClass<TSchema, TInstance>;
   accessors<TThis extends RuntimeClass<TSchema, TInstance>>(this: TThis, options: AccessorOptions<TSchema>): TThis;
   identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
     key: TKey
@@ -339,6 +347,7 @@ type RuntimeClassConstructionMembers =
   | "hydrate"
   | "extends"
   | "factories"
+  | "construction"
   | "accessors"
   | "identity"
   | "validate"
@@ -354,11 +363,18 @@ export type ConstructorRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance
     ): ConstructorRuntimeClass<TSchema, TInstance & ExtensionMethods<TSchema, TInstance, TExtensions>>;
     factories<const TOptions extends FactoryOptions>(
       options: TOptions
-    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
-    accessors(options: AccessorOptions<TSchema>): ConstructorRuntimeClass<TSchema, TInstance>;
+    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions, "throw", JITValidationError, false, true>;
+    construction(mode: "constructor"): ConstructionFixedConstructor<TSchema, TInstance>;
+    construction(mode: "factory"): ConstructionFixedFactory<TSchema, TInstance>;
+    accessors(
+      options: AccessorOptions<TSchema>
+    ): (new (input: Input<TSchema>) => TInstance) & Omit<ConstructorRuntimeClass<TSchema, TInstance>, "accessors">;
     identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
       key: TKey
-    ): ConstructorRuntimeClass<TSchema, TInstance & IdentityMethods>;
+    ): (new (
+      input: Input<TSchema>
+    ) => TInstance & IdentityMethods) &
+      Omit<ConstructorRuntimeClass<TSchema, TInstance & IdentityMethods>, "identity">;
   };
 
 export interface FactoryOptions {
@@ -443,6 +459,8 @@ export type ConfiguredRuntimeClass<
   TOptions extends FactoryOptions,
   TMode extends FactoryResultMode = "throw",
   TError = JITValidationError,
+  TValidated extends boolean = false,
+  TFactoriesConfigured extends boolean = false,
 > = (abstract new (
   input: Input<TSchema>
 ) => TInstance) &
@@ -455,40 +473,103 @@ export type ConfiguredRuntimeClass<
       TInstance & ExtensionMethods<TSchema, TInstance, TExtensions>,
       TOptions,
       TMode,
-      TError
+      TError,
+      TValidated,
+      TFactoriesConfigured
     >;
-    factories<const TNext extends FactoryOptions>(
-      options: TNext
-    ): ConfiguredRuntimeClass<TSchema, TInstance, TNext, TMode, TError>;
-    accessors(options: AccessorOptions<TSchema>): ConfiguredRuntimeClass<TSchema, TInstance, TOptions, TMode, TError>;
+    accessors(
+      options: AccessorOptions<TSchema>
+    ): (abstract new (
+      input: Input<TSchema>
+    ) => TInstance) &
+      Omit<
+        ConfiguredRuntimeClass<TSchema, TInstance, TOptions, TMode, TError, TValidated, TFactoriesConfigured>,
+        "accessors"
+      >;
     identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
       key: TKey
-    ): ConfiguredRuntimeClass<TSchema, TInstance & IdentityMethods, TOptions, TMode, TError>;
-    /**
-     * Fixes how a rejected input is reported. The choice belongs to the
-     * artifact, not to the call, so the factory signature says exactly which
-     * shape a caller gets.
-     */
-    validate<const TPolicy extends FactoryValidationOptions = Record<never, never>>(
-      policy?: TPolicy & FactoryValidationOptions
-    ): ConfiguredRuntimeClass<
-      TSchema,
-      TInstance,
-      TOptions,
-      ResolvedResultMode<TPolicy>,
-      ResolvedPolicyError<TPolicy, TError>
-    >;
+    ): (abstract new (
+      input: Input<TSchema>
+    ) => TInstance & IdentityMethods) &
+      Omit<
+        ConfiguredRuntimeClass<
+          TSchema,
+          TInstance & IdentityMethods,
+          TOptions,
+          TMode,
+          TError,
+          TValidated,
+          TFactoriesConfigured
+        >,
+        "identity"
+      >;
     /** Adds one domain invariant, written in the shared condition builder. */
     assert<const TAssertion extends AssertionOptions = Record<never, never>>(
       predicate: (query: QueryConditionBuilder<ATS.TypeofSchema<TSchema>>) => QueryConditionNode,
       options?: TAssertion
-    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions, TMode, ResolvedAssertionError<TAssertion, TError>>;
-  };
+    ): ConfiguredRuntimeClass<
+      TSchema,
+      TInstance,
+      TOptions,
+      TMode,
+      ResolvedAssertionError<TAssertion, TError>,
+      TValidated,
+      TFactoriesConfigured
+    >;
+  } & (TValidated extends true
+    ? object
+    : {
+        /** Fixes the factory validation policy exactly once for this artifact. */
+        validate<const TPolicy extends FactoryValidationOptions = Record<never, never>>(
+          policy?: TPolicy & FactoryValidationOptions
+        ): ConfiguredRuntimeClass<
+          TSchema,
+          TInstance,
+          TOptions,
+          ResolvedResultMode<TPolicy>,
+          ResolvedPolicyError<TPolicy, TError>,
+          true,
+          TFactoriesConfigured
+        >;
+      }) &
+  (TValidated extends true
+    ? object
+    : TFactoriesConfigured extends true
+      ? object
+      : {
+          construction(mode: "constructor"): ConstructionFixedConstructor<TSchema, TInstance>;
+          construction(
+            mode: "factory"
+          ): (abstract new (
+            input: Input<TSchema>
+          ) => TInstance) &
+            Omit<
+              ConfiguredRuntimeClass<TSchema, TInstance, TOptions, TMode, TError, false, TFactoriesConfigured>,
+              "construction" | "factories"
+            >;
+        }) &
+  (TFactoriesConfigured extends true
+    ? object
+    : {
+        factories<const TNext extends FactoryOptions>(
+          options: TNext
+        ): ConfiguredRuntimeClass<TSchema, TInstance, TNext, TMode, TError, TValidated, true>;
+      });
 
 export type FactoryRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
 > = ConfiguredRuntimeClass<TSchema, TInstance, {}>;
+
+type ConstructionFixedConstructor<TSchema extends ATS.AnyTypeSchema, TInstance> = (new (
+  input: Input<TSchema>
+) => TInstance) &
+  Omit<ConstructorRuntimeClass<TSchema, TInstance>, "construction" | "factories">;
+
+type ConstructionFixedFactory<TSchema extends ATS.AnyTypeSchema, TInstance> = (abstract new (
+  input: Input<TSchema>
+) => TInstance) &
+  Omit<FactoryRuntimeClass<TSchema, TInstance>, "construction" | "factories">;
 
 type IdentifierRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<TSchema, TInstance> & {
   readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance, "value", true>;
@@ -526,11 +607,19 @@ export type AbstractRuntimeClass<
     ): AbstractRuntimeClass<TSchema, TInstance & ExtensionMethods<TSchema, TInstance, TExtensions>>;
     factories<const TOptions extends FactoryOptions>(
       options: TOptions
-    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
-    accessors(options: AccessorOptions<TSchema>): AbstractRuntimeClass<TSchema, TInstance>;
+    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions, "throw", JITValidationError, false, true>;
+    accessors(
+      options: AccessorOptions<TSchema>
+    ): (abstract new (
+      input: Input<TSchema>
+    ) => TInstance) &
+      Omit<AbstractRuntimeClass<TSchema, TInstance>, "accessors">;
     identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
       key: TKey
-    ): AbstractRuntimeClass<TSchema, TInstance & IdentityMethods>;
+    ): (abstract new (
+      input: Input<TSchema>
+    ) => TInstance & IdentityMethods) &
+      Omit<AbstractRuntimeClass<TSchema, TInstance & IdentityMethods>, "identity">;
   };
 
 /** An immutable, tree-shakeable operation that installs one prototype capability. */
@@ -559,6 +648,7 @@ const RESERVED_EXTENSION_NAMES: ReadonlySet<string> = new Set([
   "hydrate",
   "extends",
   "factories",
+  "construction",
   "accessors",
   "identity",
   "validate",
@@ -627,15 +717,48 @@ type AggregateMethods<TSchema extends ATS.AnyTypeSchema> = AggregateProtectedMet
   peekEvents(): readonly unknown[];
   pullEvents(): unknown[];
   commit(publisher: EventPublisher): Promise<void>;
+};
+type TimestampMethods = {
+  touch(): void;
+};
+type SoftDeleteMethods = {
   softDelete(): void;
   restore(): void;
   readonly isDeleted: boolean;
 };
-type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<TSchema, TInstance> & {
-  timestamps(options: TimestampOptions<TSchema>): AggregateRuntimeClass<TSchema, TInstance>;
-  softDelete(options: SoftDeleteOptions<TSchema>): AggregateRuntimeClass<TSchema, TInstance>;
-  versioned(options: VersionedOptions<TSchema>): AggregateRuntimeClass<TSchema, TInstance>;
-};
+type AggregateRuntimeClass<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  THasTimestamps extends boolean = false,
+  THasSoftDelete extends boolean = false,
+  THasVersion extends boolean = false,
+> = FactoryRuntimeClass<
+  TSchema,
+  TInstance &
+    (THasTimestamps extends true ? TimestampMethods : object) &
+    (THasSoftDelete extends true ? SoftDeleteMethods : object)
+> &
+  (THasTimestamps extends true
+    ? object
+    : {
+        timestamps(
+          options: TimestampOptions<TSchema>
+        ): AggregateRuntimeClass<TSchema, TInstance, true, THasSoftDelete, THasVersion>;
+      }) &
+  (THasSoftDelete extends true
+    ? object
+    : {
+        softDelete(
+          options: SoftDeleteOptions<TSchema>
+        ): AggregateRuntimeClass<TSchema, TInstance, THasTimestamps, true, THasVersion>;
+      }) &
+  (THasVersion extends true
+    ? object
+    : {
+        versioned(
+          options: VersionedOptions<TSchema>
+        ): AggregateRuntimeClass<TSchema, TInstance, THasTimestamps, THasSoftDelete, true>;
+      });
 interface ClassWithCapability extends ClassCapability<object> {
   readonly __with: true;
 }
@@ -733,6 +856,8 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
   }[] = [];
   const installedMethodNames = new Set<string>();
   const schemaNames: ReadonlySet<string> = new Set(properties);
+  let constructionConfigured = false;
+  let factoriesConfigured = false;
   let factoryNames: { create: string | false; hydrate: string | false } =
     construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false };
 
@@ -794,6 +919,12 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput)[]) => {
         for (const extension of extensions) {
           if (isClassCapability(extension)) {
+            if (installedCapabilities.includes(extension.kind)) {
+              throw new JITError(
+                "INVALID_OPERATION",
+                `Class capability ${JSON.stringify(extension.kind)} is already installed`
+              );
+            }
             // The names a capability defines are read back from the prototype
             // rather than from a table, so a later extension collides with a
             // clear message instead of a raw redefinition error.
@@ -832,6 +963,12 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       configurable: true,
       enumerable: false,
       value: (options: FactoryOptions) => {
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
+        }
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
         const next = {
           create: options.create === undefined ? factoryNames.create : options.create,
           hydrate: options.hydrate === undefined ? factoryNames.hydrate : options.hydrate,
@@ -843,6 +980,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           );
         }
         constructionState.mode = "factory";
+        factoriesConfigured = true;
         installFactory(classTarget, factoryNames.create, next.create, create);
         installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
         factoryNames = next;
@@ -863,9 +1001,46 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         return classTarget;
       },
     },
+    construction: {
+      enumerable: false,
+      value: (mode: ConstructionMode) => {
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
+        }
+        if (mode !== "constructor" && mode !== "factory") {
+          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
+        }
+        if (isAbstract && mode === "constructor") {
+          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
+        }
+        if (policy.configured) {
+          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+        }
+        constructionConfigured = true;
+        constructionState.mode = mode;
+        if (mode === "factory") {
+          const next = { create: "create", hydrate: "hydrate" } as const;
+          installFactory(classTarget, factoryNames.create, next.create, create);
+          installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
+          factoryNames = next;
+        } else {
+          installFactory(classTarget, factoryNames.create, false, create);
+          installFactory(classTarget, factoryNames.hydrate, false, hydrate);
+          factoryNames = { create: false, hydrate: false };
+        }
+        registerClass();
+        return classTarget;
+      },
+    },
     accessors: {
       enumerable: false,
       value: (options: AccessorOptions<TSchema>) => {
+        if (accessors !== undefined) {
+          throw new JITError("INVALID_OPERATION", "Accessors are already configured for this Runtime Class");
+        }
         const next = createRuntimeClass(
           schema,
           isAbstract,
@@ -882,6 +1057,9 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     identity: {
       enumerable: false,
       value: (key: Extract<keyof ATS.TypeofSchema<TSchema>, string>) => {
+        if (installedCapabilities.some((capability) => capability.startsWith("identity:"))) {
+          throw new JITError("INVALID_OPERATION", "Identity is already configured for this Runtime Class");
+        }
         const identity = classType.identity(key);
         identity.install(classTarget, schema);
         installedCapabilities.push(identity.kind);
@@ -919,7 +1097,17 @@ function installFactory<TSchema extends ATS.AnyTypeSchema>(
 ): void {
   if (previous !== false && previous !== next) Reflect.deleteProperty(classTarget, previous);
   if (next === false) return;
-  if (next === "schema" || next === "use" || next === "factories" || next === "accessors" || next === "identity") {
+  if (
+    next === "schema" ||
+    next === "use" ||
+    next === "extends" ||
+    next === "factories" ||
+    next === "construction" ||
+    next === "accessors" ||
+    next === "identity" ||
+    next === "validate" ||
+    next === "assert"
+  ) {
     throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
   }
   Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
@@ -937,8 +1125,14 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
   let safeHydrate: ((state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
   const equal = compileEqual(schema) as (left: unknown, right: unknown) => boolean;
   const hash = compileHash(schema) as (value: unknown) => number;
-  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
-  const classTarget = globalThis.Function("__parse", "__construct", source)(parse, INTERNAL_CONSTRUCT) as RuntimeClass<
+  const constructionState: { mode: ConstructionMode } = { mode: "factory" };
+  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
+  const classTarget = globalThis.Function(
+    "__parse",
+    "__construct",
+    "__construction",
+    source
+  )(parse, INTERNAL_CONSTRUCT, constructionState) as RuntimeClass<
     TSchema,
     ScalarValueObject<ATS.TypeofSchema<TSchema>>
   >;
@@ -953,6 +1147,8 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     create: "create",
     hydrate: "hydrate",
   };
+  let constructionConfigured = false;
+  let factoriesConfigured = false;
 
   function create<TThis extends RuntimeClass<TSchema>>(
     this: TThis,
@@ -999,7 +1195,7 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       abstract: isAbstract,
       frozen: true,
       aggregate: false,
-      construction: "factory",
+      construction: constructionState.mode,
       representation: "value",
       ...policyArtifact(policy),
       capabilities: installedCapabilities,
@@ -1025,6 +1221,12 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput)[]) => {
         for (const extension of extensions) {
           if (isClassCapability(extension)) {
+            if (installedCapabilities.includes(extension.kind)) {
+              throw new JITError(
+                "INVALID_OPERATION",
+                `Class capability ${JSON.stringify(extension.kind)} is already installed`
+              );
+            }
             const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
             extension.install(classTarget, schema);
             for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
@@ -1042,6 +1244,12 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     factories: {
       enumerable: false,
       value: (options: FactoryOptions) => {
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
+        }
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
         const next = {
           create: options.create === undefined ? factoryNames.create : options.create,
           hydrate: options.hydrate === undefined ? factoryNames.hydrate : options.hydrate,
@@ -1054,7 +1262,41 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
         }
         installFactory(classTarget, factoryNames.create, next.create, create);
         installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
+        factoriesConfigured = true;
         factoryNames = next;
+        register();
+        return classTarget;
+      },
+    },
+    construction: {
+      enumerable: false,
+      value: (mode: ConstructionMode) => {
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
+        }
+        if (mode !== "constructor" && mode !== "factory") {
+          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
+        }
+        if (isAbstract && mode === "constructor") {
+          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
+        }
+        if (policy.configured) {
+          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+        }
+        constructionConfigured = true;
+        constructionState.mode = mode;
+        if (mode === "factory") {
+          installFactory(classTarget, factoryNames.create, "create", create);
+          installFactory(classTarget, factoryNames.hydrate, "hydrate", hydrate);
+          factoryNames = { create: "create", hydrate: "hydrate" };
+        } else {
+          installFactory(classTarget, factoryNames.create, false, create);
+          installFactory(classTarget, factoryNames.hydrate, false, hydrate);
+          factoryNames = { create: false, hydrate: false };
+        }
         register();
         return classTarget;
       },
@@ -1307,7 +1549,7 @@ type ValueObjectInstance<TSchema extends ATS.AnyTypeSchema> =
     ? ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods & ObjectValueAccessor<ATS.TypeofSchema<TSchema>>
     : ScalarValueObject<ATS.TypeofSchema<TSchema>>;
 
-valueObject.abstract = function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
+export function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
 ): FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>> {
   const unwrapped = unwrapSchema(schema);
@@ -1327,7 +1569,7 @@ valueObject.abstract = function abstractValueObject<TSchema extends ATS.AnyTypeS
       ? runtime.extends(classType.equals, classType.hashCode)
       : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode)
   ) as FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
-};
+}
 
 type DefaultIdentifierSchema = ATS.DefaultSchema<ATS.StringSchema>;
 
@@ -1424,26 +1666,42 @@ function findRuntimeTypeSchema(schema: ATS.AnyTypeSchema): ATS.RuntimeTypeSchema
   }
 }
 
-/** Entity preset: an abstract class with explicit or unambiguous inferred identity semantics. */
-export function entity<TSchema extends ATS.AnyTypeSchema>(
+function createEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
+  isAbstract: boolean,
   ...args: IdentityArguments<TSchema>
 ): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  return createRuntimeClass(unwrapped, true, false, false, "factory").extends(
+  return createRuntimeClass(unwrapped, isAbstract, false, false, "factory").extends(
     classType.identity(identity)
   ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods>;
 }
 
-/** Abstract entity preset with ordered domain events and compiled in-place updates. */
-export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+/** Concrete factory-first Entity with explicit or inferred identity semantics. */
+export function entity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
+  ...args: IdentityArguments<TSchema>
+): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
+  return createEntity(schema, false, ...args);
+}
+
+/** Abstract factory-first Entity base, intended exclusively for subclassing. */
+export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: IdentityArguments<TSchema>
+): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
+  return createEntity(schema, true, ...args);
+}
+
+function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  isAbstract: boolean,
   ...args: IdentityArguments<TSchema>
 ): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const aggregate = createRuntimeClass(unwrapped, true, false, true, "factory").extends(
+  const aggregate = createRuntimeClass(unwrapped, isAbstract, false, true, "factory").extends(
     classType.identity(identity)
   ) as unknown as AggregateRuntimeClass<
     TSchema,
@@ -1469,8 +1727,12 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
     updateValues.push(compileUpdate(base.def.props[field]) as (value: unknown, patch: unknown) => unknown);
   }
   let updatedAt: string | undefined;
+  let touchAt: string | undefined;
   let deletedAt: string | undefined;
   let version: string | undefined;
+  let timestampsConfigured = false;
+  let softDeleteConfigured = false;
+  let versionConfigured = false;
   const installMutation = () => {
     const mutation = buildAggregateMutationPlan({
       fields,
@@ -1495,6 +1757,9 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
     configurable: false,
     enumerable: false,
     value: (timestamp: TimestampOptions<TSchema>) => {
+      if (timestampsConfigured) {
+        throw new JITError("INVALID_OPERATION", "Timestamps are already configured for this Aggregate Root");
+      }
       const field = timestamp.updatedAt;
       const schemaForField = base.def.props[field];
       if (!schemaForField || resolveWrappers(schemaForField).base.type !== TypeName.date) {
@@ -1503,10 +1768,16 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
       if (timestamp.touch !== undefined && timestamp.touch !== "mutation" && timestamp.touch !== "manual") {
         throw new JITError("INVALID_OPERATION", "Timestamp touch must be mutation or manual");
       }
+      timestampsConfigured = true;
+      touchAt = field;
       updatedAt = timestamp.touch === "manual" ? undefined : field;
+      definePrototype(aggregate.prototype, "touch", function touch(this: Record<string, unknown>) {
+        this[field] = new Date();
+      });
       installMutation();
       setClassMutationArtifact(aggregate, {
         ...(updatedAt === undefined ? {} : { updatedAt }),
+        touchAt,
         ...(deletedAt === undefined ? {} : { deletedAt }),
         ...(version === undefined ? {} : { version }),
       });
@@ -1517,6 +1788,9 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
     configurable: false,
     enumerable: false,
     value: (options: SoftDeleteOptions<TSchema>) => {
+      if (softDeleteConfigured) {
+        throw new JITError("INVALID_OPERATION", "Soft delete is already configured for this Aggregate Root");
+      }
       const field = options.field;
       const schemaForField = base.def.props[field];
       const resolved = schemaForField && resolveWrappers(schemaForField);
@@ -1526,6 +1800,7 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
           `Soft-delete field ${JSON.stringify(field)} must be a nullable Date schema`
         );
       }
+      softDeleteConfigured = true;
       deletedAt = field;
       definePrototype(aggregate.prototype, "softDelete", function softDelete(this: Record<string, unknown>) {
         const now = new Date();
@@ -1545,6 +1820,7 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
       });
       setClassMutationArtifact(aggregate, {
         ...(updatedAt === undefined ? {} : { updatedAt }),
+        ...(touchAt === undefined ? {} : { touchAt }),
         deletedAt,
         ...(version === undefined ? {} : { version }),
       });
@@ -1555,6 +1831,9 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
     configurable: false,
     enumerable: false,
     value: (options: VersionedOptions<TSchema>) => {
+      if (versionConfigured) {
+        throw new JITError("INVALID_OPERATION", "Versioning is already configured for this Aggregate Root");
+      }
       const field = options.field;
       const schemaForField = base.def.props[field];
       const type = schemaForField && resolveWrappers(schemaForField).base.type;
@@ -1564,10 +1843,12 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
           `Version field ${JSON.stringify(field)} must be a number or int schema`
         );
       }
+      versionConfigured = true;
       version = field;
       installMutation();
       setClassMutationArtifact(aggregate, {
         ...(updatedAt === undefined ? {} : { updatedAt }),
+        ...(touchAt === undefined ? {} : { touchAt }),
         ...(deletedAt === undefined ? {} : { deletedAt }),
         version,
       });
@@ -1595,6 +1876,22 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
     }
   );
   return aggregate;
+}
+
+/** Concrete Aggregate Root with controlled mutation and an ordered event buffer. */
+export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: IdentityArguments<TSchema>
+): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
+  return createAggregateRoot(schema, false, ...args);
+}
+
+/** Abstract Aggregate Root base, intended exclusively for subclassing. */
+export function abstractAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: IdentityArguments<TSchema>
+): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
+  return createAggregateRoot(schema, true, ...args);
 }
 
 type EventSchema<TPayload extends ATS.AnyTypeSchema, TType extends string, TVersion extends number> = ATS.ObjectSchema<{

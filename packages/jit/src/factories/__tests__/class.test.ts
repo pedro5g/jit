@@ -60,6 +60,29 @@ describe("JIT.class", () => {
     }
   });
 
+  it("customizes the single construction boundary explicitly", () => {
+    const Factory = JIT.class(JIT.object({ value: JIT.string() })).construction("factory");
+    const Constructor = JIT.ddd
+      .entity(JIT.object({ id: JIT.string(), value: JIT.string() }), { id: "id" })
+      .construction("constructor");
+
+    expect(Factory.create({ value: "factory" })).toBeInstanceOf(Factory);
+    expect(() => new (Factory as unknown as new (input: unknown) => unknown)({ value: "direct" })).toThrow(
+      /factory construction/i
+    );
+    expect(new Constructor({ id: "u_1", value: "direct" })).toBeInstanceOf(Constructor);
+    expect("create" in Constructor).toBe(false);
+    expect(() => (Factory as unknown as { construction(mode: string): unknown }).construction("constructor")).toThrow(
+      /already configured/i
+    );
+    if (Object.is(1, 2)) {
+      // @ts-expect-error construction is configured exactly once
+      Factory.construction("constructor");
+      // @ts-expect-error construction mode and factory naming are alternative declarations
+      Factory.factories({ create: "make" });
+    }
+  });
+
   it("constructs instances in schema-field order after compiled validation", () => {
     const User = JIT.class(UserSchema);
     const user = new User({ name: "Ada" });
@@ -158,6 +181,13 @@ describe("JIT.class", () => {
     void User.create;
     // @ts-expect-error disabled create factory is absent
     void FactorylessUser.create;
+    if (Object.is(1, 2)) {
+      // @ts-expect-error factory names are configured exactly once
+      User.factories({ create: "again" });
+    }
+    expect(() =>
+      (User as unknown as { factories(options: { create: string }): unknown }).factories({ create: "again" })
+    ).toThrow(/already configured/i);
   });
 
   it("emits real private backing fields with configurable public accessors", () => {
@@ -172,9 +202,15 @@ describe("JIT.class", () => {
     expect(Object.getOwnPropertyDescriptor(User.prototype, "id")?.set).toBeUndefined();
     expect(Object.getOwnPropertyDescriptor(User.prototype, "passwordHash")?.get).toBeDefined();
     expect("#p0" in user).toBe(false);
-    expectTypeOf(User.accessors).toBeFunction();
-    // @ts-expect-error accessor keys are constrained to the runtime schema fields
-    User.accessors({ fields: { missing: { set: false } } });
+    if (Object.is(1, 2)) {
+      // @ts-expect-error accessors are configured exactly once
+      User.accessors({});
+      // @ts-expect-error accessor keys are constrained to the runtime schema fields
+      JIT.class(JIT.object({ id: JIT.string() })).accessors({ fields: { missing: { set: false } } });
+    }
+    expect(() => (User as unknown as { accessors(options: object): unknown }).accessors({})).toThrow(
+      /already configured/i
+    );
   });
 
   it("preserves polymorphic static construction for subclasses", () => {
@@ -195,7 +231,7 @@ describe("JIT.class", () => {
   });
 
   it("preserves value-object capabilities through an abstract subclass", () => {
-    const MoneyBase = JIT.ddd.valueObject.abstract(
+    const MoneyBase = JIT.ddd.abstract.valueObject(
       JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) })
     );
     class Money extends MoneyBase {}
@@ -214,6 +250,14 @@ describe("JIT.class", () => {
     expectTypeOf(money.equals).toBeFunction();
     expectTypeOf(money.hashCode).toBeFunction();
     expectTypeOf(money.value.amount).toEqualTypeOf<number>();
+  });
+
+  it("keeps abstract DDD bases factory-only", () => {
+    const UserBase = JIT.ddd.abstract.entity(JIT.object({ id: JIT.string() }), { id: "id" });
+
+    expect(() => (UserBase as unknown as { construction(mode: string): unknown }).construction("constructor")).toThrow(
+      /abstract Runtime Class/i
+    );
   });
 
   it("represents scalar value objects as immutable runtime objects", () => {
@@ -352,14 +396,37 @@ describe("JIT.class", () => {
 
       const [noError, value] = Tuple.create(valid);
       const [error, noValue] = Tuple.create(invalid);
-      expect(noError).toBeUndefined();
+      expect(noError).toBeNull();
       expect(value?.amount).toBe(10);
       expect(error).toBeInstanceOf(JITValidationError);
-      expect(noValue).toBeUndefined();
+      expect(noValue).toBeNull();
 
       expectTypeOf(Throwing.create(valid)).toHaveProperty("amount");
       expectTypeOf(Result.create(valid)).toHaveProperty("ok");
       expectTypeOf(Tuple.create(valid)).toHaveProperty(0);
+    });
+
+    it("specializes tuple factories for subclasses with null empty channels", () => {
+      const UUID = JIT.ddd.uniqueIdentifier();
+      class UserEntity extends JIT.ddd
+        .entity(JIT.object({ id: UUID, name: JIT.string() }))
+        .validate({ result: "tuple" }) {}
+
+      const user = UserEntity.create({ name: "Ada" });
+
+      expect(user[0]).toBeNull();
+      expect(user[1]).toBeInstanceOf(UserEntity);
+      expectTypeOf(user).toEqualTypeOf<readonly [JITValidationError, null] | readonly [null, UserEntity]>();
+    });
+
+    it("fixes validation policy exactly once", () => {
+      const Money = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
+
+      if (Object.is(1, 2)) {
+        // @ts-expect-error validation is a singleton artifact policy
+        Money.validate();
+      }
+      expect(() => (Money as unknown as { validate(): unknown }).validate()).toThrow(/already configured/i);
     });
 
     it("covers hydration and lets a phase keep the built-in behavior", () => {
@@ -710,19 +777,22 @@ describe("JIT.class", () => {
   });
 
   it("binds identity keys to the object schema", () => {
-    const UserBase = JIT.class
-      .abstract(JIT.object({ id: JIT.string(), name: JIT.string() }))
-      .identity("id")
-      .factories({ create: "create", hydrate: "hydrate" });
+    const Identified = JIT.class.abstract(JIT.object({ id: JIT.string(), name: JIT.string() })).identity("id");
+    const UserBase = Identified.factories({ create: "create", hydrate: "hydrate" });
 
     class User extends UserBase {}
 
     expect(User.create({ id: "u_1", name: "Ada" }).sameIdentity(User.create({ id: "u_1", name: "Grace" }))).toBe(true);
     const assertInvalidIdentity = () => {
       // @ts-expect-error identity keys must be schema fields
-      UserBase.identity("missing");
+      JIT.class.abstract(JIT.object({ id: JIT.string() })).identity("missing");
+      // @ts-expect-error identity is configured exactly once
+      Identified.identity("id");
     };
     void assertInvalidIdentity;
+    expect(() => (UserBase as unknown as { identity(key: string): unknown }).identity("name")).toThrow(
+      /already configured/i
+    );
   });
 
   it("touches a configured timestamp once for an effective aggregate mutation", () => {
@@ -742,6 +812,18 @@ describe("JIT.class", () => {
     order.confirm();
     expect(order.updatedAt).toBeInstanceOf(Date);
     expect(order.updatedAt.getTime()).toBeGreaterThan(initial.getTime());
+    const mutatedAt = order.updatedAt;
+    order.touch();
+    expect(order.updatedAt.getTime()).toBeGreaterThanOrEqual(mutatedAt.getTime());
+    expect(() =>
+      (OrderBase as unknown as { timestamps(options: { updatedAt: string }): unknown }).timestamps({
+        updatedAt: "updatedAt",
+      })
+    ).toThrow(/already configured/i);
+    if (Object.is(1, 2)) {
+      // @ts-expect-error timestamps are a singleton aggregate policy
+      OrderBase.timestamps({ updatedAt: "updatedAt" });
+    }
   });
 
   it("combines soft-delete and timestamp metadata in one clock read", () => {
@@ -885,7 +967,7 @@ describe("JIT.class", () => {
   });
 
   it("builds abstract entities with identity separate from structural equality", () => {
-    const UserBase = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
+    const UserBase = JIT.ddd.abstract.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
 
     class User extends UserBase {}
 
@@ -1088,7 +1170,15 @@ describe("JIT.class", () => {
 
 describe("JIT.ddd", () => {
   it("is the only place the domain presets are reachable from", () => {
-    expect(Object.keys(JIT.ddd)).toEqual(["valueObject", "entity", "aggregateRoot", "domainEvent", "uniqueIdentifier"]);
+    expect(Object.keys(JIT.ddd)).toEqual([
+      "valueObject",
+      "entity",
+      "aggregateRoot",
+      "domainEvent",
+      "uniqueIdentifier",
+      "watchedList",
+      "abstract",
+    ]);
 
     // The presets are a vocabulary, not schema factories: they do not sit next
     // to JIT.string() where someone reaching for an entity has to scan past them.
@@ -1099,7 +1189,8 @@ describe("JIT.ddd", () => {
     // The primitive the presets configure stays top level: DTOs, JSON
     // pipelines and AOT class artifacts build on it with no domain meaning.
     expect(typeof JIT.class).toBe("function");
-    // Statics survive the move.
-    expect(typeof JIT.ddd.valueObject.abstract).toBe("function");
+    expect(typeof JIT.ddd.abstract.valueObject).toBe("function");
+    expect(typeof JIT.ddd.abstract.entity).toBe("function");
+    expect(typeof JIT.ddd.abstract.aggregateRoot).toBe("function");
   });
 });

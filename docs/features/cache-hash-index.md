@@ -248,7 +248,7 @@ Application-level memoization remains an application concern:
   match when equivalent values may have different references;
 - define application-specific size, TTL, and eviction limits.
 
-`JIT.state.watchedList()` can drive invalidation for incrementally edited
+`JIT.ddd.watchedList()` can drive invalidation for incrementally edited
 collections. It does not automatically invalidate hashes, compile caches, or
 application results. Read `isChanged()` or the change arrays from `snapshot()`
 and invalidate affected application keys explicitly.

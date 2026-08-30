@@ -31,6 +31,19 @@ Calling `.factories(...)` changes the construction mode; it does not add a
 second path. Renamed aliases replace canonical names, and at least one factory
 must remain enabled.
 
+When names do not need customization, `.construction(...)` is the single
+explicit mode switch in either direction:
+
+```ts
+const FactoryClass = JIT.class(UserSchema).construction("factory");
+const ConstructorEntity = JIT.ddd.entity(UserSchema).construction("constructor");
+```
+
+The first exposes only `create`/`hydrate`; the second exposes only `new`.
+Construction and validation policies are singleton declarations. Repeating
+`.construction(...)` or `.validate(...)` is rejected instead of silently
+reconfiguring an already described artifact.
+
 Factories are polymorphic. If an Entity or Aggregate Root base is subclassed,
 `Subclass.create(...)` and `Subclass.hydrate(...)` return the subclass.
 

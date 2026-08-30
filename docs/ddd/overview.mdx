@@ -10,12 +10,17 @@ Use the smallest semantic primitive that describes the domain:
 - `JIT.ddd.aggregateRoot(schema, { id })` adds controlled internal mutation and an ordered domain-event buffer.
 - `JIT.ddd.domainEvent(type, { version, payload })` describes an immutable versioned fact.
 - `JIT.ddd.uniqueIdentifier(schema?)` creates an identifier-like scalar Value Object and defaults to a generated UUID.
+- `JIT.ddd.watchedList(schema, items, options)` owns tracked child-collection changes.
+- `JIT.ddd.abstract.{valueObject,entity,aggregateRoot}` creates bases that must be subclassed.
 
 `.validate(...)` chooses how a rejected input is reported and `.assert(...)`
 adds domain invariants; both are described in
 [Validation and assertions](./validation-and-assertions.mdx).
 
-All five are SchemaLike. They can be passed directly to `JIT.validate.parse`, `JIT.json.parse`, `JIT.json.stringify`, mapping, and AOT generation.
+The Runtime Type presets are SchemaLike. They can be passed directly to
+`JIT.validate.parse`, `JIT.json.parse`, `JIT.json.stringify`, mapping, and AOT
+generation. `watchedList` is deliberately stateful runtime infrastructure, not
+an AOT function artifact.
 
 | Runtime Type | Default construction |
 | --- | --- |

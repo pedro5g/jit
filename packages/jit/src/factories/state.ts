@@ -3,7 +3,7 @@ import { derive } from "./derive.js";
 import { patch } from "./patch.js";
 import { reconcile } from "./reconcile.js";
 import { update } from "./update.js";
-import { watch, watchedList } from "./watch.js";
+import { watch } from "./watch.js";
 
 /** Operations that describe immutable state evolution. */
 export const state = Object.freeze({
@@ -13,5 +13,4 @@ export const state = Object.freeze({
   derive,
   reconcile,
   watch,
-  watchedList,
 });

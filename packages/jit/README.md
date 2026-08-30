@@ -722,11 +722,11 @@ changes.updatedItems;
 changes.isChanged;
 ```
 
-Use `JIT.state.watchedList` when an aggregate owns an evolving list. The keyed form
+Use `JIT.ddd.watchedList` when an aggregate owns an evolving list. The keyed form
 maintains identity indexes and tracks canceled additions/removals:
 
 ```ts
-const members = JIT.state.watchedList(Users, previousUsers, { key: "id" });
+const members = JIT.ddd.watchedList(Users, previousUsers, { key: "id" });
 
 members.add(newUser);
 members.remove(oldUser);

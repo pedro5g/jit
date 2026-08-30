@@ -299,7 +299,12 @@ interface ClassArtifact {
         readonly set: string | false;
       }[]
     | undefined;
-  readonly mutation?: { readonly updatedAt?: string; readonly version?: string; readonly deletedAt?: string };
+  readonly mutation?: {
+    readonly updatedAt?: string;
+    readonly touchAt?: string;
+    readonly version?: string;
+    readonly deletedAt?: string;
+  };
   readonly domainEvent?: { readonly type: string; readonly version: number };
   /** Failure policy and domain invariants, present only when configured. */
   readonly policy?: {
@@ -371,7 +376,12 @@ export function getArtifact(value: unknown): CompiledArtifact | undefined {
 /** Updates class-only declarative metadata without changing the class identity. */
 export function setClassMutationArtifact(
   value: object,
-  mutation: { readonly updatedAt?: string; readonly version?: string; readonly deletedAt?: string }
+  mutation: {
+    readonly updatedAt?: string;
+    readonly touchAt?: string;
+    readonly version?: string;
+    readonly deletedAt?: string;
+  }
 ): void {
   const artifact = REGISTRY.get(value);
   if (artifact?.kind !== "class") return;

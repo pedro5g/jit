@@ -808,6 +808,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         mixins.push(`__JitAggregate<${classUpdateType(artifact.schema)}>`);
         if (artifact.mutation?.deletedAt !== undefined)
           mixins.push("{ softDelete(): void; restore(): void; readonly isDeleted: boolean }");
+        if (artifact.mutation?.touchAt !== undefined) mixins.push("{ touch(): void }");
       }
       const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
       const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
@@ -988,12 +989,12 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       policy.result === "result"
         ? "  const __success = (value) => ({ ok: true, value });"
         : policy.result === "tuple"
-          ? "  const __success = (value) => [undefined, value];"
+          ? "  const __success = (value) => [null, value];"
           : "  const __success = (value) => value;",
       policy.result === "result"
         ? "  const __failure = (error) => ({ ok: false, error });"
         : policy.result === "tuple"
-          ? "  const __failure = (error) => [error, undefined];"
+          ? "  const __failure = (error) => [error, null];"
           : "  const __failure = (error) => { throw error; };"
     );
     if (policy.result === "throw") needsValidationError = true;
@@ -1248,6 +1249,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         `restore() { ${writeField(deletedAt, "null")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
         `get isDeleted() { return ${readField(deletedAt)} !== null; }`
       );
+    }
+    if (artifact.aggregate && artifact.mutation?.touchAt !== undefined) {
+      methods.push(`touch() { ${writeField(artifact.mutation.touchAt, "new Date()")} }`);
     }
     const assignments = valueRepresentation
       ? "this.value = state;"

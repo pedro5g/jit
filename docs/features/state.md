@@ -13,7 +13,7 @@ JIT.state.patch.json(User);
 JIT.state.collection(Users);
 JIT.state.reconcile(Users);
 JIT.state.watch(Users, { key: "id" });
-JIT.state.watchedList(Users, initial, { key: "id" });
+JIT.ddd.watchedList(Users, initial, { key: "id" });
 ```
 
 The previous root operations are removed rather than retained as aliases. This
@@ -40,7 +40,7 @@ generic path walker in compiled update code.
 Runtime and define expose the same `state` keys. Update, patch, reconcile and
 callback-free watch artifacts keep their reconstructive metadata and generate
 the same standalone functions as before the namespace migration. Stateful
-`watchedList` remains runtime infrastructure rather than an AOT function.
+`JIT.ddd.watchedList` remains runtime infrastructure rather than an AOT function.
 
 ## Declared patches
 

@@ -387,7 +387,7 @@ const Users = JIT.array(schema);
 
 // The playground applies the JSON actions and returns snapshot().
 const watchedList = (initial: JIT.Typeof<typeof Users>) =>
-  JIT.state.watchedList(Users, initial, { key: "id" });
+  JIT.ddd.watchedList(Users, initial, { key: "id" });
 `,
     a: `[
   { "id": 1, "name": "Ada", "role": "admin" },

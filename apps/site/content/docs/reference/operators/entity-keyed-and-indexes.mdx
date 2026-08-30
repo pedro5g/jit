@@ -252,11 +252,11 @@ compile cache.
 | Validator duplicate-key check           |              no |                      no |                      no |
 | Query result memoization                |              no |                      no |                      no |
 
-`JIT.state.watch()` and `JIT.state.watchedList()` receive their key explicitly because
+`JIT.state.watch()` and `JIT.ddd.watchedList()` receive their key explicitly because
 they own change-tracking state rather than compile an equality strategy:
 
 ```ts
-const members = JIT.state.watchedList(Users, initialUsers, { key: "id" });
+const members = JIT.ddd.watchedList(Users, initialUsers, { key: "id" });
 const watchUsers = JIT.state.watch(Users, { key: "id" });
 ```
 

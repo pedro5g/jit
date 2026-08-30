@@ -206,4 +206,4 @@ Declare identity on the collection (`.keyed("id")`) rather than repeating `.by("
 
 ## 15. Non-goals
 
-Reconcile compares two snapshots by identity. It does not track changes over time, hold state between calls, or subscribe to anything — that is `JIT.state.watch` and `JIT.state.watchedList`. It does not merge, resolve conflicts, or produce a patch to apply; `changes("diff")` reports what differs and stops there. It does not reorder, and it does not detect a move as anything other than the identity staying put.
+Reconcile compares two snapshots by identity. It does not track changes over time, hold state between calls, or subscribe to anything — that is `JIT.state.watch` and `JIT.ddd.watchedList`. It does not merge, resolve conflicts, or produce a patch to apply; `changes("diff")` reports what differs and stops there. It does not reorder, and it does not detect a move as anything other than the identity staying put.

@@ -1065,6 +1065,33 @@ describe("JIT AOT generate", () => {
     expect((aot.error as { readonly issues: readonly unknown[] }).issues).toHaveLength(2);
   });
 
+  it("should preserve null tuple factory channels in standalone AOT", async () => {
+    const Tuple = JIT.ddd.valueObject(JIT.object({ name: JIT.string() })).validate({ result: "tuple" });
+    const result = AOT.generate({ groups: {}, artifacts: { Tuple }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Tuple: typeof Tuple;
+    };
+
+    expect(result.skipped).toEqual([]);
+    expect(generated.Tuple.create({ name: "Ada" })[0]).toBeNull();
+    expect(generated.Tuple.create({ name: 1 } as never)[1]).toBeNull();
+  });
+
+  it("should preserve explicit construction modes in standalone AOT", async () => {
+    const Factory = JIT.class(JIT.object({ value: JIT.string() })).construction("factory");
+    const Constructor = JIT.ddd.valueObject(JIT.string()).construction("constructor");
+    const result = AOT.generate({ groups: {}, artifacts: { Factory, Constructor }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Factory: typeof Factory;
+      readonly Constructor: typeof Constructor;
+    };
+
+    expect(result.skipped).toEqual([]);
+    expect(generated.Factory.create({ value: "factory" }).value).toBe("factory");
+    expect(new generated.Constructor("direct").value).toBe("direct");
+    expect("create" in generated.Constructor).toBe(false);
+  });
+
   it("should preserve an assertion issue limit in standalone AOT", async () => {
     const Limited = JIT.ddd
       .valueObject(JIT.object({ a: JIT.number(), b: JIT.number(), c: JIT.number() }))
@@ -1239,7 +1266,7 @@ describe("JIT AOT generate", () => {
   });
 
   it("should preserve abstract value-object behavior in AOT subclasses", async () => {
-    const MoneyBase = JIT.ddd.valueObject.abstract(
+    const MoneyBase = JIT.ddd.abstract.valueObject(
       JIT.object({
         amount: JIT.number(),
         currency: JIT.enum(["BRL", "USD"]),
@@ -1699,6 +1726,7 @@ describe("JIT AOT generate", () => {
         };
         create(input: { id: string; status: string; updatedAt: Date }): {
           update(patch: { status: string }): void;
+          touch(): void;
           updatedAt: Date;
         };
       };
@@ -1713,6 +1741,9 @@ describe("JIT AOT generate", () => {
 
     order.update({ status: "confirmed" });
     expect(order.updatedAt.getTime()).toBeGreaterThan(initial.getTime());
+    const mutatedAt = order.updatedAt;
+    order.touch();
+    expect(order.updatedAt.getTime()).toBeGreaterThanOrEqual(mutatedAt.getTime());
   });
 
   it("should emit soft-delete metadata with a shared timestamp instant", async () => {

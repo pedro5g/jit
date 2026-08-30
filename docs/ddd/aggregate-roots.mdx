@@ -3,7 +3,7 @@
 An aggregate root is an entity that owns a consistency boundary and an ordered pending-event queue. Persistence and repositories stay outside it.
 
 ```ts
-const OrderBase = JIT.ddd.aggregateRoot(
+const OrderBase = JIT.ddd.abstract.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
     status: JIT.enum(["draft", "confirmed"]),
@@ -22,3 +22,10 @@ class Order extends OrderBase {
 `update()` and `raise()` are protected. External direct mutation remains rejected by TypeScript, and readonly schema fields cannot appear in the update patch. Known fields are assigned with compiled field-specific code rather than `Object.assign`.
 
 `peekEvents()` returns a snapshot without exposing the internal array. `pullEvents()` preserves order and clears the queue. `commit(publisher)` publishes sequentially, clears the queue after the full sequence succeeds, and leaves it intact when publishing fails.
+
+Timestamp, soft-delete, and version policies are singleton aggregate
+configurations. `.timestamps({ updatedAt })` installs a shared `touch()`
+prototype method and, unless `touch: "manual"` is selected, updates the field
+once per effective mutation. `.softDelete({ field })` installs
+`softDelete()`, `restore()`, and `isDeleted`; `.versioned({ field })` advances
+the version through the same mutation plan. Repeating one policy is rejected.
