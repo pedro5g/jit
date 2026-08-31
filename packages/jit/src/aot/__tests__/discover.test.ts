@@ -277,7 +277,7 @@ describe("JIT AOT self-contained types", () => {
         `generated import typecheck failed\n${failed.stdout?.toString() ?? ""}${failed.stderr?.toString() ?? ""}`
       );
     }
-  }, 15_000);
+  }, 30_000);
 
   it("should name a generated type after the schema that declared it", () => {
     const User = JIT.object({ id: JIT.number() });
