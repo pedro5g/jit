@@ -20,6 +20,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { JIT } from "@jit-compiler/jit/runtime";
+import { extractTypeExports } from "./knowledge/parsers/api";
+import { runExample } from "./knowledge/parsers/examples";
 
 const siteDir = path.resolve(import.meta.dirname, "..");
 const contentDir = path.join(siteDir, "content/docs");
@@ -56,117 +58,6 @@ function slugify(heading: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/**
- * Names a jit example is allowed to reference without defining them.
- *
- * Documentation examples are fragments on purpose — they show the shape of a
- * call, not a whole program — so the values around the call are supplied here
- * rather than demanded of the page. Anything beyond this list is a genuinely
- * undefined reference and gets reported.
- */
-const AMBIENT: Record<string, unknown> = {
-  console: { log: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-  logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
-  queue: { write: () => {}, push: () => {} },
-  socket: { on: () => {}, write: () => {} },
-  process: { env: {}, stdout: { write: () => {} } },
-  fetch: async () => ({ ok: true, json: async () => ({}), body: null }),
-  structuredClone: (value: unknown) => value,
-};
-
-/**
- * A stand-in for a schema the example never declares, which throws the moment
- * it is used.
- *
- * Names like `Event`, `Request` and `File` read as schemas in an example and
- * are also platform globals, so a fragment that says `JIT.array(Event)` gets
- * handed the DOM `Event` constructor and fails with a TypeError that looks
- * exactly like a real API mistake. Shadowing them turns that back into the
- * ReferenceError it truly is: an undeclared reference in a fragment.
- */
-function undeclared(name: string): unknown {
-  const raise = () => {
-    throw new ReferenceError(`${name} is not defined`);
-  };
-
-  return new Proxy(function () {} as object, { get: raise, apply: raise, construct: raise });
-}
-
-/** Platform globals that documentation examples use as schema names. */
-const SHADOWED = [
-  "Event",
-  "Request",
-  "Response",
-  "File",
-  "Headers",
-  "Blob",
-  "Node",
-  "Text",
-  "Comment",
-  "Range",
-  "Image",
-  "Notification",
-  "Location",
-  "History",
-  "Storage",
-  "Performance",
-  "Worker",
-  "Document",
-  "Selection",
-];
-
-/**
- * Examples that show a failure on purpose.
- *
- * The ops page demonstrates check ordering with
- * `JIT.validate.parse(Email)("NOT-AN-EMAIL"); // throws`, and it is right to.
- * A validation error from a block that says it throws is the block working.
- */
-const DEMONSTRATES_A_THROW = /\/\/[^\n]*\b(throws?|lan[çc]a|rejects?|erro|error|❌)\b/i;
-
-/**
- * Executes one example, reporting only failures that are the example's fault.
- *
- * A `ReferenceError` for a value the fragment never defines is expected — the
- * page is showing a call, not a program — so it is treated as a pass. A
- * `TypeError` is not: `JIT.stream(Row).ndjson()` throwing "is not a function"
- * means the page is teaching an API that does not exist, which is exactly the
- * class of error a reader cannot tell from a working one until they run it.
- */
-async function runExample(code: string): Promise<string | null> {
-  const body = code
-    .replace(/^\s*import[^\n]*$/gm, "")
-    .replace(/^\s*export\s*\{[^}]*\};?\s*$/gm, "")
-    .replace(/\bexport\s+(?=(?:const|let|var|function|class|type|interface)\b)/g, "")
-    .replace(/^\s*(?:type|interface)\s[\s\S]*?(?:;|\n\})\s*$/gm, "");
-
-  // a name the fragment declares itself is its own; only the rest is shadowed
-  const declared = new Set(
-    [...body.matchAll(/\b(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1])
-  );
-  const shadowed = SHADOWED.filter((name) => !declared.has(name));
-  const names = [...Object.keys(AMBIENT), ...shadowed];
-  const values = [...Object.keys(AMBIENT).map((name) => AMBIENT[name]), ...shadowed.map(undeclared)];
-
-  try {
-    const factory = new Function("JIT", ...names, `"use strict";\nreturn (async () => {\n${body}\n})();`) as (
-      ...args: unknown[]
-    ) => Promise<unknown>;
-
-    await factory(JIT, ...values);
-    return null;
-  } catch (error) {
-    // a fragment referencing a value it never declares is showing a call, not a program
-    if (error instanceof ReferenceError) return null;
-    // a fragment that is not a complete statement is a formatting choice
-    if (error instanceof SyntaxError) return null;
-    // and a block that says it throws is working when it does
-    if (DEMONSTRATES_A_THROW.test(code) && error instanceof Error && /validation/i.test(error.name)) return null;
-
-    return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  }
-}
-
 const files = (await collect(contentDir)).sort();
 const pages = new Map<string, Set<string>>();
 const sources = new Map<string, string>();
@@ -189,7 +80,18 @@ for (const file of files) {
   pages.set(urlFor(file), anchors);
 }
 
-const knownApi = new Set([...Object.keys(JIT), "Typeof", "Strict"]);
+/**
+ * Every name a page may write as `JIT.x`.
+ *
+ * The type half is read out of `runtime.ts` rather than listed here. It was
+ * listed here, as `["Typeof", "Strict"]`, and the library grew `Input`,
+ * `Hydrate` and `Wire` — so this audit failed on a page that was correct,
+ * which is the one kind of failure that trains you to ignore an audit.
+ */
+const typeExports = extractTypeExports(
+  await fs.readFile(path.resolve(siteDir, "../../packages/jit/src/runtime.ts"), "utf8")
+);
+const knownApi = new Set([...Object.keys(JIT), ...typeExports]);
 let examplesRun = 0;
 
 // second pass: the checks

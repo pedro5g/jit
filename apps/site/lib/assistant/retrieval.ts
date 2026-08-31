@@ -9,9 +9,6 @@ const B = 0.6;
 const HEADING_REPEATS = 3;
 const PAGE_TITLE_REPEATS = 2;
 
-/** How much of a literal match a concept-derived term is worth. */
-const CONCEPT_TERM_SCALE = 0.45;
-
 /** Sections on the page being read win ties, but cannot beat a better answer. */
 const CURRENT_PAGE_BOOST = 1.18;
 const CURRENT_SECTION_BOOST = 1.3;
@@ -38,18 +35,6 @@ const HISTORY_PENALTY = 0.45;
  * explains the thing.
  */
 const DENSE_PENALTY = 0.75;
-
-/**
- * How much a page the concept graph named is lifted.
- *
- * When the graph matches a concept from the words the reader actually typed, it
- * knows the subject with more certainty than BM25 does — the graph was written
- * by hand, term frequency was not. "como instalo a jit?" resolves to `install`,
- * whose page is the quick start, while lexically "instalo" shares no token with
- * an English index and the ranking is left to guess. A boost rather than an
- * override: a section that answers the question better still wins.
- */
-const CONCEPT_PAGE_BOOST = 1.35;
 
 /**
  * How much of a section's vocabulary may already appear in one kept above it
@@ -116,29 +101,15 @@ export class DocsRetriever {
       limit?: number;
       currentUrl?: string;
       queryVector?: Float32Array | null;
-      /** Vocabulary the concept graph derived from the question. */
-      conceptTerms?: QueryTerm[];
       /**
        * The question is about a version or a migration, so the changelog and
        * the migration guide compete on equal terms.
        */
       allowHistory?: boolean;
-      /** Pages the concept graph named for this question, from the reader's own words. */
-      conceptPages?: string[];
     } = {}
   ): RetrievedSection[] {
     const limit = options.limit ?? 6;
-    const preferred = new Set(options.conceptPages ?? []);
-    const terms = [
-      ...tokenizeQuery(query),
-      // The graph knows what the question is about; the words the reader typed
-      // are still the evidence. Concept terms are scaled below a literal match
-      // so an exact identifier always wins its own page.
-      ...(options.conceptTerms ?? []).map((term) => ({
-        term: term.term,
-        weight: term.weight * CONCEPT_TERM_SCALE,
-      })),
-    ];
+    const terms = tokenizeQuery(query);
     if (terms.length === 0) return [];
 
     const lexical = this.bm25(terms);
@@ -159,8 +130,6 @@ export class DocsRetriever {
       const { url, kind, dense } = this.indexed[i].section;
       if (kind === "history" && !options.allowHistory) score *= HISTORY_PENALTY;
       if (dense) score *= DENSE_PENALTY;
-      if (preferred.size > 0 && preferred.has(url.split("#")[0])) score *= CONCEPT_PAGE_BOOST;
-
       if (currentPath && url === options.currentUrl) score *= CURRENT_SECTION_BOOST;
       else if (currentPath && url.split("#")[0] === currentPath) score *= CURRENT_PAGE_BOOST;
 

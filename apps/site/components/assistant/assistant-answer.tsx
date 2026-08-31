@@ -3,8 +3,7 @@
 import { Play, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { CopyButton } from "@/components/code/copy-button";
-import { workspaceActionFor } from "@/lib/assistant/actions";
-import type { RetrievedSection } from "@/lib/assistant/types";
+import { type GhostSource, workspaceActionFor } from "@/lib/copilot/presentation/adapters/ghost";
 
 /**
  * A small local model writes fenced code and bracketed citations, and nothing
@@ -37,7 +36,7 @@ export function parseAnswer(answer: string): Block[] {
 }
 
 /** Turns `[2]` into a link to the second source, leaving unknown numbers as text. */
-function withCitations(text: string, sources: RetrievedSection[]) {
+function withCitations(text: string, sources: GhostSource[]) {
   let offset = 0;
 
   return text.split(/(\[\d+\])/g).map((part) => {
@@ -51,8 +50,8 @@ function withCitations(text: string, sources: RetrievedSection[]) {
     return (
       <Link
         key={key}
-        href={source.section.url}
-        title={`${source.section.page} — ${source.section.heading}`}
+        href={source.url}
+        title={`${source.page} — ${source.heading}`}
         className="mx-0.5 rounded-pixel bg-gold-200/15 px-1 font-mono text-[10px] text-gold-200 no-underline hover:bg-gold-200/25"
       >
         {part}
@@ -67,7 +66,7 @@ export function AssistantAnswer({
   onRunCode,
 }: {
   content: string;
-  sources: RetrievedSection[];
+  sources: GhostSource[];
   /** Opens a snippet in the workspace. */
   onRunCode?: (code: string, mode: "run" | "generate") => void;
 }) {
@@ -113,19 +112,19 @@ export function AssistantAnswer({
   );
 }
 
-export function AssistantSources({ sources }: { sources: RetrievedSection[] }) {
+export function AssistantSources({ sources }: { sources: GhostSource[] }) {
   if (sources.length === 0) return null;
 
   return (
     <ul className="mt-2 flex flex-wrap gap-1.5">
       {sources.map((source, index) => (
-        <li key={source.section.url + source.section.part}>
+        <li key={source.url + source.part}>
           <Link
-            href={source.section.url}
+            href={source.url}
             className="inline-flex items-center gap-1.5 rounded-pill border border-line-subtle px-2 py-0.5 text-[11px] text-fg-muted no-underline transition-colors hover:border-line-gold hover:text-gold-200"
           >
             <span className="font-mono text-[10px] text-gold-200">{index + 1}</span>
-            <span className="max-w-52 truncate">{source.section.heading}</span>
+            <span className="max-w-52 truncate">{source.heading}</span>
           </Link>
         </li>
       ))}

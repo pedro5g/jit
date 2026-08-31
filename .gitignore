@@ -167,3 +167,14 @@ CLAUDE.md
 apps/site/public/playground/jit-dts.json
 apps/site/public/assistant/docs-index.json
 apps/site/public/assistant/api-surface.json
+apps/site/public/copilot/
+apps/site/.cache/knowledge/
+apps/site/.scratch/
+# Benchmark runs and rendered reports are regenerable; the hand-read labels
+# they are scored against are not, so those stay in the repository.
+apps/site/.eval/*
+!apps/site/.eval/copilot/
+apps/site/.eval/copilot/*
+!apps/site/.eval/copilot/labels/
+apps/site/.eval/copilot/labels/*
+!apps/site/.eval/copilot/labels/*.jsonl

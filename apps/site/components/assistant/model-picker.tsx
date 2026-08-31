@@ -1,12 +1,10 @@
 "use client";
 
-import { Check, Download, HardDrive, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { Download, HardDrive, X } from "lucide-react";
 import type { ModelChoice } from "@/hooks/use-assistant";
-import type { GenerationModel } from "@/lib/assistant/catalog";
-import { deleteModel } from "@/lib/assistant/model-store";
-import { formatBytes, formatDuration } from "@/lib/assistant/progress";
-import type { ProviderState } from "@/lib/assistant/types";
+import { formatBytes } from "@/lib/assistant/progress";
+import type { ModelState } from "@/lib/copilot/application/services/model.service";
+import type { GenerationModelSpec } from "@/lib/copilot/config/models";
 
 /**
  * Where a download is agreed to, watched, and taken back.
@@ -22,23 +20,19 @@ export function ModelPicker({
   onSelect,
   onDownload,
   onCancel,
-  onRemoved,
 }: {
   models: ModelChoice[];
-  provider: ProviderState | null;
-  onSelect: (model: GenerationModel) => void;
+  provider: ModelState | null;
+  onSelect: (model: GenerationModelSpec) => void;
   onDownload: () => void;
   onCancel: () => void;
-  onRemoved: () => void;
 }) {
-  const [removing, setRemoving] = useState<string | null>(null);
   const downloading = provider?.status === "downloading";
 
   return (
     <div className="flex flex-col gap-1.5">
       {models.map((model) => {
-        const presence = model.presence;
-        const total = presence?.totalBytes ?? model.approximateBytes;
+        const total = model.approximateBytes;
         const active = model.selected;
 
         return (
@@ -57,34 +51,7 @@ export function ModelPicker({
               >
                 <span className="truncate text-xs font-semibold text-ghost-100">{model.label}</span>
                 <span className="shrink-0 font-mono text-[10px] text-fg-subtle">{formatBytes(total)}</span>
-                {presence?.complete && (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-success/15 px-1.5 text-[10px] text-success">
-                    <Check aria-hidden className="size-2.5" />
-                    on this machine
-                  </span>
-                )}
-                {presence?.partial && (
-                  <span className="shrink-0 font-mono text-[10px] text-warning">
-                    {Math.round((presence.cachedBytes / total) * 100)}% cached
-                  </span>
-                )}
               </button>
-
-              {presence && presence.cachedBytes > 0 && !downloading && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${model.label} from this machine`}
-                  onClick={async () => {
-                    setRemoving(model.id);
-                    await deleteModel(model);
-                    setRemoving(null);
-                    onRemoved();
-                  }}
-                  className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:text-danger"
-                >
-                  <Trash2 aria-hidden className={`size-3 ${removing === model.id ? "animate-pulse" : ""}`} />
-                </button>
-              )}
             </div>
 
             <p className="mt-0.5 text-[11px] leading-snug text-fg-muted">{model.summary}</p>
@@ -113,8 +80,8 @@ export function ModelPicker({
   );
 }
 
-function DownloadProgress({ provider, onCancel }: { provider: ProviderState; onCancel: () => void }) {
-  const { loadedBytes, totalBytes, estimatedRemainingMs, progress } = provider;
+function DownloadProgress({ provider, onCancel }: { provider: ModelState; onCancel: () => void }) {
+  const { loadedBytes, totalBytes, progress } = provider;
 
   return (
     <div className="mt-0.5 rounded-control border border-line-subtle px-2.5 py-2">
@@ -123,7 +90,6 @@ function DownloadProgress({ provider, onCancel }: { provider: ProviderState; onC
           {loadedBytes !== undefined && totalBytes !== undefined
             ? `${formatBytes(loadedBytes)} / ${formatBytes(totalBytes)}`
             : `${Math.round(progress)}%`}
-          {estimatedRemainingMs ? ` · ${formatDuration(estimatedRemainingMs)} left` : ""}
         </p>
         <button
           type="button"

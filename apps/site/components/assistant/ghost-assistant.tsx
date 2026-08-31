@@ -32,8 +32,6 @@ import {
   type PerformedAction,
   useAssistant,
 } from "@/hooks/use-assistant";
-import { type AssistantAction, planActions } from "@/lib/assistant/actions";
-import { type AuditFinding, isSevere } from "@/lib/assistant/audit";
 import {
   ASSISTANT_OPEN_EVENT,
   readEditorCode,
@@ -42,6 +40,8 @@ import {
   requestSnippetDemo,
   requestWorkspaceWrite,
 } from "@/lib/assistant/bus";
+import type { AuditFinding } from "@/lib/copilot/core/entities/audit";
+import { type GhostAction, isSevere, planGhostActions } from "@/lib/copilot/presentation/adapters/ghost";
 
 /**
  * Openers that retrieval answers well. A prompt like "write me a schema" is a
@@ -137,13 +137,11 @@ export function GhostAssistant() {
    * where the editor is already open, and offered as a button when it is not.
    */
   const perform = useCallback(
-    (actions: AssistantAction[], context: PerformContext) => {
-      const { auto, offered } = planActions(actions, pathname, {
-        readerAskedToNavigate: context.asksToNavigate,
-      });
+    (actions: GhostAction[], context: PerformContext) => {
+      const { automatic, offered } = planGhostActions(actions, pathname, context.asksToNavigate);
       const performed: PerformedAction[] = [];
 
-      for (const action of auto) {
+      for (const action of automatic) {
         if (action.kind === "highlight") {
           requestHighlight({ heading: action.heading });
           performed.push({ kind: "highlight", label: `pointed at "${action.heading}"` });
@@ -223,7 +221,7 @@ export function GhostAssistant() {
   );
 
   const act = useCallback(
-    (action: AssistantAction) => {
+    (action: GhostAction) => {
       if (action.kind === "workspace") {
         openCode(action.code, action.mode);
         return;
@@ -332,7 +330,6 @@ export function GhostAssistant() {
             onSelect={(model) => void assistant.selectModel(model)}
             onDownload={() => void assistant.prepareProvider()}
             onCancel={assistant.cancelDownload}
-            onRemoved={() => void assistant.refreshModels()}
           />
           {assistant.semantic.status !== "ready" && (
             <button
@@ -498,7 +495,7 @@ function Turn({
   last: boolean;
   busy: boolean;
   onRunCode: (code: string, mode: "run" | "generate") => void;
-  onAct: (action: AssistantAction) => void;
+  onAct: (action: GhostAction) => void;
   onAsk: (question: string) => void;
   onGuide: (url: string, heading: string, close: boolean) => void;
   onRegenerate: () => void;
@@ -599,7 +596,7 @@ function Guide({
   sources: AssistantMessage["sources"];
   onGuide: (url: string, heading: string, close: boolean) => void;
 }) {
-  const best = sources[0]?.section;
+  const best = sources[0];
   if (!best) return null;
 
   return (
@@ -648,42 +645,7 @@ function Audit({ findings }: { findings: AuditFinding[] }) {
 }
 
 function describe(finding: AuditFinding): string {
-  if (finding.kind === "invented-api") {
-    const plural = finding.names.length > 1;
-    return `${finding.names.join(", ")} ${plural ? "are not" : "is not"} part of jit — the model made ${plural ? "them" : "it"} up.`;
-  }
-
-  if (finding.kind === "invented-method") {
-    const plural = finding.names.length > 1;
-    return `${finding.names.join(", ")} ${plural ? "do" : "does"} not exist on any jit schema — checked against the compiled library, not the docs.`;
-  }
-
-  if (finding.kind === "invented-cli") {
-    return `${finding.names.join(", ")} is not a command the jit CLI has. It has: jit init, jit generate, jit watch, jit check, jit mcp.`;
-  }
-
-  if (finding.kind === "unusable-example") {
-    return `The code example does not work: ${finding.reason}`;
-  }
-
-  if (finding.kind === "example-failed") {
-    return `I ran this example before showing it, and ${finding.reason}`;
-  }
-
-  if (finding.kind === "degenerated") {
-    return `The model's output came apart: ${finding.reason}`;
-  }
-
-  if (finding.kind === "contradiction") {
-    return `This contradicts the documentation: ${finding.claim}`;
-  }
-
-  if (finding.kind === "unsupported-number") {
-    return `${finding.values.join(", ")} appears in none of the sources below — treat the figure as invented.`;
-  }
-
-  const plural = finding.sentences.length > 1;
-  return `Nothing in the sources supports ${plural ? "these claims" : "this claim"}: ${finding.sentences.map((sentence) => `"${sentence}"`).join(" ")}`;
+  return finding.detail;
 }
 
 /** The stages, in the order they happen, with what each one is doing. */
@@ -742,11 +704,8 @@ function Working({ message }: { message: AssistantMessage }) {
 
       {passed >= 0 &&
         message.sources.slice(0, 3).map((source) => (
-          <p
-            key={source.section.url + source.section.part}
-            className="truncate pl-1 font-mono text-[10px] text-fg-subtle"
-          >
-            {source.section.page} · {source.section.heading}
+          <p key={source.url + source.part} className="truncate pl-1 font-mono text-[10px] text-fg-subtle">
+            {source.page} · {source.heading}
           </p>
         ))}
     </div>

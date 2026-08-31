@@ -1383,7 +1383,7 @@ function buildAggregateMutationPlan(options) {
     ...options.version === void 0 ? {} : { version: options.version }
   });
 }
-function emitAggregateMutationBody(plan, updates) {
+function emitAggregateMutationBody(plan, updates, clockExpression = "new Date()") {
   const writer = new CodeWriter();
   writer.line("let changed = false;");
   for (const field of plan.mutableFields) {
@@ -1399,7 +1399,7 @@ function emitAggregateMutationBody(plan, updates) {
     writer.line("}");
   }
   writer.line("if (!changed) return;");
-  if (plan.updatedAt !== void 0) writer.line("const now = new Date();");
+  if (plan.updatedAt !== void 0) writer.line(`const now = ${clockExpression};`);
   if (plan.updatedAt !== void 0) writer.line(`this${emitPropertyAccess("", plan.updatedAt)} = now;`);
   if (plan.version !== void 0) writer.line(`this${emitPropertyAccess("", plan.version)} += 1;`);
   return writer.toString();
@@ -6198,7 +6198,10 @@ var ValidatorEmitter = class {
     } else {
       this.writer.line(`${this.awaited ? "async " : ""}function ${name}(value, issues, path) {`);
       this.writer.indent(() => {
-        const output = this.emitInline(schema, "value", { kind: "dynamic", source: "path" });
+        const output = this.emitInline(schema, "value", {
+          kind: "dynamic",
+          source: "path"
+        });
         this.writer.line(`return ${output};`);
       });
       this.writer.line("}");
@@ -6259,17 +6262,23 @@ var ValidatorEmitter = class {
       case TypeName.unknown:
         return value;
       case TypeName.never:
-        this.emitFail(path, "invalid_type", "never", "no value is assignable to never");
+        this.emitFail(path, "invalid_type", "never", this.requiredMessage(schema, "no value is assignable to never"));
         return value;
       case TypeName.void:
       case TypeName.undefined:
-        this.failIf(`${value} !== undefined`, path, "invalid_type", "undefined", "expected undefined");
+        this.failIf(
+          `${value} !== undefined`,
+          path,
+          "invalid_type",
+          "undefined",
+          this.requiredMessage(schema, "expected undefined")
+        );
         return value;
       case TypeName.null:
-        this.failIf(`${value} !== null`, path, "invalid_type", "null", "expected null");
+        this.failIf(`${value} !== null`, path, "invalid_type", "null", this.requiredMessage(schema, "expected null"));
         return value;
       case TypeName.nan:
-        this.failIf(`${value} === ${value}`, path, "invalid_type", "nan", "expected NaN");
+        this.failIf(`${value} === ${value}`, path, "invalid_type", "nan", this.requiredMessage(schema, "expected NaN"));
         return value;
       case TypeName.string:
         return this.emitString(schema, value, path);
@@ -6278,15 +6287,21 @@ var ValidatorEmitter = class {
       case TypeName.int:
         return this.emitNumber(schema, value, path, true);
       case TypeName.boolean:
-        return this.emitTypeofLeaf(value, path, "boolean");
+        return this.emitTypeofLeaf(schema, value, path, "boolean");
       case TypeName.bigint:
-        return this.emitTypeofLeaf(value, path, "bigint");
+        return this.emitTypeofLeaf(schema, value, path, "bigint");
       case TypeName.symbol:
-        return this.emitTypeofLeaf(value, path, "symbol");
+        return this.emitTypeofLeaf(schema, value, path, "symbol");
       case TypeName.date:
         return this.emitDate(schema, value, path);
       case TypeName.regex:
-        this.failIf(`!(${value} instanceof RegExp)`, path, "invalid_type", "RegExp", "expected a RegExp");
+        this.failIf(
+          `!(${value} instanceof RegExp)`,
+          path,
+          "invalid_type",
+          "RegExp",
+          this.requiredMessage(schema, "expected a RegExp")
+        );
         return value;
       case TypeName.file:
         this.failIf(
@@ -6294,11 +6309,11 @@ var ValidatorEmitter = class {
           path,
           "invalid_type",
           "File",
-          "expected a File"
+          this.requiredMessage(schema, "expected a File")
         );
         return value;
       case TypeName.json:
-        return this.emitJson(value, path);
+        return this.emitJson(schema, value, path);
       case TypeName.custom:
         return this.emitCustom(schema, value, path);
       case TypeName.not:
@@ -6306,7 +6321,13 @@ var ValidatorEmitter = class {
       case TypeName.templateLiteral:
         return this.emitTemplateLiteral(schema, value, path);
       case TypeName.function:
-        this.failIf(`typeof ${value} !== "function"`, path, "expected_function", "function", "expected function");
+        this.failIf(
+          `typeof ${value} !== "function"`,
+          path,
+          "expected_function",
+          "function",
+          this.requiredMessage(schema, "expected function")
+        );
         return value;
       case TypeName.temporal:
         return this.emitTemporal(schema, value, path);
@@ -6316,7 +6337,13 @@ var ValidatorEmitter = class {
         const literalSource = emitLiteral(schema.def.value);
         const literalText = String(schema.def.value);
         const test = typeof schema.def.value === "number" && Number.isNaN(schema.def.value) ? `${value} === ${value}` : `${value} !== ${literalSource}`;
-        this.failIf(test, path, "invalid_literal", literalText, `expected literal ${literalText}`);
+        this.failIf(
+          test,
+          path,
+          "invalid_literal",
+          literalText,
+          this.requiredMessage(schema, `expected literal ${literalText}`)
+        );
         return value;
       }
       case TypeName.enum: {
@@ -6327,7 +6354,7 @@ var ValidatorEmitter = class {
           path,
           "invalid_enum",
           values.map((option) => String(option)).join(" | "),
-          "expected one of the enum values"
+          this.requiredMessage(schema, "expected one of the enum values")
         );
         return value;
       }
@@ -6360,7 +6387,13 @@ var ValidatorEmitter = class {
       }
       case TypeName.instanceof: {
         const guard = emitSchemaGuard(schema, value);
-        this.failIf(`!(${guard})`, path, "invalid_type", "instance", "expected a class instance");
+        this.failIf(
+          `!(${guard})`,
+          path,
+          "invalid_type",
+          "instance",
+          this.requiredMessage(schema, "expected a class instance")
+        );
         return value;
       }
       case TypeName.promise: {
@@ -6373,7 +6406,7 @@ var ValidatorEmitter = class {
           path,
           "invalid_type",
           "Promise",
-          "expected a thenable"
+          this.requiredMessage(schema, "expected a thenable")
         );
         return value;
       }
@@ -6435,20 +6468,26 @@ var ValidatorEmitter = class {
     writer.indent(body);
     writer.line("}");
   }
-  emitTypeofLeaf(value, path, expected) {
-    this.failIf(`typeof ${value} !== "${expected}"`, path, `expected_${expected}`, expected, `expected ${expected}`);
+  emitTypeofLeaf(schema, value, path, expected) {
+    this.failIf(
+      `typeof ${value} !== "${expected}"`,
+      path,
+      `expected_${expected}`,
+      expected,
+      this.requiredMessage(schema, `expected ${expected}`)
+    );
     return value;
   }
   requiredMessage(schema, fallback) {
     return typeof schema.def.requiredMessage === "string" ? schema.def.requiredMessage : fallback;
   }
-  emitJson(value, path) {
+  emitJson(schema, value, path) {
     this.failIf(
       `!${this.emitJsonPredicate()}(${value})`,
       path,
       "invalid_json",
       "JSON value",
-      "expected a JSON-encodable value"
+      this.requiredMessage(schema, "expected a JSON-encodable value")
     );
     return value;
   }
@@ -6472,7 +6511,7 @@ var ValidatorEmitter = class {
       path,
       "invalid_not",
       "not",
-      "value matched a forbidden schema"
+      this.requiredMessage(schema, "value matched a forbidden schema")
     );
     return value;
   }
@@ -6483,14 +6522,14 @@ var ValidatorEmitter = class {
       path,
       "expected_string",
       "string",
-      "expected string",
+      this.requiredMessage(schema, "expected string"),
       () => {
         this.failIf(
           `!${this.bind(regex2)}.test(${value})`,
           path,
           "invalid_template_literal",
           "template literal",
-          "expected a matching template literal string"
+          this.requiredMessage(schema, "expected a matching template literal string")
         );
       },
       `typeof ${value}`
@@ -6569,7 +6608,11 @@ var ValidatorEmitter = class {
             "out_of_range",
             `${String(range.min)}..${String(range.max)}`,
             check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`,
-            { minimum: String(range.min), maximum: String(range.max), inclusive: true }
+            {
+              minimum: String(range.min),
+              maximum: String(range.max),
+              inclusive: true
+            }
           );
           break;
         }
@@ -7082,7 +7125,7 @@ var ValidatorEmitter = class {
       path,
       "expected_array",
       "array",
-      "expected array",
+      this.requiredMessage(schema, "expected array"),
       () => {
         for (const check of checks) {
           switch (check.kind) {
@@ -7153,7 +7196,7 @@ var ValidatorEmitter = class {
       path,
       "expected_array",
       "tuple",
-      "expected tuple",
+      this.requiredMessage(schema, "expected tuple"),
       () => {
         const lengthTest = rest ? `${value}.length < ${items.length}` : `${value}.length !== ${items.length}`;
         this.failIf(
@@ -7193,7 +7236,7 @@ var ValidatorEmitter = class {
       path,
       "expected_set",
       "Set",
-      "expected a Set",
+      this.requiredMessage(schema, "expected a Set"),
       () => {
         const item = this.nextVar("e");
         if (build) this.writer.line(`${out} = new Set();`);
@@ -7220,7 +7263,7 @@ var ValidatorEmitter = class {
       path,
       "expected_map",
       "Map",
-      "expected a Map",
+      this.requiredMessage(schema, "expected a Map"),
       () => {
         const entry = this.nextVar("e");
         if (build) this.writer.line(`${out} = new Map();`);
@@ -7247,7 +7290,7 @@ var ValidatorEmitter = class {
       path,
       "expected_object",
       "record",
-      "expected a plain object",
+      this.requiredMessage(schema, "expected a plain object"),
       () => {
         const keys = this.nextVar("k");
         const index2 = this.nextVar("i");
@@ -7284,13 +7327,16 @@ var ValidatorEmitter = class {
       path,
       "expected_object",
       "object",
-      "expected object",
+      this.requiredMessage(schema, "expected object"),
       () => {
         const outputs = [];
         for (const key of keys) {
           const propOut = this.emitNode(props[key], emitPropertyAccess(value, key), staticChild(path, key), value);
           const transform3 = fieldTransforms?.[key];
-          outputs.push({ key, expr: transform3 ? `${transform3}(${propOut}, ${value})` : propOut });
+          outputs.push({
+            key,
+            expr: transform3 ? `${transform3}(${propOut}, ${value})` : propOut
+          });
         }
         if (build && preserveUnknownKeys) {
           this.writer.line(`${out} = Object.assign({}, ${value});`);
@@ -7364,7 +7410,7 @@ var ValidatorEmitter = class {
         path,
         "invalid_union",
         "union",
-        "value matched no union option"
+        this.requiredMessage(schema, "value matched no union option")
       );
       return value;
     }
@@ -7381,7 +7427,7 @@ var ValidatorEmitter = class {
     });
     this.writer.line("} else {");
     this.writer.indent(() => {
-      this.emitFail(path, "invalid_union", "union", "value matched no union option");
+      this.emitFail(path, "invalid_union", "union", this.requiredMessage(schema, "value matched no union option"));
     });
     this.writer.line("}");
     return out;
@@ -7392,7 +7438,13 @@ var ValidatorEmitter = class {
     const count = tests.length === 0 ? "0" : tests.map((test) => `(${test} ? 1 : 0)`).join(" + ");
     const build = this.mode === "parse" && options.some(needsBuild);
     if (this.mode === "is" || !build) {
-      this.failIf(`${count} !== 1`, path, "invalid_xor", "exactly one schema", "value must match exactly one schema");
+      this.failIf(
+        `${count} !== 1`,
+        path,
+        "invalid_xor",
+        "exactly one schema",
+        this.requiredMessage(schema, "value must match exactly one schema")
+      );
       return value;
     }
     const out = this.nextVar("o");
@@ -7453,10 +7505,15 @@ var ValidatorEmitter = class {
       path,
       "expected_object",
       "object",
-      "expected object",
+      this.requiredMessage(schema, "expected object"),
       () => {
         if (tagged.length === 0) {
-          this.emitFail(path, "invalid_union", "discriminated union", "unknown discriminator value");
+          this.emitFail(
+            path,
+            "invalid_union",
+            "discriminated union",
+            this.requiredMessage(schema, "unknown discriminator value")
+          );
           return;
         }
         const tag = this.nextVar("t");
@@ -7470,7 +7527,12 @@ var ValidatorEmitter = class {
         });
         this.writer.line("} else {");
         this.writer.indent(() => {
-          this.emitFail(path, "invalid_union", "discriminated union", "unknown discriminator value");
+          this.emitFail(
+            path,
+            "invalid_union",
+            "discriminated union",
+            this.requiredMessage(schema, "unknown discriminator value")
+          );
         });
         this.writer.line("}");
       },
@@ -7587,7 +7649,12 @@ function staticChild(path, segment) {
   const literal4 = emitLiteral(segment);
   if (path.kind === "static") {
     const segments = [...path.segments ?? [], segment];
-    return { kind: "static", source: JSON.stringify(segments), segments, parts: [...path.parts ?? [], literal4] };
+    return {
+      kind: "static",
+      source: JSON.stringify(segments),
+      segments,
+      parts: [...path.parts ?? [], literal4]
+    };
   }
   if (path.parts !== void 0) return dynamicPath([...path.parts, literal4]);
   return { kind: "dynamic", source: `[...${path.source}, ${literal4}]` };
@@ -7614,7 +7681,10 @@ function appendIssuePath(path, segments) {
   if (path.parts !== void 0) {
     return dynamicPath([...path.parts, ...segments.map((segment) => emitLiteral(segment))]);
   }
-  return { kind: "dynamic", source: `[...${path.source}, ...${JSON.stringify(segments)}]` };
+  return {
+    kind: "dynamic",
+    source: `[...${path.source}, ...${JSON.stringify(segments)}]`
+  };
 }
 function dynamicPath(parts) {
   return { kind: "dynamic", source: `[${parts.join(", ")}]`, parts };
@@ -7683,7 +7753,10 @@ function unwrapValidation(schema, emitter2) {
     if (current.type === TypeName.default) {
       if (emitter2.resolveDefaults && !defaultValue) {
         const raw = current.def.defaultValue;
-        defaultValue = { binding: emitter2.bind(raw), isFactory: typeof raw === "function" };
+        defaultValue = {
+          binding: emitter2.bind(raw),
+          isFactory: typeof raw === "function"
+        };
       }
       current = current.def.innerType;
       continue;
@@ -8023,7 +8096,10 @@ function emitValidator(schema, options = {}) {
   const emitters = [isEmitter, parseEmitter, asyncEmitter].filter(
     (emitter2) => Boolean(emitter2)
   );
-  const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? { names: [], values: [] };
+  const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? {
+    names: [],
+    values: []
+  };
   const helperBlocks = emitters.flatMap((emitter2) => emitter2.helpers());
   const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}
 ` : "";
@@ -18410,11 +18486,14 @@ function emitModule(plan, options, layout) {
   }
   for (const name of Object.keys(plan.schemas)) {
     if (!isValidIdentifier(name)) continue;
-    typeNames.set(unwrapSchema(plan.schemas[name]), name);
+    const schema = unwrapSchema(plan.schemas[name]);
+    if (!typeNames.has(schema)) typeNames.set(schema, name);
   }
-  const typeExports = [...typeNames].map(([schema, name]) => {
+  const typeExports = Object.entries(plan.schemas).flatMap(([name, input]) => {
+    if (!isValidIdentifier(name)) return [];
+    const schema = unwrapSchema(input);
     tsTypes.push(`export type ${name} = ${emitTypeScriptType(schema, typeNames)};`);
-    return name;
+    return [name];
   });
   js.push(GENERATED_BANNER);
   if (ts) js.push("// @ts-nocheck -- generated internals are typed at the public export boundary.");
@@ -18850,9 +18929,15 @@ function emitModule(plan, options, layout) {
       if (artifact.aggregate) {
         needsAggregateType = true;
         mixins.push(`__JitAggregate<${classUpdateType(artifact.schema)}>`);
-        if (artifact.mutation?.deletedAt !== void 0)
-          mixins.push("{ softDelete(): void; restore(): void; readonly isDeleted: boolean }");
-        if (artifact.mutation?.touchAt !== void 0) mixins.push("{ touch(): void }");
+        if (artifact.mutation?.deletedAt !== void 0) {
+          const deleteMethod = classMemberName(artifact.mutation.deleteMethod ?? "softDelete");
+          const restoreMethod = classMemberName(artifact.mutation.restoreMethod ?? "restore");
+          const isDeletedMember = classMemberName(artifact.mutation.isDeletedMember ?? "isDeleted");
+          mixins.push(`{ ${deleteMethod}(): void; ${restoreMethod}(): void; readonly ${isDeletedMember}: boolean }`);
+        }
+        if (artifact.mutation?.touchAt !== void 0) {
+          mixins.push(`{ ${classMemberName(artifact.mutation.touchMethod ?? "touch")}(): void }`);
+        }
       }
       const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
       const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
@@ -19002,6 +19087,14 @@ function emitModule(plan, options, layout) {
         schema: reportName,
         operation: "class.extends",
         reason: `application extension ${JSON.stringify(applicationMethods[0]?.name)} is a runtime binding and has no reconstructive AOT representation`
+      });
+      return void 0;
+    }
+    if (artifact.mutation?.timestampClock !== void 0 || artifact.mutation?.deletionClock !== void 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.extends",
+        reason: "a custom DDD clock is a runtime binding and has no standalone AOT representation"
       });
       return void 0;
     }
@@ -19169,14 +19262,22 @@ function emitModule(plan, options, layout) {
     if (artifact.aggregate && artifact.mutation?.deletedAt !== void 0) {
       const deletedAt = artifact.mutation.deletedAt;
       const updatedAt = artifact.mutation.updatedAt;
+      const deleteMethod = classMemberName(artifact.mutation.deleteMethod ?? "softDelete");
+      const restoreMethod = classMemberName(artifact.mutation.restoreMethod ?? "restore");
+      const isDeletedMember = classMemberName(artifact.mutation.isDeletedMember ?? "isDeleted");
       methods.push(
-        `softDelete() { const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "now")}`} }`,
-        `restore() { ${writeField(deletedAt, "null")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
-        `get isDeleted() { return ${readField(deletedAt)} !== null; }`
+        `${deleteMethod}() { const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "now")}`} }`,
+        `${restoreMethod}() { ${writeField(deletedAt, "null")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
+        `get ${isDeletedMember}() { return ${readField(deletedAt)} !== null; }`
       );
     }
     if (artifact.aggregate && artifact.mutation?.touchAt !== void 0) {
-      methods.push(`touch() { ${writeField(artifact.mutation.touchAt, "new Date()")} }`);
+      methods.push(
+        `${classMemberName(artifact.mutation.touchMethod ?? "touch")}() { ${writeField(
+          artifact.mutation.touchAt,
+          "new Date()"
+        )} }`
+      );
     }
     const assignments = valueRepresentation ? "this.value = state;" : fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
     const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
@@ -22706,35 +22807,40 @@ function queryBoundaryFilters(boundary) {
   return boundary.fields.map((field) => [field.path.join("."), field.shorthand ? true : field.operators]);
 }
 
+// ../../packages/jit/src/factories/validation-message.ts
+function resolveValidationMessage(input) {
+  return typeof input === "string" ? input : input?.message;
+}
+function withValidationMessage(def, input) {
+  const message = resolveValidationMessage(input);
+  return { ...def, requiredMessage: message };
+}
+
 // ../../packages/jit/src/factories/collection/collection.ts
-function array(element) {
+function array(element, message) {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.array, {
-      element: unwrapSchema(element)
-    })
+    createSchema(
+      TypeName.array,
+      withValidationMessage({ element: unwrapSchema(element) }, message)
+    )
   );
 }
-function set(element) {
+function set(element, message) {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.set, {
-      element: unwrapSchema(element)
-    })
+    createSchema(TypeName.set, withValidationMessage({ element: unwrapSchema(element) }, message))
   );
 }
-function map(key, value) {
+function map(key, value, message) {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.map, {
-      key: unwrapSchema(key),
-      value: unwrapSchema(value)
-    })
+    createSchema(TypeName.map, withValidationMessage({ key: unwrapSchema(key), value: unwrapSchema(value) }, message))
   );
 }
-function record(key, value) {
+function record(key, value, message) {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.record, {
-      key: unwrapSchema(key),
-      value: unwrapSchema(value)
-    })
+    createSchema(
+      TypeName.record,
+      withValidationMessage({ key: unwrapSchema(key), value: unwrapSchema(value) }, message)
+    )
   );
 }
 function tuple(...items) {
@@ -24915,6 +25021,7 @@ function validateObjectKeys3(schema, keys, compilerName) {
 // ../../packages/jit/src/factories/class.ts
 var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
 var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
+var AGGREGATE_POLICY_TARGET = /* @__PURE__ */ Symbol("jit.ddd.aggregate-policy-target");
 function createPolicyState() {
   return {
     mode: "throw",
@@ -25177,6 +25284,8 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
           installedMethods.push(...installMethods(classTarget, extension, schemaNames, installedMethodNames));
         }
         registerClass();
+        const aggregatePolicy = classTarget[AGGREGATE_POLICY_TARGET];
+        aggregatePolicy?.refreshArtifact();
         return classTarget;
       }
     },
@@ -25329,7 +25438,11 @@ function installFactory(classTarget, previous, next, factory) {
   if (next === "schema" || next === "use" || next === "extends" || next === "factories" || next === "construction" || next === "accessors" || next === "identity" || next === "validate" || next === "assert") {
     throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
   }
-  Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
+  Object.defineProperty(classTarget, next, {
+    configurable: true,
+    enumerable: false,
+    value: factory
+  });
 }
 function createScalarValueObject(schema, identifier2, isAbstract) {
   const parse3 = compileValidator(schema).parse;
@@ -25370,6 +25483,9 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
   }
   function hydrate(state3) {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
+    }
     const construct2 = this;
     if (!policy.configured || !policy.hydrate) {
       return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
@@ -25668,7 +25784,14 @@ function valueObject(schema) {
     return createScalarValueObject(unwrapped, false, false);
   }
   const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
-  return "value" in base.def.props ? runtime.extends(classType.equals, classType.hashCode) : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode);
+  return "value" in base.def.props ? runtime.extends(
+    classType.equals,
+    classType.hashCode
+  ) : runtime.extends(
+    valueAccessorCapability,
+    classType.equals,
+    classType.hashCode
+  );
 }
 function abstractValueObject(schema) {
   const unwrapped = unwrapSchema(schema);
@@ -25680,7 +25803,14 @@ function abstractValueObject(schema) {
     return createScalarValueObject(unwrapped, false, true);
   }
   const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
-  return "value" in base.def.props ? runtime.extends(classType.equals, classType.hashCode) : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode);
+  return "value" in base.def.props ? runtime.extends(
+    classType.equals,
+    classType.hashCode
+  ) : runtime.extends(
+    valueAccessorCapability,
+    classType.equals,
+    classType.hashCode
+  );
 }
 function uniqueIdentifier(schema) {
   const identifierSchema = schema === void 0 ? defaultTo(
@@ -25736,10 +25866,42 @@ function findRuntimeTypeSchema(schema) {
     return void 0;
   }
 }
+function aggregatePolicyTarget(classTarget) {
+  const target = classTarget[AGGREGATE_POLICY_TARGET];
+  if (target === void 0) {
+    throw new JITError("INVALID_OPERATION", "This DDD capability requires an Aggregate Root");
+  }
+  return target;
+}
+function timestamps(options) {
+  return Object.freeze({
+    kind: "ddd.timestamps",
+    install(classTarget) {
+      aggregatePolicyTarget(classTarget).timestamps(options);
+    }
+  });
+}
+function softDelete(options) {
+  return Object.freeze({
+    kind: "ddd.softDelete",
+    install(classTarget) {
+      aggregatePolicyTarget(classTarget).softDelete(options);
+    }
+  });
+}
+function versioned(options) {
+  return Object.freeze({
+    kind: "ddd.versioned",
+    install(classTarget) {
+      aggregatePolicyTarget(classTarget).versioned(options);
+    }
+  });
+}
 function createEntity(schema, isAbstract, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  return createRuntimeClass(unwrapped, isAbstract, false, false, "factory").extends(
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory");
+  return runtime.extends(
     classType.identity(identity)
   );
 }
@@ -25752,7 +25914,8 @@ function abstractEntity(schema, ...args) {
 function createAggregateRoot(schema, isAbstract, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const aggregate = createRuntimeClass(unwrapped, isAbstract, false, true, "factory").extends(
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory");
+  const aggregate = runtime.extends(
     classType.identity(identity)
   );
   const base = resolveWrappers(unwrapped).base;
@@ -25777,9 +25940,49 @@ function createAggregateRoot(schema, isAbstract, ...args) {
   let touchAt;
   let deletedAt;
   let version;
+  let timestampClock;
+  let deletionClock;
+  let touchMethod;
+  let deleteMethod;
+  let restoreMethod;
+  let isDeletedMember;
   let timestampsConfigured = false;
   let softDeleteConfigured = false;
   let versionConfigured = false;
+  const now = (clock) => {
+    const value = clock === void 0 ? /* @__PURE__ */ new Date() : clock();
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+      throw new JITError("INVALID_OPERATION", "A DDD clock must return a valid Date");
+    }
+    return value;
+  };
+  const methodName = (value, fallback, label) => {
+    const name = value ?? fallback;
+    if (name.length === 0) throw new JITError("INVALID_OPERATION", `${label} method name cannot be empty`);
+    if (name in base.def.props) {
+      throw new JITError("INVALID_OPERATION", `${label} method ${JSON.stringify(name)} collides with a schema field`);
+    }
+    if (name in aggregate.prototype) {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `${label} method ${JSON.stringify(name)} collides with an installed capability`
+      );
+    }
+    return name;
+  };
+  const mutationArtifact = () => ({
+    ...updatedAt === void 0 ? {} : { updatedAt },
+    ...touchAt === void 0 ? {} : { touchAt },
+    ...version === void 0 ? {} : { version },
+    ...deletedAt === void 0 ? {} : { deletedAt },
+    ...timestampClock === void 0 ? {} : { timestampClock },
+    ...deletionClock === void 0 ? {} : { deletionClock },
+    ...touchMethod === void 0 ? {} : { touchMethod },
+    ...deleteMethod === void 0 ? {} : { deleteMethod },
+    ...restoreMethod === void 0 ? {} : { restoreMethod },
+    ...isDeletedMember === void 0 ? {} : { isDeletedMember }
+  });
+  const refreshArtifact = () => setClassMutationArtifact(aggregate, mutationArtifact());
   const installMutation = () => {
     const mutation = buildAggregateMutationPlan({
       fields,
@@ -25787,10 +25990,17 @@ function createAggregateRoot(schema, isAbstract, ...args) {
       ...updatedAt === void 0 ? {} : { updatedAt },
       ...version === void 0 ? {} : { version }
     });
+    const clockNames = updatedAt !== void 0 && timestampClock !== void 0 ? ["__clock"] : [];
+    const clockValues = updatedAt !== void 0 && timestampClock !== void 0 ? [() => now(timestampClock)] : [];
     const assign = globalThis.Function(
       ...updateNames,
-      `return function update(patch) { ${emitAggregateMutationBody(mutation, updateBindings)} };`
-    )(...updateValues);
+      ...clockNames,
+      `return function update(patch) { ${emitAggregateMutationBody(
+        mutation,
+        updateBindings,
+        clockNames.length === 0 ? "new Date()" : "__clock()"
+      )} };`
+    )(...updateValues, ...clockValues);
     Object.defineProperty(aggregate.prototype, "update", {
       configurable: true,
       enumerable: false,
@@ -25798,10 +26008,8 @@ function createAggregateRoot(schema, isAbstract, ...args) {
     });
   };
   installMutation();
-  Object.defineProperty(aggregate, "timestamps", {
-    configurable: false,
-    enumerable: false,
-    value: (timestamp) => {
+  const aggregatePolicies = {
+    timestamps(timestamp) {
       if (timestampsConfigured) {
         throw new JITError("INVALID_OPERATION", "Timestamps are already configured for this Aggregate Root");
       }
@@ -25813,26 +26021,22 @@ function createAggregateRoot(schema, isAbstract, ...args) {
       if (timestamp.touch !== void 0 && timestamp.touch !== "mutation" && timestamp.touch !== "manual") {
         throw new JITError("INVALID_OPERATION", "Timestamp touch must be mutation or manual");
       }
+      if (timestamp.clock !== void 0 && typeof timestamp.clock !== "function") {
+        throw new JITError("INVALID_OPERATION", "Timestamp clock must be a function");
+      }
+      const name = methodName(timestamp.methods?.touch, "touch", "Timestamp");
       timestampsConfigured = true;
       touchAt = field;
       updatedAt = timestamp.touch === "manual" ? void 0 : field;
-      definePrototype(aggregate.prototype, "touch", function touch() {
-        this[field] = /* @__PURE__ */ new Date();
+      timestampClock = timestamp.clock;
+      touchMethod = name;
+      definePrototype(aggregate.prototype, name, function touch() {
+        this[field] = now(timestampClock);
       });
       installMutation();
-      setClassMutationArtifact(aggregate, {
-        ...updatedAt === void 0 ? {} : { updatedAt },
-        touchAt,
-        ...deletedAt === void 0 ? {} : { deletedAt },
-        ...version === void 0 ? {} : { version }
-      });
-      return aggregate;
-    }
-  });
-  Object.defineProperty(aggregate, "softDelete", {
-    configurable: false,
-    enumerable: false,
-    value: (options) => {
+      refreshArtifact();
+    },
+    softDelete(options) {
       if (softDeleteConfigured) {
         throw new JITError("INVALID_OPERATION", "Soft delete is already configured for this Aggregate Root");
       }
@@ -25845,37 +26049,40 @@ function createAggregateRoot(schema, isAbstract, ...args) {
           `Soft-delete field ${JSON.stringify(field)} must be a nullable Date schema`
         );
       }
+      if (options.clock !== void 0 && typeof options.clock !== "function") {
+        throw new JITError("INVALID_OPERATION", "Soft-delete clock must be a function");
+      }
+      const nextDeleteMethod = methodName(options.methods?.delete, "softDelete", "Soft-delete");
+      const nextRestoreMethod = methodName(options.methods?.restore, "restore", "Soft-delete");
+      const nextIsDeletedMember = methodName(options.methods?.isDeleted, "isDeleted", "Soft-delete");
+      if ((/* @__PURE__ */ new Set([nextDeleteMethod, nextRestoreMethod, nextIsDeletedMember])).size !== 3) {
+        throw new JITError("INVALID_OPERATION", "Soft-delete member names must be distinct");
+      }
       softDeleteConfigured = true;
       deletedAt = field;
-      definePrototype(aggregate.prototype, "softDelete", function softDelete() {
-        const now = /* @__PURE__ */ new Date();
-        this[field] = now;
-        if (updatedAt !== void 0) this[updatedAt] = now;
+      deletionClock = options.clock;
+      deleteMethod = nextDeleteMethod;
+      restoreMethod = nextRestoreMethod;
+      isDeletedMember = nextIsDeletedMember;
+      definePrototype(aggregate.prototype, nextDeleteMethod, function softDelete2() {
+        const current = now(deletionClock ?? timestampClock);
+        this[field] = current;
+        if (updatedAt !== void 0) this[updatedAt] = current;
       });
-      definePrototype(aggregate.prototype, "restore", function restore() {
+      definePrototype(aggregate.prototype, nextRestoreMethod, function restore() {
         this[field] = null;
-        if (updatedAt !== void 0) this[updatedAt] = /* @__PURE__ */ new Date();
+        if (updatedAt !== void 0) this[updatedAt] = now(deletionClock ?? timestampClock);
       });
-      Object.defineProperty(aggregate.prototype, "isDeleted", {
+      Object.defineProperty(aggregate.prototype, nextIsDeletedMember, {
         configurable: false,
         enumerable: false,
         get() {
           return this[field] !== null;
         }
       });
-      setClassMutationArtifact(aggregate, {
-        ...updatedAt === void 0 ? {} : { updatedAt },
-        ...touchAt === void 0 ? {} : { touchAt },
-        deletedAt,
-        ...version === void 0 ? {} : { version }
-      });
-      return aggregate;
-    }
-  });
-  Object.defineProperty(aggregate, "versioned", {
-    configurable: false,
-    enumerable: false,
-    value: (options) => {
+      refreshArtifact();
+    },
+    versioned(options) {
       if (versionConfigured) {
         throw new JITError("INVALID_OPERATION", "Versioning is already configured for this Aggregate Root");
       }
@@ -25891,14 +26098,13 @@ function createAggregateRoot(schema, isAbstract, ...args) {
       versionConfigured = true;
       version = field;
       installMutation();
-      setClassMutationArtifact(aggregate, {
-        ...updatedAt === void 0 ? {} : { updatedAt },
-        ...touchAt === void 0 ? {} : { touchAt },
-        ...deletedAt === void 0 ? {} : { deletedAt },
-        version
-      });
-      return aggregate;
-    }
+      refreshArtifact();
+    },
+    refreshArtifact
+  };
+  Object.defineProperty(aggregate, AGGREGATE_POLICY_TARGET, {
+    enumerable: false,
+    value: aggregatePolicies
   });
   definePrototype(aggregate.prototype, "raise", function raise(event) {
     this.__jitEvents[this.__jitEvents.length] = event;
@@ -25945,7 +26151,11 @@ function domainEvent(type, options) {
   Object.defineProperty(event.prototype, "~event", {
     configurable: false,
     enumerable: false,
-    value: Object.freeze({ version: 1, type, schemaVersion: options.version }),
+    value: Object.freeze({
+      version: 1,
+      type,
+      schemaVersion: options.version
+    }),
     writable: false
   });
   registerArtifact(event, {
@@ -26010,18 +26220,31 @@ function installMethods(classTarget, methods, taken, installed) {
         `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
       );
     }
-    Object.defineProperty(classTarget.prototype, name, { ...descriptor, enumerable: false, configurable: false });
+    Object.defineProperty(classTarget.prototype, name, {
+      ...descriptor,
+      enumerable: false,
+      configurable: false
+    });
     installed.add(name);
     if (descriptor.get !== void 0) recorded.push({ name, kind: "get", source: descriptor.get });
     if (descriptor.set !== void 0) recorded.push({ name, kind: "set", source: descriptor.set });
     if (descriptor.get === void 0 && descriptor.set === void 0) {
-      recorded.push({ name, kind: "method", source: descriptor.value });
+      recorded.push({
+        name,
+        kind: "method",
+        source: descriptor.value
+      });
     }
   }
   return recorded;
 }
 function definePrototype(prototype, key, value) {
-  Object.defineProperty(prototype, key, { configurable: false, enumerable: false, value, writable: false });
+  Object.defineProperty(prototype, key, {
+    configurable: false,
+    enumerable: false,
+    value,
+    writable: false
+  });
 }
 
 // ../../packages/jit/src/factories/composition/composition.ts
@@ -26354,6 +26577,12 @@ var ddd = Object.freeze({
   domainEvent,
   /** Scalar identifier Value Object; defaults to a generated UUID. */
   uniqueIdentifier,
+  /** Aggregate timestamp capability, installed through `.extends(...)`. */
+  timestamps,
+  /** Aggregate soft-delete capability, installed through `.extends(...)`. */
+  softDelete,
+  /** Aggregate optimistic-version capability, installed through `.extends(...)`. */
+  versioned,
   /** A collection that tracks additions and removals by semantic identity. */
   watchedList,
   /** Explicit base types that cannot be created until subclassed. */
@@ -26407,9 +26636,12 @@ function unresolvedIndexPlan(schema, shape) {
 var emptyDef = {};
 
 // ../../packages/jit/src/factories/primitive/string.ts
-function string() {
+function string(message) {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.string, emptyDef)
+    createSchema(
+      TypeName.string,
+      withValidationMessage(emptyDef, message)
+    )
   );
 }
 
@@ -26528,18 +26760,24 @@ function stringify2(schema) {
 var ndjson = Object.freeze({ parse: parse2, stringify: stringify2 });
 
 // ../../packages/jit/src/factories/object/object.ts
-function object(shape) {
+function object(shape, message) {
   const props = {};
   for (const key in shape) {
     props[key] = unwrapSchema(shape[key]);
   }
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.object, {
-      props,
-      unknownKeys: void 0,
-      catchall: void 0,
-      checks: []
-    })
+    createSchema(
+      TypeName.object,
+      withValidationMessage(
+        {
+          props,
+          unknownKeys: void 0,
+          catchall: void 0,
+          checks: []
+        },
+        message
+      )
+    )
   );
 }
 
@@ -26549,67 +26787,90 @@ function any() {
 }
 
 // ../../packages/jit/src/factories/primitive/bigint.ts
-function bigint2() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.bigint, emptyDef));
+function bigint2(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.bigint, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/boolean.ts
-function boolean2() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.boolean, emptyDef));
+function boolean2(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.boolean, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/date.ts
-function date2() {
+function date2(message) {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.date, emptyDef)
+    createSchema(TypeName.date, withValidationMessage(emptyDef, message))
   );
 }
 
 // ../../packages/jit/src/factories/primitive/file.ts
-function file() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.file, emptyDef));
+function file(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.file, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/int.ts
-function int() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.int, emptyDef));
+function int(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.int, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/nan.ts
-function nan() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.nan, emptyDef));
+function nan(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.nan, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/never.ts
-function never() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.never, emptyDef));
+function never(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.never, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/null.ts
-function nullType() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.null, emptyDef));
+function nullType(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.null, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/number.ts
-function number2() {
+function number2(message) {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.number, emptyDef)
+    createSchema(
+      TypeName.number,
+      withValidationMessage(emptyDef, message)
+    )
   );
 }
 
 // ../../packages/jit/src/factories/primitive/regex.ts
-function regex() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.regex, emptyDef));
+function regex(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.regex, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/symbol.ts
-function symbol() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.symbol, emptyDef));
+function symbol(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.symbol, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/undefined.ts
-function undefinedType() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.undefined, emptyDef));
+function undefinedType(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.undefined, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/primitive/unknown.ts
@@ -26618,8 +26879,10 @@ function unknown() {
 }
 
 // ../../packages/jit/src/factories/primitive/void.ts
-function voidType() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.void, emptyDef));
+function voidType(message) {
+  return /* @__PURE__ */ createBuilder(
+    createSchema(TypeName.void, withValidationMessage(emptyDef, message))
+  );
 }
 
 // ../../packages/jit/src/factories/process.ts
@@ -27793,19 +28056,11 @@ function selectArraySchema(schema, fields) {
 }
 
 // ../../packages/jit/src/factories/special/special.ts
-function literal3(value) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.literal, {
-      value
-    })
-  );
+function literal3(value, message) {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.literal, withValidationMessage({ value }, message)));
 }
-function nativeEnum(values) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.enum, {
-      values
-    })
-  );
+function nativeEnum(values, message) {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.enum, withValidationMessage({ values }, message)));
 }
 function lazy(getter) {
   return /* @__PURE__ */ createBuilder(
@@ -27814,15 +28069,11 @@ function lazy(getter) {
     })
   );
 }
-function instanceOf(ctor) {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.instanceof, {
-      ctor
-    })
-  );
+function instanceOf(ctor, message) {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.instanceof, withValidationMessage({ ctor }, message)));
 }
-function jsonValue() {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, {}));
+function jsonValue(message) {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, withValidationMessage({}, message)));
 }
 function custom(predicate, message) {
   return /* @__PURE__ */ createBuilder(
@@ -27832,12 +28083,13 @@ function custom(predicate, message) {
     })
   );
 }
-function templateLiteral(parts) {
+function templateLiteral(parts, message) {
   const normalized = parts.map((part) => typeof part === "string" ? part : unwrapSchema(part));
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.templateLiteral, {
-      parts: normalized
-    })
+    createSchema(
+      TypeName.templateLiteral,
+      withValidationMessage({ parts: normalized }, message)
+    )
   );
 }
 function functionSchema(options) {
@@ -27848,11 +28100,7 @@ function functionSchema(options) {
     rest: void 0
   });
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.function, {
-      input,
-      output,
-      args
-    })
+    createSchema(TypeName.function, withValidationMessage({ input, output, args }, options.message))
   );
 }
 function temporalSchema(kind) {
@@ -28419,23 +28667,26 @@ function collectBindings(keys, transforms) {
 
 // ../../packages/jit/src/factories/coerce.ts
 function flagged(schema) {
-  return createBuilder({ ...schema, def: { ...schema.def, coerce: true } });
+  return createBuilder({
+    ...schema,
+    def: { ...schema.def, coerce: true }
+  });
 }
 var nativeCoercions = {
-  string() {
-    return flagged(string().schema);
+  string(message) {
+    return flagged(string(message).schema);
   },
-  number() {
-    return flagged(number2().schema);
+  number(message) {
+    return flagged(number2(message).schema);
   },
-  boolean() {
-    return flagged(boolean2().schema);
+  boolean(message) {
+    return flagged(boolean2(message).schema);
   },
-  bigint() {
-    return flagged(bigint2().schema);
+  bigint(message) {
+    return flagged(bigint2(message).schema);
   },
-  date() {
-    return flagged(date2().schema);
+  date(message) {
+    return flagged(date2(message).schema);
   }
 };
 

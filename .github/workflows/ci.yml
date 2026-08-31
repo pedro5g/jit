@@ -48,6 +48,13 @@ jobs:
       - name: build project
         run: pnpm run build
 
+      - name: validate copilot knowledge artifacts
+        # §67: an unregistered route, a duplicated id, a dangling relation or a
+        # failing documentation example is invisible at build time and becomes a
+        # confidently wrong answer at read time. Compiles in memory and writes
+        # nothing, so it needs no embedding model and no network.
+        run: pnpm --filter @jit/site knowledge:validate
+
       - name: build documentation site
         run: pnpm --filter @jit/site build
 

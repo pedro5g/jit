@@ -1,7 +1,6 @@
-// Builds the retrieval index the ghost assistant answers from: every MDX page
-// under content/docs is split at its headings into self-contained sections,
-// stripped of MDX syntax, and written as one JSON document served statically.
-// Run from apps/site (wired into the dev/build scripts). Output is gitignored.
+// Frozen lexical artifact for configuration A of the headless benchmark.
+// The product reads public/copilot/v1 instead; this file remains reproducible
+// so A/B continues to measure the retired pipeline against the replacement.
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -144,11 +143,9 @@ function splitLongText(text) {
  *
  *   related: /docs/runtime/queries, /docs/runtime/binary-rowsets
  *
- * The concept graph already derives most of these from its own edges, but it
- * only knows about relationships between *concepts*. A page-to-page link that
- * no concept expresses — the boundary guide belonging next to the DTO
- * reference — has nowhere else to live, and a reader who reaches one of them
- * almost always wants the other. `audit-docs` verifies every target exists.
+ * The retired baseline used these page-to-page links as a weak lexical
+ * relation. `audit-docs` still verifies every target so the frozen benchmark
+ * cannot silently rank a route that no longer exists.
  */
 function relatedFrom(data) {
   if (!data.related) return [];
@@ -282,12 +279,35 @@ for (const file of files) {
  */
 function marksRemovedApis(text, known) {
   for (const match of text.matchAll(/\bJIT\.([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
-    const name = match[1];
-    // type-level exports are real but absent from the runtime namespace
-    if (!known.has(name) && name !== "Typeof" && name !== "Strict") return true;
+    if (!known.has(match[1])) return true;
   }
 
   return false;
+}
+
+/**
+ * Public names that exist only in the type system.
+ *
+ * This used to be the literal pair `Typeof` and `Strict`, written out here and
+ * in two other scripts. The library grew `Input`, `Hydrate`, `Wire` and
+ * `Update`, the runtime-classes reference started using three of them, and
+ * every one of those pages was marked as quoting a removed API — so the prompt
+ * told the model that correct, current documentation was a counter-example.
+ *
+ * Read from `runtime.ts` instead, which cannot fall behind the library.
+ */
+function typeExports(source) {
+  const names = new Set();
+
+  for (const match of source.matchAll(/^export type ([A-Za-z_$][\w$]*)\s*[<=]/gm)) names.add(match[1]);
+  for (const match of source.matchAll(/^export type \{([\s\S]*?)\}/gm)) {
+    for (const part of match[1].split(",")) {
+      const name = part.trim().split(/\s+as\s+/).pop()?.trim();
+      if (name && /^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
+    }
+  }
+
+  return [...names];
 }
 
 const apiSurface = extractApiSurface(
@@ -299,7 +319,8 @@ if (apiSurface.length === 0) {
   process.exit(1);
 }
 
-const knownApi = new Set(apiSurface.map((member) => member.name));
+const declaredTypes = typeExports(await fs.readFile(path.resolve(siteDir, "../../packages/jit/src/runtime.ts"), "utf8"));
+const knownApi = new Set([...apiSurface.map((member) => member.name), ...declaredTypes]);
 let legacySections = 0;
 
 for (const section of documents) {
@@ -337,6 +358,9 @@ const payload = {
     .slice(0, 16),
   builtAt: new Date().toISOString(),
   api: apiSurface,
+  // Carried rather than re-derived by every consumer. Four places used to
+  // hardcode `["Typeof", "Strict"]`, and all four went stale together.
+  typeExports: declaredTypes,
   methodsInDocs: methodsCalledInDocs(documents),
   documents,
 };

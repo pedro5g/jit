@@ -194,30 +194,59 @@ description of a library that no longer exists. **Rebuild that context in the sa
 from `apps/site`:
 
 ```bash
-pnpm gen:api-surface   # the surface the answer audit is checked against
-pnpm gen:docs-index    # retrieval index; its version key invalidates cached embeddings
+pnpm knowledge:build   # compile docs, symbols, routes, indexes and embeddings
+pnpm knowledge:validate # validate the generated knowledge in memory
 pnpm gen:dts           # Monaco declarations for the workspace
 pnpm gen:lab           # browser AOT bundle used by Generate and by example verification
 pnpm audit:docs        # executes every documentation example against the real library
 pnpm eval:ghost        # retrieval against the golden question set
 ```
 
-Context that is written by hand and must be updated by hand: `lib/assistant/graph.ts`
-(concepts, verified facts, one runnable example per concept), `lib/assistant/solutions.ts`
-(symptom to API recipes) and `lib/assistant/prompt.ts` (the always-true block). Their
-examples are executed by the test suite, so a stale one fails the build.
+The copilot has no hand-written concept graph or duplicated fact catalog. Knowledge is
+compiled from the runtime surface, documentation, routes and executed examples. A fact
+that can be extracted from a real source must not be added to the prompt by hand.
 
 Rules the assistant and workspace are held to:
 
-- No unaudited answer is shown. Every jit code block the assistant writes is transpiled
-  and executed in a disposable worker before the reader sees it; a block that throws,
-  loops or uses an undeclared value is an audit finding.
-- Generative behaviour is beta and says so. The verified floor (retrieval, concept facts,
-  executed examples) is what the product promises; the model is a layer on top.
+- No unaudited answer is shown. Fatal audit findings fail closed after at most one
+  constrained retry. Schema generation uses validated `SchemaIntent` and deterministic
+  code generation; the model never writes JIT syntax for that path.
+- Generative behaviour is beta and says so. The verified floor (retrieval, compiled
+  symbols and documentation examples) is what the product promises; the model is a
+  language layer on top.
 - The workspace holds a project. `lib/workspace/project.ts` owns path rules, identical to
   the artifact protocol's, and `lib/workspace/bundle.ts` links files so each dependency
   keeps its own scope.
 - The entrypoint import line belongs to the workspace and is restored when edited.
+
+### The copilot's knowledge and its measurement (lib/copilot)
+
+The copilot engine replaced the hand-written graph assistant after the retrieval and
+generation measurements established the migration boundary. Its knowledge is compiled
+rather than written:
+
+```bash
+pnpm knowledge:build      # compile docs, API surface and routes into versioned artifacts
+pnpm knowledge:validate   # in-memory; an unregistered route or dangling relation fails CI
+pnpm knowledge:benchmark  # generation, one process per configuration, writes .eval runs
+pnpm knowledge:label      # adjudication sheet + empty label scaffold for a run
+pnpm knowledge:rescore    # re-score saved transcripts with today's detectors, no generation
+```
+
+- Detection is not policy. A validator reports what it found, the audit aggregates and
+  classifies, and an `AuditPolicy` decides what the product does. Never move a severity
+  decision into a detector.
+- The model is never a source of truth, and neither is a second model. There is no
+  LLM judge anywhere in the eval path: a judge's verdicts are the one thing nothing else
+  could check.
+- A benchmark run is an artifact — manifest, cases, contexts, responses — written as soon
+  as its configuration finishes. Runs and reports are regenerable and ignored; the
+  hand-read labels under `.eval/copilot/labels/` are ground truth and are committed.
+- A detector's precision and recall are measured against those labels, never against its
+  own output, and a bad score is a finding rather than a reason to move a threshold.
+- The headless light tier is not the browser's. Qwen3.5-0.8B does not load under
+  `onnxruntime-node`, so the headless floor is a smaller model and its numbers are a lower
+  bound on the browser tier, never an estimate of it. Never quote one table as the other.
 
 ## Performance Principles
 
@@ -259,6 +288,12 @@ Every new runtime artifact must:
 - have runtime/AOT semantic parity tests;
 - have deterministic generated-source coverage;
 - have a focused tree-shaking fixture.
+
+AOT declaration discovery treats the module's explicit exports as its public
+manifest. Private schemas, artifacts and artifact objects are build-time
+implementation details and must not be emitted. A structural type is emitted
+only for an explicit `export type Name = JIT.Typeof<typeof schema>` declaration
+or an equivalent type-only export of that alias.
 
 Composed operations must lower as one optimized AOT program where fusion is
 safe. API parity does not require byte-identical source, but both hosts must
@@ -334,7 +369,9 @@ query describes the request; facts on the collection decide the access path.
 - Create semantics may resolve defaults. Hydrate semantics never regenerate persisted defaults.
 - Nested Runtime Types accept their boundary representation and materialize recursively through the shared validation/materialization lowering.
 - Scalar Value Objects are runtime objects with a readonly `value` accessor; never represent them as primitive intersections with methods.
+- `Typeof` describes that materialized runtime representation. `Input`, `Hydrate`, and `Wire` describe boundary representations; never make `Typeof` primitive merely because a scalar Value Object serializes as one.
 - Identity inference uses identifier metadata only when exactly one unambiguous candidate exists. Explicit identity always wins.
+- Identifier metadata marks a Value Object as an identity candidate; it does not give the Value Object `identity()`/`sameIdentity()`. Those methods belong to Entities and Aggregate Roots.
 - Factory validation and domain assertions are opt-in and add zero work to unconfigured classes. `.validate()` selects the failure channel and the phases it covers; it does not decide whether the schema is checked, because defaults and nested Runtime Type materialization come from that same parse.
 - A domain assertion reports through the factory's result policy, never its own. An assertion error carries the rule and the field, never the rejected value.
 - Result policy is fixed at artifact declaration and reflected exactly in factory types.
@@ -344,6 +381,7 @@ query describes the request; facts on the collection decide the access path.
 - A custom message never changes an issue code and never reaches boolean codegen. Application logic depends on `issue.code`/`issue.params`, never on `issue.message`, and no issue carries the rejected value.
 - Class capabilities reuse existing compiler plans; do not create separate clone, validation or diff engines for classes.
 - Class and DDD capabilities attach through `.extends()`; do not reintroduce `.use()` for prototype capabilities.
+- Timestamp, soft-delete, and version capabilities live under `JIT.ddd` and attach through `.extends()`. Their default clocks remain directly emitted; custom clocks are runtime bindings and require an explicit AOT skip reason.
 - Custom extensions live on the prototype and never allocate a method per instance, and there is no dispatcher between a call and its body.
 - An extension name may not shadow a schema accessor, a factory, the constructor or an installed capability. There is no override escape hatch.
 - Built-in extensions are reconstructive AOT capabilities. Application methods are runtime bindings and make standalone AOT generation skip the complete class with a reason. Never reconstruct a custom method from `Function#toString`; a future portable method requires declarative IR or an explicit external-module binding contract.
