@@ -1063,7 +1063,7 @@ Discovery rules are intentionally boring:
 - `entries` accepts files, directories, and globs like `jit/**/*.jit.ts`;
 - `patterns` controls directory scans; the default matches `**/*.jit.ts` and
   `**/*.jit.js`;
-- if no artifacts are declared, the CLI prints a warning and writes nothing;
+- if no declarations are exported, the CLI prints a warning and writes nothing;
 - `jit doctor` prints resolved config, output directory, patterns, and files;
 - `jit list` loads declaration files and prints declared types, artifact
   objects and standalone artifacts without writing anything;
@@ -1071,30 +1071,32 @@ Discovery rules are intentionally boring:
   exact generated source for review;
 - `jit clean` removes the configured generated directory.
 
-The declaration file is the manifest, read literally: a schema names a
-generated type, an artifact becomes a generated function under its own binding
-name, and an object of artifacts becomes one frozen object. `export` is
-optional; a schema alone never becomes a runtime function.
+The declaration file is an explicit manifest: exported artifacts become
+generated functions under their export names, exported artifact objects become
+frozen objects, and exported `JIT.Typeof<typeof schema>` aliases become
+generated structural types. Private schemas and artifacts are build-time
+implementation details and do not leak into output.
 
 ```ts
 // jit/user.jit.ts — discovered by convention (**/*.jit.ts)
 import { JIT } from "@jit-compiler/jit/define";
 
-// Private to the file, but it still names the generated `User` type.
-const User = JIT.object({
+const userSchema = JIT.object({
   id: JIT.number(),
   name: JIT.string(),
   role: JIT.string(),
 });
 
+export type User = JIT.Typeof<typeof userSchema>;
+
 // Keeps its binding name exactly.
-export const isUser = JIT.validate.is(User);
+export const isUser = JIT.validate.is(userSchema);
 
 // One frozen object: UserOps.parse, UserOps.findAdmins.
 export const UserOps = {
-  parse: JIT.validate.parse(User),
+  parse: JIT.validate.parse(userSchema),
   findAdmins: JIT.cqrs
-    .query(JIT.array(User))
+    .query(JIT.array(userSchema))
     .filter((q) => q.eq("role", "admin")),
 };
 ```

@@ -21,12 +21,23 @@ NumericId.create(42).value; // number
 
 Identifier metadata means “identifier-like”, not automatically “the entity identity”. Entity and Aggregate Root presets infer identity only when exactly one field carries this metadata. Multiple identifier fields require `{ id: "..." }` explicitly.
 
+The identifier Value Object itself does not expose `identity()` or
+`sameIdentity()`. A Value Object has value semantics (`equals` and `hashCode`);
+identity comparison belongs to the Entity or Aggregate Root that selects the
+field.
+
 ## Boundary model
 
 - Create input is the underlying scalar input; a defaulted identifier also supports `create()`.
 - Hydrate input is the complete persisted scalar and never runs the creation default.
 - Runtime is an immutable object with `value`, `equals()` and `hashCode()`.
 - Wire is the underlying scalar, not `{ value }`.
+
+Accordingly, `JIT.Typeof<typeof Schema>` describes the materialized object,
+while `JIT.Input<typeof Schema>`, `JIT.Hydrate<typeof Schema>`, and
+`JIT.Wire<typeof Schema>` describe their respective scalar boundaries. Making
+`Typeof` a string would disagree with the value returned by parse and factory
+construction.
 
 Nested object fields and arrays accept scalar boundary values and are materialized directly into identifier instances by the compiled validator. Runtime and define declarations register the same reconstructive class descriptor. AOT co-emits the identifier class and rewrites nested materialization bindings to that standalone class; no Runtime Type registry or schema walker remains in generated code.
 

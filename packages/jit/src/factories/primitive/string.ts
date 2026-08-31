@@ -1,6 +1,7 @@
 import { type ChecksDef, createSchema, type StringCheck, type StringSchema, TypeName } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder } from "../../core/builder/index.js";
+import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 import { emptyDef } from "./empty-def.js";
 
 /**
@@ -8,8 +9,11 @@ import { emptyDef } from "./empty-def.js";
  *
  * @returns A builder wrapping a string schema.
  */
-export function string(): Builder<StringSchema<[]>> {
+export function string(message?: ValidationMessage): Builder<StringSchema<[]>> {
   return /* @__PURE__ */ createBuilder(
-    createSchema<string, "string", ChecksDef<StringCheck, []>>(TypeName.string, emptyDef)
+    createSchema<string, "string", ChecksDef<StringCheck, []>>(
+      TypeName.string,
+      withValidationMessage(emptyDef, message)
+    )
   );
 }

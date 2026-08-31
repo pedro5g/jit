@@ -37,7 +37,8 @@ export function buildAggregateMutationPlan(options: AggregateMutationPlanOptions
 /** Emits the hot aggregate mutation body with at most one clock read. */
 export function emitAggregateMutationBody(
   plan: AggregateMutationPlan,
-  updates: ReadonlyMap<string, string | null>
+  updates: ReadonlyMap<string, string | null>,
+  clockExpression = "new Date()"
 ): string {
   const writer = new CodeWriter();
 
@@ -55,7 +56,7 @@ export function emitAggregateMutationBody(
     writer.line("}");
   }
   writer.line("if (!changed) return;");
-  if (plan.updatedAt !== undefined) writer.line("const now = new Date();");
+  if (plan.updatedAt !== undefined) writer.line(`const now = ${clockExpression};`);
   if (plan.updatedAt !== undefined) writer.line(`this${emitPropertyAccess("", plan.updatedAt)} = now;`);
   if (plan.version !== undefined) writer.line(`this${emitPropertyAccess("", plan.version)} += 1;`);
   return writer.toString();

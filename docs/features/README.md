@@ -13,6 +13,7 @@ work and for production performance. Each page explains:
 
 - [AOT generation and tree sharing](./aot-tree-sharing.md)
 - [Runtime validation](./runtime-validation.md)
+- [DDD Runtime capabilities](./ddd-runtime-capabilities.md)
 - [Composable execution pipelines](./composable-execution.md)
 - [CLI and config](./cli-and-config.md)
 - [Cache, hash, and index strategies](./cache-hash-index.md)
@@ -57,6 +58,7 @@ work and for production performance. Each page explains:
 | Goal                              | Start here              | Main decision                               |
 | --------------------------------- | ----------------------- | ------------------------------------------- |
 | Validate one request/config value | Runtime validation      | `is` vs `parse` vs `safeParse`              |
+| Model domain identity/lifecycle   | DDD Runtime capabilities | runtime value vs boundary; compiled policy |
 | Compose a request/response flow   | Composable execution    | stages, boundaries, and AOT-safe bindings   |
 | Define constraints and transforms | Schema operators        | built-in operator vs callback refinement    |
 | Model date/time boundaries        | Temporal, ISO, codecs   | ISO string vs Date vs Temporal              |

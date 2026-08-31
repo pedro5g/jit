@@ -46,10 +46,19 @@ export {
   type EventPublisher,
   type RuntimeClass,
   type ScalarValueObject,
+  type SoftDeleteCapability,
+  type SoftDeleteOptions,
   type StandardEvent,
+  type TimestampCapability,
+  type TimestampOptions,
+  type VersionedCapability,
+  type VersionedOptions,
 } from "./class.js";
 export * from "./collection/index.js";
-export type { CollectionMutation, CollectionState } from "./collection-state.js";
+export type {
+  CollectionMutation,
+  CollectionState,
+} from "./collection-state.js";
 export * from "./composition/index.js";
 export {
   type CqrsQuery,
@@ -69,9 +78,18 @@ export {
   csv,
 } from "./csv.js";
 export { ddd } from "./ddd.js";
-export type { DerivedBuilder, DerivedComputation, DerivedExplanation } from "./derive.js";
+export type {
+  DerivedBuilder,
+  DerivedComputation,
+  DerivedExplanation,
+} from "./derive.js";
 export { dto } from "./dto.js";
-export { type IndexBuilder, type IndexPlan, index, type KeyedIndexPlan } from "./indexing.js";
+export {
+  type IndexBuilder,
+  type IndexPlan,
+  index,
+  type KeyedIndexPlan,
+} from "./indexing.js";
 export { type IsoFactories, iso } from "./iso.js";
 export { type LookupBuilder, type LookupPlan, lookup } from "./lookup.js";
 export type { MapperOverride, MapperOverrides } from "./mapper.js";
@@ -101,7 +119,12 @@ export type {
   ProcessBuilder,
 } from "./process.js";
 export { process } from "./process.js";
-export { type ProjectablePath, type ProjectBuilder, type Projected, project } from "./project.js";
+export {
+  type ProjectablePath,
+  type ProjectBuilder,
+  type Projected,
+  project,
+} from "./project.js";
 export type {
   BinaryQueryBuilder,
   LazyQueryBuilder,
@@ -164,6 +187,7 @@ export type {
   UpdateInput,
   UpdateRecipe,
 } from "./update.js";
+export type { ValidationMessage } from "./validation-message.js";
 export type {
   RuntimeWatch,
   WatchedListOptions,

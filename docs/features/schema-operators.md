@@ -4,6 +4,19 @@ Schema operators are fluent transformations and checks over the schema AST.
 They are not runtime decorators. The compiler reads them once and emits direct
 code for the selected operation.
 
+Base factories accept either a message string or `{ message }` where their
+argument list has an unambiguous final position. This customizes only the base
+type gate (`expected_string`, `expected_object`, and so on); chained checks
+keep their own diagnostics:
+
+```ts
+JIT.string("Expected text").min(3, "Expected at least three characters");
+JIT.array(JIT.number(), { message: "Expected a numeric array" });
+```
+
+Variadic composition factories use `.required(message)` on the returned
+builder. Codes and params remain stable when presentation text changes.
+
 ## Object Shape Operators
 
 ```ts

@@ -63,7 +63,9 @@ describe("jit CLI", () => {
     expect(source).toContain('entries: ["./jit/**/*.jit.ts"]');
     expect(source).toContain('directory: "generated"');
     expect(source).toContain('format: "ts"');
-    expect(existsSync(join(projectDir, "jit", "user.jit.ts"))).toBe(true);
+    const declaration = readFileSync(join(projectDir, "jit", "user.jit.ts"), "utf8");
+
+    expect(declaration).toContain("export type User = JIT.Typeof<typeof User>;");
   });
 
   it("should initialize plain JavaScript output when the project has no tsconfig", async () => {
@@ -96,12 +98,13 @@ describe("jit CLI", () => {
     const { runtime, stdout, stderr } = createRuntime();
 
     writeDeclaration("user.jit.ts", [
-      "const User = JIT.object({",
+      "const userSchema = JIT.object({",
       "  id: JIT.number(),",
       "  name: JIT.string(),",
       "});",
       "",
-      "export const isUser = JIT.validate.is(User);",
+      "export type User = JIT.Typeof<typeof userSchema>;",
+      "export const isUser = JIT.validate.is(userSchema);",
     ]);
     writeConfig();
 
@@ -111,7 +114,6 @@ describe("jit CLI", () => {
     expect(code).toBe(0);
     expect(stderr.join("")).toBe("");
     expect(stdout.join("")).toContain("using");
-    // The schema is private in the declaration, but it still names the type.
     expect(source).toContain("export type User = { id: number; name: string };");
     expect(source).toContain("const isUser: (value: unknown) => value is User =");
     expect(source).toContain("export { isUser };");
@@ -125,12 +127,13 @@ describe("jit CLI", () => {
     const { runtime } = createRuntime();
 
     writeDeclaration("user.jit.ts", [
-      "const User = JIT.object({ id: JIT.number(), name: JIT.string() });",
+      "const userSchema = JIT.object({ id: JIT.number(), name: JIT.string() });",
       "",
+      "export type User = JIT.Typeof<typeof userSchema>;",
       "export const UserMethods = {",
-      "  is: JIT.validate.is(User),",
-      "  toJson: JIT.json.stringify(User),",
-      "  equal: JIT.compare.equal(User),",
+      "  is: JIT.validate.is(userSchema),",
+      "  toJson: JIT.json.stringify(userSchema),",
+      "  equal: JIT.compare.equal(userSchema),",
       "};",
     ]);
     writeConfig();
@@ -150,12 +153,14 @@ describe("jit CLI", () => {
     const { runtime } = createRuntime();
 
     writeDeclaration("user.jit.ts", [
-      "const User = JIT.object({ id: JIT.number() });",
-      "export const isUser = JIT.validate.is(User);",
+      "const userSchema = JIT.object({ id: JIT.number() });",
+      "export type User = JIT.Typeof<typeof userSchema>;",
+      "export const isUser = JIT.validate.is(userSchema);",
     ]);
     writeDeclaration("post.jit.ts", [
-      "const Post = JIT.object({ slug: JIT.string() });",
-      "export const isPost = JIT.validate.is(Post);",
+      "const postSchema = JIT.object({ slug: JIT.string() });",
+      "export type Post = JIT.Typeof<typeof postSchema>;",
+      "export const isPost = JIT.validate.is(postSchema);",
     ]);
     writeConfig({ perFile: true });
 
@@ -168,6 +173,24 @@ describe("jit CLI", () => {
     expect(barrel).toContain('export { isUser } from "./user.js";');
     expect(barrel).toContain('export type { User } from "./user.js";');
     expect(barrel).toContain('export { isPost } from "./post.js";');
+  });
+
+  it("should not create a per-file module for declarations with no exports", async () => {
+    const { runtime } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const schema = JIT.object({ id: JIT.number() });",
+      "export const isUser = JIT.validate.is(schema);",
+    ]);
+    writeDeclaration("private.jit.ts", [
+      "const schema = JIT.object({ secret: JIT.string() });",
+      "const validateSecret = JIT.validate.is(schema);",
+    ]);
+    writeConfig({ perFile: true });
+
+    expect(await main(["generate"], runtime)).toBe(0);
+    expect(existsSync(join(projectDir, "generated", "user.ts"))).toBe(true);
+    expect(existsSync(join(projectDir, "generated", "private.ts"))).toBe(false);
   });
 
   it("should remove output left by a previous generation", async () => {
@@ -209,6 +232,7 @@ describe("jit CLI", () => {
 
     writeDeclaration("user.jit.ts", [
       "const User = JIT.object({ id: JIT.number() });",
+      "export type UserValue = JIT.Typeof<typeof User>;",
       "export const isUser = JIT.validate.is(User);",
       "export const UserMethods = { toJson: JIT.json.stringify(User) };",
     ]);
@@ -221,7 +245,7 @@ describe("jit CLI", () => {
 
     expect(output).toContain("format: ts");
     expect(output).toContain("layout: single index module");
-    expect(output).toContain("type User");
+    expect(output).toContain("type UserValue");
     expect(output).toContain("isUser:");
     expect(output).toContain("UserMethods:");
     expect(existsSync(join(projectDir, "generated"))).toBe(false);
@@ -251,7 +275,27 @@ describe("jit CLI", () => {
     const code = await main(["generate"], runtime);
 
     expect(code).toBe(1);
-    expect(stderr.join("")).toContain("No AOT artifacts found");
+    expect(stderr.join("")).toContain("No exported AOT declarations found");
+  });
+
+  it("should generate a type-only module only for an explicit Typeof export", async () => {
+    const { runtime, stderr } = createRuntime();
+
+    writeDeclaration("user.jit.ts", [
+      "const privateSchema = JIT.object({ hidden: JIT.boolean() });",
+      "const userSchema = JIT.object({ id: JIT.number() });",
+      "export type User = JIT.Typeof<typeof userSchema>;",
+    ]);
+    writeConfig();
+
+    const code = await main(["generate"], runtime);
+    const source = readFileSync(join(projectDir, "generated", "index.ts"), "utf8");
+
+    expect(code).toBe(0);
+    expect(stderr.join("")).toBe("");
+    expect(source).toContain("export type User = { id: number };");
+    expect(source).not.toContain("privateSchema");
+    expect(source).not.toContain("hidden");
   });
 
   it("should reject unknown output formats", async () => {

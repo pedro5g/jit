@@ -15,15 +15,16 @@ Create `*.jit.ts` declaration files with the define entrypoint:
 ```ts
 import { JIT } from "@jit-compiler/jit/define";
 
-export const UserSchema = JIT.object({
+const userSchema = JIT.object({
   id: JIT.number().int().positive(),
   name: JIT.string().min(2),
   email: JIT.string().email(),
 });
 
-export const isUser = JIT.validate.is(UserSchema);
-export const parseUser = JIT.validate.parse(UserSchema);
-export const stringifyUser = JIT.json.stringify(UserSchema);
+export type User = JIT.Typeof<typeof userSchema>;
+export const isUser = JIT.validate.is(userSchema);
+export const parseUser = JIT.validate.parse(userSchema);
+export const stringifyUser = JIT.json.stringify(userSchema);
 ```
 
 After `jit generate`, standalone exports stay flat:
@@ -38,8 +39,8 @@ If the developer wants an aggregated object, group explicit functions:
 
 ```ts
 const selected = {
-  is: JIT.validate.is(UserSchema),
-  parse: JIT.validate.parse(UserSchema),
+  is: JIT.validate.is(userSchema),
+  parse: JIT.validate.parse(userSchema),
 };
 
 export const User = selected;
@@ -86,6 +87,18 @@ export { User };
 It does not also emit `isUser` or `parseUser` as public exports. Internal
 bindings may exist inside the generated file, but bundlers can drop them when
 the object itself is not imported.
+
+Types are equally explicit:
+
+```ts
+const userSchema = JIT.object({ id: JIT.number() });
+export type User = JIT.Typeof<typeof userSchema>;
+```
+
+Only `User` is emitted as a structural type. A private schema, private
+artifact, or private artifact object never becomes generated output merely
+because it is declared in a discovered file. `export { local as publicName }`
+and type-only export lists preserve their public names.
 
 ## Why Tree Sharing Matters
 
@@ -147,8 +160,9 @@ Cache helpers are also conditional:
 - Export flat functions when the app imports operations independently.
 - Use an artifact object when the code naturally calls `User.is`, `User.parse`,
   or `User.stringify` together.
-- A schema on its own declares a type, not a runtime function. Declare the
-  artifacts you want, either standalone or on an artifact object.
+- Export `JIT.Typeof<typeof schema>` only for the structural types consumers
+  should import. A schema declaration by itself emits nothing.
+- Export the artifacts you want, either standalone or on an artifact object.
 - Turn on `output.perFile` when different routes import unrelated schemas: each
   declaration file becomes its own module plus an `index` barrel.
 - Run `pnpm clean:artifacts` after local builds if zshy leaves ignored build

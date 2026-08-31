@@ -19,6 +19,7 @@ import {
 } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
+import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 
 /**
  * Creates a literal schema builder.
@@ -27,12 +28,8 @@ import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builde
  * @param value - The literal runtime value.
  * @returns A builder wrapping a literal schema.
  */
-export function literal<const TValue>(value: TValue): Builder<LiteralSchema<TValue>> {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.literal, {
-      value,
-    })
-  );
+export function literal<const TValue>(value: TValue, message?: ValidationMessage): Builder<LiteralSchema<TValue>> {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.literal, withValidationMessage({ value }, message)));
 }
 
 /**
@@ -42,12 +39,11 @@ export function literal<const TValue>(value: TValue): Builder<LiteralSchema<TVal
  * @param values - An object whose values are strings or numbers.
  * @returns A builder wrapping an enum schema.
  */
-function nativeEnum<const TValues extends EnumValuesInput>(values: TValues): Builder<EnumSchema<TValues>> {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.enum, {
-      values,
-    })
-  );
+function nativeEnum<const TValues extends EnumValuesInput>(
+  values: TValues,
+  message?: ValidationMessage
+): Builder<EnumSchema<TValues>> {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.enum, withValidationMessage({ values }, message)));
 }
 
 export { nativeEnum as enum };
@@ -75,18 +71,15 @@ export function lazy<TSchema extends AnyTypeSchema>(getter: () => SchemaInput<TS
  * @returns A builder wrapping an instanceof schema.
  */
 export function instanceOf<TCtor extends abstract new (...args: any[]) => unknown>(
-  ctor: TCtor
+  ctor: TCtor,
+  message?: ValidationMessage
 ): Builder<InstanceOfSchema<TCtor>> {
-  return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.instanceof, {
-      ctor,
-    })
-  );
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.instanceof, withValidationMessage({ ctor }, message)));
 }
 
 /** Creates a schema that accepts JSON-encodable values. Kept under `JIT.json.value()`. */
-export function jsonValue(): Builder<JsonSchema> {
-  return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, {}));
+export function jsonValue(message?: ValidationMessage): Builder<JsonSchema> {
+  return /* @__PURE__ */ createBuilder(createSchema(TypeName.json, withValidationMessage({}, message)));
 }
 
 /**
@@ -109,14 +102,16 @@ export type TemplateLiteralFactoryPart = string | SchemaInput;
 
 /** Creates a template-literal string schema from literal and schema parts. */
 export function templateLiteral<const TParts extends readonly TemplateLiteralFactoryPart[]>(
-  parts: TParts
+  parts: TParts,
+  message?: ValidationMessage
 ): Builder<TemplateLiteralSchema<TParts>> {
   const normalized = parts.map((part) => (typeof part === "string" ? part : unwrapSchema(part))) as unknown as TParts;
 
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.templateLiteral, {
-      parts: normalized as readonly TemplateLiteralInputPart[],
-    }) as TemplateLiteralSchema<TParts>
+    createSchema(
+      TypeName.templateLiteral,
+      withValidationMessage({ parts: normalized as readonly TemplateLiteralInputPart[] }, message)
+    ) as TemplateLiteralSchema<TParts>
   );
 }
 
@@ -126,6 +121,7 @@ export interface FunctionSchemaOptions<
 > {
   readonly input: TInput;
   readonly output?: TOutput;
+  readonly message?: string;
 }
 
 type UnwrapFunctionInputs<TInput extends readonly SchemaInput[]> = {
@@ -154,11 +150,10 @@ function functionSchema<
   }) as TupleSchema<UnwrapFunctionInputs<TInput>>;
 
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.function, {
-      input,
-      output,
-      args,
-    }) as FunctionSchema<UnwrapFunctionInputs<TInput>, UnwrapFunctionOutput<TOutput>>
+    createSchema(TypeName.function, withValidationMessage({ input, output, args }, options.message)) as FunctionSchema<
+      UnwrapFunctionInputs<TInput>,
+      UnwrapFunctionOutput<TOutput>
+    >
   );
 }
 

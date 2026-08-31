@@ -298,6 +298,16 @@ describe("JIT AOT self-contained types", () => {
     expect(source).toContain("const isTeam: (value: unknown) => value is Team =");
   });
 
+  it("should preserve every explicitly requested type alias", () => {
+    const Schema = JIT.object({ id: JIT.number() });
+
+    AOT.generate({ schemas: { User: Schema, UserRecord: Schema }, outDir, format: "ts" });
+    const source = readFileSync(join(outDir, "index.ts"), "utf8");
+
+    expect(source).toContain("export type User = { id: number };");
+    expect(source).toContain("export type UserRecord = { id: number };");
+  });
+
   it("should expose JIT.Typeof for builders and schemas", () => {
     const User = JIT.object({
       id: JIT.number(),
@@ -345,13 +355,16 @@ describe("JIT AOT schema discovery", () => {
     ).toEqual(["order.jit.ts", "user.jit.mjs"]);
   });
 
-  it("should classify declarations by what they are, exported or not", async () => {
+  it("should collect only explicitly exported artifacts and Typeof aliases", async () => {
     const schemaModule = [
       `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
-      "const User = JIT.object({ id: JIT.number() });",
-      "const isUser = JIT.validate.is(User);",
-      "export const User_is = isUser;",
-      "const UserMethods = { stringify: JIT.json.stringify(User) };",
+      "const userSchema = JIT.object({ id: JIT.number() });",
+      "type UserValue = JIT.Typeof<typeof userSchema>;",
+      "export type { UserValue as User };",
+      "const isUser = JIT.validate.is(userSchema);",
+      "export { isUser as User_is };",
+      "const UserMethods = { stringify: JIT.json.stringify(userSchema) };",
+      "export const PublicSchema = userSchema;",
       "export const notASchema = 42;",
       "",
     ].join("\n");
@@ -360,11 +373,8 @@ describe("JIT AOT schema discovery", () => {
 
     const collected = await AOT.collectDeclarations([join(projectDir, "user.jit.ts")]);
 
-    // A private schema still names its generated type.
     expect(Object.keys(collected.schemas)).toEqual(["User"]);
-    // A private object of artifacts is still a declaration.
-    expect(Object.keys(collected.groups)).toEqual(["UserMethods"]);
-    // `isUser` only exists to back the exported alias, which wins.
+    expect(Object.keys(collected.groups)).toEqual([]);
     expect(Object.keys(collected.artifacts)).toEqual(["User_is"]);
     expect([...collected.exported]).toEqual(["User_is"]);
 
@@ -373,6 +383,52 @@ describe("JIT AOT schema discovery", () => {
     await expect(
       AOT.collectDeclarations([join(projectDir, "user.jit.ts"), join(projectDir, "dup.jit.ts")])
     ).rejects.toThrow(/defined in both/);
+  });
+
+  it("should preserve every explicit public alias of the same artifact", async () => {
+    const schemaModule = [
+      `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
+      "const schema = JIT.object({ id: JIT.number() });",
+      "const validate = JIT.validate.is(schema);",
+      "export { validate as isUser, validate as acceptsUser };",
+      "",
+    ].join("\n");
+    const file = join(projectDir, "aliases.jit.ts");
+
+    writeFileSync(file, schemaModule);
+    const collected = await AOT.collectDeclarations([file]);
+
+    expect(Object.keys(collected.artifacts).sort()).toEqual(["acceptsUser", "isUser"]);
+    expect([...collected.exported].sort()).toEqual(["acceptsUser", "isUser"]);
+  });
+
+  it("should resolve Typeof through a namespace import", async () => {
+    const schemaModule = [
+      `import * as jit from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
+      "const schema = jit.JIT.object({ id: jit.JIT.number() });",
+      "export type User = jit.JIT.Typeof<typeof schema>;",
+      "",
+    ].join("\n");
+    const file = join(projectDir, "namespace.jit.ts");
+
+    writeFileSync(file, schemaModule);
+    const collected = await AOT.collectDeclarations([file]);
+
+    expect(Object.keys(collected.schemas)).toEqual(["User"]);
+  });
+
+  it("should reject an exported Typeof alias whose operand is not a schema", async () => {
+    const schemaModule = [
+      `import { JIT } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "packages", "jit", "src", "index.ts")).href)};`,
+      "const value = 42;",
+      "export type Value = JIT.Typeof<typeof value>;",
+      "",
+    ].join("\n");
+    const file = join(projectDir, "invalid-type.jit.ts");
+
+    writeFileSync(file, schemaModule);
+
+    await expect(AOT.collectDeclarations([file])).rejects.toThrow(/Value.*value.*not a JIT schema/i);
   });
 
   it("should find jit.config files and type them via defineConfig", () => {

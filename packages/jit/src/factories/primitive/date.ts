@@ -1,6 +1,7 @@
 import { type ChecksDef, createSchema, type DateLikeCheck, type DateSchema, TypeName } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder } from "../../core/builder/index.js";
+import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 import { emptyDef } from "./empty-def.js";
 
 /**
@@ -8,8 +9,8 @@ import { emptyDef } from "./empty-def.js";
  *
  * @returns A builder wrapping a Date schema.
  */
-export function date(): Builder<DateSchema<[]>> {
+export function date(message?: ValidationMessage): Builder<DateSchema<[]>> {
   return /* @__PURE__ */ createBuilder(
-    createSchema<Date, "date", ChecksDef<DateLikeCheck, []>>(TypeName.date, emptyDef)
+    createSchema<Date, "date", ChecksDef<DateLikeCheck, []>>(TypeName.date, withValidationMessage(emptyDef, message))
   );
 }

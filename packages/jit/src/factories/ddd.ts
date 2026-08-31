@@ -5,8 +5,11 @@ import {
   aggregateRoot,
   domainEvent,
   entity,
+  softDelete,
+  timestamps,
   uniqueIdentifier,
   valueObject,
+  versioned,
 } from "./class.js";
 import { watchedList } from "./watch.js";
 
@@ -33,6 +36,12 @@ export const ddd = Object.freeze({
   domainEvent,
   /** Scalar identifier Value Object; defaults to a generated UUID. */
   uniqueIdentifier,
+  /** Aggregate timestamp capability, installed through `.extends(...)`. */
+  timestamps,
+  /** Aggregate soft-delete capability, installed through `.extends(...)`. */
+  softDelete,
+  /** Aggregate optimistic-version capability, installed through `.extends(...)`. */
+  versioned,
   /** A collection that tracks additions and removals by semantic identity. */
   watchedList,
   /** Explicit base types that cannot be created until subclassed. */

@@ -254,10 +254,13 @@ describe("JIT.class", () => {
 
   it("keeps abstract DDD bases factory-only", () => {
     const UserBase = JIT.ddd.abstract.entity(JIT.object({ id: JIT.string() }), { id: "id" });
+    const CodeBase = JIT.ddd.abstract.valueObject(JIT.string());
 
     expect(() => (UserBase as unknown as { construction(mode: string): unknown }).construction("constructor")).toThrow(
       /abstract Runtime Class/i
     );
+    expect(() => CodeBase.create("code")).toThrow(/abstract JIT class/i);
+    expect(() => CodeBase.hydrate("code")).toThrow(/abstract JIT class/i);
   });
 
   it("represents scalar value objects as immutable runtime objects", () => {
@@ -302,13 +305,43 @@ describe("JIT.class", () => {
     expect(() => NumericId.create(-1)).toThrow(/positive number/i);
     expectTypeOf(UserId.create().value).toEqualTypeOf<string>();
     expectTypeOf(NumericId.create(1).value).toEqualTypeOf<number>();
+    if (Object.is(1, 2)) {
+      // @ts-expect-error identifier Value Objects carry metadata; they do not own entity identity
+      UserId.identity("value");
+    }
+  });
+
+  it("infers a wrapped unique identifier while keeping boundary and runtime types distinct", () => {
+    const UniqueIdentifier = JIT.ddd.uniqueIdentifier(
+      JIT.string()
+        .uuid(4)
+        .default(() => crypto.randomUUID())
+    );
+    const UserSchema = JIT.object({
+      id: UniqueIdentifier,
+      name: JIT.string().min(1).max(100),
+      email: JIT.string().email(),
+    });
+    const UserBase = JIT.ddd.abstract.entity(UserSchema);
+    class User extends UserBase {}
+    const persisted = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
+    const user = User.hydrate({ id: persisted, name: "Ada", email: "ada@example.com" });
+
+    expect(user.id).toBeInstanceOf(UniqueIdentifier);
+    expect(user.id.value).toBe(persisted);
+    expect(() => UserBase.hydrate({ id: persisted, name: "Ada", email: "ada@example.com" })).toThrow(
+      /abstract JIT class/i
+    );
+    expectTypeOf<JIT.Typeof<typeof UserSchema>["id"]>().toEqualTypeOf<JIT.ScalarValueObject<string>>();
+    expectTypeOf<JIT.Input<typeof UserSchema>["id"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<JIT.Hydrate<typeof UserSchema>["id"]>().toEqualTypeOf<string>();
   });
 
   it("infers one identifier and materializes nested Runtime Types at both boundaries", () => {
     const UserId = JIT.ddd.uniqueIdentifier();
     const UserBase = JIT.ddd.entity(
       JIT.object({
-        id: UserId,
+        id: JIT.readonly(UserId),
         name: JIT.string(),
         aliases: JIT.array(UserId),
       })
@@ -800,7 +833,7 @@ describe("JIT.class", () => {
       .aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), updatedAt: JIT.date() }), {
         id: "id",
       })
-      .timestamps({ updatedAt: "updatedAt" });
+      .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }));
     class Order extends OrderBase {
       confirm() {
         this.update({ status: "confirmed" });
@@ -816,13 +849,11 @@ describe("JIT.class", () => {
     order.touch();
     expect(order.updatedAt.getTime()).toBeGreaterThanOrEqual(mutatedAt.getTime());
     expect(() =>
-      (OrderBase as unknown as { timestamps(options: { updatedAt: string }): unknown }).timestamps({
-        updatedAt: "updatedAt",
-      })
-    ).toThrow(/already configured/i);
+      (OrderBase.extends as (...extensions: unknown[]) => unknown)(JIT.ddd.timestamps({ updatedAt: "updatedAt" }))
+    ).toThrow(/already installed/i);
     if (Object.is(1, 2)) {
-      // @ts-expect-error timestamps are a singleton aggregate policy
-      OrderBase.timestamps({ updatedAt: "updatedAt" });
+      // @ts-expect-error an installed capability cannot redeclare touch()
+      OrderBase.extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }));
     }
   });
 
@@ -831,8 +862,7 @@ describe("JIT.class", () => {
       .aggregateRoot(JIT.object({ id: JIT.string(), updatedAt: JIT.date(), deletedAt: JIT.date().nullable() }), {
         id: "id",
       })
-      .timestamps({ updatedAt: "updatedAt" })
-      .softDelete({ field: "deletedAt" });
+      .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }), JIT.ddd.softDelete({ field: "deletedAt" }));
     class Order extends OrderBase {}
     const order = Order.create({ id: "o_1", updatedAt: new Date(0), deletedAt: null });
 
@@ -843,12 +873,81 @@ describe("JIT.class", () => {
     expect(order.isDeleted).toBe(false);
   });
 
+  it("configures DDD clocks and member names without a runtime dispatcher", () => {
+    const timestampValues = [new Date(10), new Date(20)];
+    let timestampReads = 0;
+    const deletedAt = new Date(30);
+    const OrderBase = JIT.ddd
+      .aggregateRoot(
+        JIT.object({
+          id: JIT.string(),
+          status: JIT.string(),
+          changedAt: JIT.date(),
+          archivedAt: JIT.date().nullable(),
+        }),
+        { id: "id" }
+      )
+      .extends(
+        JIT.ddd.timestamps({
+          updatedAt: "changedAt",
+          clock: () => timestampValues[timestampReads++] as Date,
+          methods: { touch: "markChanged" },
+        }),
+        JIT.ddd.softDelete({
+          field: "archivedAt",
+          clock: () => deletedAt,
+          methods: { delete: "archive", restore: "unarchive", isDeleted: "isArchived" },
+        })
+      );
+    class Order extends OrderBase {
+      confirm() {
+        this.update({ status: "confirmed" });
+      }
+    }
+    const order = Order.create({ id: "o_1", status: "draft", changedAt: new Date(0), archivedAt: null });
+
+    order.confirm();
+    expect(order.changedAt).toBe(timestampValues[0]);
+    order.markChanged();
+    expect(order.changedAt).toBe(timestampValues[1]);
+    order.archive();
+    expect(order.archivedAt).toBe(deletedAt);
+    expect(order.changedAt).toBe(deletedAt);
+    expect(order.isArchived).toBe(true);
+    order.unarchive();
+    expect(order.isArchived).toBe(false);
+    expect(order.markChanged).toBe(Order.prototype.markChanged);
+    expect(() =>
+      JIT.ddd
+        .entity(JIT.object({ id: JIT.string() }), { id: "id" })
+        .extends(JIT.ddd.timestamps({ updatedAt: "id" }) as never)
+    ).toThrow(/Aggregate Root/i);
+    if (Object.is(1, 2)) {
+      JIT.ddd
+        .aggregateRoot(JIT.object({ id: JIT.string(), archivedAt: JIT.date() }), { id: "id" })
+        // @ts-expect-error soft-delete state must explicitly include null
+        .extends(JIT.ddd.softDelete({ field: "archivedAt" }));
+    }
+    expect(() =>
+      JIT.ddd
+        .aggregateRoot(JIT.object({ id: JIT.string(), changedAt: JIT.date() }), { id: "id" })
+        .extends(JIT.ddd.timestamps({ updatedAt: "changedAt", methods: { touch: "id" } }) as never)
+    ).toThrow(/schema field/i);
+    expect(() =>
+      JIT.ddd
+        .aggregateRoot(JIT.object({ id: JIT.string(), changedAt: JIT.date() }), { id: "id" })
+        .extends(JIT.ddd.timestamps({ updatedAt: "changedAt", clock: () => new Date(Number.NaN) }))
+        .create({ id: "o_2", changedAt: new Date(0) })
+        .touch()
+    ).toThrow(/valid Date/i);
+  });
+
   it("increments a schema-bound version only after an effective mutation", () => {
     const OrderBase = JIT.ddd
       .aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string(), version: JIT.int() }), {
         id: "id",
       })
-      .versioned({ field: "version" });
+      .extends(JIT.ddd.versioned({ field: "version" }));
     class Order extends OrderBase {
       confirm() {
         this.update({ status: "confirmed" });
@@ -860,6 +959,13 @@ describe("JIT.class", () => {
     expect(order.version).toBe(4);
     order.confirm();
     expect(order.version).toBe(4);
+    expect(() =>
+      (OrderBase.extends as (...extensions: unknown[]) => unknown)(JIT.ddd.versioned({ field: "version" }))
+    ).toThrow(/already installed/i);
+    if (Object.is(1, 2)) {
+      // @ts-expect-error versioning is a singleton capability
+      OrderBase.extends(JIT.ddd.versioned({ field: "version" }));
+    }
   });
 
   it("rejects non-object schemas before emitting a constructor", () => {
@@ -1176,6 +1282,9 @@ describe("JIT.ddd", () => {
       "aggregateRoot",
       "domainEvent",
       "uniqueIdentifier",
+      "timestamps",
+      "softDelete",
+      "versioned",
       "watchedList",
       "abstract",
     ]);

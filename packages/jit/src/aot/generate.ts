@@ -96,7 +96,7 @@ export interface GenerateOptions {
   readonly artifacts?: Readonly<Record<string, unknown>>;
   /** Declaration name -> object of artifacts, emitted as one frozen object. */
   readonly groups?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-  /** Declaration name -> schema, emitted as a named exported type. */
+  /** Explicit generated type name -> schema. */
   readonly schemas?: Readonly<Record<string, SchemaInput>>;
   /** Output directory. Previous JIT output there is always replaced. */
   readonly outDir: string;
@@ -166,10 +166,10 @@ interface EmittedBinding {
  * into the file, so it has zero imports: no engine weight, no module graph
  * to load on cold start, CSP-safe.
  *
- * A declaration file is read literally. `const User = JIT.object({...})`
- * names the generated type; `export const isUser = JIT.validate.is(User)`
- * becomes `isUser`; and an object of artifacts becomes one frozen object
- * with exactly those members.
+ * A declaration file exposes an explicit manifest. `export type User =
+ * JIT.Typeof<typeof userSchema>` names a generated type; `export const isUser
+ * = JIT.validate.is(userSchema)` becomes `isUser`; and an exported object of
+ * artifacts becomes one frozen object with exactly those members.
  */
 export function generate(options: GenerateOptions): GenerateResult {
   const layout = resolveOutputLayout(assertOutputFormat(options.format ?? "js"));
@@ -298,19 +298,24 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     }
   }
 
-  // Every declared schema is named first, so a schema nested inside another
+  // Every explicitly requested type is named first, so a schema nested inside another
   // is emitted as its own name instead of being inlined a second time.
   // A generated type and a generated value may share a name: TypeScript keeps
   // them in separate declaration spaces, so `User.is(value)` and `User` as a
   // type both read naturally from the same declaration file.
   for (const name of Object.keys(plan.schemas)) {
     if (!isValidIdentifier(name)) continue;
-    typeNames.set(unwrapSchema(plan.schemas[name] as SchemaInput<ATS.AnyTypeSchema>), name);
+    const schema = unwrapSchema(plan.schemas[name] as SchemaInput<ATS.AnyTypeSchema>);
+
+    if (!typeNames.has(schema)) typeNames.set(schema, name);
   }
 
-  const typeExports = [...typeNames].map(([schema, name]) => {
+  const typeExports = Object.entries(plan.schemas).flatMap(([name, input]) => {
+    if (!isValidIdentifier(name)) return [];
+    const schema = unwrapSchema(input as SchemaInput<ATS.AnyTypeSchema>);
+
     tsTypes.push(`export type ${name} = ${emitTypeScriptType(schema, typeNames)};`);
-    return name;
+    return [name];
   });
 
   js.push(GENERATED_BANNER);
@@ -806,9 +811,15 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       if (artifact.aggregate) {
         needsAggregateType = true;
         mixins.push(`__JitAggregate<${classUpdateType(artifact.schema)}>`);
-        if (artifact.mutation?.deletedAt !== undefined)
-          mixins.push("{ softDelete(): void; restore(): void; readonly isDeleted: boolean }");
-        if (artifact.mutation?.touchAt !== undefined) mixins.push("{ touch(): void }");
+        if (artifact.mutation?.deletedAt !== undefined) {
+          const deleteMethod = classMemberName(artifact.mutation.deleteMethod ?? "softDelete");
+          const restoreMethod = classMemberName(artifact.mutation.restoreMethod ?? "restore");
+          const isDeletedMember = classMemberName(artifact.mutation.isDeletedMember ?? "isDeleted");
+          mixins.push(`{ ${deleteMethod}(): void; ${restoreMethod}(): void; readonly ${isDeletedMember}: boolean }`);
+        }
+        if (artifact.mutation?.touchAt !== undefined) {
+          mixins.push(`{ ${classMemberName(artifact.mutation.touchMethod ?? "touch")}(): void }`);
+        }
       }
       const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
       const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
@@ -1076,6 +1087,14 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
       return undefined;
     }
+    if (artifact.mutation?.timestampClock !== undefined || artifact.mutation?.deletionClock !== undefined) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.extends",
+        reason: "a custom DDD clock is a runtime binding and has no standalone AOT representation",
+      });
+      return undefined;
+    }
     const validator = emitValidatorBinding(
       binding,
       artifact.domainEvent ? (base as ATS.ObjectSchema).def.props.payload : artifact.schema,
@@ -1244,14 +1263,22 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     if (artifact.aggregate && artifact.mutation?.deletedAt !== undefined) {
       const deletedAt = artifact.mutation.deletedAt;
       const updatedAt = artifact.mutation.updatedAt;
+      const deleteMethod = classMemberName(artifact.mutation.deleteMethod ?? "softDelete");
+      const restoreMethod = classMemberName(artifact.mutation.restoreMethod ?? "restore");
+      const isDeletedMember = classMemberName(artifact.mutation.isDeletedMember ?? "isDeleted");
       methods.push(
-        `softDelete() { const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "now")}`} }`,
-        `restore() { ${writeField(deletedAt, "null")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
-        `get isDeleted() { return ${readField(deletedAt)} !== null; }`
+        `${deleteMethod}() { const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "now")}`} }`,
+        `${restoreMethod}() { ${writeField(deletedAt, "null")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
+        `get ${isDeletedMember}() { return ${readField(deletedAt)} !== null; }`
       );
     }
     if (artifact.aggregate && artifact.mutation?.touchAt !== undefined) {
-      methods.push(`touch() { ${writeField(artifact.mutation.touchAt, "new Date()")} }`);
+      methods.push(
+        `${classMemberName(artifact.mutation.touchMethod ?? "touch")}() { ${writeField(
+          artifact.mutation.touchAt,
+          "new Date()"
+        )} }`
+      );
     }
     const assignments = valueRepresentation
       ? "this.value = state;"

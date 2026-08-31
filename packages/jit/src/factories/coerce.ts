@@ -6,9 +6,13 @@ import { boolean as booleanFactory } from "./primitive/boolean.js";
 import { date as dateFactory } from "./primitive/date.js";
 import { number as numberFactory } from "./primitive/number.js";
 import { string as stringFactory } from "./primitive/string.js";
+import type { ValidationMessage } from "./validation-message.js";
 
 function flagged<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Builder<TSchema> {
-  return createBuilder({ ...schema, def: { ...(schema.def as object), coerce: true } } as TSchema);
+  return createBuilder({
+    ...schema,
+    def: { ...(schema.def as object), coerce: true },
+  } as TSchema);
 }
 
 /**
@@ -29,27 +33,27 @@ function flagged<TSchema extends ATS.AnyTypeSchema>(schema: TSchema): Builder<TS
  * ```
  */
 export interface NativeCoercions {
-  string(): Builder<ATS.StringSchema>;
-  number(): Builder<ATS.NumberSchema>;
-  boolean(): Builder<ATS.BooleanSchema>;
-  bigint(): Builder<ATS.BigIntSchema>;
-  date(): Builder<ATS.DateSchema>;
+  string(message?: ValidationMessage): Builder<ATS.StringSchema>;
+  number(message?: ValidationMessage): Builder<ATS.NumberSchema>;
+  boolean(message?: ValidationMessage): Builder<ATS.BooleanSchema>;
+  bigint(message?: ValidationMessage): Builder<ATS.BigIntSchema>;
+  date(message?: ValidationMessage): Builder<ATS.DateSchema>;
 }
 
 export const nativeCoercions: NativeCoercions = {
-  string(): Builder<ATS.StringSchema> {
-    return flagged(stringFactory().schema);
+  string(message?: ValidationMessage): Builder<ATS.StringSchema> {
+    return flagged(stringFactory(message).schema);
   },
-  number(): Builder<ATS.NumberSchema> {
-    return flagged(numberFactory().schema);
+  number(message?: ValidationMessage): Builder<ATS.NumberSchema> {
+    return flagged(numberFactory(message).schema);
   },
-  boolean(): Builder<ATS.BooleanSchema> {
-    return flagged(booleanFactory().schema);
+  boolean(message?: ValidationMessage): Builder<ATS.BooleanSchema> {
+    return flagged(booleanFactory(message).schema);
   },
-  bigint(): Builder<ATS.BigIntSchema> {
-    return flagged(bigintFactory().schema);
+  bigint(message?: ValidationMessage): Builder<ATS.BigIntSchema> {
+    return flagged(bigintFactory(message).schema);
   },
-  date(): Builder<ATS.DateSchema> {
-    return flagged(dateFactory().schema);
+  date(message?: ValidationMessage): Builder<ATS.DateSchema> {
+    return flagged(dateFactory(message).schema);
   },
 };

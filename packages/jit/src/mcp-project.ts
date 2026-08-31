@@ -114,7 +114,7 @@ export async function inspectAot(args: Readonly<Record<string, unknown>>, worksp
 export async function previewAot(args: Readonly<Record<string, unknown>>, workspace: string): Promise<McpPayload> {
   const resolved = await resolveAotProject(args, workspace);
   const collected = await collectDeclarations(resolved.files);
-  assertBuildable(collected.artifacts, collected.groups, resolved.files);
+  assertBuildable(collected.artifacts, collected.groups, collected.schemas, resolved.files);
   const stage = readEnum(args, "stage", ["summary", "source"] as const) ?? "summary";
   const target = readOptionalString(args, "target");
   const tempDir = mkdtempSync(join(tmpdir(), "jit-mcp-preview-"));
@@ -155,7 +155,7 @@ export async function generateAot(args: Readonly<Record<string, unknown>>, works
 
   const resolved = await resolveAotProject(args, workspace);
   const collected = await collectDeclarations(resolved.files);
-  assertBuildable(collected.artifacts, collected.groups, resolved.files);
+  assertBuildable(collected.artifacts, collected.groups, collected.schemas, resolved.files);
   const result = generate({
     ...collected,
     outDir: resolved.outDir,
@@ -498,11 +498,12 @@ function artifactOperations(value: unknown): readonly string[] {
 function assertBuildable(
   artifacts: Readonly<Record<string, unknown>>,
   groups: Readonly<Record<string, unknown>>,
+  schemas: Readonly<Record<string, unknown>>,
   files: readonly string[]
 ): void {
-  if (Object.keys(artifacts).length + Object.keys(groups).length === 0) {
+  if (Object.keys(artifacts).length + Object.keys(groups).length + Object.keys(schemas).length === 0) {
     throw new Error(
-      `No AOT artifacts found in ${files.join(", ") || "the selected files"}. Declare compiled JIT functions or artifact objects.`
+      `No exported AOT declarations found in ${files.join(", ") || "the selected files"}. Export compiled JIT artifacts or JIT.Typeof aliases.`
     );
   }
 }

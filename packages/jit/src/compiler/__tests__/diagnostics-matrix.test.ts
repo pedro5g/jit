@@ -169,6 +169,61 @@ function firstIssue(schema: unknown, invalid: unknown) {
 }
 
 describe("validation operator diagnostics", () => {
+  it.each([
+    ["string", JIT.string(), JIT.string({ message: MESSAGE }), 1],
+    ["number", JIT.number(), JIT.number(MESSAGE), "1"],
+    ["int", JIT.int(), JIT.int(MESSAGE), "1"],
+    ["boolean", JIT.boolean(), JIT.boolean(MESSAGE), 1],
+    ["bigint", JIT.bigint(), JIT.bigint(MESSAGE), 1],
+    ["symbol", JIT.symbol(), JIT.symbol(MESSAGE), "symbol"],
+    ["date", JIT.date(), JIT.date(MESSAGE), "2026-01-01"],
+    ["regex", JIT.regex(), JIT.regex(MESSAGE), "/x/"],
+    ["null", JIT.null(), JIT.null(MESSAGE), 0],
+    ["undefined", JIT.undefined(), JIT.undefined(MESSAGE), null],
+    ["void", JIT.void(), JIT.void(MESSAGE), null],
+    ["nan", JIT.nan(), JIT.nan(MESSAGE), 0],
+    ["never", JIT.never(), JIT.never(MESSAGE), 0],
+    ["file", JIT.file(), JIT.file(MESSAGE), {}],
+    ["literal", JIT.literal("ok"), JIT.literal("ok", MESSAGE), "no"],
+    ["enum", JIT.enum(["a", "b"]), JIT.enum(["a", "b"], MESSAGE), "c"],
+    ["instanceOf", JIT.instanceOf(Date), JIT.instanceOf(Date, MESSAGE), {}],
+    ["json", JIT.json.value(), JIT.json.value(MESSAGE), Symbol("invalid")],
+    ["template", JIT.templateLiteral(["id-", JIT.number()]), JIT.templateLiteral(["id-", JIT.number()], MESSAGE), 1],
+    ["function", JIT.function({ input: [] }), JIT.function({ input: [], message: MESSAGE }), 1],
+    ["array", JIT.array(JIT.string()), JIT.array(JIT.string(), MESSAGE), {}],
+    ["set", JIT.set(JIT.string()), JIT.set(JIT.string(), MESSAGE), []],
+    ["map", JIT.mapSchema(JIT.string(), JIT.number()), JIT.mapSchema(JIT.string(), JIT.number(), MESSAGE), {}],
+    ["record", JIT.record(JIT.string(), JIT.number()), JIT.record(JIT.string(), JIT.number(), MESSAGE), []],
+    ["object", JIT.object({ id: JIT.string() }), JIT.object({ id: JIT.string() }, MESSAGE), []],
+    ["tuple", JIT.tuple(JIT.string()), JIT.tuple(JIT.string()).required(MESSAGE), {}],
+    ["union", JIT.union(JIT.string(), JIT.number()), JIT.union(JIT.string(), JIT.number()).required(MESSAGE), true],
+    ["xor", JIT.xor(JIT.string(), JIT.number()), JIT.xor(JIT.string(), JIT.number()).required(MESSAGE), true],
+    [
+      "discriminatedUnion",
+      JIT.discriminatedUnion("kind", [JIT.object({ kind: JIT.literal("a") })]),
+      JIT.discriminatedUnion("kind", [JIT.object({ kind: JIT.literal("a") })]).required(MESSAGE),
+      { kind: "x" },
+    ],
+    ["promise", JIT.promise(JIT.string()), JIT.promise(JIT.string()).required(MESSAGE), 1],
+    ["temporal", JIT.temporal.instant(), JIT.temporal.instant().required(MESSAGE), {}],
+  ] as const)("%s type gate has the same customizable diagnostic contract", (_name, baseSchema, custom, invalid) => {
+    const base = firstIssue(baseSchema, invalid);
+    const overridden = firstIssue(custom, invalid);
+
+    expect(base?.message).toBeTruthy();
+    expect(overridden?.message).toBe(MESSAGE);
+    expect(overridden?.code).toBe(base?.code);
+    expect(overridden?.expected).toBe(base?.expected);
+  });
+
+  it("keeps base-gate messages out of boolean source", () => {
+    const plain = Compiler.emitValidatorSource(JIT.string().schema, { ops: ["is"] });
+    const custom = Compiler.emitValidatorSource(JIT.string(MESSAGE).schema, { ops: ["is"] });
+
+    expect(custom).toBe(plain);
+    expect(custom).not.toContain(MESSAGE);
+  });
+
   it("covers every check the builder can append", () => {
     const declared = declaredCheckKinds();
     const covered = new Set(cases.map((entry) => entry.kind));

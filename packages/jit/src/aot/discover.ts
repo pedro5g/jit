@@ -3,7 +3,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SchemaInput } from "../core/builder/index.js";
 import { JITError } from "../errors/index.js";
-import { classifyDeclaration, readArtifactGroup } from "./classify.js";
+import { classifyDeclaration, isSchemaInput, readArtifactGroup } from "./classify.js";
 import type { AotOutputFormat } from "./generate.js";
 
 export { classifyDeclarations, isSchemaInput } from "./classify.js";
@@ -175,19 +175,20 @@ export interface CollectedDeclarations {
   readonly artifacts: Record<string, unknown>;
   /** Binding name -> object literal whose members are compiled artifacts. */
   readonly groups: Record<string, Record<string, unknown>>;
-  /** Binding name -> schema, used to name generated types after the declaration. */
+  /** Exported type alias -> schema referenced by `JIT.Typeof<typeof binding>`. */
   readonly schemas: Record<string, SchemaInput>;
   /** Binding name -> file it was declared in. */
   readonly sources: ReadonlyMap<string, string>;
-  /** Bindings the declaration file exports itself. */
+  /** Runtime bindings the declaration file exports itself. */
   readonly exported: ReadonlySet<string>;
 }
 
 /**
- * Reads every declaration file and classifies its top-level bindings. A
- * schema, an artifact and an object of artifacts are all valid declarations;
- * `export` is not required, because the file itself is the manifest.
- * Name collisions across files throw — generated exports share one module.
+ * Reads every declaration file and classifies its explicit public surface.
+ * Exported artifacts and artifact objects become runtime output. Exported
+ * `JIT.Typeof<typeof schema>` aliases become generated types. Private bindings
+ * remain available only while resolving those declarations and never become
+ * output merely because they exist in a `.jit` file.
  */
 export async function collectDeclarations(files: readonly string[]): Promise<CollectedDeclarations> {
   const artifacts: Record<string, unknown> = {};
@@ -195,16 +196,16 @@ export async function collectDeclarations(files: readonly string[]): Promise<Col
   const schemas: Record<string, SchemaInput> = {};
   const sources = new Map<string, string>();
   const exported = new Set<string>();
-  const consumed = new Set<unknown>();
 
   for (const file of files) {
     const declaration = await loadDeclarationFile(file);
 
     for (const name of Object.keys(declaration.module)) {
+      if (!declaration.exported.has(name)) continue;
       const value = declaration.module[name];
       const kind = classifyDeclaration(value);
 
-      if (kind === undefined) continue;
+      if (kind === undefined || kind === "schema") continue;
 
       const previous = sources.get(name);
 
@@ -216,43 +217,34 @@ export async function collectDeclarations(files: readonly string[]): Promise<Col
       }
 
       if (kind === "group") {
-        const group = readArtifactGroup(value) as Record<string, unknown>;
-
-        groups[name] = group;
-        for (const member of Object.values(group)) consumed.add(member);
-      } else if (kind === "artifact") {
-        artifacts[name] = value;
+        groups[name] = readArtifactGroup(value) as Record<string, unknown>;
       } else {
-        schemas[name] = value as SchemaInput;
+        artifacts[name] = value;
       }
 
       sources.set(name, file);
-      if (declaration.exported.has(name)) exported.add(name);
+      exported.add(name);
     }
-  }
 
-  // An artifact that only exists to be placed on a group is an implementation
-  // detail of that group unless the file also exports it on its own.
-  for (const name of Object.keys(artifacts)) {
-    if (consumed.has(artifacts[name]) && !exported.has(name)) delete artifacts[name];
-  }
+    for (const type of declaration.types) {
+      const schema = declaration.module[type.schemaBinding];
 
-  // The same artifact bound to several names must not be generated twice; the
-  // exported name is the one the application imports.
-  const byValue = new Map<unknown, string>();
+      if (!isSchemaInput(schema)) {
+        throw new JITError(
+          "INVALID_OPERATION",
+          `AOT type ${JSON.stringify(type.name)} references ${JSON.stringify(type.schemaBinding)}, which is not a JIT schema`
+        );
+      }
+      const previous = sources.get(type.name);
 
-  for (const name of Object.keys(artifacts)) {
-    const previous = byValue.get(artifacts[name]);
-
-    if (previous === undefined) {
-      byValue.set(artifacts[name], name);
-      continue;
-    }
-    if (exported.has(name) && !exported.has(previous)) {
-      delete artifacts[previous];
-      byValue.set(artifacts[name], name);
-    } else {
-      delete artifacts[name];
+      if (previous !== undefined && previous !== file) {
+        throw new JITError(
+          "INVALID_OPERATION",
+          `AOT declaration "${type.name}" is defined in both ${previous} and ${file} — declaration names must be unique across files`
+        );
+      }
+      schemas[type.name] = schema;
+      sources.set(type.name, file);
     }
   }
 
@@ -262,22 +254,27 @@ export async function collectDeclarations(files: readonly string[]): Promise<Col
 interface LoadedDeclaration {
   readonly module: Record<string, unknown>;
   readonly exported: ReadonlySet<string>;
+  readonly types: readonly ExportedTypeAlias[];
+}
+
+interface ExportedTypeAlias {
+  readonly name: string;
+  readonly schemaBinding: string;
 }
 
 /**
- * Loads a declaration file with its private top-level bindings made visible.
- * A schema kept local (`const User = JIT.object(...)`) still has to name the
- * generated type, so the file is loaded through a temporary sibling module
- * that re-exports those bindings. The sibling is always removed again, and
- * any failure falls back to a plain import.
+ * Loads a declaration file with private top-level bindings visible only so an
+ * explicit exported type alias can resolve its `typeof` operand. The sibling
+ * is always removed again; private values are filtered before classification.
  */
 async function loadDeclarationFile(file: string): Promise<LoadedDeclaration> {
   const source = readFileSync(file, "utf8");
   const bindings = readTopLevelBindings(source);
-  const exported = new Set(bindings.filter((binding) => binding.exported).map((binding) => binding.name));
-  const hidden = bindings.filter((binding) => !binding.exported).map((binding) => binding.name);
+  const exported = readRuntimeExports(source);
+  const types = readExportedTypeAliases(source);
+  const hidden = bindings.filter((binding) => !exported.has(binding));
 
-  if (hidden.length === 0) return { module: await loadModule(file), exported };
+  if (hidden.length === 0) return { module: await loadModule(file), exported, types };
 
   const extension = extname(file);
   const sibling = join(
@@ -287,45 +284,100 @@ async function loadDeclarationFile(file: string): Promise<LoadedDeclaration> {
 
   try {
     writeFileSync(sibling, `${source}\nexport { ${hidden.join(", ")} };\n`);
-    return { module: await loadModule(sibling), exported };
+    return { module: await loadModule(sibling), exported, types };
   } catch {
-    return { module: await loadModule(file), exported };
+    return { module: await loadModule(file), exported, types };
   } finally {
     rmSync(sibling, { force: true });
   }
 }
 
-interface TopLevelBinding {
-  readonly name: string;
-  readonly exported: boolean;
-}
-
-/** Top-level `const`/`let`/`var` bindings, plus names in `export { ... }`. */
-function readTopLevelBindings(source: string): readonly TopLevelBinding[] {
-  const bindings: TopLevelBinding[] = [];
+/** Top-level `const`/`let`/`var` binding names. */
+function readTopLevelBindings(source: string): readonly string[] {
+  const bindings: string[] = [];
   const seen = new Set<string>();
-  const reexported = new Set<string>();
 
-  for (const match of source.matchAll(/^export\s*\{([^}]*)\}\s*;?\s*$/gm)) {
-    for (const entry of match[1].split(",")) {
-      const name = entry
-        .trim()
-        .split(/\s+as\s+/)[0]
-        ?.trim();
-
-      if (name) reexported.add(name);
-    }
-  }
-
-  for (const match of source.matchAll(/^(export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm)) {
-    const name = match[2];
+  for (const match of source.matchAll(/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm)) {
+    const name = match[1];
 
     if (seen.has(name)) continue;
     seen.add(name);
-    bindings.push({ name, exported: match[1] !== undefined || reexported.has(name) });
+    bindings.push(name);
   }
 
   return bindings;
+}
+
+/** Runtime names explicitly exported by the declaration module. */
+function readRuntimeExports(source: string): ReadonlySet<string> {
+  const exported = new Set<string>();
+
+  for (const match of source.matchAll(/^export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm)) {
+    exported.add(match[1]);
+  }
+  for (const block of readExportBlocks(source)) {
+    if (block.typesOnly) continue;
+    for (const entry of block.entries) {
+      if (!entry.typesOnly) exported.add(entry.exported);
+    }
+  }
+
+  return exported;
+}
+
+/** Explicit `JIT.Typeof<typeof schema>` aliases, including type-only export lists. */
+function readExportedTypeAliases(source: string): readonly ExportedTypeAlias[] {
+  const aliases = new Map<string, { readonly schemaBinding: string; readonly exported: boolean }>();
+
+  for (const match of source.matchAll(
+    /^(export\s+)?type\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?JIT\.Typeof\s*<\s*typeof\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*>\s*;?/gm
+  )) {
+    aliases.set(match[2], { schemaBinding: match[3], exported: match[1] !== undefined });
+  }
+
+  const result = new Map<string, ExportedTypeAlias>();
+
+  for (const [name, alias] of aliases) {
+    if (alias.exported) result.set(name, { name, schemaBinding: alias.schemaBinding });
+  }
+  for (const block of readExportBlocks(source)) {
+    for (const entry of block.entries) {
+      if (!block.typesOnly && !entry.typesOnly) continue;
+      const alias = aliases.get(entry.local);
+
+      if (alias) result.set(entry.exported, { name: entry.exported, schemaBinding: alias.schemaBinding });
+    }
+  }
+
+  return [...result.values()];
+}
+
+interface ExportBlock {
+  readonly typesOnly: boolean;
+  readonly entries: readonly { readonly local: string; readonly exported: string; readonly typesOnly: boolean }[];
+}
+
+function readExportBlocks(source: string): readonly ExportBlock[] {
+  const blocks: ExportBlock[] = [];
+
+  for (const match of source.matchAll(/^export\s+(type\s+)?\{([^}]*)\}\s*;?/gm)) {
+    const typesOnly = match[1] !== undefined;
+    const entries = match[2]
+      .split(",")
+      .map((raw) => {
+        const trimmed = raw.trim();
+        const entryTypesOnly = trimmed.startsWith("type ");
+        const value = entryTypesOnly ? trimmed.slice(5).trim() : trimmed;
+        const [local, exported = local] = value.split(/\s+as\s+/).map((part) => part.trim());
+
+        return { local, exported, typesOnly: entryTypesOnly };
+      })
+      .filter((entry) => entry.local.length > 0 && entry.exported.length > 0);
+
+    blocks.push({ typesOnly, entries });
+  }
+
+  return blocks;
 }
 
 function isGlobPattern(value: string): boolean {

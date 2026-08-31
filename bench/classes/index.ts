@@ -3,13 +3,46 @@ import { loadAotArtifacts } from "../shared/aot.js";
 import { runSuite } from "../shared/persist.js";
 import { registerScenario } from "../shared/scenario.js";
 
-const UserState = JIT.object({ id: JIT.string(), name: JIT.string(), active: JIT.boolean() });
+const UserState = JIT.object({
+  id: JIT.string(),
+  name: JIT.string(),
+  active: JIT.boolean(),
+});
 const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
 const UserBase = JIT.ddd.entity(UserState, { id: "id" });
 const OrderBase = JIT.ddd.aggregateRoot(
-  JIT.object({ id: JIT.string().readonly(), status: JIT.enum(["draft", "confirmed"]) }),
+  JIT.object({
+    id: JIT.string().readonly(),
+    status: JIT.enum(["draft", "confirmed"]),
+  }),
   { id: "id" }
 );
+const TimestampedOrderBase = JIT.ddd
+  .aggregateRoot(
+    JIT.object({
+      id: JIT.string().readonly(),
+      status: JIT.enum(["draft", "confirmed"]),
+      updatedAt: JIT.date(),
+    }),
+    { id: "id" }
+  )
+  .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }));
+const fixedClockValue = new Date(1);
+const ClockedOrderBase = JIT.ddd
+  .aggregateRoot(
+    JIT.object({
+      id: JIT.string().readonly(),
+      status: JIT.enum(["draft", "confirmed"]),
+      changedAt: JIT.date(),
+    }),
+    { id: "id" }
+  )
+  .extends(
+    JIT.ddd.timestamps({
+      updatedAt: "changedAt",
+      clock: () => fixedClockValue,
+    })
+  );
 const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
   payload: JIT.object({ orderId: JIT.string() }),
   version: 1,
@@ -24,6 +57,18 @@ class Order extends OrderBase {
   recordAndPull(event: unknown): unknown[] {
     this.raise(event);
     return this.pullEvents();
+  }
+}
+
+class TimestampedOrder extends TimestampedOrderBase {
+  toggleStatus(): void {
+    this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
+  }
+}
+
+class ClockedOrder extends ClockedOrderBase {
+  toggleStatus(): void {
+    this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
   }
 }
 
@@ -57,6 +102,20 @@ class HandwrittenOrder {
   }
 }
 
+class HandwrittenTimestampedOrder {
+  constructor(
+    readonly id: string,
+    public status: "draft" | "confirmed",
+    public updatedAt: Date,
+    private readonly clock: () => Date
+  ) {}
+
+  update(): void {
+    this.status = this.status === "draft" ? "confirmed" : "draft";
+    this.updatedAt = this.clock();
+  }
+}
+
 const userInput = { id: "u_1", name: "Ada", active: true };
 const moneyInput = { amount: 10, currency: "BRL" };
 const runtimeUser = User.create(userInput);
@@ -64,7 +123,30 @@ const runtimeSameUser = User.create({ ...userInput, name: "Grace" });
 const runtimeMoney = Money.create(moneyInput);
 const runtimeSameMoney = Money.create(moneyInput);
 const runtimeOrder = Order.create({ id: "o_1", status: "draft" });
+const runtimeTimestampedOrder = TimestampedOrder.create({
+  id: "o_2",
+  status: "draft",
+  updatedAt: new Date(0),
+});
+const runtimeClockedOrder = ClockedOrder.create({
+  id: "o_3",
+  status: "draft",
+  changedAt: new Date(0),
+});
 const handwrittenOrder = new HandwrittenOrder("o_1", "draft");
+const handwrittenTimestampedOrder = new HandwrittenTimestampedOrder("o_2", "draft", new Date(0), () => new Date());
+const handwrittenClockedOrder = new HandwrittenTimestampedOrder("o_3", "draft", new Date(0), () => fixedClockValue);
+const timestampAot = await loadAotArtifacts({ TimestampedOrderBase });
+class AotTimestampedOrder extends timestampAot.TimestampedOrderBase {
+  toggleStatus(): void {
+    this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
+  }
+}
+const aotTimestampedOrder = AotTimestampedOrder.create({
+  id: "o_4",
+  status: "draft",
+  updatedAt: new Date(0),
+});
 const parseUser = JIT.json.parse(User).validate();
 const userJson = JSON.stringify(userInput);
 
@@ -115,6 +197,28 @@ registerScenario({
   args: [runtimeOrder],
   jit: (order: Order) => order.toggleStatus(),
   competitors: [{ name: "handwritten class", fn: () => handwrittenOrder.update() }],
+});
+
+registerScenario({
+  op: "aggregate timestamp mutation",
+  name: "default clock",
+  args: [runtimeTimestampedOrder],
+  jit: (order: TimestampedOrder) => order.toggleStatus(),
+  competitors: [
+    {
+      name: "handwritten class",
+      fn: () => handwrittenTimestampedOrder.update(),
+    },
+    { name: "JIT AOT", fn: () => aotTimestampedOrder.toggleStatus() },
+  ],
+});
+
+registerScenario({
+  op: "aggregate timestamp mutation",
+  name: "injected clock",
+  args: [runtimeClockedOrder],
+  jit: (order: ClockedOrder) => order.toggleStatus(),
+  competitors: [{ name: "handwritten class", fn: () => handwrittenClockedOrder.update() }],
 });
 
 registerScenario({
@@ -202,7 +306,10 @@ registerScenario({
       fn: (input: string) => new HandwrittenEmail(input),
       biased: "wraps a trusted string without applying the schema's email validation",
     },
-    { name: "JIT AOT", fn: (input: string) => valueObjectAot.Email.create(input) },
+    {
+      name: "JIT AOT",
+      fn: (input: string) => valueObjectAot.Email.create(input),
+    },
   ],
 });
 
@@ -247,7 +354,12 @@ const nestedAot = await loadAotArtifacts({ UserId, Email, NestedBase });
 class AotNestedUser extends nestedAot.NestedBase {}
 const persistedId = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
 const aliasId = "f63ca4d3-2b8f-49e6-80ff-0cedaf1e6504";
-const nestedState = { id: persistedId, name: "Ada", email: "ada@example.com", aliases: [aliasId] };
+const nestedState = {
+  id: persistedId,
+  name: "Ada",
+  email: "ada@example.com",
+  aliases: [aliasId],
+};
 
 registerScenario({
   op: "entity hydrate",
@@ -265,7 +377,10 @@ registerScenario({
       }),
       biased: "constructs trusted wrappers without applying schema validation",
     },
-    { name: "JIT AOT", fn: (state: typeof nestedState) => AotNestedUser.hydrate(state) },
+    {
+      name: "JIT AOT",
+      fn: (state: typeof nestedState) => AotNestedUser.hydrate(state),
+    },
   ],
 });
 
@@ -290,7 +405,11 @@ const AssertedMoney = JIT.ddd
   .valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }))
   .validate({ result: "result" })
   .assert((query) => query.gte("amount", 0));
-const policyAot = await loadAotArtifacts({ PlainMoney, ResultMoney, AssertedMoney });
+const policyAot = await loadAotArtifacts({
+  PlainMoney,
+  ResultMoney,
+  AssertedMoney,
+});
 
 registerScenario({
   op: "factory policy",
@@ -298,10 +417,22 @@ registerScenario({
   args: [moneyInput],
   jit: (input: typeof moneyInput) => PlainMoney.create(input),
   competitors: [
-    { name: "result policy", fn: (input: typeof moneyInput) => ResultMoney.create(input) },
-    { name: "result policy + assertion", fn: (input: typeof moneyInput) => AssertedMoney.create(input) },
-    { name: "JIT AOT", fn: (input: typeof moneyInput) => policyAot.PlainMoney.create(input) },
-    { name: "JIT AOT result", fn: (input: typeof moneyInput) => policyAot.ResultMoney.create(input) },
+    {
+      name: "result policy",
+      fn: (input: typeof moneyInput) => ResultMoney.create(input),
+    },
+    {
+      name: "result policy + assertion",
+      fn: (input: typeof moneyInput) => AssertedMoney.create(input),
+    },
+    {
+      name: "JIT AOT",
+      fn: (input: typeof moneyInput) => policyAot.PlainMoney.create(input),
+    },
+    {
+      name: "JIT AOT result",
+      fn: (input: typeof moneyInput) => policyAot.ResultMoney.create(input),
+    },
     {
       name: "JIT AOT result + assertion",
       fn: (input: typeof moneyInput) => policyAot.AssertedMoney.create(input),
@@ -321,9 +452,18 @@ registerScenario({
     }
   },
   competitors: [
-    { name: "result policy", fn: (input: unknown) => ResultMoney.create(input as typeof moneyInput) },
-    { name: "result policy + assertion", fn: (input: unknown) => AssertedMoney.create(input as typeof moneyInput) },
-    { name: "JIT AOT result", fn: (input: unknown) => policyAot.ResultMoney.create(input as typeof moneyInput) },
+    {
+      name: "result policy",
+      fn: (input: unknown) => ResultMoney.create(input as typeof moneyInput),
+    },
+    {
+      name: "result policy + assertion",
+      fn: (input: unknown) => AssertedMoney.create(input as typeof moneyInput),
+    },
+    {
+      name: "JIT AOT result",
+      fn: (input: unknown) => policyAot.ResultMoney.create(input as typeof moneyInput),
+    },
     {
       name: "JIT AOT result + assertion",
       fn: (input: unknown) => policyAot.AssertedMoney.create(input as typeof moneyInput),

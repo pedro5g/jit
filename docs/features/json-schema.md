@@ -201,9 +201,10 @@ schema, and the document itself never reaches the bundle:
 
 ```ts
 // jit/user.jit.ts
-const User = JIT.jsonSchema.from(contract as const);
+const userSchema = JIT.jsonSchema.from(contract as const);
 
-export const isUser = JIT.validate.is(User);
+export type User = JIT.Typeof<typeof userSchema>;
+export const isUser = JIT.validate.is(userSchema);
 ```
 
 ```ts

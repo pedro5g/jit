@@ -23,9 +23,58 @@ class Order extends OrderBase {
 
 `peekEvents()` returns a snapshot without exposing the internal array. `pullEvents()` preserves order and clears the queue. `commit(publisher)` publishes sequentially, clears the queue after the full sequence succeeds, and leaves it intact when publishing fails.
 
-Timestamp, soft-delete, and version policies are singleton aggregate
-configurations. `.timestamps({ updatedAt })` installs a shared `touch()`
-prototype method and, unless `touch: "manual"` is selected, updates the field
-once per effective mutation. `.softDelete({ field })` installs
-`softDelete()`, `restore()`, and `isDeleted`; `.versioned({ field })` advances
-the version through the same mutation plan. Repeating one policy is rejected.
+Timestamp, soft-delete, and version policies are DDD capabilities. They live in
+the domain namespace and use the same `.extends(...)` composition rule as
+other Runtime Class behavior:
+
+```ts
+const AuditedOrderBase = JIT.ddd
+  .aggregateRoot(
+    JIT.object({
+      id: JIT.string(),
+      status: JIT.string(),
+      changedAt: JIT.date(),
+      archivedAt: JIT.date().nullable(),
+      version: JIT.int(),
+    }),
+    { id: "id" },
+  )
+  .extends(
+    JIT.ddd.timestamps({ updatedAt: "changedAt" }),
+    JIT.ddd.softDelete({ field: "archivedAt" }),
+    JIT.ddd.versioned({ field: "version" }),
+  );
+```
+
+`timestamps` installs `touch()` and, unless `touch: "manual"` is selected,
+updates the configured field once per effective mutation. `softDelete`
+installs `softDelete()`, `restore()`, and `isDeleted`. `versioned` advances the
+configured number through the same mutation plan. Repeating a capability is
+rejected; capabilities also cannot shadow schema fields or existing methods.
+
+Names and clocks are explicit configuration, not global registries:
+
+```ts
+const applicationClock = () => new Date("2026-01-01T00:00:00.000Z");
+
+JIT.ddd.timestamps({
+  updatedAt: "changedAt",
+  clock: applicationClock,
+  methods: { touch: "markChanged" },
+});
+
+JIT.ddd.softDelete({
+  field: "archivedAt",
+  clock: applicationClock,
+  methods: {
+    delete: "archive",
+    restore: "unarchive",
+    isDeleted: "isArchived",
+  },
+});
+```
+
+Without `clock`, runtime JIT and AOT emit a direct `new Date()` and add no
+dispatch. An application clock is a runtime binding; standalone AOT rejects
+the complete class with an explicit skip reason instead of serializing the
+closure. All methods are installed once on the prototype.

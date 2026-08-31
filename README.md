@@ -174,9 +174,10 @@ deliberate allocation boundaries and AOT constraints.
 
 ## AOT: the declaration file is the manifest
 
-`jit generate` reads a `*.jit.ts` file literally. A schema names a generated
-type, an artifact becomes a generated function, and an object of artifacts
-becomes one frozen object — `export` is optional.
+`jit generate` reads the explicit exports of a `*.jit.ts` file. An exported
+artifact becomes a generated function, an exported object of artifacts becomes
+one frozen object, and an exported `JIT.Typeof` alias becomes a generated type.
+Private bindings are build-time implementation details.
 
 ```sh
 pnpm jit init
@@ -187,17 +188,18 @@ pnpm jit generate
 // input: jit/user.jit.ts
 import { JIT } from "@jit-compiler/jit/define";
 
-const User = JIT.object({
+const userSchema = JIT.object({
   id: JIT.number().int32(),
   name: JIT.string().min(2),
 });
 
-export const isUser = JIT.validate.is(User);
+export type User = JIT.Typeof<typeof userSchema>;
+export const isUser = JIT.validate.is(userSchema);
 
 export const UserMethods = {
-  is: JIT.validate.is(User),
-  toJson: JIT.json.stringify(User),
-  toObject: JIT.json.parse(User),
+  is: JIT.validate.is(userSchema),
+  toJson: JIT.json.stringify(userSchema),
+  toObject: JIT.json.parse(userSchema),
 };
 ```
 

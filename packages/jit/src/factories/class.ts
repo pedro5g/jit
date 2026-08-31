@@ -41,6 +41,7 @@ type ObjectSchema<TSchema extends ATS.AnyTypeSchema> = TSchema & {
 
 const CLASS_TARGET = Symbol("jit.class.target");
 const INTERNAL_CONSTRUCT = Symbol("jit.class.construct");
+const AGGREGATE_POLICY_TARGET = Symbol("jit.ddd.aggregate-policy-target");
 export type ConstructionMode = "constructor" | "factory";
 
 /** How a factory reports a rejected input. Fixed at declaration, never per call. */
@@ -163,7 +164,9 @@ function policyError(policy: FactoryPolicyState, issues: readonly ValidationIssu
  * An unconfigured class contributes nothing, so its artifact — and the module
  * AOT generates from it — is exactly what it was before policies existed.
  */
-function policyArtifact(policy: FactoryPolicyState): { readonly policy?: ClassPolicyArtifact } {
+function policyArtifact(policy: FactoryPolicyState): {
+  readonly policy?: ClassPolicyArtifact;
+} {
   if (!policy.configured) return {};
   const bindings = policy.assertions.flatMap((descriptor) => descriptor.bindings);
 
@@ -262,7 +265,7 @@ export type ClassExtensionArgs<
   TExtensions extends readonly AnyClassExtension[],
 > = {
   [TKey in keyof TExtensions]: TExtensions[TKey] extends AnyClassCapability
-    ? TExtensions[TKey]
+    ? NonConflictingCapability<TExtensions[TKey], TSchema, TInstance>
     : TExtensions[TKey] &
         // The built-ins named in the same call are part of `this`, so a method
         // may use a capability it was declared beside.
@@ -284,6 +287,26 @@ type CapabilitiesInCall<
 >;
 
 type AnyClassExtension = AnyClassCapability | ClassMethodsInput;
+
+type CompatibleCapability<TCapability extends AnyClassCapability, TSchema extends ATS.AnyTypeSchema> =
+  TCapability extends TimestampCapability<infer TOptions>
+    ? TOptions["updatedAt"] extends DateKeys<TSchema>
+      ? TCapability
+      : never
+    : TCapability extends SoftDeleteCapability<infer TOptions>
+      ? TOptions["field"] extends NullableDateKeys<TSchema>
+        ? TCapability
+        : never
+      : TCapability extends VersionedCapability<infer TOptions>
+        ? TOptions["field"] extends NumberKeys<TSchema>
+          ? TCapability
+          : never
+        : TCapability;
+
+type NonConflictingCapability<TCapability extends AnyClassCapability, TSchema extends ATS.AnyTypeSchema, TInstance> =
+  Extract<keyof MethodsForCapability<TCapability, TSchema, TInstance>, keyof TInstance> extends never
+    ? CompatibleCapability<TCapability, TSchema>
+    : never;
 
 /** Methods an extension contributes, keeping declared signatures intact. */
 type MethodsForExtension<
@@ -443,13 +466,19 @@ type FactoryMethods<
           ): FactoryOutcome<InstanceType<TThis>, TMode, TError>;
         });
 
-type ResolvedResultMode<TPolicy> = TPolicy extends { readonly result: infer TMode extends FactoryResultMode }
+type ResolvedResultMode<TPolicy> = TPolicy extends {
+  readonly result: infer TMode extends FactoryResultMode;
+}
   ? TMode
   : "throw";
-type ResolvedPolicyError<TPolicy, TError> = TPolicy extends { readonly error: (...args: never[]) => infer TNext }
+type ResolvedPolicyError<TPolicy, TError> = TPolicy extends {
+  readonly error: (...args: never[]) => infer TNext;
+}
   ? TNext
   : TError;
-type ResolvedAssertionError<TOptions, TError> = TOptions extends { readonly error: (...args: never[]) => infer TNext }
+type ResolvedAssertionError<TOptions, TError> = TOptions extends {
+  readonly error: (...args: never[]) => infer TNext;
+}
   ? TError | TNext
   : TError | DomainAssertionError;
 
@@ -485,23 +514,6 @@ export type ConfiguredRuntimeClass<
       Omit<
         ConfiguredRuntimeClass<TSchema, TInstance, TOptions, TMode, TError, TValidated, TFactoriesConfigured>,
         "accessors"
-      >;
-    identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
-      key: TKey
-    ): (abstract new (
-      input: Input<TSchema>
-    ) => TInstance & IdentityMethods) &
-      Omit<
-        ConfiguredRuntimeClass<
-          TSchema,
-          TInstance & IdentityMethods,
-          TOptions,
-          TMode,
-          TError,
-          TValidated,
-          TFactoriesConfigured
-        >,
-        "identity"
       >;
     /** Adds one domain invariant, written in the shared condition builder. */
     assert<const TAssertion extends AssertionOptions = Record<never, never>>(
@@ -571,7 +583,15 @@ type ConstructionFixedFactory<TSchema extends ATS.AnyTypeSchema, TInstance> = (a
 ) => TInstance) &
   Omit<FactoryRuntimeClass<TSchema, TInstance>, "construction" | "factories">;
 
-type IdentifierRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<TSchema, TInstance> & {
+type ScalarFactoryRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = (abstract new (
+  input: Input<TSchema>
+) => TInstance) &
+  Omit<FactoryRuntimeClass<TSchema, TInstance>, "accessors" | "assert">;
+
+type IdentifierRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = ScalarFactoryRuntimeClass<
+  TSchema,
+  TInstance
+> & {
   readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance, "value", true>;
 };
 
@@ -680,7 +700,10 @@ type AnyClassCapability = ClassCapability<object>;
 type EqualsMethods = { equals(other: unknown): boolean };
 type HashCodeMethods = { hashCode(): number };
 type DiffMethods = { diff(other: unknown): DiffChange[] };
-type IdentityMethods = { sameIdentity(other: unknown): boolean; identity(): unknown };
+type IdentityMethods = {
+  sameIdentity(other: unknown): boolean;
+  identity(): unknown;
+};
 type ValueAccessor<TValue> = { readonly value: TValue };
 export interface ScalarValueObject<TValue> extends EqualsMethods, HashCodeMethods {
   readonly value: TValue;
@@ -690,23 +713,39 @@ type DateKeys<TSchema extends ATS.AnyTypeSchema> = {
 }[keyof ATS.TypeofSchema<TSchema>] &
   string;
 type NullableDateKeys<TSchema extends ATS.AnyTypeSchema> = {
-  [TKey in keyof ATS.TypeofSchema<TSchema>]: ATS.TypeofSchema<TSchema>[TKey] extends Date | null ? TKey : never;
+  [TKey in keyof ATS.TypeofSchema<TSchema>]: null extends ATS.TypeofSchema<TSchema>[TKey]
+    ? Exclude<ATS.TypeofSchema<TSchema>[TKey], null> extends Date
+      ? TKey
+      : never
+    : never;
 }[keyof ATS.TypeofSchema<TSchema>] &
   string;
 type NumberKeys<TSchema extends ATS.AnyTypeSchema> = {
   [TKey in keyof ATS.TypeofSchema<TSchema>]: ATS.TypeofSchema<TSchema>[TKey] extends number ? TKey : never;
 }[keyof ATS.TypeofSchema<TSchema>] &
   string;
-export interface TimestampOptions<TSchema extends ATS.AnyTypeSchema> {
-  readonly updatedAt: DateKeys<TSchema>;
-  readonly createdAt?: DateKeys<TSchema>;
+export interface TimestampOptions {
+  readonly updatedAt: string;
   readonly touch?: "mutation" | "manual";
+  /** Runtime clock. Omit it to emit a direct `new Date()` in runtime and AOT. */
+  readonly clock?: () => Date;
+  readonly methods?: {
+    /** Prototype method name; defaults to `touch`. */
+    readonly touch?: string;
+  };
 }
-export interface SoftDeleteOptions<TSchema extends ATS.AnyTypeSchema> {
-  readonly field: NullableDateKeys<TSchema>;
+export interface SoftDeleteOptions {
+  readonly field: string;
+  /** Uses the timestamp clock when omitted and timestamps are installed. */
+  readonly clock?: () => Date;
+  readonly methods?: {
+    readonly delete?: string;
+    readonly restore?: string;
+    readonly isDeleted?: string;
+  };
 }
-export interface VersionedOptions<TSchema extends ATS.AnyTypeSchema> {
-  readonly field: NumberKeys<TSchema>;
+export interface VersionedOptions {
+  readonly field: string;
 }
 declare class AggregateProtectedMethods<TSchema extends ATS.AnyTypeSchema> {
   protected update(patch: SchemaUpdate<TSchema>): void;
@@ -718,47 +757,40 @@ type AggregateMethods<TSchema extends ATS.AnyTypeSchema> = AggregateProtectedMet
   pullEvents(): unknown[];
   commit(publisher: EventPublisher): Promise<void>;
 };
-type TimestampMethods = {
-  touch(): void;
+type NamedMethod<TName extends string, TMethod> = {
+  readonly [TKey in TName]: TMethod;
 };
-type SoftDeleteMethods = {
-  softDelete(): void;
-  restore(): void;
-  readonly isDeleted: boolean;
-};
-type AggregateRuntimeClass<
-  TSchema extends ATS.AnyTypeSchema,
-  TInstance,
-  THasTimestamps extends boolean = false,
-  THasSoftDelete extends boolean = false,
-  THasVersion extends boolean = false,
-> = FactoryRuntimeClass<
-  TSchema,
-  TInstance &
-    (THasTimestamps extends true ? TimestampMethods : object) &
-    (THasSoftDelete extends true ? SoftDeleteMethods : object)
-> &
-  (THasTimestamps extends true
-    ? object
-    : {
-        timestamps(
-          options: TimestampOptions<TSchema>
-        ): AggregateRuntimeClass<TSchema, TInstance, true, THasSoftDelete, THasVersion>;
-      }) &
-  (THasSoftDelete extends true
-    ? object
-    : {
-        softDelete(
-          options: SoftDeleteOptions<TSchema>
-        ): AggregateRuntimeClass<TSchema, TInstance, THasTimestamps, true, THasVersion>;
-      }) &
-  (THasVersion extends true
-    ? object
-    : {
-        versioned(
-          options: VersionedOptions<TSchema>
-        ): AggregateRuntimeClass<TSchema, TInstance, THasTimestamps, THasSoftDelete, true>;
-      });
+declare const VERSIONED_CAPABILITY: unique symbol;
+type VersionedCapabilityMarker = { readonly [VERSIONED_CAPABILITY]?: true };
+type OptionMethodName<TOptions, TKey extends PropertyKey, TFallback extends string> = TOptions extends {
+  readonly methods: Record<TKey, infer TName extends string>;
+}
+  ? TName
+  : TFallback;
+type TimestampMethodsFor<TOptions> = NamedMethod<OptionMethodName<TOptions, "touch", "touch">, () => void>;
+type SoftDeleteMethodsFor<TOptions> = NamedMethod<OptionMethodName<TOptions, "delete", "softDelete">, () => void> &
+  NamedMethod<OptionMethodName<TOptions, "restore", "restore">, () => void> &
+  Readonly<NamedMethod<OptionMethodName<TOptions, "isDeleted", "isDeleted">, boolean>>;
+
+export interface TimestampCapability<TOptions extends TimestampOptions = TimestampOptions>
+  extends ClassCapability<TimestampMethodsFor<TOptions>> {
+  readonly kind: "ddd.timestamps";
+  readonly __options?: TOptions;
+}
+
+export interface SoftDeleteCapability<TOptions extends SoftDeleteOptions = SoftDeleteOptions>
+  extends ClassCapability<SoftDeleteMethodsFor<TOptions>> {
+  readonly kind: "ddd.softDelete";
+  readonly __options?: TOptions;
+}
+
+export interface VersionedCapability<TOptions extends VersionedOptions = VersionedOptions>
+  extends ClassCapability<VersionedCapabilityMarker> {
+  readonly kind: "ddd.versioned";
+  readonly __options?: TOptions;
+}
+
+type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<TSchema, TInstance>;
 interface ClassWithCapability extends ClassCapability<object> {
   readonly __with: true;
 }
@@ -940,6 +972,12 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           installedMethods.push(...installMethods(classTarget, extension, schemaNames, installedMethodNames));
         }
         registerClass();
+        const aggregatePolicy = (
+          classTarget as RuntimeClass<TSchema> & {
+            readonly [AGGREGATE_POLICY_TARGET]?: AggregatePolicyTarget;
+          }
+        )[AGGREGATE_POLICY_TARGET];
+        aggregatePolicy?.refreshArtifact();
         return classTarget;
       },
     },
@@ -1110,14 +1148,18 @@ function installFactory<TSchema extends ATS.AnyTypeSchema>(
   ) {
     throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
   }
-  Object.defineProperty(classTarget, next, { configurable: true, enumerable: false, value: factory });
+  Object.defineProperty(classTarget, next, {
+    configurable: true,
+    enumerable: false,
+    value: factory,
+  });
 }
 
 function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   identifier: boolean,
   isAbstract: boolean
-): FactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>> {
+): ScalarFactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>> {
   const parse = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
   const policy = createPolicyState();
@@ -1172,6 +1214,9 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
   }
 
   function hydrate<TThis extends RuntimeClass<TSchema>>(this: TThis, state: Hydrate<TSchema>): InstanceType<TThis> {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
+    }
     const construct = this as unknown as new (
       input: unknown,
       token: symbol,
@@ -1342,7 +1387,7 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     return this.value;
   });
   register();
-  return classTarget as unknown as FactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
+  return classTarget as unknown as ScalarFactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
 }
 
 function emitConstructor(
@@ -1521,24 +1566,28 @@ const valueAccessorCapability = capability<ValueAccessor<unknown>>("value", (pro
 /** Immutable class preset with compiled structural equality and hash code. */
 export function valueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>> {
+): ValueObjectRuntimeClass<TSchema> {
   const unwrapped = unwrapSchema(schema);
   const base = resolveWrappers(unwrapped).base;
   if (base.type !== TypeName.object) {
     if (!isPrimitiveLikeSchema(base)) {
       throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
     }
-    return createScalarValueObject(unwrapped, false, false) as FactoryRuntimeClass<
-      TSchema,
-      ValueObjectInstance<TSchema>
-    >;
+    return createScalarValueObject(unwrapped, false, false) as unknown as ValueObjectRuntimeClass<TSchema>;
   }
   const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
   return (
     "value" in (base as ATS.ObjectSchema).def.props
-      ? runtime.extends(classType.equals, classType.hashCode)
-      : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode)
-  ) as FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
+      ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+          classType.equals,
+          classType.hashCode
+        )
+      : (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+          valueAccessorCapability,
+          classType.equals,
+          classType.hashCode
+        )
+  ) as ValueObjectRuntimeClass<TSchema>;
 }
 
 type ObjectValueAccessor<TValue extends object> = "value" extends keyof TValue
@@ -1548,27 +1597,35 @@ type ValueObjectInstance<TSchema extends ATS.AnyTypeSchema> =
   ATS.TypeofSchema<TSchema> extends object
     ? ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods & ObjectValueAccessor<ATS.TypeofSchema<TSchema>>
     : ScalarValueObject<ATS.TypeofSchema<TSchema>>;
+type ValueObjectRuntimeClass<TSchema extends ATS.AnyTypeSchema> =
+  ATS.TypeofSchema<TSchema> extends object
+    ? FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>
+    : ScalarFactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
 
 export function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>
-): FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>> {
+): ValueObjectRuntimeClass<TSchema> {
   const unwrapped = unwrapSchema(schema);
   const base = resolveWrappers(unwrapped).base;
   if (base.type !== TypeName.object) {
     if (!isPrimitiveLikeSchema(base)) {
       throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
     }
-    return createScalarValueObject(unwrapped, false, true) as FactoryRuntimeClass<
-      TSchema,
-      ValueObjectInstance<TSchema>
-    >;
+    return createScalarValueObject(unwrapped, false, true) as unknown as ValueObjectRuntimeClass<TSchema>;
   }
   const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
   return (
     "value" in (base as ATS.ObjectSchema).def.props
-      ? runtime.extends(classType.equals, classType.hashCode)
-      : runtime.extends(valueAccessorCapability, classType.equals, classType.hashCode)
-  ) as FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>;
+      ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+          classType.equals,
+          classType.hashCode
+        )
+      : (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+          valueAccessorCapability,
+          classType.equals,
+          classType.hashCode
+        )
+  ) as ValueObjectRuntimeClass<TSchema>;
 }
 
 type DefaultIdentifierSchema = ATS.DefaultSchema<ATS.StringSchema>;
@@ -1595,12 +1652,29 @@ export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(schema?: Sch
   return createScalarValueObject(identifierSchema, true, false);
 }
 
+type HasIdentifierMetadata<TSchema extends ATS.AnyTypeSchema> =
+  TSchema extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "value", true>
+    ? true
+    : TSchema extends ATS.LazySchema<infer TInner>
+      ? HasIdentifierMetadata<TInner>
+      : TSchema extends
+            | ATS.OptionalSchema<infer TInner>
+            | ATS.NullableSchema<infer TInner>
+            | ATS.NullishSchema<infer TInner>
+            | ATS.DefaultSchema<infer TInner>
+            | ATS.BrandSchema<infer TInner>
+            | ATS.ReadonlySchema<infer TInner>
+            | ATS.RefineSchema<infer TInner>
+            | ATS.CoerceSchema<infer TInner>
+            | ATS.PipeSchema<infer TInner>
+            | ATS.TransformSchema<infer TInner>
+        ? HasIdentifierMetadata<TInner>
+        : false;
+
 type IdentityKeys<TSchema extends ATS.AnyTypeSchema> =
   TSchema extends ATS.ObjectSchema<infer TShape>
     ? {
-        [TKey in keyof TShape]: TShape[TKey] extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "value", true>
-          ? TKey
-          : never;
+        [TKey in keyof TShape]: HasIdentifierMetadata<TShape[TKey]> extends true ? TKey : never;
       }[keyof TShape] &
         string
     : never;
@@ -1608,8 +1682,16 @@ type IsUnion<TValue, TWhole = TValue> = TValue extends unknown ? ([TWhole] exten
 type IdentityArguments<TSchema extends ATS.AnyTypeSchema> = [IdentityKeys<TSchema>] extends [never]
   ? [options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
   : IsUnion<IdentityKeys<TSchema>> extends true
-    ? [options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
-    : [options?: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }];
+    ? [
+        options: {
+          readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string>;
+        },
+      ]
+    : [
+        options?: {
+          readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string>;
+        },
+      ];
 
 function resolveIdentityKey(schema: ATS.AnyTypeSchema, explicit: string | undefined): string {
   const base = resolveWrappers(schema).base;
@@ -1666,6 +1748,57 @@ function findRuntimeTypeSchema(schema: ATS.AnyTypeSchema): ATS.RuntimeTypeSchema
   }
 }
 
+interface AggregatePolicyTarget {
+  timestamps(options: TimestampOptions): void;
+  softDelete(options: SoftDeleteOptions): void;
+  versioned(options: VersionedOptions): void;
+  refreshArtifact(): void;
+}
+
+function aggregatePolicyTarget(classTarget: Function): AggregatePolicyTarget {
+  const target = (
+    classTarget as Function & {
+      readonly [AGGREGATE_POLICY_TARGET]?: AggregatePolicyTarget;
+    }
+  )[AGGREGATE_POLICY_TARGET];
+  if (target === undefined) {
+    throw new JITError("INVALID_OPERATION", "This DDD capability requires an Aggregate Root");
+  }
+  return target;
+}
+
+/** Adds timestamp mutation semantics to an Aggregate Root. */
+export function timestamps<const TOptions extends TimestampOptions>(options: TOptions): TimestampCapability<TOptions> {
+  return Object.freeze({
+    kind: "ddd.timestamps" as const,
+    install(classTarget: Function) {
+      aggregatePolicyTarget(classTarget).timestamps(options);
+    },
+  });
+}
+
+/** Adds reversible soft deletion to an Aggregate Root. */
+export function softDelete<const TOptions extends SoftDeleteOptions>(
+  options: TOptions
+): SoftDeleteCapability<TOptions> {
+  return Object.freeze({
+    kind: "ddd.softDelete" as const,
+    install(classTarget: Function) {
+      aggregatePolicyTarget(classTarget).softDelete(options);
+    },
+  });
+}
+
+/** Advances a numeric version after each effective Aggregate Root mutation. */
+export function versioned<const TOptions extends VersionedOptions>(options: TOptions): VersionedCapability<TOptions> {
+  return Object.freeze({
+    kind: "ddd.versioned" as const,
+    install(classTarget: Function) {
+      aggregatePolicyTarget(classTarget).versioned(options);
+    },
+  });
+}
+
 function createEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   isAbstract: boolean,
@@ -1673,7 +1806,8 @@ function createEntity<TSchema extends ATS.AnyTypeSchema>(
 ): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  return createRuntimeClass(unwrapped, isAbstract, false, false, "factory").extends(
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory");
+  return (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
     classType.identity(identity)
   ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods>;
 }
@@ -1701,7 +1835,8 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
 ): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const aggregate = createRuntimeClass(unwrapped, isAbstract, false, true, "factory").extends(
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory");
+  const aggregate = (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
     classType.identity(identity)
   ) as unknown as AggregateRuntimeClass<
     TSchema,
@@ -1730,9 +1865,49 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   let touchAt: string | undefined;
   let deletedAt: string | undefined;
   let version: string | undefined;
+  let timestampClock: (() => Date) | undefined;
+  let deletionClock: (() => Date) | undefined;
+  let touchMethod: string | undefined;
+  let deleteMethod: string | undefined;
+  let restoreMethod: string | undefined;
+  let isDeletedMember: string | undefined;
   let timestampsConfigured = false;
   let softDeleteConfigured = false;
   let versionConfigured = false;
+  const now = (clock: (() => Date) | undefined): Date => {
+    const value = clock === undefined ? new Date() : clock();
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+      throw new JITError("INVALID_OPERATION", "A DDD clock must return a valid Date");
+    }
+    return value;
+  };
+  const methodName = (value: string | undefined, fallback: string, label: string): string => {
+    const name = value ?? fallback;
+    if (name.length === 0) throw new JITError("INVALID_OPERATION", `${label} method name cannot be empty`);
+    if (name in base.def.props) {
+      throw new JITError("INVALID_OPERATION", `${label} method ${JSON.stringify(name)} collides with a schema field`);
+    }
+    if (name in aggregate.prototype) {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `${label} method ${JSON.stringify(name)} collides with an installed capability`
+      );
+    }
+    return name;
+  };
+  const mutationArtifact = () => ({
+    ...(updatedAt === undefined ? {} : { updatedAt }),
+    ...(touchAt === undefined ? {} : { touchAt }),
+    ...(version === undefined ? {} : { version }),
+    ...(deletedAt === undefined ? {} : { deletedAt }),
+    ...(timestampClock === undefined ? {} : { timestampClock }),
+    ...(deletionClock === undefined ? {} : { deletionClock }),
+    ...(touchMethod === undefined ? {} : { touchMethod }),
+    ...(deleteMethod === undefined ? {} : { deleteMethod }),
+    ...(restoreMethod === undefined ? {} : { restoreMethod }),
+    ...(isDeletedMember === undefined ? {} : { isDeletedMember }),
+  });
+  const refreshArtifact = () => setClassMutationArtifact(aggregate, mutationArtifact());
   const installMutation = () => {
     const mutation = buildAggregateMutationPlan({
       fields,
@@ -1740,10 +1915,17 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
       ...(updatedAt === undefined ? {} : { updatedAt }),
       ...(version === undefined ? {} : { version }),
     });
+    const clockNames = updatedAt !== undefined && timestampClock !== undefined ? ["__clock"] : [];
+    const clockValues = updatedAt !== undefined && timestampClock !== undefined ? [() => now(timestampClock)] : [];
     const assign = globalThis.Function(
       ...updateNames,
-      `return function update(patch) { ${emitAggregateMutationBody(mutation, updateBindings)} };`
-    )(...updateValues) as (this: object, patch: SchemaUpdate<TSchema>) => void;
+      ...clockNames,
+      `return function update(patch) { ${emitAggregateMutationBody(
+        mutation,
+        updateBindings,
+        clockNames.length === 0 ? "new Date()" : "__clock()"
+      )} };`
+    )(...updateValues, ...clockValues) as (this: object, patch: SchemaUpdate<TSchema>) => void;
 
     Object.defineProperty(aggregate.prototype, "update", {
       configurable: true,
@@ -1753,10 +1935,8 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   };
 
   installMutation();
-  Object.defineProperty(aggregate, "timestamps", {
-    configurable: false,
-    enumerable: false,
-    value: (timestamp: TimestampOptions<TSchema>) => {
+  const aggregatePolicies: AggregatePolicyTarget = {
+    timestamps(timestamp: TimestampOptions) {
       if (timestampsConfigured) {
         throw new JITError("INVALID_OPERATION", "Timestamps are already configured for this Aggregate Root");
       }
@@ -1768,26 +1948,22 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
       if (timestamp.touch !== undefined && timestamp.touch !== "mutation" && timestamp.touch !== "manual") {
         throw new JITError("INVALID_OPERATION", "Timestamp touch must be mutation or manual");
       }
+      if (timestamp.clock !== undefined && typeof timestamp.clock !== "function") {
+        throw new JITError("INVALID_OPERATION", "Timestamp clock must be a function");
+      }
+      const name = methodName(timestamp.methods?.touch, "touch", "Timestamp");
       timestampsConfigured = true;
       touchAt = field;
       updatedAt = timestamp.touch === "manual" ? undefined : field;
-      definePrototype(aggregate.prototype, "touch", function touch(this: Record<string, unknown>) {
-        this[field] = new Date();
+      timestampClock = timestamp.clock;
+      touchMethod = name;
+      definePrototype(aggregate.prototype, name, function touch(this: Record<string, unknown>) {
+        this[field] = now(timestampClock);
       });
       installMutation();
-      setClassMutationArtifact(aggregate, {
-        ...(updatedAt === undefined ? {} : { updatedAt }),
-        touchAt,
-        ...(deletedAt === undefined ? {} : { deletedAt }),
-        ...(version === undefined ? {} : { version }),
-      });
-      return aggregate;
+      refreshArtifact();
     },
-  });
-  Object.defineProperty(aggregate, "softDelete", {
-    configurable: false,
-    enumerable: false,
-    value: (options: SoftDeleteOptions<TSchema>) => {
+    softDelete(options: SoftDeleteOptions) {
       if (softDeleteConfigured) {
         throw new JITError("INVALID_OPERATION", "Soft delete is already configured for this Aggregate Root");
       }
@@ -1800,37 +1976,40 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
           `Soft-delete field ${JSON.stringify(field)} must be a nullable Date schema`
         );
       }
+      if (options.clock !== undefined && typeof options.clock !== "function") {
+        throw new JITError("INVALID_OPERATION", "Soft-delete clock must be a function");
+      }
+      const nextDeleteMethod = methodName(options.methods?.delete, "softDelete", "Soft-delete");
+      const nextRestoreMethod = methodName(options.methods?.restore, "restore", "Soft-delete");
+      const nextIsDeletedMember = methodName(options.methods?.isDeleted, "isDeleted", "Soft-delete");
+      if (new Set([nextDeleteMethod, nextRestoreMethod, nextIsDeletedMember]).size !== 3) {
+        throw new JITError("INVALID_OPERATION", "Soft-delete member names must be distinct");
+      }
       softDeleteConfigured = true;
       deletedAt = field;
-      definePrototype(aggregate.prototype, "softDelete", function softDelete(this: Record<string, unknown>) {
-        const now = new Date();
-        this[field] = now;
-        if (updatedAt !== undefined) this[updatedAt] = now;
+      deletionClock = options.clock;
+      deleteMethod = nextDeleteMethod;
+      restoreMethod = nextRestoreMethod;
+      isDeletedMember = nextIsDeletedMember;
+      definePrototype(aggregate.prototype, nextDeleteMethod, function softDelete(this: Record<string, unknown>) {
+        const current = now(deletionClock ?? timestampClock);
+        this[field] = current;
+        if (updatedAt !== undefined) this[updatedAt] = current;
       });
-      definePrototype(aggregate.prototype, "restore", function restore(this: Record<string, unknown>) {
+      definePrototype(aggregate.prototype, nextRestoreMethod, function restore(this: Record<string, unknown>) {
         this[field] = null;
-        if (updatedAt !== undefined) this[updatedAt] = new Date();
+        if (updatedAt !== undefined) this[updatedAt] = now(deletionClock ?? timestampClock);
       });
-      Object.defineProperty(aggregate.prototype, "isDeleted", {
+      Object.defineProperty(aggregate.prototype, nextIsDeletedMember, {
         configurable: false,
         enumerable: false,
         get(this: Record<string, unknown>) {
           return this[field] !== null;
         },
       });
-      setClassMutationArtifact(aggregate, {
-        ...(updatedAt === undefined ? {} : { updatedAt }),
-        ...(touchAt === undefined ? {} : { touchAt }),
-        deletedAt,
-        ...(version === undefined ? {} : { version }),
-      });
-      return aggregate;
+      refreshArtifact();
     },
-  });
-  Object.defineProperty(aggregate, "versioned", {
-    configurable: false,
-    enumerable: false,
-    value: (options: VersionedOptions<TSchema>) => {
+    versioned(options: VersionedOptions) {
       if (versionConfigured) {
         throw new JITError("INVALID_OPERATION", "Versioning is already configured for this Aggregate Root");
       }
@@ -1846,14 +2025,13 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
       versionConfigured = true;
       version = field;
       installMutation();
-      setClassMutationArtifact(aggregate, {
-        ...(updatedAt === undefined ? {} : { updatedAt }),
-        ...(touchAt === undefined ? {} : { touchAt }),
-        ...(deletedAt === undefined ? {} : { deletedAt }),
-        version,
-      });
-      return aggregate;
+      refreshArtifact();
     },
+    refreshArtifact,
+  };
+  Object.defineProperty(aggregate, AGGREGATE_POLICY_TARGET, {
+    enumerable: false,
+    value: aggregatePolicies,
   });
   definePrototype(aggregate.prototype, "raise", function raise(this: { __jitEvents: unknown[] }, event: unknown) {
     this.__jitEvents[this.__jitEvents.length] = event;
@@ -1914,11 +2092,15 @@ export type DomainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string
 > &
   (abstract new (
     input: Input<EventSchema<TPayload, TType, TVersion>>
-  ) => DomainEventState<TPayload, TType, TVersion> & { readonly "~event": StandardEvent }) & {
-    create(input: Input<TPayload>): DomainEventState<TPayload, TType, TVersion> & { readonly "~event": StandardEvent };
-    hydrate(
-      state: Hydrate<EventSchema<TPayload, TType, TVersion>>
-    ): DomainEventState<TPayload, TType, TVersion> & { readonly "~event": StandardEvent };
+  ) => DomainEventState<TPayload, TType, TVersion> & {
+    readonly "~event": StandardEvent;
+  }) & {
+    create(input: Input<TPayload>): DomainEventState<TPayload, TType, TVersion> & {
+      readonly "~event": StandardEvent;
+    };
+    hydrate(state: Hydrate<EventSchema<TPayload, TType, TVersion>>): DomainEventState<TPayload, TType, TVersion> & {
+      readonly "~event": StandardEvent;
+    };
     readonly type: TType;
     readonly version: TVersion;
   };
@@ -1926,7 +2108,10 @@ export type DomainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string
 /** Creates an immutable, versioned domain-event class from a payload schema. */
 export function domainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string, TVersion extends number>(
   type: TType,
-  options: { readonly version: TVersion; readonly payload: SchemaInput<TPayload> }
+  options: {
+    readonly version: TVersion;
+    readonly payload: SchemaInput<TPayload>;
+  }
 ): DomainEvent<TPayload, TType, TVersion> {
   const payload = unwrapSchema(options.payload);
   const schema = createDomainEventSchema(payload, type, options.version);
@@ -1954,7 +2139,11 @@ export function domainEvent<TPayload extends ATS.AnyTypeSchema, TType extends st
   Object.defineProperty(event.prototype, "~event", {
     configurable: false,
     enumerable: false,
-    value: Object.freeze({ version: 1, type, schemaVersion: options.version } satisfies StandardEvent),
+    value: Object.freeze({
+      version: 1,
+      type,
+      schemaVersion: options.version,
+    } satisfies StandardEvent),
     writable: false,
   });
   registerArtifact(event, {
@@ -2029,8 +2218,16 @@ function installMethods(
   methods: ClassMethodsInput,
   taken: ReadonlySet<string>,
   installed: Set<string>
-): { readonly name: string; readonly kind: "method" | "get" | "set"; readonly source: Function }[] {
-  const recorded: { name: string; kind: "method" | "get" | "set"; source: Function }[] = [];
+): {
+  readonly name: string;
+  readonly kind: "method" | "get" | "set";
+  readonly source: Function;
+}[] {
+  const recorded: {
+    name: string;
+    kind: "method" | "get" | "set";
+    source: Function;
+  }[] = [];
 
   for (const name of Object.keys(methods)) {
     if (RESERVED_EXTENSION_NAMES.has(name) || taken.has(name) || installed.has(name)) {
@@ -2047,17 +2244,30 @@ function installMethods(
         `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
       );
     }
-    Object.defineProperty(classTarget.prototype, name, { ...descriptor, enumerable: false, configurable: false });
+    Object.defineProperty(classTarget.prototype, name, {
+      ...descriptor,
+      enumerable: false,
+      configurable: false,
+    });
     installed.add(name);
     if (descriptor.get !== undefined) recorded.push({ name, kind: "get", source: descriptor.get });
     if (descriptor.set !== undefined) recorded.push({ name, kind: "set", source: descriptor.set });
     if (descriptor.get === undefined && descriptor.set === undefined) {
-      recorded.push({ name, kind: "method", source: descriptor.value as Function });
+      recorded.push({
+        name,
+        kind: "method",
+        source: descriptor.value as Function,
+      });
     }
   }
   return recorded;
 }
 
 function definePrototype(prototype: object, key: string, value: Function): void {
-  Object.defineProperty(prototype, key, { configurable: false, enumerable: false, value, writable: false });
+  Object.defineProperty(prototype, key, {
+    configurable: false,
+    enumerable: false,
+    value,
+    writable: false,
+  });
 }

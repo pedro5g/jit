@@ -1131,6 +1131,17 @@ describe("JIT AOT generate", () => {
     ]);
   });
 
+  it("should skip a class whose DDD clock is a runtime binding", () => {
+    const Order = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), updatedAt: JIT.date() }), { id: "id" })
+      .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt", clock: () => new Date(0) }));
+    const result = AOT.generate({ groups: {}, artifacts: { Order }, outDir });
+
+    expect(result.skipped).toEqual([
+      { schema: "Order", operation: "class.extends", reason: expect.stringContaining("custom DDD clock") },
+    ]);
+  });
+
   it("should lower the clone capability through the shared clone plan", async () => {
     const Schema = JIT.object({ id: JIT.string(), tags: JIT.array(JIT.string()) });
     const User = JIT.class(Schema).extends(JIT.class.clone);
@@ -1714,7 +1725,7 @@ describe("JIT AOT generate", () => {
           id: "id",
         }
       )
-      .timestamps({ updatedAt: "updatedAt" });
+      .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }));
     AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderBase: {
@@ -1758,8 +1769,7 @@ describe("JIT AOT generate", () => {
           id: "id",
         }
       )
-      .timestamps({ updatedAt: "updatedAt" })
-      .softDelete({ field: "deletedAt" });
+      .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }), JIT.ddd.softDelete({ field: "deletedAt" }));
     AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderBase: {
@@ -1793,6 +1803,33 @@ describe("JIT AOT generate", () => {
     expect(order.deletedAt).toBe(order.updatedAt);
     order.restore();
     expect(order.isDeleted).toBe(false);
+  });
+
+  it("should preserve renamed DDD capability members in standalone AOT", async () => {
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), changedAt: JIT.date(), archivedAt: JIT.date().nullable() }), {
+        id: "id",
+      })
+      .extends(
+        JIT.ddd.timestamps({ updatedAt: "changedAt", methods: { touch: "markChanged" } }),
+        JIT.ddd.softDelete({
+          field: "archivedAt",
+          methods: { delete: "archive", restore: "unarchive", isDeleted: "isArchived" },
+        })
+      );
+    const result = AOT.generate({ groups: {}, artifacts: { OrderBase }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly OrderBase: typeof OrderBase;
+    };
+    class Order extends generated.OrderBase {}
+    const order = Order.create({ id: "o_1", changedAt: new Date(0), archivedAt: null });
+
+    expect(result.skipped).toEqual([]);
+    order.markChanged();
+    order.archive();
+    expect(order.isArchived).toBe(true);
+    order.unarchive();
+    expect(order.isArchived).toBe(false);
   });
 
   it("should lower static CQRS queries through the existing query artifact", async () => {

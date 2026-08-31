@@ -10,6 +10,7 @@ import {
 } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
+import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 
 /**
  * Creates an array schema builder.
@@ -18,11 +19,15 @@ import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builde
  * @param element - The schema or builder for each array element.
  * @returns A builder wrapping an array schema.
  */
-export function array<TElement extends AnyTypeSchema>(element: SchemaInput<TElement>): Builder<ArraySchema<TElement>> {
+export function array<TElement extends AnyTypeSchema>(
+  element: SchemaInput<TElement>,
+  message?: ValidationMessage
+): Builder<ArraySchema<TElement>> {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.array, {
-      element: unwrapSchema(element),
-    }) as ArraySchema<TElement>
+    createSchema(
+      TypeName.array,
+      withValidationMessage({ element: unwrapSchema(element) }, message)
+    ) as ArraySchema<TElement>
   );
 }
 
@@ -33,11 +38,12 @@ export function array<TElement extends AnyTypeSchema>(element: SchemaInput<TElem
  * @param element - The schema or builder for each Set element.
  * @returns A builder wrapping a Set schema.
  */
-export function set<TElement extends AnyTypeSchema>(element: SchemaInput<TElement>): Builder<SetSchema<TElement>> {
+export function set<TElement extends AnyTypeSchema>(
+  element: SchemaInput<TElement>,
+  message?: ValidationMessage
+): Builder<SetSchema<TElement>> {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.set, {
-      element: unwrapSchema(element),
-    })
+    createSchema(TypeName.set, withValidationMessage({ element: unwrapSchema(element) }, message))
   );
 }
 
@@ -52,13 +58,11 @@ export function set<TElement extends AnyTypeSchema>(element: SchemaInput<TElemen
  */
 export function map<TKey extends AnyTypeSchema, TValue extends AnyTypeSchema>(
   key: SchemaInput<TKey>,
-  value: SchemaInput<TValue>
+  value: SchemaInput<TValue>,
+  message?: ValidationMessage
 ): Builder<MapSchema<TKey, TValue>> {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.map, {
-      key: unwrapSchema(key),
-      value: unwrapSchema(value),
-    })
+    createSchema(TypeName.map, withValidationMessage({ key: unwrapSchema(key), value: unwrapSchema(value) }, message))
   );
 }
 
@@ -73,13 +77,14 @@ export function map<TKey extends AnyTypeSchema, TValue extends AnyTypeSchema>(
  */
 export function record<TKey extends AnyTypeSchema, TValue extends AnyTypeSchema>(
   key: SchemaInput<TKey>,
-  value: SchemaInput<TValue>
+  value: SchemaInput<TValue>,
+  message?: ValidationMessage
 ): Builder<RecordSchema<TKey, TValue>> {
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.record, {
-      key: unwrapSchema(key),
-      value: unwrapSchema(value),
-    })
+    createSchema(
+      TypeName.record,
+      withValidationMessage({ key: unwrapSchema(key), value: unwrapSchema(value) }, message)
+    )
   );
 }
 

@@ -136,6 +136,24 @@ JIT.number().positive("Amount must be positive");
 JIT.string().uuid({ version: 4, message: "Expected UUID v4" });
 ```
 
+Base type gates follow the same contract. String shorthand and the options
+form are equivalent:
+
+```ts
+const Name = JIT.string("Name must be text").min(1, "Name is required");
+const Count = JIT.number({ message: "Count must be numeric" }).int();
+const Payload = JIT.object(
+  { name: Name, count: Count },
+  { message: "Payload must be an object" }
+);
+```
+
+Object and common collection factories accept the same optional final
+argument. Variadic factories such as `tuple` and `union` use
+`.required(message)` to customize their own gate without making a schema
+argument ambiguous. This metadata is diagnostic-only: boolean `is()` source
+does not contain or allocate messages.
+
 Where a check already takes a semantic argument first, a lone string is still
 the message: `.time("…")`, `.datetime("…")`, `.digest("sha256", "…")`,
 `.format("###-##", "…")`. `.mac()` is the one exception, because its delimiter

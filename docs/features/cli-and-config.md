@@ -100,9 +100,10 @@ pnpm jit list              # every declared type, artifact object and artifact
 pnpm jit inspect isUser --stage source
 ```
 
-This matters because AOT is explicit. A schema on its own declares a type, not
-a runtime function. If no artifacts are found, the CLI warns and writes
-nothing.
+This matters because AOT is explicit. A schema on its own emits nothing. An
+artifact or artifact object must be exported to become runtime output; a type
+must be declared as `export type Name = JIT.Typeof<typeof schema>`. If no
+public declarations are found, the CLI warns and writes nothing.
 
 ## Why This Improves Performance
 
@@ -121,9 +122,9 @@ only the generated functions used by the route.
 ## Best Practices
 
 - Keep declaration files small and explicit.
-- Let the declaration file be the manifest: a schema names its generated type,
-  an artifact becomes a generated function, an object of artifacts becomes one
-  frozen object.
+- Let exports define the manifest: exported artifacts become functions,
+  exported artifact objects become frozen objects, and exported `JIT.Typeof`
+  aliases become structural types.
 - Keep the default TypeScript output for application source; it carries
   structural types and public signatures in the executable file itself.
 - Turn on `output.perFile` when different routes import unrelated schemas.

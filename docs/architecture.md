@@ -270,10 +270,11 @@ format. Output location never changes the code format:
   alone and never importing the barrel;
 - zero imports — the validation error class and runtime helpers
   (keyed-index cache, hash primitives) are inlined;
-- export shape mirrors the declaration file: an artifact keeps the exact
-  binding name (`const isUser = JIT.validate.is(User)` -> `isUser`), an object
-  of artifacts emits one frozen object (`UserOps.is`), and a schema emits a
-  named type (`export type User`) but no runtime function;
+- export shape mirrors explicit exports from the declaration file: an artifact
+  keeps the exact binding name (`const isUser = JIT.validate.is(User)` ->
+  `isUser`), an object
+  of artifacts emits one frozen object (`UserOps.is`), and an explicit
+  `export type User = JIT.Typeof<typeof userSchema>` emits a structural type;
 - the generator never emits an operation outside the selected surface: object
   markers use only the keys present in the compiled object; standalone output
   uses only exported registered functions;
@@ -287,10 +288,10 @@ format. Output location never changes the code format:
   `safeParse`, async validation is absent unless it is the selected runtime
   capability, and `fromJSON` lowers native `JSON.parse` plus specialized
   validation directly without an intermediate parse wrapper;
-- discovery loads each declaration file through a temporary sibling module
-  that re-exports its private top-level bindings, so a schema kept local still
-  names its generated type; self-contained callback bindings are emitted into
-  the generated module, while native/bound functions and callbacks with
+- discovery may load a temporary sibling module to resolve the private schema
+  referenced by an exported `JIT.Typeof` alias, but private values are filtered
+  before classification and never become output implicitly; self-contained
+  callback bindings are emitted into the generated module, while native/bound functions and callbacks with
   inaccessible closure dependencies are skipped with a reported reason, never
   miscompiled.
 
@@ -304,10 +305,10 @@ configured generated directory. `entries` is optional; when omitted,
 `jit generate` scans from the project root. `entries` accepts files,
 directories, and globs, with legacy `schemas` preserved as an alias.
 `patterns` controls directory scans (default `**/*.jit.ts`). The scanner skips
-`node_modules`, dot-dirs, and build output. If no buildable exported
-functions/objects are found, the CLI warns and writes nothing. TypeScript
-schema files load natively on runtimes that strip types, falling back to
-`jiti` when installed.
+`node_modules`, dot-dirs, and build output. TypeScript schema files load
+natively on runtimes that strip types, falling back to `jiti` when installed.
+If no exported artifact, artifact object, or supported type alias is found,
+the CLI warns and writes nothing.
 
 ## Reconstructive artifact boundary
 

@@ -1,6 +1,7 @@
 import { type AnyTypeSchema, createSchema, type SchemaShape, TypeName } from "../../core/ats/index.js";
 import type { ObjectBuilder } from "../../core/builder/index.js";
 import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builder/index.js";
+import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 
 type BuilderShape<TShape extends Record<string, SchemaInput>> = {
   readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema extends AnyTypeSchema>
@@ -16,7 +17,8 @@ type BuilderShape<TShape extends Record<string, SchemaInput>> = {
  * @returns A builder wrapping an object schema.
  */
 export function object<const TShape extends Record<string, SchemaInput>>(
-  shape: TShape
+  shape: TShape,
+  message?: ValidationMessage
 ): ObjectBuilder<BuilderShape<TShape>> {
   const props: Record<string, AnyTypeSchema> = {};
 
@@ -25,11 +27,17 @@ export function object<const TShape extends Record<string, SchemaInput>>(
   }
 
   return /* @__PURE__ */ createBuilder(
-    createSchema(TypeName.object, {
-      props: props as BuilderShape<TShape> & SchemaShape,
-      unknownKeys: undefined,
-      catchall: undefined,
-      checks: [],
-    })
+    createSchema(
+      TypeName.object,
+      withValidationMessage(
+        {
+          props: props as BuilderShape<TShape> & SchemaShape,
+          unknownKeys: undefined,
+          catchall: undefined,
+          checks: [],
+        },
+        message
+      )
+    )
   ) as ObjectBuilder<BuilderShape<TShape>>;
 }

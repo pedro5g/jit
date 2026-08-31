@@ -1,6 +1,7 @@
 import { createSchema, type EmptyDef, type FileSchema, TypeName } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder } from "../../core/builder/index.js";
+import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 import { emptyDef } from "./empty-def.js";
 
 /**
@@ -8,6 +9,8 @@ import { emptyDef } from "./empty-def.js";
  *
  * @returns A builder wrapping a File schema.
  */
-export function file(): Builder<FileSchema> {
-  return /* @__PURE__ */ createBuilder(createSchema<File, "file", EmptyDef>(TypeName.file, emptyDef));
+export function file(message?: ValidationMessage): Builder<FileSchema> {
+  return /* @__PURE__ */ createBuilder(
+    createSchema<File, "file", EmptyDef>(TypeName.file, withValidationMessage(emptyDef, message))
+  );
 }

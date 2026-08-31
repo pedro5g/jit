@@ -137,8 +137,14 @@ async function runGenerate(
   const runOnce = async (): Promise<number> => {
     const declarations = await collectDeclarations(files);
 
-    if (Object.keys(declarations.artifacts).length === 0 && Object.keys(declarations.groups).length === 0) {
-      stderr(`No AOT artifacts found in: ${files.join(", ")}. Declare compiled JIT functions or artifact objects.\n`);
+    if (
+      Object.keys(declarations.artifacts).length === 0 &&
+      Object.keys(declarations.groups).length === 0 &&
+      Object.keys(declarations.schemas).length === 0
+    ) {
+      stderr(
+        `No exported AOT declarations found in: ${files.join(", ")}. Export compiled JIT artifacts or JIT.Typeof aliases.\n`
+      );
       return 1;
     }
 
@@ -523,6 +529,7 @@ function writeExampleDeclaration(cwd: string, format: AotOutputFormat): void {
       "  name: JIT.string().trim().min(1),",
       "});",
       "",
+      ...(format === "ts" ? ["export type User = JIT.Typeof<typeof User>;", ""] : []),
       "export const isUser = JIT.validate.is(User);",
       "export const parseUser = JIT.validate.parse(User);",
       "export const stringifyUser = JIT.json.stringify(User);",

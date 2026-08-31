@@ -35,6 +35,7 @@ import {
 } from "./execution.js";
 import type { MapperArgs } from "./mapper.js";
 import { jsonValue } from "./special/special.js";
+import type { ValidationMessage } from "./validation-message.js";
 
 export type {
   CallableArtifact,
@@ -145,7 +146,7 @@ export const validate: ValidateNamespace = Object.freeze({
 });
 
 export interface JsonNamespace {
-  value(): Builder<ATS.JsonSchema>;
+  value(message?: ValidationMessage): Builder<ATS.JsonSchema>;
   parse<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): SchemaArtifact<string, TSchema>;
   stringify<TSchema extends ATS.AnyTypeSchema>(
     schema: SchemaInput<TSchema>

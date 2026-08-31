@@ -1,6 +1,7 @@
 import { type ChecksDef, createSchema, type NumberCheck, type NumberSchema, TypeName } from "../../core/ats/index.js";
 import type { Builder } from "../../core/builder/index.js";
 import { createBuilder } from "../../core/builder/index.js";
+import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 import { emptyDef } from "./empty-def.js";
 
 /**
@@ -8,8 +9,11 @@ import { emptyDef } from "./empty-def.js";
  *
  * @returns A builder wrapping a number schema.
  */
-export function number(): Builder<NumberSchema<[]>> {
+export function number(message?: ValidationMessage): Builder<NumberSchema<[]>> {
   return /* @__PURE__ */ createBuilder(
-    createSchema<number, "number", ChecksDef<NumberCheck, []>>(TypeName.number, emptyDef)
+    createSchema<number, "number", ChecksDef<NumberCheck, []>>(
+      TypeName.number,
+      withValidationMessage(emptyDef, message)
+    )
   );
 }

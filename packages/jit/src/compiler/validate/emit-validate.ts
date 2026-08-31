@@ -315,7 +315,10 @@ class ValidatorEmitter {
     } else {
       this.writer.line(`${this.awaited ? "async " : ""}function ${name}(value, issues, path) {`);
       this.writer.indent(() => {
-        const output = this.emitInline(schema, "value", { kind: "dynamic", source: "path" });
+        const output = this.emitInline(schema, "value", {
+          kind: "dynamic",
+          source: "path",
+        });
 
         this.writer.line(`return ${output};`);
       });
@@ -407,17 +410,23 @@ class ValidatorEmitter {
       case TypeName.unknown:
         return value;
       case TypeName.never:
-        this.emitFail(path, "invalid_type", "never", "no value is assignable to never");
+        this.emitFail(path, "invalid_type", "never", this.requiredMessage(schema, "no value is assignable to never"));
         return value;
       case TypeName.void:
       case TypeName.undefined:
-        this.failIf(`${value} !== undefined`, path, "invalid_type", "undefined", "expected undefined");
+        this.failIf(
+          `${value} !== undefined`,
+          path,
+          "invalid_type",
+          "undefined",
+          this.requiredMessage(schema, "expected undefined")
+        );
         return value;
       case TypeName.null:
-        this.failIf(`${value} !== null`, path, "invalid_type", "null", "expected null");
+        this.failIf(`${value} !== null`, path, "invalid_type", "null", this.requiredMessage(schema, "expected null"));
         return value;
       case TypeName.nan:
-        this.failIf(`${value} === ${value}`, path, "invalid_type", "nan", "expected NaN");
+        this.failIf(`${value} === ${value}`, path, "invalid_type", "nan", this.requiredMessage(schema, "expected NaN"));
         return value;
       case TypeName.string:
         return this.emitString(schema, value, path);
@@ -426,15 +435,21 @@ class ValidatorEmitter {
       case TypeName.int:
         return this.emitNumber(schema, value, path, true);
       case TypeName.boolean:
-        return this.emitTypeofLeaf(value, path, "boolean");
+        return this.emitTypeofLeaf(schema, value, path, "boolean");
       case TypeName.bigint:
-        return this.emitTypeofLeaf(value, path, "bigint");
+        return this.emitTypeofLeaf(schema, value, path, "bigint");
       case TypeName.symbol:
-        return this.emitTypeofLeaf(value, path, "symbol");
+        return this.emitTypeofLeaf(schema, value, path, "symbol");
       case TypeName.date:
         return this.emitDate(schema, value, path);
       case TypeName.regex:
-        this.failIf(`!(${value} instanceof RegExp)`, path, "invalid_type", "RegExp", "expected a RegExp");
+        this.failIf(
+          `!(${value} instanceof RegExp)`,
+          path,
+          "invalid_type",
+          "RegExp",
+          this.requiredMessage(schema, "expected a RegExp")
+        );
         return value;
       case TypeName.file:
         this.failIf(
@@ -442,11 +457,11 @@ class ValidatorEmitter {
           path,
           "invalid_type",
           "File",
-          "expected a File"
+          this.requiredMessage(schema, "expected a File")
         );
         return value;
       case TypeName.json:
-        return this.emitJson(value, path);
+        return this.emitJson(schema, value, path);
       case TypeName.custom:
         return this.emitCustom(schema, value, path);
       case TypeName.not:
@@ -454,7 +469,13 @@ class ValidatorEmitter {
       case TypeName.templateLiteral:
         return this.emitTemplateLiteral(schema, value, path);
       case TypeName.function:
-        this.failIf(`typeof ${value} !== "function"`, path, "expected_function", "function", "expected function");
+        this.failIf(
+          `typeof ${value} !== "function"`,
+          path,
+          "expected_function",
+          "function",
+          this.requiredMessage(schema, "expected function")
+        );
         return value;
       case TypeName.temporal:
         return this.emitTemporal(schema, value, path);
@@ -468,7 +489,13 @@ class ValidatorEmitter {
             ? `${value} === ${value}`
             : `${value} !== ${literalSource}`;
 
-        this.failIf(test, path, "invalid_literal", literalText, `expected literal ${literalText}`);
+        this.failIf(
+          test,
+          path,
+          "invalid_literal",
+          literalText,
+          this.requiredMessage(schema, `expected literal ${literalText}`)
+        );
         return value;
       }
       case TypeName.enum: {
@@ -480,7 +507,7 @@ class ValidatorEmitter {
           path,
           "invalid_enum",
           values.map((option) => String(option)).join(" | "),
-          "expected one of the enum values"
+          this.requiredMessage(schema, "expected one of the enum values")
         );
         return value;
       }
@@ -519,7 +546,13 @@ class ValidatorEmitter {
       case TypeName.instanceof: {
         const guard = emitSchemaGuard(schema, value);
 
-        this.failIf(`!(${guard})`, path, "invalid_type", "instance", "expected a class instance");
+        this.failIf(
+          `!(${guard})`,
+          path,
+          "invalid_type",
+          "instance",
+          this.requiredMessage(schema, "expected a class instance")
+        );
         return value;
       }
       case TypeName.promise: {
@@ -535,7 +568,7 @@ class ValidatorEmitter {
           path,
           "invalid_type",
           "Promise",
-          "expected a thenable"
+          this.requiredMessage(schema, "expected a thenable")
         );
         return value;
       }
@@ -618,8 +651,14 @@ class ValidatorEmitter {
     writer.line("}");
   }
 
-  private emitTypeofLeaf(value: string, path: PathRef, expected: string): string {
-    this.failIf(`typeof ${value} !== "${expected}"`, path, `expected_${expected}`, expected, `expected ${expected}`);
+  private emitTypeofLeaf(schema: AnySchema, value: string, path: PathRef, expected: string): string {
+    this.failIf(
+      `typeof ${value} !== "${expected}"`,
+      path,
+      `expected_${expected}`,
+      expected,
+      this.requiredMessage(schema, `expected ${expected}`)
+    );
     return value;
   }
 
@@ -627,13 +666,13 @@ class ValidatorEmitter {
     return typeof schema.def.requiredMessage === "string" ? schema.def.requiredMessage : fallback;
   }
 
-  private emitJson(value: string, path: PathRef): string {
+  private emitJson(schema: AnySchema, value: string, path: PathRef): string {
     this.failIf(
       `!${this.emitJsonPredicate()}(${value})`,
       path,
       "invalid_json",
       "JSON value",
-      "expected a JSON-encodable value"
+      this.requiredMessage(schema, "expected a JSON-encodable value")
     );
     return value;
   }
@@ -661,7 +700,7 @@ class ValidatorEmitter {
       path,
       "invalid_not",
       "not",
-      "value matched a forbidden schema"
+      this.requiredMessage(schema, "value matched a forbidden schema")
     );
     return value;
   }
@@ -674,14 +713,14 @@ class ValidatorEmitter {
       path,
       "expected_string",
       "string",
-      "expected string",
+      this.requiredMessage(schema, "expected string"),
       () => {
         this.failIf(
           `!${this.bind(regex)}.test(${value})`,
           path,
           "invalid_template_literal",
           "template literal",
-          "expected a matching template literal string"
+          this.requiredMessage(schema, "expected a matching template literal string")
         );
       },
       `typeof ${value}`
@@ -763,7 +802,10 @@ class ValidatorEmitter {
           break;
         }
         case "between": {
-          const range = check.value as { readonly min: Date | string; readonly max: Date | string };
+          const range = check.value as {
+            readonly min: Date | string;
+            readonly max: Date | string;
+          };
           const min = this.dateLikeBound(range.min, target);
           const max = this.dateLikeBound(range.max, target);
 
@@ -773,7 +815,11 @@ class ValidatorEmitter {
             "out_of_range",
             `${String(range.min)}..${String(range.max)}`,
             check.message ?? `expected a value between ${String(range.min)} and ${String(range.max)}`,
-            { minimum: String(range.min), maximum: String(range.max), inclusive: true }
+            {
+              minimum: String(range.min),
+              maximum: String(range.max),
+              inclusive: true,
+            }
           );
           break;
         }
@@ -1108,7 +1154,10 @@ class ValidatorEmitter {
               break;
             }
             case "stringFormat": {
-              const spec = check.value as { readonly name: string; readonly pattern: RegExp };
+              const spec = check.value as {
+                readonly name: string;
+                readonly pattern: RegExp;
+              };
 
               this.failIf(
                 `!${this.bind(spec.pattern)}.test(${value})`,
@@ -1332,7 +1381,7 @@ class ValidatorEmitter {
       path,
       "expected_array",
       "array",
-      "expected array",
+      this.requiredMessage(schema, "expected array"),
       () => {
         for (const check of checks) {
           switch (check.kind) {
@@ -1411,7 +1460,7 @@ class ValidatorEmitter {
       path,
       "expected_array",
       "tuple",
-      "expected tuple",
+      this.requiredMessage(schema, "expected tuple"),
       () => {
         const lengthTest = rest ? `${value}.length < ${items.length}` : `${value}.length !== ${items.length}`;
 
@@ -1462,7 +1511,7 @@ class ValidatorEmitter {
       path,
       "expected_set",
       "Set",
-      "expected a Set",
+      this.requiredMessage(schema, "expected a Set"),
       () => {
         const item = this.nextVar("e");
 
@@ -1495,7 +1544,7 @@ class ValidatorEmitter {
       path,
       "expected_map",
       "Map",
-      "expected a Map",
+      this.requiredMessage(schema, "expected a Map"),
       () => {
         const entry = this.nextVar("e");
 
@@ -1528,7 +1577,7 @@ class ValidatorEmitter {
       path,
       "expected_object",
       "record",
-      "expected a plain object",
+      this.requiredMessage(schema, "expected a plain object"),
       () => {
         const keys = this.nextVar("k");
         const index = this.nextVar("i");
@@ -1581,7 +1630,7 @@ class ValidatorEmitter {
       path,
       "expected_object",
       "object",
-      "expected object",
+      this.requiredMessage(schema, "expected object"),
       () => {
         const outputs: { key: string; expr: string }[] = [];
 
@@ -1589,7 +1638,10 @@ class ValidatorEmitter {
           const propOut = this.emitNode(props[key], emitPropertyAccess(value, key), staticChild(path, key), value);
           const transform = fieldTransforms?.[key];
 
-          outputs.push({ key, expr: transform ? `${transform}(${propOut}, ${value})` : propOut });
+          outputs.push({
+            key,
+            expr: transform ? `${transform}(${propOut}, ${value})` : propOut,
+          });
         }
 
         if (build && preserveUnknownKeys) {
@@ -1675,7 +1727,7 @@ class ValidatorEmitter {
         path,
         "invalid_union",
         "union",
-        "value matched no union option"
+        this.requiredMessage(schema, "value matched no union option")
       );
       return value;
     }
@@ -1695,7 +1747,7 @@ class ValidatorEmitter {
     });
     this.writer.line("} else {");
     this.writer.indent(() => {
-      this.emitFail(path, "invalid_union", "union", "value matched no union option");
+      this.emitFail(path, "invalid_union", "union", this.requiredMessage(schema, "value matched no union option"));
     });
     this.writer.line("}");
     return out;
@@ -1708,7 +1760,13 @@ class ValidatorEmitter {
     const build = this.mode === "parse" && options.some(needsBuild);
 
     if (this.mode === "is" || !build) {
-      this.failIf(`${count} !== 1`, path, "invalid_xor", "exactly one schema", "value must match exactly one schema");
+      this.failIf(
+        `${count} !== 1`,
+        path,
+        "invalid_xor",
+        "exactly one schema",
+        this.requiredMessage(schema, "value must match exactly one schema")
+      );
       return value;
     }
 
@@ -1782,10 +1840,15 @@ class ValidatorEmitter {
       path,
       "expected_object",
       "object",
-      "expected object",
+      this.requiredMessage(schema, "expected object"),
       () => {
         if (tagged.length === 0) {
-          this.emitFail(path, "invalid_union", "discriminated union", "unknown discriminator value");
+          this.emitFail(
+            path,
+            "invalid_union",
+            "discriminated union",
+            this.requiredMessage(schema, "unknown discriminator value")
+          );
           return;
         }
 
@@ -1803,7 +1866,12 @@ class ValidatorEmitter {
         });
         this.writer.line("} else {");
         this.writer.indent(() => {
-          this.emitFail(path, "invalid_union", "discriminated union", "unknown discriminator value");
+          this.emitFail(
+            path,
+            "invalid_union",
+            "discriminated union",
+            this.requiredMessage(schema, "unknown discriminator value")
+          );
         });
         this.writer.line("}");
       },
@@ -1948,7 +2016,12 @@ function staticChild(path: PathRef, segment: ATS.IssuePathSegment): PathRef {
   if (path.kind === "static") {
     const segments = [...(path.segments ?? []), segment];
 
-    return { kind: "static", source: JSON.stringify(segments), segments, parts: [...(path.parts ?? []), literal] };
+    return {
+      kind: "static",
+      source: JSON.stringify(segments),
+      segments,
+      parts: [...(path.parts ?? []), literal],
+    };
   }
 
   if (path.parts !== undefined) return dynamicPath([...path.parts, literal]);
@@ -1982,7 +2055,10 @@ function appendIssuePath(path: PathRef, segments: readonly ATS.IssuePathSegment[
   if (path.parts !== undefined) {
     return dynamicPath([...path.parts, ...segments.map((segment) => emitLiteral(segment))]);
   }
-  return { kind: "dynamic", source: `[...${path.source}, ...${JSON.stringify(segments)}]` };
+  return {
+    kind: "dynamic",
+    source: `[...${path.source}, ...${JSON.stringify(segments)}]`,
+  };
 }
 
 function dynamicPath(parts: readonly string[]): PathRef {
@@ -2068,7 +2144,10 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
       if (emitter.resolveDefaults && !defaultValue) {
         const raw = current.def.defaultValue;
 
-        defaultValue = { binding: emitter.bind(raw), isFactory: typeof raw === "function" };
+        defaultValue = {
+          binding: emitter.bind(raw),
+          isFactory: typeof raw === "function",
+        };
       }
       current = current.def.innerType as AnySchema;
       continue;
@@ -2535,7 +2614,10 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const emitters = [isEmitter, parseEmitter, asyncEmitter].filter((emitter): emitter is ValidatorEmitter =>
     Boolean(emitter)
   );
-  const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? { names: [], values: [] };
+  const bindings = (isEmitter ?? asyncEmitter ?? parseEmitter)?.bindings() ?? {
+    names: [],
+    values: [],
+  };
   const helperBlocks = emitters.flatMap((emitter) => emitter.helpers());
   const helperSource = helperBlocks.length > 0 ? `${helperBlocks.join("\n")}\n` : "";
   const functionSource = emitters.map((emitter) => emitter.writer.toString()).join("\n");

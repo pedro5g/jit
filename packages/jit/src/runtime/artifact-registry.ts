@@ -198,7 +198,10 @@ interface DerivedPlanArtifact {
   readonly schema: import("../core/ats/index.js").AnyTypeSchema;
   readonly source: string;
   readonly memo: boolean;
-  readonly equalSources: readonly { readonly name: string; readonly source: string }[];
+  readonly equalSources: readonly {
+    readonly name: string;
+    readonly source: string;
+  }[];
   readonly layout: import("../compiler/change-layout.js").ChangeLayout;
   readonly reads: readonly string[];
   readonly cacheKey: string;
@@ -290,7 +293,10 @@ interface ClassArtifact {
     readonly kind: "method" | "get" | "set";
     readonly source: Function;
   }[];
-  readonly factories: { readonly create: string | false; readonly hydrate: string | false };
+  readonly factories: {
+    readonly create: string | false;
+    readonly hydrate: string | false;
+  };
   readonly accessors?:
     | readonly {
         readonly key: string;
@@ -304,6 +310,12 @@ interface ClassArtifact {
     readonly touchAt?: string;
     readonly version?: string;
     readonly deletedAt?: string;
+    readonly timestampClock?: unknown;
+    readonly deletionClock?: unknown;
+    readonly touchMethod?: string;
+    readonly deleteMethod?: string;
+    readonly restoreMethod?: string;
+    readonly isDeletedMember?: string;
   };
   readonly domainEvent?: { readonly type: string; readonly version: number };
   /** Failure policy and domain invariants, present only when configured. */
@@ -381,6 +393,12 @@ export function setClassMutationArtifact(
     readonly touchAt?: string;
     readonly version?: string;
     readonly deletedAt?: string;
+    readonly timestampClock?: unknown;
+    readonly deletionClock?: unknown;
+    readonly touchMethod?: string;
+    readonly deleteMethod?: string;
+    readonly restoreMethod?: string;
+    readonly isDeletedMember?: string;
   }
 ): void {
   const artifact = REGISTRY.get(value);

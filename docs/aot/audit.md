@@ -107,7 +107,8 @@ Currently implemented:
 
 - a standalone artifact keeps the developer's exact binding name;
 - an object of artifacts emits one frozen object with exactly those members;
-- a schema emits a named exported type and no runtime function;
+- an exported `JIT.Typeof<typeof schema>` alias emits a named structural type;
+- private schemas, artifacts, and artifact objects emit nothing;
 - `diff`, `stringify`, `fromJSON`, validators, equal, clone, hash, specialized
   string formatters, mask, sanitize, codec, queries, mappers, sort plans, index
   plans, and built-in transforms are re-emitted from registered artifacts when
