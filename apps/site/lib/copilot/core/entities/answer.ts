@@ -42,6 +42,8 @@ export interface CopilotAnswer {
    * because §73's retry-success rate is measured from it.
    */
   retried: boolean;
+  /** The model prose failed policy; `text` is the safe evidence-only fallback. */
+  rejected: boolean;
   /**
    * Nothing in the documentation covered the question.
    *
@@ -49,5 +51,10 @@ export interface CopilotAnswer {
    * should present this as an honest answer rather than as a rejection.
    */
   insufficientEvidence: boolean;
-  timings: { retrievalMs: number; contextMs: number; generationMs: number; auditMs: number };
+  timings: {
+    retrievalMs: number;
+    contextMs: number;
+    generationMs: number;
+    auditMs: number;
+  };
 }

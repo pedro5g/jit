@@ -27,7 +27,12 @@ describe("audit", () => {
   let audit: AuditService;
 
   beforeAll(async () => {
-    const result = await build({ embed: false, verifyExamples: false, write: false, quiet: true });
+    const result = await build({
+      embed: false,
+      verifyExamples: false,
+      write: false,
+      quiet: true,
+    });
     engine = await createKnowledgeEngine(
       new MemoryArtifactLoader({
         manifest: result.manifest,
@@ -48,12 +53,17 @@ describe("audit", () => {
   }, 120_000);
 
   async function contextFor(question: string): Promise<ModelContext> {
-    const report = await engine.retriever.retrieve(question, { context: { locale: "en" } });
+    const report = await engine.retriever.retrieve(question, {
+      context: { locale: "en" },
+    });
     return contextService.build({
       question,
       locale: "en",
       report,
-      reservedTokens: promptOverhead(engine.symbols, { question, exactSymbols: report.exactSymbols }),
+      reservedTokens: promptOverhead(engine.symbols, {
+        question,
+        exactSymbols: report.exactSymbols,
+      }),
     });
   }
 
@@ -171,9 +181,43 @@ describe("audit", () => {
 
     const drift = result.findings.find((finding) => finding.kind === "foreign-domain-drift");
     expect(drift).toBeDefined();
-    // A warning rather than a block: nothing in it is wrong, it just never
-    // shows the reader the library they asked about.
+    // Detection remains a warning; production policy still fails closed for
+    // this particular warning because the block is presented as a jit example.
     expect(drift?.severity).toBe("warning");
+    expect(rejects(result)).toBe(true);
+  });
+
+  it("grounds a faithful Portuguese explanation against English evidence", async () => {
+    const context = await contextFor("why is generated code fast?");
+    const result = audit.run({
+      question: "por que o código gerado é rápido?",
+      answer:
+        "O caminho gerado é rápido porque emite acesso direto às propriedades, loops indexados e somente as validações exigidas pelo schema. [1]",
+      locale: "pt-BR",
+      modelContext: {
+        ...context,
+        locale: "pt-BR",
+        question: "por que o código gerado é rápido?",
+      },
+      symbols: engine.symbols,
+      knowledge: engine.knowledge,
+      corpusKnows,
+      topScore: 0.05,
+      agreement: 2,
+    });
+
+    expect(result.grounding.coverage).toBeGreaterThanOrEqual(0.9);
+    expect(rejects(result)).toBe(false);
+  });
+
+  it("blocks the observed unsupported runtime claim even though its detector is a warning", async () => {
+    const result = await check(
+      "why is generated code fast?",
+      "The generated code is fast because it avoids the overhead of a full JavaScript runtime by using AOT compilation directly in the function body. This means the compiler generates a single executable block containing all necessary logic without needing a separate loader or interpreter between the input and output.\n\n```ts\ndeclare const generate = () => 'generated-fast-code';\n```"
+    );
+
+    expect(result.findings.some((finding) => finding.kind === "unsupported-factual-claim")).toBe(true);
+    expect(rejects(result)).toBe(true);
   });
 
   it("catches a generation that looped", async () => {
@@ -299,7 +343,12 @@ describe("context", () => {
   let contextService: ContextService;
 
   beforeAll(async () => {
-    const result = await build({ embed: false, verifyExamples: false, write: false, quiet: true });
+    const result = await build({
+      embed: false,
+      verifyExamples: false,
+      write: false,
+      quiet: true,
+    });
     engine = await createKnowledgeEngine(
       new MemoryArtifactLoader({
         manifest: result.manifest,
@@ -318,12 +367,17 @@ describe("context", () => {
   }, 120_000);
 
   const contextFor = async (question: string) => {
-    const report = await engine.retriever.retrieve(question, { context: { locale: "en" } });
+    const report = await engine.retriever.retrieve(question, {
+      context: { locale: "en" },
+    });
     return contextService.build({
       question,
       locale: "en",
       report,
-      reservedTokens: promptOverhead(engine.symbols, { question, exactSymbols: report.exactSymbols }),
+      reservedTokens: promptOverhead(engine.symbols, {
+        question,
+        exactSymbols: report.exactSymbols,
+      }),
       budget: CONTEXT_BUDGET.hard,
     });
   };
@@ -391,7 +445,12 @@ describe("context", () => {
 
 describe("actions", () => {
   const evidence = [
-    { index: 1, routeId: "route.docs.reference.functions.mask", breadcrumb: "mask › Fields", anchor: "fields" },
+    {
+      index: 1,
+      routeId: "route.docs.reference.functions.mask",
+      breadcrumb: "mask › Fields",
+      anchor: "fields",
+    },
     { index: 2, routeId: "route.docs.quick-start", breadcrumb: "Quick start" },
   ] as never as Parameters<typeof parseActions>[0]["evidence"];
 

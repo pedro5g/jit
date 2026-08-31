@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AuditFinding, AuditResult } from "../core/entities/audit";
 import type { FailureKind } from "../core/entities/claim";
-import { type AnswerLabel, shadowMetrics } from "../eval/labels";
+import { type AnswerLabel, auditReleaseReady, shadowMetrics } from "../eval/labels";
 
 /**
  * The arithmetic behind §PART 25, tested without a model in sight.
@@ -38,6 +38,12 @@ const label = (question: string, kinds: FailureKind[], shouldReject: boolean): A
 });
 
 describe("shadow metrics", () => {
+  it("requires enough human labels before claiming the 98% release target", () => {
+    const perfectButTiny = shadowMetrics([{ question: "a", result: result([]) }], [label("a", [], false)]);
+    expect(perfectButTiny.rejection.precision).toBe(1);
+    expect(auditReleaseReady(perfectButTiny)).toBe(false);
+  });
+
   it("scores a detector against what a reader actually found", () => {
     const metrics = shadowMetrics(
       [
@@ -87,6 +93,16 @@ describe("shadow metrics", () => {
 
     expect(metrics.rejection.truePositiveRate).toBe(0);
     expect(metrics.rejection.falseNegatives).toBe(1);
+  });
+
+  it("scores the same warning-level fail-closed decisions used in production", () => {
+    const metrics = shadowMetrics(
+      [{ question: "plain-js", result: result([finding("foreign-domain-drift", "warning")]) }],
+      [label("plain-js", ["foreign-domain-drift"], true)]
+    );
+
+    expect(metrics.rejection.truePositiveRate).toBe(1);
+    expect(metrics.rejection.falseNegatives).toBe(0);
   });
 
   it("reads grounding from the verdict rather than from a finding", () => {

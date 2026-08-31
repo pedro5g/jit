@@ -12,7 +12,14 @@
  * name — sit at the ends. The documentation goes in the middle, where its
  * length hurts least.
  */
-import { ACTION_RULES, ANSWER_RULES, NO_EVIDENCE_RULES, SECTION_LABELS, SITE_FACTS } from "../../config/prompt";
+import {
+  ACTION_RULES,
+  ANSWER_RULES,
+  NO_EVIDENCE_RULES,
+  SECTION_LABELS,
+  SITE_FACTS,
+  TOOL_RULES,
+} from "../../config/prompt";
 import type { ApiSymbol } from "../../core/entities/api-symbol";
 import type { ModelContext } from "../../core/entities/model-context";
 import type { GenerationMessage } from "../../core/ports/language-model";
@@ -70,6 +77,7 @@ function renderSystem(context: ModelContext, options: RenderOptions): string {
   }
 
   blocks.push(renderEvidence(context));
+  blocks.push(TOOL_RULES);
   blocks.push(ACTION_RULES);
 
   return blocks.filter(Boolean).join("\n\n");
@@ -136,7 +144,11 @@ export function renderedSize(messages: readonly GenerationMessage[]): number {
  */
 export function promptOverhead(
   symbols: SymbolRepository,
-  input: { question: string; exactSymbols: readonly ApiSymbol[]; includeSurface?: boolean }
+  input: {
+    question: string;
+    exactSymbols: readonly ApiSymbol[];
+    includeSurface?: boolean;
+  }
 ): number {
   const includeSurface = input.includeSurface ?? input.exactSymbols.length > 0;
 
@@ -152,6 +164,7 @@ export function promptOverhead(
   const blocks = [
     ANSWER_RULES,
     SITE_FACTS,
+    TOOL_RULES,
     ACTION_RULES,
     SECTION_LABELS.documentation,
     corrections ? `${SECTION_LABELS.corrections}\n${corrections}` : "",

@@ -15,7 +15,7 @@
 import type { ClaimKind, ClaimSeverity, GroundingClaim } from "../../core/entities/claim";
 import type { ModelContext } from "../../core/entities/model-context";
 import type { KnowledgeId } from "../../core/value-objects/ids";
-import { fold } from "../retrieval/tokenizer";
+import { fold, queryConcepts, tokenize } from "../retrieval/tokenizer";
 
 /**
  * Words too common to count as evidence that two sentences say the same thing.
@@ -73,6 +73,21 @@ function contentWords(text: string): string[] {
     .split(/[^\p{L}\p{N}.]+/u)
     .map((word) => fold(word.replace(/\.$/, "")))
     .filter((word) => word.length > 3 && !COMMON.has(word));
+}
+
+interface ContentConcept {
+  literal: string;
+  variants: string[];
+}
+
+/**
+ * A reader may answer in Portuguese from English evidence. Each reader word
+ * is therefore compared through the same literal/synonym/stem expansion used
+ * by retrieval. The denominator remains the number of reader concepts: an
+ * expansion improves recall without making one word count six times.
+ */
+function contentConcepts(text: string): ContentConcept[] {
+  return queryConcepts(text).filter((concept) => concept.literal.length > 3 && !COMMON.has(fold(concept.literal)));
 }
 
 /**
@@ -179,7 +194,10 @@ const PARAPHRASE = 0.25;
 export function analyseClaims(input: ClaimInput): ClaimAnalysis {
   const evidenceWords = new Map<KnowledgeId, Set<string>>();
   for (const evidence of input.context.evidence) {
-    evidenceWords.set(evidence.knowledgeId, new Set(contentWords(evidence.content)));
+    evidenceWords.set(
+      evidence.knowledgeId,
+      new Set([...contentWords(evidence.content), ...tokenize(evidence.content)])
+    );
   }
 
   const allEvidence = new Set<string>();
@@ -197,8 +215,9 @@ export function analyseClaims(input: ClaimInput): ClaimAnalysis {
     const sentence = raw.trim();
     if (sentence.length < 25 || sentence.startsWith("```")) continue;
 
-    const words = contentWords(sentence);
-    if (words.length < 3) continue;
+    const concepts = contentConcepts(sentence);
+    const words = concepts.map((concept) => concept.literal);
+    if (concepts.length < 3) continue;
 
     /**
      * Which passages support this sentence, by shared vocabulary.
@@ -209,8 +228,8 @@ export function analyseClaims(input: ClaimInput): ClaimAnalysis {
      */
     const supporting: KnowledgeId[] = [];
     for (const [id, vocabulary] of evidenceWords) {
-      const shared = words.filter((word) => vocabulary.has(word)).length;
-      if (shared / words.length >= PARAPHRASE) supporting.push(id);
+      const shared = concepts.filter((concept) => concept.variants.some((variant) => vocabulary.has(variant))).length;
+      if (shared / concepts.length >= PARAPHRASE) supporting.push(id);
     }
 
     for (const claim of classify(sentence, words, input, figuresInEvidence, allEvidence)) {

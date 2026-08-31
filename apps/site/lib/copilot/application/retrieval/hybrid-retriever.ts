@@ -75,11 +75,25 @@ const EMPTY_SIGNALS: Record<RetrievalSignal, RetrievalCandidate[]> = {
   "current-context": [],
 };
 
+/**
+ * Unknown vocabulary is evidence about the query, not proof that the corpus
+ * cannot answer it. Conceptual questions routinely contain reader wording
+ * absent from the English docs ("funciona", "especializado"). The exception
+ * is a boundary claim: asking whether jit supports or connects to an unknown
+ * product must stay deny-by-default even when generic support pages rank.
+ */
+const EXTERNAL_BOUNDARY =
+  /\b(?:support|supports|integrat|connect|adapter|plugin|price|pricing|license|licensed|suport|integra|conect|adaptador|pre[çc]o|licen[çc]a)\w*\b/i;
+const BOUNDARY_VOCABULARY =
+  /^(?:jit|support|supports|integrat\w*|connect\w*|adapter\w*|plugin\w*|price|pricing|license\w*|suport\w*|integra\w*|conect\w*|adaptador\w*|preco|licenca)$/i;
+
 export class HybridRetriever {
   constructor(private readonly deps: HybridRetrieverDeps) {}
 
   async retrieve(question: string, options: RetrieveOptions): Promise<RetrievalReport> {
-    const bySignal: Record<RetrievalSignal, RetrievalCandidate[]> = { ...EMPTY_SIGNALS };
+    const bySignal: Record<RetrievalSignal, RetrievalCandidate[]> = {
+      ...EMPTY_SIGNALS,
+    };
     const timings = { lexicalMs: 0, semanticMs: 0, symbolMs: 0, fusionMs: 0 };
 
     // ---------------------------------------------------------- symbols
@@ -96,6 +110,7 @@ export class HybridRetriever {
     const unknownTerms = queryConcepts(question)
       .filter((concept) => !concept.variants.some((variant) => this.deps.lexical.knows(variant)))
       .map((concept) => concept.literal);
+    const unknownSubjects = unknownTerms.filter((term) => !BOUNDARY_VOCABULARY.test(term));
     bySignal.lexical = this.deps.lexical.searchTerms(terms, CANDIDATES_PER_SIGNAL).map((match, index) => ({
       chunkId: match.chunkId,
       signal: "lexical" as const,
@@ -133,7 +148,8 @@ export class HybridRetriever {
       coverage: {
         covered:
           exact.length > 0 ||
-          (unknownTerms.length === 0 && (specificity > 0 || bySignal["current-context"].length > 0)),
+          ((!EXTERNAL_BOUNDARY.test(question) || unknownSubjects.length === 0) &&
+            (bySignal.lexical.length > 0 || bySignal.semantic.length > 0 || bySignal["current-context"].length > 0)),
         specificity,
         unknownTerms,
       },
@@ -156,7 +172,10 @@ export class HybridRetriever {
    * stated goes in at full weight; what the wording merely implies goes in
    * where three other retrievers can outvote it.
    */
-  private retrieveSymbols(question: string): { exact: ApiSymbol[]; candidates: RetrievalCandidate[] } {
+  private retrieveSymbols(question: string): {
+    exact: ApiSymbol[];
+    candidates: RetrievalCandidate[];
+  } {
     const { stated, implied } = extractSymbolMentions(question);
     const exact: ApiSymbol[] = [];
     const weak: ApiSymbol[] = [];
@@ -280,7 +299,11 @@ export class HybridRetriever {
     const contextWeight = specificity < FOLLOW_UP_SPECIFICITY ? FOLLOW_UP_CONTEXT_WEIGHT : weights["current-context"];
     const fused = new Map<
       ChunkId,
-      { score: number; signals: Set<RetrievalSignal>; scores: RetrievalResult["scores"] }
+      {
+        score: number;
+        signals: Set<RetrievalSignal>;
+        scores: RetrievalResult["scores"];
+      }
     >();
 
     for (const [signal, candidates] of Object.entries(bySignal) as [RetrievalSignal, RetrievalCandidate[]][]) {

@@ -1,15 +1,18 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { build } from "../../../scripts/knowledge/build";
-import { AuditService } from "../application/audit/audit.service";
+import { AuditService, StrictAuditPolicy } from "../application/audit/audit.service";
 import { ContextService } from "../application/context/context.service";
+import { acceptedHistory } from "../application/context/history";
+import { promptOverhead, renderMessages } from "../application/context/render";
 import { CopilotService } from "../application/services/copilot.service";
 import { parseToolCalls, stripToolCalls } from "../application/tools/parse-tool-calls";
 import { runTool } from "../application/tools/registry";
 import type { GenerationRequest, GenerationResult, LanguageModelPort } from "../core/ports/language-model";
+import { executableBlocks, prepareSnippet } from "../infrastructure/examples/snippet-safety";
 import type { KnowledgeEngine } from "../infrastructure/knowledge-engine";
 import { createKnowledgeEngine } from "../infrastructure/knowledge-engine";
 import { MemoryArtifactLoader } from "../infrastructure/storage/memory-artifact-loader";
-import { CopilotController } from "../presentation/controllers/copilot.controller";
+import { CopilotController, lightTierCanGenerate } from "../presentation/controllers/copilot.controller";
 
 class ScriptedModel implements LanguageModelPort {
   readonly id = "scripted";
@@ -20,7 +23,10 @@ class ScriptedModel implements LanguageModelPort {
 
   async generate(request: GenerationRequest): Promise<GenerationResult> {
     this.requests.push(request);
-    return { text: this.replies[this.requests.length - 1] ?? "", finish: "stop" };
+    return {
+      text: this.replies[this.requests.length - 1] ?? "",
+      finish: "stop",
+    };
   }
 
   async stream(request: GenerationRequest, onDelta: (delta: string) => void): Promise<GenerationResult> {
@@ -34,7 +40,12 @@ let engine: KnowledgeEngine;
 let loader: MemoryArtifactLoader;
 
 beforeAll(async () => {
-  const result = await build({ embed: false, verifyExamples: false, write: false, quiet: true });
+  const result = await build({
+    embed: false,
+    verifyExamples: false,
+    write: false,
+    quiet: true,
+  });
   loader = new MemoryArtifactLoader({
     manifest: result.manifest,
     entries: result.entries,
@@ -47,6 +58,30 @@ beforeAll(async () => {
 }, 120_000);
 
 describe("tool protocol", () => {
+  it("teaches the model the same closed tool tags the parser accepts", async () => {
+    const question = "What does JIT.validate.safeParse do?";
+    const report = await engine.retriever.retrieve(question, {
+      context: { locale: "en" },
+    });
+    const context = new ContextService({
+      knowledge: engine.knowledge,
+      routes: engine.routes,
+      symbols: engine.symbols,
+    }).build({
+      question,
+      locale: "en",
+      report,
+      reservedTokens: promptOverhead(engine.symbols, {
+        question,
+        exactSymbols: report.exactSymbols,
+      }),
+    });
+    const prompt = renderMessages(context, { symbols: engine.symbols })[0]?.content ?? "";
+
+    expect(prompt).toContain("[[api:JIT.exact.path]]");
+    expect(prompt).toContain("[[find:short topic]]");
+  });
+
   it("accepts only closed, allowlisted call tags and deduplicates them", () => {
     expect(parseToolCalls("[[api:JIT.string.uuid]] [[api:JIT.string.uuid]] [[shell:rm -rf /]] [[find:uuid]]")).toEqual([
       { name: "lookupSymbol", input: "JIT.string.uuid" },
@@ -83,11 +118,77 @@ describe("tool protocol", () => {
   });
 });
 
+describe("answer example execution", () => {
+  it("extracts executable blocks and rejects ambient browser capabilities", () => {
+    expect(executableBlocks("```ts\nconst schema = JIT.string();\n```")).toEqual(["const schema = JIT.string();"]);
+    expect(prepareSnippet("const schema = JIT.string();")).toEqual({
+      ok: true,
+      code: "const schema = JIT.string();",
+    });
+    expect(prepareSnippet("JIT.string(); fetch('/secret')")).toMatchObject({
+      ok: false,
+    });
+    expect(prepareSnippet("const value = 1")).toMatchObject({ ok: false });
+  });
+
+  it("fails closed when a generated example does not execute", async () => {
+    const service = new CopilotService({
+      engine,
+      context: new ContextService({
+        knowledge: engine.knowledge,
+        routes: engine.routes,
+        symbols: engine.symbols,
+      }),
+      audit: new AuditService(),
+      policy: new StrictAuditPolicy(false),
+      examples: {
+        verify: async () => ({
+          ok: false,
+          error: "safeParse is not a function",
+        }),
+      },
+    });
+    const model = new ScriptedModel(["Use this example. [1]\n\n```ts\nconst schema = JIT.string().notReal();\n```"]);
+
+    const answer = await service.ask({ question: "how do I validate a uuid?" }, model, null);
+
+    expect(answer.rejected).toBe(true);
+    expect(answer.text).toContain("could not verify");
+    expect(answer.audit.findings.some((finding) => finding.kind === "invalid-example")).toBe(true);
+  });
+});
+
+describe("conversation history", () => {
+  it("never feeds rejected prose or its paired question into the next answer", () => {
+    expect(
+      acceptedHistory([
+        { role: "user", content: "first" },
+        { role: "assistant", content: "grounded" },
+        { role: "user", content: "why is it fast?" },
+        {
+          role: "assistant",
+          content: "invented runtime claim",
+          rejected: true,
+        },
+        { role: "user", content: "follow-up" },
+      ])
+    ).toEqual([
+      { role: "user", content: "first" },
+      { role: "assistant", content: "grounded" },
+      { role: "user", content: "follow-up" },
+    ]);
+  });
+});
+
 describe("bounded tool loop", () => {
   function service() {
     return new CopilotService({
       engine,
-      context: new ContextService({ knowledge: engine.knowledge, routes: engine.routes, symbols: engine.symbols }),
+      context: new ContextService({
+        knowledge: engine.knowledge,
+        routes: engine.routes,
+        symbols: engine.symbols,
+      }),
       audit: new AuditService(),
     });
   }
@@ -127,12 +228,46 @@ describe("bounded tool loop", () => {
     expect(answer.insufficientEvidence).toBe(true);
     expect(answer.text).toContain("no evidence");
   });
+
+  it("keeps evidence for a covered conceptual question written in Portuguese", async () => {
+    const model = new ScriptedModel([
+      "A geração especializada emite acesso direto a propriedades e loops indexados. [1]",
+    ]);
+
+    const answer = await service().ask(
+      {
+        question: "como funciona a geração de código especializado?",
+        locale: "pt-BR",
+      },
+      model,
+      null
+    );
+
+    expect(model.requests).toHaveLength(1);
+    expect(answer.insufficientEvidence).toBe(false);
+    expect(answer.evidence.length).toBeGreaterThan(0);
+  });
 });
 
 describe("browser controller", () => {
+  it("keeps the light tier on exact lookup and out of conceptual synthesis", async () => {
+    const exact = await engine.retriever.retrieve("What does JIT.validate.safeParse do?", {
+      context: { locale: "en" },
+    });
+    const conceptual = await engine.retriever.retrieve("por que o código gerado é rápido?", {
+      context: { locale: "pt-BR" },
+    });
+
+    expect(lightTierCanGenerate("What does JIT.validate.safeParse do?", exact)).toBe(true);
+    expect(lightTierCanGenerate("por que o código gerado é rápido?", conceptual)).toBe(false);
+  });
+
   it("keeps retrieval useful without a loaded model", async () => {
     const controller = new CopilotController(loader);
-    const response = await controller.ask({ question: "how do I validate a uuid?", currentPath: "/docs" });
+    const response = await controller.ask({
+      question: "how do I validate a uuid?",
+      currentPath: "/docs",
+    });
 
     expect(response.kind).toBe("search");
     if (response.kind !== "search") return;

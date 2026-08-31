@@ -18,6 +18,7 @@ import type { EmbeddingPort } from "../../core/ports/embedding";
 import type { GenerationMessage } from "../../core/ports/language-model";
 import type { RouteId } from "../../core/value-objects/ids";
 import type { Locale } from "../../core/value-objects/locale";
+import { BrowserSnippetVerifier } from "../../infrastructure/examples/browser-snippet-verifier";
 import {
   createKnowledgeEngine,
   type KnowledgeEngine,
@@ -29,7 +30,12 @@ import { ghostActions, ghostSources } from "../adapters/ghost";
 export type CopilotResponse =
   | { kind: "answer"; answer: CopilotAnswer }
   | { kind: "search"; report: RetrievalReport; context: ModelContext }
-  | { kind: "schema"; result: SchemaResult; report: RetrievalReport; context: ModelContext };
+  | {
+      kind: "schema";
+      result: SchemaResult;
+      report: RetrievalReport;
+      context: ModelContext;
+    };
 
 export interface ControllerAskInput {
   question: string;
@@ -53,6 +59,18 @@ export function asksForSchema(question: string): boolean {
   );
 }
 
+/**
+ * The 0.8B tier is useful as a language layer over deterministic lookup, but
+ * the measured failure was conceptual synthesis. Keep it on tasks whose truth
+ * is anchored by an exact public symbol or a navigation request.
+ */
+export function lightTierCanGenerate(question: string, report: RetrievalReport): boolean {
+  return (
+    report.exactSymbols.length > 0 ||
+    /\b(?:open|show me|take me|go to|where is|abra|abre|mostre|onde fica)\b/i.test(question)
+  );
+}
+
 export class CopilotController {
   private engine: KnowledgeEngine | null = null;
   private service: CopilotService | null = null;
@@ -73,7 +91,11 @@ export class CopilotController {
 
   private async assemble(): Promise<void> {
     const engine = await createKnowledgeEngine(this.loader);
-    const context = new ContextService({ knowledge: engine.knowledge, routes: engine.routes, symbols: engine.symbols });
+    const context = new ContextService({
+      knowledge: engine.knowledge,
+      routes: engine.routes,
+      symbols: engine.symbols,
+    });
 
     this.engine = engine;
     this.models.setVectorAvailability(engine.hasSemanticSearch);
@@ -84,6 +106,7 @@ export class CopilotController {
       // Production is fail-closed: validators detect, this policy decides.
       // Saved benchmark transcripts may still use ShadowAuditPolicy.
       policy: new StrictAuditPolicy(true),
+      examples: new BrowserSnippetVerifier(),
     });
     this.schema = new SchemaService({ symbols: engine.symbols });
     await this.models.status();
@@ -120,19 +143,32 @@ export class CopilotController {
       return { kind: "search", ...result };
     }
 
+    if (this.models.current.tier === "light") {
+      const found = await service.search(request, this.embedder);
+      if (asksForSchema(input.question) || !lightTierCanGenerate(input.question, found.report)) {
+        return { kind: "search", ...found };
+      }
+    }
+
     if (asksForSchema(input.question)) {
       const found = await service.search(request, this.embedder);
       return {
         kind: "schema",
         ...found,
         result: await schema.generate(
-          { request: input.question, ...(input.signal ? { signal: input.signal } : {}) },
+          {
+            request: input.question,
+            ...(input.signal ? { signal: input.signal } : {}),
+          },
           model
         ),
       };
     }
 
-    return { kind: "answer", answer: await service.ask(request, model, this.embedder) };
+    return {
+      kind: "answer",
+      answer: await service.ask(request, model, this.embedder),
+    };
   }
 
   routeId(path: string): RouteId | undefined {

@@ -17,6 +17,7 @@
  * it, and whether a reader was better off not seeing it at all.
  */
 
+import { StrictAuditPolicy } from "../application/audit/audit.service";
 import type { AuditResult } from "../core/entities/audit";
 import type { FailureKind } from "../core/entities/claim";
 
@@ -82,6 +83,23 @@ export interface ShadowMetrics {
   substantiallyUngroundedRecall: number;
 }
 
+export const AUDIT_RELEASE_TARGET = {
+  minimumLabels: 100,
+  rejectionPrecision: 0.98,
+  rejectionRecall: 0.98,
+  maximumFalsePositiveRate: 0.02,
+} as const;
+
+/** A release gate over human labels, never detector self-scores. */
+export function auditReleaseReady(metrics: ShadowMetrics): boolean {
+  return (
+    metrics.labelled >= AUDIT_RELEASE_TARGET.minimumLabels &&
+    metrics.rejection.precision >= AUDIT_RELEASE_TARGET.rejectionPrecision &&
+    metrics.rejection.truePositiveRate >= AUDIT_RELEASE_TARGET.rejectionRecall &&
+    metrics.rejection.falsePositiveRate <= AUDIT_RELEASE_TARGET.maximumFalsePositiveRate
+  );
+}
+
 const ratio = (numerator: number, denominator: number) => (denominator === 0 ? 1 : numerator / denominator);
 
 /**
@@ -99,6 +117,7 @@ export const SCORED_KINDS: FailureKind[] = [
   "foreign-domain-drift",
   "wrong-language",
   "generation-degeneration",
+  "invalid-example",
   "substantially-ungrounded",
 ];
 
@@ -141,7 +160,8 @@ export function shadowMetrics(answers: readonly ScoredAnswer[], labels: readonly
     };
   });
 
-  const rejects = (result: AuditResult) => result.findings.some((finding) => finding.severity === "fatal");
+  const policy = new StrictAuditPolicy();
+  const rejects = (result: AuditResult) => policy.shouldReject(result);
 
   const shouldHave = pairs.filter((pair) => pair.label.shouldReject);
   const shouldNot = pairs.filter((pair) => !pair.label.shouldReject);

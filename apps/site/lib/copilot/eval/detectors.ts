@@ -16,7 +16,7 @@
  * a claim traces to evidence, a route was shown, the reply is in the reader's
  * language — is checkable against the index and the context.
  */
-import { AuditService, ShadowAuditPolicy } from "../application/audit/audit.service";
+import { AuditService, ShadowAuditPolicy, StrictAuditPolicy } from "../application/audit/audit.service";
 import type { AuditResult } from "../core/entities/audit";
 import type { FailureKind, FailureOrigin } from "../core/entities/claim";
 import type { ModelContext } from "../core/entities/model-context";
@@ -274,7 +274,7 @@ export function measureGeneration(cases: readonly MeasuredCase[]): GenerationMet
       withSymbol.length === 0
         ? 1
         : withSymbol.filter((entry) => entry.measurement.namesExpectedSymbol).length / withSymbol.length,
-    wouldReject: share((entry) => entry.measurement.audit.findings.some((finding) => finding.severity === "fatal")),
+    wouldReject: share((entry) => new StrictAuditPolicy().shouldReject(entry.measurement.audit)),
 
     averageClaims: cases.reduce((sum, entry) => sum + entry.measurement.audit.grounding.claims, 0) / total,
     averageCharacters: Math.round(cases.reduce((sum, entry) => sum + entry.measurement.characters, 0) / total),

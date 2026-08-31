@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { acceptedHistory } from "@/lib/copilot/application/context/history";
 import type { ModelState, ModelStatus } from "@/lib/copilot/application/services/model.service";
 import type { GenerationModelSpec } from "@/lib/copilot/config/models";
 import type { AuditFinding } from "@/lib/copilot/core/entities/audit";
@@ -29,6 +30,7 @@ export interface AssistantMessage {
   performed: PerformedAction[];
   followUps: string[];
   findings: AuditFinding[];
+  rejected?: boolean;
   streaming?: boolean;
   stage?: AnswerStage;
   written?: number;
@@ -69,7 +71,10 @@ function splitActions(
   result: { performed: PerformedAction[]; offered: GhostAction[] } | undefined,
   fallback: GhostAction[]
 ) {
-  return { performed: result?.performed ?? [], actions: result?.offered ?? fallback };
+  return {
+    performed: result?.performed ?? [],
+    actions: result?.offered ?? fallback,
+  };
 }
 
 function fallbackActions(sources: readonly GhostSource[], currentPath: string): GhostAction[] {
@@ -77,19 +82,25 @@ function fallbackActions(sources: readonly GhostSource[], currentPath: string): 
   if (!best) return [];
 
   return best.url.split("#")[0] === currentPath.split("#")[0]
-    ? [{ kind: "highlight", heading: best.heading, label: `Point at "${best.heading}"` }]
+    ? [
+        {
+          kind: "highlight",
+          heading: best.heading,
+          label: `Point at "${best.heading}"`,
+        },
+      ]
     : [{ kind: "navigate", url: best.url, label: `Open ${best.page}` }];
 }
 
 function searchFloor(locale: "en" | "pt-BR", found: boolean): string {
   if (locale === "pt-BR") {
     return found
-      ? "Encontrei estas fontes na documentação. Carregue um modelo local para receber uma explicação auditada."
+      ? "Encontrei estas fontes verificadas na documentação. Abra a principal abaixo para ler a explicação completa."
       : "Não encontrei evidência sobre isso na documentação atual.";
   }
 
   return found
-    ? "I found these sources in the documentation. Load a local model for an audited explanation."
+    ? "I found these verified sources in the documentation. Open the first one below for the complete explanation."
     : "I found no evidence about that in the current documentation.";
 }
 
@@ -104,7 +115,10 @@ export function useAssistant() {
   const [indexError, setIndexError] = useState<string | null>(null);
   const [provider, setProvider] = useState<ModelState>(EMPTY_MODEL);
   const [models, setModels] = useState<ModelChoice[]>([]);
-  const [semantic, setSemantic] = useState<SemanticState>({ status: "needs-download", progress: 0 });
+  const [semantic, setSemantic] = useState<SemanticState>({
+    status: "needs-download",
+    progress: 0,
+  });
   const [busy, setBusy] = useState(false);
 
   const controller = useCallback(() => {
@@ -163,7 +177,10 @@ export function useAssistant() {
   const enableSemanticSearch = useCallback(async () => {
     setSemantic({ status: "downloading", progress: 0 });
     const ready = await controller().prepareEmbedding((progress) => setSemantic({ status: "downloading", progress }));
-    setSemantic({ status: ready ? "ready" : "failed", progress: ready ? 100 : 0 });
+    setSemantic({
+      status: ready ? "ready" : "failed",
+      progress: ready ? 100 : 0,
+    });
   }, [controller]);
 
   const stop = useCallback(() => {
@@ -228,7 +245,7 @@ export function useAssistant() {
       };
 
       try {
-        const history: GenerationMessage[] = transcript.slice(-6).map(({ role, content }) => ({ role, content }));
+        const history: GenerationMessage[] = acceptedHistory(transcript);
         let written = 0;
         const response = await current.ask({
           question: trimmed,
@@ -253,7 +270,12 @@ export function useAssistant() {
             sources: presented.sources,
             streaming: false,
             stage: undefined,
-            ...splitActions(options.perform?.(derived, { asksToNavigate: asksToNavigate(trimmed) }), derived),
+            ...splitActions(
+              options.perform?.(derived, {
+                asksToNavigate: asksToNavigate(trimmed),
+              }),
+              derived
+            ),
           });
           return;
         }
@@ -305,11 +327,19 @@ export function useAssistant() {
         update({
           content: answer.text,
           sources: presented.sources,
-          findings: answer.audit.findings,
+          // Findings describe prose that was discarded. Showing them beside
+          // the safe fallback made the fallback itself look wrong.
+          findings: answer.rejected ? [] : answer.audit.findings,
+          rejected: answer.rejected,
           attempts: answer.retried ? 2 : 1,
           streaming: false,
           stage: undefined,
-          ...splitActions(options.perform?.(actions, { asksToNavigate: asksToNavigate(trimmed) }), actions),
+          ...splitActions(
+            options.perform?.(actions, {
+              asksToNavigate: asksToNavigate(trimmed),
+            }),
+            actions
+          ),
         });
       } catch (error) {
         if (!controllerAbort.signal.aborted) {

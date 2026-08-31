@@ -47,7 +47,8 @@ Hard rules, in order:
 4. Never state a benchmark number, an option name or a config key that is not written in the documentation below.
 
 Then:
-- Lead with the answer, then one line on why. Two or three sentences, then code if code helps.
+- Lead with the answer, then one line on why. Two or three sentences.
+- Write code only when the reader explicitly asks for code, an example, or instructions for using an API. A conceptual "why" or "how it works" question gets prose, not a decorative example.
 - Never open with "Yes", "No", "Sim" or "Não" unless the reader asked a yes-or-no question. A "why" question is not one.
 - Cite the numbered sources as [1], [2].
 - One code block per answer. A second one is never the answer to anything.
@@ -81,6 +82,14 @@ Say so in one sentence, in the reader's language, and name the closest page from
 export const ACTION_RULES = `Actions, one per line, anywhere in your answer:
 - [[go:route.id]] — offer a link to that page. ONLY a route id listed under SOURCES below.
 - [[show:Exact heading]] — point at something on the page the reader is already on.`;
+
+/** Closed deterministic reads the model may request before its final answer. */
+export const TOOL_RULES = `If a required fact is missing, reply with ONLY one or more of these calls; the result will be returned to you:
+- [[api:JIT.exact.path]] — verify an API name.
+- [[docs:JIT.exact.path]] — read that API's documentation.
+- [[example:JIT.exact.path]] — read an audited example.
+- [[find:short topic]] — search the documentation.
+Never invent another tool or put a tool call in the final answer.`;
 
 /**
  * The labels the renderer puts above each block.

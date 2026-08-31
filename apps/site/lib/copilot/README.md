@@ -14,7 +14,11 @@ The capability ladder is progressive:
 4. navigation actions are parsed from an allowlisted protocol;
 5. schema requests produce validated `SchemaIntent`, then deterministic JIT source.
 
-Normal answers use a bounded tool loop. Only registered read-only tools can run, duplicate calls are ignored, and at most four calls are accepted. The final answer is audited. A fatal finding gets one constrained retry; a second fatal result is replaced by a localized refusal. Unsupported subjects are rejected before generation by corpus-coverage evidence, not by an arbitrary RRF score.
+Normal answers use a bounded tool loop. Only registered read-only tools can run, duplicate calls are ignored, and at most four calls are accepted. The final answer is audited. Fatal findings and policy-blocked grounding/drift warnings get one constrained retry; a second rejected result is replaced by a localized evidence-only fallback. Rejected prose and its paired question never enter conversation history, and findings about discarded prose are not rendered as though they described the fallback.
+
+Coverage is deny-by-default for questions that claim support for, or integration with, an unknown external subject. Unknown wording on a strongly retrieved conceptual question remains diagnostic instead of erasing its evidence; this is required for Portuguese questions over the English corpus. Claim grounding uses the same bilingual concept expansion as retrieval.
+
+Fenced TypeScript and JavaScript in a generated answer is transpiled and executed against the real runtime in a disposable browser worker with an abort signal and a 2.5 second limit. A failed or unsafe example is a fatal audit finding. Conceptual questions do not request decorative code. The light 0.8B tier is restricted to exact-symbol lookup and navigation; conceptual and schema requests fall back to verified sources.
 
 ## Compiled knowledge
 
@@ -41,9 +45,11 @@ The retrieval evaluation has 264 deterministic cases. On the artifact set genera
 - no-evidence classification mistakes: 0
 - selected-context recall: 98.4%
 - selected-context contamination: 0%
-- average prompt: 1,484 estimated tokens
+- average prompt: 1,607 estimated tokens
 
 These numbers measure retrieval and context selection, not factual correctness of generated prose. Do not describe them as “98% answer accuracy.” Generation quality is measured separately from saved transcripts with deterministic detectors and hand-read labels.
+
+The release-readiness gate requires at least 100 human-labelled browser transcripts, at least 98% rejection precision and recall, and at most a 2% false-positive rate. A tiny or unlabeled run cannot pass by reporting a vacuous 100%. This repository currently has no committed browser labels, so no generated-answer accuracy claim is made yet.
 
 ```bash
 pnpm knowledge:benchmark             # headless A/B/C; long and memory-heavy

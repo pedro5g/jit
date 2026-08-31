@@ -294,6 +294,15 @@ describe("reciprocal rank fusion", () => {
     expect(covered.coverage.covered).toBe(true);
   });
 
+  it("does not confuse a supported subject with an external integration claim", async () => {
+    const supported = await retriever.retrieve("does jit support masking fields?", {
+      context: { locale: "en" },
+    });
+
+    expect(supported.coverage.unknownTerms).not.toContain("masking");
+    expect(supported.coverage.covered).toBe(true);
+  });
+
   it("keeps at most two chunks from one page", async () => {
     const many = Array.from({ length: 6 }, (_, index) =>
       chunk({

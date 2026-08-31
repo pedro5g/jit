@@ -16,6 +16,7 @@ import type { AuditPolicy } from "../../core/entities/audit";
 import type { ModelContext } from "../../core/entities/model-context";
 import type { RetrievalReport } from "../../core/entities/retrieval";
 import { MAX_TOOL_CALLS } from "../../core/entities/tool";
+import type { CodeExampleVerifierPort } from "../../core/ports/code-example-verifier";
 import type { EmbeddingPort } from "../../core/ports/embedding";
 import type { GenerationMessage, LanguageModelPort } from "../../core/ports/language-model";
 import { type LoggerPort, silentLogger } from "../../core/ports/logger";
@@ -59,6 +60,8 @@ export interface CopilotServiceDeps {
    * a detector nobody has validated costs the reader an answer that was fine.
    */
   policy?: AuditPolicy;
+  /** Browser implementation executes code in a disposable worker. */
+  examples?: CodeExampleVerifierPort;
 }
 
 /**
@@ -93,7 +96,11 @@ export class CopilotService {
     embedder: EmbeddingPort | null
   ): Promise<{ report: RetrievalReport; context: ModelContext }> {
     const locale = input.locale ?? detectLocale(input.question);
-    this.logger.emit({ type: "query.received", locale, length: input.question.length });
+    this.logger.emit({
+      type: "query.received",
+      locale,
+      length: input.question.length,
+    });
 
     const started = performance.now();
     const report = await this.retrieve(input, embedder);
@@ -193,6 +200,7 @@ export class CopilotService {
         evidence: [],
         audit,
         retried: false,
+        rejected: false,
         insufficientEvidence: true,
         timings: {
           retrievalMs,
@@ -244,7 +252,12 @@ export class CopilotService {
       );
 
       callsUsed += results.length;
-      for (const tool of results) this.logger.emit({ type: "tool.called", tool: tool.call.name, ok: tool.hit });
+      for (const tool of results)
+        this.logger.emit({
+          type: "tool.called",
+          tool: tool.call.name,
+          ok: tool.hit,
+        });
 
       toolMessages.push(
         { role: "assistant", content: result.text },
@@ -262,14 +275,19 @@ export class CopilotService {
       );
 
       result = await model.stream(
-        { messages: toolMessages, maxTokens: MAX_ANSWER_TOKENS, temperature: 0, signal },
+        {
+          messages: toolMessages,
+          maxTokens: MAX_ANSWER_TOKENS,
+          temperature: 0,
+          signal,
+        },
         input.onDelta ?? (() => {})
       );
     }
 
     result = { ...result, text: stripToolCalls(result.text) };
 
-    let audit = this.audit(result.text, context, report);
+    let audit = await this.auditWithExamples(result.text, context, report, signal);
     let retried = false;
 
     /**
@@ -287,15 +305,23 @@ export class CopilotService {
       const corrected = [
         ...messages,
         { role: "assistant" as const, content: result.text },
-        { role: "user" as const, content: retryInstruction(audit.findings, this.deps.engine.symbols) },
+        {
+          role: "user" as const,
+          content: retryInstruction(audit.findings, this.deps.engine.symbols),
+        },
       ];
 
       const second = await model.stream(
-        { messages: corrected, maxTokens: MAX_ANSWER_TOKENS, temperature: 0, signal },
+        {
+          messages: corrected,
+          maxTokens: MAX_ANSWER_TOKENS,
+          temperature: 0,
+          signal,
+        },
         input.onDelta ?? (() => {})
       );
 
-      const secondAudit = this.audit(second.text, context, report);
+      const secondAudit = await this.auditWithExamples(second.text, context, report, signal);
 
       // The first answer is kept when the retry is no better: a second attempt
       // that fails differently is not progress, and the reader gets the one
@@ -355,8 +381,14 @@ export class CopilotService {
       evidence: context.evidence,
       audit,
       retried,
+      rejected,
       insufficientEvidence: context.empty,
-      timings: { retrievalMs, contextMs, generationMs, auditMs: performance.now() - auditStart },
+      timings: {
+        retrievalMs,
+        contextMs,
+        generationMs,
+        auditMs: performance.now() - auditStart,
+      },
     };
   }
 
@@ -378,5 +410,35 @@ export class CopilotService {
       topScore: best?.finalScore ?? 0,
       agreement,
     });
+  }
+
+  private async auditWithExamples(answer: string, context: ModelContext, report: RetrievalReport, signal: AbortSignal) {
+    const audit = this.audit(answer, context, report);
+    const verifier = this.deps.examples;
+    if (!verifier) return audit;
+
+    const verified = await verifier.verify(answer, signal).catch((error: unknown) => ({
+      ok: false as const,
+      error: error instanceof Error ? error.message : "Example verification failed.",
+    }));
+    if (verified.ok) return audit;
+
+    const finding = {
+      kind: "invalid-example" as const,
+      severity: "fatal" as const,
+      origin: "model_failure" as const,
+      detail: `The code example was discarded because it did not execute successfully: ${verified.error ?? "unknown error"}`,
+      offenders: [verified.error ?? "execution failed"],
+      source: "example-execution",
+    };
+
+    return {
+      ...audit,
+      findings: [...audit.findings, finding],
+      classification: {
+        kinds: [...new Set([...audit.classification.kinds, finding.kind])],
+        origins: [...new Set([...audit.classification.origins, finding.origin])],
+      },
+    };
   }
 }

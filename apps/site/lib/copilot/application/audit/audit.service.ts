@@ -176,7 +176,7 @@ export class StrictAuditPolicy implements AuditPolicy {
   constructor(private readonly retryEnabled = false) {}
 
   shouldReject(result: AuditResult): boolean {
-    return result.findings.some((finding) => finding.severity === "fatal");
+    return result.findings.some(isBlockingFinding);
   }
 
   shouldRetry(result: AuditResult): boolean {
@@ -211,7 +211,7 @@ export class ShadowAuditPolicy implements AuditPolicy {
 export function retryInstruction(findings: readonly AuditFinding[], symbols: SymbolRepository): string {
   const lines: string[] = ["Your previous answer was rejected. Fix exactly these problems and answer again."];
 
-  for (const finding of findings.filter((entry) => entry.severity === "fatal")) {
+  for (const finding of findings.filter(isBlockingFinding)) {
     lines.push(`- ${finding.detail}`);
 
     for (const offender of finding.offenders.slice(0, 4)) {
@@ -222,4 +222,12 @@ export function retryInstruction(findings: readonly AuditFinding[], symbols: Sym
 
   lines.push("Use only names that appear in the API surface, and only facts written in the documentation above.");
   return lines.join("\n");
+}
+
+function isBlockingFinding(finding: AuditFinding): boolean {
+  return (
+    finding.severity === "fatal" ||
+    finding.kind === "unsupported-factual-claim" ||
+    finding.kind === "foreign-domain-drift"
+  );
 }

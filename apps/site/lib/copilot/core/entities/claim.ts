@@ -67,6 +67,7 @@ export type FailureKind =
   | "foreign-domain-drift"
   | "wrong-language"
   | "generation-degeneration"
+  | "invalid-example"
   | "substantially-ungrounded"
   | "fully-grounded";
 
