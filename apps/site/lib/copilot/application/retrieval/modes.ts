@@ -74,11 +74,13 @@ const LOOKUP_PHRASES = /\b(what (?:does|is)|how do I use|o que (?:faz|é)|como u
 
 export interface ModeInput {
   question: string;
-  /** Whether exact symbol lookup resolved anything. */
+  /** Resolved symbols, including weak bare-name matches, for compatibility. */
   exactSymbols: number;
+  /** Symbols the reader explicitly wrote as API syntax. */
+  explicitSymbols?: number;
 }
 
-export function detectMode({ question, exactSymbols }: ModeInput): RetrievalMode {
+export function detectMode({ question, exactSymbols, explicitSymbols = exactSymbols }: ModeInput): RetrievalMode {
   if (NAVIGATION_PHRASES.test(question)) return "navigation";
 
   /**
@@ -90,10 +92,10 @@ export function detectMode({ question, exactSymbols }: ModeInput): RetrievalMode
    * DTO?") is conceptual, and a symbol on its own ("JIT.mask drops fields,
    * right?") is a claim to check rather than a place to go.
    */
-  if (exactSymbols > 0 && LOOKUP_PHRASES.test(question)) return "navigation";
+  if (explicitSymbols > 0 && LOOKUP_PHRASES.test(question)) return "navigation";
 
   // A bare identifier, with no sentence around it, is someone looking a name up.
-  if (exactSymbols > 0 && question.trim().split(/\s+/).length <= 3) return "navigation";
+  if (explicitSymbols > 0 && question.trim().split(/\s+/).length <= 3) return "navigation";
 
   return "knowledge";
 }

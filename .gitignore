@@ -20,6 +20,8 @@ lib-cov
 
 # Coverage directory used by tools like istanbul
 coverage
+!apps/site/lib/copilot/application/coverage/
+!apps/site/lib/copilot/application/coverage/*.ts
 *.lcov
 
 # nyc test coverage

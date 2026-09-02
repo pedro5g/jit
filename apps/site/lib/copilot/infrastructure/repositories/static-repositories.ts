@@ -13,9 +13,16 @@ import { resolvePath } from "../../config/routes";
 import type { ApiSymbol } from "../../core/entities/api-symbol";
 import type { DocumentChunk } from "../../core/entities/document-chunk";
 import type { KnowledgeEntry } from "../../core/entities/knowledge-entry";
+import type { KnowledgeRelation } from "../../core/entities/knowledge-relation";
 import type { SymbolMatch } from "../../core/entities/retrieval";
 import type { RouteEntry } from "../../core/entities/route-entry";
-import type { ChunkRepository, KnowledgeRepository, RouteRepository, SymbolRepository } from "../../core/repositories";
+import type {
+  ChunkRepository,
+  KnowledgeGraphRepository,
+  KnowledgeRepository,
+  RouteRepository,
+  SymbolRepository,
+} from "../../core/repositories";
 import type { ChunkId, KnowledgeId, RouteId, SymbolId } from "../../core/value-objects/ids";
 import { symbolPath } from "../../core/value-objects/ids";
 import type { Locale } from "../../core/value-objects/locale";
@@ -59,6 +66,26 @@ export class StaticKnowledgeRepository implements KnowledgeRepository {
 
   all(): readonly KnowledgeEntry[] {
     return this.entries;
+  }
+}
+
+export class StaticKnowledgeGraphRepository implements KnowledgeGraphRepository {
+  private readonly bySource = new Map<string, KnowledgeRelation[]>();
+
+  constructor(private readonly relations: KnowledgeRelation[]) {
+    for (const relation of relations) {
+      const list = this.bySource.get(relation.from) ?? [];
+      list.push(relation);
+      this.bySource.set(relation.from, list);
+    }
+  }
+
+  neighbours(id: KnowledgeId): readonly KnowledgeRelation[] {
+    return this.bySource.get(id) ?? [];
+  }
+
+  all(): readonly KnowledgeRelation[] {
+    return this.relations;
   }
 }
 

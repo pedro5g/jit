@@ -21,6 +21,7 @@ import { DOCS_CONTENT_DIR, docRoute } from "../../lib/copilot/config/routes";
 import type { ApiSymbol } from "../../lib/copilot/core/entities/api-symbol";
 import type { DocumentChunk } from "../../lib/copilot/core/entities/document-chunk";
 import type { KnowledgeEntry, KnowledgeKind } from "../../lib/copilot/core/entities/knowledge-entry";
+import type { KnowledgeRelation } from "../../lib/copilot/core/entities/knowledge-relation";
 import type { KnowledgeManifest } from "../../lib/copilot/core/entities/manifest";
 import { chunkId, type KnowledgeId, knowledgeId } from "../../lib/copilot/core/value-objects/ids";
 import { DEFAULT_LOCALE, LOCALES } from "../../lib/copilot/core/value-objects/locale";
@@ -33,6 +34,7 @@ import { type ParsedSection, parseDocument } from "./parsers/docs";
 import { isRunnableExample, runExample } from "./parsers/examples";
 import { extractRoutes } from "./parsers/routes";
 import { chunkSection } from "./transform/chunk";
+import { deriveFacets } from "./transform/facets";
 import { digest, embeddingHash, normalizeForHash, sha256 } from "./transform/normalize";
 import { linkRelationships } from "./transform/relationships";
 import { createSymbolLinker, quotesRemovedApis } from "./transform/symbols";
@@ -75,6 +77,7 @@ export interface BuildOptions {
 export interface BuildResult {
   manifest: KnowledgeManifest;
   entries: KnowledgeEntry[];
+  relations: KnowledgeRelation[];
   chunks: DocumentChunk[];
   symbols: ApiSymbol[];
   routes: Awaited<ReturnType<typeof extractRoutes>>["routes"];
@@ -114,6 +117,7 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
   // --------------------------------------------- parse: docs into entries
   const entries: KnowledgeEntry[] = [];
   const declared = new Map<KnowledgeId, string[]>();
+  const references = new Map<KnowledgeId, string[]>();
   /** How strongly each entry names each symbol, for evidence-ranked assignment. */
   const linkWeights = new Map<KnowledgeId, Map<string, number>>();
   const entriesByPath = new Map<string, KnowledgeEntry[]>();
@@ -151,9 +155,10 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
       const links = linkSymbols(section.text, `${document.title} ${section.heading}`);
       linkWeights.set(id, new Map(links.map((link) => [link.id, link.weight])));
 
+      const kind = kindFor(file.relative, section);
       const entry: KnowledgeEntry = {
         id,
-        kind: kindFor(file.relative, section),
+        kind,
         locale: DEFAULT_LOCALE,
         title: section.heading,
         breadcrumb: section.breadcrumb || document.title,
@@ -161,6 +166,14 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
         routeId: route.id,
         ...(section.anchor ? { anchor: section.anchor } : {}),
         symbols: links.map((link) => link.id),
+        facets: deriveFacets({
+          title: section.heading,
+          breadcrumb: section.breadcrumb || document.title,
+          routeId: route.id,
+          symbols: links.map((link) => link.id),
+          kind,
+          concepts: section.concepts,
+        }),
         related: [],
         dense: section.dense,
         showsRemovedApis: quotesRemovedApis(section.text, api.symbols),
@@ -172,6 +185,7 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
 
       entries.push(entry);
       declared.set(id, related);
+      references.set(id, section.references);
 
       const onPath = entriesByPath.get(route.path) ?? [];
       onPath.push(entry);
@@ -185,7 +199,8 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
   }
 
   // -------------------------------------------------------- relationships
-  linkRelationships({ entries, entriesByPath, declared });
+  const relations = linkRelationships({ entries, entriesByPath, declared, references });
+  log(`[knowledge] ${relations.length} relations`);
 
   /**
    * Where each symbol is documented, and by what.
@@ -357,7 +372,10 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
   // -------------------------------------------------------------- manifest
   const manifest: KnowledgeManifest = {
     version: ARTIFACT_VERSION,
-    contentHash: sha256(...chunks.map((chunk) => `${chunk.id}@${chunk.sourceHash}`)).slice(0, 16),
+    contentHash: sha256(
+      ...chunks.map((chunk) => `${chunk.id}@${chunk.sourceHash}`),
+      ...relations.map((relation) => `${relation.from}>${relation.kind}>${relation.to}@${relation.source}`)
+    ).slice(0, 16),
     builtAt: new Date().toISOString(),
     embedding: {
       model: EMBEDDING_MODEL.repo,
@@ -372,13 +390,14 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
       chunks: chunks.length,
       symbols: api.symbols.length,
       routes: routes.length,
+      relations: relations.length,
       vectors: vectors?.length ?? 0,
     },
     bytes: {},
   };
 
   // -------------------------------------------------------------- validate
-  const problems = validateArtifacts({ manifest, entries, chunks, symbols: api.symbols, routes });
+  const problems = validateArtifacts({ manifest, entries, chunks, symbols: api.symbols, routes, relations });
 
   // ----------------------------------------------------------------- write
   if (options.write && !problems.some(isFatal)) {
@@ -389,6 +408,7 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
       chunks,
       symbols: api.symbols,
       routes,
+      relations,
       lexical,
       vectors,
     });
@@ -401,6 +421,7 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
   return {
     manifest,
     entries,
+    relations,
     chunks,
     symbols: api.symbols,
     routes,

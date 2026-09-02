@@ -40,6 +40,7 @@ describe("audit", () => {
         chunks: result.chunks,
         symbols: result.symbols,
         routes: result.routes,
+        relations: result.relations,
         lexical: result.lexical,
       })
     );
@@ -187,6 +188,20 @@ describe("audit", () => {
     expect(rejects(result)).toBe(true);
   });
 
+  it("rejects unsupported technical details in generated explanation prose", async () => {
+    const result = await check(
+      "why is jit fast?",
+      [
+        "The JIT compiles code in real time and writes binary files before each request.",
+        "A known shape is read as a list of properties, which gives the process near-zero latency.",
+        "The optimization creates recursive calls that restart the search loop for each field.",
+      ].join(" ")
+    );
+
+    expect(rejects(result)).toBe(true);
+    expect(result.findings.some((finding) => finding.kind === "unsupported-factual-claim")).toBe(true);
+  });
+
   it("grounds a faithful Portuguese explanation against English evidence", async () => {
     const context = await contextFor("why is generated code fast?");
     const result = audit.run({
@@ -208,6 +223,40 @@ describe("audit", () => {
 
     expect(result.grounding.coverage).toBeGreaterThanOrEqual(0.9);
     expect(rejects(result)).toBe(false);
+  });
+
+  it("rejects a broad explanation that has no source citation", async () => {
+    const result = await check(
+      "why is jit fast?",
+      "The JIT compiles schemas into specialized code, so repeated calls avoid generic interpretation and execute a predictable hot path."
+    );
+
+    expect(rejects(result)).toBe(true);
+    expect(result.findings.some((finding) => finding.kind === "missing-source-citation")).toBe(true);
+  });
+
+  it("does not let an uncited Portuguese technical sentence evade claim analysis", async () => {
+    const context = await contextFor("por que a JIT é tão rápida?");
+    const result = audit.run({
+      question: "por que a JIT é tão rápida?",
+      answer:
+        "Além disso, a otimização de memória é crucial, pois o objeto é construído apenas quando necessário, evitando informações irrelevantes durante o loop de busca por chave.",
+      locale: "pt-BR",
+      modelContext: {
+        ...context,
+        locale: "pt-BR",
+        question: "por que a JIT é tão rápida?",
+      },
+      symbols: engine.symbols,
+      knowledge: engine.knowledge,
+      corpusKnows,
+      topScore: 0.05,
+      agreement: 2,
+    });
+
+    expect(result.grounding.claims).toBeGreaterThan(0);
+    expect(result.findings.some((finding) => finding.kind === "missing-source-citation")).toBe(true);
+    expect(rejects(result)).toBe(true);
   });
 
   it("blocks the observed unsupported runtime claim even though its detector is a warning", async () => {
@@ -356,6 +405,7 @@ describe("context", () => {
         chunks: result.chunks,
         symbols: result.symbols,
         routes: result.routes,
+        relations: result.relations,
         lexical: result.lexical,
       })
     );

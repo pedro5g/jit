@@ -8,6 +8,7 @@
 import type { ApiSymbol } from "../../core/entities/api-symbol";
 import type { DocumentChunk } from "../../core/entities/document-chunk";
 import type { KnowledgeEntry } from "../../core/entities/knowledge-entry";
+import type { KnowledgeRelation } from "../../core/entities/knowledge-relation";
 import type { KnowledgeManifest } from "../../core/entities/manifest";
 import type { RouteEntry } from "../../core/entities/route-entry";
 import { artifactStale } from "../../core/errors/copilot-error";
@@ -20,6 +21,35 @@ export interface RawArtifacts {
   chunks: DocumentChunk[];
   symbols: ApiSymbol[];
   routes: RouteEntry[];
+}
+
+export type WireKnowledgeEdge = readonly [
+  KnowledgeRelation["to"],
+  KnowledgeRelation["kind"],
+  KnowledgeRelation["source"],
+];
+export type WireKnowledgeNode = readonly [KnowledgeRelation["from"], WireKnowledgeEdge[]];
+
+export function hydrateRelations(nodes: readonly WireKnowledgeNode[]): KnowledgeRelation[] {
+  return nodes.flatMap(([from, edges]) => edges.map(([to, kind, source]) => ({ from, to, kind, source })));
+}
+
+/** Checks the graph separately because relations are a separate artifact. */
+export function assertRelationsConsistent(
+  manifest: KnowledgeManifest,
+  relations: readonly KnowledgeRelation[],
+  entries: readonly KnowledgeEntry[]
+): void {
+  if (manifest.counts.relations !== relations.length) {
+    throw artifactStale(`${manifest.counts.relations} relations`, `${relations.length}`);
+  }
+
+  const entryIds = new Set(entries.map((entry) => entry.id));
+  for (const relation of relations) {
+    if (!entryIds.has(relation.from) || !entryIds.has(relation.to)) {
+      throw artifactStale("relations with current entry ids", "relations with dangling entry ids");
+    }
+  }
 }
 
 export function hydrate(raw: RawArtifacts): KnowledgeSource {

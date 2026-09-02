@@ -12,7 +12,8 @@
  */
 import { CONTEXT_BUDGET, RETRIEVAL_LIMIT } from "../../config/retrieval";
 import type { CopilotAction, CopilotAnswer } from "../../core/entities/answer";
-import type { AuditPolicy } from "../../core/entities/audit";
+import type { AuditPolicy, AuditResult } from "../../core/entities/audit";
+import type { CoveragePlan } from "../../core/entities/coverage";
 import type { ModelContext } from "../../core/entities/model-context";
 import type { RetrievalReport } from "../../core/entities/retrieval";
 import { MAX_TOOL_CALLS } from "../../core/entities/tool";
@@ -24,11 +25,14 @@ import type { RouteId } from "../../core/value-objects/ids";
 import { detectLocale, type Locale } from "../../core/value-objects/locale";
 import type { KnowledgeEngine } from "../../infrastructure/knowledge-engine";
 import { fallbackNavigation, parseActions } from "../actions/parse-actions";
-import { type AuditService, retryInstruction, ShadowAuditPolicy } from "../audit/audit.service";
+import { type AuditService, retryInstruction, ShadowAuditPolicy, StrictAuditPolicy } from "../audit/audit.service";
 import type { ContextService } from "../context/context.service";
 import { promptOverhead, renderMessages } from "../context/render";
+import { CoveragePlanner } from "../coverage/coverage-planner";
+import { KnowledgeExpansionService } from "../coverage/knowledge-expansion.service";
 import { parseToolCalls, stripToolCalls } from "../tools/parse-tool-calls";
 import { runTool } from "../tools/registry";
+import { GroundedSynthesisService } from "./grounded-synthesis.service";
 
 export interface AskInput {
   question: string;
@@ -76,12 +80,22 @@ const ABOUT_A_VERSION =
 
 /** Tokens an answer gets. Enough for three paragraphs and one code block. */
 const MAX_ANSWER_TOKENS = 700;
+const DELIVERY_POLICY = new StrictAuditPolicy();
 
 export class CopilotService {
   private readonly logger: LoggerPort;
+  private readonly expansion: KnowledgeExpansionService;
+  private readonly coverage: CoveragePlanner;
+  private readonly grounded = new GroundedSynthesisService();
 
   constructor(private readonly deps: CopilotServiceDeps) {
     this.logger = deps.logger ?? silentLogger;
+    this.expansion = new KnowledgeExpansionService({
+      graph: deps.engine.graph,
+      knowledge: deps.engine.knowledge,
+      chunks: deps.engine.chunks,
+    });
+    this.coverage = new CoveragePlanner({ knowledge: deps.engine.knowledge, chunks: deps.engine.chunks });
   }
 
   /**
@@ -119,9 +133,11 @@ export class CopilotService {
 
     // A missing embedder is a capability level, not an error; a failing one is
     // a degraded level. Neither is allowed to take retrieval down with it.
+    const embeddingStart = performance.now();
     const queryVector = embedder ? await embedder.embed(input.question).catch(() => null) : null;
+    const queryEmbeddingMs = performance.now() - embeddingStart;
 
-    return this.deps.engine.retriever.retrieve(input.question, {
+    const report = await this.deps.engine.retriever.retrieve(input.question, {
       context: {
         locale,
         ...(input.routeId ? { routeId: input.routeId } : {}),
@@ -131,18 +147,25 @@ export class CopilotService {
       limit: RETRIEVAL_LIMIT,
       allowHistory: ABOUT_A_VERSION.test(input.question),
     });
+    report.timings.queryEmbeddingMs = embedder ? queryEmbeddingMs : 0;
+    report.timings.totalSemanticMs = queryEmbeddingMs + report.timings.semanticMs;
+    return report;
   }
 
   private buildContext(input: AskInput, report: RetrievalReport, locale: Locale): ModelContext {
+    const plan = this.planCoverage(input.question, report, locale);
+    const knownSymbols = plan.scope === "broad" ? report.explicitSymbols : report.exactSymbols;
     const reservedTokens = promptOverhead(this.deps.engine.symbols, {
       question: input.question,
-      exactSymbols: report.exactSymbols,
+      exactSymbols: knownSymbols,
+      answerMode: plan.answerMode,
     });
 
     const context = this.deps.context.build({
       question: input.question,
       locale,
       report,
+      plan,
       reservedTokens,
       budget: CONTEXT_BUDGET.hard,
       ...(input.routeId
@@ -165,6 +188,17 @@ export class CopilotService {
     return context;
   }
 
+  private planCoverage(question: string, report: RetrievalReport, locale: Locale): CoveragePlan {
+    const expansion = this.expansion.expand({
+      question,
+      seeds: report.results.slice(0, 5),
+      locale,
+      maxDepth: 2,
+      maxCandidates: 30,
+    });
+    return this.coverage.plan({ question, report, expansion, maxEvidence: 8 });
+  }
+
   /**
    * The full flow.
    *
@@ -185,10 +219,7 @@ export class CopilotService {
     const contextMs = performance.now() - contextStart;
 
     if (context.empty) {
-      const text =
-        locale === "pt-BR"
-          ? "Não encontrei evidência sobre isso na documentação atual."
-          : "I found no evidence about that in the current documentation.";
+      const text = noEvidenceMessage(locale);
       const auditStart = performance.now();
       const audit = this.audit(text, context, report);
 
@@ -211,6 +242,31 @@ export class CopilotService {
       };
     }
 
+    if (!context.coverage.readiness.sufficient) {
+      const auditStart = performance.now();
+      const fallback = this.auditedGroundedFallback(context, report);
+      const actions: CopilotAction[] = [];
+      const navigation = fallbackNavigation(context.evidence, actions);
+      if (navigation) actions.push(navigation);
+      return {
+        text: fallback.text,
+        locale,
+        actions,
+        citations: this.citations(context, locale),
+        evidence: context.evidence,
+        audit: fallback.audit,
+        retried: false,
+        rejected: false,
+        insufficientEvidence: true,
+        timings: {
+          retrievalMs,
+          contextMs,
+          generationMs: 0,
+          auditMs: performance.now() - auditStart,
+        },
+      };
+    }
+
     const messages = renderMessages(context, {
       symbols: this.deps.engine.symbols,
       ...(input.history ? { history: input.history } : {}),
@@ -221,7 +277,10 @@ export class CopilotService {
 
     let result = await model.stream(
       { messages, maxTokens: MAX_ANSWER_TOKENS, temperature: 0, signal },
-      input.onDelta ?? (() => {})
+      // Do not expose model deltas before the audit. A streamed hallucination
+      // cannot be taken back from the reader, so the product buffers the
+      // generation and emits the policy-approved text once below.
+      () => {}
     );
 
     const toolMessages = [...messages];
@@ -281,7 +340,7 @@ export class CopilotService {
           temperature: 0,
           signal,
         },
-        input.onDelta ?? (() => {})
+        () => {}
       );
     }
 
@@ -318,7 +377,7 @@ export class CopilotService {
           temperature: 0,
           signal,
         },
-        input.onDelta ?? (() => {})
+        () => {}
       );
 
       const secondAudit = await this.auditWithExamples(second.text, context, report, signal);
@@ -358,26 +417,38 @@ export class CopilotService {
       findings: audit.findings.length,
     });
 
-    const rejected = policy.shouldReject(audit);
-    const text = rejected
-      ? locale === "pt-BR"
-        ? "Não consegui verificar esta resposta com evidência suficiente. As fontes abaixo são o resultado confiável que encontrei."
-        : "I could not verify this answer with enough evidence. The sources below are the reliable result I found."
-      : parsed.text;
+    let rejected = policy.shouldReject(audit);
+    let text = parsed.text;
+    if (rejected) {
+      const salvaged = this.grounded.salvage(parsed.text, audit);
+      if (salvaged) {
+        const salvagedAudit = await this.auditWithExamples(salvaged, context, report, signal);
+        if (!policy.shouldReject(salvagedAudit)) {
+          text = salvaged;
+          audit = salvagedAudit;
+          rejected = false;
+        }
+      }
+      if (rejected) {
+        const fallback = this.auditedGroundedFallback(context, report);
+        text = fallback.text;
+        // The delivered fallback has its own audit. Keep the model findings as
+        // provenance for the rejection, without allowing an unsafe fallback
+        // to pass merely because the original policy decision was made earlier.
+        audit = mergeDeliveryAudit(audit, fallback.audit);
+      }
+    }
+
+    // Emitting once is intentionally the last step of the safety boundary.
+    // The UI still receives its normal delta callback, but never receives raw
+    // model prose that the audit may later reject.
+    if (text) input.onDelta?.(text);
 
     return {
       text,
       locale,
       actions,
-      citations: context.evidence.map((evidence) => {
-        const path = this.deps.context.pathFor(evidence, locale);
-        return {
-          index: evidence.index,
-          routeId: evidence.routeId,
-          ...(path ? { path } : {}),
-          breadcrumb: evidence.breadcrumb,
-        };
-      }),
+      citations: this.citations(context, locale),
       evidence: context.evidence,
       audit,
       retried,
@@ -392,7 +463,19 @@ export class CopilotService {
     };
   }
 
-  private audit(answer: string, context: ModelContext, report: RetrievalReport) {
+  private citations(context: ModelContext, locale: Locale): CopilotAnswer["citations"] {
+    return context.evidence.map((evidence) => {
+      const path = this.deps.context.pathFor(evidence, locale);
+      return {
+        index: evidence.index,
+        routeId: evidence.routeId,
+        ...(path ? { path } : {}),
+        breadcrumb: evidence.breadcrumb,
+      };
+    });
+  }
+
+  private audit(answer: string, context: ModelContext, report: RetrievalReport, sourceOnly = false) {
     const best = report.results[0];
 
     // How many independent retrievers agreed on the best result — the strongest
@@ -403,6 +486,7 @@ export class CopilotService {
       question: context.question,
       answer,
       locale: context.locale,
+      ...(sourceOnly ? { sourceOnly: true } : {}),
       modelContext: context,
       symbols: this.deps.engine.symbols,
       knowledge: this.deps.engine.knowledge,
@@ -410,6 +494,25 @@ export class CopilotService {
       topScore: best?.finalScore ?? 0,
       agreement,
     });
+  }
+
+  private auditedGroundedFallback(
+    context: ModelContext,
+    report: RetrievalReport
+  ): { text: string; audit: AuditResult } {
+    let text = this.grounded.synthesize(context);
+    let audit = this.audit(text, context, report, true);
+
+    // A source-only arrangement should normally be safe by construction, but
+    // it still crosses the same validators as model prose. If an excerpt
+    // trips a blocking check, fail closed with a statement that makes no
+    // technical claim rather than showing unaudited text.
+    if (DELIVERY_POLICY.shouldReject(audit)) {
+      text = noEvidenceMessage(context.locale);
+      audit = this.audit(text, context, report, true);
+    }
+
+    return { text, audit };
   }
 
   private async auditWithExamples(answer: string, context: ModelContext, report: RetrievalReport, signal: AbortSignal) {
@@ -441,4 +544,22 @@ export class CopilotService {
       },
     };
   }
+}
+
+function noEvidenceMessage(locale: Locale): string {
+  return locale === "pt-BR"
+    ? "Não encontrei evidência suficiente na documentação atual para responder com segurança."
+    : "I found no evidence in the current documentation to answer safely.";
+}
+
+function mergeDeliveryAudit(blocked: AuditResult, delivered: AuditResult): AuditResult {
+  const findings = [...blocked.findings, ...delivered.findings];
+  return {
+    ...delivered,
+    findings,
+    classification: {
+      kinds: [...new Set(findings.map((finding) => finding.kind))],
+      origins: [...new Set(findings.map((finding) => finding.origin))],
+    },
+  };
 }

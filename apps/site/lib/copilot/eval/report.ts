@@ -122,6 +122,22 @@ export function renderReport(sections: readonly ReportSection[], options: Report
     "  coverage",
     share((metrics) => metrics.groundingCoverage)
   );
+  row(
+    "  explanation completeness",
+    share((metrics) => metrics.explanationCompleteness)
+  );
+  row(
+    "  facet coverage",
+    share((metrics) => metrics.facetCoverage)
+  );
+  row(
+    "  specificity",
+    share((metrics) => metrics.specificity)
+  );
+  row(
+    "  redundancy",
+    share((metrics) => metrics.redundancy)
+  );
   row("  claims / answer", (section) => section.metrics.averageClaims.toFixed(1));
   out();
 
@@ -195,6 +211,18 @@ export function renderReport(sections: readonly ReportSection[], options: Report
     "  would be rejected",
     share((metrics) => metrics.wouldReject)
   );
+  row(
+    "  raw model rejected",
+    share((metrics) => metrics.rawWouldReject)
+  );
+  row(
+    "  deterministic salvage",
+    share((metrics) => metrics.salvageUsed)
+  );
+  row(
+    "  grounded fallback",
+    share((metrics) => metrics.groundedSynthesisUsed)
+  );
   out();
 
   out("  cost");
@@ -206,6 +234,9 @@ export function renderReport(sections: readonly ReportSection[], options: Report
     section.metrics.medianTtftMs === null ? "-" : `${(section.metrics.medianTtftMs / 1000).toFixed(2)}s`
   );
   row("  tokens/sec", (section) => section.metrics.tokensPerSecond.toFixed(1));
+  row("  query embedding", (section) => `${section.metrics.queryEmbeddingMs.toFixed(1)}ms`);
+  row("  exact vector scan", (section) => `${section.metrics.vectorScanMs.toFixed(2)}ms`);
+  row("  top-K finalize", (section) => `${section.metrics.vectorTopKMs.toFixed(2)}ms`);
   row("  peak heap", (section) =>
     section.manifest?.browser?.peakMemoryMb ? `${Math.round(section.manifest.browser.peakMemoryMb)}mb` : "-"
   );

@@ -1,8 +1,9 @@
 import type { ApiSymbol } from "../entities/api-symbol";
 import type { DocumentChunk } from "../entities/document-chunk";
 import type { KnowledgeEntry } from "../entities/knowledge-entry";
+import type { KnowledgeRelation } from "../entities/knowledge-relation";
 import type { KnowledgeManifest } from "../entities/manifest";
-import type { LexicalMatch, SymbolMatch, VectorMatch } from "../entities/retrieval";
+import type { LexicalMatch, SymbolMatch, VectorMatch, VectorSearchMetrics } from "../entities/retrieval";
 import type { RouteEntry } from "../entities/route-entry";
 import type { ChunkId, KnowledgeId, RouteId, SymbolId } from "../value-objects/ids";
 import type { Locale } from "../value-objects/locale";
@@ -24,6 +25,11 @@ export interface KnowledgeRepository {
   /** Entries documenting a symbol, best first. */
   bySymbol(id: SymbolId): KnowledgeEntry[];
   all(): readonly KnowledgeEntry[];
+}
+
+export interface KnowledgeGraphRepository {
+  neighbours(id: KnowledgeId): readonly KnowledgeRelation[];
+  all(): readonly KnowledgeRelation[];
 }
 
 export interface ChunkRepository {
@@ -81,6 +87,7 @@ export interface SymbolRepository {
 
 export interface VectorRepository {
   search(vector: Float32Array, limit: number): VectorMatch[];
+  readonly lastMetrics: VectorSearchMetrics | null;
   readonly dimensions: number;
   /** False when the build shipped without embeddings, or they failed to load. */
   readonly available: boolean;

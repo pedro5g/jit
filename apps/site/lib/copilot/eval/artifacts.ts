@@ -12,14 +12,15 @@
  * and `contexts.jsonl` and never regenerates a token.
  */
 import type { ModelContext } from "../core/entities/model-context";
+import type { RetrievalReport } from "../core/entities/retrieval";
 import type { EvalCase } from "./types";
 
 /** Bumped when the prompt's wording changes in a way that could move results. */
-export const PROMPT_VERSION = 2;
+export const PROMPT_VERSION = 3;
 /** Bumped when context selection changes: roles, quotas, budget, dedupe. */
-export const CONTEXT_VERSION = 2;
+export const CONTEXT_VERSION = 3;
 /** Bumped when the case set changes. */
-export const DATASET_VERSION = 1;
+export const DATASET_VERSION = 2;
 
 export interface RunManifest {
   runId: string;
@@ -86,12 +87,17 @@ export interface ContextRecord {
   contextTokens: number;
   /** The serialized `ModelContext`, so a scorer needs nothing else. */
   context: ModelContext;
+  retrievalTimings?: RetrievalReport["timings"];
 }
 
 /** One line of `responses.jsonl`. */
 export interface ResponseRecord {
   question: string;
   answer: string;
+  /** The model's unfiltered output, retained when delivery used a safe path. */
+  rawAnswer?: string;
+  /** How the answer reached the reader. Old runs are model responses. */
+  delivery?: "model" | "salvage" | "grounded-synthesis";
   latencyMs: number;
   tokensPerSecond: number;
   /** Time to first token, which only a streaming host can measure — §PART 27. */

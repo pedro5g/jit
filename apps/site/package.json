@@ -21,6 +21,8 @@
     "knowledge:validate": "tsx --conditions @jit/source scripts/knowledge/cli.ts validate",
     "knowledge:inspect": "tsx --conditions @jit/source scripts/knowledge/cli.ts inspect",
     "knowledge:eval": "tsx --conditions @jit/source scripts/knowledge/cli.ts eval",
+    "knowledge:eval:explain": "tsx --conditions @jit/source scripts/knowledge/cli.ts eval:explain",
+    "knowledge:bench:vector": "tsx --conditions @jit/source scripts/knowledge/vector-benchmark.ts",
     "preknowledge:benchmark": "node scripts/build-docs-index.mjs",
     "knowledge:benchmark": "tsx --conditions @jit/source scripts/knowledge/benchmark.ts",
     "knowledge:rescore": "tsx --conditions @jit/source scripts/knowledge/rescore.ts",

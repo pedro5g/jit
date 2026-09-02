@@ -12,12 +12,13 @@
  * symbol retrieval rather than failing to load.
  */
 import { ARTIFACT_BASE, ARTIFACTS, type ArtifactName } from "../../config/artifacts";
+import type { KnowledgeRelation } from "../../core/entities/knowledge-relation";
 import type { KnowledgeManifest } from "../../core/entities/manifest";
 import { artifactUnavailable } from "../../core/errors/copilot-error";
 import type { KnowledgeSource } from "../../core/repositories";
 import type { LexicalCapableLoader } from "../knowledge-engine";
 import type { LexicalIndexDocument } from "../retrieval/lexical-repository";
-import { assertConsistent, hydrate, type RawArtifacts } from "./hydrate";
+import { assertConsistent, hydrate, hydrateRelations, type RawArtifacts, type WireKnowledgeNode } from "./hydrate";
 
 export class FetchArtifactLoader implements LexicalCapableLoader {
   constructor(
@@ -66,6 +67,10 @@ export class FetchArtifactLoader implements LexicalCapableLoader {
     } catch {
       return null;
     }
+  }
+
+  async loadRelations(_manifest: KnowledgeManifest): Promise<KnowledgeRelation[]> {
+    return hydrateRelations(await this.json<WireKnowledgeNode[]>("relations"));
   }
 
   loadLexical(): Promise<LexicalIndexDocument> {

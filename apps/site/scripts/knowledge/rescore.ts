@@ -126,10 +126,12 @@ for (const run of runs) {
         symbols: engine.symbols,
         knowledge: engine.knowledge,
         corpusKnows: (term) => engine.lexical.knows(term),
+        sourceOnly: response.delivery === "grounded-synthesis",
       }),
       latencyMs: response.latencyMs,
       tokensPerSecond: response.tokensPerSecond,
       ...(response.ttftMs ? { ttftMs: response.ttftMs } : {}),
+      ...(context.retrievalTimings ? { retrievalTimings: context.retrievalTimings } : {}),
     });
   }
 

@@ -1,4 +1,4 @@
-import type { KnowledgeId, RouteId, SymbolId } from "../value-objects/ids";
+import type { FacetId, KnowledgeId, RouteId, SymbolId } from "../value-objects/ids";
 import type { Locale } from "../value-objects/locale";
 
 /**
@@ -24,6 +24,13 @@ export type KnowledgeKind =
   | "migration"
   | "history"
   | "overview";
+
+export interface KnowledgeFacet {
+  id: FacetId;
+  /** Human-readable source label; shown by the inspector, never asserted as fact. */
+  label: string;
+  source: "heading" | "concept" | "page" | "route" | "symbol" | "kind";
+}
 
 /**
  * One canonical unit of documented knowledge.
@@ -59,6 +66,9 @@ export interface KnowledgeEntry {
 
   /** Every public API name this entry documents or demonstrates. */
   symbols: SymbolId[];
+
+  /** Explanatory dimensions extracted by the compiler from this entry. */
+  facets: KnowledgeFacet[];
 
   /**
    * Entries deliberately linked to this one, from `related:` frontmatter and

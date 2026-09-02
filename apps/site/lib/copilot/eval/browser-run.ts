@@ -15,6 +15,7 @@
  */
 import type { ContextService } from "../application/context/context.service";
 import type { GenerationModelSpec, ModelTier } from "../config/models";
+import type { EmbeddingPort } from "../core/ports/embedding";
 import type { LanguageModelPort } from "../core/ports/language-model";
 import type { KnowledgeEngine } from "../infrastructure/knowledge-engine";
 import {
@@ -96,6 +97,7 @@ export interface BrowserRunInput {
   engine: KnowledgeEngine;
   contextService: ContextService;
   model: LanguageModelPort;
+  embedder?: EmbeddingPort | null;
   spec: GenerationModelSpec;
   browser: BrowserBlock;
   cases: readonly EvalCase[];
@@ -118,7 +120,7 @@ export interface BrowserRunResult {
  * import without.
  */
 export async function runBrowserBenchmark(input: BrowserRunInput): Promise<BrowserRunResult> {
-  const prompt = pipelinePrompt(input.engine, input.contextService);
+  const prompt = pipelinePrompt(input.engine, input.contextService, input.embedder ?? null);
   const result: BrowserRunResult = {
     artifacts: {
       manifest: browserManifest({

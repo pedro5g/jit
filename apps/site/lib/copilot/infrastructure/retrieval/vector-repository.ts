@@ -1,67 +1,96 @@
-/**
- * Brute-force cosine similarity over the packed vectors.
- *
- * §31 and §32 are explicit that this stays brute force until a benchmark says
- * otherwise, and the arithmetic backs them up: 619 chunks at 384 dimensions is
- * 238,000 multiply-adds over one contiguous Float32Array — roughly a tenth of
- * a millisecond, next to the tens of milliseconds it takes to embed the query
- * that gets compared. An ANN index would optimise 0.4% of the latency and add
- * a structure that has to be rebuilt, versioned and validated.
- *
- * The vectors are stored normalized, so the dot product *is* the cosine and
- * there is no magnitude to divide by.
- */
-import type { VectorMatch } from "../../core/entities/retrieval";
+/** Exact dot-product search over normalized vectors in one flat Float32Array. */
+import type { VectorMatch, VectorSearchMetrics } from "../../core/entities/retrieval";
 import type { VectorRepository } from "../../core/repositories";
 import type { ChunkId } from "../../core/value-objects/ids";
 
 export class PackedVectorRepository implements VectorRepository {
   readonly available: boolean;
+  lastMetrics: VectorSearchMetrics | null = null;
 
   constructor(
     private readonly vectors: Float32Array | null,
     private readonly chunkIds: readonly string[],
     readonly dimensions: number
   ) {
-    // A truncated file is worse than a missing one: the offsets still resolve
-    // and every result is silently drawn from the wrong chunk.
     this.available = vectors !== null && vectors.length === chunkIds.length * dimensions;
   }
 
   search(vector: Float32Array, limit: number): VectorMatch[] {
     const vectors = this.vectors;
-    if (!this.available || !vectors || vector.length !== this.dimensions) return [];
+    if (!this.available || !vectors || vector.length !== this.dimensions || limit <= 0) {
+      this.lastMetrics = null;
+      return [];
+    }
 
-    /**
-     * A bounded insertion sort beats sorting the whole corpus.
-     *
-     * `limit` is 20; scoring 619 candidates and sorting them is 619 log 619
-     * comparisons to discard 599 of them. Keeping a small ordered array costs
-     * at most `limit` shifts per accepted candidate, and most candidates are
-     * rejected by one comparison against the worst kept score.
-     */
-    const best: VectorMatch[] = [];
-    let worst = -Infinity;
+    const started = performance.now();
+    const heapScores = new Float64Array(limit);
+    const heapIndexes = new Int32Array(limit);
+    let size = 0;
 
-    for (let index = 0; index < this.chunkIds.length; index++) {
+    for (let index = 0; index < this.chunkIds.length; index += 1) {
       const offset = index * this.dimensions;
-
       let dot = 0;
-      for (let dimension = 0; dimension < this.dimensions; dimension++) {
+      for (let dimension = 0; dimension < this.dimensions; dimension += 1) {
         dot += vectors[offset + dimension] * vector[dimension];
       }
 
-      if (best.length === limit && dot <= worst) continue;
-
-      const match: VectorMatch = { chunkId: this.chunkIds[index] as ChunkId, score: dot };
-      let position = best.length;
-      while (position > 0 && best[position - 1].score < dot) position -= 1;
-
-      best.splice(position, 0, match);
-      if (best.length > limit) best.pop();
-      worst = best[best.length - 1].score;
+      if (size < limit) {
+        heapScores[size] = dot;
+        heapIndexes[size] = index;
+        siftUp(heapScores, heapIndexes, size);
+        size += 1;
+      } else if (dot > heapScores[0]) {
+        heapScores[0] = dot;
+        heapIndexes[0] = index;
+        siftDown(heapScores, heapIndexes, size, 0);
+      }
     }
 
+    const scanFinished = performance.now();
+    const best: VectorMatch[] = new Array(size);
+    for (let index = 0; index < size; index += 1) {
+      best[index] = { chunkId: this.chunkIds[heapIndexes[index]] as ChunkId, score: heapScores[index] };
+    }
+    best.sort((left, right) => right.score - left.score || left.chunkId.localeCompare(right.chunkId));
+    const finished = performance.now();
+    this.lastMetrics = {
+      vectorCount: this.chunkIds.length,
+      dimensions: this.dimensions,
+      vectorScanMs: scanFinished - started,
+      topKSelectionMs: finished - scanFinished,
+      totalMs: finished - started,
+      limit,
+    };
     return best;
   }
+}
+
+function siftUp(scores: Float64Array, indexes: Int32Array, position: number): void {
+  while (position > 0) {
+    const parent = (position - 1) >> 1;
+    if (scores[parent] <= scores[position]) return;
+    swap(scores, indexes, parent, position);
+    position = parent;
+  }
+}
+
+function siftDown(scores: Float64Array, indexes: Int32Array, size: number, position: number): void {
+  while (true) {
+    const left = position * 2 + 1;
+    if (left >= size) return;
+    const right = left + 1;
+    const child = right < size && scores[right] < scores[left] ? right : left;
+    if (scores[position] <= scores[child]) return;
+    swap(scores, indexes, position, child);
+    position = child;
+  }
+}
+
+function swap(scores: Float64Array, indexes: Int32Array, left: number, right: number): void {
+  const score = scores[left];
+  scores[left] = scores[right];
+  scores[right] = score;
+  const index = indexes[left];
+  indexes[left] = indexes[right];
+  indexes[right] = index;
 }

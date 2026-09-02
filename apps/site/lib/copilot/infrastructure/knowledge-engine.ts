@@ -11,6 +11,7 @@ import type { KnowledgeManifest } from "../core/entities/manifest";
 import type { ArtifactLoaderPort } from "../core/ports/artifact-loader";
 import type {
   ChunkRepository,
+  KnowledgeGraphRepository,
   KnowledgeRepository,
   RouteRepository,
   SymbolRepository,
@@ -18,16 +19,19 @@ import type {
 } from "../core/repositories";
 import {
   StaticChunkRepository,
+  StaticKnowledgeGraphRepository,
   StaticKnowledgeRepository,
   StaticRouteRepository,
   StaticSymbolRepository,
 } from "./repositories/static-repositories";
 import { type LexicalIndexDocument, StaticLexicalRepository } from "./retrieval/lexical-repository";
 import { PackedVectorRepository } from "./retrieval/vector-repository";
+import { assertRelationsConsistent } from "./storage/hydrate";
 
 export interface KnowledgeEngine {
   manifest: KnowledgeManifest;
   knowledge: KnowledgeRepository;
+  graph: KnowledgeGraphRepository;
   chunks: ChunkRepository;
   symbols: SymbolRepository;
   routes: RouteRepository;
@@ -46,10 +50,11 @@ export interface LexicalCapableLoader extends ArtifactLoaderPort {
 export async function createKnowledgeEngine(loader: LexicalCapableLoader): Promise<KnowledgeEngine> {
   const manifest = await loader.loadManifest();
 
-  const [source, lexicalIndex, packedVectors] = await Promise.all([
+  const [source, lexicalIndex, packedVectors, relations] = await Promise.all([
     loader.loadSource(manifest),
     loader.loadLexical(),
     loader.loadVectors(manifest),
+    loader.loadRelations(manifest),
   ]);
 
   const chunks = new StaticChunkRepository(source.chunks);
@@ -60,10 +65,12 @@ export async function createKnowledgeEngine(loader: LexicalCapableLoader): Promi
     source.chunks.map((chunk) => chunk.id),
     manifest.embedding.dimensions
   );
+  assertRelationsConsistent(manifest, relations, source.entries);
 
   return {
     manifest,
     knowledge: new StaticKnowledgeRepository(source.entries),
+    graph: new StaticKnowledgeGraphRepository(relations),
     chunks,
     symbols,
     routes: new StaticRouteRepository(source.routes),

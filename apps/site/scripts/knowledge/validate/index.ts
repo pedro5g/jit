@@ -13,6 +13,7 @@
 import type { ApiSymbol } from "../../../lib/copilot/core/entities/api-symbol";
 import type { DocumentChunk } from "../../../lib/copilot/core/entities/document-chunk";
 import type { KnowledgeEntry } from "../../../lib/copilot/core/entities/knowledge-entry";
+import type { KnowledgeRelation } from "../../../lib/copilot/core/entities/knowledge-relation";
 import type { KnowledgeManifest } from "../../../lib/copilot/core/entities/manifest";
 import type { RouteEntry } from "../../../lib/copilot/core/entities/route-entry";
 import { isChunkId, isKnowledgeId, isRouteId, isSymbolId } from "../../../lib/copilot/core/value-objects/ids";
@@ -29,6 +30,7 @@ export interface ValidationInput {
   chunks: DocumentChunk[];
   symbols: ApiSymbol[];
   routes: RouteEntry[];
+  relations: KnowledgeRelation[];
 }
 
 export function validateArtifacts(input: ValidationInput): ValidationProblem[] {
@@ -59,6 +61,12 @@ export function validateArtifacts(input: ValidationInput): ValidationProblem[] {
       if (!entryIds.has(related)) report("relation", `${entry.id} relates to unknown entry ${related}`);
       if (related === entry.id) report("relation", `${entry.id} relates to itself`);
     }
+  }
+
+  for (const relation of input.relations) {
+    if (!entryIds.has(relation.from)) report("relation", `edge starts at unknown entry ${relation.from}`);
+    if (!entryIds.has(relation.to)) report("relation", `edge ends at unknown entry ${relation.to}`);
+    if (relation.from === relation.to) report("relation", `${relation.from} has a self edge`);
   }
 
   const seenChunk = new Set<string>();
@@ -156,6 +164,8 @@ export function validateArtifacts(input: ValidationInput): ValidationProblem[] {
   if (counts.chunks !== input.chunks.length) report("manifest", "manifest chunk count disagrees with chunks.json");
   if (counts.symbols !== input.symbols.length) report("manifest", "manifest symbol count disagrees with symbols.json");
   if (counts.routes !== input.routes.length) report("manifest", "manifest route count disagrees with routes.json");
+  if (counts.relations !== input.relations.length)
+    report("manifest", "manifest relation count disagrees with relations.json");
   if (!input.manifest.contentHash) report("manifest", "manifest carries no content hash");
   if (input.entries.length === 0) report("coverage", "no knowledge entries were produced");
 

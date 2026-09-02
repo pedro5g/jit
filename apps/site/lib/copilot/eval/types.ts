@@ -7,7 +7,7 @@
  * §71's shape names symbols and route ids instead, which survive a rename by
  * construction.
  */
-import type { RouteId, SymbolId } from "../core/value-objects/ids";
+import type { FacetId, RouteId, SymbolId } from "../core/value-objects/ids";
 import type { Locale } from "../core/value-objects/locale";
 
 /** §70's categories, so a regression can be attributed rather than just noticed. */
@@ -34,6 +34,8 @@ export interface EvalCase {
     routes?: RouteId[];
     /** The route that must rank first. */
     best?: RouteId;
+    /** Compiler-derived facet ids expected in a broad explanation. */
+    facets?: FacetId[];
   };
 
   /**

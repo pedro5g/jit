@@ -8,6 +8,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ARTIFACT_DIR } from "../../lib/copilot/config/artifacts";
+import { runExplanationEval } from "../../lib/copilot/eval/explanation-run";
 import { runEval } from "../../lib/copilot/eval/run";
 import { createKnowledgeEngine } from "../../lib/copilot/infrastructure/knowledge-engine";
 import { NodeArtifactLoader } from "../../lib/copilot/infrastructure/storage/node-artifact-loader";
@@ -214,7 +215,56 @@ switch (command) {
     break;
   }
 
+  case "eval:explain": {
+    const loader = new NodeArtifactLoader(path.join(siteDir, "public", ARTIFACT_DIR));
+    const engine = await createKnowledgeEngine(loader);
+    const embedder = flags.has("--no-embed") || !engine.hasSemanticSearch ? null : new TransformersEmbedder();
+    const metrics = await runExplanationEval(engine, embedder);
+    const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+    console.log(`\n[knowledge] ${metrics.cases} explanation cases · semantic ${embedder ? "on" : "off"}`);
+    console.log(`  graph                     ${metrics.graphNodes} nodes · ${metrics.graphEdges} edges`);
+    console.log(
+      `  graph sources             ${Object.entries(metrics.graphBySource)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([source, count]) => `${source} ${count}`)
+        .join(" · ")}`
+    );
+    console.log(
+      `  graph relations           ${Object.entries(metrics.graphByKind)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([kind, count]) => `${kind} ${count}`)
+        .join(" · ")}`
+    );
+    console.log(`  seed facet coverage       ${percent(metrics.seedFacetCoverage)}`);
+    console.log(`  expanded facet coverage   ${percent(metrics.expandedFacetCoverage)}`);
+    console.log(`  expansion candidate recall ${percent(metrics.expansionCandidateFacetCoverage)}`);
+    console.log(`  seed contamination        ${percent(metrics.seedContamination)}`);
+    console.log(`  expanded contamination    ${percent(metrics.expandedContamination)}   (target <= 5%)`);
+    console.log(`  generation readiness      ${percent(metrics.readyToGenerate)}`);
+    console.log(`  expansion latency         ${metrics.averageExpansionMs.toFixed(2)} ms average`);
+    console.log(
+      `  context size              ${metrics.averageContextTokens.toFixed(0)} average · ${metrics.p95ContextTokens} P95 tokens`
+    );
+    console.log(
+      `  semantic latency          embedding ${metrics.averageQueryEmbeddingMs.toFixed(2)} ms · scan ${metrics.averageVectorScanMs.toFixed(3)} ms · top-K ${metrics.averageVectorTopKMs.toFixed(3)} ms`
+    );
+    const failures: string[] = [];
+    if (metrics.expandedFacetCoverage <= metrics.seedFacetCoverage) {
+      failures.push("expanded facet coverage must exceed the retrieval-only seed baseline");
+    }
+    if (metrics.expandedContamination > 0.05) {
+      failures.push(
+        `expanded contamination must remain at or below 5% (got ${percent(metrics.expandedContamination)})`
+      );
+    }
+    if (failures.length > 0) {
+      for (const failure of failures) console.error(`  FAIL ${failure}`);
+      process.exitCode = 1;
+    }
+    break;
+  }
+
   default:
-    console.error(`unknown command ${command} — expected build, validate, inspect, eval or clean`);
+    console.error(`unknown command ${command} — expected build, validate, inspect, eval, eval:explain or clean`);
     process.exit(2);
 }

@@ -44,6 +44,14 @@ export interface AuditContext {
   answer: string;
   locale: Locale;
 
+  /**
+   * The response is a deterministic arrangement of excerpts already present
+   * in `modelContext`, not model-authored prose. The audit still runs, but
+   * language detection must not reject an English source excerpt shown to a
+   * Portuguese reader.
+   */
+  sourceOnly?: boolean;
+
   modelContext: ModelContext;
 
   symbols: SymbolRepository;

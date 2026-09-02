@@ -37,6 +37,7 @@ export interface KnowledgeManifest {
     chunks: number;
     symbols: number;
     routes: number;
+    relations: number;
     /** Chunks that have a vector. Zero when the build ran without embeddings. */
     vectors: number;
   };

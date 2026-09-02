@@ -21,7 +21,11 @@ const ENOUGH_PROSE = 60;
 export const wrongLanguageValidator: AnswerValidator = {
   name: "wrong-language",
 
-  validate({ answer, locale }: AuditContext): AuditFinding[] {
+  validate({ answer, locale, sourceOnly }: AuditContext): AuditFinding[] {
+    // Source-only fallback deliberately preserves the language of the
+    // verified documentation excerpt. It is not a model language failure.
+    if (sourceOnly) return [];
+
     const prose = answer
       .replace(/```[\s\S]*?```/g, " ")
       .replace(/`[^`]*`/g, " ")

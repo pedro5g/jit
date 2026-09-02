@@ -1,3 +1,4 @@
+import type { KnowledgeRelation } from "../entities/knowledge-relation";
 import type { KnowledgeManifest } from "../entities/manifest";
 import type { KnowledgeSource } from "../repositories";
 
@@ -12,6 +13,7 @@ import type { KnowledgeSource } from "../repositories";
 export interface ArtifactLoaderPort {
   loadManifest(): Promise<KnowledgeManifest>;
   loadSource(manifest: KnowledgeManifest): Promise<KnowledgeSource>;
+  loadRelations(manifest: KnowledgeManifest): Promise<KnowledgeRelation[]>;
   /** The packed Float32 vectors, or null when the build shipped without them. */
   loadVectors(manifest: KnowledgeManifest): Promise<Float32Array | null>;
 }

@@ -161,6 +161,7 @@ describe("running the case set", () => {
         chunks: result.chunks,
         symbols: result.symbols,
         routes: result.routes,
+        relations: result.relations,
         lexical: result.lexical,
       })
     );
@@ -245,6 +246,10 @@ describe("the report", () => {
           showedCode: false,
           citesSource: false,
           namesExpectedSymbol: null,
+          explanationCompleteness: null,
+          facetCoverage: null,
+          specificity: 1,
+          redundancy: 0,
           attribution: {
             knowledgeIds: [],
             chunkIds: [],

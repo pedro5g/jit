@@ -1,77 +1,129 @@
-/**
- * Which entries belong next to which.
- *
- * Two sources, and neither of them is a hand-weighted graph — that is the
- * thing being removed. §111: if it can be extracted, extract it.
- *
- *   `related:` frontmatter — a page-to-page link an author declared. The
- *   boundary guide belonging next to the DTO reference is a judgement no
- *   extractor makes, and it is cheap for an author to state.
- *
- *   shared symbols — two passages documenting `JIT.validate.safeParse` are
- *   related whether or not anyone said so, and this is where almost all of the
- *   real edges come from.
- *
- * The result is used for one thing only: giving the context builder somewhere
- * to go when retrieval returns a single strong hit and nothing else. It is not
- * a ranking signal, because a relationship says two things are adjacent, not
- * that either answers the question.
- */
 import type { KnowledgeEntry } from "../../../lib/copilot/core/entities/knowledge-entry";
+import type {
+  KnowledgeRelation,
+  KnowledgeRelationKind,
+  KnowledgeRelationSource,
+} from "../../../lib/copilot/core/entities/knowledge-relation";
 import type { KnowledgeId } from "../../../lib/copilot/core/value-objects/ids";
 
-/** How many related entries any one entry keeps. Beyond this it is a list, not a link. */
-const MAX_RELATED = 6;
+const MAX_PER_KIND = 6;
 
 export interface RelationInput {
   entries: KnowledgeEntry[];
-  /** Site path -> the entries on that page, for resolving `related:` targets. */
   entriesByPath: Map<string, KnowledgeEntry[]>;
-  /** Declared page links, by entry id. */
   declared: Map<KnowledgeId, string[]>;
+  references: Map<KnowledgeId, string[]>;
 }
 
-export function linkRelationships({ entries, entriesByPath, declared }: RelationInput): void {
+/** Builds deterministic, bounded neighbourhoods and updates legacy `related`. */
+export function linkRelationships(input: RelationInput): KnowledgeRelation[] {
+  const { entries, entriesByPath, declared, references } = input;
+  const relations = new Map<string, KnowledgeRelation>();
+  const byRoute = new Map<string, KnowledgeEntry[]>();
   const bySymbol = new Map<string, KnowledgeEntry[]>();
+  const byFacet = new Map<string, KnowledgeEntry[]>();
+  const pathByEntry = new Map<KnowledgeId, string>();
+
+  const add = (
+    from: KnowledgeEntry,
+    to: KnowledgeEntry,
+    kind: KnowledgeRelationKind,
+    source: KnowledgeRelationSource
+  ) => {
+    if (from.id === to.id) return;
+    const key = `${from.id}\0${kind}\0${to.id}`;
+    if (!relations.has(key)) relations.set(key, { from: from.id, to: to.id, kind, source });
+  };
+
+  for (const [path, pathEntries] of entriesByPath) {
+    for (const entry of pathEntries) pathByEntry.set(entry.id, path);
+  }
+
   for (const entry of entries) {
+    const route = byRoute.get(entry.routeId) ?? [];
+    route.push(entry);
+    byRoute.set(entry.routeId, route);
     for (const symbol of entry.symbols) {
       const list = bySymbol.get(symbol) ?? [];
       list.push(entry);
       bySymbol.set(symbol, list);
     }
+    // A heading or page label is navigation metadata, not a shared concept.
+    // "Performance" appears on many unrelated reference pages, and linking
+    // all of those pages turns a useful neighbourhood into a contamination
+    // fan-out. Only explicit compiler-derived concept labels create
+    // same-concept edges; heading/page facets still remain available to the
+    // coverage planner on the entry itself.
+    for (const facet of entry.facets.filter((item) => item.source === "concept")) {
+      const list = byFacet.get(facet.id) ?? [];
+      list.push(entry);
+      byFacet.set(facet.id, list);
+    }
   }
+
+  for (const routeEntries of byRoute.values()) {
+    for (let index = 0; index < routeEntries.length; index += 1) {
+      const entry = routeEntries[index];
+      const parentTrail = entry.breadcrumb.split(" › ").slice(0, -1).join(" › ");
+      const parent = routeEntries
+        .slice(0, index)
+        .reverse()
+        .find((candidate) => candidate.breadcrumb === parentTrail);
+
+      if (parent) {
+        add(entry, parent, "parent", "heading-hierarchy");
+        add(parent, entry, "child", "heading-hierarchy");
+      }
+
+      const previous = routeEntries[index - 1];
+      const next = routeEntries[index + 1];
+      if (previous) add(entry, previous, "same-route", "route-hierarchy");
+      if (next) add(entry, next, "same-route", "route-hierarchy");
+    }
+  }
+
+  const resolveTarget = (entry: KnowledgeEntry, target: string): KnowledgeEntry[] => {
+    const [rawPath, anchor] = target.split("#");
+    const path = rawPath || pathByEntry.get(entry.id);
+    const candidates = path ? (entriesByPath.get(path) ?? []) : [];
+    return anchor ? candidates.filter((candidate) => candidate.anchor === anchor) : candidates.slice(0, 1);
+  };
 
   for (const entry of entries) {
-    const scored = new Map<KnowledgeId, number>();
-
-    // A declared page link outranks anything derived: the author was making a
-    // statement, and there are only a few dozen of them site-wide.
-    for (const path of declared.get(entry.id) ?? []) {
-      for (const target of entriesByPath.get(path) ?? []) {
-        if (target.id !== entry.id) scored.set(target.id, 100 + (target.anchor ? 0 : 1));
-      }
+    for (const target of declared.get(entry.id) ?? []) {
+      for (const resolved of resolveTarget(entry, target)) add(entry, resolved, "related", "frontmatter");
     }
-
-    /**
-     * A symbol shared by half the site says nothing.
-     *
-     * `JIT.object` appears in ninety passages; two of them sharing it is not
-     * evidence they belong together. The weight is the inverse of how common
-     * the symbol is, which is idf by another name and for the same reason.
-     */
-    for (const symbol of entry.symbols) {
-      const sharing = bySymbol.get(symbol) ?? [];
-      if (sharing.length > 20) continue;
-
-      for (const target of sharing) {
-        if (target.id === entry.id) continue;
-        scored.set(target.id, (scored.get(target.id) ?? 0) + 1 / sharing.length);
-      }
+    for (const target of references.get(entry.id) ?? []) {
+      for (const resolved of resolveTarget(entry, target)) add(entry, resolved, "reference", "mdx-link");
     }
-
-    entry.related = [...scored.entries()]
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-      .slice(0, MAX_RELATED)
-      .map(([id]) => id);
   }
+
+  for (const sharing of bySymbol.values()) {
+    if (sharing.length > 20) continue;
+    for (const entry of sharing) {
+      for (const target of sharing.slice(0, MAX_PER_KIND)) add(entry, target, "same-symbol", "shared-symbol");
+    }
+  }
+
+  for (const sharing of byFacet.values()) {
+    if (sharing.length < 2 || sharing.length > 12) continue;
+    for (const entry of sharing) {
+      for (const target of sharing.slice(0, MAX_PER_KIND)) add(entry, target, "same-concept", "derived-concept");
+    }
+  }
+
+  const result = [...relations.values()].sort(
+    (left, right) =>
+      left.from.localeCompare(right.from) || left.kind.localeCompare(right.kind) || left.to.localeCompare(right.to)
+  );
+
+  const outgoing = new Map<KnowledgeId, KnowledgeId[]>();
+  for (const relation of result) {
+    const list = outgoing.get(relation.from) ?? [];
+    if (!list.includes(relation.to) && list.length < MAX_PER_KIND) list.push(relation.to);
+    outgoing.set(relation.from, list);
+  }
+  for (const entry of entries) entry.related = outgoing.get(entry.id) ?? [];
+
+  return result;
 }

@@ -98,7 +98,7 @@ export class HybridRetriever {
 
     // ---------------------------------------------------------- symbols
     const symbolStart = performance.now();
-    const { exact, candidates: symbolCandidates } = this.retrieveSymbols(question);
+    const { exact, explicit, candidates: symbolCandidates } = this.retrieveSymbols(question);
     bySignal["exact-symbol"] = symbolCandidates.filter((candidate) => candidate.signal === "exact-symbol");
     bySignal["prefix-symbol"] = symbolCandidates.filter((candidate) => candidate.signal === "prefix-symbol");
     timings.symbolMs = performance.now() - symbolStart;
@@ -135,7 +135,13 @@ export class HybridRetriever {
     bySignal["current-context"] = this.retrieveCurrentContext(options.context);
 
     // ------------------------------------------------------------ fuse
-    const mode = options.mode ?? detectMode({ question, exactSymbols: exact.length });
+    const mode =
+      options.mode ??
+      detectMode({
+        question,
+        exactSymbols: exact.length,
+        explicitSymbols: explicit.length,
+      });
 
     const fusionStart = performance.now();
     const results = this.fuse(bySignal, options, specificity, weightsFor(mode));
@@ -145,6 +151,7 @@ export class HybridRetriever {
       normalizedQuery: tokenize(question).join(" "),
       mode,
       exactSymbols: exact,
+      explicitSymbols: explicit,
       coverage: {
         covered:
           exact.length > 0 ||
@@ -156,7 +163,10 @@ export class HybridRetriever {
       bySignal,
       results,
       semantic: describeSemantic(bySignal.semantic),
-      timings,
+      timings: {
+        ...timings,
+        ...(this.deps.vectors.lastMetrics ? { vector: this.deps.vectors.lastMetrics } : {}),
+      },
     };
   }
 
@@ -174,6 +184,7 @@ export class HybridRetriever {
    */
   private retrieveSymbols(question: string): {
     exact: ApiSymbol[];
+    explicit: ApiSymbol[];
     candidates: RetrievalCandidate[];
   } {
     const { stated, implied } = extractSymbolMentions(question);
@@ -254,7 +265,7 @@ export class HybridRetriever {
       }
     }
 
-    return { exact: [...exact, ...weak], candidates };
+    return { exact: [...exact, ...weak], explicit: exact, candidates };
   }
 
   /**

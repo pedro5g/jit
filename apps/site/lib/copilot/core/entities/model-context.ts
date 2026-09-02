@@ -1,6 +1,8 @@
 import type { ChunkId, KnowledgeId, RouteId } from "../value-objects/ids";
 import type { Locale } from "../value-objects/locale";
 import type { ApiSymbol } from "./api-symbol";
+import type { AnswerMode, CoveragePlan, QuestionScope } from "./coverage";
+import type { KnowledgeFacet } from "./knowledge-entry";
 
 /**
  * The context as data, before anything turns it into a prompt.
@@ -47,6 +49,9 @@ export interface ContextEvidence {
   /** The passage quotes APIs the library no longer has. */
   showsRemovedApis: boolean;
   tokens: number;
+  facets: KnowledgeFacet[];
+  /** Generic explanatory section selected by coverage planning. */
+  section: string;
 }
 
 /** A name the question asked about, stated as truth rather than retrieved. */
@@ -97,6 +102,8 @@ export interface ContextBudget {
 export interface ModelContext {
   question: string;
   locale: Locale;
+  scope: QuestionScope;
+  answerMode: AnswerMode;
 
   evidence: ContextEvidence[];
   symbols: ContextSymbol[];
@@ -107,6 +114,8 @@ export interface ModelContext {
   current?: { routeId: RouteId; title: string; anchor?: string; selectedText?: string };
 
   budget: ContextBudget;
+
+  coverage: Pick<CoveragePlan, "coverageScore" | "selectedFacetIds" | "readiness">;
 
   /**
    * Retrieval returned nothing at all.

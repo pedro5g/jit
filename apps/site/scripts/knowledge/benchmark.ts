@@ -43,6 +43,7 @@ import {
   toJsonl,
 } from "../../lib/copilot/eval/artifacts";
 import { type MeasuredCase, measureGeneration } from "../../lib/copilot/eval/detectors";
+import { explanationCases, resolveExplanationFacets } from "../../lib/copilot/eval/explanation-cases";
 import { generationCases } from "../../lib/copilot/eval/generation-cases";
 import {
   fatalFlags,
@@ -165,7 +166,11 @@ async function main() {
     },
   ].filter((config) => !only || config.name === only);
 
-  const cases = generationCases().slice(0, limit);
+  const cases = (
+    process.argv.includes("--explain")
+      ? resolveExplanationFacets(explanationCases(), engine.knowledge, engine.graph)
+      : generationCases()
+  ).slice(0, limit);
   const results = new Map<string, MeasuredCase[]>();
   const manifests = new Map<string, RunManifest>();
   const records: Record<string, { cases: CaseRecord[]; contexts: ContextRecord[]; responses: ResponseRecord[] }> = {};

@@ -69,6 +69,7 @@ export type FailureKind =
   | "generation-degeneration"
   | "invalid-example"
   | "substantially-ungrounded"
+  | "missing-source-citation"
   | "fully-grounded";
 
 /**

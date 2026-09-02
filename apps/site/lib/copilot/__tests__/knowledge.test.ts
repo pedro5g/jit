@@ -104,6 +104,7 @@ describe("retrieval, without a model", () => {
         chunks: result.chunks,
         symbols: result.symbols,
         routes: result.routes,
+        relations: result.relations,
         lexical: result.lexical,
       })
     );

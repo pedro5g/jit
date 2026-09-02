@@ -19,6 +19,7 @@ import { ARTIFACTS } from "../../lib/copilot/config/artifacts";
 import type { ApiSymbol } from "../../lib/copilot/core/entities/api-symbol";
 import type { DocumentChunk } from "../../lib/copilot/core/entities/document-chunk";
 import type { KnowledgeEntry } from "../../lib/copilot/core/entities/knowledge-entry";
+import type { KnowledgeRelation } from "../../lib/copilot/core/entities/knowledge-relation";
 import type { KnowledgeManifest } from "../../lib/copilot/core/entities/manifest";
 import type { RouteEntry } from "../../lib/copilot/core/entities/route-entry";
 import type { LexicalIndex } from "./indexes/lexical";
@@ -30,6 +31,7 @@ export interface WriteInput {
   chunks: DocumentChunk[];
   symbols: ApiSymbol[];
   routes: RouteEntry[];
+  relations: KnowledgeRelation[];
   lexical: LexicalIndex;
   /** One per chunk, in chunk order, or null when the build skipped embeddings. */
   vectors: Float32Array[] | null;
@@ -74,6 +76,24 @@ export function stripContent(entries: readonly KnowledgeEntry[]): WireKnowledgeE
   return entries.map(({ content: _content, ...rest }) => rest);
 }
 
+/** Compact JSON wins here: ids compress well and a binary codec would add no measured value. */
+export type WireKnowledgeEdge = readonly [
+  KnowledgeRelation["to"],
+  KnowledgeRelation["kind"],
+  KnowledgeRelation["source"],
+];
+export type WireKnowledgeNode = readonly [KnowledgeRelation["from"], WireKnowledgeEdge[]];
+
+export function packRelations(relations: readonly KnowledgeRelation[]): WireKnowledgeNode[] {
+  const nodes = new Map<KnowledgeRelation["from"], WireKnowledgeEdge[]>();
+  for (const relation of relations) {
+    const edges = nodes.get(relation.from) ?? [];
+    edges.push([relation.to, relation.kind, relation.source]);
+    nodes.set(relation.from, edges);
+  }
+  return [...nodes];
+}
+
 async function writeJson(file: string, value: unknown): Promise<number> {
   const text = JSON.stringify(value);
   await fs.writeFile(file, text);
@@ -90,6 +110,7 @@ export async function writeArtifacts(input: WriteInput): Promise<Record<string, 
   bytes[ARTIFACTS.chunks] = await writeJson(at("chunks"), input.chunks);
   bytes[ARTIFACTS.symbols] = await writeJson(at("symbols"), input.symbols);
   bytes[ARTIFACTS.routes] = await writeJson(at("routes"), input.routes);
+  bytes[ARTIFACTS.relations] = await writeJson(at("relations"), packRelations(input.relations));
   bytes[ARTIFACTS.lexical] = await writeJson(at("lexical"), input.lexical);
 
   if (input.vectors) {

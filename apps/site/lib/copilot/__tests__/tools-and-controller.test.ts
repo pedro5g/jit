@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { build } from "../../../scripts/knowledge/build";
 import { AuditService, StrictAuditPolicy } from "../application/audit/audit.service";
@@ -12,7 +14,7 @@ import { executableBlocks, prepareSnippet } from "../infrastructure/examples/sni
 import type { KnowledgeEngine } from "../infrastructure/knowledge-engine";
 import { createKnowledgeEngine } from "../infrastructure/knowledge-engine";
 import { MemoryArtifactLoader } from "../infrastructure/storage/memory-artifact-loader";
-import { CopilotController, lightTierCanGenerate } from "../presentation/controllers/copilot.controller";
+import { asksForSchema, CopilotController } from "../presentation/controllers/copilot.controller";
 
 class ScriptedModel implements LanguageModelPort {
   readonly id = "scripted";
@@ -52,6 +54,7 @@ beforeAll(async () => {
     chunks: result.chunks,
     symbols: result.symbols,
     routes: result.routes,
+    relations: result.relations,
     lexical: result.lexical,
   });
   engine = await createKnowledgeEngine(loader);
@@ -153,8 +156,32 @@ describe("answer example execution", () => {
     const answer = await service.ask({ question: "how do I validate a uuid?" }, model, null);
 
     expect(answer.rejected).toBe(true);
-    expect(answer.text).toContain("could not verify");
+    expect(answer.text).toContain("documentation grounds the answer");
     expect(answer.audit.findings.some((finding) => finding.kind === "invalid-example")).toBe(true);
+  });
+
+  it("does not stream unaudited model text", async () => {
+    const service = new CopilotService({
+      engine,
+      context: new ContextService({
+        knowledge: engine.knowledge,
+        routes: engine.routes,
+        symbols: engine.symbols,
+      }),
+      audit: new AuditService(),
+      policy: new StrictAuditPolicy(false),
+    });
+    const model = new ScriptedModel(["The library was created by A Fictional Founder in 2020."]);
+    const deltas: string[] = [];
+
+    const answer = await service.ask(
+      { question: "why is jit fast?", locale: "en", onDelta: (delta) => deltas.push(delta) },
+      model,
+      null
+    );
+
+    expect(deltas).toEqual([answer.text]);
+    expect(deltas.join()).not.toContain("Fictional Founder");
   });
 });
 
@@ -250,16 +277,18 @@ describe("bounded tool loop", () => {
 });
 
 describe("browser controller", () => {
-  it("keeps the light tier on exact lookup and out of conceptual synthesis", async () => {
-    const exact = await engine.retriever.retrieve("What does JIT.validate.safeParse do?", {
-      context: { locale: "en" },
-    });
-    const conceptual = await engine.retriever.retrieve("por que o código gerado é rápido?", {
-      context: { locale: "pt-BR" },
-    });
+  it("routes schema construction intent without stealing conceptual schema questions", () => {
+    expect(asksForSchema("create a schema for a user")).toBe(true);
+    expect(asksForSchema("Explain what this schema compiles to")).toBe(false);
+    expect(asksForSchema("what happens from a schema to a compiled operation?")).toBe(false);
+  });
 
-    expect(lightTierCanGenerate("What does JIT.validate.safeParse do?", exact)).toBe(true);
-    expect(lightTierCanGenerate("por que o código gerado é rápido?", conceptual)).toBe(false);
+  it("does not impose a model-tier policy on conceptual synthesis", async () => {
+    const source = readFileSync(
+      path.resolve(import.meta.dirname, "../presentation/controllers/copilot.controller.ts"),
+      "utf8"
+    );
+    expect(source).not.toMatch(/current\.tier\s*===\s*["']light["']/);
   });
 
   it("keeps retrieval useful without a loaded model", async () => {

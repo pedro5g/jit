@@ -32,6 +32,7 @@ import { fabricatedHistoryValidator } from "./validators/fabricated-history.vali
 import { foreignDomainValidator } from "./validators/foreign-domain.validator";
 import { groundingValidator, groundingVerdict } from "./validators/grounding.validator";
 import { inventedSymbolValidator } from "./validators/invented-symbol.validator";
+import { sourceCitationValidator } from "./validators/source-citation.validator";
 import { unsupportedClaimValidator } from "./validators/unsupported-claim.validator";
 import { unsupportedNumberValidator } from "./validators/unsupported-number.validator";
 import { wrongLanguageValidator } from "./validators/wrong-language.validator";
@@ -53,6 +54,7 @@ export const DEFAULT_VALIDATORS: AnswerValidator[] = [
   wrongLanguageValidator,
   unsupportedNumberValidator,
   unsupportedClaimValidator,
+  sourceCitationValidator,
   groundingValidator,
 ];
 
@@ -60,6 +62,7 @@ export interface AuditInput {
   question: string;
   answer: string;
   locale: Locale;
+  sourceOnly?: boolean;
   modelContext: ModelContext;
   symbols: SymbolRepository;
   knowledge: KnowledgeRepository;
@@ -85,6 +88,7 @@ export class AuditService {
       question: input.question,
       answer: input.answer,
       locale: input.locale,
+      ...(input.sourceOnly ? { sourceOnly: true } : {}),
       modelContext: input.modelContext,
       symbols: input.symbols,
       knowledge: input.knowledge,

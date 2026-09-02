@@ -8,8 +8,9 @@ import { type BrowserBlock, readBrowserEnvironment, usedHeapMb } from "@/lib/cop
 import { runBrowserBenchmark } from "@/lib/copilot/eval/browser-run";
 import { bundleFileName, packBundle } from "@/lib/copilot/eval/bundle";
 import { measureGeneration } from "@/lib/copilot/eval/detectors";
-import { generationCases } from "@/lib/copilot/eval/generation-cases";
+import { explanationCases, resolveExplanationFacets } from "@/lib/copilot/eval/explanation-cases";
 import { BROWSER_NOTE, renderReport } from "@/lib/copilot/eval/report";
+import { BrowserEmbedder } from "@/lib/copilot/infrastructure/embeddings/browser-embedder";
 import { createKnowledgeEngine, type KnowledgeEngine } from "@/lib/copilot/infrastructure/knowledge-engine";
 import { TransformersLanguageModel } from "@/lib/copilot/infrastructure/models/transformers-language-model";
 import { CopilotWorkerHost } from "@/lib/copilot/infrastructure/models/worker-host";
@@ -19,7 +20,7 @@ import { FetchArtifactLoader } from "@/lib/copilot/infrastructure/storage/fetch-
  * The browser half of the benchmark — §PART 26.
  *
  * Deliberately not linked from anywhere. This page is a measuring instrument,
- * not a feature: it downloads a model, answers thirty questions with it and
+ * not a feature: it downloads a model, answers forty questions with it and
  * hands back a file. Everything that decides a number comes from the same
  * modules the headless run and the product use, so what is left here is the
  * three things a page genuinely owns — consent to a download, progress while
@@ -42,7 +43,7 @@ interface Row {
 
 type Phase = "idle" | "loading" | "downloading" | "running" | "done" | "error";
 
-const CASES = generationCases();
+const CASES = explanationCases();
 
 function formatMb(bytes: number) {
   return `${Math.round(bytes / (1024 * 1024))} MB`;
@@ -86,6 +87,7 @@ export function CopilotBenchmarkRunner() {
       // different knowledge build is not a comparison, and the manifest hash
       // recorded below is what proves which one it was.
       const engine = (engineRef.current ??= await createKnowledgeEngine(new FetchArtifactLoader()));
+      const measuredCases = resolveExplanationFacets(cases, engine.knowledge, engine.graph);
       const contextService = new ContextService({
         knowledge: engine.knowledge,
         routes: engine.routes,
@@ -93,6 +95,10 @@ export function CopilotBenchmarkRunner() {
       });
 
       const host = (hostRef.current ??= new CopilotWorkerHost());
+
+      const embedder = new BrowserEmbedder(host);
+      setNote("downloading the multilingual retrieval model");
+      await embedder.preload(setBytes);
 
       setPhase("downloading");
       setNote(`downloading ${spec.label} — about ${formatMb(spec.approximateBytes)}, cached after the first run`);
@@ -102,15 +108,16 @@ export function CopilotBenchmarkRunner() {
       let peak = environment.peakMemoryMb ?? 0;
 
       setPhase("running");
-      setNote(`${cases.length} cases · ${spec.label} · WebGPU`);
+      setNote(`${measuredCases.length} explanation cases · ${spec.label} · WebGPU`);
 
       const result = await runBrowserBenchmark({
         engine,
         contextService,
         model: new TransformersLanguageModel(host, spec),
+        embedder,
         spec,
         browser: environment,
-        cases,
+        cases: measuredCases,
         signal: controller.signal,
         onProgress: (progress) => {
           const heap = usedHeapMb();

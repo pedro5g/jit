@@ -166,10 +166,10 @@ const FIGURE = /\b\d+(?:[.,]\d+)?\s?(?:ns|µs|us|ms|s|x|%|KB|MB|GB|GiB|MiB)\b/gi
 
 /** A sentence stating how the library works or what it supports. */
 const TECHNICAL =
-  /\b(compil|gener|valid|allocat|cache|parse|runtime|memory|thread|interpret|serial|infer|emit|optimi[sz])/i;
+  /\b(compil|gener|valid|allocat|aloc|cache|parse|runtime|memori|thread|interpret|serial|infer|emit|optimi[sz]|otimiz|execut|propriet|propried|chamad|caminh|lat[êe]nc|redund|shape|hot[- ]path|constru|process|busc|acess|funcion|desempenh)/i;
 
 const BEHAVIOUR =
-  /\b(supports?|does not support|requires?|stores?|uses?|works with|integrates?|suporta|requer|armazena|utiliza)\b/i;
+  /\b(supports?|does not support|requires?|stores?|uses?|works with|integrates?|runs?|reads?|creates?|avoids?|keeps?|preserves?|suporta|requer|armazena|utiliza|execut|l[eê]|cri|evit|mant[ée]m|preserva|constru|process|busc|acess)\b/i;
 
 export interface ClaimAnalysis {
   claims: GroundingClaim[];
@@ -189,7 +189,7 @@ export interface ClaimInput {
 }
 
 /** Below this share of shared content words, a sentence is not a paraphrase. */
-const PARAPHRASE = 0.25;
+const PARAPHRASE = 0.45;
 
 export function analyseClaims(input: ClaimInput): ClaimAnalysis {
   const evidenceWords = new Map<KnowledgeId, Set<string>>();

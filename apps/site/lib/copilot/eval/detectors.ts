@@ -17,9 +17,12 @@
  * language — is checkable against the index and the context.
  */
 import { AuditService, ShadowAuditPolicy, StrictAuditPolicy } from "../application/audit/audit.service";
+import { overlap } from "../application/context/stages";
+import { queryConcepts, tokenize } from "../application/retrieval/tokenizer";
 import type { AuditResult } from "../core/entities/audit";
 import type { FailureKind, FailureOrigin } from "../core/entities/claim";
 import type { ModelContext } from "../core/entities/model-context";
+import type { RetrievalReport } from "../core/entities/retrieval";
 import type { KnowledgeRepository, SymbolRepository } from "../core/repositories";
 import type { EvalCase } from "./types";
 
@@ -44,6 +47,10 @@ export interface AnswerMeasurement {
    * says the right name appeared, not that what was said about it is true.
    */
   namesExpectedSymbol: boolean | null;
+  explanationCompleteness: number | null;
+  facetCoverage: number | null;
+  specificity: number;
+  redundancy: number;
 
   /**
    * What the answer was shown, kept beside what it said — §PART 10.
@@ -73,6 +80,7 @@ export interface MeasureInput {
   corpusKnows: (term: string) => boolean;
   topScore?: number;
   agreement?: number;
+  sourceOnly?: boolean;
 }
 
 export function measureAnswer(input: MeasureInput): AnswerMeasurement {
@@ -80,6 +88,7 @@ export function measureAnswer(input: MeasureInput): AnswerMeasurement {
     question: input.case.question,
     answer: input.answer,
     locale: input.case.locale,
+    ...(input.sourceOnly ? { sourceOnly: true } : {}),
     modelContext: input.context,
     symbols: input.symbols,
     knowledge: input.knowledge,
@@ -97,6 +106,18 @@ export function measureAnswer(input: MeasureInput): AnswerMeasurement {
     .filter((routeId) => !allowed.has(routeId));
 
   const expectedSymbols = input.case.expected.symbols ?? [];
+  const expectedFacets = input.case.expected.facets ?? [];
+  const facetsById = new Map(
+    input.context.evidence.flatMap((evidence) => evidence.facets.map((facet) => [facet.id, facet]))
+  );
+  const answerConcepts = queryConcepts(input.answer);
+  const coveredFacets = expectedFacets.filter((id) => {
+    const facet = facetsById.get(id);
+    if (!facet) return false;
+    const label = new Set(tokenize(facet.label));
+    return answerConcepts.some((concept) => concept.variants.some((variant) => label.has(variant)));
+  });
+  const facetCoverage = expectedFacets.length === 0 ? null : coveredFacets.length / expectedFacets.length;
 
   return {
     answered: input.answer.trim().length > 0,
@@ -112,6 +133,10 @@ export function measureAnswer(input: MeasureInput): AnswerMeasurement {
             const symbol = input.symbols.findById(id);
             return symbol ? input.answer.includes(symbol.name) : false;
           }),
+    explanationCompleteness: facetCoverage === null ? null : facetCoverage * 0.65 + audit.grounding.coverage * 0.35,
+    facetCoverage,
+    specificity: answerSpecificity(input.answer),
+    redundancy: answerRedundancy(input.answer),
     attribution: {
       knowledgeIds: input.context.evidence.map((evidence) => evidence.knowledgeId),
       chunkIds: input.context.evidence.map((evidence) => evidence.chunkId),
@@ -127,6 +152,9 @@ export function measureAnswer(input: MeasureInput): AnswerMeasurement {
 export interface MeasuredCase {
   case: EvalCase;
   measurement: AnswerMeasurement;
+  /** Shadow measurement of the model output before deterministic delivery. */
+  rawMeasurement?: AnswerMeasurement;
+  delivery?: "model" | "salvage" | "grounded-synthesis";
   latencyMs: number;
   tokensPerSecond: number;
   /**
@@ -137,6 +165,7 @@ export interface MeasuredCase {
    * a zero would print as the better of the two.
    */
   ttftMs?: number;
+  retrievalTimings?: RetrievalReport["timings"];
 }
 
 /**
@@ -196,12 +225,23 @@ export interface GenerationMetrics {
 
   averageClaims: number;
   averageCharacters: number;
+  explanationCompleteness: number;
+  facetCoverage: number;
+  specificity: number;
+  redundancy: number;
   medianLatencyMs: number;
   /** Null when the runtime could not observe it — never 0. */
   medianTtftMs: number | null;
   tokensPerSecond: number;
+  queryEmbeddingMs: number;
+  vectorScanMs: number;
+  vectorTopKMs: number;
 
   byOrigin: Record<string, number>;
+  /** Model outputs rejected before the safe delivery path was applied. */
+  rawWouldReject: number;
+  salvageUsed: number;
+  groundedSynthesisUsed: number;
 }
 
 const has = (result: AuditResult, kind: FailureKind) => result.findings.some((finding) => finding.kind === kind);
@@ -224,6 +264,7 @@ export function measureGeneration(cases: readonly MeasuredCase[]): GenerationMet
     .map((entry) => entry.ttftMs)
     .filter((value): value is number => typeof value === "number" && value > 0)
     .sort((left, right) => left - right);
+  const explanations = cases.filter((entry) => entry.measurement.explanationCompleteness !== null);
 
   const byOrigin: Record<string, number> = {};
   for (const entry of cases) {
@@ -275,12 +316,51 @@ export function measureGeneration(cases: readonly MeasuredCase[]): GenerationMet
         ? 1
         : withSymbol.filter((entry) => entry.measurement.namesExpectedSymbol).length / withSymbol.length,
     wouldReject: share((entry) => new StrictAuditPolicy().shouldReject(entry.measurement.audit)),
+    rawWouldReject: share((entry) =>
+      entry.rawMeasurement ? new StrictAuditPolicy().shouldReject(entry.rawMeasurement.audit) : false
+    ),
+    salvageUsed: share((entry) => entry.delivery === "salvage"),
+    groundedSynthesisUsed: share((entry) => entry.delivery === "grounded-synthesis"),
 
     averageClaims: cases.reduce((sum, entry) => sum + entry.measurement.audit.grounding.claims, 0) / total,
     averageCharacters: Math.round(cases.reduce((sum, entry) => sum + entry.measurement.characters, 0) / total),
+    explanationCompleteness:
+      explanations.length === 0
+        ? 1
+        : explanations.reduce((sum, entry) => sum + (entry.measurement.explanationCompleteness ?? 0), 0) /
+          explanations.length,
+    facetCoverage:
+      explanations.length === 0
+        ? 1
+        : explanations.reduce((sum, entry) => sum + (entry.measurement.facetCoverage ?? 0), 0) / explanations.length,
+    specificity: cases.reduce((sum, entry) => sum + entry.measurement.specificity, 0) / total,
+    redundancy: cases.reduce((sum, entry) => sum + entry.measurement.redundancy, 0) / total,
     medianLatencyMs: Math.round(latencies[Math.floor(latencies.length / 2)] ?? 0),
     medianTtftMs: ttfts.length === 0 ? null : Math.round(ttfts[Math.floor(ttfts.length / 2)] ?? 0),
     tokensPerSecond: Math.round((cases.reduce((sum, entry) => sum + entry.tokensPerSecond, 0) / total) * 10) / 10,
+    queryEmbeddingMs: cases.reduce((sum, entry) => sum + (entry.retrievalTimings?.queryEmbeddingMs ?? 0), 0) / total,
+    vectorScanMs: cases.reduce((sum, entry) => sum + (entry.retrievalTimings?.vector?.vectorScanMs ?? 0), 0) / total,
+    vectorTopKMs: cases.reduce((sum, entry) => sum + (entry.retrievalTimings?.vector?.topKSelectionMs ?? 0), 0) / total,
     byOrigin,
   };
+}
+
+function answerSpecificity(answer: string): number {
+  const tokens = tokenize(answer);
+  return tokens.length === 0 ? 0 : new Set(tokens).size / tokens.length;
+}
+
+function answerRedundancy(answer: string): number {
+  const sentences = answer
+    .replace(/```[\s\S]*?```/g, " ")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => new Set(tokenize(sentence)))
+    .filter((tokens) => tokens.size > 2);
+  let highest = 0;
+  for (let left = 0; left < sentences.length; left += 1) {
+    for (let right = left + 1; right < sentences.length; right += 1) {
+      highest = Math.max(highest, overlap(sentences[left], sentences[right]));
+    }
+  }
+  return highest;
 }

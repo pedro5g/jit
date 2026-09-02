@@ -52,6 +52,7 @@ work and for production performance. Each page explains:
 - [Benchmarks, memory, and load testing](./benchmarks-memory-load.md)
 - [Executable runtime and AOT examples](./examples.md)
 - [MCP server for coding agents](./mcp-server.md)
+- [Documentation copilot coverage planning](./copilot-coverage.md)
 
 ## Find A Feature By Goal
 

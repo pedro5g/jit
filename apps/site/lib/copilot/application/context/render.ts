@@ -14,6 +14,7 @@
  */
 import {
   ACTION_RULES,
+  ANSWER_MODE_RULES,
   ANSWER_RULES,
   NO_EVIDENCE_RULES,
   SECTION_LABELS,
@@ -58,7 +59,10 @@ export function renderMessages(context: ModelContext, options: RenderOptions): G
 function renderSystem(context: ModelContext, options: RenderOptions): string {
   if (context.empty) return [NO_EVIDENCE_RULES, renderEvidence(context)].filter(Boolean).join("\n\n");
 
-  const blocks = [ANSWER_RULES, SITE_FACTS];
+  const interactive = isInteractiveMode(context.answerMode);
+  const blocks = [ANSWER_RULES, ANSWER_MODE_RULES[context.answerMode]];
+
+  if (interactive) blocks.push(SITE_FACTS);
 
   if (context.corrections.length > 0) {
     blocks.push(
@@ -77,8 +81,10 @@ function renderSystem(context: ModelContext, options: RenderOptions): string {
   }
 
   blocks.push(renderEvidence(context));
-  blocks.push(TOOL_RULES);
-  blocks.push(ACTION_RULES);
+  if (interactive) {
+    blocks.push(TOOL_RULES);
+    blocks.push(ACTION_RULES);
+  }
 
   return blocks.filter(Boolean).join("\n\n");
 }
@@ -104,8 +110,22 @@ function renderSymbols(context: ModelContext): string {
 function renderEvidence(context: ModelContext): string {
   if (context.evidence.length === 0) return "";
 
-  const rendered = context.evidence.map((evidence) => `${evidenceHeader(evidence)}\n${evidence.content}`);
-  return `${SECTION_LABELS.documentation}\n\n${rendered.join("\n\n")}`;
+  if (context.scope !== "broad") {
+    const rendered = context.evidence.map((evidence) => `${evidenceHeader(evidence)}\n${evidence.content}`);
+    return `${SECTION_LABELS.documentation}\n\n${rendered.join("\n\n")}`;
+  }
+
+  const sections = new Map<string, ModelContext["evidence"]>();
+  for (const evidence of context.evidence) {
+    const list = sections.get(evidence.section) ?? [];
+    list.push(evidence);
+    sections.set(evidence.section, list);
+  }
+  const rendered = [...sections].map(
+    ([section, evidence]) =>
+      `ASPECT — ${section.toUpperCase()}\n${evidence.map((item) => `${evidenceHeader(item)}\n${item.content}`).join("\n\n")}`
+  );
+  return `${SECTION_LABELS.documentation}\nThe aspects below are separate parts of a complete answer. Synthesize across them without treating relation metadata as fact.\n\n${rendered.join("\n\n")}`;
 }
 
 function renderUser(context: ModelContext): string {
@@ -148,8 +168,11 @@ export function promptOverhead(
     question: string;
     exactSymbols: readonly ApiSymbol[];
     includeSurface?: boolean;
+    answerMode?: ModelContext["answerMode"];
   }
 ): number {
+  const answerMode = input.answerMode ?? (input.exactSymbols.length > 0 ? "lookup" : "explain");
+  const interactive = isInteractiveMode(answerMode);
   const includeSurface = input.includeSurface ?? input.exactSymbols.length > 0;
 
   const facts = input.exactSymbols
@@ -163,9 +186,8 @@ export function promptOverhead(
 
   const blocks = [
     ANSWER_RULES,
-    SITE_FACTS,
-    TOOL_RULES,
-    ACTION_RULES,
+    ANSWER_MODE_RULES[answerMode],
+    ...(interactive ? [SITE_FACTS, TOOL_RULES, ACTION_RULES] : []),
     SECTION_LABELS.documentation,
     corrections ? `${SECTION_LABELS.corrections}\n${corrections}` : "",
     facts ? `${SECTION_LABELS.symbols}\n${facts}` : "",
@@ -177,4 +199,8 @@ export function promptOverhead(
   const separators = blocks.filter(Boolean).length * 2;
 
   return blocks.reduce((sum, block) => sum + estimateTokens(block), separators);
+}
+
+function isInteractiveMode(mode: ModelContext["answerMode"]): boolean {
+  return mode === "lookup" || mode === "navigate" || mode === "code";
 }

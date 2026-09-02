@@ -74,8 +74,10 @@ export interface RetrievalReport {
   normalizedQuery: string;
   /** Which task the ranking was tuned for. */
   mode: "knowledge" | "navigation";
-  /** Symbols the query named outright, before any ranking. */
+  /** Resolved explicit and inferred symbol mentions, retained for compatibility. */
   exactSymbols: ApiSymbol[];
+  /** Symbols written with explicit API syntax; inferred bare names are excluded. */
+  explicitSymbols: ApiSymbol[];
   /** Whether the corpus contains every subject introduced by the question. */
   coverage: {
     covered: boolean;
@@ -94,7 +96,24 @@ export interface RetrievalReport {
    * signal, and it is invisible unless it is recorded.
    */
   semantic: { top: number[]; margin: number; spread: number };
-  timings: { lexicalMs: number; semanticMs: number; symbolMs: number; fusionMs: number };
+  timings: {
+    lexicalMs: number;
+    semanticMs: number;
+    symbolMs: number;
+    fusionMs: number;
+    queryEmbeddingMs?: number;
+    totalSemanticMs?: number;
+    vector?: VectorSearchMetrics;
+  };
+}
+
+export interface VectorSearchMetrics {
+  vectorCount: number;
+  dimensions: number;
+  vectorScanMs: number;
+  topKSelectionMs: number;
+  totalMs: number;
+  limit: number;
 }
 
 /** A symbol hit, with how it was matched — exact beats prefix, always. */

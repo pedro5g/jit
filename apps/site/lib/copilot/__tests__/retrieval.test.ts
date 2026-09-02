@@ -201,8 +201,10 @@ describe("vector repository", () => {
     expect(results[0].score).toBeCloseTo(1, 5);
   });
 
-  it("honours the limit through the bounded insertion sort", () => {
+  it("honours the limit through a bounded min-heap and reports the exact scan", () => {
     expect(repository.search(normalize(Float32Array.from([1, 1, 0, 0])), 2)).toHaveLength(2);
+    expect(repository.lastMetrics).toMatchObject({ vectorCount: 3, dimensions: 4, limit: 2 });
+    expect(repository.lastMetrics?.totalMs).toBeGreaterThanOrEqual(0);
   });
 
   it("refuses to answer from a truncated file rather than answering wrongly", () => {

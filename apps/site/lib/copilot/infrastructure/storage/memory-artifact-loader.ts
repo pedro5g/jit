@@ -10,6 +10,7 @@
 import type { ApiSymbol } from "../../core/entities/api-symbol";
 import type { DocumentChunk } from "../../core/entities/document-chunk";
 import type { KnowledgeEntry } from "../../core/entities/knowledge-entry";
+import type { KnowledgeRelation } from "../../core/entities/knowledge-relation";
 import type { KnowledgeManifest } from "../../core/entities/manifest";
 import type { RouteEntry } from "../../core/entities/route-entry";
 import type { KnowledgeSource } from "../../core/repositories";
@@ -24,6 +25,7 @@ export interface MemoryArtifacts {
   routes: RouteEntry[];
   lexical: LexicalIndexDocument;
   vectors?: Float32Array[] | null;
+  relations?: KnowledgeRelation[];
 }
 
 export class MemoryArtifactLoader implements LexicalCapableLoader {
@@ -50,5 +52,9 @@ export class MemoryArtifactLoader implements LexicalCapableLoader {
     for (const [index, vector] of vectors.entries()) packed.set(vector, index * manifest.embedding.dimensions);
 
     return packed;
+  }
+
+  async loadRelations(_manifest: KnowledgeManifest): Promise<KnowledgeRelation[]> {
+    return this.artifacts.relations ?? [];
   }
 }

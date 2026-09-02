@@ -303,7 +303,7 @@ export function queryConcepts(query: string): QueryConcept[] {
 
       const expanded = tokenizeQuery(segment)
         .filter((term) => term.weight < 1)
-        .map((term) => term.term);
+        .flatMap((term) => [term.term, ...tokenize(term.term)]);
 
       concepts.push({ literal, variants: [...new Set([...direct, ...expanded])] });
     }

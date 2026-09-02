@@ -34,6 +34,10 @@ export interface ParsedSection {
   text: string;
   /** Fenced code blocks, kept separately so examples can be verified. */
   code: { lang: string; source: string }[];
+  /** Documentation links present in this section, before MDX is flattened. */
+  references: string[];
+  /** Explicit explanatory labels such as bold mechanism names in a list. */
+  concepts: string[];
   /** The section is mostly a table. */
   dense: boolean;
 }
@@ -144,6 +148,10 @@ export function parseDocument(relativeFile: string, source: string): ParsedDocum
       ...(heading ? { anchor: anchorFor(heading) } : {}),
       text: text.trim(),
       code,
+      references: [...raw.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)]
+        .map((match) => match[1].trim())
+        .filter((target) => target.startsWith("/") || target.startsWith("#")),
+      concepts: [...raw.matchAll(/^\s*[-*]\s+\*\*([^*]+)\*\*/gm)].map((match) => match[1].replace(/[.:]+$/, "").trim()),
       dense: nonEmpty.length > 0 && tableRows / nonEmpty.length > 0.5,
     });
   };

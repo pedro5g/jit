@@ -31,7 +31,7 @@ export const GENERATION_MODELS: GenerationModelSpec[] = [
     repo: "onnx-community/Qwen3.5-0.8B-Text-ONNX",
     label: "Qwen3.5 0.8B",
     summary:
-      "Smallest download. Experimental navigation and exact API lookup; conceptual answers use verified sources.",
+      "Smallest download. Explains covered questions from verified sources; falls back safely when evidence or generation is insufficient.",
     dtype: "q4f16",
     approximateBytes: 490 * MIB,
     contextWindow: 4096,

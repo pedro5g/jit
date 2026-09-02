@@ -54,21 +54,12 @@ export interface ControllerAskInput {
  * the question; a false negative still goes through the audited answer path.
  */
 export function asksForSchema(question: string): boolean {
-  return /\b(?:create|make|write|generate|build|declare|crie|criar|gere|gerar|monte|montar|escreva|schema|esquema)\b/i.test(
-    question
-  );
-}
-
-/**
- * The 0.8B tier is useful as a language layer over deterministic lookup, but
- * the measured failure was conceptual synthesis. Keep it on tasks whose truth
- * is anchored by an exact public symbol or a navigation request.
- */
-export function lightTierCanGenerate(question: string, report: RetrievalReport): boolean {
-  return (
-    report.exactSymbols.length > 0 ||
-    /\b(?:open|show me|take me|go to|where is|abra|abre|mostre|onde fica)\b/i.test(question)
-  );
+  const mentionsSchema = /\b(?:schema|esquema)\b/i.test(question);
+  const constructionIntent =
+    /\b(?:create|make|write|generate|build|declare|define|model|crie|criar|gere|gerar|monte|montar|escreva|defina|definir|modele)\b/i.test(
+      question
+    );
+  return mentionsSchema && constructionIntent;
 }
 
 export class CopilotController {
@@ -141,13 +132,6 @@ export class CopilotController {
     if (!model) {
       const result = await service.search(request, this.embedder);
       return { kind: "search", ...result };
-    }
-
-    if (this.models.current.tier === "light") {
-      const found = await service.search(request, this.embedder);
-      if (asksForSchema(input.question) || !lightTierCanGenerate(input.question, found.report)) {
-        return { kind: "search", ...found };
-      }
     }
 
     if (asksForSchema(input.question)) {

@@ -119,6 +119,7 @@ export const SCORED_KINDS: FailureKind[] = [
   "generation-degeneration",
   "invalid-example",
   "substantially-ungrounded",
+  "missing-source-citation",
 ];
 
 export interface ScoredAnswer {

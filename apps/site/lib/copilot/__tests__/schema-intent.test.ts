@@ -236,6 +236,7 @@ describe("against the real API surface", () => {
         chunks: result.chunks,
         symbols: result.symbols,
         routes: result.routes,
+        relations: result.relations,
         lexical: result.lexical,
       })
     );

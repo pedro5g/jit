@@ -10,11 +10,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ARTIFACTS } from "../../config/artifacts";
+import type { KnowledgeRelation } from "../../core/entities/knowledge-relation";
 import type { KnowledgeManifest } from "../../core/entities/manifest";
 import { artifactUnavailable } from "../../core/errors/copilot-error";
 import type { ArtifactLoaderPort } from "../../core/ports/artifact-loader";
 import type { KnowledgeSource } from "../../core/repositories";
-import { assertConsistent, hydrate, type RawArtifacts } from "./hydrate";
+import { assertConsistent, hydrate, hydrateRelations, type RawArtifacts, type WireKnowledgeNode } from "./hydrate";
 
 export class NodeArtifactLoader implements ArtifactLoaderPort {
   constructor(private readonly dir: string) {}
@@ -57,6 +58,10 @@ export class NodeArtifactLoader implements ArtifactLoaderPort {
       // symbol retrieval answer most questions without them.
       return null;
     }
+  }
+
+  async loadRelations(_manifest: KnowledgeManifest): Promise<KnowledgeRelation[]> {
+    return hydrateRelations(await this.json<WireKnowledgeNode[]>("relations"));
   }
 
   /** The lexical index, which is not part of `KnowledgeSource`. */

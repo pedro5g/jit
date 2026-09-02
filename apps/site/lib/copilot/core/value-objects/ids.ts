@@ -35,10 +35,14 @@ export type SymbolId = Branded<"SymbolId">;
 /** A page, independent of the path it is served from. */
 export type RouteId = Branded<"RouteId">;
 
+/** A compiler-derived explanatory dimension used by coverage planning. */
+export type FacetId = Branded<"FacetId">;
+
 export const KNOWLEDGE_PREFIX = "knowledge.";
 export const CHUNK_PREFIX = "chunk.";
 export const SYMBOL_PREFIX = "symbol.";
 export const ROUTE_PREFIX = "route.";
+export const FACET_PREFIX = "facet.";
 
 /**
  * The characters an id segment may contain.
@@ -95,6 +99,10 @@ export function chunkId(...segments: string[]): ChunkId {
 
 export function routeId(...segments: string[]): RouteId {
   return join(ROUTE_PREFIX, segments) as RouteId;
+}
+
+export function facetId(...segments: string[]): FacetId {
+  return join(FACET_PREFIX, segments) as FacetId;
 }
 
 /**

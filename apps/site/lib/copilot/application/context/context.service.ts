@@ -18,8 +18,9 @@
  * recall and contamination are properties of this file's output, and they are
  * measurable only because the output is an object.
  */
-import { CONTEXT_BUDGET, MIN_EVIDENCE_CONFIDENCE } from "../../config/retrieval";
+import { CONTEXT_BUDGET, MIN_BROAD_FACET_CONFIDENCE, MIN_EVIDENCE_CONFIDENCE } from "../../config/retrieval";
 import type { ApiSymbol } from "../../core/entities/api-symbol";
+import type { CoveragePlan } from "../../core/entities/coverage";
 import type {
   ContextEvidence,
   ContextNavigation,
@@ -45,6 +46,7 @@ export interface ContextRequest {
   question: string;
   locale: Locale;
   report: RetrievalReport;
+  plan?: CoveragePlan;
 
   current?: {
     routeId?: RouteId;
@@ -62,37 +64,55 @@ export class ContextService {
   constructor(private readonly deps: ContextServiceDeps) {}
 
   build(request: ContextRequest): ModelContext {
+    const plan = request.plan ?? fallbackPlan(request.report);
     const total = request.budget ?? CONTEXT_BUDGET.target;
     const reserved = request.reservedTokens ?? 0;
 
     /**
-     * At least a third of the budget stays with the documentation, whatever
-     * the fixed half grows to. A prompt that is all rules and no evidence is a
-     * prompt answered from memory — which is the failure every one of those
-     * rules is trying to prevent.
+     * Fixed prompt blocks consume their declared share, and the remainder is
+     * the hard ceiling for source evidence. A prompt that is all rules and no
+     * evidence is a prompt answered from memory — which is the failure every
+     * one of those rules is trying to prevent.
      */
-    const evidenceAllowance = Math.max(Math.round(total / 3), total - reserved);
+    const evidenceAllowance = Math.max(0, total - reserved);
 
     // ---------------------------------------------- classify and deduplicate
     const roles = new Map<string, EvidenceRole>();
-    for (const result of request.report.results) roles.set(result.chunk.id, classify(result));
+    for (const result of plan.selected) roles.set(result.chunk.id, classify(result));
     const roleOf = (result: RetrievalResult) => roles.get(result.chunk.id) ?? "reference";
 
-    const deduped = dedupe(request.report.results);
+    const deduped = dedupe(plan.selected);
     const selected = selectByRole(request.report.coverage.covered ? deduped.kept : [], roleOf);
 
     // ------------------------------------------------------- allocate budget
-    const best = request.report.results[0]?.finalScore ?? 0;
+    const best = plan.selected[0]?.finalScore ?? request.report.results[0]?.finalScore ?? 0;
     const evidence: ContextEvidence[] = [];
     let used = 0;
     let droppedForBudget = 0;
 
     for (const result of selected.kept) {
-      const candidate = toEvidence(result, evidence.length + 1, roleOf(result), best);
+      const entry = this.deps.knowledge.findById(result.chunk.knowledgeId);
+      const facets = entry?.facets ?? [];
+      const selectedFacet = facets.find((facet) => plan.selectedFacetIds.includes(facet.id));
+      const candidate = toEvidence(
+        result,
+        evidence.length + 1,
+        roleOf(result),
+        best,
+        facets,
+        evidence.length === 0 ? "Core evidence" : (selectedFacet?.label ?? result.chunk.title),
+        result.chunk.content
+      );
 
       // A passage worth a fraction of the top hit is attention a small model
       // spends badly. The first one is exempt: something beats nothing.
-      if (evidence.length > 0 && candidate.confidence < MIN_EVIDENCE_CONFIDENCE) {
+      const broadConceptSupport =
+        plan.scope === "broad" &&
+        candidate.confidence >= MIN_BROAD_FACET_CONFIDENCE &&
+        selectedFacet !== undefined &&
+        (entry?.kind === "concept" || entry?.kind === "overview");
+
+      if (evidence.length > 0 && candidate.confidence < MIN_EVIDENCE_CONFIDENCE && !broadConceptSupport) {
         droppedForBudget += 1;
         continue;
       }
@@ -109,7 +129,8 @@ export class ContextService {
     }
 
     // ---------------------------------------------------------- symbol truth
-    const symbols: ContextSymbol[] = request.report.exactSymbols.slice(0, 4).map((symbol) => ({
+    const knownSymbols = plan.scope === "broad" ? request.report.explicitSymbols : request.report.exactSymbols;
+    const symbols: ContextSymbol[] = knownSymbols.slice(0, 4).map((symbol) => ({
       symbol,
       validOn: symbol.validOn,
       members: this.membersOf(symbol),
@@ -146,6 +167,8 @@ export class ContextService {
     return {
       question: request.question,
       locale: request.locale,
+      scope: plan.scope,
+      answerMode: plan.answerMode,
       evidence,
       symbols,
       corrections: findCorrections(request.question, this.deps.symbols),
@@ -167,6 +190,11 @@ export class ContextService {
         evidenceUsed: used,
         droppedForBudget,
         droppedAsRedundant: deduped.dropped + selected.dropped,
+      },
+      coverage: {
+        coverageScore: plan.coverageScore,
+        selectedFacetIds: plan.selectedFacetIds,
+        readiness: plan.readiness,
       },
       empty: !request.report.coverage.covered || evidence.length === 0 || best <= 0,
     };
@@ -192,6 +220,28 @@ export class ContextService {
   }
 }
 
+function fallbackPlan(report: RetrievalReport): CoveragePlan {
+  const scope = report.exactSymbols.length > 0 ? "lookup" : "focused";
+  return {
+    scope,
+    answerMode: scope === "lookup" ? "lookup" : "explain",
+    seeds: report.results.slice(0, 5).map((result) => result.chunk.knowledgeId),
+    expansion: { seeds: [], candidates: [], visited: 0, elapsedMs: 0 },
+    candidates: [],
+    facets: [],
+    selected: report.results,
+    selectedFacetIds: [],
+    coverageScore: report.results.length > 0 ? 1 : 0,
+    redundancyDropped: 0,
+    readiness: {
+      sufficient: report.coverage.covered && report.results.length > 0,
+      coverage: report.results.length > 0 ? 1 : 0,
+      evidenceCount: report.results.length,
+      sourceConfidence: report.results.length > 0 ? 1 : 0,
+    },
+  };
+}
+
 /**
  * The header a passage is rendered with, costed alongside its text.
  *
@@ -209,7 +259,15 @@ export function evidenceHeader(
   return `[${evidence.index}] ${evidence.breadcrumb} (${evidence.routeId})${warning}`;
 }
 
-function toEvidence(result: RetrievalResult, index: number, role: EvidenceRole, best: number): ContextEvidence {
+function toEvidence(
+  result: RetrievalResult,
+  index: number,
+  role: EvidenceRole,
+  best: number,
+  facets: ContextEvidence["facets"],
+  section: string,
+  content: string
+): ContextEvidence {
   const evidence: ContextEvidence = {
     knowledgeId: result.chunk.knowledgeId,
     chunkId: result.chunk.id,
@@ -218,7 +276,7 @@ function toEvidence(result: RetrievalResult, index: number, role: EvidenceRole, 
     index,
     breadcrumb: result.chunk.breadcrumb,
     title: result.chunk.title,
-    content: result.chunk.content,
+    content,
     role,
     reason: result.reason,
     // Relative to the best hit in this context: an absolute RRF score means
@@ -226,6 +284,8 @@ function toEvidence(result: RetrievalResult, index: number, role: EvidenceRole, 
     confidence: best > 0 ? Math.round((result.finalScore / best) * 100) / 100 : 0,
     showsRemovedApis: result.chunk.showsRemovedApis,
     tokens: 0,
+    facets,
+    section,
   };
 
   evidence.tokens = estimateTokens(`${evidenceHeader(evidence)}\n${evidence.content}`);

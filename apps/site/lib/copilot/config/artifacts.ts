@@ -20,6 +20,7 @@ export const ARTIFACTS = {
   chunks: "chunks.json",
   symbols: "symbols.json",
   routes: "routes.json",
+  relations: "relations.json",
   lexical: "lexical.json",
   vectors: "vectors.bin",
 } as const;
