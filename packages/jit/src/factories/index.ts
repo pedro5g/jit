@@ -38,12 +38,14 @@ export {
 export { type ApiQuery, type ApiQueryOptions, api } from "./api.js";
 export { type CacheKeyBuilder, cacheKey } from "./cache-key.js";
 export { canonical } from "./canonical.js";
+export type { OverwriteDescriptor } from "./class.js";
 export {
   type AbstractRuntimeClass,
   type ClassFactory,
   class,
   type DomainEvent,
   type EventPublisher,
+  overwrite,
   type RuntimeClass,
   type ScalarValueObject,
   type SoftDeleteCapability,

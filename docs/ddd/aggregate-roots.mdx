@@ -33,24 +33,26 @@ const AuditedOrderBase = JIT.ddd
     JIT.object({
       id: JIT.string(),
       status: JIT.string(),
-      changedAt: JIT.date(),
-      archivedAt: JIT.date().nullable(),
-      version: JIT.int(),
     }),
     { id: "id" },
   )
-  .extends(
-    JIT.ddd.timestamps({ updatedAt: "changedAt" }),
-    JIT.ddd.softDelete({ field: "archivedAt" }),
-    JIT.ddd.versioned({ field: "version" }),
-  );
+  .extends(JIT.ddd.timestamps(), JIT.ddd.softDelete(), JIT.ddd.versioned());
 ```
 
-`timestamps` installs `touch()` and, unless `touch: "manual"` is selected,
-updates the configured field once per effective mutation. `softDelete`
-installs `softDelete()`, `restore()`, and `isDeleted`. `versioned` advances the
-configured number through the same mutation plan. Repeating a capability is
+`timestamps` structurally resolves `createdAt` and `updatedAt`, installs
+`touch()`, and, unless `touch: "manual"` is selected, updates `updatedAt` once
+per effective mutation. `softDelete` resolves `deletedAt` and installs
+`softDelete()`, `restore()`, and `isDeleted`. `versioned` resolves `version` and
+advances it through the same mutation plan. Repeating a capability is
 rejected; capabilities also cannot shadow schema fields or existing methods.
+
+Mutation no-ops return before reading a clock or allocating a `Date`:
+
+```ts
+order.update({ status: order.status }); // no lifecycle change
+order.softDelete();                     // first transition only
+order.restore();                        // second transition only
+```
 
 Names and clocks are explicit configuration, not global registries:
 

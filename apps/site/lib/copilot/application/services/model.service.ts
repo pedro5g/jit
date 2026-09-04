@@ -20,20 +20,16 @@ import {
   type ModelTier,
   modelForTier,
   SELECTED_TIER_KEY,
-} from "../../config/models";
-import type { CapabilityLevel, CapabilityReport, EnvironmentCapabilities } from "../../core/entities/capability";
-import type { EmbeddingPort } from "../../core/ports/embedding";
-import type { LanguageModelPort } from "../../core/ports/language-model";
-import { BrowserEmbedder } from "../../infrastructure/embeddings/browser-embedder";
-import {
-  ChromeLanguageModel,
-  chromeLanguageModelStatus,
-  isChromeLanguageModelSupported,
-} from "../../infrastructure/models/chrome-language-model";
-import { TransformersLanguageModel } from "../../infrastructure/models/transformers-language-model";
-import { CopilotWorkerHost } from "../../infrastructure/models/worker-host";
+} from "../../config/models.js";
+import type { CapabilityLevel, CapabilityReport, EnvironmentCapabilities } from "../../core/entities/capability.js";
+import type { EmbeddingPort } from "../../core/ports/embedding.js";
+import type { LanguageModelPort } from "../../core/ports/language-model.js";
+import type { LanguageModelAvailability, LanguageModelProviderPort } from "../../core/ports/language-model-provider.js";
+import { BrowserEmbedder } from "../../infrastructure/embeddings/browser-embedder.js";
+import { TransformersLanguageModel } from "../../infrastructure/models/transformers-language-model.js";
+import { CopilotWorkerHost } from "../../infrastructure/models/worker-host.js";
 
-export type ModelStatus = "unsupported" | "needs-download" | "downloading" | "ready" | "failed";
+export type ModelStatus = LanguageModelAvailability | "failed";
 
 export interface ModelState {
   tier: ModelTier | "chrome-built-in";
@@ -57,14 +53,14 @@ export type ModelStateListener = (state: ModelState) => void;
  */
 const MEMORY_FOR_LARGE_MODELS_GB = 8;
 
-export function detectEnvironment(vectors: boolean): EnvironmentCapabilities {
+export function detectEnvironment(vectors: boolean, chromeBuiltIn = false): EnvironmentCapabilities {
   const navigatorLike = globalThis.navigator as (Navigator & { deviceMemory?: number; gpu?: unknown }) | undefined;
 
   const memory = navigatorLike?.deviceMemory;
 
   return {
     webgpu: typeof navigatorLike?.gpu === "object" && navigatorLike.gpu !== null,
-    chromeBuiltIn: isChromeLanguageModelSupported(),
+    chromeBuiltIn,
     ...(typeof memory === "number" ? { deviceMemoryGb: memory } : {}),
     mobile: /Android|iPhone|iPad|iPod/i.test(navigatorLike?.userAgent ?? ""),
     vectors,
@@ -81,7 +77,10 @@ export class ModelService {
 
   private state: ModelState = { tier: DEFAULT_TIER, label: "", status: "unsupported", progress: 0 };
 
-  constructor(private readonly environment: EnvironmentCapabilities) {
+  constructor(
+    private readonly environment: EnvironmentCapabilities,
+    private readonly builtInProvider: LanguageModelProviderPort | null = null
+  ) {
     this.state = { ...this.state, ...this.initialState() };
   }
 
@@ -161,7 +160,9 @@ export class ModelService {
 
   async status(): Promise<ModelStatus> {
     const status = this.environment.chromeBuiltIn
-      ? await chromeLanguageModelStatus()
+      ? this.builtInProvider
+        ? await this.builtInProvider.availability()
+        : "unsupported"
       : !this.environment.webgpu
         ? "unsupported"
         : this.model
@@ -183,8 +184,39 @@ export class ModelService {
     if (this.model) return this.model;
 
     if (this.environment.chromeBuiltIn) {
-      this.model = new ChromeLanguageModel();
-      this.emit({ tier: "chrome-built-in", label: this.model.label, status: "ready", progress: 100 });
+      const provider = this.builtInProvider;
+      if (!provider) {
+        this.emit({ status: "unsupported", progress: 0 });
+        return null;
+      }
+
+      const availability = await provider.availability();
+      if (availability === "unsupported" || availability === "unavailable") {
+        this.emit({
+          tier: "chrome-built-in",
+          label: provider.label,
+          status: availability,
+          progress: 0,
+          ...(provider.lastAvailabilityDetail ? { error: provider.lastAvailabilityDetail } : {}),
+        });
+        return null;
+      }
+
+      this.emit({ tier: "chrome-built-in", label: provider.label, status: "downloading", progress: 0 });
+      const prepared = await provider.initialize((fraction) =>
+        this.emit({ progress: Math.min(99, Math.round(fraction * 100)) })
+      );
+      if (prepared !== "available") {
+        this.emit({
+          status: prepared,
+          progress: 0,
+          ...(provider.lastAvailabilityDetail ? { error: provider.lastAvailabilityDetail } : {}),
+        });
+        return null;
+      }
+
+      this.model = provider;
+      this.emit({ status: "ready", progress: 100 });
       return this.model;
     }
 

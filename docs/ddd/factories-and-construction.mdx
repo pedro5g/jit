@@ -57,6 +57,12 @@ The current class compiler retains its existing compiled validation semantics;
 the later opt-in validation policy is a separate concern from choosing the
 construction boundary.
 
+DDD lifecycle capabilities extend this separation structurally. Their fields
+are part of the EffectiveSchema before factories are compiled: `create()`
+generates `createdAt`, `updatedAt`, `deletedAt`, and `version` according to the
+capabilities, while `hydrate()` requires the complete persisted state. Managed
+fields are not accepted as ordinary create input or user update patches.
+
 ## Generated code and allocation
 
 Construction emits one shape-stable class. Factory mode adds one module-local

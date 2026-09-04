@@ -70,13 +70,40 @@ keep their inference, and the methods become part of the instance type.
 
 A name that already means something is refused, in the types and at run time:
 a schema field, a factory, `constructor`, or a capability installed earlier. A
-silent shadow would look like it worked and change what the class is. There is
-no `override` escape hatch — an extension is meant to be additive.
+silent shadow would look like it worked and change what the class is. Use the
+explicit `JIT.overwrite(value)` marker when replacement is intentional:
 
 ```ts
 JIT.class(UserSchema).extends({ name() {} });
 // JITError: Class extension "name" would shadow an existing member; rename it
 ```
+
+## Overwriting members
+
+`JIT.overwrite(value)` replaces exactly one member that already exists. It is
+resolved while the class definition is accumulated and disappears before
+runtime or AOT compilation, so generated methods have no marker checks or
+dispatch:
+
+```ts
+const Named = JIT.class(UserSchema).extends({
+  label() {
+    return this.name;
+  },
+});
+
+const Upper = Named.extends({
+  label: JIT.overwrite(function label() {
+    return this.name.toUpperCase();
+  }),
+});
+```
+
+The same marker can replace a built-in method, an earlier extension, or a
+managed lifecycle field. A missing target is an error, and a field overwrite
+is checked again against any capability that still owns it. Arbitrary
+application functions remain runtime bindings and make standalone AOT skip
+the complete class with an explicit reason.
 
 ## Accessors
 
@@ -146,6 +173,26 @@ class User extends UserBase {}
 const user = User.create({ id: "u_1", name: "Ada" });
 user.identity; // "u_1"
 ```
+
+DDD lifecycle capabilities resolve their canonical fields before the class is
+compiled. Missing fields are injected, compatible fields are reused,
+augmentable fields are completed, and conflicts fail during declaration:
+
+```ts
+const AuditedUser = JIT.ddd
+  .entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" })
+  .extends(JIT.ddd.timestamps(), JIT.ddd.softDelete(), JIT.ddd.versioned());
+
+const user = AuditedUser.create({ id: "u_1", name: "Ada" });
+user.createdAt; // Date
+user.updatedAt; // null until touch() or an effective update
+user.deletedAt; // null until softDelete()
+user.version; // 0
+```
+
+Those managed fields are required by `hydrate()` and excluded from ordinary
+create/update input. `touch()`, `softDelete()`, and `restore()` are specialized
+prototype methods with no lifecycle discovery in their hot path.
 
 ## Validation policies
 

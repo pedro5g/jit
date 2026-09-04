@@ -13,11 +13,6 @@ function getArtifact(value) {
   if ((typeof value !== "object" || value === null) && typeof value !== "function") return void 0;
   return REGISTRY.get(value);
 }
-function setClassMutationArtifact(value, mutation) {
-  const artifact = REGISTRY.get(value);
-  if (artifact?.kind !== "class") return;
-  REGISTRY.set(value, { ...artifact, mutation });
-}
 
 // ../../packages/jit/src/aot/classify.ts
 function classifyDeclarations(bindings) {
@@ -1375,10 +1370,12 @@ function accessProjectionFields(descriptor, action) {
 
 // ../../packages/jit/src/compiler/aggregate-mutation.ts
 function buildAggregateMutationPlan(options) {
-  const readonlyFields = new Set(options.readonlyFields);
+  const readonlyFields = /* @__PURE__ */ new Set([...options.readonlyFields ?? [], ...options.managedFields ?? []]);
   const mutableFields = [...new Set(options.fields)].filter((field) => !readonlyFields.has(field));
   return Object.freeze({
     mutableFields: Object.freeze(mutableFields),
+    managedFields: Object.freeze([...options.managedFields ?? []]),
+    ...options.fieldAccess === void 0 ? {} : { fieldAccess: options.fieldAccess },
     ...options.updatedAt === void 0 ? {} : { updatedAt: options.updatedAt },
     ...options.version === void 0 ? {} : { version: options.version }
   });
@@ -1389,7 +1386,7 @@ function emitAggregateMutationBody(plan, updates, clockExpression = "new Date()"
   for (const field of plan.mutableFields) {
     const update2 = updates.get(field);
     if (update2 === void 0) continue;
-    const current = `this${emitPropertyAccess("", field)}`;
+    const current = plan.fieldAccess?.get(field) ?? `this${emitPropertyAccess("", field)}`;
     const fieldPatch = `patch${emitPropertyAccess("", field)}`;
     writer.line(`if (${fieldPatch} !== undefined) {`);
     writer.indent(() => {
@@ -1400,9 +1397,18 @@ function emitAggregateMutationBody(plan, updates, clockExpression = "new Date()"
   }
   writer.line("if (!changed) return;");
   if (plan.updatedAt !== void 0) writer.line(`const now = ${clockExpression};`);
-  if (plan.updatedAt !== void 0) writer.line(`this${emitPropertyAccess("", plan.updatedAt)} = now;`);
-  if (plan.version !== void 0) writer.line(`this${emitPropertyAccess("", plan.version)} += 1;`);
+  if (plan.updatedAt !== void 0) writer.line(emitLifecycleWrite(plan, plan.updatedAt, "now"));
+  if (plan.version !== void 0) {
+    const current = plan.fieldAccess?.get(plan.version) ?? `this${emitPropertyAccess("", plan.version)}`;
+    writer.line(emitLifecycleWrite(plan, plan.version, `${current} + 1`));
+  }
   return writer.toString();
+}
+function emitLifecycleWrite(plan, field, value) {
+  const access2 = plan.fieldAccess?.get(field);
+  if (access2 !== void 0) return `${access2} = ${value};`;
+  if (!plan.managedFields.includes(field)) return `this${emitPropertyAccess("", field)} = ${value};`;
+  return `Object.defineProperty(this, ${JSON.stringify(field)}, { value: ${value}, writable: false, enumerable: true, configurable: true });`;
 }
 
 // ../../packages/jit/src/runtime/hash/hash-cache.ts
@@ -6141,11 +6147,17 @@ var ValidatorEmitter = class {
           writer.line(`${output} = ${defaultExpr};`);
           if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
         });
+        if (unwrapped.nullable) {
+          writer.line(`} else if (${holder} === null) {`);
+          writer.indent(() => {
+            writer.line(`${output} = ${holder};`);
+          });
+        }
         writer.line("} else {");
         writer.indent(emitValidated);
         writer.line("}");
       } else {
-        writer.line(`if (${holder} !== undefined) {`);
+        writer.line(`if (${holder} !== undefined && ${unwrapped.nullable ? `${holder} !== null` : "true"}) {`);
         writer.indent(emitValidated);
         writer.line("}");
       }
@@ -17731,13 +17743,13 @@ function emitStructural(schema, emit) {
       return "unknown";
   }
 }
-function emitBoundaryType(schema, mode, names) {
+function emitBoundaryType(schema, mode, names, omitFields) {
   const emit = (current) => {
     const node = current;
     if (node.type === TypeName.runtimeType) return emit(node.def.innerType);
     if (node.type === TypeName.object) {
       const props = node.def.props;
-      const entries = Object.keys(props).map((key) => {
+      const entries = Object.keys(props).filter((key) => omitFields?.has(key) !== true).map((key) => {
         const property = props[key];
         const safeKey = parse_exports.isValidIdentifier(key) ? key : JSON.stringify(key);
         const optional3 = mode === "create" && acceptsMissingBoundary(property) ? "?" : "";
@@ -17757,8 +17769,13 @@ function emitBoundaryType(schema, mode, names) {
   };
   return emit(schema);
 }
-function acceptsMissingBoundary(schema) {
+function acceptsMissingBoundary(schema, omitFields) {
   const node = schema;
+  if (node.type === TypeName.object) {
+    const props = node.def.props;
+    const fields = Object.keys(props).filter((key) => omitFields?.has(key) !== true);
+    return fields.length === 0 || fields.every((key) => acceptsMissingBoundary(props[key]));
+  }
   if (node.type === TypeName.optional || node.type === TypeName.nullish || node.type === TypeName.default) return true;
   if (node.type === TypeName.runtimeType || node.type === TypeName.brand || node.type === TypeName.readonly || node.type === TypeName.refine || node.type === TypeName.coerce || node.type === TypeName.pipe || node.type === TypeName.transform) {
     return acceptsMissingBoundary(node.def.innerType);
@@ -18938,12 +18955,15 @@ function emitModule(plan, options, layout) {
         if (artifact.mutation?.touchAt !== void 0) {
           mixins.push(`{ ${classMemberName(artifact.mutation.touchMethod ?? "touch")}(): void }`);
         }
+      } else if (artifact.mutation?.updatedAt !== void 0 || artifact.mutation?.version !== void 0) {
+        mixins.push(`{ update(patch: ${classUpdateType(artifact.schema)}): void; }`);
       }
       const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
       const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
-      const createInput = emitBoundaryType(artifact.schema, "create", typeNames);
+      const managedFields = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
+      const createInput = emitBoundaryType(artifact.schema, "create", typeNames, managedFields);
       const hydrateInput = emitBoundaryType(artifact.schema, "hydrate", typeNames);
-      const createParameters = acceptsMissingBoundary(artifact.schema) ? `...args: [] | [input: ${createInput}]` : `input: ${createInput}`;
+      const createParameters = acceptsMissingBoundary(artifact.schema, managedFields) ? `...args: [] | [input: ${createInput}]` : `input: ${createInput}`;
       const factories = [
         artifact.factories.create === false ? "" : `${JSON.stringify(artifact.factories.create)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, ${createParameters}): InstanceType<TThis>;`,
         artifact.factories.hydrate === false ? "" : `${JSON.stringify(artifact.factories.hydrate)}<TThis extends abstract new (...args: never[]) => unknown>(this: TThis, state: ${hydrateInput}): InstanceType<TThis>;`
@@ -19060,12 +19080,16 @@ function emitModule(plan, options, layout) {
             expected: failure.rule ?? "a domain invariant",
             message: failure.message
           })});`,
-          custom2 === void 0 ? `  const __fail${index2} = () => undefined;` : `  const __fail${index2} = (value) => (${custom2})(value, ${JSON.stringify({ ...failure, error: void 0 })});`
+          custom2 === void 0 ? `  const __fail${index2} = () => undefined;` : `  const __errorCandidate${index2} = ${custom2}; const __fail${index2} = () => true;`
         );
       }
       lines.push(...indentBlock(assertions.source));
       lines.push(
-        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };'
+        `  const __assertFailure = (outcome, value) => { ${policy.error === void 0 ? "" : `if (outcome.errorIndex < 0 || ${policy.errorPriority ?? 1e3} >= (outcome.errorIndex < 0 ? -1 : [${assertions.failures.map((failure) => failure.priority).join(", ")}][outcome.errorIndex])) return __error(outcome.issues);`} ${assertions.failures.map(
+          (failure, index2) => failure.error === void 0 ? "" : `if (outcome.errorIndex === ${index2}) return __errorCandidate${index2}(value, ${JSON.stringify({ ...failure, error: void 0 })});`
+        ).join(
+          " "
+        )} const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };`
       );
     }
     return lines;
@@ -19098,6 +19122,14 @@ function emitModule(plan, options, layout) {
       });
       return void 0;
     }
+    if ((artifact.policy?.nestedErrors?.length ?? 0) > 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.validate",
+        reason: "a nested custom error factory is a runtime binding and has no standalone AOT representation"
+      });
+      return void 0;
+    }
     const validator = emitValidatorBinding(
       binding,
       artifact.domainEvent ? base.def.props.payload : artifact.schema,
@@ -19122,26 +19154,45 @@ function emitModule(plan, options, layout) {
     const methods = [];
     const capabilities = new Set(artifact.capabilities);
     const fields = valueRepresentation ? ["value"] : Object.keys(base.def.props);
+    const managedFieldNames = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
+    const managedStorage = new Map(
+      (artifact.managedFields ?? []).map((managed, index2) => [managed.field, `__managed${index2}`])
+    );
     const accessorByKey = new Map(artifact.accessors?.map((accessor) => [accessor.key, accessor]));
     const slots = /* @__PURE__ */ new Map();
     let slotIndex = 0;
     for (const field of fields) {
-      if (accessorByKey.get(field)?.field === "private") slots.set(field, `#p${slotIndex++}`);
+      if (accessorByKey.get(field)?.field === "private" && !managedStorage.has(field))
+        slots.set(field, `#p${slotIndex++}`);
     }
     const readField = (field) => {
+      const managed = managedStorage.get(field);
+      if (managed !== void 0) return `this[${managed}]`;
       const slot = slots.get(field);
       return slot ? `this.${slot}` : `this[${JSON.stringify(field)}]`;
     };
-    const writeField = (field, value) => `${readField(field)} = ${value};`;
+    const writeField = (field, value) => managedStorage.has(field) ? `${readField(field)} = ${value};` : managedFieldNames.has(field) ? `Object.defineProperty(this, ${JSON.stringify(field)}, { value: ${value}, writable: false, enumerable: true, configurable: true });` : `${readField(field)} = ${value};`;
     const accessorDefinitions = (artifact.accessors ?? []).filter((accessor) => accessor.field === "private").flatMap((accessor) => {
       const slot = slots.get(accessor.key);
+      const managed = managedStorage.get(accessor.key);
       const definitions = [];
-      if (accessor.get !== false)
-        definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
-      if (accessor.set !== false)
-        definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
+      if (accessor.get !== false) {
+        definitions.push(
+          managed === void 0 ? `get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }` : `get [${JSON.stringify(accessor.get)}]() { return this[${managed}]; }`
+        );
+      }
+      if (accessor.set !== false) {
+        definitions.push(
+          managed === void 0 ? `set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }` : `set [${JSON.stringify(accessor.set)}](value) { this[${managed}] = value; }`
+        );
+      }
       return definitions;
     });
+    for (const field of managedFieldNames) {
+      if (accessorByKey.get(field)?.field === "private") continue;
+      const managed = managedStorage.get(field);
+      if (managed !== void 0) methods.push(`get [${JSON.stringify(field)}]() { return this[${managed}]; }`);
+    }
     if (capabilities.has("equals")) {
       if (valueRepresentation) {
         const equal3 = internalIdentifier(`${binding}_equal`);
@@ -19181,19 +19232,23 @@ function emitModule(plan, options, layout) {
       methods.push(`clone() { return new this.constructor(${clone3}(this), __construct, true); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
-    const needsUpdate = artifact.aggregate || capabilities.has("with");
+    const needsUpdate = artifact.aggregate || capabilities.has("with") || artifact.mutation?.updatedAt !== void 0 || artifact.mutation?.version !== void 0;
     let update2;
     let aggregateUpdateBody;
     if (needsUpdate) {
-      if (artifact.aggregate) {
+      if (artifact.aggregate || artifact.mutation?.updatedAt !== void 0 || artifact.mutation?.version !== void 0) {
         const readonlyFields = fields.filter(
           (field) => resolveWrappers(base.def.props[field]).readonly
         );
         const mutation = buildAggregateMutationPlan({
           fields,
           readonlyFields,
+          ...artifact.managedFields === void 0 ? {} : { managedFields: artifact.managedFields.map((field) => field.field) },
           ...artifact.mutation?.updatedAt === void 0 ? {} : { updatedAt: artifact.mutation.updatedAt },
-          ...artifact.mutation?.version === void 0 ? {} : { version: artifact.mutation.version }
+          ...artifact.mutation?.version === void 0 ? {} : { version: artifact.mutation.version },
+          fieldAccess: new Map(
+            [...managedStorage.entries()].map(([field, managed]) => [field, `this[${managed}]`])
+          )
         });
         const updates = /* @__PURE__ */ new Map();
         for (let index2 = 0; index2 < mutation.mutableFields.length; index2++) {
@@ -19250,49 +19305,63 @@ function emitModule(plan, options, layout) {
         );
       }
     }
-    if (artifact.aggregate && aggregateUpdateBody) {
+    if (aggregateUpdateBody && (artifact.aggregate || artifact.mutation?.updatedAt !== void 0 || artifact.mutation?.version !== void 0)) {
+      methods.push(`update(patch) { ${aggregateUpdateBody} }`);
+    }
+    if (artifact.aggregate) {
       methods.push(
-        `update(patch) { ${aggregateUpdateBody} }`,
         "raise(event) { this.__jitEvents.push(event); }",
         "peekEvents() { return this.__jitEvents.slice(); }",
         "pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }",
         "async commit(publisher) { const pending = this.__jitEvents; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); this.__jitEvents.splice(0, pending.length); }"
       );
     }
-    if (artifact.aggregate && artifact.mutation?.deletedAt !== void 0) {
+    if (artifact.mutation?.deletedAt !== void 0) {
       const deletedAt = artifact.mutation.deletedAt;
       const updatedAt = artifact.mutation.updatedAt;
+      const version = artifact.mutation.version;
       const deleteMethod = classMemberName(artifact.mutation.deleteMethod ?? "softDelete");
       const restoreMethod = classMemberName(artifact.mutation.restoreMethod ?? "restore");
       const isDeletedMember = classMemberName(artifact.mutation.isDeletedMember ?? "isDeleted");
       methods.push(
-        `${deleteMethod}() { const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "now")}`} }`,
-        `${restoreMethod}() { ${writeField(deletedAt, "null")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
+        `${deleteMethod}() { if (${readField(deletedAt)} !== null) return; const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === void 0 ? "" : ` ${writeField(updatedAt, "now")}`}${version === void 0 ? "" : ` ${writeField(version, `${readField(version)} + 1`)}`} }`,
+        `${restoreMethod}() { if (${readField(deletedAt)} === null) return; ${writeField(deletedAt, "null")}${updatedAt === void 0 ? "" : ` const now = new Date(); ${writeField(updatedAt, "now")}`}${version === void 0 ? "" : ` ${writeField(version, `${readField(version)} + 1`)}`} }`,
         `get ${isDeletedMember}() { return ${readField(deletedAt)} !== null; }`
       );
     }
-    if (artifact.aggregate && artifact.mutation?.touchAt !== void 0) {
+    if (artifact.mutation?.touchAt !== void 0) {
+      const version = artifact.mutation.version;
       methods.push(
-        `${classMemberName(artifact.mutation.touchMethod ?? "touch")}() { ${writeField(
-          artifact.mutation.touchAt,
-          "new Date()"
-        )} }`
+        `${classMemberName(artifact.mutation.touchMethod ?? "touch")}() { const now = new Date(); ${writeField(artifact.mutation.touchAt, "now")}${version === void 0 ? "" : ` ${writeField(version, `${readField(version)} + 1`)}`} }`
       );
     }
-    const assignments = valueRepresentation ? "this.value = state;" : fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
+    const assignments = valueRepresentation ? "this.value = state;" : fields.map((field) => `${readField(field)} = state[${JSON.stringify(field)}];`).join(" ");
+    const managedAccessors = [...managedStorage.entries()].filter(([field]) => accessorByKey.get(field)?.field !== "private").map(
+      ([field]) => `Object.defineProperty(this, ${JSON.stringify(field)}, { get: Object.getOwnPropertyDescriptor(${binding}.prototype, ${JSON.stringify(field)}).get, enumerable: true, configurable: false });`
+    ).join(" ");
     const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
     const freeze = artifact.frozen ? " Object.freeze(this);" : "";
     const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
+    const managedCreation = artifact.managedFields ?? [];
+    const creationAssignments = managedCreation.map((managed) => {
+      const field = JSON.stringify(managed.field);
+      if (managed.role === "createdAt") return `if (input[${field}] !== undefined) state[${field}] = new Date();`;
+      if (managed.role === "updatedAt" || managed.role === "deletedAt") return `state[${field}] = null;`;
+      return `state[${field}] = 0;`;
+    }).join(" ");
+    const creationToken = creationAssignments.length === 0 ? "__construct" : "__create";
     const policy = artifact.policy;
-    const assertionCall = policy?.assertions === void 0 ? "" : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome)); ";
-    const policyCreate = policy === void 0 || !policy.create ? void 0 : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
+    const assertionCall = policy?.assertions === void 0 ? "" : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome, result.data)); ";
+    const policyCreate = policy === void 0 || !policy.create ? void 0 : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${creationAssignments.replace(/state\[/g, "result.data[")} ${assertionCall}return __success(new this(result.data, __construct, true));`;
     const policyHydrate = policy === void 0 || !policy.hydrate ? void 0 : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
-    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? "return new this(input, __construct);";
+    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? `return new this(input, ${creationToken});`;
     const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : policyHydrate ?? `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
-    const constructionGuard = artifact.construction === "factory" ? 'if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ' : "";
-    const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
+    const constructionGuard = artifact.construction === "factory" ? `if (token !== __construct${creationAssignments.length === 0 ? "" : " && token !== __create"} && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ` : "";
+    const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${creationAssignments.length === 0 ? "" : `if (token === __create) { ${creationAssignments} } `}${assignments}${managedAccessors.length === 0 ? "" : ` ${managedAccessors}`}${events}${freeze} }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push("  const __construct = Symbol();");
+    for (const managed of managedStorage.values()) js.push(`  const ${managed} = Symbol();`);
+    if (creationAssignments.length > 0) js.push("  const __create = Symbol();");
     if (policy !== void 0) {
       const policyLines = emitClassPolicy(policy, reportName);
       if (policyLines === void 0) return void 0;
@@ -20637,6 +20706,419 @@ function isGeneratedJson(path) {
   } catch {
     return false;
   }
+}
+
+// ../../packages/jit/src/classes/members.ts
+var ResolvedMemberTable = class _ResolvedMemberTable {
+  constructor() {
+    this.members = /* @__PURE__ */ new Map();
+  }
+  add(member) {
+    this.members.set(member.name, member);
+  }
+  get(name) {
+    return this.members.get(name);
+  }
+  has(name) {
+    return this.members.has(name);
+  }
+  replace(name, member) {
+    if (!this.members.has(name)) throw new Error(`Cannot replace missing class member ${JSON.stringify(name)}`);
+    this.members.set(name, member);
+  }
+  entries() {
+    return [...this.members.values()];
+  }
+  clone() {
+    const copy = new _ResolvedMemberTable();
+    for (const member of this.members.values()) copy.add(member);
+    return copy;
+  }
+};
+
+// ../../packages/jit/src/classes/effective-schema.ts
+var EMPTY_LIFECYCLE = Object.freeze({});
+var MANAGED_CREATED_AT_DEFAULT = () => /* @__PURE__ */ new Date();
+function resolveEffectiveObjectSchema(schema) {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) throw new Error("JIT Runtime Class requires an object schema");
+  return base;
+}
+function applyDddCapability(state3, kind, rawOptions) {
+  const options = rawOptions ?? {};
+  const object2 = resolveEffectiveObjectSchema(state3.schema);
+  const props = { ...object2.def.props };
+  const lifecycle = { ...state3.lifecycle };
+  const managed = [...state3.managedFields];
+  const members = state3.members.clone();
+  if (kind === "ddd.timestamps") {
+    if (lifecycle.timestamps !== void 0) throw new Error("Timestamps are already configured for this Runtime Class");
+    const createdAt = options.createdAt ?? "createdAt";
+    const updatedAt = options.updatedAt ?? "updatedAt";
+    ensureDistinctFields(createdAt, updatedAt, "timestamps");
+    ensureFieldMemberAvailable(members, createdAt, kind);
+    ensureFieldMemberAvailable(members, updatedAt, kind);
+    props[createdAt] = resolveManagedField(props[createdAt], "createdAt", "ddd.timestamps", options.clock);
+    props[updatedAt] = resolveManagedField(props[updatedAt], "updatedAt", "ddd.timestamps");
+    members.add({ name: createdAt, kind: "field", source: "capability", owner: kind, schema: props[createdAt] });
+    members.add({ name: updatedAt, kind: "field", source: "capability", owner: kind, schema: props[updatedAt] });
+    lifecycle.timestamps = Object.freeze({
+      kind,
+      createdAt,
+      updatedAt,
+      ...options.touch === void 0 ? {} : { touch: options.touch },
+      ...options.clock === void 0 ? {} : { clock: options.clock },
+      touchMethod: options.methods?.touch ?? "touch"
+    });
+    addManaged(managed, {
+      field: createdAt,
+      owner: kind,
+      role: "createdAt",
+      userMutable: false,
+      creation: "clock",
+      ...options.clock === void 0 ? {} : { clock: options.clock },
+      hydration: "required",
+      mutation: "immutable"
+    });
+    addManaged(managed, {
+      field: updatedAt,
+      owner: kind,
+      role: "updatedAt",
+      userMutable: false,
+      creation: "null",
+      hydration: "required",
+      mutation: "timestamp"
+    });
+    ensureMethodMemberAvailable(members, options.methods?.touch ?? "touch", kind);
+    addMember(members, lifecycle.timestamps.touchMethod, "capability", kind, "method");
+  } else if (kind === "ddd.softDelete") {
+    if (lifecycle.softDelete !== void 0) {
+      throw new Error("Soft delete is already configured for this Runtime Class");
+    }
+    const field = options.field ?? "deletedAt";
+    ensureFieldMemberAvailable(members, field, kind);
+    props[field] = resolveManagedField(props[field], "deletedAt", kind);
+    members.add({ name: field, kind: "field", source: "capability", owner: kind, schema: props[field] });
+    lifecycle.softDelete = Object.freeze({
+      kind,
+      field,
+      ...options.clock === void 0 ? {} : { clock: options.clock },
+      deleteMethod: options.methods?.delete ?? "softDelete",
+      restoreMethod: options.methods?.restore ?? "restore",
+      isDeletedMember: options.methods?.isDeleted ?? "isDeleted"
+    });
+    ensureDistinctMembers(
+      [lifecycle.softDelete.deleteMethod, lifecycle.softDelete.restoreMethod, lifecycle.softDelete.isDeletedMember],
+      kind
+    );
+    ensureMethodMemberAvailable(members, lifecycle.softDelete.deleteMethod, kind);
+    ensureMethodMemberAvailable(members, lifecycle.softDelete.restoreMethod, kind);
+    ensureMethodMemberAvailable(members, lifecycle.softDelete.isDeletedMember, kind);
+    addManaged(managed, {
+      field,
+      owner: kind,
+      role: "deletedAt",
+      userMutable: false,
+      creation: "null",
+      hydration: "required",
+      mutation: "delete"
+    });
+    addMember(members, lifecycle.softDelete.deleteMethod, "capability", kind, "method");
+    addMember(members, lifecycle.softDelete.restoreMethod, "capability", kind, "method");
+    addMember(members, lifecycle.softDelete.isDeletedMember, "capability", kind, "getter");
+  } else {
+    if (lifecycle.versioned !== void 0) throw new Error("Versioning is already configured for this Runtime Class");
+    const field = options.field ?? "version";
+    ensureFieldMemberAvailable(members, field, kind);
+    props[field] = resolveManagedField(props[field], "version", kind);
+    members.add({ name: field, kind: "field", source: "capability", owner: kind, schema: props[field] });
+    lifecycle.versioned = Object.freeze({ kind, field });
+    addManaged(managed, {
+      field,
+      owner: kind,
+      role: "version",
+      userMutable: false,
+      creation: "zero",
+      hydration: "required",
+      mutation: "version"
+    });
+  }
+  const nextSchema = createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+  validateManagedFields(nextSchema, managed);
+  return Object.freeze({
+    schema: nextSchema,
+    lifecycle: Object.freeze(lifecycle),
+    managedFields: Object.freeze(managed),
+    members
+  });
+}
+function validateManagedFields(schema, managed) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  for (const descriptor of managed) {
+    const field = object2.def.props[descriptor.field];
+    if (field === void 0) {
+      throw new Error(`Managed field ${JSON.stringify(descriptor.field)} was removed from the class schema`);
+    }
+    const resolved = resolveWrappers(field);
+    const expected = descriptor.role === "version" ? "int or number" : descriptor.role === "createdAt" ? "Date" : "nullable Date";
+    const validType = descriptor.role === "version" ? resolved.base.type === TypeName.int || resolved.base.type === TypeName.number : resolved.base.type === TypeName.date;
+    const validNullability = descriptor.role === "updatedAt" || descriptor.role === "deletedAt" ? resolved.nullable : !resolved.nullable;
+    if (!validType || !validNullability) {
+      throw new Error(
+        `DDD capability ${descriptor.owner} cannot manage ${descriptor.role} ${JSON.stringify(descriptor.field)}: expected ${expected}`
+      );
+    }
+    if (!resolved.readonly) {
+      throw new Error(`Managed field ${JSON.stringify(descriptor.field)} must remain readonly`);
+    }
+  }
+}
+function reapplyManagedFields(schema, managed) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  if (managed.length === 0) return schema;
+  const props = { ...object2.def.props };
+  for (const descriptor of managed) {
+    props[descriptor.field] = resolveManagedField(
+      props[descriptor.field],
+      descriptor.role,
+      descriptor.owner,
+      descriptor.clock
+    );
+  }
+  const next = createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+  validateManagedFields(next, managed);
+  return next;
+}
+function initialEffectiveSchema(schema) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  const members = new ResolvedMemberTable();
+  for (const [name, field] of Object.entries(object2.def.props)) {
+    members.add({ name, kind: "field", source: "schema", schema: field });
+  }
+  return {
+    schema,
+    lifecycle: EMPTY_LIFECYCLE,
+    managedFields: [],
+    members
+  };
+}
+function addMember(members, name, source, owner, kind) {
+  members.add({ name, kind, source, owner });
+}
+function addManaged(target, descriptor) {
+  const index2 = target.findIndex((item) => item.field === descriptor.field);
+  if (index2 === -1) target.push(Object.freeze(descriptor));
+  else {
+    const previous = target[index2];
+    if (previous?.owner !== descriptor.owner || previous.role !== descriptor.role) {
+      throw new Error(
+        `Managed field ${JSON.stringify(descriptor.field)} is already owned by ${previous?.owner ?? "another capability"}`
+      );
+    }
+    target[index2] = Object.freeze(descriptor);
+  }
+}
+function ensureDistinctFields(left, right, owner) {
+  if (left === right) throw new Error(`${owner} fields must be distinct`);
+}
+function ensureDistinctMembers(names, owner) {
+  if (new Set(names).size !== names.length) throw new Error(`${owner} member names must be distinct`);
+}
+function ensureFieldMemberAvailable(members, name, owner) {
+  const existing = members.get(name);
+  if (existing !== void 0 && existing.kind !== "field") {
+    throw new Error(`${owner} field ${JSON.stringify(name)} collides with existing ${existing.kind} member`);
+  }
+}
+function ensureMethodMemberAvailable(members, name, owner) {
+  if (members.has(name))
+    throw new Error(`${owner} member ${JSON.stringify(name)} collides with an existing class member`);
+}
+function resolveManagedField(existing, role, owner, creationClock) {
+  if (existing === void 0) {
+    if (role === "createdAt")
+      return managedDate(false, creationClock === void 0 ? MANAGED_CREATED_AT_DEFAULT : managedClock(creationClock));
+    if (role === "updatedAt" || role === "deletedAt") return managedDate(true, null);
+    return managedVersion(0);
+  }
+  const resolution = resolveManagedFieldState(existing, role);
+  if (resolution === "CONFLICT") {
+    throw new Error(
+      `DDD capability ${owner} cannot manage ${JSON.stringify(role)}: field is not compatible with its canonical type`
+    );
+  }
+  const resolved = resolveWrappers(existing);
+  const expectedNullable = role === "updatedAt" || role === "deletedAt";
+  const defaultValue = findDefault(existing);
+  let result = existing;
+  if (expectedNullable && !resolved.nullable) result = nullable(result);
+  if (!defaultValue.present) {
+    result = defaultTo(
+      result,
+      role === "createdAt" ? creationClock === void 0 ? MANAGED_CREATED_AT_DEFAULT : managedClock(creationClock) : role === "version" ? 0 : null
+    );
+  }
+  if (!resolveWrappers(result).readonly) result = readonly(result);
+  return result;
+}
+function resolveManagedFieldState(existing, role) {
+  if (existing === void 0) return "MISSING";
+  const resolved = resolveWrappers(existing);
+  const expectedNullable = role === "updatedAt" || role === "deletedAt";
+  const validBase = role === "version" ? resolved.base.type === TypeName.int || resolved.base.type === TypeName.number : resolved.base.type === TypeName.date;
+  if (!validBase || !expectedNullable && resolved.nullable) return "CONFLICT";
+  const defaultValue = findDefault(existing);
+  const expectedDefault = role === "createdAt" ? MANAGED_CREATED_AT_DEFAULT : role === "version" ? 0 : null;
+  if (defaultValue.present && (role === "createdAt" ? defaultValue.value !== expectedDefault : defaultValue.value !== expectedDefault)) {
+    return "CONFLICT";
+  }
+  return resolved.nullable === expectedNullable && resolved.readonly && defaultValue.present ? "COMPATIBLE" : "AUGMENTABLE";
+}
+function managedDate(nullable3, defaultValue) {
+  const date3 = createSchema(TypeName.date, { checks: [] });
+  const value = nullable3 ? nullable(date3) : date3;
+  return readonly(defaultTo(value, defaultValue));
+}
+function managedClock(clock) {
+  return () => {
+    const value = clock();
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+      throw new Error("A DDD clock must return a valid Date");
+    }
+    return value;
+  };
+}
+function managedVersion(defaultValue) {
+  const version = createSchema(TypeName.int, { checks: [] });
+  return readonly(defaultTo(version, defaultValue));
+}
+function findDefault(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.default) {
+      return { present: true, value: current.def.defaultValue };
+    }
+    if (current.type === TypeName.lazy) {
+      current = current.def.getter();
+      continue;
+    }
+    if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.readonly || current.type === TypeName.brand || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
+      current = current.def.innerType;
+      continue;
+    }
+    return { present: false };
+  }
+}
+
+// ../../packages/jit/src/classes/overwrite.ts
+var OVERWRITE = /* @__PURE__ */ Symbol("jit.class.overwrite");
+function overwrite(value) {
+  return Object.freeze({
+    [OVERWRITE]: true,
+    value
+  });
+}
+function isOverwriteDescriptor(value) {
+  return typeof value === "object" && value !== null && value[OVERWRITE] === true;
+}
+
+// ../../packages/jit/src/compiler/assertion.ts
+function resolveAssertionDescriptor(input) {
+  const fields = conditionFields(input.condition, /* @__PURE__ */ new Set());
+  const field = fields.size === 1 ? [...fields][0] : void 0;
+  const rule = input.rule ?? field;
+  return Object.freeze({
+    condition: input.condition,
+    bindings: Object.freeze([...input.bindings]),
+    rule,
+    // A domain code is the caller's vocabulary; without one the issue says
+    // only that this was an application rule rather than a schema shape.
+    code: input.code ?? "custom",
+    priority: input.priority ?? 900,
+    message: input.message ?? (rule === void 0 ? "a domain assertion does not hold" : `the assertion on ${JSON.stringify(rule)} does not hold`),
+    field
+  });
+}
+function emitAssertionSource(descriptors, maxIssues) {
+  const writer = new CodeWriter();
+  writer.line("function __assert(value) {");
+  writer.indent(() => {
+    writer.line("let issues;");
+    writer.line("let errorIndex = -1;");
+    writer.line("let errorPriority = -1;");
+    descriptors.forEach((descriptor, index2) => {
+      const test = emitQueryConditionSource(descriptor.condition, { fieldBase: "value", paramBase: "value" });
+      writer.line(`if (!(${test})) {`);
+      writer.indent(() => {
+        writer.line(`const failure = __fail${index2}(value);`);
+        writer.line(
+          `if (failure !== undefined && ${descriptor.priority} > errorPriority) { errorIndex = ${index2}; errorPriority = ${descriptor.priority}; }`
+        );
+        writer.line(`(issues ??= [])[issues.length] = __issue${index2};`);
+        if (maxIssues !== void 0) writer.line(`if (issues.length === ${maxIssues}) return { issues, errorIndex };`);
+      });
+      writer.line("}");
+    });
+    writer.line("return issues === undefined ? undefined : { issues, errorIndex };");
+  });
+  writer.line("}");
+  return writer.toString();
+}
+function assertionIssues(descriptors) {
+  return descriptors.map(
+    (descriptor) => Object.freeze({
+      path: descriptor.field === void 0 ? [] : [descriptor.field],
+      code: descriptor.code,
+      expected: descriptor.rule ?? GENERIC_RULE,
+      message: descriptor.message
+    })
+  );
+}
+function assertionFailures(descriptors, errors) {
+  return descriptors.map((_, index2) => {
+    const custom2 = errors[index2];
+    if (custom2 === void 0) return () => false;
+    return () => true;
+  });
+}
+function assertionError(issues) {
+  const first = issues[0];
+  const rule = first?.expected === GENERIC_RULE ? void 0 : first?.expected;
+  return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", {
+    ...rule === void 0 ? {} : { rule },
+    ...first?.path[0] === void 0 ? {} : { field: String(first.path[0]) },
+    issues
+  });
+}
+var GENERIC_RULE = "a domain invariant";
+function conditionFields(condition, into) {
+  if (condition.kind === "logical") {
+    conditionFields(condition.left, into);
+    conditionFields(condition.right, into);
+    return into;
+  }
+  if (condition.kind === "not") return conditionFields(condition.inner, into);
+  if (condition.left.kind === "field") into.add(condition.left.key);
+  if (condition.right.kind === "field") into.add(condition.right.key);
+  return into;
 }
 
 // ../../packages/jit/src/compiler/change-layout.ts
@@ -23790,6 +24272,7 @@ __export(factories_exports, {
   object: () => object,
   ops: () => ops,
   optional: () => optional2,
+  overwrite: () => overwrite,
   pipe: () => pipe2,
   process: () => process,
   project: () => project,
@@ -23933,82 +24416,6 @@ function builder(schema, form) {
 // ../../packages/jit/src/factories/canonical.ts
 function canonical(schema) {
   return compileCanonical(unwrapSchema(schema));
-}
-
-// ../../packages/jit/src/compiler/assertion.ts
-function resolveAssertionDescriptor(input) {
-  const fields = conditionFields(input.condition, /* @__PURE__ */ new Set());
-  const field = fields.size === 1 ? [...fields][0] : void 0;
-  const rule = input.rule ?? field;
-  return Object.freeze({
-    condition: input.condition,
-    bindings: Object.freeze([...input.bindings]),
-    rule,
-    // A domain code is the caller's vocabulary; without one the issue says
-    // only that this was an application rule rather than a schema shape.
-    code: input.code ?? "custom",
-    message: input.message ?? (rule === void 0 ? "a domain assertion does not hold" : `the assertion on ${JSON.stringify(rule)} does not hold`),
-    field
-  });
-}
-function emitAssertionSource(descriptors, maxIssues) {
-  const writer = new CodeWriter();
-  writer.line("function __assert(value) {");
-  writer.indent(() => {
-    writer.line("let issues;");
-    descriptors.forEach((descriptor, index2) => {
-      const test = emitQueryConditionSource(descriptor.condition, { fieldBase: "value", paramBase: "value" });
-      writer.line(`if (!(${test})) {`);
-      writer.indent(() => {
-        writer.line(`const failure = __fail${index2}(value);`);
-        writer.line("if (failure !== undefined) return { error: failure };");
-        writer.line(`(issues ??= [])[issues.length] = __issue${index2};`);
-        if (maxIssues !== void 0) writer.line(`if (issues.length === ${maxIssues}) return { issues };`);
-      });
-      writer.line("}");
-    });
-    writer.line("return issues === undefined ? undefined : { issues };");
-  });
-  writer.line("}");
-  return writer.toString();
-}
-function assertionIssues(descriptors) {
-  return descriptors.map(
-    (descriptor) => Object.freeze({
-      path: descriptor.field === void 0 ? [] : [descriptor.field],
-      code: descriptor.code,
-      expected: descriptor.rule ?? GENERIC_RULE,
-      message: descriptor.message
-    })
-  );
-}
-function assertionFailures(descriptors, errors) {
-  return descriptors.map((descriptor, index2) => {
-    const custom2 = errors[index2];
-    if (custom2 === void 0) return () => void 0;
-    return (value) => custom2(value, descriptor);
-  });
-}
-function assertionError(issues) {
-  const first = issues[0];
-  const rule = first?.expected === GENERIC_RULE ? void 0 : first?.expected;
-  return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", {
-    ...rule === void 0 ? {} : { rule },
-    ...first?.path[0] === void 0 ? {} : { field: String(first.path[0]) },
-    issues
-  });
-}
-var GENERIC_RULE = "a domain invariant";
-function conditionFields(condition, into) {
-  if (condition.kind === "logical") {
-    conditionFields(condition.left, into);
-    conditionFields(condition.right, into);
-    return into;
-  }
-  if (condition.kind === "not") return conditionFields(condition.inner, into);
-  if (condition.left.kind === "field") into.add(condition.left.key);
-  if (condition.right.kind === "field") into.add(condition.right.key);
-  return into;
 }
 
 // ../../packages/jit/src/compiler/codec.ts
@@ -25021,7 +25428,6 @@ function validateObjectKeys3(schema, keys, compilerName) {
 // ../../packages/jit/src/factories/class.ts
 var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
 var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
-var AGGREGATE_POLICY_TARGET = /* @__PURE__ */ Symbol("jit.ddd.aggregate-policy-target");
 function createPolicyState() {
   return {
     mode: "throw",
@@ -25031,9 +25437,12 @@ function createPolicyState() {
     configured: false,
     validationConfigured: false,
     maxIssues: void 0,
+    errorPriority: 1e3,
+    errorPriorityExplicit: false,
     assertions: [],
     assertionErrors: [],
-    assert: void 0
+    assert: void 0,
+    nestedErrors: []
   };
 }
 function compileAssertions(policy) {
@@ -25057,7 +25466,15 @@ return __assert;`
   policy.assert = (value) => {
     const outcome = guard(value);
     if (outcome === void 0) return void 0;
-    return outcome.error ?? assertionError(outcome.issues ?? []);
+    const selectedPriority = outcome.errorIndex === void 0 || outcome.errorIndex < 0 ? -1 : policy.assertions[outcome.errorIndex]?.priority ?? -1;
+    if (policy.error !== void 0 && policy.errorPriority >= selectedPriority) {
+      return policy.error(outcome.issues);
+    }
+    if (outcome.errorIndex !== void 0 && outcome.errorIndex >= 0) {
+      const factory = policy.assertionErrors[outcome.errorIndex];
+      if (factory !== void 0) return factory(value, policy.assertions[outcome.errorIndex]);
+    }
+    return assertionError(outcome.issues ?? []);
   };
 }
 function policySuccess(policy, value) {
@@ -25071,7 +25488,57 @@ function policyFailure(policy, error) {
   throw error;
 }
 function policyError(policy, issues) {
-  return policy.error === void 0 ? new JITValidationError(issues) : policy.error(issues);
+  let selected = policy.error === void 0 ? void 0 : { priority: policy.errorPriority, depth: 0, order: -1, factory: policy.error };
+  for (const candidate of policy.nestedErrors) {
+    if (!hasIssueAtPath(issues, candidate.path)) continue;
+    if (selected === void 0 || candidate.priority > selected.priority || candidate.priority === selected.priority && candidate.depth < selected.depth || candidate.priority === selected.priority && candidate.depth === selected.depth && candidate.order < selected.order) {
+      selected = candidate;
+    }
+  }
+  return selected === void 0 ? new JITValidationError(issues) : selected.factory(issues);
+}
+function hasIssueAtPath(issues, prefix) {
+  return issues.some((issue) => prefix.every((part, index2) => issue.path[index2] === part));
+}
+function collectNestedErrorCandidates(schema) {
+  const candidates = [];
+  const active = /* @__PURE__ */ new Set();
+  let order = 0;
+  const walk = (current, path, depth) => {
+    if (active.has(current)) return;
+    active.add(current);
+    if (current.type === TypeName.runtimeType) {
+      const nested = getArtifact(current.def.materialize);
+      if (nested?.kind === "class" && typeof nested.policy?.error === "function") {
+        candidates.push({
+          priority: nested.policy.errorPriorityExplicit ? nested.policy.errorPriority ?? 800 : 800,
+          depth,
+          order: order++,
+          path,
+          factory: nested.policy.error
+        });
+      }
+    }
+    if (current.type === TypeName.object) {
+      for (const [key, child] of Object.entries(current.def.props))
+        walk(child, [...path, key], depth + 1);
+      active.delete(current);
+      return;
+    }
+    if (current.type === TypeName.array || current.type === TypeName.set) {
+      walk(
+        current.def.element,
+        path,
+        depth + 1
+      );
+      active.delete(current);
+      return;
+    }
+    for (const child of schemaChildren(current)) walk(child, path, depth + 1);
+    active.delete(current);
+  };
+  walk(schema, [], 0);
+  return candidates;
 }
 function policyArtifact(policy) {
   if (!policy.configured) return {};
@@ -25082,7 +25549,18 @@ function policyArtifact(policy) {
       create: policy.create,
       hydrate: policy.hydrate,
       ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues },
+      ...policy.error === void 0 ? {} : { errorPriority: policy.errorPriority },
+      ...policy.error === void 0 ? {} : { errorPriorityExplicit: policy.errorPriorityExplicit },
       ...policy.error === void 0 ? {} : { error: policy.error },
+      ...policy.nestedErrors.length === 0 ? {} : {
+        nestedErrors: policy.nestedErrors.map((candidate) => ({
+          priority: candidate.priority,
+          depth: candidate.depth,
+          order: candidate.order,
+          path: candidate.path,
+          error: candidate.factory
+        }))
+      },
       ...policy.assertions.length === 0 ? {} : {
         assertions: {
           source: emitAssertionSource(policy.assertions, policy.maxIssues),
@@ -25093,6 +25571,7 @@ function policyArtifact(policy) {
             field: descriptor.field,
             code: descriptor.code,
             message: descriptor.message,
+            priority: descriptor.priority,
             ...policy.assertionErrors[index2] === void 0 ? {} : { error: policy.assertionErrors[index2] }
           }))
         }
@@ -25107,6 +25586,9 @@ function applyValidationPolicy(policy, options) {
   if (options?.maxIssues !== void 0 && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
     throw new RangeError("maxIssues must be a positive safe integer");
   }
+  if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
+    throw new RangeError("priority must be a finite number");
+  }
   policy.configured = true;
   policy.validationConfigured = true;
   if (options?.result !== void 0) policy.mode = options.result;
@@ -25114,6 +25596,10 @@ function applyValidationPolicy(policy, options) {
   if (options?.create !== void 0) policy.create = options.create;
   if (options?.hydrate !== void 0) policy.hydrate = options.hydrate;
   if (options?.maxIssues !== void 0) policy.maxIssues = options.maxIssues;
+  if (options?.priority !== void 0) {
+    policy.errorPriority = options.priority;
+    policy.errorPriorityExplicit = true;
+  }
   if (policy.assertions.length > 0) compileAssertions(policy);
 }
 function applyAssertion(policy, schema, predicate, options) {
@@ -25123,13 +25609,17 @@ function applyAssertion(policy, schema, predicate, options) {
   }
   const builder2 = createConditionBuilder(policy.assertions.reduce((total, item) => total + item.bindings.length, 0));
   const condition = predicate(builder2.builder);
+  if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
+    throw new RangeError("priority must be a finite number");
+  }
   policy.assertions.push(
     resolveAssertionDescriptor({
       condition,
       bindings: builder2.bindings,
       ...options?.rule === void 0 ? {} : { rule: options.rule },
       ...options?.code === void 0 ? {} : { code: options.code },
-      ...options?.message === void 0 ? {} : { message: options.message }
+      ...options?.message === void 0 ? {} : { message: options.message },
+      ...options?.priority === void 0 ? {} : { priority: options.priority }
     })
   );
   policy.assertionErrors.push(options?.error);
@@ -25165,84 +25655,123 @@ function classFactory(schema) {
 function abstractClass(schema) {
   return createRuntimeClass(unwrapSchema(schema), true, false, false, "constructor");
 }
-function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, construction, accessors) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "JIT.class() requires an object schema");
+function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, construction, accessors, seed) {
+  const baseState = initialEffectiveSchema(schema);
+  const members = seed?.members?.clone() ?? baseState.members;
+  if (aggregate && !members.has("update")) addMember(members, "update", "preset", "ddd.aggregateRoot", "method");
+  if (aggregate) {
+    addMember(members, "raise", "preset", "ddd.aggregateRoot", "method");
+    addMember(members, "peekEvents", "preset", "ddd.aggregateRoot", "method");
+    addMember(members, "pullEvents", "preset", "ddd.aggregateRoot", "method");
+    addMember(members, "commit", "preset", "ddd.aggregateRoot", "method");
   }
-  const objectSchema = resolved;
+  const state3 = {
+    declaredSchema: seed?.declaredSchema ?? schema,
+    schema,
+    isAbstract,
+    freezeInstances,
+    aggregate,
+    construction,
+    constructionConfigured: seed?.constructionConfigured ?? false,
+    // Factory-first presets still allow one explicit `.construction(...)` or
+    // `.factories(...)` decision; the default mode is not itself a lock.
+    factoriesConfigured: seed?.factoriesConfigured ?? false,
+    factoryNames: seed?.factoryNames ?? (construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }),
+    accessors,
+    capabilities: Object.freeze([...seed?.capabilities ?? []]),
+    methods: Object.freeze([...seed?.methods ?? []]),
+    lifecycle: seed?.lifecycle ?? baseState.lifecycle,
+    managedFields: Object.freeze([...seed?.managedFields ?? baseState.managedFields]),
+    members,
+    policy: seed?.policy ?? createPolicyState()
+  };
+  const policy = {
+    ...state3.policy,
+    nestedErrors: collectNestedErrorCandidates(state3.schema)
+  };
+  const objectSchema = resolveEffectiveObjectSchema(state3.schema);
   const properties = Object.keys(objectSchema.def.props);
-  const parse3 = compileValidator(schema).parse;
-  const hydrateState = compileHydrator(schema);
-  const constructionState = { mode: construction };
-  const policy = createPolicyState();
+  const parse3 = compileValidator(state3.schema).parse;
+  const hydrateState = compileHydrator(state3.schema);
   let safeParse;
   let safeHydrate;
   const policySafeParse = () => {
-    safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
+    safeParse ??= compileValidatorSelection(state3.schema, ["safeParse"], {
       ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
     }).safeParse;
     return safeParse;
   };
   const policySafeHydrate = () => {
-    safeHydrate ??= compileSafeHydrator(schema, {
+    safeHydrate ??= compileSafeHydrator(state3.schema, {
       ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
     });
     return safeHydrate;
   };
-  const registerClass = () => registerArtifact(classTarget, {
-    kind: "class",
-    schema,
-    abstract: isAbstract,
-    frozen: freezeInstances,
-    aggregate,
-    construction: constructionState.mode,
-    representation: "object",
-    ...policyArtifact(policy),
-    capabilities: installedCapabilities,
-    ...installedMethods.length === 0 ? {} : { methods: installedMethods },
-    factories: factoryNames,
-    accessors
-  });
+  const constructionState = { mode: state3.construction };
+  const managedStorage = resolveManagedStorage(properties, state3.accessors, state3.managedFields);
   const classTarget = emitConstructor(
     properties,
-    freezeInstances,
-    aggregate,
+    state3.freezeInstances,
+    state3.aggregate,
     parse3,
     constructionState,
-    accessors
+    state3.accessors,
+    managedStorage
   );
-  const installedCapabilities = [];
-  const installedCapabilityValues = [];
-  const installedMethods = [];
-  const installedMethodNames = /* @__PURE__ */ new Set();
-  const schemaNames = new Set(properties);
-  let constructionConfigured = false;
-  let factoriesConfigured = false;
-  let factoryNames = construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false };
+  for (const capabilityValue of state3.capabilities) capabilityValue.install(classTarget, state3.schema);
+  installLifecycleMethods(classTarget, state3, managedStorage);
+  for (const method of state3.methods) installMethodDefinition(classTarget, method);
+  function registerClass() {
+    const mutation = lifecycleArtifact(state3.lifecycle);
+    registerArtifact(classTarget, {
+      kind: "class",
+      declaredSchema: state3.declaredSchema,
+      schema: state3.schema,
+      abstract: state3.isAbstract,
+      frozen: state3.freezeInstances,
+      aggregate: state3.aggregate,
+      construction: state3.construction,
+      representation: "object",
+      capabilities: state3.capabilities.map((capability2) => capability2.kind),
+      managedFields: state3.managedFields,
+      lifecycle: state3.lifecycle,
+      resolvedMembers: state3.members.entries(),
+      ...mutation === void 0 ? {} : { mutation },
+      ...policyArtifact(policy),
+      ...state3.methods.length === 0 ? {} : { methods: state3.methods },
+      factories: state3.factoryNames,
+      accessors: state3.accessors
+    });
+  }
   function create(input) {
-    if (isAbstract && this === classTarget) {
+    if (state3.isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
     }
     const construct2 = this;
-    if (!policy.configured || !policy.create) return new construct2(input, INTERNAL_CONSTRUCT);
+    if (!policy.configured || !policy.create) {
+      if (state3.lifecycle.timestamps === void 0 && state3.lifecycle.softDelete === void 0 && state3.lifecycle.versioned === void 0) {
+        return new construct2(input, INTERNAL_CONSTRUCT);
+      }
+      return new construct2(initializeCreatedLifecycle(parse3(input), input, state3.lifecycle), INTERNAL_CONSTRUCT, true);
+    }
     const parsed = policySafeParse()(input);
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    const created = initializeCreatedLifecycle(parsed.data, input, state3.lifecycle);
     if (policy.assert !== void 0) {
-      const failure = policy.assert(parsed.data);
+      const failure = policy.assert(created);
       if (failure !== void 0) return policyFailure(policy, failure);
     }
-    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
+    return policySuccess(policy, new construct2(created, INTERNAL_CONSTRUCT, true));
   }
-  function hydrate(state3) {
-    if (isAbstract && this === classTarget) {
+  function hydrate(input) {
+    if (state3.isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
     }
     const construct2 = this;
     if (!policy.configured || !policy.hydrate) {
-      return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
+      return new construct2(hydrateState(input), INTERNAL_CONSTRUCT, true);
     }
-    const parsed = policySafeHydrate()(state3);
+    const parsed = policySafeHydrate()(input);
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
     if (policy.assert !== void 0) {
       const failure = policy.assert(parsed.data);
@@ -25255,7 +25784,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     schema: {
       enumerable: true,
       value: createSchema(TypeName.runtimeType, {
-        innerType: schema,
+        innerType: state3.schema,
         materialize: classTarget,
         representation: "object",
         identifier: false
@@ -25263,61 +25792,34 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     },
     extends: {
       enumerable: false,
-      value: (...extensions) => {
-        for (const extension of extensions) {
-          if (isClassCapability(extension)) {
-            if (installedCapabilities.includes(extension.kind)) {
-              throw new JITError(
-                "INVALID_OPERATION",
-                `Class capability ${JSON.stringify(extension.kind)} is already installed`
-              );
-            }
-            const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
-            extension.install(classTarget, schema);
-            for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
-              if (!before.has(name)) installedMethodNames.add(name);
-            }
-            installedCapabilities.push(extension.kind);
-            installedCapabilityValues.push(extension);
-            continue;
-          }
-          installedMethods.push(...installMethods(classTarget, extension, schemaNames, installedMethodNames));
-        }
-        registerClass();
-        const aggregatePolicy = classTarget[AGGREGATE_POLICY_TARGET];
-        aggregatePolicy?.refreshArtifact();
-        return classTarget;
-      }
+      value: (...extensions) => materializeClassState(resolveClassExtensions(state3, extensions))
     },
     validate: {
       enumerable: false,
       value: (options) => {
-        applyValidationPolicy(policy, options);
-        registerClass();
-        return classTarget;
+        applyValidationPolicy(state3.policy, options);
+        return materializeClassState(state3);
       }
     },
     assert: {
       enumerable: false,
       value: (predicate, options) => {
-        applyAssertion(policy, schema, predicate, options);
-        registerClass();
-        return classTarget;
+        applyAssertion(state3.policy, state3.schema, predicate, options);
+        return materializeClassState(state3);
       }
     },
     factories: {
-      configurable: true,
       enumerable: false,
       value: (options) => {
-        if (factoriesConfigured) {
+        if (state3.factoriesConfigured) {
           throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
         }
-        if (constructionConfigured) {
+        if (state3.constructionConfigured) {
           throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
         }
         const next = {
-          create: options.create === void 0 ? factoryNames.create : options.create,
-          hydrate: options.hydrate === void 0 ? factoryNames.hydrate : options.hydrate
+          create: options.create === void 0 ? state3.factoryNames.create : options.create,
+          hydrate: options.hydrate === void 0 ? state3.factoryNames.hydrate : options.hydrate
         };
         if (next.create === false && next.hydrate === false) {
           throw new JITError(
@@ -25325,112 +25827,454 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
             "Factory construction requires at least one create or hydrate factory"
           );
         }
-        constructionState.mode = "factory";
-        factoriesConfigured = true;
-        installFactory(classTarget, factoryNames.create, next.create, create);
-        installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
-        factoryNames = next;
-        registerArtifact(classTarget, {
-          kind: "class",
-          schema,
-          abstract: isAbstract,
-          frozen: freezeInstances,
-          aggregate,
-          construction: constructionState.mode,
-          representation: "object",
-          ...policyArtifact(policy),
-          ...installedMethods.length === 0 ? {} : { methods: installedMethods },
-          capabilities: installedCapabilities,
-          factories: factoryNames,
-          accessors
+        return materializeClassState({
+          ...state3,
+          construction: "factory",
+          factoriesConfigured: true,
+          factoryNames: next
         });
-        return classTarget;
       }
     },
     construction: {
       enumerable: false,
       value: (mode) => {
-        if (constructionConfigured) {
+        if (state3.constructionConfigured) {
           throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
         }
-        if (factoriesConfigured) {
+        if (state3.factoriesConfigured) {
           throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
         }
         if (mode !== "constructor" && mode !== "factory") {
           throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
         }
-        if (isAbstract && mode === "constructor") {
+        if (state3.isAbstract && mode === "constructor") {
           throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
         }
-        if (policy.configured) {
+        if (state3.policy.configured) {
           throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
         }
-        constructionConfigured = true;
-        constructionState.mode = mode;
-        if (mode === "factory") {
-          const next = { create: "create", hydrate: "hydrate" };
-          installFactory(classTarget, factoryNames.create, next.create, create);
-          installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
-          factoryNames = next;
-        } else {
-          installFactory(classTarget, factoryNames.create, false, create);
-          installFactory(classTarget, factoryNames.hydrate, false, hydrate);
-          factoryNames = { create: false, hydrate: false };
-        }
-        registerClass();
-        return classTarget;
+        return materializeClassState({
+          ...state3,
+          construction: mode,
+          constructionConfigured: true,
+          factoryNames: mode === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }
+        });
       }
     },
     accessors: {
       enumerable: false,
       value: (options) => {
-        if (accessors !== void 0) {
+        if (state3.accessors !== void 0) {
           throw new JITError("INVALID_OPERATION", "Accessors are already configured for this Runtime Class");
         }
-        const next = createRuntimeClass(
-          schema,
-          isAbstract,
-          freezeInstances,
-          aggregate,
-          constructionState.mode,
-          resolveAccessors(properties, options)
-        );
-        next.extends(...installedCapabilityValues);
-        return constructionState.mode === "factory" ? next.factories(factoryNames) : next;
+        return materializeClassState({
+          ...state3,
+          accessors: resolveAccessors(properties, options)
+        });
       }
     },
     identity: {
       enumerable: false,
       value: (key) => {
-        if (installedCapabilities.some((capability2) => capability2.startsWith("identity:"))) {
+        if (state3.capabilities.some((capability2) => capability2.kind.startsWith("identity:"))) {
           throw new JITError("INVALID_OPERATION", "Identity is already configured for this Runtime Class");
         }
-        const identity = classType.identity(key);
-        identity.install(classTarget, schema);
-        installedCapabilities.push(identity.kind);
-        installedCapabilityValues.push(identity);
-        registerArtifact(classTarget, {
-          kind: "class",
-          schema,
-          abstract: isAbstract,
-          frozen: freezeInstances,
-          aggregate,
-          construction: constructionState.mode,
-          representation: "object",
-          ...policyArtifact(policy),
-          ...installedMethods.length === 0 ? {} : { methods: installedMethods },
-          capabilities: installedCapabilities,
-          factories: factoryNames,
-          accessors
-        });
-        return classTarget;
+        return materializeClassState(resolveClassExtensions(state3, [classType.identity(key)]));
       }
     }
   });
-  installFactory(classTarget, false, factoryNames.create, create);
-  installFactory(classTarget, false, factoryNames.hydrate, hydrate);
+  installFactory(classTarget, false, state3.factoryNames.create, create);
+  installFactory(classTarget, false, state3.factoryNames.hydrate, hydrate);
   registerClass();
   return classTarget;
+}
+function materializeClassState(state3) {
+  return createRuntimeClass(
+    state3.schema,
+    state3.isAbstract,
+    state3.freezeInstances,
+    state3.aggregate,
+    state3.construction,
+    state3.accessors,
+    state3
+  );
+}
+function resolveClassExtensions(current, extensions) {
+  let next = {
+    ...current,
+    capabilities: [...current.capabilities],
+    methods: [...current.methods],
+    managedFields: [...current.managedFields],
+    members: current.members.clone()
+  };
+  for (const extension of extensions) {
+    if (isClassCapability(extension)) {
+      if (next.capabilities.some((capability2) => capability2.kind === extension.kind)) {
+        throw new JITError(
+          "INVALID_OPERATION",
+          `Class capability ${JSON.stringify(extension.kind)} is already installed`
+        );
+      }
+      for (const name of capabilityMemberNames(extension)) assertNewMember(next.members, name, extension.kind);
+      if (extension.kind === "ddd.timestamps" || extension.kind === "ddd.softDelete" || extension.kind === "ddd.versioned") {
+        try {
+          const resolved = applyDddCapability(
+            {
+              schema: next.schema,
+              lifecycle: next.lifecycle,
+              managedFields: next.managedFields,
+              members: next.members
+            },
+            extension.kind,
+            capabilityOptions(extension)
+          );
+          next = {
+            ...next,
+            schema: resolved.schema,
+            lifecycle: resolved.lifecycle,
+            managedFields: resolved.managedFields,
+            members: resolved.members,
+            capabilities: [...next.capabilities, extension]
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", `${extension.kind} declaration conflict: ${message}`);
+        }
+      } else {
+        const names = capabilityMemberNames(extension);
+        for (const name of names) assertNewMember(next.members, name, extension.kind);
+        const members2 = next.members.clone();
+        for (const name of names) addMember(members2, name, "capability", extension.kind, "method");
+        next = { ...next, members: members2, capabilities: [...next.capabilities, extension] };
+      }
+      continue;
+    }
+    const members = next.members.clone();
+    const methods = [...next.methods];
+    let schema = next.schema;
+    for (const name of Object.getOwnPropertyNames(extension)) {
+      const descriptor = Object.getOwnPropertyDescriptor(extension, name);
+      if (descriptor === void 0) continue;
+      const value = descriptor.value;
+      if (isOverwriteDescriptor(value)) {
+        const existing = members.get(name);
+        if (existing === void 0) {
+          throw new JITError(
+            "CLASS_OVERWRITE_TARGET_NOT_FOUND",
+            `Class member ${JSON.stringify(name)} does not exist. JIT.overwrite() can only replace an existing member.`
+          );
+        }
+        if (isSchemaInputValue(value.value)) {
+          if (existing.kind !== "field") {
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
+          }
+          schema = replaceSchemaField(schema, name, unwrapSchema(value.value));
+          schema = reapplyManagedAfterOverwrite(schema, next.managedFields);
+          const effectiveField = resolveEffectiveObjectSchema(schema).def.props[name];
+          members.replace(name, {
+            ...existing,
+            source: "overwrite",
+            schema: effectiveField
+          });
+        } else {
+          if (existing.kind === "field") {
+            throw new JITError(
+              "CLASS_MEMBER_ALREADY_EXISTS",
+              `Member ${JSON.stringify(name)} is a schema field; use a schema value with JIT.overwrite(...)`
+            );
+          }
+          const replacement = methodDefinitionFromValue(name, value.value);
+          replaceMethod(methods, name, replacement);
+          members.replace(name, { ...existing, source: "overwrite", descriptor: { value: replacement.source } });
+        }
+        continue;
+      }
+      if (members.has(name) || RESERVED_EXTENSION_NAMES.has(name)) {
+        throw new JITError(
+          "CLASS_MEMBER_ALREADY_EXISTS",
+          `Class member ${JSON.stringify(name)} would shadow an existing member. Use ${JSON.stringify(`${name}: JIT.overwrite(...)`)} to replace it explicitly.`
+        );
+      }
+      const method = methodDefinitionFromDescriptor(name, descriptor);
+      methods.push(method);
+      addMember(
+        members,
+        name,
+        "extension",
+        "custom extension",
+        method.kind === "get" ? "getter" : method.kind === "set" ? "setter" : "method"
+      );
+    }
+    validateManagedFields(schema, next.managedFields);
+    next = { ...next, schema, methods, members };
+  }
+  validateManagedFields(next.schema, next.managedFields);
+  return next;
+}
+function capabilityOptions(capability2) {
+  return capability2.__options;
+}
+function capabilityMemberNames(capability2) {
+  return capability2.__memberNames ?? [];
+}
+function assertNewMember(members, name, owner) {
+  const existing = members.get(name);
+  if (existing !== void 0) {
+    if (existing.kind === "field") {
+      throw new JITError(
+        "CLASS_MEMBER_ALREADY_EXISTS",
+        `Member ${JSON.stringify(name)} is a schema field and cannot be installed by ${owner}`
+      );
+    }
+    throw new JITError(
+      "CLASS_MEMBER_ALREADY_EXISTS",
+      `Member ${JSON.stringify(name)} already exists. Existing source conflicts with ${owner}; use JIT.overwrite(...) explicitly.`
+    );
+  }
+}
+function isSchemaInputValue(value) {
+  return typeof value === "object" && value !== null && "schema" in value && typeof value.schema === "object" || typeof value === "object" && value !== null && "type" in value && "def" in value;
+}
+function replaceSchemaField(schema, name, replacement) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  const props = { ...object2.def.props, [name]: replacement };
+  return createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+}
+function reapplyManagedAfterOverwrite(schema, managedFields) {
+  try {
+    return reapplyManagedFields(schema, managedFields);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", message);
+  }
+}
+function methodDefinitionFromDescriptor(name, descriptor) {
+  if (descriptor.get !== void 0 || descriptor.set !== void 0) {
+    return {
+      name,
+      kind: descriptor.get === void 0 ? "set" : "get",
+      source: descriptor.get ?? descriptor.set
+    };
+  }
+  if (typeof descriptor.value !== "function") {
+    throw new JITError(
+      "INVALID_OPERATION",
+      `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
+    );
+  }
+  return { name, kind: "method", source: descriptor.value };
+}
+function methodDefinitionFromValue(name, value) {
+  if (typeof value !== "function") {
+    throw new JITError(
+      "INVALID_OPERATION",
+      `Overwrite ${JSON.stringify(name)} must provide a method function or schema`
+    );
+  }
+  return { name, kind: "method", source: value };
+}
+function replaceMethod(methods, name, replacement) {
+  const index2 = methods.findIndex((method) => method.name === name);
+  if (index2 === -1) methods.push(replacement);
+  else methods[index2] = replacement;
+}
+function installMethodDefinition(classTarget, method) {
+  const descriptor = method.kind === "method" ? { value: method.source, writable: false } : method.kind === "get" ? { get: method.source } : { set: method.source };
+  Object.defineProperty(classTarget.prototype, method.name, {
+    ...descriptor,
+    configurable: true,
+    enumerable: false
+  });
+}
+function lifecycleArtifact(lifecycle) {
+  const timestamps2 = lifecycle.timestamps;
+  const deletion = lifecycle.softDelete;
+  const versioned2 = lifecycle.versioned;
+  if (timestamps2 === void 0 && deletion === void 0 && versioned2 === void 0) return void 0;
+  return {
+    ...timestamps2?.touch === "manual" || timestamps2 === void 0 ? {} : { updatedAt: timestamps2.updatedAt },
+    ...timestamps2 === void 0 ? {} : { touchAt: timestamps2.updatedAt, touchMethod: timestamps2.touchMethod },
+    ...versioned2 === void 0 ? {} : { version: versioned2.field },
+    ...deletion === void 0 ? {} : {
+      deletedAt: deletion.field,
+      deleteMethod: deletion.deleteMethod,
+      restoreMethod: deletion.restoreMethod,
+      isDeletedMember: deletion.isDeletedMember
+    },
+    ...timestamps2?.clock === void 0 ? {} : { timestampClock: timestamps2.clock },
+    ...deletion?.clock === void 0 ? {} : { deletionClock: deletion.clock }
+  };
+}
+function installLifecycleMethods(classTarget, state3, managedStorage) {
+  const lifecycle = state3.lifecycle;
+  const timestamps2 = lifecycle.timestamps;
+  const deletion = lifecycle.softDelete;
+  const versioned2 = lifecycle.versioned;
+  const needsMutation = state3.aggregate || timestamps2 !== void 0 || deletion !== void 0 || versioned2 !== void 0;
+  const managedAccess = (field) => {
+    const storage = managedStorage.get(field);
+    return storage === void 0 ? `this[${JSON.stringify(field)}]` : `this[${storage.name}]`;
+  };
+  const managedWrite = (field, value) => {
+    const storage = managedStorage.get(field);
+    return storage === void 0 ? `Object.defineProperty(this, ${JSON.stringify(field)}, { value: ${value}, writable: false, enumerable: true, configurable: true });` : `${managedAccess(field)} = ${value};`;
+  };
+  const installLifecycleMethod = (name, clock, body) => {
+    const source = `return function() { ${body} };`;
+    const storageEntries = [...managedStorage.values()];
+    const storageNames = storageEntries.map((entry) => entry.name);
+    const storageValues = storageEntries.map((entry) => entry.value);
+    const method = globalThis.Function(
+      ...storageNames,
+      ...clock === void 0 ? [] : ["__clock"],
+      source
+    )(...storageValues, ...clock === void 0 ? [] : [() => checkedClock(clock)]);
+    definePrototype(classTarget.prototype, name, method, true);
+  };
+  if (needsMutation) {
+    const object2 = resolveEffectiveObjectSchema(state3.schema);
+    const fields = Object.keys(object2.def.props);
+    const readonlyFields = fields.filter((field) => resolveWrappers(object2.def.props[field]).readonly);
+    const mutableFields = fields.filter((field) => !readonlyFields.includes(field));
+    const updates = /* @__PURE__ */ new Map();
+    const names = [];
+    const values = [];
+    for (const field of mutableFields) {
+      if (state3.managedFields.some((managed) => managed.field === field)) continue;
+      const fieldSchema = object2.def.props[field];
+      if (isPrimitiveLikeSchema(resolveWrappers(fieldSchema).base)) updates.set(field, null);
+      else {
+        const name = `__update${names.length}`;
+        names.push(name);
+        values.push(compileUpdate(fieldSchema));
+        updates.set(field, name);
+      }
+    }
+    const mutation = buildAggregateMutationPlan({
+      fields: mutableFields,
+      readonlyFields: [...readonlyFields, ...state3.managedFields.map((managed) => managed.field)],
+      ...timestamps2?.touch !== "manual" && timestamps2 !== void 0 ? { updatedAt: timestamps2.updatedAt } : {},
+      ...versioned2 === void 0 ? {} : { version: versioned2.field },
+      managedFields: state3.managedFields.map((managed) => managed.field),
+      fieldAccess: new Map(
+        [...managedStorage.entries()].map(([field, storage]) => [field, `this[${storage.name}]`])
+      )
+    });
+    const clock = timestamps2?.clock;
+    const clockNames = mutation.updatedAt === void 0 || clock === void 0 ? [] : ["__clock"];
+    const clockValues = clockNames.length === 0 ? [] : [() => checkedClock(clock)];
+    const storageEntries = [...managedStorage.values()];
+    const storageNames = storageEntries.map((entry) => entry.name);
+    const storageValues = storageEntries.map((entry) => entry.value);
+    const update2 = globalThis.Function(
+      ...names,
+      ...storageNames,
+      ...clockNames,
+      `return function update(patch) { ${emitAggregateMutationBody(mutation, updates, clockNames.length === 0 ? "new Date()" : "__clock()")} };`
+    )(...values, ...storageValues, ...clockValues);
+    definePrototype(classTarget.prototype, "update", update2, true);
+  }
+  if (timestamps2 !== void 0) {
+    const clock = timestamps2.clock;
+    const field = timestamps2.updatedAt;
+    const version = versioned2?.field;
+    installLifecycleMethod(
+      timestamps2.touchMethod,
+      clock,
+      `const now = ${clock === void 0 ? "new Date()" : "__clock()"}; ${managedWrite(field, "now")} ${version === void 0 ? "" : managedWrite(version, `${managedAccess(version)} + 1`)}`
+    );
+  }
+  if (deletion !== void 0) {
+    const timestampField = timestamps2?.touch === "manual" || timestamps2 === void 0 ? void 0 : timestamps2.updatedAt;
+    const clock = deletion.clock ?? timestamps2?.clock;
+    installLifecycleMethod(
+      deletion.deleteMethod,
+      clock,
+      `if (${managedAccess(deletion.field)} !== null) return; const now = ${clock === void 0 ? "new Date()" : "__clock()"}; ${managedWrite(deletion.field, "now")} ${timestampField === void 0 ? "" : managedWrite(timestampField, "now")} ${versioned2 === void 0 ? "" : managedWrite(versioned2.field, `${managedAccess(versioned2.field)} + 1`)}`
+    );
+    installLifecycleMethod(
+      deletion.restoreMethod,
+      timestampField === void 0 ? void 0 : clock,
+      `if (${managedAccess(deletion.field)} === null) return; ${managedWrite(deletion.field, "null")} ${timestampField === void 0 ? "" : managedWrite(timestampField, clock === void 0 ? "new Date()" : "__clock()")} ${versioned2 === void 0 ? "" : managedWrite(versioned2.field, `${managedAccess(versioned2.field)} + 1`)}`
+    );
+    const deletionStorage = managedStorage.get(deletion.field);
+    Object.defineProperty(classTarget.prototype, deletion.isDeletedMember, {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return deletionStorage === void 0 ? this[deletion.field] !== null : this[deletionStorage.value] !== null;
+      }
+    });
+  }
+  if (state3.aggregate) {
+    definePrototype(
+      classTarget.prototype,
+      "raise",
+      function raise(event) {
+        this.__jitEvents[this.__jitEvents.length] = event;
+      },
+      true
+    );
+    definePrototype(
+      classTarget.prototype,
+      "peekEvents",
+      function peekEvents() {
+        return this.__jitEvents.slice();
+      },
+      true
+    );
+    definePrototype(
+      classTarget.prototype,
+      "pullEvents",
+      function pullEvents() {
+        const events = this.__jitEvents;
+        this.__jitEvents = [];
+        return events;
+      },
+      true
+    );
+    definePrototype(
+      classTarget.prototype,
+      "commit",
+      async function commit(publisher) {
+        const pending = this.__jitEvents;
+        for (let index2 = 0; index2 < pending.length; index2++) await publisher.publish(pending[index2]);
+        this.__jitEvents.splice(0, pending.length);
+      },
+      true
+    );
+  }
+}
+function checkedClock(clock) {
+  const value = clock();
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new JITError("INVALID_OPERATION", "A DDD clock must return a valid Date");
+  }
+  return value;
+}
+function initializeCreatedLifecycle(value, input, lifecycle) {
+  if (typeof value !== "object" || value === null) return value;
+  const result = value;
+  const supplied = typeof input === "object" && input !== null ? input : void 0;
+  const timestamps2 = lifecycle.timestamps;
+  if (timestamps2 !== void 0) {
+    if (supplied?.[timestamps2.createdAt] !== void 0) {
+      result[timestamps2.createdAt] = timestamps2.clock === void 0 ? /* @__PURE__ */ new Date() : checkedClock(timestamps2.clock);
+    }
+    result[timestamps2.updatedAt] = null;
+  }
+  if (lifecycle.softDelete !== void 0) result[lifecycle.softDelete.field] = null;
+  if (lifecycle.versioned !== void 0) result[lifecycle.versioned.field] = 0;
+  return result;
 }
 function installFactory(classTarget, previous, next, factory) {
   if (previous !== false && previous !== next) Reflect.deleteProperty(classTarget, previous);
@@ -25651,13 +26495,25 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
   register();
   return classTarget;
 }
-function emitConstructor(properties, freezeInstances, aggregate, parse3, construction, accessors) {
+function emitConstructor(properties, freezeInstances, aggregate, parse3, construction, accessors, managedStorage = /* @__PURE__ */ new Map()) {
   const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
   const slots = [];
   const definitions = [];
   let slotIndex = 0;
   const assignments = properties.map((property) => {
     const accessor = accessorByKey.get(property);
+    const managed = managedStorage.get(property);
+    if (managed !== void 0) {
+      if (accessor?.field === "private") {
+        if (accessor.get !== false)
+          definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this[${managed.name}]; }`);
+        if (accessor.set !== false)
+          definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this[${managed.name}] = value; }`);
+      } else {
+        definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
+      }
+      return `this[${managed.name}] = state${emitPropertyAccess("", property)};`;
+    }
     if (accessor?.field !== "private") {
       return `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};`;
     }
@@ -25668,14 +26524,30 @@ function emitConstructor(properties, freezeInstances, aggregate, parse3, constru
       definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
     return `this.${slot} = state${emitPropertyAccess("", property)};`;
   });
+  const managedAccessors = [...managedStorage.entries()].filter(([field]) => accessorByKey.get(field)?.field !== "private").map(
+    ([field]) => `Object.defineProperty(this, ${JSON.stringify(field)}, { get: Object.getOwnPropertyDescriptor(JITRuntimeClass.prototype, ${JSON.stringify(field)}).get, enumerable: true, configurable: false });`
+  ).join(" ");
   const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
-  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
+  const storageEntries = [...managedStorage.values()];
+  const storageNames = storageEntries.map((entry) => entry.name);
+  const storageValues = storageEntries.map((entry) => entry.value);
+  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${managedAccessors.length === 0 ? "" : ` ${managedAccessors}`}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
   return globalThis.Function(
+    ...storageNames,
     "__parse",
     "__construct",
     "__construction",
     source
-  )(parse3, INTERNAL_CONSTRUCT, construction);
+  )(...storageValues, parse3, INTERNAL_CONSTRUCT, construction);
+}
+function resolveManagedStorage(properties, _accessors, managedFields) {
+  const storage = /* @__PURE__ */ new Map();
+  for (let index2 = 0; index2 < managedFields.length; index2++) {
+    const field = managedFields[index2]?.field;
+    if (field === void 0 || !properties.includes(field)) continue;
+    storage.set(field, { name: `__managed${index2}`, value: /* @__PURE__ */ Symbol(`jit.${field}`) });
+  }
+  return storage;
 }
 function resolveAccessors(properties, options) {
   return properties.map((key) => {
@@ -25699,70 +26571,104 @@ function resolveAccessorMember(key, member) {
 var classType = Object.assign(classFactory, {
   abstract: abstractClass,
   equals: capability("equals", (prototype, schema) => {
-    definePrototype(prototype, "equals", compileEqualMethod(schema));
+    definePrototype(prototype, "equals", compileEqualMethod(schema), true);
   }),
   hashCode: capability("hashCode", (prototype, schema) => {
     const hash4 = compileHash(schema);
-    definePrototype(prototype, "hashCode", function hashCode() {
-      return hash4(this);
-    });
+    definePrototype(
+      prototype,
+      "hashCode",
+      function hashCode() {
+        return hash4(this);
+      },
+      true
+    );
   }),
   with: (() => {
     const base = capability("with", (prototype, schema) => {
       const update2 = compileUpdate(schema);
-      definePrototype(prototype, "with", function withPatch(patch3) {
-        const next = update2(this, patch3);
-        return new this.constructor(
-          next,
-          INTERNAL_CONSTRUCT
-        );
-      });
+      definePrototype(
+        prototype,
+        "with",
+        function withPatch(patch3) {
+          const next = update2(this, patch3);
+          return new this.constructor(
+            next,
+            INTERNAL_CONSTRUCT
+          );
+        },
+        true
+      );
     });
     return Object.freeze({ ...base, __with: true });
   })(),
   diff: capability("diff", (prototype, schema) => {
     const diff3 = compileDiff(schema);
-    definePrototype(prototype, "diff", function diffInstance(other) {
-      return diff3(this, other);
-    });
+    definePrototype(
+      prototype,
+      "diff",
+      function diffInstance(other) {
+        return diff3(this, other);
+      },
+      true
+    );
   }),
   clone: (() => {
     const base = capability("clone", (prototype, schema) => {
       const clone3 = compileClone(schema);
-      definePrototype(prototype, "clone", function cloneInstance() {
-        return new this.constructor(
-          clone3(this),
-          INTERNAL_CONSTRUCT,
-          true
-        );
-      });
+      definePrototype(
+        prototype,
+        "clone",
+        function cloneInstance() {
+          return new this.constructor(
+            clone3(this),
+            INTERNAL_CONSTRUCT,
+            true
+          );
+        },
+        true
+      );
     });
     return Object.freeze({ ...base, __clone: true });
   })(),
   identity(key) {
-    return capability(`identity:${key}`, (prototype, schema) => {
-      const base = resolveWrappers(schema).base;
-      const props = base.type === TypeName.object ? base.def.props : void 0;
-      if (!props || !(key in props)) {
-        throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
-      }
-      const runtimeIdentity = findRuntimeTypeSchema(props[key]);
-      const valueIdentity = runtimeIdentity?.def.representation === "value";
-      const equalIdentity = valueIdentity ? compileEqual(runtimeIdentity.def.innerType) : void 0;
-      definePrototype(prototype, "identity", function identity() {
-        return this[key];
-      });
-      definePrototype(prototype, "sameIdentity", function sameIdentity(other) {
-        if (typeof other !== "object" || other === null) return false;
-        const left = this[key];
-        const right = other[key];
-        if (!valueIdentity) return Object.is(left, right);
-        return typeof left === "object" && left !== null && typeof right === "object" && right !== null && equalIdentity(
-          left.value,
-          right.value
+    return capability(
+      `identity:${key}`,
+      (prototype, schema) => {
+        const base = resolveWrappers(schema).base;
+        const props = base.type === TypeName.object ? base.def.props : void 0;
+        if (!props || !(key in props)) {
+          throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
+        }
+        const runtimeIdentity = findRuntimeTypeSchema(props[key]);
+        const valueIdentity = runtimeIdentity?.def.representation === "value";
+        const equalIdentity = valueIdentity ? compileEqual(runtimeIdentity.def.innerType) : void 0;
+        definePrototype(
+          prototype,
+          "identity",
+          function identity() {
+            return this[key];
+          },
+          true
         );
-      });
-    });
+        definePrototype(
+          prototype,
+          "sameIdentity",
+          function sameIdentity(other) {
+            if (typeof other !== "object" || other === null) return false;
+            const left = this[key];
+            const right = other[key];
+            if (!valueIdentity) return Object.is(left, right);
+            return typeof left === "object" && left !== null && typeof right === "object" && right !== null && equalIdentity(
+              left.value,
+              right.value
+            );
+          },
+          true
+        );
+      },
+      ["identity", "sameIdentity"]
+    );
   }
 });
 var valueAccessorCapability = capability("value", (prototype) => {
@@ -25866,34 +26772,39 @@ function findRuntimeTypeSchema(schema) {
     return void 0;
   }
 }
-function aggregatePolicyTarget(classTarget) {
-  const target = classTarget[AGGREGATE_POLICY_TARGET];
-  if (target === void 0) {
-    throw new JITError("INVALID_OPERATION", "This DDD capability requires an Aggregate Root");
-  }
-  return target;
-}
 function timestamps(options) {
+  const resolved = options ?? {};
+  const touch = resolved.methods?.touch ?? "touch";
   return Object.freeze({
     kind: "ddd.timestamps",
-    install(classTarget) {
-      aggregatePolicyTarget(classTarget).timestamps(options);
+    __options: resolved,
+    __memberNames: Object.freeze([touch]),
+    install() {
     }
   });
 }
 function softDelete(options) {
+  const resolved = options ?? {};
+  const names = [
+    resolved.methods?.delete ?? "softDelete",
+    resolved.methods?.restore ?? "restore",
+    resolved.methods?.isDeleted ?? "isDeleted"
+  ];
   return Object.freeze({
     kind: "ddd.softDelete",
-    install(classTarget) {
-      aggregatePolicyTarget(classTarget).softDelete(options);
+    __options: resolved,
+    __memberNames: Object.freeze(names),
+    install() {
     }
   });
 }
 function versioned(options) {
+  const resolved = options ?? {};
   return Object.freeze({
     kind: "ddd.versioned",
-    install(classTarget) {
-      aggregatePolicyTarget(classTarget).versioned(options);
+    __options: resolved,
+    __memberNames: Object.freeze([]),
+    install() {
     }
   });
 }
@@ -25915,218 +26826,9 @@ function createAggregateRoot(schema, isAbstract, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityKey(unwrapped, args[0]?.id);
   const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory");
-  const aggregate = runtime.extends(
+  return runtime.extends(
     classType.identity(identity)
   );
-  const base = resolveWrappers(unwrapped).base;
-  const fields = Object.keys(base.def.props);
-  const readonlyFields = fields.filter((field) => resolveWrappers(base.def.props[field]).readonly);
-  const updateBindings = /* @__PURE__ */ new Map();
-  const updateNames = [];
-  const updateValues = [];
-  for (let index2 = 0; index2 < fields.length; index2++) {
-    const field = fields[index2];
-    if (readonlyFields.includes(field)) continue;
-    if (isPrimitiveLikeSchema(resolveWrappers(base.def.props[field]).base)) {
-      updateBindings.set(field, null);
-      continue;
-    }
-    const name = `__update${index2}`;
-    updateBindings.set(field, name);
-    updateNames.push(name);
-    updateValues.push(compileUpdate(base.def.props[field]));
-  }
-  let updatedAt;
-  let touchAt;
-  let deletedAt;
-  let version;
-  let timestampClock;
-  let deletionClock;
-  let touchMethod;
-  let deleteMethod;
-  let restoreMethod;
-  let isDeletedMember;
-  let timestampsConfigured = false;
-  let softDeleteConfigured = false;
-  let versionConfigured = false;
-  const now = (clock) => {
-    const value = clock === void 0 ? /* @__PURE__ */ new Date() : clock();
-    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-      throw new JITError("INVALID_OPERATION", "A DDD clock must return a valid Date");
-    }
-    return value;
-  };
-  const methodName = (value, fallback, label) => {
-    const name = value ?? fallback;
-    if (name.length === 0) throw new JITError("INVALID_OPERATION", `${label} method name cannot be empty`);
-    if (name in base.def.props) {
-      throw new JITError("INVALID_OPERATION", `${label} method ${JSON.stringify(name)} collides with a schema field`);
-    }
-    if (name in aggregate.prototype) {
-      throw new JITError(
-        "INVALID_OPERATION",
-        `${label} method ${JSON.stringify(name)} collides with an installed capability`
-      );
-    }
-    return name;
-  };
-  const mutationArtifact = () => ({
-    ...updatedAt === void 0 ? {} : { updatedAt },
-    ...touchAt === void 0 ? {} : { touchAt },
-    ...version === void 0 ? {} : { version },
-    ...deletedAt === void 0 ? {} : { deletedAt },
-    ...timestampClock === void 0 ? {} : { timestampClock },
-    ...deletionClock === void 0 ? {} : { deletionClock },
-    ...touchMethod === void 0 ? {} : { touchMethod },
-    ...deleteMethod === void 0 ? {} : { deleteMethod },
-    ...restoreMethod === void 0 ? {} : { restoreMethod },
-    ...isDeletedMember === void 0 ? {} : { isDeletedMember }
-  });
-  const refreshArtifact = () => setClassMutationArtifact(aggregate, mutationArtifact());
-  const installMutation = () => {
-    const mutation = buildAggregateMutationPlan({
-      fields,
-      readonlyFields,
-      ...updatedAt === void 0 ? {} : { updatedAt },
-      ...version === void 0 ? {} : { version }
-    });
-    const clockNames = updatedAt !== void 0 && timestampClock !== void 0 ? ["__clock"] : [];
-    const clockValues = updatedAt !== void 0 && timestampClock !== void 0 ? [() => now(timestampClock)] : [];
-    const assign = globalThis.Function(
-      ...updateNames,
-      ...clockNames,
-      `return function update(patch) { ${emitAggregateMutationBody(
-        mutation,
-        updateBindings,
-        clockNames.length === 0 ? "new Date()" : "__clock()"
-      )} };`
-    )(...updateValues, ...clockValues);
-    Object.defineProperty(aggregate.prototype, "update", {
-      configurable: true,
-      enumerable: false,
-      value: assign
-    });
-  };
-  installMutation();
-  const aggregatePolicies = {
-    timestamps(timestamp) {
-      if (timestampsConfigured) {
-        throw new JITError("INVALID_OPERATION", "Timestamps are already configured for this Aggregate Root");
-      }
-      const field = timestamp.updatedAt;
-      const schemaForField = base.def.props[field];
-      if (!schemaForField || resolveWrappers(schemaForField).base.type !== TypeName.date) {
-        throw new JITError("INVALID_OPERATION", `Timestamp field ${JSON.stringify(field)} must be a Date schema`);
-      }
-      if (timestamp.touch !== void 0 && timestamp.touch !== "mutation" && timestamp.touch !== "manual") {
-        throw new JITError("INVALID_OPERATION", "Timestamp touch must be mutation or manual");
-      }
-      if (timestamp.clock !== void 0 && typeof timestamp.clock !== "function") {
-        throw new JITError("INVALID_OPERATION", "Timestamp clock must be a function");
-      }
-      const name = methodName(timestamp.methods?.touch, "touch", "Timestamp");
-      timestampsConfigured = true;
-      touchAt = field;
-      updatedAt = timestamp.touch === "manual" ? void 0 : field;
-      timestampClock = timestamp.clock;
-      touchMethod = name;
-      definePrototype(aggregate.prototype, name, function touch() {
-        this[field] = now(timestampClock);
-      });
-      installMutation();
-      refreshArtifact();
-    },
-    softDelete(options) {
-      if (softDeleteConfigured) {
-        throw new JITError("INVALID_OPERATION", "Soft delete is already configured for this Aggregate Root");
-      }
-      const field = options.field;
-      const schemaForField = base.def.props[field];
-      const resolved = schemaForField && resolveWrappers(schemaForField);
-      if (!resolved || resolved.base.type !== TypeName.date || !resolved.nullable) {
-        throw new JITError(
-          "INVALID_OPERATION",
-          `Soft-delete field ${JSON.stringify(field)} must be a nullable Date schema`
-        );
-      }
-      if (options.clock !== void 0 && typeof options.clock !== "function") {
-        throw new JITError("INVALID_OPERATION", "Soft-delete clock must be a function");
-      }
-      const nextDeleteMethod = methodName(options.methods?.delete, "softDelete", "Soft-delete");
-      const nextRestoreMethod = methodName(options.methods?.restore, "restore", "Soft-delete");
-      const nextIsDeletedMember = methodName(options.methods?.isDeleted, "isDeleted", "Soft-delete");
-      if ((/* @__PURE__ */ new Set([nextDeleteMethod, nextRestoreMethod, nextIsDeletedMember])).size !== 3) {
-        throw new JITError("INVALID_OPERATION", "Soft-delete member names must be distinct");
-      }
-      softDeleteConfigured = true;
-      deletedAt = field;
-      deletionClock = options.clock;
-      deleteMethod = nextDeleteMethod;
-      restoreMethod = nextRestoreMethod;
-      isDeletedMember = nextIsDeletedMember;
-      definePrototype(aggregate.prototype, nextDeleteMethod, function softDelete2() {
-        const current = now(deletionClock ?? timestampClock);
-        this[field] = current;
-        if (updatedAt !== void 0) this[updatedAt] = current;
-      });
-      definePrototype(aggregate.prototype, nextRestoreMethod, function restore() {
-        this[field] = null;
-        if (updatedAt !== void 0) this[updatedAt] = now(deletionClock ?? timestampClock);
-      });
-      Object.defineProperty(aggregate.prototype, nextIsDeletedMember, {
-        configurable: false,
-        enumerable: false,
-        get() {
-          return this[field] !== null;
-        }
-      });
-      refreshArtifact();
-    },
-    versioned(options) {
-      if (versionConfigured) {
-        throw new JITError("INVALID_OPERATION", "Versioning is already configured for this Aggregate Root");
-      }
-      const field = options.field;
-      const schemaForField = base.def.props[field];
-      const type = schemaForField && resolveWrappers(schemaForField).base.type;
-      if (type !== TypeName.int && type !== TypeName.number) {
-        throw new JITError(
-          "INVALID_OPERATION",
-          `Version field ${JSON.stringify(field)} must be a number or int schema`
-        );
-      }
-      versionConfigured = true;
-      version = field;
-      installMutation();
-      refreshArtifact();
-    },
-    refreshArtifact
-  };
-  Object.defineProperty(aggregate, AGGREGATE_POLICY_TARGET, {
-    enumerable: false,
-    value: aggregatePolicies
-  });
-  definePrototype(aggregate.prototype, "raise", function raise(event) {
-    this.__jitEvents[this.__jitEvents.length] = event;
-  });
-  definePrototype(aggregate.prototype, "peekEvents", function peekEvents() {
-    return this.__jitEvents.slice();
-  });
-  definePrototype(aggregate.prototype, "pullEvents", function pullEvents() {
-    const events = this.__jitEvents;
-    this.__jitEvents = [];
-    return events;
-  });
-  definePrototype(
-    aggregate.prototype,
-    "commit",
-    async function commit(publisher) {
-      const pending = this.__jitEvents;
-      for (let index2 = 0; index2 < pending.length; index2++) await publisher.publish(pending[index2]);
-      this.__jitEvents.splice(0, pending.length);
-    }
-  );
-  return aggregate;
 }
 function aggregateRoot(schema, ...args) {
   return createAggregateRoot(schema, false, ...args);
@@ -26195,9 +26897,10 @@ function createEventId() {
 function createIdentifierValue() {
   return crypto.randomUUID();
 }
-function capability(kind, install) {
+function capability(kind, install, memberNames = [kind]) {
   return Object.freeze({
     kind,
+    __memberNames: Object.freeze([...memberNames]),
     install(classTarget, schema) {
       install(classTarget.prototype, schema);
     }
@@ -26238,9 +26941,9 @@ function installMethods(classTarget, methods, taken, installed) {
   }
   return recorded;
 }
-function definePrototype(prototype, key, value) {
+function definePrototype(prototype, key, value, configurable = false) {
   Object.defineProperty(prototype, key, {
-    configurable: false,
+    configurable,
     enumerable: false,
     value,
     writable: false
@@ -29943,6 +30646,497 @@ function securityStage2(schema, operation, many) {
     effects: { ...NO_EFFECTS2, mayAllocate: true }
   };
 }
+var DEFINED_RESERVED_MEMBER_NAMES = /* @__PURE__ */ new Set([
+  "constructor",
+  "schema",
+  "create",
+  "hydrate",
+  "extends",
+  "factories",
+  "construction",
+  "accessors",
+  "identity",
+  "validate",
+  "assert"
+]);
+var DEFINE_EXECUTION_ERROR = "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead.";
+function defineArtifactFailure() {
+  throw new JITError("JIT_AOT_001_ARTIFACT_EXECUTED", DEFINE_EXECUTION_ERROR);
+}
+function defineCapability(kind, memberNames = [], options) {
+  return Object.freeze({
+    kind,
+    __memberNames: Object.freeze([...memberNames]),
+    ...options === void 0 ? {} : { __options: options },
+    install() {
+    }
+  });
+}
+function defineClassState(schema, abstract, aggregate) {
+  const initial = initialEffectiveSchema(schema);
+  const members = initial.members.clone();
+  const capabilities = [];
+  if (aggregate) {
+    for (const name of ["update", "raise", "peekEvents", "pullEvents", "commit"])
+      addMember(members, name, "preset", "ddd.aggregateRoot", "method");
+  }
+  return {
+    declaredSchema: schema,
+    schema,
+    abstract,
+    aggregate,
+    construction: aggregate ? "factory" : "constructor",
+    factories: aggregate ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false },
+    capabilities,
+    methods: [],
+    lifecycle: {},
+    managedFields: [],
+    members,
+    accessors: [],
+    validationConfigured: false,
+    policy: void 0
+  };
+}
+function definedCapabilityOptions(value) {
+  return value.__options;
+}
+function definedCapabilityMembers(value) {
+  return value.__memberNames ?? [];
+}
+function isDefinedSchema(value) {
+  return typeof value === "object" && value !== null && "type" in value && "def" in value;
+}
+function isDefinedSchemaInput(value) {
+  return isDefinedSchema(value) || typeof value === "object" && value !== null && "schema" in value && typeof value.schema === "object";
+}
+function defineClassExtensions(state3, extensions) {
+  let next = state3;
+  for (const extension of extensions) {
+    if (typeof extension === "object" && extension !== null && typeof extension.install === "function") {
+      const capability2 = extension;
+      if (next.capabilities.includes(capability2.kind)) {
+        throw new JITError(
+          "INVALID_OPERATION",
+          `Class capability ${JSON.stringify(capability2.kind)} is already installed`
+        );
+      }
+      for (const name of definedCapabilityMembers(capability2)) {
+        if (next.members.has(name)) {
+          throw new JITError(
+            "CLASS_MEMBER_ALREADY_EXISTS",
+            `Member ${JSON.stringify(name)} already exists; use JIT.overwrite(...) explicitly`
+          );
+        }
+      }
+      if (capability2.kind === "ddd.timestamps" || capability2.kind === "ddd.softDelete" || capability2.kind === "ddd.versioned") {
+        let resolved;
+        try {
+          resolved = applyDddCapability(
+            {
+              schema: next.schema,
+              lifecycle: next.lifecycle,
+              managedFields: next.managedFields,
+              members: next.members
+            },
+            capability2.kind,
+            definedCapabilityOptions(capability2)
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", `${capability2.kind} declaration conflict: ${message}`);
+        }
+        next = {
+          ...next,
+          schema: resolved.schema,
+          lifecycle: resolved.lifecycle,
+          managedFields: resolved.managedFields,
+          members: resolved.members,
+          capabilities: [...next.capabilities, capability2.kind]
+        };
+      } else {
+        const members2 = next.members.clone();
+        for (const name of definedCapabilityMembers(capability2))
+          addMember(members2, name, "capability", capability2.kind, "method");
+        next = { ...next, capabilities: [...next.capabilities, capability2.kind], members: members2 };
+      }
+      continue;
+    }
+    const members = next.members.clone();
+    const methods = [...next.methods];
+    let schema = next.schema;
+    for (const name of Object.getOwnPropertyNames(extension)) {
+      const descriptor = Object.getOwnPropertyDescriptor(extension, name);
+      if (descriptor === void 0) continue;
+      const value = descriptor.value;
+      if (isOverwriteDescriptor(value)) {
+        const existing = members.get(name);
+        if (existing === void 0) {
+          throw new JITError(
+            "CLASS_OVERWRITE_TARGET_NOT_FOUND",
+            `Class member ${JSON.stringify(name)} does not exist. JIT.overwrite() can only replace an existing member.`
+          );
+        }
+        if (isDefinedSchemaInput(value.value)) {
+          if (existing.kind !== "field")
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
+          const replacement = unwrapSchema(value.value);
+          const object2 = resolveWrappers(schema).base;
+          if (object2.type !== TypeName.object)
+            throw new JITError("INVALID_OPERATION", "Class schema must be an object");
+          const props = { ...object2.def.props, [name]: replacement };
+          schema = createSchema(
+            TypeName.object,
+            {
+              props,
+              unknownKeys: object2.def.unknownKeys,
+              catchall: object2.def.catchall,
+              checks: object2.def.checks
+            },
+            object2.annotations
+          );
+          const rechecked = applyManagedFieldsForDefine(schema, next.managedFields);
+          schema = rechecked;
+          const effectiveObject = resolveWrappers(schema).base;
+          const effectiveField = effectiveObject.type === TypeName.object ? effectiveObject.def.props[name] : replacement;
+          members.replace(name, { ...existing, source: "overwrite", schema: effectiveField });
+        } else {
+          if (existing.kind === "field")
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is a schema field`);
+          if (typeof value.value !== "function")
+            throw new JITError("INVALID_OPERATION", `Overwrite ${JSON.stringify(name)} must provide a method`);
+          const replacement = { name, kind: "method", source: value.value };
+          const index2 = methods.findIndex((method) => method.name === name);
+          if (index2 === -1) methods.push(replacement);
+          else methods[index2] = replacement;
+          members.replace(name, { ...existing, source: "overwrite", descriptor: { value: value.value } });
+        }
+        continue;
+      }
+      if (members.has(name) || DEFINED_RESERVED_MEMBER_NAMES.has(name)) {
+        throw new JITError(
+          "CLASS_MEMBER_ALREADY_EXISTS",
+          `Member ${JSON.stringify(name)} already exists. Use ${JSON.stringify(`${name}: JIT.overwrite(...)`)} to replace it.`
+        );
+      }
+      if (descriptor.get === void 0 && descriptor.set === void 0 && typeof value !== "function") {
+        throw new JITError("INVALID_OPERATION", `Class extension ${JSON.stringify(name)} must be a method or getter`);
+      }
+      const kind = descriptor.get === void 0 ? descriptor.set === void 0 ? "method" : "set" : "get";
+      methods.push({ name, kind, source: descriptor.get ?? descriptor.set ?? value });
+      addMember(
+        members,
+        name,
+        "extension",
+        "custom extension",
+        kind === "get" ? "getter" : kind === "set" ? "setter" : "method"
+      );
+    }
+    next = { ...next, schema, methods, members };
+  }
+  return next;
+}
+function applyManagedFieldsForDefine(schema, managedFields) {
+  if (managedFields.length === 0) return schema;
+  try {
+    return reapplyManagedFields(schema, managedFields);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", message);
+  }
+}
+function definedPolicyBase(state3) {
+  return state3.policy ?? {
+    result: "throw",
+    create: true,
+    hydrate: true
+  };
+}
+function definedAssertions(descriptors, maxIssues, errors) {
+  const bindingValues = descriptors.flatMap((descriptor) => descriptor.bindings);
+  return {
+    descriptors: Object.freeze([...descriptors]),
+    source: emitAssertionSource(descriptors, maxIssues),
+    bindingNames: Object.freeze(bindingValues.map((_, index2) => `__q${index2}`)),
+    bindingValues: Object.freeze(bindingValues),
+    failures: Object.freeze(
+      descriptors.map((descriptor, index2) => ({
+        rule: descriptor.rule,
+        field: descriptor.field,
+        code: descriptor.code,
+        message: descriptor.message,
+        priority: descriptor.priority,
+        ...errors[index2] === void 0 ? {} : { error: errors[index2] }
+      }))
+    )
+  };
+}
+function defineClassAssertion(state3, predicate, options) {
+  const policy = definedPolicyBase(state3);
+  const previous = policy.assertions;
+  const startIndex = previous?.bindingValues.length ?? 0;
+  const builder2 = createConditionBuilder(startIndex);
+  const condition = predicate(builder2.builder);
+  if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
+    throw new RangeError("priority must be a finite number");
+  }
+  const descriptor = resolveAssertionDescriptor({
+    condition,
+    bindings: builder2.bindings,
+    ...options?.rule === void 0 ? {} : { rule: options.rule },
+    ...options?.code === void 0 ? {} : { code: options.code },
+    ...options?.message === void 0 ? {} : { message: options.message },
+    ...options?.priority === void 0 ? {} : { priority: options.priority }
+  });
+  const descriptors = [...previous?.descriptors ?? [], descriptor];
+  const errors = [...previous?.failures.map((failure) => failure.error) ?? [], options?.error];
+  return {
+    ...state3,
+    policy: {
+      ...policy,
+      assertions: definedAssertions(descriptors, policy.maxIssues, errors)
+    }
+  };
+}
+function definedLifecycleMutation(lifecycle) {
+  const timestamps2 = lifecycle.timestamps;
+  const deletion = lifecycle.softDelete;
+  const versioned2 = lifecycle.versioned;
+  if (timestamps2 === void 0 && deletion === void 0 && versioned2 === void 0) return void 0;
+  return {
+    ...timestamps2?.touch === "manual" || timestamps2 === void 0 ? {} : { updatedAt: timestamps2.updatedAt },
+    ...timestamps2 === void 0 ? {} : { touchAt: timestamps2.updatedAt, touchMethod: timestamps2.touchMethod },
+    ...versioned2 === void 0 ? {} : { version: versioned2.field },
+    ...deletion === void 0 ? {} : {
+      deletedAt: deletion.field,
+      deleteMethod: deletion.deleteMethod,
+      restoreMethod: deletion.restoreMethod,
+      isDeletedMember: deletion.isDeletedMember
+    },
+    ...timestamps2?.clock === void 0 ? {} : { timestampClock: timestamps2.clock },
+    ...deletion?.clock === void 0 ? {} : { deletionClock: deletion.clock }
+  };
+}
+function defineRuntimeClass(state3) {
+  const target = function definedRuntimeClass() {
+    return defineArtifactFailure();
+  };
+  const materialize = function materializeDefinedClass() {
+    return defineArtifactFailure();
+  };
+  const mutation = definedLifecycleMutation(state3.lifecycle);
+  registerArtifact(target, {
+    kind: "class",
+    declaredSchema: state3.declaredSchema,
+    schema: state3.schema,
+    abstract: state3.abstract,
+    frozen: false,
+    aggregate: state3.aggregate,
+    construction: state3.construction,
+    representation: "object",
+    capabilities: state3.capabilities,
+    managedFields: state3.managedFields,
+    lifecycle: state3.lifecycle,
+    resolvedMembers: state3.members.entries(),
+    ...mutation === void 0 ? {} : { mutation },
+    ...state3.methods.length === 0 ? {} : { methods: state3.methods },
+    ...state3.policy === void 0 ? {} : { policy: state3.policy },
+    factories: state3.factories,
+    accessors: state3.accessors
+  });
+  Object.defineProperties(target, {
+    schema: {
+      enumerable: true,
+      value: createSchema(TypeName.runtimeType, {
+        innerType: state3.schema,
+        materialize,
+        representation: "object",
+        identifier: false
+      })
+    },
+    create: { enumerable: false, value: defineArtifactFailure },
+    hydrate: { enumerable: false, value: defineArtifactFailure },
+    extends: {
+      enumerable: false,
+      value: (...extensions) => defineRuntimeClass(defineClassExtensions(state3, extensions))
+    },
+    construction: {
+      enumerable: false,
+      value: (mode) => {
+        if (state3.policy !== void 0) {
+          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+        }
+        return defineRuntimeClass({
+          ...state3,
+          construction: mode,
+          factories: mode === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }
+        });
+      }
+    },
+    factories: {
+      enumerable: false,
+      value: (options) => defineRuntimeClass({
+        ...state3,
+        construction: "factory",
+        factories: {
+          create: options.create === void 0 ? "create" : options.create,
+          hydrate: options.hydrate === void 0 ? "hydrate" : options.hydrate
+        }
+      })
+    },
+    accessors: { enumerable: false, value: () => defineRuntimeClass(state3) },
+    identity: {
+      enumerable: false,
+      value: (key) => defineRuntimeClass(
+        defineClassExtensions(state3, [defineCapability(`identity:${key}`, ["identity", "sameIdentity"])])
+      )
+    },
+    validate: {
+      enumerable: false,
+      value: (options) => {
+        if (state3.validationConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factory validation is already configured for this Runtime Class");
+        }
+        if (options?.maxIssues !== void 0 && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
+          throw new RangeError("maxIssues must be a positive safe integer");
+        }
+        if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
+          throw new RangeError("priority must be a finite number");
+        }
+        const previous = definedPolicyBase(state3);
+        return defineRuntimeClass({
+          ...state3,
+          validationConfigured: true,
+          policy: {
+            ...previous,
+            result: options?.result ?? previous.result,
+            create: options?.create ?? previous.create,
+            hydrate: options?.hydrate ?? previous.hydrate,
+            ...options?.maxIssues === void 0 ? {} : { maxIssues: options.maxIssues },
+            ...options?.error === void 0 ? {} : { errorPriority: options.priority ?? 1e3, errorPriorityExplicit: options.priority !== void 0 },
+            ...options?.error === void 0 ? {} : { error: options.error }
+          }
+        });
+      }
+    },
+    assert: {
+      enumerable: false,
+      value: (predicate, options) => defineRuntimeClass(defineClassAssertion(state3, predicate, options))
+    }
+  });
+  return target;
+}
+var defineClass = Object.assign(
+  ((schema) => defineRuntimeClass(defineClassState(unwrapSchema(schema), false, false))),
+  {
+    abstract: (schema) => defineRuntimeClass(defineClassState(unwrapSchema(schema), true, false)),
+    equals: defineCapability("equals", ["equals"]),
+    hashCode: defineCapability("hashCode", ["hashCode"]),
+    with: defineCapability("with", ["with"]),
+    diff: defineCapability("diff", ["diff"]),
+    clone: defineCapability("clone", ["clone"]),
+    identity: (key) => defineCapability(`identity:${key}`, ["identity", "sameIdentity"])
+  }
+);
+function defineIdentityKey(schema, explicit, label) {
+  const object2 = resolveWrappers(schema).base;
+  if (object2.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${label} identity requires an object schema`);
+  }
+  if (explicit !== void 0) return explicit;
+  const candidates = Object.keys(object2.def.props).filter(
+    (key) => defineIsIdentifierSchema(object2.def.props[key])
+  );
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 0) {
+    throw new JITError(
+      "INVALID_OPERATION",
+      `${label} identity must be explicit when the schema has no unique identifier`
+    );
+  }
+  throw new JITError(
+    "INVALID_OPERATION",
+    `${label} identity must be explicit when the schema has multiple unique identifiers`
+  );
+}
+function defineIsIdentifierSchema(schema) {
+  return defineFindRuntimeTypeSchema(schema)?.def.identifier === true;
+}
+function defineFindRuntimeTypeSchema(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.runtimeType) return current;
+    if (current.type === TypeName.lazy) {
+      current = current.def.getter();
+      continue;
+    }
+    if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.default || current.type === TypeName.brand || current.type === TypeName.readonly || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
+      current = current.def.innerType;
+      continue;
+    }
+    return void 0;
+  }
+}
+var defineEntity = ((schema, options) => {
+  const unwrapped = unwrapSchema(schema);
+  const object2 = resolveWrappers(unwrapped).base;
+  const id = defineIdentityKey(
+    unwrapped,
+    options?.id ?? (object2.type === TypeName.object && "id" in object2.def.props ? "id" : void 0),
+    "Entity"
+  );
+  const state3 = defineClassState(unwrapped, false, false);
+  return defineRuntimeClass(
+    defineClassExtensions({ ...state3, construction: "factory", factories: { create: "create", hydrate: "hydrate" } }, [
+      defineClass.identity(id)
+    ])
+  );
+});
+var defineAggregateRoot = ((schema, options) => {
+  const unwrapped = unwrapSchema(schema);
+  const object2 = resolveWrappers(unwrapped).base;
+  const id = defineIdentityKey(
+    unwrapped,
+    options?.id ?? (object2.type === TypeName.object && "id" in object2.def.props ? "id" : void 0),
+    "Aggregate"
+  );
+  return defineRuntimeClass(
+    defineClassExtensions(defineClassState(unwrapped, false, true), [defineClass.identity(id)])
+  );
+});
+var defineTimestamps = ((options) => defineCapability(
+  "ddd.timestamps",
+  [options?.methods?.touch ?? "touch"],
+  options
+));
+var defineSoftDelete = ((options) => defineCapability(
+  "ddd.softDelete",
+  [
+    options?.methods?.delete ?? "softDelete",
+    options?.methods?.restore ?? "restore",
+    options?.methods?.isDeleted ?? "isDeleted"
+  ],
+  options
+));
+var defineVersioned = ((options) => defineCapability("ddd.versioned", [], options));
+var defineDdd = Object.freeze({
+  ...ddd,
+  entity: defineEntity,
+  aggregateRoot: defineAggregateRoot,
+  timestamps: defineTimestamps,
+  softDelete: defineSoftDelete,
+  versioned: defineVersioned,
+  abstract: Object.freeze({
+    ...ddd.abstract,
+    entity: ((schema, options) => {
+      const value = defineEntity(schema, options);
+      return value;
+    }),
+    aggregateRoot: ((schema, options) => {
+      const value = defineAggregateRoot(schema, options);
+      return value;
+    })
+  })
+});
 function stage(kind, input, output) {
   return {
     kind,
@@ -29955,6 +31149,9 @@ function stage(kind, input, output) {
 }
 var JIT = {
   ...factories_exports,
+  class: defineClass,
+  ddd: defineDdd,
+  overwrite,
   validate: validate2,
   json: json2,
   binary: binary3,

@@ -4,6 +4,8 @@
  * and for explicitly exported standalone functions.
  */
 
+import type { LifecycleDefinition, ManagedFieldDescriptor } from "../classes/effective-schema.js";
+import type { ResolvedClassMember } from "../classes/members.js";
 import type { AccessDescriptor } from "../compiler/access.js";
 import type { CacheKeyDescriptor } from "../compiler/cache-key.js";
 import type { ChangedDescriptor } from "../compiler/changed.js";
@@ -280,6 +282,8 @@ interface ExecutionArtifact {
 /** A runtime class reduced to the data needed by the import-free AOT emitter. */
 interface ClassArtifact {
   readonly kind: "class";
+  /** Schema supplied by the declaration before structural DDD resolution. */
+  readonly declaredSchema?: ATS.AnyTypeSchema;
   readonly schema: ATS.AnyTypeSchema;
   readonly abstract: boolean;
   readonly frozen: boolean;
@@ -287,6 +291,10 @@ interface ClassArtifact {
   readonly construction: "constructor" | "factory";
   readonly representation: "object" | "value";
   readonly capabilities: readonly string[];
+  /** Effective DDD ownership and lifecycle plan, resolved before compilation. */
+  readonly managedFields?: readonly ManagedFieldDescriptor[];
+  readonly lifecycle?: LifecycleDefinition;
+  readonly resolvedMembers?: readonly ResolvedClassMember[];
   /** Application-owned prototype members added through `.extends({...})`. */
   readonly methods?: readonly {
     readonly name: string;
@@ -324,8 +332,18 @@ interface ClassArtifact {
     readonly create: boolean;
     readonly hydrate: boolean;
     readonly maxIssues?: number;
+    readonly errorPriority?: number;
+    readonly errorPriorityExplicit?: boolean;
     /** Bound error factory; AOT skips the artifact when it cannot be serialized. */
     readonly error?: unknown;
+    /** Nested boundary error factories are runtime bindings unless reconstructed explicitly. */
+    readonly nestedErrors?: readonly {
+      readonly priority: number;
+      readonly depth: number;
+      readonly order: number;
+      readonly path: readonly (string | number)[];
+      readonly error: unknown;
+    }[];
     /** One generated guard over the validated state; absent without assertions. */
     readonly assertions?: {
       readonly source: string;
@@ -336,6 +354,7 @@ interface ClassArtifact {
         readonly field: string | undefined;
         readonly code: string;
         readonly message: string;
+        readonly priority: number;
         readonly error?: unknown;
       }[];
     };

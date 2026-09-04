@@ -42,7 +42,7 @@ export interface ContextEvidence {
 
   role: EvidenceRole;
   /** Which retriever carried this hit. */
-  reason: "exact-symbol" | "prefix-symbol" | "lexical" | "semantic" | "current-context" | "hybrid";
+  reason: "exact-symbol" | "prefix-symbol" | "lexical" | "semantic" | "current-context" | "hybrid" | "oracle";
   /** The fused score, normalized against the best hit in this context. */
   confidence: number;
 

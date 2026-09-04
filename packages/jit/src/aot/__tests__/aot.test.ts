@@ -1822,7 +1822,7 @@ describe("JIT AOT generate", () => {
       readonly OrderBase: typeof OrderBase;
     };
     class Order extends generated.OrderBase {}
-    const order = Order.create({ id: "o_1", changedAt: new Date(0), archivedAt: null });
+    const order = Order.create({ id: "o_1" });
 
     expect(result.skipped).toEqual([]);
     order.markChanged();
@@ -1830,6 +1830,95 @@ describe("JIT AOT generate", () => {
     expect(order.isArchived).toBe(true);
     order.unarchive();
     expect(order.isArchived).toBe(false);
+  });
+
+  it("keeps structural DDD definitions reconstructive on the define host", async () => {
+    const User = DefineJIT.ddd
+      .entity(DefineJIT.object({ id: DefineJIT.string(), name: DefineJIT.string() }), { id: "id" })
+      .extends(DefineJIT.ddd.timestamps(), DefineJIT.ddd.softDelete(), DefineJIT.ddd.versioned());
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        create(input: { id: string; name: string }): {
+          id: string;
+          name: string;
+          createdAt: Date;
+          updatedAt: Date | null;
+          deletedAt: Date | null;
+          version: number;
+          update(patch: { name?: string }): void;
+          touch(): void;
+          softDelete(): void;
+          restore(): void;
+          readonly isDeleted: boolean;
+        };
+        hydrate(input: {
+          id: string;
+          name: string;
+          createdAt: Date;
+          updatedAt: Date | null;
+          deletedAt: Date | null;
+          version: number;
+        }): unknown;
+      };
+    };
+    const user = generated.User.create({ id: "u_1", name: "Ada" });
+
+    expect(result.skipped).toEqual([]);
+    expect(user.updatedAt).toBeNull();
+    expect(user.deletedAt).toBeNull();
+    expect(user.version).toBe(0);
+    user.update({ name: "Grace" });
+    expect(user.updatedAt).toBeInstanceOf(Date);
+    expect(user.version).toBe(1);
+    user.softDelete();
+    expect(user.isDeleted).toBe(true);
+    user.restore();
+    expect(user.isDeleted).toBe(false);
+    expect(
+      generated.User.hydrate({
+        id: "u_1",
+        name: "Ada",
+        createdAt: new Date(0),
+        updatedAt: null,
+        deletedAt: null,
+        version: 0,
+      })
+    ).toBeDefined();
+    expect(source).not.toContain("artifact-registry");
+    expect(source).not.toContain("RuntimeClass");
+  });
+
+  it("rechecks managed fields after define-host overwrites", () => {
+    const User = DefineJIT.ddd
+      .entity(DefineJIT.object({ id: DefineJIT.string() }), { id: "id" })
+      .extends(DefineJIT.ddd.timestamps());
+
+    try {
+      User.extends({
+        updatedAt: DefineJIT.overwrite(DefineJIT.string()),
+      } as never);
+      throw new Error("expected a declaration error");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "DDD_CAPABILITY_SCHEMA_CONFLICT" });
+    }
+  });
+
+  it("preserves define-host assertions as reconstructive class metadata", async () => {
+    const User = DefineJIT.ddd
+      .entity(DefineJIT.object({ id: DefineJIT.string(), age: DefineJIT.number() }), { id: "id" })
+      .assert((query) => query.gte("age", 18), { rule: "adult" });
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        create(input: unknown): { readonly id: string; readonly age: number };
+      };
+    };
+
+    expect(result.skipped).toEqual([]);
+    expect(generated.User.create({ id: "u_1", age: 18 })).toMatchObject({ id: "u_1", age: 18 });
+    expect(() => generated.User.create({ id: "u_1", age: 17 })).toThrow(/adult/);
   });
 
   it("should lower static CQRS queries through the existing query artifact", async () => {

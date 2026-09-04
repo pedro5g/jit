@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 import { type AutoTokenizer, env, pipeline, TextStreamer } from "@huggingface/transformers";
-import { EMBEDDING_MODEL, MODEL_CACHE_KEY } from "../../config/models";
-import type { CopilotWorkerRequest, CopilotWorkerResponse } from "./worker-protocol";
+import { EMBEDDING_MODEL, MODEL_CACHE_KEY } from "../../config/models.js";
+import { applyOfficialChatTemplate } from "./chat-template.js";
+import type { CopilotWorkerRequest, CopilotWorkerResponse } from "./worker-protocol.js";
 
 /**
  * Everything that touches a model runs here.
@@ -73,34 +74,6 @@ function load(task: "text-generation" | "feature-extraction", repo: string, dtyp
   return created;
 }
 
-/**
- * Applies the chat template here rather than letting the pipeline do it.
- *
- * Two reasons, both template arguments rather than generation arguments, so
- * this is the only place they can be set: a Qwen3 template defaults to
- * emitting a `<think>` block that would stream straight into the answer, and
- * Gemma's template rejects a system role outright.
- */
-function buildPrompt(tokenizer: Tokenizer, messages: { role: string; content: string }[]) {
-  const apply = (input: { role: string; content: string }[], options: Record<string, unknown>) =>
-    tokenizer.apply_chat_template(input, {
-      tokenize: false,
-      add_generation_prompt: true,
-      ...options,
-    }) as string;
-
-  try {
-    return apply(messages, { enable_thinking: false });
-  } catch {
-    // no system role in this template: fold it into the first user turn
-    const folded = messages.map((message) =>
-      message.role === "system" ? { role: "user", content: message.content } : message
-    );
-
-    return apply(folded, {});
-  }
-}
-
 async function generate(request: Extract<CopilotWorkerRequest, { type: "generate" }>) {
   const generator = (await load("text-generation", request.repo, request.dtype, request.id)) as unknown as {
     tokenizer: Tokenizer;
@@ -111,6 +84,8 @@ async function generate(request: Extract<CopilotWorkerRequest, { type: "generate
   generationAbort = new AbortController();
   const { signal } = generationAbort;
 
+  const prompt = applyOfficialChatTemplate(generator.tokenizer, request.messages).prompt;
+  const promptTokens = generator.tokenizer.encode(prompt).length;
   const started = performance.now();
   let firstToken = 0;
   let tokens = 0;
@@ -126,20 +101,25 @@ async function generate(request: Extract<CopilotWorkerRequest, { type: "generate
         post({ id: request.id, type: "first-token", ms: firstToken });
       }
 
-      tokens += 1;
       post({ id: request.id, type: "delta", text });
+    },
+    token_callback_function: () => {
+      tokens += 1;
     },
   });
 
-  await generator(buildPrompt(generator.tokenizer, request.messages), {
+  await generator(prompt, {
     max_new_tokens: request.maxTokens,
     // Greedy unless asked otherwise. Every answer this thing produces is
     // checked against a fixed surface, and sampling buys variety in exactly
     // the dimension the audit then has to reject.
     do_sample: request.temperature > 0,
     ...(request.temperature > 0 ? { temperature: request.temperature } : {}),
+    ...(request.topP !== undefined ? { top_p: request.topP } : {}),
+    ...(request.topK !== undefined ? { top_k: request.topK } : {}),
+    ...(request.presencePenalty !== undefined ? { presence_penalty: request.presencePenalty } : {}),
     // repetition creeps in on small models once an answer runs long
-    repetition_penalty: 1.1,
+    repetition_penalty: request.repetitionPenalty ?? 1.1,
     return_full_text: false,
     streamer,
   });
@@ -153,6 +133,7 @@ async function generate(request: Extract<CopilotWorkerRequest, { type: "generate
     finish: aborted ? "aborted" : tokens >= request.maxTokens ? "length" : "stop",
     tokens,
     ms: performance.now() - started,
+    promptTokens,
   });
 }
 

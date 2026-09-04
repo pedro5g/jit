@@ -27,6 +27,19 @@ export const CAPABILITY_LEVELS = [
 
 export type CapabilityLevel = (typeof CAPABILITY_LEVELS)[number];
 
+/** A measured model profile, independent from parameter count or tier names. */
+export type ModelCapabilityLevel = "unmeasured" | "unsupported" | "weak" | "acceptable" | "strong";
+
+export interface ModelCapabilityProfile {
+  navigation: ModelCapabilityLevel;
+  lookup: ModelCapabilityLevel;
+  explain: ModelCapabilityLevel;
+  deepExplain: ModelCapabilityLevel;
+  groundedSynthesis: ModelCapabilityLevel;
+  portuguese: ModelCapabilityLevel;
+  english: ModelCapabilityLevel;
+}
+
 export function atLeast(level: CapabilityLevel, required: CapabilityLevel): boolean {
   return CAPABILITY_LEVELS.indexOf(level) >= CAPABILITY_LEVELS.indexOf(required);
 }

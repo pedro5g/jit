@@ -12,24 +12,26 @@
  * differ, and pretending otherwise is what produces a browser path that quietly
  * became a copy.
  */
-import { retryInstruction, StrictAuditPolicy } from "../application/audit/audit.service";
-import type { ContextService } from "../application/context/context.service";
-import { promptOverhead, renderMessages } from "../application/context/render";
-import { buildCoveragePlan } from "../application/coverage/coverage-pipeline";
-import { GroundedSynthesisService } from "../application/services/grounded-synthesis.service";
-import { stripToolCalls } from "../application/tools/parse-tool-calls";
-import { CONTEXT_BUDGET } from "../config/retrieval";
-import type { ModelContext } from "../core/entities/model-context";
-import type { RetrievalReport } from "../core/entities/retrieval";
-import type { EmbeddingPort } from "../core/ports/embedding";
-import type { GenerationMessage, LanguageModelPort } from "../core/ports/language-model";
-import type { KnowledgeEngine } from "../infrastructure/knowledge-engine";
-import type { CaseRecord, ContextRecord, ResponseRecord } from "./artifacts";
-import { type MeasuredCase, measureAnswer } from "./detectors";
-import type { EvalCase } from "./types";
+import { retryInstruction, StrictAuditPolicy } from "../application/audit/audit.service.js";
+import type { ContextService } from "../application/context/context.service.js";
+import { promptOverhead, renderMessages } from "../application/context/render.js";
+import { buildCoveragePlan } from "../application/coverage/coverage-pipeline.js";
+import { GroundedSynthesisService } from "../application/services/grounded-synthesis.service.js";
+import { stripToolCalls } from "../application/tools/parse-tool-calls.js";
+import type { DecodingSpec } from "../config/models.js";
+import { CONTEXT_BUDGET } from "../config/retrieval.js";
+import type { ModelContext } from "../core/entities/model-context.js";
+import type { RetrievalReport } from "../core/entities/retrieval.js";
+import type { EmbeddingPort } from "../core/ports/embedding.js";
+import type { GenerationMessage, LanguageModelPort } from "../core/ports/language-model.js";
+import type { KnowledgeEngine } from "../infrastructure/knowledge-engine.js";
+import type { CaseRecord, ContextRecord, ResponseRecord } from "./artifacts.js";
+import { type MeasuredCase, measureAnswer } from "./detectors.js";
+import type { EvalCase } from "./types.js";
 
 /** Answer length, identical across runtimes so latency is comparable. */
-export const MAX_TOKENS = 400;
+/** Generic capability ceiling; every downloadable candidate gets the same limit. */
+export const MAX_TOKENS = 512;
 
 export interface PromptedCase {
   messages: GenerationMessage[];
@@ -103,6 +105,7 @@ export interface GenerateCaseInput {
   prompt: PromptForCase;
   case: EvalCase;
   maxTokens?: number;
+  decoding?: Pick<DecodingSpec, "id" | "temperature" | "topP" | "topK" | "presencePenalty" | "repetitionPenalty">;
   /** Deltas, when the host has a screen to put them on. */
   onDelta?: (delta: string) => void;
   signal?: AbortSignal;
@@ -115,7 +118,12 @@ export async function generateCase(input: GenerateCaseInput): Promise<GeneratedC
   const request = {
     messages,
     maxTokens: input.maxTokens ?? MAX_TOKENS,
-    temperature: 0,
+    temperature: input.decoding?.temperature ?? 0,
+    ...(input.decoding?.topP !== undefined ? { topP: input.decoding.topP } : {}),
+    ...(input.decoding?.topK !== undefined ? { topK: input.decoding.topK } : {}),
+    ...(input.decoding?.presencePenalty !== undefined ? { presencePenalty: input.decoding.presencePenalty } : {}),
+    ...(input.decoding?.repetitionPenalty !== undefined ? { repetitionPenalty: input.decoding.repetitionPenalty } : {}),
+    ...(input.decoding?.id ? { decodingId: input.decoding.id } : {}),
     signal: input.signal ?? new AbortController().signal,
   };
 
@@ -237,7 +245,7 @@ export async function generateCase(input: GenerateCaseInput): Promise<GeneratedC
   });
   input.onDelta?.(answer);
 
-  const tokensPerSecond = selectedResult.timings?.tokensPerSecond ?? 0;
+  const tokensPerSecond = selectedResult.timings?.tokensPerSecond ?? null;
 
   return {
     measured: {
@@ -277,6 +285,8 @@ export async function generateCase(input: GenerateCaseInput): Promise<GeneratedC
         ...(selectedResult.usage?.completionTokens !== undefined
           ? { completionTokens: selectedResult.usage.completionTokens }
           : {}),
+        finish: selectedResult.finish,
+        truncated: selectedResult.finish === "length",
       },
     },
   };

@@ -242,11 +242,17 @@ class ValidatorEmitter {
           writer.line(`${output} = ${defaultExpr};`);
           if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
         });
+        if (unwrapped.nullable) {
+          writer.line(`} else if (${holder} === null) {`);
+          writer.indent(() => {
+            writer.line(`${output} = ${holder};`);
+          });
+        }
         writer.line("} else {");
         writer.indent(emitValidated);
         writer.line("}");
       } else {
-        writer.line(`if (${holder} !== undefined) {`);
+        writer.line(`if (${holder} !== undefined && ${unwrapped.nullable ? `${holder} !== null` : "true"}) {`);
         writer.indent(emitValidated);
         writer.line("}");
       }

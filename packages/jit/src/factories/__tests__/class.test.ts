@@ -521,6 +521,31 @@ describe("JIT.class", () => {
       expect(Money.create(valid).ok).toBe(true);
     });
 
+    it("selects one deterministic error candidate after collecting assertion issues", () => {
+      class OuterError extends Error {
+        constructor(readonly issues: readonly unknown[]) {
+          super("outer");
+        }
+      }
+      class AssertionError extends Error {}
+      const Default = JIT.ddd
+        .valueObject(JIT.object({ amount: JIT.number(), fee: JIT.number() }))
+        .validate({ result: "result", error: (issues) => new OuterError(issues) })
+        .assert((query) => query.gte("amount", 0), { error: () => new AssertionError("assertion") })
+        .assert((query) => query.gte("fee", 0), { error: () => new AssertionError("assertion-2") });
+      const HigherAssertion = JIT.ddd
+        .valueObject(JIT.object({ amount: JIT.number() }))
+        .validate({ result: "result", error: (issues) => new OuterError(issues), priority: 1000 })
+        .assert((query) => query.gte("amount", 0), { error: () => new AssertionError("assertion"), priority: 1200 });
+
+      const outer = Default.create({ amount: -1, fee: -2 });
+      const assertion = HigherAssertion.create({ amount: -1 });
+
+      expect(outer.ok === false && outer.error).toBeInstanceOf(OuterError);
+      expect(assertion.ok === false && assertion.error).toBeInstanceOf(AssertionError);
+      expect(outer.ok === false && outer.error instanceof OuterError && outer.error.issues).toHaveLength(2);
+    });
+
     it("collects every invariant that did not hold, as issues", () => {
       const Money = JIT.ddd
         .valueObject(JIT.object({ amount: JIT.number(), fee: JIT.number() }))
@@ -840,7 +865,7 @@ describe("JIT.class", () => {
       }
     }
     const initial = new Date(0);
-    const order = Order.create({ id: "o_1", status: "draft", updatedAt: initial });
+    const order = Order.create({ id: "o_1", status: "draft" });
 
     order.confirm();
     expect(order.updatedAt).toBeInstanceOf(Date);
@@ -864,7 +889,7 @@ describe("JIT.class", () => {
       })
       .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }), JIT.ddd.softDelete({ field: "deletedAt" }));
     class Order extends OrderBase {}
-    const order = Order.create({ id: "o_1", updatedAt: new Date(0), deletedAt: null });
+    const order = Order.create({ id: "o_1" });
 
     order.softDelete();
     expect(order.isDeleted).toBe(true);
@@ -874,7 +899,7 @@ describe("JIT.class", () => {
   });
 
   it("configures DDD clocks and member names without a runtime dispatcher", () => {
-    const timestampValues = [new Date(10), new Date(20)];
+    const timestampValues = [new Date(10), new Date(20), new Date(30)];
     let timestampReads = 0;
     const deletedAt = new Date(30);
     const OrderBase = JIT.ddd
@@ -904,12 +929,12 @@ describe("JIT.class", () => {
         this.update({ status: "confirmed" });
       }
     }
-    const order = Order.create({ id: "o_1", status: "draft", changedAt: new Date(0), archivedAt: null });
+    const order = Order.create({ id: "o_1", status: "draft" });
 
     order.confirm();
-    expect(order.changedAt).toBe(timestampValues[0]);
-    order.markChanged();
     expect(order.changedAt).toBe(timestampValues[1]);
+    order.markChanged();
+    expect(order.changedAt).toBe(timestampValues[2]);
     order.archive();
     expect(order.archivedAt).toBe(deletedAt);
     expect(order.changedAt).toBe(deletedAt);
@@ -921,11 +946,10 @@ describe("JIT.class", () => {
       JIT.ddd
         .entity(JIT.object({ id: JIT.string() }), { id: "id" })
         .extends(JIT.ddd.timestamps({ updatedAt: "id" }) as never)
-    ).toThrow(/Aggregate Root/i);
+    ).toThrow(/cannot manage|compatible/i);
     if (Object.is(1, 2)) {
       JIT.ddd
         .aggregateRoot(JIT.object({ id: JIT.string(), archivedAt: JIT.date() }), { id: "id" })
-        // @ts-expect-error soft-delete state must explicitly include null
         .extends(JIT.ddd.softDelete({ field: "archivedAt" }));
     }
     expect(() =>
@@ -937,7 +961,7 @@ describe("JIT.class", () => {
       JIT.ddd
         .aggregateRoot(JIT.object({ id: JIT.string(), changedAt: JIT.date() }), { id: "id" })
         .extends(JIT.ddd.timestamps({ updatedAt: "changedAt", clock: () => new Date(Number.NaN) }))
-        .create({ id: "o_2", changedAt: new Date(0) })
+        .create({ id: "o_2" })
         .touch()
     ).toThrow(/valid Date/i);
   });
@@ -953,12 +977,13 @@ describe("JIT.class", () => {
         this.update({ status: "confirmed" });
       }
     }
-    const order = Order.create({ id: "o_1", status: "draft", version: 3 });
+    const order = Order.create({ id: "o_1", status: "draft" });
 
+    expect(order.version).toBe(0);
     order.confirm();
-    expect(order.version).toBe(4);
+    expect(order.version).toBe(1);
     order.confirm();
-    expect(order.version).toBe(4);
+    expect(order.version).toBe(1);
     expect(() =>
       (OrderBase.extends as (...extensions: unknown[]) => unknown)(JIT.ddd.versioned({ field: "version" }))
     ).toThrow(/already installed/i);

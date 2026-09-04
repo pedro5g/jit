@@ -192,16 +192,17 @@ export interface ClaimInput {
 const PARAPHRASE = 0.45;
 
 export function analyseClaims(input: ClaimInput): ClaimAnalysis {
-  const evidenceWords = new Map<KnowledgeId, Set<string>>();
+  /** Keep passages distinct even when several chunks share one knowledge id. */
+  const evidenceWords: { id: KnowledgeId; vocabulary: Set<string> }[] = [];
   for (const evidence of input.context.evidence) {
-    evidenceWords.set(
-      evidence.knowledgeId,
-      new Set([...contentWords(evidence.content), ...tokenize(evidence.content)])
-    );
+    evidenceWords.push({
+      id: evidence.knowledgeId,
+      vocabulary: new Set([...contentWords(evidence.content), ...tokenize(evidence.content)]),
+    });
   }
 
   const allEvidence = new Set<string>();
-  for (const words of evidenceWords.values()) for (const word of words) allEvidence.add(word);
+  for (const { vocabulary } of evidenceWords) for (const word of vocabulary) allEvidence.add(word);
 
   const figuresInEvidence = new Set(
     input.context.evidence
@@ -227,7 +228,7 @@ export function analyseClaims(input: ClaimInput): ClaimAnalysis {
      * and that is only answerable if a claim names the evidence it leaned on.
      */
     const supporting: KnowledgeId[] = [];
-    for (const [id, vocabulary] of evidenceWords) {
+    for (const { id, vocabulary } of evidenceWords) {
       const shared = concepts.filter((concept) => concept.variants.some((variant) => vocabulary.has(variant))).length;
       if (shared / concepts.length >= PARAPHRASE) supporting.push(id);
     }

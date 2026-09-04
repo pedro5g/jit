@@ -158,19 +158,22 @@ function emitStructural(schema: ATS.AnyTypeSchema, emit: EmitChild): string {
 export function emitBoundaryType(
   schema: ATS.AnyTypeSchema,
   mode: "create" | "hydrate",
-  names?: ReadonlyMap<ATS.AnyTypeSchema, string>
+  names?: ReadonlyMap<ATS.AnyTypeSchema, string>,
+  omitFields?: ReadonlySet<string>
 ): string {
   const emit = (current: ATS.AnyTypeSchema): string => {
     const node = current as AnySchema;
     if (node.type === TypeName.runtimeType) return emit(node.def.innerType as ATS.AnyTypeSchema);
     if (node.type === TypeName.object) {
       const props = node.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
-      const entries = Object.keys(props).map((key) => {
-        const property = props[key];
-        const safeKey = Parse.isValidIdentifier(key) ? key : JSON.stringify(key);
-        const optional = mode === "create" && acceptsMissingBoundary(property) ? "?" : "";
-        return `${safeKey}${optional}: ${emit(property)}`;
-      });
+      const entries = Object.keys(props)
+        .filter((key) => omitFields?.has(key) !== true)
+        .map((key) => {
+          const property = props[key];
+          const safeKey = Parse.isValidIdentifier(key) ? key : JSON.stringify(key);
+          const optional = mode === "create" && acceptsMissingBoundary(property) ? "?" : "";
+          return `${safeKey}${optional}: ${emit(property)}`;
+        });
       return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
     }
     if (node.type === TypeName.array) return `${wrapForSuffix(emit(node.def.element as ATS.AnyTypeSchema))}[]`;
@@ -194,8 +197,13 @@ export function emitBoundaryType(
   return emit(schema);
 }
 
-export function acceptsMissingBoundary(schema: ATS.AnyTypeSchema): boolean {
+export function acceptsMissingBoundary(schema: ATS.AnyTypeSchema, omitFields?: ReadonlySet<string>): boolean {
   const node = schema as AnySchema;
+  if (node.type === TypeName.object) {
+    const props = node.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
+    const fields = Object.keys(props).filter((key) => omitFields?.has(key) !== true);
+    return fields.length === 0 || fields.every((key) => acceptsMissingBoundary(props[key]));
+  }
   if (node.type === TypeName.optional || node.type === TypeName.nullish || node.type === TypeName.default) return true;
   if (
     node.type === TypeName.runtimeType ||

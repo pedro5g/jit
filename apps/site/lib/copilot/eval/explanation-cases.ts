@@ -126,7 +126,11 @@ export function explanationCases(): EvalCase[] {
     question: definition.question,
     category: "concept",
     locale: definition.locale,
-    expected: { routes: [definition.route], best: definition.route },
+    expected: {
+      routes: [definition.route],
+      best: definition.route,
+      ...(definition.anchor ? { anchor: definition.anchor } : {}),
+    },
   }));
 }
 
@@ -136,12 +140,15 @@ export function resolveExplanationFacets(
   knowledge: KnowledgeRepository,
   graph?: KnowledgeGraphRepository
 ): EvalCase[] {
-  return cases.map((testCase, index) => {
-    const definition = DEFINITIONS[index];
+  return cases.map((testCase) => {
+    const route = testCase.expected.routes?.[0] ?? testCase.expected.best;
+    if (!route) return testCase;
+
     const entries = knowledge
       .all()
       .filter(
-        (entry) => entry.routeId === definition.route && (definition.anchor ? entry.anchor === definition.anchor : true)
+        (entry) =>
+          entry.routeId === route && (testCase.expected.anchor ? entry.anchor === testCase.expected.anchor : true)
       );
     const related = graph
       ? entries.flatMap((entry) =>

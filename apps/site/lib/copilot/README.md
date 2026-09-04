@@ -57,6 +57,14 @@ The 40-case bilingual explanation evaluation measures the coverage planner indep
 
 The host-browser harness also completed the acceptance case once in Edge 152/WebGPU on AMD GCN5 (16 cores, 16 GB): Qwen3.5 0.8B took 53.5 s at 8.0 tokens/s, including the single audit retry. Its raw prose was rejected by the audit; deterministic grounded synthesis delivered 100% grounded output with 80.5% explanation completeness and 70.0% facet coverage. This is not a 40-case browser quality result. Qwen3 1.7B could not create a session on that host (`std::bad_alloc`).
 
+The controlled capability experiment is separate from that product measurement. `knowledge:eval:capability` freezes the oracle preparation and `/lab/benchmark` qualifies a deliberately small pool: Qwen3.5 0.8B q4f16, SmolLM2 135M q4f16, SmolLM2 360M q4f16, and the opaque Chrome `LanguageModel` runtime. Identity, runtime, dtype and measured capability are separate registry fields; parameter count never qualifies a candidate. Each candidate uses the same task and Config P: oracle evidence, minimal synthesis prompt, raw answer and shadow measurement. R and X are available only after that candidate clears P. The smoke set is eight fixed bilingual cases (four PT-BR and four EN); only after P clears its gate should the full 40-case matrix be run. `knowledge:inspect:capability "question"` prints the exact oracle evidence, provenance and token budget without loading model weights.
+
+Transformers candidates use the checkpoint's official `tokenizer.apply_chat_template` path. The baseline is deterministic decoding; one alternate configuration is recorded only when the model card documents it (Qwen non-thinking sampling and SmolLM2 conservative sampling). The Qwen alternate records the official recipe's `presence_penalty` omission because the installed Transformers.js generation config does not expose that control. The generic capability limit is 512 tokens for every applicable candidate. Finish reason, truncation, prompt/completion usage, TTFT and throughput are recorded independently; Chrome reports N/A where its API exposes no token count. Chrome availability is an infrastructure result, not a model-quality failure.
+
+The capability report weights source-derived facets as core, supporting and optional, reports a declared deterministic causal-coherence proxy, and keeps runtime latency separate from the capability verdict. Its P/R/X decomposition is model ceiling, context loss, protocol loss and delivery recovery. No human review output changes the automatic score, and no LLM judge is used.
+
+The baseline is temperature `0`, greedy decoding, and Qwen thinking disabled. The alternate Qwen and SmolLM2 settings are registered in the candidate manifest and sent through the same provider-neutral decoding fields; the report names each recipe instead of collapsing it into an informal “model” score. No candidate-specific prompt, evidence or retry is allowed in P.
+
 The release-readiness gate requires at least 100 human-labelled browser transcripts, at least 98% rejection precision and recall, and at most a 2% false-positive rate. A tiny or unlabeled run cannot pass by reporting a vacuous 100%. This repository currently has no committed browser labels, so no generated-answer accuracy claim is made yet.
 
 ```bash
@@ -64,9 +72,11 @@ pnpm knowledge:benchmark             # headless A/B/C; long and memory-heavy
 pnpm knowledge:benchmark -- --only B --limit 2
 pnpm knowledge:label -- <run-id>
 pnpm knowledge:rescore -- <run-id>
+pnpm knowledge:model:smoke -- --candidate smollm2-360m-instruct-q4f16
+pnpm knowledge:eval:models -- --candidate chrome-language-model --cases smoke
 ```
 
-Headless configuration B uses Qwen2.5 0.5B because the browser's Qwen3.5 0.8B graph does not load under `onnxruntime-node`. Its result is a lower-bound experiment, never a measurement of the browser tier. The browser benchmark at `/lab/benchmark` is the authoritative WebGPU/product measurement and records its runtime and hardware separately. It runs the forty-case bilingual explanation suite and resolves expected facet IDs from the exact compiled knowledge artifact used by that run.
+Headless configuration B uses Qwen2.5 0.5B because the browser's Qwen3.5 0.8B graph does not load under `onnxruntime-node`. Its result is a lower-bound experiment, never a measurement of the browser tier. The browser benchmark at `/lab/benchmark` is the authoritative browser measurement and records its runtime and hardware separately. It selects a candidate and decoding recipe, runs the fixed smoke/full set, and resolves expected facet IDs from the exact compiled knowledge artifact used by that run. `knowledge:rescore` groups saved capability runs by candidate, runtime, dtype and decoding, then writes `.eval/copilot/reports/<date>-model-shootout.md` with quality-first gates, PT/EN results, raw acceptance outputs, profiles and performance facts.
 
 Benchmark outputs are regenerable and ignored under `.eval/copilot/runs`. Human labels under `.eval/copilot/labels/*.jsonl` are the committed ground truth. Detectors report observations; `AuditPolicy` alone decides whether the product shows an answer.
 

@@ -16,15 +16,15 @@
  * a claim traces to evidence, a route was shown, the reply is in the reader's
  * language — is checkable against the index and the context.
  */
-import { AuditService, ShadowAuditPolicy, StrictAuditPolicy } from "../application/audit/audit.service";
-import { overlap } from "../application/context/stages";
-import { queryConcepts, tokenize } from "../application/retrieval/tokenizer";
-import type { AuditResult } from "../core/entities/audit";
-import type { FailureKind, FailureOrigin } from "../core/entities/claim";
-import type { ModelContext } from "../core/entities/model-context";
-import type { RetrievalReport } from "../core/entities/retrieval";
-import type { KnowledgeRepository, SymbolRepository } from "../core/repositories";
-import type { EvalCase } from "./types";
+import { AuditService, ShadowAuditPolicy, StrictAuditPolicy } from "../application/audit/audit.service.js";
+import { overlap } from "../application/context/stages.js";
+import { queryConcepts, tokenize } from "../application/retrieval/tokenizer.js";
+import type { AuditResult } from "../core/entities/audit.js";
+import type { FailureKind, FailureOrigin } from "../core/entities/claim.js";
+import type { ModelContext } from "../core/entities/model-context.js";
+import type { RetrievalReport } from "../core/entities/retrieval.js";
+import type { KnowledgeRepository, SymbolRepository } from "../core/repositories/index.js";
+import type { EvalCase } from "./types.js";
 
 const shadow = new ShadowAuditPolicy();
 
@@ -156,7 +156,7 @@ export interface MeasuredCase {
   rawMeasurement?: AnswerMeasurement;
   delivery?: "model" | "salvage" | "grounded-synthesis";
   latencyMs: number;
-  tokensPerSecond: number;
+  tokensPerSecond: number | null;
   /**
    * Time to first token, which only a streaming host can observe — §PART 27.
    *
@@ -165,6 +165,9 @@ export interface MeasuredCase {
    * a zero would print as the better of the two.
    */
   ttftMs?: number;
+  finish?: "stop" | "length" | "aborted";
+  /** `true` only when the provider says the configured limit ended generation. */
+  truncated?: boolean;
   retrievalTimings?: RetrievalReport["timings"];
 }
 
@@ -202,6 +205,9 @@ export interface GenerationMetrics {
   foreignDomainDrift: number;
   wrongLanguage: number;
   degenerated: number;
+  /** Share of outputs whose provider explicitly stopped at maxTokens. */
+  /** Null when no response recorded an explicit finish reason. */
+  truncated: number | null;
 
   wrongNavigation: number;
   /** Of the answers that offered a link at all, those whose links were real. */
@@ -232,7 +238,7 @@ export interface GenerationMetrics {
   medianLatencyMs: number;
   /** Null when the runtime could not observe it — never 0. */
   medianTtftMs: number | null;
-  tokensPerSecond: number;
+  tokensPerSecond: number | null;
   queryEmbeddingMs: number;
   vectorScanMs: number;
   vectorTopKMs: number;
@@ -294,6 +300,7 @@ export function measureGeneration(cases: readonly MeasuredCase[]): GenerationMet
     foreignDomainDrift: share((entry) => has(entry.measurement.audit, "foreign-domain-drift")),
     wrongLanguage: share((entry) => has(entry.measurement.audit, "wrong-language")),
     degenerated: share((entry) => has(entry.measurement.audit, "generation-degeneration")),
+    truncated: cases.some((entry) => entry.finish !== undefined) ? share((entry) => entry.truncated === true) : null,
 
     wrongNavigation: share((entry) => entry.measurement.wrongNavigation.length > 0),
     correctNavigation:
@@ -337,7 +344,13 @@ export function measureGeneration(cases: readonly MeasuredCase[]): GenerationMet
     redundancy: cases.reduce((sum, entry) => sum + entry.measurement.redundancy, 0) / total,
     medianLatencyMs: Math.round(latencies[Math.floor(latencies.length / 2)] ?? 0),
     medianTtftMs: ttfts.length === 0 ? null : Math.round(ttfts[Math.floor(ttfts.length / 2)] ?? 0),
-    tokensPerSecond: Math.round((cases.reduce((sum, entry) => sum + entry.tokensPerSecond, 0) / total) * 10) / 10,
+    tokensPerSecond: cases.some((entry) => entry.tokensPerSecond !== null)
+      ? Math.round(
+          (cases.reduce((sum, entry) => sum + (entry.tokensPerSecond ?? 0), 0) /
+            cases.filter((entry) => entry.tokensPerSecond !== null).length) *
+            10
+        ) / 10
+      : null,
     queryEmbeddingMs: cases.reduce((sum, entry) => sum + (entry.retrievalTimings?.queryEmbeddingMs ?? 0), 0) / total,
     vectorScanMs: cases.reduce((sum, entry) => sum + (entry.retrievalTimings?.vector?.vectorScanMs ?? 0), 0) / total,
     vectorTopKMs: cases.reduce((sum, entry) => sum + (entry.retrievalTimings?.vector?.topKSelectionMs ?? 0), 0) / total,

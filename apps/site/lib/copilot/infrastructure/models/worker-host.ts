@@ -8,7 +8,7 @@
  * The pipelines are cached inside it by task and repo, so switching models
  * keeps the one already loaded.
  */
-import type { CopilotWorkerRequest, CopilotWorkerResponse } from "./worker-protocol";
+import type { CopilotWorkerRequest, CopilotWorkerResponse } from "./worker-protocol.js";
 
 /** `Omit` over a union collapses it, so the id is dropped per member. */
 type WorkerCall = CopilotWorkerRequest extends infer T ? (T extends { id: number } ? Omit<T, "id"> : never) : never;
@@ -20,7 +20,7 @@ interface Pending {
   onDelta?: (text: string) => void;
   onFirstToken?: (ms: number) => void;
   onVector?: (vector: Float32Array) => void;
-  onDone?: (finish: "stop" | "length" | "aborted", tokens: number, ms: number) => void;
+  onDone?: (finish: "stop" | "length" | "aborted", tokens: number, ms: number, promptTokens?: number) => void;
 }
 
 /** Thrown when the reader cancels; the UI shows no error for it. */
@@ -60,7 +60,7 @@ export class CopilotWorkerHost {
           request.onVector?.(response.data);
           break;
         case "done":
-          request.onDone?.(response.finish, response.tokens, response.ms);
+          request.onDone?.(response.finish, response.tokens, response.ms, response.promptTokens);
           break;
         case "result":
           this.pending.delete(response.id);

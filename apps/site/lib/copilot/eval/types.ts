@@ -36,6 +36,8 @@ export interface EvalCase {
     best?: RouteId;
     /** Compiler-derived facet ids expected in a broad explanation. */
     facets?: FacetId[];
+    /** Stable section locator used by explanation and capability evals. */
+    anchor?: string;
   };
 
   /**

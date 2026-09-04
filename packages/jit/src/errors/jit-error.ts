@@ -25,7 +25,10 @@ export type JITErrorCode =
   | "READONLY_FIELD"
   | "REFINE_FAILED"
   | "VALIDATION_FAILED"
-  | "ASSERTION_FAILED";
+  | "ASSERTION_FAILED"
+  | "CLASS_MEMBER_ALREADY_EXISTS"
+  | "CLASS_OVERWRITE_TARGET_NOT_FOUND"
+  | "DDD_CAPABILITY_SCHEMA_CONFLICT";
 
 /**
  * Optional structured details attached to a `JITError`.

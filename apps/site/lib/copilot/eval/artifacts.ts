@@ -11,9 +11,10 @@
  * them is what makes re-scoring cheap — a new detector reads `responses.jsonl`
  * and `contexts.jsonl` and never regenerates a token.
  */
-import type { ModelContext } from "../core/entities/model-context";
-import type { RetrievalReport } from "../core/entities/retrieval";
-import type { EvalCase } from "./types";
+import type { ModelContext } from "../core/entities/model-context.js";
+import type { RetrievalReport } from "../core/entities/retrieval.js";
+import type { OracleContext } from "./oracle-context.js";
+import type { EvalCase } from "./types.js";
 
 /** Bumped when the prompt's wording changes in a way that could move results. */
 export const PROMPT_VERSION = 3;
@@ -22,13 +23,40 @@ export const CONTEXT_VERSION = 3;
 /** Bumped when the case set changes. */
 export const DATASET_VERSION = 2;
 
+export type BenchmarkKind = "capability" | "real-context" | "production";
+export type ContextSource = "oracle" | "pipeline";
+export type PromptKind = "minimal-synthesis" | "production";
+
 export interface RunManifest {
   runId: string;
   ranAt: string;
 
-  model: { id: string; label: string; repo: string; dtype: string; revision?: string };
+  model: {
+    id: string;
+    label: string;
+    /** Downloadable repository; absent for Chrome's opaque built-in model. */
+    repo?: string;
+    /** Provider-exposed model family/revision, not an estimate. */
+    family?: string;
+    dtype?: string;
+    revision?: string;
+    parameterCount?: number;
+  };
   /** `node` is absent for a browser run, where there is none to record. */
-  runtime: { provider: string; device: string; node?: string };
+  runtime: {
+    provider: string;
+    device: string;
+    node?: string;
+    availability?: "unsupported" | "unavailable" | "needs-download" | "downloading" | "ready";
+    compatibility?: "available" | "unavailable" | "not-tested";
+    availabilityDetail?: string;
+    /** Bytes observed by the download callback; absent when the provider cannot expose them. */
+    downloadBytes?: number;
+    /** Preparation and session timings, kept separate from answer latency. */
+    coldStartMs?: number;
+    warmInitMs?: number;
+    sessionCreateMs?: number;
+  };
 
   /** What the model was answering from. */
   knowledge: { contentHash: string; embeddingModel: string; chunks: number; symbols: number };
@@ -37,7 +65,32 @@ export interface RunManifest {
   contextVersion: number;
   datasetVersion: number;
 
-  generation: { maxTokens: number; temperature: number; greedy: boolean };
+  generation: {
+    maxTokens: number;
+    temperature: number;
+    greedy: boolean;
+    decodingId?: string;
+    decodingSource?: "baseline" | "official-recommendation" | "runtime-default";
+    topP?: number;
+    topK?: number;
+    presencePenalty?: number;
+    repetitionPenalty?: number;
+    decodingNote?: string;
+    /** Whether this provider enforced maxTokens rather than merely receiving it. */
+    maxTokensEnforced?: boolean;
+    chatTemplate?: string;
+    samplingMode?: string;
+    /** Provider-level switch; absent in legacy runs that did not record it. */
+    thinking?: "disabled" | "enabled" | "unsupported";
+  };
+
+  /** Metadata that makes the P/R/X responsibility boundary explicit. */
+  benchmarkKind?: BenchmarkKind;
+  contextSource?: ContextSource;
+  promptKind?: PromptKind;
+  retry?: boolean;
+  fallback?: boolean;
+  citationsRequired?: boolean;
 
   /**
    * Where a browser run differs from a headless one — §PART 27.
@@ -87,6 +140,8 @@ export interface ContextRecord {
   contextTokens: number;
   /** The serialized `ModelContext`, so a scorer needs nothing else. */
   context: ModelContext;
+  /** Capability metadata is retained so scoring never reconstructs an oracle. */
+  oracle?: OracleContext;
   retrievalTimings?: RetrievalReport["timings"];
 }
 
@@ -99,11 +154,17 @@ export interface ResponseRecord {
   /** How the answer reached the reader. Old runs are model responses. */
   delivery?: "model" | "salvage" | "grounded-synthesis";
   latencyMs: number;
-  tokensPerSecond: number;
+  /** Null when the provider did not expose token counts. */
+  tokensPerSecond: number | null;
   /** Time to first token, which only a streaming host can measure — §PART 27. */
   ttftMs?: number;
   promptTokens?: number;
+  /** True when the browser provider did not expose tokenizer usage. */
+  promptTokensEstimated?: boolean;
   completionTokens?: number;
+  finish?: "stop" | "length" | "aborted";
+  /** Explicit because an unavailable finish reason must not be inferred. */
+  truncated?: boolean;
 }
 
 export interface RunArtifacts {

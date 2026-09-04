@@ -11,9 +11,9 @@
  * "invented API: 0.0%" is exactly what this format exists to prevent.
  */
 
-import type { RunManifest } from "./artifacts";
-import type { GenerationMetrics, MeasuredCase } from "./detectors";
-import type { ShadowMetrics } from "./labels";
+import type { RunManifest } from "./artifacts.js";
+import type { GenerationMetrics, MeasuredCase } from "./detectors.js";
+import type { ShadowMetrics } from "./labels.js";
 
 /**
  * Stated in every report, because a table travels further than its caveats.
@@ -233,7 +233,9 @@ export function renderReport(sections: readonly ReportSection[], options: Report
   row("  median first token", (section) =>
     section.metrics.medianTtftMs === null ? "-" : `${(section.metrics.medianTtftMs / 1000).toFixed(2)}s`
   );
-  row("  tokens/sec", (section) => section.metrics.tokensPerSecond.toFixed(1));
+  row("  tokens/sec", (section) =>
+    section.metrics.tokensPerSecond === null ? "-" : section.metrics.tokensPerSecond.toFixed(1)
+  );
   row("  query embedding", (section) => `${section.metrics.queryEmbeddingMs.toFixed(1)}ms`);
   row("  exact vector scan", (section) => `${section.metrics.vectorScanMs.toFixed(2)}ms`);
   row("  top-K finalize", (section) => `${section.metrics.vectorTopKMs.toFixed(2)}ms`);

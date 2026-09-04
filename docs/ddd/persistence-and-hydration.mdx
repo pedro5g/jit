@@ -30,4 +30,11 @@ user.id.value === persistedId;
 
 `create()` resolves nested defaults, so a defaulted identifier field may be omitted. `hydrate()` requires that same persisted field and never invokes its default. The compiler emits direct materialization at each known field/element; no generic schema walker runs per entity.
 
+The same rule applies to DDD lifecycle state. With
+`timestamps()`, `softDelete()`, and `versioned()`, `hydrate()` requires
+`createdAt`, `updatedAt`, `deletedAt`, and `version`; it preserves those values
+exactly. `create()` initializes `createdAt` from the capability clock,
+`updatedAt`/`deletedAt` to `null`, and `version` to `0`. These managed fields
+are persisted state, not ordinary user updates.
+
 AOT co-emits required Runtime Classes beside construction pipelines, producing import-free ordinary JavaScript. The generated module contains validators, assignments, factories, and selected capabilities but no JIT runtime import.

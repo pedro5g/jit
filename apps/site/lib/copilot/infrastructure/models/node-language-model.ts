@@ -17,8 +17,9 @@
  * different sub-1B model, and the comparison says so.
  */
 
-import { CopilotError } from "../../core/errors/copilot-error";
-import type { GenerationRequest, GenerationResult, LanguageModelPort } from "../../core/ports/language-model";
+import { CopilotError } from "../../core/errors/copilot-error.js";
+import type { GenerationRequest, GenerationResult, LanguageModelPort } from "../../core/ports/language-model.js";
+import { applyOfficialChatTemplate } from "./chat-template.js";
 
 type Generator = ((input: string, options: Record<string, unknown>) => Promise<unknown>) & {
   tokenizer: {
@@ -70,18 +71,7 @@ export class NodeLanguageModel implements LanguageModelPort {
   private prompt(messages: GenerationRequest["messages"]): string {
     const tokenizer = this.generator?.tokenizer;
     if (!tokenizer) throw new CopilotError("model-unavailable", "the model is not loaded");
-
-    const apply = (input: unknown, options: Record<string, unknown>) =>
-      tokenizer.apply_chat_template(input, { tokenize: false, add_generation_prompt: true, ...options }) as string;
-
-    try {
-      return apply(messages, { enable_thinking: false });
-    } catch {
-      const folded = messages.map((message) =>
-        message.role === "system" ? { role: "user", content: message.content } : message
-      );
-      return apply(folded, {});
-    }
+    return applyOfficialChatTemplate(tokenizer, messages).prompt;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationResult> {
@@ -97,7 +87,10 @@ export class NodeLanguageModel implements LanguageModelPort {
       max_new_tokens: request.maxTokens,
       do_sample: request.temperature > 0,
       ...(request.temperature > 0 ? { temperature: request.temperature } : {}),
-      repetition_penalty: 1.1,
+      ...(request.topP !== undefined ? { top_p: request.topP } : {}),
+      ...(request.topK !== undefined ? { top_k: request.topK } : {}),
+      ...(request.presencePenalty !== undefined ? { presence_penalty: request.presencePenalty } : {}),
+      repetition_penalty: request.repetitionPenalty ?? 1.1,
       return_full_text: false,
     })) as { generated_text: string }[];
 

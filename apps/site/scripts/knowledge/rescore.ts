@@ -18,23 +18,33 @@
  * hand (§PART 25), the same pass reports what the detectors got right and
  * wrong against that reading.
  */
+
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { ARTIFACT_DIR } from "../../lib/copilot/config/artifacts";
-import type { Locale } from "../../lib/copilot/core/value-objects/locale";
+import { ARTIFACT_DIR } from "../../lib/copilot/config/artifacts.js";
+import { QUALIFICATION_CANDIDATES } from "../../lib/copilot/config/models.js";
+import type { Locale } from "../../lib/copilot/core/value-objects/locale.js";
 import {
   type CaseRecord,
   type ContextRecord,
   fromJsonl,
   type ResponseRecord,
   type RunManifest,
-} from "../../lib/copilot/eval/artifacts";
-import { type MeasuredCase, measureAnswer, measureGeneration } from "../../lib/copilot/eval/detectors";
-import { type AnswerLabel, shadowMetrics } from "../../lib/copilot/eval/labels";
-import { BROWSER_NOTE, type ReportSection, renderReport } from "../../lib/copilot/eval/report";
-import type { EvalCase } from "../../lib/copilot/eval/types";
-import { createKnowledgeEngine } from "../../lib/copilot/infrastructure/knowledge-engine";
-import { NodeArtifactLoader } from "../../lib/copilot/infrastructure/storage/node-artifact-loader";
+} from "../../lib/copilot/eval/artifacts.js";
+import { rescoreCapabilityRun } from "../../lib/copilot/eval/capability.js";
+import type { CapabilityReportSection } from "../../lib/copilot/eval/capability-report.js";
+import { type MeasuredCase, measureAnswer, measureGeneration } from "../../lib/copilot/eval/detectors.js";
+import { type AnswerLabel, shadowMetrics } from "../../lib/copilot/eval/labels.js";
+import {
+  renderModelShootoutReport,
+  type ShootoutCandidateIdentity,
+  type ShootoutCandidateResult,
+} from "../../lib/copilot/eval/model-shootout-report.js";
+import { BROWSER_NOTE, type ReportSection, renderReport } from "../../lib/copilot/eval/report.js";
+import type { EvalCase } from "../../lib/copilot/eval/types.js";
+import { createKnowledgeEngine } from "../../lib/copilot/infrastructure/knowledge-engine.js";
+import { NodeArtifactLoader } from "../../lib/copilot/infrastructure/storage/node-artifact-loader.js";
 
 const siteDir = path.resolve(import.meta.dirname, "../..");
 const evalDir = path.join(siteDir, ".eval/copilot");
@@ -45,22 +55,31 @@ const engine = await createKnowledgeEngine(new NodeArtifactLoader(path.join(site
 /**
  * Which runs to score.
  *
- * The most recent run per configuration by default. Comparing a config from
- * today against one from last week is exactly the mistake the manifest exists
- * to prevent, so the selection makes the correct thing the easy one.
+ * The most recent run per candidate/configuration/decoding by default. A
+ * single "latest P" slot would silently compare one candidate with another,
+ * which is precisely what the shootout manifest is meant to prevent.
  */
 async function latestRuns(): Promise<string[]> {
   const entries = await fs.readdir(runsDir).catch(() => [] as string[]);
-  const byConfig = new Map<string, string>();
+  const byCandidate = new Map<string, string>();
 
   for (const entry of entries.sort()) {
     const manifest = JSON.parse(
       await fs.readFile(path.join(runsDir, entry, "manifest.json"), "utf8").catch(() => "null")
     ) as RunManifest | null;
-    if (manifest) byConfig.set(manifest.config, entry);
+    if (manifest) {
+      const key = [
+        manifest.config,
+        manifest.model.id,
+        manifest.runtime.provider,
+        manifest.model.dtype ?? "",
+        manifest.generation.decodingId ?? "",
+      ].join("|");
+      byCandidate.set(key, entry);
+    }
   }
 
-  return [...byConfig.values()].sort();
+  return [...byCandidate.values()].sort();
 }
 
 /**
@@ -82,6 +101,136 @@ const runs = requested.length > 0 ? requested : await latestRuns();
 if (runs.length === 0) {
   console.error("no runs under .eval/copilot/runs — run pnpm knowledge:benchmark first");
   process.exit(1);
+}
+
+const capabilityRuns = await Promise.all(
+  runs.map(async (run) => {
+    const manifest = JSON.parse(await fs.readFile(path.join(runsDir, run, "manifest.json"), "utf8")) as RunManifest;
+    return manifest.benchmarkKind === "capability" ||
+      manifest.benchmarkKind === "real-context" ||
+      manifest.config === "X"
+      ? { run, manifest }
+      : null;
+  })
+).then((items) => items.filter((item): item is { run: string; manifest: RunManifest } => item !== null));
+
+if (capabilityRuns.length > 0) {
+  const byCandidate = new Map<string, ShootoutCandidateResult>();
+  for (const { run, manifest } of capabilityRuns) {
+    const dir = path.join(runsDir, run);
+    const artifacts = {
+      manifest,
+      cases: fromJsonl<CaseRecord>(await fs.readFile(path.join(dir, "cases.jsonl"), "utf8")),
+      contexts: fromJsonl<ContextRecord>(await fs.readFile(path.join(dir, "contexts.jsonl"), "utf8")),
+      responses: fromJsonl<ResponseRecord>(await fs.readFile(path.join(dir, "responses.jsonl"), "utf8")),
+    };
+    const rescored = rescoreCapabilityRun({ engine, ...artifacts });
+    if (!["P", "R", "X"].includes(manifest.config)) continue;
+    const registered = QUALIFICATION_CANDIDATES.find(
+      (candidate) =>
+        candidate.id === manifest.model.id ||
+        (candidate.model === manifest.model.repo && candidate.dtype === manifest.model.dtype)
+    );
+    const candidate: ShootoutCandidateIdentity = registered
+      ? {
+          id: registered.id,
+          label: registered.label,
+          provider: registered.provider,
+          ...(registered.model ? { model: registered.model } : {}),
+          family: registered.modelFamily,
+          ...(registered.modelRevision ? { revision: registered.modelRevision } : {}),
+          ...(registered.dtype ? { dtype: registered.dtype } : {}),
+          ...(registered.parameterCount !== undefined ? { parameterCount: registered.parameterCount } : {}),
+          ...(registered.approximateBytes !== undefined ? { approximateBytes: registered.approximateBytes } : {}),
+        }
+      : {
+          id: manifest.model.id,
+          label: manifest.model.label,
+          provider: manifest.runtime.provider === "transformers.js" ? "transformers-webgpu" : manifest.runtime.provider,
+          ...(manifest.model.repo ? { model: manifest.model.repo } : {}),
+          ...(manifest.model.family ? { family: manifest.model.family } : {}),
+          ...(manifest.model.revision ? { revision: manifest.model.revision } : {}),
+          ...(manifest.model.dtype ? { dtype: manifest.model.dtype } : {}),
+          ...(manifest.model.parameterCount !== undefined ? { parameterCount: manifest.model.parameterCount } : {}),
+        };
+    const key = [candidate.id, manifest.model.dtype ?? "", manifest.generation.decodingId ?? ""].join("|");
+    const current = byCandidate.get(key) ?? {
+      candidate,
+      sections: [],
+      profile: rescored.profile,
+      availability: manifest.runtime.availability ?? manifest.runtime.compatibility,
+    };
+    const section: CapabilityReportSection = {
+      config: manifest.config as "P" | "R" | "X",
+      label: manifest.configLabel,
+      artifacts,
+      cases: rescored.measured,
+      metrics: rescored.metrics,
+      deliveredMetrics: rescored.deliveredMetrics,
+      profile: rescored.profile,
+    };
+    byCandidate.set(key, {
+      ...current,
+      sections: [...current.sections, section].sort((left, right) => left.config.localeCompare(right.config)),
+    });
+  }
+
+  for (const candidate of QUALIFICATION_CANDIDATES) {
+    const keyPrefix = `${candidate.id}|`;
+    if ([...byCandidate.keys()].some((key) => key.startsWith(keyPrefix))) continue;
+    byCandidate.set(keyPrefix, {
+      candidate: {
+        id: candidate.id,
+        label: candidate.label,
+        provider: candidate.provider,
+        ...(candidate.model ? { model: candidate.model } : {}),
+        family: candidate.modelFamily,
+        ...(candidate.dtype ? { dtype: candidate.dtype } : {}),
+        ...(candidate.parameterCount !== undefined ? { parameterCount: candidate.parameterCount } : {}),
+        ...(candidate.approximateBytes !== undefined ? { approximateBytes: candidate.approximateBytes } : {}),
+      },
+      sections: [],
+      availability: candidate.provider === "chrome-language-model" ? "not-recorded" : "not-run",
+    });
+  }
+
+  const candidates = [...byCandidate.values()];
+  const qwenP = candidates
+    .find((candidate) => candidate.candidate.id === "qwen3.5-0.8b-q4f16")
+    ?.sections.find((section) => section.config === "P");
+  const report = renderModelShootoutReport({
+    candidates,
+    testedCommit: `${execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()} (working tree changes present)`,
+    benchmarkVersion: "jit-copilot-p1-v1",
+    datasetVersion: Math.max(
+      ...candidates
+        .flatMap((candidate) => candidate.sections)
+        .map((section) => section.artifacts.manifest.datasetVersion),
+      2
+    ),
+    knowledgeHash: candidates.flatMap((candidate) => candidate.sections).find(Boolean)?.artifacts.manifest.knowledge
+      .contentHash,
+    ...(qwenP
+      ? {
+          groundingCalibration: {
+            before: 0,
+            after: qwenP.metrics.generation.groundingCoverage,
+            reason:
+              "the detector preserved only the last passage for repeated knowledgeId values; it now retains every context passage as a separate vocabulary set",
+          },
+        }
+      : {}),
+  });
+  console.log(`\n${report}`);
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:]/g, "").replace("T", "-");
+  const reportFile = path.join(evalDir, "reports", `${stamp}-model-shootout.md`);
+  await fs.mkdir(path.dirname(reportFile), { recursive: true });
+  await fs.writeFile(
+    reportFile,
+    `${report}\n## Runs\n\n${capabilityRuns.map(({ run }) => `- \`${run}\``).join("\n")}\n`
+  );
+  console.log(`  written to ${path.relative(siteDir, reportFile)}\n`);
+  process.exit(0);
 }
 
 const sections: ReportSection[] = [];

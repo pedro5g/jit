@@ -64,6 +64,12 @@ JIT.ddd.entity(UserSchema).validate({
 `maxIssues` applies to schema issues and independent assertion issues alike.
 The compiled guard returns as soon as the declared bound is reached.
 
+Nested Runtime Types do not apply their own `throw`, `result`, or `tuple`
+return policy while they are being materialized inside another artifact. They
+emit trusted values or issues into the outer lazy collector, which owns the
+final return shape. A nested custom error may be a lower-priority candidate,
+but it is constructed only after collection completes.
+
 ## Assertions
 
 An invariant is written in the same condition builder a query filter or an
@@ -105,13 +111,21 @@ is not what you want to show:
 })
 ```
 
-A declared `error` short-circuits to that error instead of an issue: it is a
-domain error type, not a diagnostic.
+A declared `error` is selected after all assertion issues are collected; it is
+a domain error type, not a diagnostic. It does not short-circuit sibling
+assertions.
 
 Assertions run after schema validation and before the instance is built, on
 data the parse already produced. They report through **the factory's result
 policy**, not their own: whether a failure throws or comes back as a value is
 one decision for the artifact, not one per invariant.
+
+When multiple custom error candidates apply, the outer validation error has
+priority `1000` by default and assertion errors have priority `900` by
+default. A higher explicit priority wins; equal priorities use declaration
+order after the outer boundary tie. The selected factory is called once with
+the complete issue list. Without a custom candidate, the library creates one
+`JITValidationError` or `DomainAssertionError`.
 
 ```text
 input → defaults → schema validation → domain assertions → materialization → policy

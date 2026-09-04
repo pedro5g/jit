@@ -10,7 +10,7 @@ import { AuditService, StrictAuditPolicy } from "../../application/audit/audit.s
 import { ContextService } from "../../application/context/context.service";
 import { type SchemaResult, SchemaService } from "../../application/schema/schema.service";
 import { type AskInput, CopilotService } from "../../application/services/copilot.service";
-import { detectEnvironment, ModelService } from "../../application/services/model.service";
+import { detectEnvironment, ModelService } from "../../application/services/model.service.js";
 import type { CopilotAnswer } from "../../core/entities/answer";
 import type { ModelContext } from "../../core/entities/model-context";
 import type { RetrievalReport } from "../../core/entities/retrieval";
@@ -24,6 +24,7 @@ import {
   type KnowledgeEngine,
   type LexicalCapableLoader,
 } from "../../infrastructure/knowledge-engine";
+import { createBuiltInLanguageModelProvider } from "../../infrastructure/models/browser-language-model-provider.js";
 import { FetchArtifactLoader } from "../../infrastructure/storage/fetch-artifact-loader";
 import { ghostActions, ghostSources } from "../adapters/ghost";
 
@@ -72,7 +73,8 @@ export class CopilotController {
   readonly models: ModelService;
 
   constructor(private readonly loader: LexicalCapableLoader = new FetchArtifactLoader()) {
-    this.models = new ModelService(detectEnvironment(false));
+    const builtInProvider = createBuiltInLanguageModelProvider();
+    this.models = new ModelService(detectEnvironment(false, builtInProvider !== null), builtInProvider);
   }
 
   initialize(): Promise<void> {

@@ -12,6 +12,8 @@ export interface AssertionDescriptor {
   /** Machine-readable issue code; `custom` unless the caller names one. */
   readonly code: string;
   readonly message: string;
+  /** Candidate priority; larger wins, declaration order breaks ties. */
+  readonly priority: number;
   /** The single field the condition speaks about, when it names exactly one. */
   readonly field: string | undefined;
 }
@@ -22,6 +24,7 @@ export interface AssertionInput {
   readonly rule?: string;
   readonly code?: string;
   readonly message?: string;
+  readonly priority?: number;
 }
 
 export function resolveAssertionDescriptor(input: AssertionInput): AssertionDescriptor {
@@ -36,6 +39,7 @@ export function resolveAssertionDescriptor(input: AssertionInput): AssertionDesc
     // A domain code is the caller's vocabulary; without one the issue says
     // only that this was an application rule rather than a schema shape.
     code: input.code ?? "custom",
+    priority: input.priority ?? 900,
     message:
       input.message ??
       (rule === undefined
@@ -62,19 +66,24 @@ export function emitAssertionSource(descriptors: readonly AssertionDescriptor[],
     // collected, the way sibling schema failures are, rather than the caller
     // learning one per attempt. The list is allocated on the first failure.
     writer.line("let issues;");
+    writer.line("let errorIndex = -1;");
+    writer.line("let errorPriority = -1;");
     descriptors.forEach((descriptor, index) => {
       const test = emitQueryConditionSource(descriptor.condition, { fieldBase: "value", paramBase: "value" });
       writer.line(`if (!(${test})) {`);
       writer.indent(() => {
         writer.line(`const failure = __fail${index}(value);`);
-        // A declared error type is not an issue; it is reported as it is.
-        writer.line("if (failure !== undefined) return { error: failure };");
+        // A custom error is a candidate. It is not constructed until every
+        // independent assertion has had a chance to contribute an issue.
+        writer.line(
+          `if (failure !== undefined && ${descriptor.priority} > errorPriority) { errorIndex = ${index}; errorPriority = ${descriptor.priority}; }`
+        );
         writer.line(`(issues ??= [])[issues.length] = __issue${index};`);
-        if (maxIssues !== undefined) writer.line(`if (issues.length === ${maxIssues}) return { issues };`);
+        if (maxIssues !== undefined) writer.line(`if (issues.length === ${maxIssues}) return { issues, errorIndex };`);
       });
       writer.line("}");
     });
-    writer.line("return issues === undefined ? undefined : { issues };");
+    writer.line("return issues === undefined ? undefined : { issues, errorIndex };");
   });
   writer.line("}");
   return writer.toString();
@@ -96,11 +105,11 @@ export function assertionIssues(descriptors: readonly AssertionDescriptor[]): re
 export function assertionFailures(
   descriptors: readonly AssertionDescriptor[],
   errors: readonly (AssertionErrorFactory | undefined)[]
-): readonly ((value: unknown) => unknown)[] {
-  return descriptors.map((descriptor, index) => {
+): readonly ((value: unknown) => boolean)[] {
+  return descriptors.map((_, index) => {
     const custom = errors[index];
-    if (custom === undefined) return () => undefined;
-    return (value: unknown) => custom(value, descriptor);
+    if (custom === undefined) return () => false;
+    return () => true;
   });
 }
 

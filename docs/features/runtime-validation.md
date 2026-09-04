@@ -126,6 +126,13 @@ The generated traversal stops as soon as issue 100 is emitted; it does not
 collect the rest and slice afterward. The default remains collect-all. Async
 validation and class/DDD `.validate({ maxIssues })` use the same emitter.
 
+When a Runtime Type is nested in a class or another schema, its boundary
+result policy is not executed internally. The compiled validator contributes
+the nested path and issues to the outer lazy collector; `result` and `tuple`
+cannot leak into the parent or stop independent sibling checks. A nested custom
+error is only a deferred candidate for the outer boundary and is constructed
+after collection.
+
 ### Custom messages
 
 Every check that can fail takes one, as a trailing argument:

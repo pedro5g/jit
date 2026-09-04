@@ -63,6 +63,30 @@ an installed capability. Runtime installation uses the prototype directly;
 there is no extension registry or dispatcher, and two instances share the
 same function.
 
+`.extends()` is stateful: each call sees the fields, built-in members,
+capabilities, and custom members accumulated by previous calls. Existing
+members are never silently replaced. Use `JIT.overwrite(...)` on the specific
+member when replacement is intentional:
+
+```ts
+const NamedUser = User.extends({
+  label() {
+    return this.name;
+  },
+});
+
+const UpperUser = NamedUser.extends({
+  label: JIT.overwrite(function label() {
+    return this.name.toUpperCase();
+  }),
+});
+```
+
+The marker is declaration-only. It disappears before class compilation, so
+the generated method has no overwrite check or dispatch. Overwriting a
+managed lifecycle field is also declaration-only and the final schema is
+rechecked against its capability contract.
+
 Built-in extensions are reconstructive AOT capabilities. Arbitrary JavaScript
 methods are runtime bindings, not source artifacts: standalone AOT generation
 skips the complete class with a `class.extends` reason. JIT never serializes a

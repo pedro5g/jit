@@ -13,11 +13,11 @@
  * not — a machine worth recording, and a run that must survive being closed
  * halfway through.
  */
-import type { ContextService } from "../application/context/context.service";
-import type { GenerationModelSpec, ModelTier } from "../config/models";
-import type { EmbeddingPort } from "../core/ports/embedding";
-import type { LanguageModelPort } from "../core/ports/language-model";
-import type { KnowledgeEngine } from "../infrastructure/knowledge-engine";
+import type { ContextService } from "../application/context/context.service.js";
+import type { DecodingSpec, GenerationCandidate, GenerationModelSpec, ModelTier } from "../config/models.js";
+import type { EmbeddingPort } from "../core/ports/embedding.js";
+import type { LanguageModelPort } from "../core/ports/language-model.js";
+import type { KnowledgeEngine } from "../infrastructure/knowledge-engine.js";
 import {
   CONTEXT_VERSION,
   DATASET_VERSION,
@@ -25,11 +25,20 @@ import {
   type RunArtifacts,
   type RunManifest,
   runId,
-} from "./artifacts";
-import type { BrowserBlock } from "./browser-environment";
-import type { MeasuredCase } from "./detectors";
-import { generateCase, MAX_TOKENS, pipelinePrompt } from "./generation-run";
-import type { EvalCase } from "./types";
+} from "./artifacts.js";
+import type { BrowserBlock } from "./browser-environment.js";
+import {
+  type CapabilityConfig,
+  type CapabilityMeasuredCase,
+  type CapabilityRunResult,
+  capabilityManifest,
+  capabilityProfile,
+  runCapabilityBenchmark,
+  summarizeCapability,
+} from "./capability.js";
+import type { MeasuredCase } from "./detectors.js";
+import { generateCase, MAX_TOKENS, pipelinePrompt } from "./generation-run.js";
+import type { EvalCase } from "./types.js";
 
 /**
  * A browser run's configuration is its tier, not another letter.
@@ -50,10 +59,20 @@ export interface BrowserManifestInput {
   cases: number;
   maxTokens?: number;
   at?: Date;
+  benchmarkKind?: RunManifest["benchmarkKind"];
+  contextSource?: RunManifest["contextSource"];
+  promptKind?: RunManifest["promptKind"];
+  retry?: boolean;
+  fallback?: boolean;
+  citationsRequired?: boolean;
+  config?: string;
+  configLabel?: string;
+  decoding?: DecodingSpec;
+  runtime?: RunManifest["runtime"];
 }
 
 export function browserManifest(input: BrowserManifestInput): RunManifest {
-  const config = browserConfigId(input.model.tier);
+  const config = input.config ?? browserConfigId(input.model.tier);
   const at = input.at ?? new Date();
 
   return {
@@ -62,25 +81,51 @@ export function browserManifest(input: BrowserManifestInput): RunManifest {
     model: {
       id: input.model.id,
       label: input.model.label,
-      repo: input.model.repo,
+      repo: input.model.model,
+      family: input.model.modelFamily,
+      ...(input.model.modelRevision ? { revision: input.model.modelRevision } : {}),
+      ...(input.model.parameterCount !== undefined ? { parameterCount: input.model.parameterCount } : {}),
       dtype: input.model.dtype,
     },
-    runtime: { provider: "transformers.js", device: "webgpu" },
+    // Keep the legacy browser benchmark's provider label stable; the new
+    // qualification manifest uses the explicit `transformers-webgpu` value.
+    runtime: input.runtime ?? { provider: "transformers.js", device: "webgpu" },
     knowledge: {
       contentHash: input.knowledge.contentHash,
       embeddingModel: input.knowledge.embedding.model,
       chunks: input.knowledge.counts.chunks,
       symbols: input.knowledge.counts.symbols,
     },
-    promptVersion: PROMPT_VERSION,
-    contextVersion: CONTEXT_VERSION,
+    promptVersion: input.promptKind === "minimal-synthesis" ? 1 : PROMPT_VERSION,
+    contextVersion: input.contextSource === "oracle" ? 1 : CONTEXT_VERSION,
     datasetVersion: DATASET_VERSION,
-    generation: { maxTokens: input.maxTokens ?? MAX_TOKENS, temperature: 0, greedy: true },
+    generation: {
+      maxTokens: input.maxTokens ?? MAX_TOKENS,
+      temperature: input.decoding?.temperature ?? 0,
+      greedy: (input.decoding?.temperature ?? 0) === 0,
+      ...(input.decoding?.id ? { decodingId: input.decoding.id } : {}),
+      ...(input.decoding?.source ? { decodingSource: input.decoding.source } : {}),
+      ...(input.decoding?.topP !== undefined ? { topP: input.decoding.topP } : {}),
+      ...(input.decoding?.topK !== undefined ? { topK: input.decoding.topK } : {}),
+      ...(input.decoding?.presencePenalty !== undefined ? { presencePenalty: input.decoding.presencePenalty } : {}),
+      ...(input.decoding?.repetitionPenalty !== undefined
+        ? { repetitionPenalty: input.decoding.repetitionPenalty }
+        : {}),
+      maxTokensEnforced: true,
+      chatTemplate: "tokenizer.apply_chat_template",
+      ...(input.decoding?.thinking ? { thinking: input.decoding.thinking } : {}),
+    },
+    benchmarkKind: input.benchmarkKind ?? "production",
+    contextSource: input.contextSource ?? "pipeline",
+    promptKind: input.promptKind ?? "production",
+    retry: input.retry ?? true,
+    fallback: input.fallback ?? true,
+    citationsRequired: input.citationsRequired ?? true,
     browser: input.browser,
     config,
     // The model is what varies inside the browser table; the runtime is in the
     // title. Leading with it keeps the column header readable when truncated.
-    configLabel: `${input.model.label} · WebGPU`,
+    configLabel: input.configLabel ?? `${input.model.label} · WebGPU`,
     cases: input.cases,
   };
 }
@@ -109,6 +154,59 @@ export interface BrowserRunInput {
 export interface BrowserRunResult {
   artifacts: RunArtifacts;
   measured: MeasuredCase[];
+}
+
+export interface BrowserCapabilityRunInput {
+  engine: KnowledgeEngine;
+  contextService: ContextService;
+  model: LanguageModelPort;
+  embedder?: EmbeddingPort | null;
+  spec: GenerationCandidate;
+  decoding?: DecodingSpec;
+  runtime?: RunManifest["runtime"];
+  browser: BrowserBlock;
+  config: CapabilityConfig;
+  cases: readonly EvalCase[];
+  onProgress?: (progress: { index: number; total: number; case: EvalCase; measured?: CapabilityMeasuredCase }) => void;
+  onDelta?: (delta: string) => void;
+  signal?: AbortSignal;
+}
+
+/** Browser adapter for P/R/X; it shares all experiment logic with tests. */
+export function runBrowserCapabilityBenchmark(input: BrowserCapabilityRunInput): Promise<CapabilityRunResult> {
+  return runCapabilityBenchmark({ ...input, decoding: input.decoding, runtime: input.runtime });
+}
+
+/** Records a provider/runtime availability result without calling the model. */
+export function unavailableCapabilityRun(input: {
+  engine: KnowledgeEngine;
+  spec: GenerationCandidate;
+  browser: BrowserBlock;
+  config: CapabilityConfig;
+  availability: RunManifest["runtime"]["availability"];
+  detail: string;
+}): CapabilityRunResult {
+  const artifacts: RunArtifacts = {
+    manifest: capabilityManifest({
+      config: input.config,
+      model: input.spec,
+      browser: input.browser,
+      knowledge: input.engine.manifest,
+      cases: 0,
+      runtime: {
+        provider: input.spec.provider,
+        device: input.spec.provider === "chrome-language-model" ? "browser" : "webgpu",
+        availability: input.availability,
+        compatibility: "unavailable",
+        availabilityDetail: input.detail,
+      },
+    }),
+    cases: [],
+    contexts: [],
+    responses: [],
+  };
+  const metrics = summarizeCapability([]);
+  return { artifacts, measured: [], metrics, deliveredMetrics: metrics, profile: capabilityProfile([]) };
 }
 
 /**

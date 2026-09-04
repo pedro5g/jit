@@ -8,6 +8,8 @@
  * chunks, and a `vector` message instead of a `vectors` one.
  */
 
+import type { GenerationMessage } from "../../core/ports/language-model.js";
+
 export type CopilotWorkerRequest =
   | { id: number; type: "preload-generation"; repo: string; dtype: string }
   | { id: number; type: "preload-embedding"; repo: string; dtype: string }
@@ -19,7 +21,12 @@ export type CopilotWorkerRequest =
       maxTokens: number;
       /** 0 for anything the audit checks against a fixed surface. */
       temperature: number;
-      messages: { role: string; content: string }[];
+      topP?: number;
+      topK?: number;
+      presencePenalty?: number;
+      repetitionPenalty?: number;
+      decodingId?: string;
+      messages: GenerationMessage[];
     }
   | { id: number; type: "abort" }
   | { id: number; type: "embed-query"; repo: string; dtype: string; text: string };
@@ -31,6 +38,13 @@ export type CopilotWorkerResponse =
   /** Time to first token, so §76's latency numbers come from the real path. */
   | { id: number; type: "first-token"; ms: number }
   | { id: number; type: "vector"; data: Float32Array }
-  | { id: number; type: "done"; finish: "stop" | "length" | "aborted"; tokens: number; ms: number }
+  | {
+      id: number;
+      type: "done";
+      finish: "stop" | "length" | "aborted";
+      tokens: number;
+      ms: number;
+      promptTokens?: number;
+    }
   | { id: number; type: "result" }
   | { id: number; type: "error"; message: string };

@@ -17,6 +17,12 @@ export interface GenerationRequest {
   maxTokens: number;
   /** 0 for anything the audit will check against a fixed surface. */
   temperature: number;
+  /** Optional provider-neutral controls, supplied only by an official recipe. */
+  topP?: number;
+  topK?: number;
+  presencePenalty?: number;
+  repetitionPenalty?: number;
+  decodingId?: string;
   /**
    * A JSON shape the reply must match.
    *
@@ -33,7 +39,7 @@ export interface GenerationResult {
   /** Why generation ended — `length` is the one that needs a retry. */
   finish: "stop" | "length" | "aborted";
   usage?: { promptTokens?: number; completionTokens?: number };
-  timings?: { ttftMs: number; totalMs: number; tokensPerSecond: number };
+  timings?: { ttftMs?: number; totalMs: number; tokensPerSecond?: number };
 }
 
 export interface LanguageModelPort {

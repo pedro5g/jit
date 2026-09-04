@@ -37,3 +37,23 @@ user.id.value; // generated UUID
 ```
 
 Zero candidates and multiple identifier candidates are rejected unless the identity field is explicit. This avoids guessing when an entity contains both its own ID and another aggregate's ID.
+
+Lifecycle capabilities may add their managed state structurally, before the
+entity is compiled:
+
+```ts
+const AuditedUser = JIT.ddd
+  .entity(JIT.object({ id: UserId, name: JIT.string() }))
+  .extends(JIT.ddd.timestamps(), JIT.ddd.softDelete(), JIT.ddd.versioned());
+
+const user = AuditedUser.create({ name: "Ada" });
+user.createdAt; // Date
+user.updatedAt; // Date | null, initially null
+user.deletedAt; // Date | null, initially null
+user.version; // 0
+```
+
+`createdAt`, `updatedAt`, `deletedAt`, and `version` are required persisted
+state for `hydrate()` and are excluded from ordinary user updates. Existing
+canonical fields are reused when compatible; incompatible fields fail during
+declaration.

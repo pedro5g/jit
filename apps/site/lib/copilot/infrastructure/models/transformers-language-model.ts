@@ -6,16 +6,20 @@
  * worker, WebGPU, the download. Above this line there is a `generate` and a
  * `stream`.
  */
-import type { GenerationModelSpec } from "../../config/models";
-import { CopilotError } from "../../core/errors/copilot-error";
-import type { GenerationRequest, GenerationResult, LanguageModelPort } from "../../core/ports/language-model";
-import type { CopilotWorkerHost } from "./worker-host";
+import type { GenerationCandidate } from "../../config/models.js";
+import { CopilotError } from "../../core/errors/copilot-error.js";
+import type { GenerationRequest, GenerationResult, LanguageModelPort } from "../../core/ports/language-model.js";
+import type { CopilotWorkerHost } from "./worker-host.js";
 
 export class TransformersLanguageModel implements LanguageModelPort {
   constructor(
     private readonly host: CopilotWorkerHost,
-    private readonly spec: GenerationModelSpec
-  ) {}
+    private readonly spec: GenerationCandidate
+  ) {
+    if (spec.provider !== "transformers-webgpu" || !spec.model || !spec.dtype) {
+      throw new Error("TransformersLanguageModel requires a downloadable Transformers candidate");
+    }
+  }
 
   get id() {
     return this.spec.id;
@@ -30,10 +34,15 @@ export class TransformersLanguageModel implements LanguageModelPort {
   }
 
   async stream(request: GenerationRequest, onDelta: (delta: string) => void): Promise<GenerationResult> {
+    const repo = this.spec.model;
+    const dtype = this.spec.dtype;
+    if (!repo || !dtype) throw new CopilotError("model-unavailable", "the model has no checkpoint or dtype");
+
     let text = "";
     let ttftMs = 0;
     let finish: GenerationResult["finish"] = "stop";
     let tokens = 0;
+    let promptTokens: number | undefined;
     let totalMs = 0;
 
     /**
@@ -49,10 +58,15 @@ export class TransformersLanguageModel implements LanguageModelPort {
     try {
       await this.host.generate(
         {
-          repo: this.spec.repo,
-          dtype: this.spec.dtype,
+          repo,
+          dtype,
           maxTokens: request.maxTokens,
           temperature: request.temperature,
+          ...(request.topP !== undefined ? { topP: request.topP } : {}),
+          ...(request.topK !== undefined ? { topK: request.topK } : {}),
+          ...(request.presencePenalty !== undefined ? { presencePenalty: request.presencePenalty } : {}),
+          ...(request.repetitionPenalty !== undefined ? { repetitionPenalty: request.repetitionPenalty } : {}),
+          ...(request.decodingId ? { decodingId: request.decodingId } : {}),
           messages: request.messages,
         },
         {
@@ -63,9 +77,10 @@ export class TransformersLanguageModel implements LanguageModelPort {
           onFirstToken: (ms) => {
             ttftMs = ms;
           },
-          onDone: (reason, count, ms) => {
+          onDone: (reason, count, ms, promptCount) => {
             finish = reason;
             tokens = count;
+            promptTokens = promptCount;
             totalMs = ms;
           },
         }
@@ -82,7 +97,7 @@ export class TransformersLanguageModel implements LanguageModelPort {
     return {
       text,
       finish: request.signal.aborted ? "aborted" : finish,
-      usage: { completionTokens: tokens },
+      usage: { ...(promptTokens !== undefined ? { promptTokens } : {}), completionTokens: tokens },
       timings: {
         ttftMs,
         totalMs,

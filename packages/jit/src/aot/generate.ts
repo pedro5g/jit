@@ -820,12 +820,15 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         if (artifact.mutation?.touchAt !== undefined) {
           mixins.push(`{ ${classMemberName(artifact.mutation.touchMethod ?? "touch")}(): void }`);
         }
+      } else if (artifact.mutation?.updatedAt !== undefined || artifact.mutation?.version !== undefined) {
+        mixins.push(`{ update(patch: ${classUpdateType(artifact.schema)}): void; }`);
       }
       const runtimeValue = artifact.representation === "value" ? `{ readonly value: ${value} }` : value;
       const instance = mixins.length === 0 ? runtimeValue : `${runtimeValue} & ${mixins.join(" & ")}`;
-      const createInput = emitBoundaryType(artifact.schema, "create", typeNames);
+      const managedFields = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
+      const createInput = emitBoundaryType(artifact.schema, "create", typeNames, managedFields);
       const hydrateInput = emitBoundaryType(artifact.schema, "hydrate", typeNames);
-      const createParameters = acceptsMissingBoundary(artifact.schema)
+      const createParameters = acceptsMissingBoundary(artifact.schema, managedFields)
         ? `...args: [] | [input: ${createInput}]`
         : `input: ${createInput}`;
       const factories = [
@@ -1042,14 +1045,22 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           })});`,
           custom === undefined
             ? `  const __fail${index} = () => undefined;`
-            : `  const __fail${index} = (value) => (${custom})(value, ${JSON.stringify({ ...failure, error: undefined })});`
+            : `  const __errorCandidate${index} = ${custom}; const __fail${index} = () => true;`
         );
       }
       lines.push(...indentBlock(assertions.source));
       // One error carries every invariant that did not hold, matching the
       // runtime host exactly.
       lines.push(
-        '  const __assertFailure = (outcome) => { if (outcome.error !== undefined) return outcome.error; const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };'
+        `  const __assertFailure = (outcome, value) => { ${policy.error === undefined ? "" : `if (outcome.errorIndex < 0 || ${policy.errorPriority ?? 1000} >= (outcome.errorIndex < 0 ? -1 : [${assertions.failures.map((failure) => failure.priority).join(", ")}][outcome.errorIndex])) return __error(outcome.issues);`} ${assertions.failures
+          .map((failure, index) =>
+            failure.error === undefined
+              ? ""
+              : `if (outcome.errorIndex === ${index}) return __errorCandidate${index}(value, ${JSON.stringify({ ...failure, error: undefined })});`
+          )
+          .join(
+            " "
+          )} const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };`
       );
     }
     return lines;
@@ -1095,6 +1106,14 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
       return undefined;
     }
+    if ((artifact.policy?.nestedErrors?.length ?? 0) > 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.validate",
+        reason: "a nested custom error factory is a runtime binding and has no standalone AOT representation",
+      });
+      return undefined;
+    }
     const validator = emitValidatorBinding(
       binding,
       artifact.domainEvent ? (base as ATS.ObjectSchema).def.props.payload : artifact.schema,
@@ -1122,30 +1141,59 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const methods: string[] = [];
     const capabilities = new Set(artifact.capabilities);
     const fields = valueRepresentation ? ["value"] : Object.keys((base as ATS.ObjectSchema).def.props);
+    const managedFieldNames = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
+    const managedStorage = new Map(
+      (artifact.managedFields ?? []).map((managed, index) => [managed.field, `__managed${index}`] as const)
+    );
     const accessorByKey = new Map(artifact.accessors?.map((accessor) => [accessor.key, accessor]));
     const slots = new Map<string, string>();
     let slotIndex = 0;
 
     for (const field of fields) {
-      if (accessorByKey.get(field)?.field === "private") slots.set(field, `#p${slotIndex++}`);
+      if (accessorByKey.get(field)?.field === "private" && !managedStorage.has(field))
+        slots.set(field, `#p${slotIndex++}`);
     }
     const readField = (field: string) => {
+      const managed = managedStorage.get(field);
+      if (managed !== undefined) return `this[${managed}]`;
       const slot = slots.get(field);
       return slot ? `this.${slot}` : `this[${JSON.stringify(field)}]`;
     };
-    const writeField = (field: string, value: string) => `${readField(field)} = ${value};`;
+    const writeField = (field: string, value: string) =>
+      managedStorage.has(field)
+        ? `${readField(field)} = ${value};`
+        : managedFieldNames.has(field)
+          ? `Object.defineProperty(this, ${JSON.stringify(field)}, { value: ${value}, writable: false, enumerable: true, configurable: true });`
+          : `${readField(field)} = ${value};`;
     const accessorDefinitions = (artifact.accessors ?? [])
       .filter((accessor) => accessor.field === "private")
       .flatMap((accessor) => {
-        const slot = slots.get(accessor.key) as string;
+        const slot = slots.get(accessor.key);
+        const managed = managedStorage.get(accessor.key);
         const definitions: string[] = [];
 
-        if (accessor.get !== false)
-          definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
-        if (accessor.set !== false)
-          definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
+        if (accessor.get !== false) {
+          definitions.push(
+            managed === undefined
+              ? `get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`
+              : `get [${JSON.stringify(accessor.get)}]() { return this[${managed}]; }`
+          );
+        }
+        if (accessor.set !== false) {
+          definitions.push(
+            managed === undefined
+              ? `set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`
+              : `set [${JSON.stringify(accessor.set)}](value) { this[${managed}] = value; }`
+          );
+        }
         return definitions;
       });
+
+    for (const field of managedFieldNames) {
+      if (accessorByKey.get(field)?.field === "private") continue;
+      const managed = managedStorage.get(field);
+      if (managed !== undefined) methods.push(`get [${JSON.stringify(field)}]() { return this[${managed}]; }`);
+    }
 
     if (capabilities.has("equals")) {
       if (valueRepresentation) {
@@ -1188,19 +1236,33 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       methods.push(`clone() { return new this.constructor(${clone}(this), __construct, true); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
-    const needsUpdate = artifact.aggregate || capabilities.has("with");
+    const needsUpdate =
+      artifact.aggregate ||
+      capabilities.has("with") ||
+      artifact.mutation?.updatedAt !== undefined ||
+      artifact.mutation?.version !== undefined;
     let update: string | undefined;
     let aggregateUpdateBody: string | undefined;
     if (needsUpdate) {
-      if (artifact.aggregate) {
+      if (
+        artifact.aggregate ||
+        artifact.mutation?.updatedAt !== undefined ||
+        artifact.mutation?.version !== undefined
+      ) {
         const readonlyFields = fields.filter(
           (field) => resolveWrappers((base as ATS.ObjectSchema).def.props[field]).readonly
         );
         const mutation = buildAggregateMutationPlan({
           fields,
           readonlyFields,
+          ...(artifact.managedFields === undefined
+            ? {}
+            : { managedFields: artifact.managedFields.map((field) => field.field) }),
           ...(artifact.mutation?.updatedAt === undefined ? {} : { updatedAt: artifact.mutation.updatedAt }),
           ...(artifact.mutation?.version === undefined ? {} : { version: artifact.mutation.version }),
+          fieldAccess: new Map(
+            [...managedStorage.entries()].map(([field, managed]) => [field, `this[${managed}]`] as const)
+          ),
         });
         const updates = new Map<string, string | null>();
         for (let index = 0; index < mutation.mutableFields.length; index++) {
@@ -1251,38 +1313,49 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         );
       }
     }
-    if (artifact.aggregate && aggregateUpdateBody) {
+    if (
+      aggregateUpdateBody &&
+      (artifact.aggregate || artifact.mutation?.updatedAt !== undefined || artifact.mutation?.version !== undefined)
+    ) {
+      methods.push(`update(patch) { ${aggregateUpdateBody} }`);
+    }
+    if (artifact.aggregate) {
       methods.push(
-        `update(patch) { ${aggregateUpdateBody} }`,
         "raise(event) { this.__jitEvents.push(event); }",
         "peekEvents() { return this.__jitEvents.slice(); }",
         "pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }",
         "async commit(publisher) { const pending = this.__jitEvents; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); this.__jitEvents.splice(0, pending.length); }"
       );
     }
-    if (artifact.aggregate && artifact.mutation?.deletedAt !== undefined) {
+    if (artifact.mutation?.deletedAt !== undefined) {
       const deletedAt = artifact.mutation.deletedAt;
       const updatedAt = artifact.mutation.updatedAt;
+      const version = artifact.mutation.version;
       const deleteMethod = classMemberName(artifact.mutation.deleteMethod ?? "softDelete");
       const restoreMethod = classMemberName(artifact.mutation.restoreMethod ?? "restore");
       const isDeletedMember = classMemberName(artifact.mutation.isDeletedMember ?? "isDeleted");
       methods.push(
-        `${deleteMethod}() { const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "now")}`} }`,
-        `${restoreMethod}() { ${writeField(deletedAt, "null")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "new Date()")}`} }`,
+        `${deleteMethod}() { if (${readField(deletedAt)} !== null) return; const now = new Date(); ${writeField(deletedAt, "now")}${updatedAt === undefined ? "" : ` ${writeField(updatedAt, "now")}`}${version === undefined ? "" : ` ${writeField(version, `${readField(version)} + 1`)}`} }`,
+        `${restoreMethod}() { if (${readField(deletedAt)} === null) return; ${writeField(deletedAt, "null")}${updatedAt === undefined ? "" : ` const now = new Date(); ${writeField(updatedAt, "now")}`}${version === undefined ? "" : ` ${writeField(version, `${readField(version)} + 1`)}`} }`,
         `get ${isDeletedMember}() { return ${readField(deletedAt)} !== null; }`
       );
     }
-    if (artifact.aggregate && artifact.mutation?.touchAt !== undefined) {
+    if (artifact.mutation?.touchAt !== undefined) {
+      const version = artifact.mutation.version;
       methods.push(
-        `${classMemberName(artifact.mutation.touchMethod ?? "touch")}() { ${writeField(
-          artifact.mutation.touchAt,
-          "new Date()"
-        )} }`
+        `${classMemberName(artifact.mutation.touchMethod ?? "touch")}() { const now = new Date(); ${writeField(artifact.mutation.touchAt, "now")}${version === undefined ? "" : ` ${writeField(version, `${readField(version)} + 1`)}`} }`
       );
     }
     const assignments = valueRepresentation
       ? "this.value = state;"
-      : fields.map((field) => writeField(field, `state[${JSON.stringify(field)}]`)).join(" ");
+      : fields.map((field) => `${readField(field)} = state[${JSON.stringify(field)}];`).join(" ");
+    const managedAccessors = [...managedStorage.entries()]
+      .filter(([field]) => accessorByKey.get(field)?.field !== "private")
+      .map(
+        ([field]) =>
+          `Object.defineProperty(this, ${JSON.stringify(field)}, { get: Object.getOwnPropertyDescriptor(${binding}.prototype, ${JSON.stringify(field)}).get, enumerable: true, configurable: false });`
+      )
+      .join(" ");
     const events = artifact.aggregate
       ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });'
       : "";
@@ -1290,6 +1363,16 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const abstractGuard = artifact.abstract
       ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); `
       : "";
+    const managedCreation = artifact.managedFields ?? [];
+    const creationAssignments = managedCreation
+      .map((managed) => {
+        const field = JSON.stringify(managed.field);
+        if (managed.role === "createdAt") return `if (input[${field}] !== undefined) state[${field}] = new Date();`;
+        if (managed.role === "updatedAt" || managed.role === "deletedAt") return `state[${field}] = null;`;
+        return `state[${field}] = 0;`;
+      })
+      .join(" ");
+    const creationToken = creationAssignments.length === 0 ? "__construct" : "__create";
     // A configured policy needs the issues rather than an exception, so the
     // factory validates first and constructs a value it already trusts. An
     // unconfigured class keeps the constructor-validating shape it had.
@@ -1297,31 +1380,33 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const assertionCall =
       policy?.assertions === undefined
         ? ""
-        : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome)); ";
+        : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome, result.data)); ";
     const policyCreate =
       policy === undefined || !policy.create
         ? undefined
-        : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
+        : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${creationAssignments.replace(/state\[/g, "result.data[")} ${assertionCall}return __success(new this(result.data, __construct, true));`;
     const policyHydrate =
       policy === undefined || !policy.hydrate
         ? undefined
         : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
     const create = artifact.domainEvent
       ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);`
-      : (policyCreate ?? "return new this(input, __construct);");
+      : (policyCreate ?? `return new this(input, ${creationToken});`);
     const hydrate = artifact.domainEvent
       ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);`
       : (policyHydrate ??
         `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`);
     const constructionGuard =
       artifact.construction === "factory"
-        ? 'if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); '
+        ? `if (token !== __construct${creationAssignments.length === 0 ? "" : " && token !== __create"} && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); `
         : "";
     const constructorSource = artifact.domainEvent
       ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }`
-      : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
+      : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${creationAssignments.length === 0 ? "" : `if (token === __create) { ${creationAssignments} } `}${assignments}${managedAccessors.length === 0 ? "" : ` ${managedAccessors}`}${events}${freeze} }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push("  const __construct = Symbol();");
+    for (const managed of managedStorage.values()) js.push(`  const ${managed} = Symbol();`);
+    if (creationAssignments.length > 0) js.push("  const __create = Symbol();");
     if (policy !== undefined) {
       const policyLines = emitClassPolicy(policy, reportName);
       if (policyLines === undefined) return undefined;
