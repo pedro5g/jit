@@ -21,16 +21,23 @@ interface ScenarioReport {
   readonly biasedOnly: boolean;
 }
 
-function formatNs(ns: number): string {
-  if (ns < 1_000) return `${ns.toFixed(2)} ns`;
-  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(2)} µs`;
-  return `${(ns / 1_000_000).toFixed(2)} ms`;
+function finiteNumber(value: number | null | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function formatBytes(bytes: number | undefined): string {
-  if (bytes === undefined) return "n/a";
-  if (bytes < 1_000) return `${bytes.toFixed(2)} b`;
-  return `${(bytes / 1_000).toFixed(2)} kb`;
+function formatNs(ns: number | null | undefined): string {
+  const finite = finiteNumber(ns);
+  if (finite === undefined) return "n/a";
+  if (finite < 1_000) return `${finite.toFixed(2)} ns`;
+  if (finite < 1_000_000) return `${(finite / 1_000).toFixed(2)} µs`;
+  return `${(finite / 1_000_000).toFixed(2)} ms`;
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  const finite = finiteNumber(bytes);
+  if (finite === undefined) return "n/a (not measurable)";
+  if (finite < 1_000) return `${finite.toFixed(2)} b`;
+  return `${(finite / 1_000).toFixed(2)} kb`;
 }
 
 function splitName(name: string): { impl: string; scenario: string } {
@@ -55,11 +62,14 @@ function buildReports(suite: PersistedSuite): ScenarioReport[] {
   const reports: ScenarioReport[] = [];
 
   for (const [scenario, runs] of byScenario) {
-    const jitRun = runs.find((run) => splitName(run.name).impl.startsWith("JIT "));
+    const jitRun = runs.find(
+      (run) => splitName(run.name).impl.startsWith("JIT ") && finiteNumber(run.stats?.avg) !== undefined
+    );
     if (!jitRun?.stats) continue;
 
-    const honest = runs.filter((run) => run !== jitRun && !(run.name in suite.biased));
-    const biased = runs.filter((run) => run !== jitRun && run.name in suite.biased);
+    const measurable = (run: PersistedRun): boolean => finiteNumber(run.stats?.avg) !== undefined;
+    const honest = runs.filter((run) => run !== jitRun && !(run.name in suite.biased) && measurable(run));
+    const biased = runs.filter((run) => run !== jitRun && run.name in suite.biased && measurable(run));
     // Fall back to biased competitors (flagged below) when no honest one exists.
     const pool = honest.length > 0 ? honest : biased;
     if (pool.length === 0) continue;
@@ -70,15 +80,19 @@ function buildReports(suite: PersistedSuite): ScenarioReport[] {
     }
     if (!best.stats) continue;
 
+    const jitAvg = finiteNumber(jitRun.stats.avg);
+    const bestAvg = finiteNumber(best.stats.avg);
+    if (jitAvg === undefined || bestAvg === undefined || bestAvg === 0) continue;
+
     reports.push({
       suite: suite.suite,
       scenario,
-      jitAvg: jitRun.stats.avg,
+      jitAvg,
       jitHeap: jitRun.stats.heap?.avg,
       bestName: splitName(best.name).impl,
-      bestAvg: best.stats.avg,
+      bestAvg,
       bestHeap: best.stats.heap?.avg,
-      ratio: jitRun.stats.avg / best.stats.avg,
+      ratio: jitAvg / bestAvg,
       biasedOnly: honest.length === 0,
     });
   }

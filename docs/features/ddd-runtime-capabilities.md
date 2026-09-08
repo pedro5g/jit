@@ -135,6 +135,49 @@ semantics and configured names. Standalone AOT never captures an application
 clock. A class carrying one is skipped in full with a `class.extends` reason,
 rather than dropping the policy or reconstructing a closure from source text.
 
+## V5 regression recovery: Runtime Type and validation boundaries
+
+The DDD presets install structural behavior at declaration time. An Entity now
+has `equals()`, `hashCode()`, `identity()`, and `sameIdentity()` by default;
+an Aggregate Root adds the ordered event buffer and controlled `update()` and
+`commit()` surface. `JIT.class.equals()`, `hashCode()`, `clone()`, `diff()`,
+and `json()` remain explicit callable capabilities for ordinary Runtime
+Classes. The callable form is equivalent to the compatible bare descriptor:
+
+```ts
+const User = JIT.ddd
+  .entity(JIT.object({ id: JIT.string(), email: JIT.string().email() }))
+  .extends(JIT.class.clone(), JIT.class.diff(), JIT.class.json());
+```
+
+Runtime Types are semantic boundaries shared by equality, hashing, cloning,
+diffing, validation, and AOT lowering. Scalar representations compare and
+hash their `value`; object representations recurse through their inner schema.
+Immutable Runtime Types are reused by clone, while mutable nested Runtime
+Types are rebuilt through the internal trusted materializer. No operation
+turns a Runtime Type into a plain object or calls a nested public factory.
+
+DDD factory validation is opt-in. `create()` still applies defaults,
+coercions, transforms, nested Runtime Type materialization, and class layout
+without executing schema checks. `.validate()` enables the shared
+`ValidationPlan` for the selected factory phases. A validated nested Runtime
+Type enables checks only for that child; it does not activate sibling checks or
+create a nested result wrapper. `hydrate()` never regenerates persisted
+defaults. The materializer and validator therefore have separate compilation
+paths, and successful paths allocate neither issue arrays nor result wrappers.
+
+Mutable class `hashCode()` methods are deliberately uncached, so a mutation
+cannot leave a stale hash. Immutable scalar Value Objects may use the existing
+structural cache. Class `clone()` and `diff()` are direct method-specialized
+compilers; clone re-enters `__jitMaterialize` to preserve the receiver's
+prototype and diff reads the same Runtime Type-aware IR as standalone diff.
+
+The AOT host reconstructs the same descriptors, including scalar Value Objects,
+Unique Identifiers, Entities, Aggregate Roots, and domain events. Unvalidated
+DDD AOT factories emit materialization-only code; validated factories emit the
+same checks and failure channel as runtime JIT. Runtime-bound custom methods,
+clocks, factories, and error constructors remain explicit skip reasons.
+
 ## Complexity, allocations, and measurement
 
 - Declaration recompiles the Aggregate Root mutation method once per installed
@@ -251,6 +294,27 @@ the runtime `either` factory 68.48 ns / 40.27 B. The success result is the
 instance itself; there is no `{ ok: true, value }` allocation. The extra work
 is declaration-selected policy handling, while the failure-only object and
 issue list remain confined to rejection.
+
+## V5 benchmark run
+
+The following is a fresh `pnpm bench:classes` run after the Runtime Type and
+validation-boundary changes. It was collected on Node 22.22.3, Apple M1,
+arm64-darwin, on 2026-09-08. Each cell is `ns/op / sampled B/op`; this is a
+machine-local regression reference, not a cross-machine performance claim.
+
+| Scenario | Runtime JIT | AOT | Handwritten equivalent | Handwritten trusted |
+| --- | ---: | ---: | ---: | ---: |
+| flat entity create | 15.76 / 48.22 | 10.97 / 48.16 | 4.45 / 48.12 | — |
+| flat entity hydrate | 61.82 / 456.67 | 48.47 / 362.77 | — | — |
+| scalar Value Object create | 32.24 / 32.31 | 27.03 / 32.11 | — | 27.18 / 32.14 |
+| nested Runtime Type hydrate | 193.40 / 394.80 | 101.50 / 320.02 | 453.44 / 731.25 | 90.37 / 264.38 |
+| default-clock mutation | 54.20 / 112.18 | 54.08 / 112.11 | 54.27 / 112.16 | — |
+| no-op aggregate update | 0.73 / 0.02 | — | 0.43 / 0.01 | — |
+
+The benchmark includes the full class suite, including rejection, serializer,
+event-buffer, and method scenarios. The generated artifact is persisted by
+the benchmark runner under `bench/results/classes.latest.json`; rerun the
+command before making a new performance claim.
 
 ## Tradeoffs and non-goals
 

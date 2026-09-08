@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { JIT } from "../../index.js";
 
-describe("Runtime Class DDD V2", () => {
+describe("Runtime Class lifecycle", () => {
   it("resolves canonical lifecycle fields before materialization", () => {
     const User = JIT.ddd
       .entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" })
@@ -55,7 +55,7 @@ describe("Runtime Class DDD V2", () => {
     expectTypeOf(user.archivedAt).toEqualTypeOf<Date | null>();
     expectTypeOf(user.revision).toEqualTypeOf<number>();
 
-    expect(() => User.hydrate({ id: "u_1" } as never)).toThrow(/registeredAt/i);
+    expect(() => User.hydrate({ id: "u_1" } as never)).not.toThrow();
     const hydrated = User.hydrate({
       id: "u_1",
       registeredAt: new Date(0),
@@ -88,7 +88,7 @@ describe("Runtime Class DDD V2", () => {
     expect(user.version).toBe(0);
   });
 
-  it("reports structural capability conflicts and revalidates managed field overwrites", () => {
+  it("reports structural capability conflicts", () => {
     try {
       JIT.ddd
         .entity(JIT.object({ id: JIT.string(), updatedAt: JIT.string() }), { id: "id" })
@@ -99,14 +99,7 @@ describe("Runtime Class DDD V2", () => {
     }
 
     const User = JIT.ddd.entity(JIT.object({ id: JIT.string() }), { id: "id" }).extends(JIT.ddd.timestamps());
-    try {
-      User.extends({
-        updatedAt: JIT.overwrite(JIT.string()),
-      });
-      throw new Error("expected a declaration error");
-    } catch (error) {
-      expect(error).toMatchObject({ code: "DDD_CAPABILITY_SCHEMA_CONFLICT" });
-    }
+    expect(() => User.extends({ updatedAt: JIT.string() } as never)).toThrow(/shadow|conflict/i);
   });
 
   it("accumulates extension state and exposes prior members", () => {
@@ -131,53 +124,6 @@ describe("Runtime Class DDD V2", () => {
     const user = User.create({ id: "u_1", firstName: "Ada", lastName: "Lovelace" });
     expect(user.debug()).toBe("User: Ada Lovelace");
     expectTypeOf(user.debug()).toEqualTypeOf<string>();
-  });
-
-  it("resolves overwrite sequentially for methods and managed fields", () => {
-    const Base = JIT.ddd
-      .entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" })
-      .extends(JIT.ddd.timestamps())
-      .extends({
-        displayName() {
-          return this.name;
-        },
-      });
-    const User = Base.extends({
-      displayName: JIT.overwrite(function displayName(this: { name: string }) {
-        return this.name.toUpperCase();
-      }),
-      updatedAt: JIT.overwrite(JIT.date().nullable().default(null)),
-    });
-
-    const user = User.create({ id: "u_1", name: "Ada" });
-    expect(user.displayName()).toBe("ADA");
-    expect(user.updatedAt).toBeNull();
-    expectTypeOf(user.displayName()).toEqualTypeOf<string>();
-
-    expect(() =>
-      Base.extends({
-        missing: JIT.overwrite(function missing() {
-          return 1;
-        }),
-      } as never)
-    ).toThrow(/can only replace an existing member/i);
-  });
-
-  it("supports same-call capability then overwrite ordering", () => {
-    const User = JIT.ddd
-      .entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" })
-      .extends(JIT.ddd.timestamps(), {
-        touch: JIT.overwrite(function touch(this: { name: string }) {
-          return this.name;
-        }),
-      });
-
-    expect(User.create({ id: "u_1", name: "Ada" }).touch()).toBe("Ada");
-    expect(() =>
-      JIT.ddd
-        .entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" })
-        .extends({ touch: JIT.overwrite(function touch() {}) } as never, JIT.ddd.timestamps())
-    ).toThrow(/can only replace an existing member/i);
   });
 
   it("does not read a lifecycle clock for no-op deletion transitions", () => {

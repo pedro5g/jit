@@ -133,6 +133,18 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitExecutionPlan(total.plan).source).toMatchSnapshot();
   });
 
+  it("Runtime Type boundary: equal, hash, clone, and diff", () => {
+    const Email = JIT.ddd.valueObject(JIT.string().email());
+    const User = JIT.ddd.entity(JIT.object({ id: Email, name: JIT.string() }), { id: "id" });
+
+    expect({
+      equal: Compiler.emitEqualSource(User.schema),
+      hash: Compiler.emitHashSource(User.schema),
+      clone: Compiler.emitCloneSource(Email.schema),
+      diff: Compiler.emitDiffSource(User.schema),
+    }).toMatchSnapshot();
+  });
+
   it("validator: deep unions, formats, coercion, transforms, and messages", () => {
     const Payment = JIT.object({
       id: JIT.string().ulid("id deve ser ULID"),
@@ -250,7 +262,7 @@ describe("generated source snapshots", () => {
     expect(Compiler.emitSerializeSource(Report.schema)).toMatchSnapshot();
   });
 
-  it("codec v2: discriminated union, optional bitmask, and collections", () => {
+  it("codec: discriminated union, optional bitmask, and collections", () => {
     const Event = JIT.object({
       seq: JIT.int(),
       at: JIT.date(),

@@ -145,6 +145,51 @@ export function compileHydrator<TSchema extends ATS.AnyTypeSchema>(
 }
 
 /**
+ * Compiles the materialization half of the validation pipeline. It preserves
+ * defaults, coercions, transforms and nested Runtime Type construction, but
+ * deliberately emits no schema checks or issue path machinery. DDD factories
+ * use this boundary until `.validate()` explicitly opts into validation.
+ */
+export function compileMaterializer<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions & { readonly resolveDefaults?: boolean }
+): (input: unknown) => ATS.TypeofSchema<TSchema> {
+  const resolveDefaults = options?.resolveDefaults ?? true;
+  return getCompileCached(
+    schema,
+    `materializer:defaults=${resolveDefaults}`,
+    () => {
+      const emitted = emitValidator(schema, {
+        is: false,
+        safeParse: false,
+        safeParseAsync: false,
+        fastParse: true,
+        resolveDefaults,
+        materializeRuntimeTypes: true,
+        validateChecks: false,
+      });
+      const parse = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values)
+        .parse as (input: unknown) => ATS.TypeofSchema<TSchema>;
+      return (input: unknown) => {
+        try {
+          return parse(input);
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            (error as { readonly __jitFastValidation?: unknown }).__jitFastValidation === true
+          ) {
+            throw new JITValidationError((error as { readonly issues: readonly ValidationIssue[] }).issues);
+          }
+          throw error;
+        }
+      };
+    },
+    options
+  );
+}
+
+/**
  * The same persisted-state boundary, reporting issues instead of throwing.
  *
  * A configured factory result policy needs the issues, not an exception, so

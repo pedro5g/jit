@@ -47,6 +47,7 @@ interface UnwrappedSchema {
   readonly materialize: string | undefined;
   readonly trustedMaterialize: boolean;
   readonly assertion: string | undefined;
+  readonly nestedValidation: boolean;
 }
 
 /**
@@ -96,15 +97,18 @@ class ValidatorEmitter {
   private readonly recursiveNames = new Map<ATS.AnyTypeSchema, string>();
   private helperCounter = 0;
   private varCounter = 0;
+  private validationEnabled: boolean;
 
   constructor(
     private mode: "is" | "parse" | "fast",
     private awaited = false,
     readonly resolveDefaults = true,
     readonly materializeRuntimeTypes = true,
-    private readonly maxIssues: number | undefined = undefined
+    private readonly maxIssues: number | undefined = undefined,
+    validationEnabled = true
   ) {
     this.rootMode = mode;
+    this.validationEnabled = validationEnabled;
   }
 
   bindings(): ValidatorBindings {
@@ -134,6 +138,10 @@ class ValidatorEmitter {
     this.bindingValues.push(value);
     this.bindingIds.set(value, name);
     return name;
+  }
+
+  bindValidation(value: unknown): string {
+    return this.validationEnabled ? this.bind(value) : "undefined";
   }
 
   nextVar(prefix: string): string {
@@ -166,6 +174,8 @@ class ValidatorEmitter {
     }
 
     const unwrapped = unwrapValidation(schema, this);
+    const previousValidation = this.validationEnabled;
+    this.validationEnabled = previousValidation || unwrapped.nestedValidation;
     const writer = this.writer;
     const holder = this.nextVar("v");
     const output = this.nextVar("o");
@@ -177,7 +187,10 @@ class ValidatorEmitter {
     writer.line(`let ${holder} = ${valueExpr};`);
     if (builds) writer.line(`let ${output} = ${holder};`);
 
-    const finish = () => (builds ? output : holder);
+    const finish = () => {
+      this.validationEnabled = previousValidation;
+      return builds ? output : holder;
+    };
 
     if (unwrapped.emptyAsUndefined) {
       writer.line(`if (${holder} === "") {`);
@@ -355,6 +368,7 @@ class ValidatorEmitter {
     message: string,
     params?: CheckParams
   ): void {
+    if (!this.validationEnabled) return;
     const writer = this.writer;
 
     writer.line(`if (${failCondition}) {`);
@@ -372,6 +386,7 @@ class ValidatorEmitter {
     received?: string,
     params?: CheckParams
   ): void {
+    if (!this.validationEnabled) return;
     const writer = this.writer;
 
     if (this.mode === "is") {
@@ -398,6 +413,7 @@ class ValidatorEmitter {
   }
 
   private emitNestedAssertion(binding: string, value: string, path: PathRef): void {
+    if (!this.validationEnabled) return;
     if (this.mode === "is") {
       this.writer.line(`if (${binding}(${value}) !== undefined) return false;`);
       return;
@@ -678,6 +694,11 @@ class ValidatorEmitter {
   ): void {
     const writer = this.writer;
 
+    if (!this.validationEnabled) {
+      body();
+      return;
+    }
+
     if (this.mode === "is") {
       writer.line(`if (${failCondition}) {`);
       writer.indent(() => {
@@ -728,7 +749,7 @@ class ValidatorEmitter {
 
     if (predicate) {
       this.failIf(
-        `!${this.bind(predicate)}(${value})`,
+        `!${this.bindValidation(predicate)}(${value})`,
         path,
         "custom",
         "custom",
@@ -762,7 +783,7 @@ class ValidatorEmitter {
       this.requiredMessage(schema, "expected string"),
       () => {
         this.failIf(
-          `!${this.bind(regex)}.test(${value})`,
+          `!${this.bindValidation(regex)}.test(${value})`,
           path,
           "invalid_template_literal",
           "template literal",
@@ -1149,7 +1170,7 @@ class ValidatorEmitter {
           switch (check.kind) {
             case "regex":
               this.failIf(
-                `!${this.bind(check.value)}.test(${value})`,
+                `!${this.bindValidation(check.value)}.test(${value})`,
                 path,
                 "invalid_format",
                 "regex",
@@ -1158,7 +1179,7 @@ class ValidatorEmitter {
               break;
             case "email":
               this.failIf(
-                `!${this.bind(check.value instanceof RegExp ? check.value : EMAIL_REGEX)}.test(${value})`,
+                `!${this.bindValidation(check.value instanceof RegExp ? check.value : EMAIL_REGEX)}.test(${value})`,
                 path,
                 "invalid_format",
                 "email",
@@ -1167,7 +1188,7 @@ class ValidatorEmitter {
               break;
             case "uuid":
               this.failIf(
-                `!${this.bind(check.value instanceof RegExp ? check.value : UUID_REGEX)}.test(${value})`,
+                `!${this.bindValidation(check.value instanceof RegExp ? check.value : UUID_REGEX)}.test(${value})`,
                 path,
                 "invalid_format",
                 "uuid",
@@ -1206,7 +1227,7 @@ class ValidatorEmitter {
               };
 
               this.failIf(
-                `!${this.bind(spec.pattern)}.test(${value})`,
+                `!${this.bindValidation(spec.pattern)}.test(${value})`,
                 path,
                 "invalid_format",
                 spec.name,
@@ -1219,7 +1240,7 @@ class ValidatorEmitter {
               // all a single compiled regex test carrying their kind.
               if (check.value instanceof RegExp) {
                 this.failIf(
-                  `!${this.bind(check.value)}.test(${value})`,
+                  `!${this.bindValidation(check.value)}.test(${value})`,
                   path,
                   "invalid_format",
                   check.kind,
@@ -2167,6 +2188,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
   let materialize: string | undefined;
   let trustedMaterialize = false;
   let assertion: string | undefined;
+  let nestedValidation = false;
 
   while (true) {
     if (current.type === TypeName.optional) {
@@ -2246,13 +2268,18 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     }
 
     if (current.type === TypeName.runtimeType) {
+      const traits = current.def.traits as ATS.RuntimeTypeTraits;
+      nestedValidation ||= traits.factoryPolicy.validationConfigured === true;
       if (emitter.materializeRuntimeTypes) {
         materialize = emitter.bind(current.def.materialize);
         trustedMaterialize =
           typeof current.def.materialize === "function" &&
           typeof (current.def.materialize as { readonly __jitMaterialize?: unknown }).__jitMaterialize === "function";
       }
-      if (current.def.assertion !== undefined) assertion = emitter.bind(current.def.assertion);
+      if (current.def.assertion !== undefined) {
+        assertion = emitter.bind(current.def.assertion);
+        nestedValidation = true;
+      }
       current = current.def.innerType as AnySchema;
       continue;
     }
@@ -2273,6 +2300,7 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     materialize,
     trustedMaterialize,
     assertion,
+    nestedValidation,
   };
 }
 
@@ -2464,6 +2492,8 @@ export interface EmitValidatorOptions {
   readonly resolveDefaults?: boolean;
   /** Leave Runtime Type construction to an explicit execution `construct` stage. */
   readonly materializeRuntimeTypes?: boolean;
+  /** Keep only materialization/transforms while skipping schema checks. */
+  readonly validateChecks?: boolean;
   /** Stop the diagnostic traversal as soon as this many issues exist. */
   readonly maxIssues?: number;
 }
@@ -2567,13 +2597,21 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const emitFastParse = options.fastParse ?? false;
   const resolveDefaults = options.resolveDefaults ?? true;
   const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
+  const validateChecks = options.validateChecks ?? true;
   const maxIssues = options.maxIssues;
   const freezesOutput = rootHasReadonly(schema);
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter: ValidatorEmitter | undefined;
 
   if (emitFastParse) {
-    const emitter = new ValidatorEmitter("fast", false, resolveDefaults, materializeRuntimeTypes);
+    const emitter = new ValidatorEmitter(
+      "fast",
+      false,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      undefined,
+      validateChecks
+    );
     emitter.markRecursive(recursive);
     parseEmitter = emitter;
     emitter.writer.line("function parse(value) {");
@@ -2585,7 +2623,14 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   }
 
   if (emitSafeParse && !emitFastParse) {
-    const emitter = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes, maxIssues);
+    const emitter = new ValidatorEmitter(
+      "parse",
+      false,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      maxIssues,
+      validateChecks
+    );
 
     emitter.markRecursive(recursive);
 
@@ -2625,7 +2670,14 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   let asyncEmitter: ValidatorEmitter | undefined;
 
   if (emitSafeParseAsync && !emitFastParse && containsPromise(schema)) {
-    const emitter = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes, maxIssues);
+    const emitter = new ValidatorEmitter(
+      "parse",
+      true,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      maxIssues,
+      validateChecks
+    );
 
     emitter.markRecursive(recursive);
 
@@ -2667,7 +2719,14 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   // Bind the same values in the same order so every function can share one
   // Function parameter list; extras from either emitter are appended after.
   if (emitIs && !emitFastParse) {
-    const emitter = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes);
+    const emitter = new ValidatorEmitter(
+      "is",
+      false,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      undefined,
+      validateChecks
+    );
 
     emitter.markRecursive(recursive);
 

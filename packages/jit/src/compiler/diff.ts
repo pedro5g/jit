@@ -31,6 +31,7 @@ export type DiffChange<T = unknown> =
  * @returns The structural changes needed to transform `left` into `right`.
  */
 export type Diff<T = unknown> = (left: T, right: T) => DiffChange[];
+export type DiffMethod<T = unknown> = (this: T, other: T) => DiffChange[];
 
 /**
  * Emits the JavaScript source of a schema-aware diff function.
@@ -40,6 +41,13 @@ export type Diff<T = unknown> = (left: T, right: T) => DiffChange[];
  */
 export function emitDiffSource(schema: ATS.AnyTypeSchema): string {
   return emitDiff(buildDiffIR(schema));
+}
+
+/** Emits a diff body whose left operand is the method receiver. */
+export function emitDiffMethodBody(schema: ATS.AnyTypeSchema): string {
+  return `const left = this;
+const right = other;
+${emitDiffBody(buildDiffIR(schema))}`;
 }
 
 /**
@@ -80,6 +88,24 @@ export function compileDiff<TSchema extends ATS.AnyTypeSchema>(
       });
       return compiled;
     },
+    options
+  );
+}
+
+/** Compiles a diff method without an extra wrapper call around the receiver. */
+export function compileDiffMethod<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): DiffMethod<ATS.Typeof<TSchema>> {
+  return getCompileCached(
+    schema,
+    "diff:method",
+    () =>
+      globalThis.Function(
+        `return function diff(other) {
+${emitDiffMethodBody(schema)}
+};`
+      )() as DiffMethod<ATS.Typeof<TSchema>>,
     options
   );
 }

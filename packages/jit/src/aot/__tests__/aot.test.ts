@@ -1297,6 +1297,34 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain('from "@jit-compiler/jit"');
   });
 
+  it("lowers class clone and diff methods over nested Runtime Types", async () => {
+    const UserId = JIT.ddd.uniqueIdentifier(JIT.string().uuid());
+    const User = JIT.ddd
+      .entity(JIT.object({ id: UserId, name: JIT.string() }), { id: "id" })
+      .extends(JIT.class.clone(), JIT.class.diff());
+    const result = AOT.generate({ groups: {}, artifacts: { UserId, User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        create(input: { id: string; name: string }): {
+          readonly id: { readonly value: string };
+          readonly name: string;
+          clone(): unknown;
+          diff(other: unknown): readonly unknown[];
+        };
+      };
+    };
+    const user = generated.User.create({ id: "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761", name: "Ada" });
+    const copy = user.clone() as typeof user;
+
+    expect(result.skipped).toEqual([]);
+    expect(copy).not.toBe(user);
+    expect(copy.id).toBe(user.id);
+    expect(user.diff(copy)).toEqual([]);
+    expect(source).toContain("__jitMaterialize");
+    expect(source).not.toContain("clone() { return new this.constructor");
+  });
+
   it("should co-emit identifiers used by nested entity materialization", async () => {
     const UserId = JIT.ddd.uniqueIdentifier();
     const UserBase = JIT.ddd.entity(JIT.object({ id: UserId, name: JIT.string() }));
@@ -1948,19 +1976,88 @@ describe("JIT AOT generate", () => {
     expect(source).not.toContain("RuntimeClass");
   });
 
-  it("rechecks managed fields after define-host overwrites", () => {
-    const User = DefineJIT.ddd
-      .entity(DefineJIT.object({ id: DefineJIT.string() }), { id: "id" })
-      .extends(DefineJIT.ddd.timestamps());
+  it("keeps scalar DDD definitions reconstructive on the define host", async () => {
+    const Email = DefineJIT.ddd.valueObject(DefineJIT.string().email());
+    const UserId = DefineJIT.ddd.uniqueIdentifier();
+    const ValidatedEmail = DefineJIT.ddd.valueObject(DefineJIT.string().email()).validate();
+    const result = AOT.generate({ groups: {}, artifacts: { Email, UserId, ValidatedEmail }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Email: { create(input: string): { readonly value: string } };
+      readonly UserId: { create(input?: string): { readonly value: string } };
+      readonly ValidatedEmail: { create(input: string): { readonly value: string } };
+    };
+
+    expect(result.skipped).toEqual([]);
+    expect(generated.Email.create("").value).toBe("");
+    expect(generated.UserId.create().value).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
+    expect(() => generated.ValidatedEmail.create("")).toThrow(/email/i);
+    expect(source).not.toContain('from "@jit-compiler/jit"');
+  });
+
+  it("keeps validation opt-in in generated DDD factories", async () => {
+    const schema = JIT.object({ id: JIT.string(), email: JIT.string().email(), age: JIT.number().min(18) });
+    const Unvalidated = JIT.ddd.entity(schema, { id: "id" });
+    const Validated = Unvalidated.validate();
+    const unvalidatedDir = mkdtempSync(join(tmpdir(), "jit-aot-unvalidated-"));
+    const validatedDir = mkdtempSync(join(tmpdir(), "jit-aot-validated-"));
 
     try {
-      User.extends({
-        updatedAt: DefineJIT.overwrite(DefineJIT.string()),
-      } as never);
-      throw new Error("expected a declaration error");
-    } catch (error) {
-      expect(error).toMatchObject({ code: "DDD_CAPABILITY_SCHEMA_CONFLICT" });
+      const unvalidatedResult = AOT.generate({ groups: {}, artifacts: { Unvalidated }, outDir: unvalidatedDir });
+      const validatedResult = AOT.generate({ groups: {}, artifacts: { Validated }, outDir: validatedDir });
+      const unvalidatedSource = readFileSync(join(unvalidatedDir, "index.js"), "utf8");
+      const validatedSource = readFileSync(join(validatedDir, "index.js"), "utf8");
+      const unvalidated = (await import(pathToFileURL(join(unvalidatedDir, "index.js")).href)) as {
+        readonly Unvalidated: { create(input: unknown): unknown };
+      };
+      const validated = (await import(pathToFileURL(join(validatedDir, "index.js")).href)) as {
+        readonly Validated: { create(input: unknown): unknown };
+      };
+      const invalid = { id: "u_1", email: "", age: 1 };
+
+      expect(unvalidatedResult.skipped).toEqual([]);
+      expect(validatedResult.skipped).toEqual([]);
+      expect(() => unvalidated.Unvalidated.create(invalid)).not.toThrow();
+      expect(() => validated.Validated.create(invalid)).toThrow();
+      expect(unvalidatedSource).not.toContain("invalid_format");
+      expect(unvalidatedSource).not.toContain("too_small");
+      expect(unvalidatedSource).not.toContain("JITValidationError");
+      expect(validatedSource).toContain("invalid_format");
+      expect(validatedSource).toContain("too_small");
+      expect(validatedSource).toContain("JITValidationError");
+    } finally {
+      rmSync(unvalidatedDir, { recursive: true, force: true });
+      rmSync(validatedDir, { recursive: true, force: true });
     }
+  });
+
+  it("keeps domain-event definitions reconstructive on the define host", async () => {
+    const OrderConfirmed = DefineJIT.ddd.domainEvent("order.confirmed", {
+      version: 2,
+      payload: DefineJIT.object({ orderId: DefineJIT.string() }),
+    });
+    const result = AOT.generate({ groups: {}, artifacts: { OrderConfirmed }, outDir });
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly OrderConfirmed: {
+        readonly type: "order.confirmed";
+        readonly version: 2;
+        create(input: { orderId: string }): {
+          readonly type: "order.confirmed";
+          readonly version: 2;
+          readonly payload: { readonly orderId: string };
+          readonly "~event": { readonly schemaVersion: 2 };
+        };
+      };
+    };
+    const event = generated.OrderConfirmed.create({ orderId: "o_1" });
+
+    expect(result.skipped).toEqual([]);
+    expect(generated.OrderConfirmed.type).toBe("order.confirmed");
+    expect(generated.OrderConfirmed.version).toBe(2);
+    expect(event.payload).toEqual({ orderId: "o_1" });
+    expect(event["~event"]).toMatchObject({ version: 1, type: "order.confirmed", schemaVersion: 2 });
   });
 
   it("preserves define-host assertions as reconstructive class metadata", async () => {

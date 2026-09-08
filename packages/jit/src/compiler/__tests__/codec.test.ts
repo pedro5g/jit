@@ -1,6 +1,6 @@
 import { Compiler, JIT } from "../../index.js";
 
-describe("JIT binary codec v2", () => {
+describe("JIT binary codec", () => {
   describe("schema versioning", () => {
     it("should stamp the version as byte 0 and reject mismatches on decode", () => {
       const Point = JIT.object({ x: JIT.number() });

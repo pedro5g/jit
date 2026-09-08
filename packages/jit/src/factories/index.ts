@@ -48,7 +48,7 @@ export {
 export { type ApiQuery, type ApiQueryOptions, api } from "./api.js";
 export { type CacheKeyBuilder, cacheKey } from "./cache-key.js";
 export { canonical } from "./canonical.js";
-export type { OverrideDescriptor, OverwriteDescriptor } from "./class.js";
+export type { OverrideDescriptor } from "./class.js";
 export {
   type AbstractRuntimeClass,
   type ClassConstructorInput,
@@ -66,10 +66,7 @@ export {
   type EventPublisher,
   type FactoryEither,
   type FactoryFailure,
-  type FactoryResultMode,
-  type FactoryResultModeInput,
   type FactoryReturnMode,
-  overwrite,
   type RuntimeClass,
   type RuntimeTypeFactoryPolicyTraits,
   type RuntimeTypeTraits,

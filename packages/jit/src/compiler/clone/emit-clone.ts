@@ -1,3 +1,4 @@
+import { JITError } from "../../errors/index.js";
 import { emitDefaultedValue } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { createEmitState, type EmitState } from "../emitter/emit-state.js";
@@ -7,13 +8,26 @@ import { emitSchemaGuard, literalDiscriminatorValue } from "../source/guard.js";
 import { emitLiteral, emitObjectKey } from "../source/literal.js";
 import type { CloneIRNode, CloneIRProgram } from "./build-clone-ir.js";
 
+export interface CloneBindings {
+  readonly names: string[];
+  readonly values: unknown[];
+}
+
+interface CloneEmitContext {
+  readonly bindings: CloneBindings;
+  readonly allowRuntimeTypeBindings: boolean;
+  readonly useTrustedRuntimeTypeMaterializers: boolean;
+  readonly ids: Map<Function, string>;
+}
+
 export function emitClone(program: CloneIRProgram): string {
   const writer = new CodeWriter();
+  const context = createContext(false, true);
 
-  emitHelpers(writer, program);
+  emitHelpers(writer, program, context);
   writer.line(`function clone(${program.param}) {`);
   writer.indent(() => {
-    emitCloneReturn(writer, program.body, program.param);
+    emitCloneReturn(writer, program.body, program.param, context);
   });
   writer.line("}");
 
@@ -21,12 +35,26 @@ export function emitClone(program: CloneIRProgram): string {
 }
 
 export function emitCloneBody(program: CloneIRProgram): string {
+  return emitCloneBodyWithBindings(program).source;
+}
+
+export function emitCloneBodyWithBindings(
+  program: CloneIRProgram,
+  options: {
+    readonly allowRuntimeTypeBindings?: boolean;
+    readonly useTrustedRuntimeTypeMaterializers?: boolean;
+  } = {}
+): { readonly source: string; readonly bindings: CloneBindings } {
   const writer = new CodeWriter();
+  const context = createContext(
+    options.allowRuntimeTypeBindings ?? true,
+    options.useTrustedRuntimeTypeMaterializers ?? true
+  );
 
-  emitHelpers(writer, program);
-  emitCloneReturn(writer, program.body, program.param);
+  emitHelpers(writer, program, context);
+  emitCloneReturn(writer, program.body, program.param, context);
 
-  return writer.toString();
+  return { source: writer.toString(), bindings: context.bindings };
 }
 
 /**
@@ -34,25 +62,37 @@ export function emitCloneBody(program: CloneIRProgram): string {
  * a call, so a self-referencing schema produces finite source that recurses at
  * run time instead of at emit time.
  */
-function emitHelpers(writer: CodeWriter, program: CloneIRProgram): void {
+function createContext(
+  allowRuntimeTypeBindings: boolean,
+  useTrustedRuntimeTypeMaterializers: boolean
+): CloneEmitContext {
+  return {
+    bindings: { names: [], values: [] },
+    allowRuntimeTypeBindings,
+    useTrustedRuntimeTypeMaterializers,
+    ids: new Map(),
+  };
+}
+
+function emitHelpers(writer: CodeWriter, program: CloneIRProgram, context: CloneEmitContext): void {
   for (const helper of program.helpers) {
     writer.line(`function ${helperName(helper.id)}(${program.param}) {`);
     writer.indent(() => {
-      emitCloneReturn(writer, helper.node, program.param);
+      emitCloneReturn(writer, helper.node, program.param, context);
     });
     writer.line("}");
   }
 }
 
-function emitCloneReturn(writer: CodeWriter, node: CloneIRNode, source: string): void {
-  const inline = emitInlineClone(node, source);
+function emitCloneReturn(writer: CodeWriter, node: CloneIRNode, source: string, context: CloneEmitContext): void {
+  const inline = emitInlineClone(node, source, context);
 
   if (inline) {
     writer.line(`return ${inline};`);
     return;
   }
 
-  emitCloneTo(writer, createEmitState(), node, source, "out");
+  emitCloneTo(writer, createEmitState(), node, source, "out", context);
   writer.line("return out;");
 }
 
@@ -60,8 +100,15 @@ function helperName(id: string): string {
   return `clone_${id}`;
 }
 
-function emitCloneTo(writer: CodeWriter, state: EmitState, node: CloneIRNode, source: string, target: string): void {
-  const inline = emitInlineClone(node, source);
+function emitCloneTo(
+  writer: CodeWriter,
+  state: EmitState,
+  node: CloneIRNode,
+  source: string,
+  target: string,
+  context: CloneEmitContext
+): void {
+  const inline = emitInlineClone(node, source, context);
 
   if (inline) {
     writer.line(`const ${target} = ${inline};`);
@@ -70,34 +117,37 @@ function emitCloneTo(writer: CodeWriter, state: EmitState, node: CloneIRNode, so
 
   switch (node.kind) {
     case "array":
-      emitArrayClone(writer, state, node, source, target);
+      emitArrayClone(writer, state, node, source, target, context);
       return;
     case "tuple":
-      emitTupleClone(writer, state, node, source, target);
+      emitTupleClone(writer, state, node, source, target, context);
       return;
     case "record":
-      emitRecordClone(writer, state, node, source, target);
+      emitRecordClone(writer, state, node, source, target, context);
       return;
     case "set":
-      emitSetClone(writer, state, node, source, target);
+      emitSetClone(writer, state, node, source, target, context);
       return;
     case "map":
-      emitMapClone(writer, state, node, source, target);
+      emitMapClone(writer, state, node, source, target, context);
+      return;
+    case "runtimeType":
+      emitRuntimeTypeClone(writer, state, node, source, target, context);
       return;
     case "guard":
-      emitGuardClone(writer, state, node, source, target);
+      emitGuardClone(writer, state, node, source, target, context);
       return;
     case "union":
-      emitUnionClone(writer, state, node, source, target);
+      emitUnionClone(writer, state, node, source, target, context);
       return;
     case "intersection":
-      emitIntersectionClone(writer, state, node, source, target);
+      emitIntersectionClone(writer, state, node, source, target, context);
       return;
     case "discriminatedUnion":
-      emitDiscriminatedUnionClone(writer, state, node, source, target);
+      emitDiscriminatedUnionClone(writer, state, node, source, target, context);
       return;
     case "object":
-      emitObjectClone(writer, state, node, source, target);
+      emitObjectClone(writer, state, node, source, target, context);
       return;
     case "date":
     case "reuse":
@@ -106,7 +156,7 @@ function emitCloneTo(writer: CodeWriter, state: EmitState, node: CloneIRNode, so
   }
 }
 
-function emitInlineClone(node: CloneIRNode, source: string): string | undefined {
+function emitInlineClone(node: CloneIRNode, source: string, context: CloneEmitContext): string | undefined {
   switch (node.kind) {
     case "reuse":
       return source;
@@ -115,9 +165,11 @@ function emitInlineClone(node: CloneIRNode, source: string): string | undefined 
     case "date":
       return `new Date(${source}.getTime())`;
     case "object":
-      return emitInlineObjectClone(node, source);
+      return emitInlineObjectClone(node, source, context);
     case "tuple":
-      return emitInlineTupleClone(node, source);
+      return emitInlineTupleClone(node, source, context);
+    case "runtimeType":
+      return node.immutable ? source : undefined;
     case "array":
     case "record":
     case "set":
@@ -132,13 +184,14 @@ function emitInlineClone(node: CloneIRNode, source: string): string | undefined 
 
 function emitInlineObjectClone(
   node: Extract<CloneIRNode, { readonly kind: "object" }>,
-  source: string
+  source: string,
+  context: CloneEmitContext
 ): string | undefined {
   const props: string[] = [];
 
   for (const prop of node.props) {
     const propSource = emitDefaultedValue(prop.schema, emitPropertyAccess(source, prop.key));
-    const cloned = emitInlineClone(prop.value, propSource);
+    const cloned = emitInlineClone(prop.value, propSource, context);
 
     if (!cloned) {
       return undefined;
@@ -152,12 +205,13 @@ function emitInlineObjectClone(
 
 function emitInlineTupleClone(
   node: Extract<CloneIRNode, { readonly kind: "tuple" }>,
-  source: string
+  source: string,
+  context: CloneEmitContext
 ): string | undefined {
   const items: string[] = [];
 
   for (let index = 0; index < node.items.length; index++) {
-    const cloned = emitInlineClone(node.items[index], `${source}[${index}]`);
+    const cloned = emitInlineClone(node.items[index], `${source}[${index}]`, context);
 
     if (!cloned) {
       return undefined;
@@ -174,13 +228,14 @@ function emitObjectClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "object" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const entries: string[] = [];
 
   for (const prop of node.props) {
     const propSource = emitDefaultedValue(prop.schema, emitPropertyAccess(source, prop.key));
-    const inline = emitInlineClone(prop.value, propSource);
+    const inline = emitInlineClone(prop.value, propSource, context);
 
     if (inline) {
       entries.push(`${emitObjectKey(prop.key)}: ${inline}`);
@@ -188,7 +243,7 @@ function emitObjectClone(
     }
 
     const propTarget = state.nextVar(`${target}_${prop.key}`);
-    emitCloneTo(writer, state, prop.value, propSource, propTarget);
+    emitCloneTo(writer, state, prop.value, propSource, propTarget, context);
     entries.push(`${emitLiteral(prop.key)}: ${propTarget}`);
   }
 
@@ -200,13 +255,14 @@ function emitTupleClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "tuple" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const entries: string[] = [];
 
   for (let index = 0; index < node.items.length; index++) {
     const itemSource = `${source}[${index}]`;
-    const inline = emitInlineClone(node.items[index], itemSource);
+    const inline = emitInlineClone(node.items[index], itemSource, context);
 
     if (inline) {
       entries.push(inline);
@@ -214,7 +270,7 @@ function emitTupleClone(
     }
 
     const itemTarget = state.nextVar(`${target}_${index}`);
-    emitCloneTo(writer, state, node.items[index], itemSource, itemTarget);
+    emitCloneTo(writer, state, node.items[index], itemSource, itemTarget, context);
     entries.push(itemTarget);
   }
 
@@ -226,7 +282,8 @@ function emitArrayClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "array" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const len = state.nextVar("len");
   const index = state.nextVar("i");
@@ -237,14 +294,14 @@ function emitArrayClone(
   writer.line(`for (let ${index} = 0; ${index} < ${len}; ${index}++) {`);
   writer.indent(() => {
     const itemSource = `${source}[${index}]`;
-    const inline = emitInlineClone(node.element, itemSource);
+    const inline = emitInlineClone(node.element, itemSource, context);
 
     if (inline) {
       writer.line(`${target}[${index}] = ${inline};`);
       return;
     }
 
-    emitCloneTo(writer, state, node.element, itemSource, item);
+    emitCloneTo(writer, state, node.element, itemSource, item, context);
     writer.line(`${target}[${index}] = ${item};`);
   });
   writer.line("}");
@@ -255,7 +312,8 @@ function emitRecordClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "record" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const keys = state.nextVar("keys");
   const len = state.nextVar("len");
@@ -268,7 +326,7 @@ function emitRecordClone(
   writer.line(`for (let ${index} = 0, ${len} = ${keys}.length; ${index} < ${len}; ${index}++) {`);
   writer.indent(() => {
     writer.line(`const ${key} = ${keys}[${index}];`);
-    emitCloneTo(writer, state, node.value, `${source}[${key}]`, clonedValue);
+    emitCloneTo(writer, state, node.value, `${source}[${key}]`, clonedValue, context);
     writer.line(`${target}[${key}] = ${clonedValue};`);
   });
   writer.line("}");
@@ -279,7 +337,8 @@ function emitSetClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "set" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const item = state.nextVar("item");
   const clonedValue = state.nextVar("clonedValue");
@@ -287,7 +346,7 @@ function emitSetClone(
   writer.line(`const ${target} = new Set();`);
   writer.line(`for (const ${item} of ${source}) {`);
   writer.indent(() => {
-    emitCloneTo(writer, state, node.element, item, clonedValue);
+    emitCloneTo(writer, state, node.element, item, clonedValue, context);
     writer.line(`${target}.add(${clonedValue});`);
   });
   writer.line("}");
@@ -298,7 +357,8 @@ function emitMapClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "map" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const entry = state.nextVar("entry");
   const key = state.nextVar("key");
@@ -311,11 +371,56 @@ function emitMapClone(
   writer.indent(() => {
     writer.line(`const ${key} = ${entry}[0];`);
     writer.line(`const ${mapValue} = ${entry}[1];`);
-    emitCloneTo(writer, state, node.key, key, nextKey);
-    emitCloneTo(writer, state, node.value, mapValue, nextValue);
+    emitCloneTo(writer, state, node.key, key, nextKey, context);
+    emitCloneTo(writer, state, node.value, mapValue, nextValue, context);
     writer.line(`${target}.set(${nextKey}, ${nextValue});`);
   });
   writer.line("}");
+}
+
+function emitRuntimeTypeClone(
+  writer: CodeWriter,
+  state: EmitState,
+  node: Extract<CloneIRNode, { readonly kind: "runtimeType" }>,
+  source: string,
+  target: string,
+  context: CloneEmitContext
+): void {
+  if (!context.allowRuntimeTypeBindings) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      "AOT cannot reconstruct a clone for a Runtime Type without a declarative materializer"
+    );
+  }
+
+  const innerTarget = state.nextVar(`${target}_inner`);
+  const innerSource = node.representation === "value" ? emitPropertyAccess(source, "value") : source;
+
+  emitCloneTo(writer, state, node.inner, innerSource, innerTarget, context);
+
+  const materializer =
+    context.useTrustedRuntimeTypeMaterializers && node.trustedMaterializer !== undefined
+      ? node.trustedMaterializer
+      : node.materializer;
+  const binding = bindCloneValue(context, materializer);
+
+  if (context.useTrustedRuntimeTypeMaterializers && node.trustedMaterializer !== undefined) {
+    writer.line(`const ${target} = ${binding}(${innerTarget});`);
+  } else {
+    writer.line(`const ${target} = new ${binding}(${innerTarget}, true);`);
+  }
+}
+
+function bindCloneValue(context: CloneEmitContext, value: Function): string {
+  const existing = context.ids.get(value);
+
+  if (existing !== undefined) return existing;
+
+  const name = `__m${context.bindings.names.length}`;
+  context.ids.set(value, name);
+  context.bindings.names.push(name);
+  context.bindings.values.push(value);
+  return name;
 }
 
 function emitGuardClone(
@@ -323,13 +428,14 @@ function emitGuardClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "guard" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   writer.line(`let ${target} = ${source};`);
   writer.line(`if (${emitGuardTest(node.optional, node.nullable, source)}) {`);
   writer.indent(() => {
     const inner = state.nextVar(`${target}_inner`);
-    emitCloneTo(writer, state, node.inner, source, inner);
+    emitCloneTo(writer, state, node.inner, source, inner, context);
     writer.line(`${target} = ${inner};`);
   });
   writer.line("}");
@@ -340,7 +446,8 @@ function emitUnionClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "union" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   writer.line(`let ${target};`);
 
@@ -351,7 +458,7 @@ function emitUnionClone(
     writer.line(`${keyword} (${emitSchemaGuard(option.schema, source)}) {`);
     writer.indent(() => {
       const optionTarget = state.nextVar(`${target}_${index}`);
-      emitCloneTo(writer, state, option.node, source, optionTarget);
+      emitCloneTo(writer, state, option.node, source, optionTarget, context);
       writer.line(`${target} = ${optionTarget};`);
     });
     writer.line("}");
@@ -363,13 +470,14 @@ function emitIntersectionClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "intersection" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const parts: string[] = [];
 
   for (let index = 0; index < node.options.length; index++) {
     const optionTarget = state.nextVar(`${target}_${index}`);
-    emitCloneTo(writer, state, node.options[index], source, optionTarget);
+    emitCloneTo(writer, state, node.options[index], source, optionTarget, context);
     parts.push(optionTarget);
   }
 
@@ -381,7 +489,8 @@ function emitDiscriminatedUnionClone(
   state: EmitState,
   node: Extract<CloneIRNode, { readonly kind: "discriminatedUnion" }>,
   source: string,
-  target: string
+  target: string,
+  context: CloneEmitContext
 ): void {
   const tag = emitPropertyAccess(source, node.discriminator);
 
@@ -398,7 +507,7 @@ function emitDiscriminatedUnionClone(
     writer.line(`${keyword} (${tag} === ${emitLiteral(value)}) {`);
     writer.indent(() => {
       const optionTarget = state.nextVar(`${target}_${index}`);
-      emitCloneTo(writer, state, option.node, source, optionTarget);
+      emitCloneTo(writer, state, option.node, source, optionTarget, context);
       writer.line(`${target} = ${optionTarget};`);
     });
     writer.line("}");

@@ -49,6 +49,8 @@ export interface RuntimeTypeFactoryPolicyTraits<
   readonly errorType: TError;
   readonly priority: TPriority;
   readonly hasAssertions: boolean;
+  /** True only when the class explicitly enabled factory validation. */
+  readonly validationConfigured?: boolean;
 }
 
 export interface DefaultRuntimeTypeFactoryPolicyTraits

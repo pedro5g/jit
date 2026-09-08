@@ -1,8 +1,7 @@
 /** The only return shapes a Runtime Type factory can expose after declaration. */
 export type FactoryReturnMode = "throw" | "either" | "tuple";
 
-/** Input-only migration spelling. It is normalized before a plan is stored. */
-export type FactoryReturnModeInput = FactoryReturnMode | "result";
+export type FactoryReturnModeInput = FactoryReturnMode;
 
 export interface FactoryPolicyCandidate {
   readonly mode: FactoryReturnMode;
@@ -20,7 +19,7 @@ const MODE_RANK: Readonly<Record<FactoryReturnMode, number>> = Object.freeze({
 
 /** Normalizes declaration syntax at the boundary; plans never carry `result`. */
 export function normalizeFactoryReturnMode(mode: FactoryReturnModeInput): FactoryReturnMode {
-  return mode === "result" ? "either" : mode;
+  return mode;
 }
 
 /**

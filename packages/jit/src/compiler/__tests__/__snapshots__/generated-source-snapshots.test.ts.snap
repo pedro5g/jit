@@ -203,6 +203,54 @@ exports[`generated source snapshots > NDJSON: fused filter, projection and seria
 })()"
 `;
 
+exports[`generated source snapshots > Runtime Type boundary: equal, hash, clone, and diff 1`] = `
+{
+  "clone": "function clone(value) {
+  return value;
+}",
+  "diff": "function diff(left, right) {
+  const changes = [];
+  if (!Object.is(left, right)) {
+    if (!Object.is(left, right)) {
+      if (!Object.is(left.id, right.id)) {
+        if (!Object.is(left.id.value, right.id.value)) {
+          changes[changes.length] = { type: "update", path: ["id"], value: right.id.value };
+        }
+      }
+      if (!Object.is(left.name, right.name)) {
+        changes[changes.length] = { type: "update", path: ["name"], value: right.name };
+      }
+    }
+  }
+  return changes;
+}",
+  "equal": "function equal(l, r) {
+  if (l === r) {
+    return true;
+  }
+  if (l.name !== r.name) {
+    return false;
+  }
+  if (l.id.value !== r.id.value) {
+    return false;
+  }
+  return true;
+}",
+  "hash": "function hash(value) {
+  let h = 23;
+  {
+  let h_1 = __hashString(value.id.value);
+    h = __combineHash(h, h_1);
+  }
+  {
+  let h_1 = __hashString(value.name);
+    h = __combineHash(h, h_1);
+  }
+  return h;
+}",
+}
+`;
+
 exports[`generated source snapshots > binary rowset: loader, hydrator, and byte query 1`] = `
 {
   "adaptiveQuery": "function query(rowset) {
@@ -553,7 +601,7 @@ return writeRows;",
 }
 `;
 
-exports[`generated source snapshots > codec v2: discriminated union, optional bitmask, and collections 1`] = `
+exports[`generated source snapshots > codec: discriminated union, optional bitmask, and collections 1`] = `
 "function _write(value, u8, dv, o) {
   let m1 = 0;
   if (value.pressure === null) m1 |= 1; else if (value.pressure !== undefined) m1 |= 2;

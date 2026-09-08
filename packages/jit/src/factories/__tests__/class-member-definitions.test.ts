@@ -4,7 +4,7 @@ import type { SchemaInput } from "../../core/builder/index.js";
 import { JITValidationError } from "../../errors/index.js";
 import { JIT } from "../../index.js";
 
-describe("Runtime Class V3 member definitions", () => {
+describe("Runtime Class member definitions", () => {
   it("adds schema fields through extends and keeps the generated constructor direct", () => {
     const User = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" }).extends({
       age: JIT.class.public(JIT.int().min(0)),

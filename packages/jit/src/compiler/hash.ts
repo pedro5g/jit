@@ -12,6 +12,7 @@ import {
   isHashCacheable,
 } from "../runtime/hash/index.js";
 import { emitDefaultedValue } from "./defaults.js";
+import { resolveRuntimeTypeOperation } from "./runtime-type/resolve-runtime-type.js";
 import { emitPropertyAccess } from "./source/access.js";
 
 /**
@@ -23,6 +24,7 @@ import { emitPropertyAccess } from "./source/access.js";
  * @returns A deterministic numeric hash.
  */
 export type Hash<T = unknown> = (value: T) => number;
+export type HashMethod<T = unknown> = (this: T) => number;
 
 type HashSchema = ATS.AnyTypeSchema & {
   readonly def: Readonly<Record<string, unknown>>;
@@ -91,6 +93,25 @@ export function compileUncachedHash<TSchema extends ATS.AnyTypeSchema>(schema: T
   )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown) as Hash<ATS.Typeof<TSchema>>;
 }
 
+/** Compiles an uncached hash method for mutable Runtime Class instances. */
+export function compileHashMethod<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): HashMethod<ATS.Typeof<TSchema>> {
+  return getCompileCached(
+    schema,
+    "hash:method",
+    () => {
+      const compute = compileUncachedHash(schema);
+      return globalThis.Function(
+        "__hash",
+        `return function hashCode() {\nreturn __hash(this);\n};`
+      )(compute) as HashMethod<ATS.Typeof<TSchema>>;
+    },
+    options
+  );
+}
+
 function emitHashBody(schema: ATS.AnyTypeSchema): string {
   const lines: string[] = [];
 
@@ -103,6 +124,18 @@ function emitHashBody(schema: ATS.AnyTypeSchema): string {
 function emitHashInto(lines: string[], schema: HashSchema, value: string, target: string, depth: number): void {
   const pad = "  ".repeat(depth);
   const next = `${target}_${depth}`;
+  const runtime = resolveRuntimeTypeOperation(schema);
+
+  if (runtime !== undefined) {
+    emitHashInto(
+      lines,
+      runtime.innerType as HashSchema,
+      runtime.representation === "value" ? emitPropertyAccess(value, "value") : value,
+      target,
+      depth
+    );
+    return;
+  }
 
   switch (schema.type) {
     case "number":

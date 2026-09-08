@@ -3,7 +3,7 @@ import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { getIndex } from "../runtime/index/index.js";
 import { emitEqual, emitEqualBody } from "./emitter/emit-equal.js";
-import { compileHash } from "./hash.js";
+import { compileHash, compileUncachedHash } from "./hash.js";
 import { buildEqualIR } from "./ir/builders/build-equal-ir.js";
 import { optimizeIR } from "./ir/optimizer/optimize-ir.js";
 import { resolveEqualStrategy } from "./strategy/resolve-strategy.js";
@@ -89,7 +89,7 @@ export function compileEqualMethod<TSchema extends ATS.AnyTypeSchema>(
       const strategy = resolveEqualStrategy(schema);
       const program = optimizeIR(buildEqualIR(schema, strategy));
       const body = emitEqualBody(program);
-      const hash = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : undefined;
+      const hash = strategy.hash.type === "hash-short-circuit" ? compileUncachedHash(schema) : undefined;
 
       return globalThis.Function(
         "__hash",

@@ -84,6 +84,17 @@ class HandwrittenUser {
   }
 }
 
+class HandwrittenMoney {
+  constructor(
+    readonly amount: number,
+    readonly currency: string
+  ) {}
+
+  equals(other: HandwrittenMoney): boolean {
+    return this.amount === other.amount && this.currency === other.currency;
+  }
+}
+
 class HandwrittenOrder {
   readonly events: unknown[] = [];
 
@@ -118,6 +129,10 @@ class HandwrittenTimestampedOrder {
 
 const userInput = { id: "u_1", name: "Ada", active: true };
 const moneyInput = { amount: 10, currency: "BRL" };
+const handwrittenUser = new HandwrittenUser(userInput.id, userInput.name, userInput.active);
+const handwrittenSameUser = new HandwrittenUser(userInput.id, "Grace", userInput.active);
+const handwrittenMoney = new HandwrittenMoney(moneyInput.amount, moneyInput.currency);
+const handwrittenSameMoney = new HandwrittenMoney(moneyInput.amount, moneyInput.currency);
 const runtimeUser = User.create(userInput);
 const runtimeSameUser = User.create({ ...userInput, name: "Grace" });
 const runtimeMoney = Money.create(moneyInput);
@@ -139,7 +154,9 @@ const handwrittenTimestampedOrder = new HandwrittenTimestampedOrder("o_2", "draf
 const handwrittenClockedOrder = new HandwrittenTimestampedOrder("o_3", "draft", new Date(0), () => fixedClockValue);
 const userAot = await loadAotArtifacts<{ readonly UserBase: typeof UserBase }>({ UserBase });
 const aotUser = userAot.UserBase.create(userInput);
-const timestampAot = await loadAotArtifacts({ TimestampedOrderBase });
+const timestampAot = await loadAotArtifacts<{ readonly TimestampedOrderBase: typeof TimestampedOrderBase }>({
+  TimestampedOrderBase,
+});
 class AotTimestampedOrder extends timestampAot.TimestampedOrderBase {
   toggleStatus(): void {
     this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
@@ -154,7 +171,7 @@ const parseUser = JIT.json.parse(User).validate();
 const userJson = JSON.stringify(userInput);
 const JsonUserBase = UserBase.extends(JIT.class.json());
 class JsonUser extends JsonUserBase {}
-const jsonUserAot = await loadAotArtifacts({ JsonUserBase });
+const jsonUserAot = await loadAotArtifacts<{ readonly JsonUserBase: typeof JsonUserBase }>({ JsonUserBase });
 const jsonUser = JsonUser.create(userInput);
 const jsonUserAotInstance = jsonUserAot.JsonUserBase.create(userInput);
 const externalJsonStringify = JIT.json.stringify(JsonUser);
@@ -183,7 +200,7 @@ registerScenario({
   args: [runtimeUser],
   jit: (user: User) => user.name,
   competitors: [
-    { name: "handwritten class", fn: (user: HandwrittenUser) => user.name },
+    { name: "handwritten class", args: [handwrittenUser], fn: (user: HandwrittenUser) => user.name },
     { name: "JIT AOT", fn: () => aotUser.name },
   ],
 });
@@ -207,13 +224,13 @@ registerScenario({
 registerScenario({
   op: "value object equals",
   name: "flat money",
-  args: [runtimeMoney, runtimeSameMoney],
-  jit: (left: InstanceType<typeof Money>, right: InstanceType<typeof Money>) => left.equals(right),
+  args: [],
+  jit: () => runtimeMoney.equals(runtimeSameMoney),
   competitors: [
     {
       name: "handwritten class",
-      fn: (left: InstanceType<typeof Money>, right: InstanceType<typeof Money>) =>
-        left.amount === right.amount && left.currency === right.currency,
+      args: [handwrittenMoney, handwrittenSameMoney],
+      fn: (left: HandwrittenMoney, right: HandwrittenMoney) => left.equals(right),
     },
   ],
 });
@@ -221,12 +238,13 @@ registerScenario({
 registerScenario({
   op: "entity identity",
   name: "flat entity",
-  args: [runtimeUser, runtimeSameUser],
-  jit: (left: User, right: User) => left.sameIdentity(right),
+  args: [],
+  jit: () => runtimeUser.sameIdentity(runtimeSameUser),
   competitors: [
     {
       name: "handwritten class",
-      fn: (left: User, right: User) => left.id === right.id,
+      args: [handwrittenUser, handwrittenSameUser],
+      fn: (left: HandwrittenUser, right: HandwrittenUser) => left.sameIdentity(right),
     },
   ],
 });
@@ -243,7 +261,7 @@ registerScenario({
   op: "aggregate mutation",
   name: "no-op update",
   args: [runtimeNoopOrder],
-  jit: (order: Order) => order.update({ status: "draft" }),
+  jit: (order: Order) => (order as unknown as { update(patch: { status: "draft" }): void }).update({ status: "draft" }),
   competitors: [
     {
       name: "handwritten class",
@@ -359,7 +377,10 @@ registerScenario({
  */
 const Email = JIT.ddd.valueObject(JIT.string().email());
 const UserId = JIT.ddd.uniqueIdentifier();
-const valueObjectAot = await loadAotArtifacts({ Email, UserId });
+const valueObjectAot = await loadAotArtifacts<{ readonly Email: typeof Email; readonly UserId: typeof UserId }>({
+  Email,
+  UserId,
+});
 
 class HandwrittenEmail {
   constructor(readonly value: string) {
@@ -399,8 +420,8 @@ registerScenario({
 registerScenario({
   op: "value object equals",
   name: "scalar wrapper",
-  args: [email, sameEmail],
-  jit: (left: typeof email, right: typeof email) => left.equals(right),
+  args: [],
+  jit: () => email.equals(sameEmail),
   competitors: [
     {
       name: "handwritten wrapper",
@@ -416,8 +437,8 @@ registerScenario({
 registerScenario({
   op: "value object read",
   name: "scalar value accessor",
-  args: [email],
-  jit: (instance: typeof email) => instance.value,
+  args: [],
+  jit: () => email.value,
   competitors: [
     { name: "handwritten wrapper", fn: () => handwrittenEmail.value },
     { name: "JIT AOT", fn: () => aotEmail.value },
@@ -433,7 +454,11 @@ const NestedBase = JIT.ddd.entity(
   })
 );
 class NestedUser extends NestedBase {}
-const nestedAot = await loadAotArtifacts({ UserId, Email, NestedBase });
+const nestedAot = await loadAotArtifacts<{
+  readonly UserId: typeof UserId;
+  readonly Email: typeof Email;
+  readonly NestedBase: typeof NestedBase;
+}>({ UserId, Email, NestedBase });
 class AotNestedUser extends nestedAot.NestedBase {}
 const persistedId = "7f8f4f83-f3c7-4bad-9b73-a3b70f47d761";
 const aliasId = "f63ca4d3-2b8f-49e6-80ff-0cedaf1e6504";
@@ -514,7 +539,11 @@ const AssertedMoney = JIT.ddd
   .valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }))
   .validate({ result: "either" })
   .assert((query) => query.gte("amount", 0));
-const policyAot = await loadAotArtifacts({
+const policyAot = await loadAotArtifacts<{
+  readonly PlainMoney: typeof PlainMoney;
+  readonly ResultMoney: typeof ResultMoney;
+  readonly AssertedMoney: typeof AssertedMoney;
+}>({
   PlainMoney,
   ResultMoney,
   AssertedMoney,
@@ -613,7 +642,7 @@ const VisibilityUser = JIT.class(JIT.object({ id: JIT.string() })).extends({
   protectedValue: JIT.class.protected(JIT.number()),
 });
 const visibilityUser = new VisibilityUser({ id: "v_1", secret: 7, protectedValue: 11 });
-const visibilityAot = await loadAotArtifacts({ VisibilityUser });
+const visibilityAot = await loadAotArtifacts<{ readonly VisibilityUser: typeof VisibilityUser }>({ VisibilityUser });
 const aotVisibilityUser = new visibilityAot.VisibilityUser({ id: "v_2", secret: 7, protectedValue: 11 });
 
 class HandwrittenVisibilityUser {

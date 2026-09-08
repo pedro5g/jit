@@ -37,10 +37,10 @@ import {
   emitAssertionSource,
   resolveAssertionDescriptor,
 } from "../compiler/assertion.js";
-import { compileClone } from "../compiler/clone.js";
-import { compileDiff } from "../compiler/diff.js";
+import { compileCloneMethod } from "../compiler/clone.js";
+import { compileDiffMethod } from "../compiler/diff.js";
 import { compileEqual, compileEqualMethod } from "../compiler/equal.js";
-import { compileHash } from "../compiler/hash.js";
+import { compileHash, compileHashMethod } from "../compiler/hash.js";
 import { compileUpdate, type DiffChange, type UpdatePatch } from "../compiler/index.js";
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
@@ -49,6 +49,7 @@ import { compileSerializeWithRootAccess } from "../compiler/serialize.js";
 import { emitPropertyAccess } from "../compiler/source/access.js";
 import {
   compileHydrator,
+  compileMaterializer,
   compileSafeHydrator,
   compileValidator,
   compileValidatorSelection,
@@ -98,10 +99,6 @@ export type {
 
 /** How a factory reports a rejected input. Fixed at declaration, never per call. */
 export type { FactoryReturnMode };
-/** @deprecated Use FactoryReturnMode. */
-export type FactoryResultMode = FactoryReturnMode;
-/** Input spelling retained only as a migration alias; plans use `either`. */
-export type FactoryResultModeInput = FactoryReturnModeInput;
 
 const FACTORY_FAILURE: unique symbol = Symbol.for("jit.factory.failure") as never;
 
@@ -154,6 +151,7 @@ type AssertionTraits<TTraits extends ATS.RuntimeTypeTraits, TError> = ATS.Runtim
   Omit<TTraits["factoryPolicy"], "errorType" | "hasAssertions"> & {
     readonly errorType: TError;
     readonly hasAssertions: true;
+    readonly validationConfigured: boolean;
   }
 >;
 
@@ -256,6 +254,17 @@ function createPolicyState(): FactoryPolicyState {
   };
 }
 
+function clonePolicyState(source: FactoryPolicyState | undefined): FactoryPolicyState {
+  if (source === undefined) return createPolicyState();
+
+  return {
+    ...source,
+    assertions: [...source.assertions],
+    assertionErrors: [...source.assertionErrors],
+    nestedErrors: [...source.nestedErrors],
+  };
+}
+
 function runtimeTypeTraits<TRepresentation extends "object" | "value", TIdentifier extends boolean>(
   representation: TRepresentation,
   identifier: TIdentifier,
@@ -282,6 +291,7 @@ function runtimeTypeTraits<TRepresentation extends "object" | "value", TIdentifi
       errorType: undefined,
       priority: policy.modePriority,
       hasAssertions: policy.assertions.length > 0,
+      validationConfigured: policy.validationConfigured,
     }),
   }) as ATS.RuntimeTypeTraits<TRepresentation, TIdentifier>;
 }
@@ -481,6 +491,7 @@ function policyArtifact(policy: FactoryPolicyState): {
       result: policy.mode,
       create: policy.create,
       hydrate: policy.hydrate,
+      validationConfigured: policy.validationConfigured,
       ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
       ...(policy.error === undefined ? {} : { errorPriority: policy.errorPriority }),
       ...(policy.error === undefined ? {} : { errorPriorityExplicit: policy.errorPriorityExplicit }),
@@ -1371,9 +1382,7 @@ type FactoryMethods<
 type ResolvedResultMode<TPolicy, TDefault extends FactoryReturnMode = "throw"> = TPolicy extends {
   readonly result: infer TMode extends FactoryReturnModeInput;
 }
-  ? TMode extends "result"
-    ? "either"
-    : TMode
+  ? TMode
   : TDefault;
 type ResolvedResultModeExplicit<TPolicy> = TPolicy extends {
   readonly result: FactoryReturnModeInput;
@@ -1688,6 +1697,11 @@ export interface ClassCapability<TMethods extends object = object> {
   readonly __options?: unknown;
 }
 
+/** A stable built-in capability can be selected either bare or as a callable. */
+export interface CallableClassCapability<TMethods extends object = object> extends ClassCapability<TMethods> {
+  (): this;
+}
+
 /**
  * Application-owned methods installed on the generated prototype.
  *
@@ -1780,7 +1794,7 @@ const RESERVED_EXTENSION_NAMES: ReadonlySet<string> = new Set([
 
 function isClassCapability(value: unknown): value is AnyClassCapability {
   return (
-    typeof value === "object" &&
+    (typeof value === "object" || typeof value === "function") &&
     value !== null &&
     typeof (value as { install?: unknown }).install === "function" &&
     typeof (value as { kind?: unknown }).kind === "string"
@@ -1802,6 +1816,7 @@ export interface StandardEvent {
 type AnyClassCapability = ClassCapability<object>;
 type EqualsMethods = { equals(other: unknown): boolean };
 type HashCodeMethods = { hashCode(): number };
+type StructuralValueMethods = EqualsMethods & HashCodeMethods;
 type DiffMethods = { diff(other: unknown): DiffChange[] };
 type IdentityMethods = {
   sameIdentity(other: unknown): boolean;
@@ -1882,10 +1897,10 @@ type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = Facto
   InitialRuntimeTypeTraits<TSchema>,
   true
 >;
-interface ClassWithCapability extends ClassCapability<object> {
+interface ClassWithCapability extends CallableClassCapability<object> {
   readonly __with: true;
 }
-interface ClassCloneCapability extends ClassCapability<object> {
+interface ClassCloneCapability extends CallableClassCapability<object> {
   readonly __clone: true;
 }
 
@@ -1947,6 +1962,7 @@ interface ClassDefinitionState {
   readonly freezeInstances: boolean;
   readonly aggregate: boolean;
   readonly construction: ConstructionMode;
+  readonly factoryValidationOptIn: boolean;
   readonly constructionConfigured: boolean;
   readonly factoriesConfigured: boolean;
   readonly factoryNames: { readonly create: string | false; readonly hydrate: string | false };
@@ -1994,6 +2010,7 @@ interface ClassStateSeed {
   readonly constructionConfigured?: boolean;
   readonly factoriesConfigured?: boolean;
   readonly identity?: IdentityState;
+  readonly factoryValidationOptIn?: boolean;
 }
 
 /** Resolves nested policy candidates once while declaring the outer class. */
@@ -2060,6 +2077,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     freezeInstances,
     aggregate,
     construction,
+    factoryValidationOptIn: seed?.factoryValidationOptIn ?? false,
     constructionConfigured: seed?.constructionConfigured ?? false,
     // Factory-first presets still allow one explicit `.construction(...)` or
     // `.factories(...)` decision; the default mode is not itself a lock.
@@ -2077,7 +2095,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     fieldPolicies: new Map(seed?.fieldPolicies ?? []),
     encapsulateFields: seed?.encapsulateFields ?? encapsulateFields,
     mutationGate: seed?.mutationGate ?? new WeakSet<object>(),
-    policy: seed?.policy ?? createPolicyState(),
+    policy: clonePolicyState(seed?.policy),
     identity: seed?.identity ?? { state: "none" },
   };
   const policy = state.policy;
@@ -2123,6 +2141,16 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
   const hydrateInput = (input: unknown): unknown => {
     hydrateState ??= compileHydrator(hydrateSchema);
     return hydrateState(boundaryInput(input));
+  };
+  let materializeCreation: ((input: unknown) => unknown) | undefined;
+  const materialize = (input: unknown): unknown => {
+    materializeCreation ??= compileMaterializer(creationSchema);
+    return materializeCreation(boundaryInput(input));
+  };
+  let materializeHydrate: ((input: unknown) => unknown) | undefined;
+  const materializeHydrated = (input: unknown): unknown => {
+    materializeHydrate ??= compileMaterializer(hydrateSchema, { resolveDefaults: false });
+    return materializeHydrate(boundaryInput(input));
   };
   const initializers = compileNoConstructorInitializers(state.schema, state.fieldPolicies);
   let safeParse: ((input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
@@ -2213,6 +2241,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       frozen: state.freezeInstances,
       aggregate: state.aggregate,
       construction: state.construction,
+      factoryValidationOptIn: state.factoryValidationOptIn,
       representation: "object",
       capabilities: state.capabilities.map((capability) => capability.kind),
       managedFields: state.managedFields,
@@ -2260,9 +2289,11 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     const customFactory = state.customFactories.create;
     if (customFactory !== undefined) {
       const parsed =
-        policy.configured && policy.create
+        policy.validationConfigured && policy.create
           ? policySafeParse()(boundaryInput(input))
-          : { success: true as const, data: parse(input) };
+          : policy.configured && !policy.create
+            ? { success: true as const, data: parse(input) }
+            : { success: true as const, data: materialize(input) };
       if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
       if (policy.assert !== undefined) {
         const failure = policy.assert(parsed.data);
@@ -2289,7 +2320,36 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         ? (policySuccess(policy, instance) as InstanceType<TThis>)
         : (instance as InstanceType<TThis>);
     }
-    if (!policy.configured || !policy.create) {
+    if (!policy.configured && state.factoryValidationOptIn) {
+      return new construct(materialize(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.configured) {
+      if (
+        state.lifecycle.timestamps === undefined &&
+        state.lifecycle.softDelete === undefined &&
+        state.lifecycle.versioned === undefined
+      ) {
+        return new construct(input, INTERNAL_CONSTRUCT);
+      }
+      return new construct(parse(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.validationConfigured && policy.create) {
+      let materialized: unknown;
+      try {
+        materialized = materialize(input);
+      } catch (error) {
+        if (policy.configured && error instanceof JITValidationError) {
+          return policyFailure(policy, policyError(policy, error.issues)) as InstanceType<TThis>;
+        }
+        throw error;
+      }
+      if (policy.assert !== undefined) {
+        const failure = policy.assert(materialized);
+        if (failure !== undefined) return policyFailure(policy, failure) as InstanceType<TThis>;
+      }
+      return policySuccess(policy, new construct(materialized, INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
+    }
+    if (!policy.create) {
       if (
         state.lifecycle.timestamps === undefined &&
         state.lifecycle.softDelete === undefined &&
@@ -2334,9 +2394,11 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     const customFactory = state.customFactories.hydrate;
     if (customFactory !== undefined) {
       const parsed =
-        policy.configured && policy.hydrate
+        policy.validationConfigured && policy.hydrate
           ? policySafeHydrate()(boundaryInput(input))
-          : { success: true as const, data: hydrateInput(input) };
+          : policy.configured && !policy.hydrate
+            ? { success: true as const, data: hydrateInput(input) }
+            : { success: true as const, data: materializeHydrated(input) };
       if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
       if (policy.assert !== undefined) {
         const failure = policy.assert(parsed.data);
@@ -2363,7 +2425,27 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         ? (policySuccess(policy, instance) as InstanceType<TThis>)
         : (instance as InstanceType<TThis>);
     }
-    if (!policy.configured || !policy.hydrate) {
+    if (!policy.configured && state.factoryValidationOptIn) {
+      return new construct(materializeHydrated(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.configured) return new construct(hydrateInput(input), INTERNAL_CONSTRUCT, true);
+    if (!policy.validationConfigured && policy.hydrate) {
+      let materialized: unknown;
+      try {
+        materialized = materializeHydrated(input);
+      } catch (error) {
+        if (policy.configured && error instanceof JITValidationError) {
+          return policyFailure(policy, policyError(policy, error.issues)) as InstanceType<TThis>;
+        }
+        throw error;
+      }
+      if (policy.assert !== undefined) {
+        const failure = policy.assert(materialized);
+        if (failure !== undefined) return policyFailure(policy, failure) as InstanceType<TThis>;
+      }
+      return policySuccess(policy, new construct(materialized, INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
+    }
+    if (!policy.hydrate) {
       return new construct(hydrateInput(input), INTERNAL_CONSTRUCT, true);
     }
     if (policy.maxIssues === undefined && policy.assert === undefined) {
@@ -2413,15 +2495,17 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     validate: {
       enumerable: false,
       value: (options?: FactoryValidationOptions) => {
-        applyValidationPolicy(state.policy, options);
-        return materializeClassState(state);
+        const policy = clonePolicyState(state.policy);
+        applyValidationPolicy(policy, options);
+        return materializeClassState({ ...state, policy });
       },
     },
     assert: {
       enumerable: false,
       value: (predicate: (query: QueryConditionBuilder<never>) => QueryConditionNode, options?: AssertionOptions) => {
-        applyAssertion(state.policy, state.schema, predicate, options);
-        return materializeClassState(state);
+        const policy = clonePolicyState(state.policy);
+        applyAssertion(policy, state.schema, predicate, options);
+        return materializeClassState({ ...state, policy });
       },
     },
     factories: {
@@ -3301,19 +3385,33 @@ function resolveFactoryOption(
   return { name: option };
 }
 
+interface ScalarClassSeed {
+  readonly policy?: FactoryPolicyState;
+  readonly capabilities?: readonly AnyClassCapability[];
+  readonly methods?: readonly InstalledScalarMethod[];
+  readonly factoryNames?: { readonly create: string | false; readonly hydrate: string | false };
+  readonly customFactories?: { readonly create?: Function; readonly hydrate?: Function };
+  readonly construction?: ConstructionMode;
+  readonly constructionConfigured?: boolean;
+  readonly factoriesConfigured?: boolean;
+}
+
 function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   identifier: boolean,
-  isAbstract: boolean
+  isAbstract: boolean,
+  seed?: ScalarClassSeed
 ): ScalarFactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>> {
   const parse = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
-  const policy = createPolicyState();
+  const materialize = compileMaterializer(schema);
+  const materializeHydrated = compileMaterializer(schema, { resolveDefaults: false });
+  const policy = clonePolicyState(seed?.policy);
   let safeParse: ((input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
   let safeHydrate: ((state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
   const equal = compileEqual(schema) as (left: unknown, right: unknown) => boolean;
   const hash = compileHash(schema) as (value: unknown) => number;
-  const constructionState: { mode: ConstructionMode } = { mode: "factory" };
+  const constructionState: { mode: ConstructionMode } = { mode: seed?.construction ?? "factory" };
   const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
   const classTarget = globalThis.Function(
     "__parse",
@@ -3333,20 +3431,26 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       return Object.freeze(instance);
     },
   });
-  const installedCapabilities = ["equals", "hashCode"];
+  const installedCapabilities = [
+    "equals",
+    "hashCode",
+    ...(seed?.capabilities ?? []).map((capability) => capability.kind),
+  ];
+  const installedCapabilityValues = [...(seed?.capabilities ?? [])];
   const installedMethods: {
     readonly name: string;
     readonly kind: "method" | "get" | "set";
     readonly source: Function;
-  }[] = [];
+  }[] = [...(seed?.methods ?? [])];
   const installedMethodNames = new Set<string>(SCALAR_MEMBERS);
-  let factoryNames: { create: string | false; hydrate: string | false } = {
+  for (const method of installedMethods) installedMethodNames.add(method.name);
+  let factoryNames: { create: string | false; hydrate: string | false } = seed?.factoryNames ?? {
     create: "create",
     hydrate: "hydrate",
   };
-  let customFactories: { create?: Function; hydrate?: Function } = {};
-  let constructionConfigured = false;
-  let factoriesConfigured = false;
+  let customFactories: { create?: Function; hydrate?: Function } = seed?.customFactories ?? {};
+  let constructionConfigured = seed?.constructionConfigured ?? false;
+  let factoriesConfigured = seed?.factoriesConfigured ?? false;
 
   const updateSchema = (): void => {
     Object.defineProperty(classTarget, "schema", {
@@ -3377,14 +3481,16 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     ) => InstanceType<TThis>;
     if (customFactories.create !== undefined) {
       const parsed =
-        policy.configured && policy.create
+        policy.validationConfigured && policy.create
           ? (() => {
               safeParse ??= compileValidatorSelection(schema, ["safeParse"], {}).safeParse as (
                 input: unknown
               ) => SafeParse<ATS.TypeofSchema<TSchema>>;
               return safeParse(args[0]);
             })()
-          : { success: true as const, data: parse(args[0]) };
+          : policy.configured && !policy.create
+            ? { success: true as const, data: parse(args[0]) }
+            : { success: true as const, data: materialize(args[0]) };
       if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
       const result = customFactories.create.call(this, parsed.data, {
         construct: (value: unknown) => new construct(value, INTERNAL_CONSTRUCT, true),
@@ -3399,7 +3505,8 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
         ? (policySuccess(policy, instance) as InstanceType<TThis>)
         : (instance as InstanceType<TThis>);
     }
-    if (!policy.configured || !policy.create) return new construct(args[0], INTERNAL_CONSTRUCT);
+    if (!policy.configured) return new construct(materialize(args[0]), INTERNAL_CONSTRUCT, true);
+    if (!policy.create) return new construct(args[0], INTERNAL_CONSTRUCT);
     if (policy.maxIssues === undefined) {
       try {
         return policySuccess(policy, new construct(parse(args[0]), INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
@@ -3427,12 +3534,14 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     ) => InstanceType<TThis>;
     if (customFactories.hydrate !== undefined) {
       const parsed =
-        policy.configured && policy.hydrate
+        policy.validationConfigured && policy.hydrate
           ? (() => {
               safeHydrate ??= compileSafeHydrator(schema) as (state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
               return safeHydrate(state);
             })()
-          : { success: true as const, data: hydrateState(state) };
+          : policy.configured && !policy.hydrate
+            ? { success: true as const, data: hydrateState(state) }
+            : { success: true as const, data: materializeHydrated(state) };
       if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
       const result = customFactories.hydrate.call(this, parsed.data, {
         construct: (value: unknown) => new construct(value, INTERNAL_CONSTRUCT, true),
@@ -3447,7 +3556,10 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
         ? (policySuccess(policy, instance) as InstanceType<TThis>)
         : (instance as InstanceType<TThis>);
     }
-    if (!policy.configured || !policy.hydrate) {
+    if (!policy.configured) {
+      return new construct(materializeHydrated(state), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.hydrate) {
       return new construct(hydrateState(state), INTERNAL_CONSTRUCT, true);
     }
     if (policy.maxIssues === undefined) {
@@ -3479,6 +3591,7 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       frozen: true,
       aggregate: false,
       construction: constructionState.mode,
+      factoryValidationOptIn: true,
       representation: "value",
       ...policyArtifact(policy),
       capabilities: installedCapabilities,
@@ -3528,6 +3641,7 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
               if (!before.has(name)) installedMethodNames.add(name);
             }
             installedCapabilities.push(extension.kind);
+            installedCapabilityValues.push(extension);
             continue;
           }
           installScalarExtension(classTarget, extension, installedMethods, installedMethodNames);
@@ -3608,9 +3722,18 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     validate: {
       enumerable: false,
       value: (options?: FactoryValidationOptions) => {
-        applyValidationPolicy(policy, options);
-        register();
-        return classTarget;
+        const nextPolicy = clonePolicyState(policy);
+        applyValidationPolicy(nextPolicy, options);
+        return createScalarValueObject(schema, identifier, isAbstract, {
+          policy: nextPolicy,
+          capabilities: installedCapabilityValues,
+          methods: installedMethods,
+          factoryNames,
+          customFactories,
+          construction: constructionState.mode,
+          constructionConfigured,
+          factoriesConfigured,
+        });
       },
     },
     assert: {
@@ -3639,6 +3762,17 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
   definePrototype(classTarget.prototype, "toJSON", function scalarToJson(this: ScalarValueObject<unknown>) {
     return this.value;
   });
+  for (const capability of seed?.capabilities ?? []) capability.install(classTarget, schema);
+  for (const method of seed?.methods ?? []) {
+    const descriptor: PropertyDescriptor = {
+      configurable: true,
+      enumerable: false,
+    };
+    if (method.kind === "method") descriptor.value = method.source;
+    else if (method.kind === "get") descriptor.get = method.source as () => unknown;
+    else descriptor.set = method.source as (value: unknown) => void;
+    Object.defineProperty(classTarget.prototype, method.name, descriptor);
+  }
   register();
   return classTarget as unknown as ScalarFactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
 }
@@ -3892,10 +4026,10 @@ function resolveAccessorMember(key: string, member: AccessorVisibility | Accesso
 export interface ClassFactory {
   <TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): ConstructorRuntimeClass<TSchema>;
   abstract<TSchema extends ATS.AnyTypeSchema>(schema: SchemaInput<TSchema>): AbstractRuntimeClass<TSchema>;
-  readonly equals: ClassCapability<EqualsMethods>;
-  readonly hashCode: ClassCapability<HashCodeMethods>;
+  readonly equals: CallableClassCapability<EqualsMethods>;
+  readonly hashCode: CallableClassCapability<HashCodeMethods>;
   readonly with: ClassWithCapability;
-  readonly diff: ClassCapability<DiffMethods>;
+  readonly diff: CallableClassCapability<DiffMethods>;
   /**
    * Copies an instance's state through the shared clone plan.
    *
@@ -3918,7 +4052,7 @@ export interface ClassFactory {
   readonly mixin: typeof classMixin;
   readonly json: <const TOptions extends ClassJsonOptions = {}>(options?: TOptions) => ClassJsonCapability<TOptions>;
   readonly isFailure: typeof isFailure;
-  identity<TKey extends string>(key: TKey): ClassCapability<IdentityMethods>;
+  identity<TKey extends string>(key: TKey): CallableClassCapability<IdentityMethods>;
 }
 
 /** Runtime type factory. Capabilities are installed separately on the prototype. */
@@ -3928,15 +4062,7 @@ export const classType: ClassFactory = Object.assign(classFactory, {
     definePrototype(prototype, "equals", compileEqualMethod(schema), true);
   }),
   hashCode: capability<HashCodeMethods>("hashCode", (prototype, schema) => {
-    const hash = compileHash(schema);
-    definePrototype(
-      prototype,
-      "hashCode",
-      function hashCode(this: unknown) {
-        return hash(this);
-      },
-      true
-    );
+    definePrototype(prototype, "hashCode", compileHashMethod(schema), true);
   }),
   with: (() => {
     const base = capability<object>("with", (prototype, schema) => {
@@ -3954,36 +4080,16 @@ export const classType: ClassFactory = Object.assign(classFactory, {
         true
       );
     });
-    return Object.freeze({ ...base, __with: true as const });
+    return base as ClassWithCapability;
   })(),
   diff: capability<DiffMethods>("diff", (prototype, schema) => {
-    const diff = compileDiff(schema);
-    definePrototype(
-      prototype,
-      "diff",
-      function diffInstance(this: unknown, other: unknown) {
-        return diff(this, other);
-      },
-      true
-    );
+    definePrototype(prototype, "diff", compileDiffMethod(schema), true);
   }),
   clone: (() => {
     const base = capability<object>("clone", (prototype, schema) => {
-      const clone = compileClone(schema);
-      definePrototype(
-        prototype,
-        "clone",
-        function cloneInstance(this: object) {
-          return new (this.constructor as new (state: object, token: symbol, validated: boolean) => object)(
-            clone(this) as object,
-            INTERNAL_CONSTRUCT,
-            true
-          );
-        },
-        true
-      );
+      definePrototype(prototype, "clone", compileCloneMethod(schema), true);
     });
-    return Object.freeze({ ...base, __clone: true as const });
+    return base as ClassCloneCapability;
   })(),
   override,
   public: classPublic,
@@ -4008,7 +4114,7 @@ export const classType: ClassFactory = Object.assign(classFactory, {
     }) as ClassJsonCapability<TOptions>;
   },
   isFailure,
-  identity(key: string): ClassCapability<IdentityMethods> {
+  identity(key: string): CallableClassCapability<IdentityMethods> {
     return capability<IdentityMethods>(
       `identity:${key}`,
       (prototype, schema) => {
@@ -4058,9 +4164,7 @@ export const classType: ClassFactory = Object.assign(classFactory, {
   },
 });
 export type { OverrideDescriptor } from "../classes/override.js";
-/** @deprecated Use `JIT.class.override(...)` instead. */
-export { override, override as overwrite } from "../classes/override.js";
-export type { OverwriteDescriptor } from "../classes/overwrite.js";
+export { override } from "../classes/override.js";
 export { classType as class };
 
 const valueAccessorCapability = capability<ValueAccessor<unknown>>("value", (prototype) => {
@@ -4085,7 +4189,9 @@ export function valueObject<TSchema extends ATS.AnyTypeSchema>(
     }
     return createScalarValueObject(unwrapped, false, false) as unknown as ValueObjectRuntimeClass<TSchema>;
   }
-  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
+  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory", false, undefined, {
+    factoryValidationOptIn: true,
+  });
   return ("value" in (base as ATS.ObjectSchema).def.props
     ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
         classType.equals,
@@ -4121,7 +4227,9 @@ export function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
     }
     return createScalarValueObject(unwrapped, false, true) as unknown as ValueObjectRuntimeClass<TSchema>;
   }
-  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
+  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory", false, undefined, {
+    factoryValidationOptIn: true,
+  });
   return ("value" in (base as ATS.ObjectSchema).def.props
     ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
         classType.equals,
@@ -4317,30 +4425,40 @@ function createEntity<TSchema extends ATS.AnyTypeSchema>(
   ...args: IdentityArguments<TSchema> | [{ readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
 ): FactoryRuntimeClass<
   TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
   InitialRuntimeTypeTraits<TSchema>,
   true
 > {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityState(unwrapped, args[0]?.id, "Entity");
+  const members = initialEffectiveSchema(unwrapped).members;
+  addMember(members, "equals", "preset", "ddd.entity", "method");
+  addMember(members, "hashCode", "preset", "ddd.entity", "method");
+  const capabilities: AnyClassCapability[] = [classType.equals, classType.hashCode];
+  if (identity.state === "resolved") {
+    addMember(members, "identity", "preset", "ddd.entity", "method");
+    addMember(members, "sameIdentity", "preset", "ddd.entity", "method");
+    capabilities.push(classType.identity(identity.key));
+  }
   const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory", true, undefined, {
     identity,
+    members,
+    capabilities,
+    factoryValidationOptIn: true,
   });
   if (identity.state !== "resolved") {
     Reflect.deleteProperty(runtime, "create");
     Reflect.deleteProperty(runtime, "hydrate");
     return runtime as unknown as FactoryRuntimeClass<
       TSchema,
-      Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+      Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
       InitialRuntimeTypeTraits<TSchema>,
       true
     >;
   }
-  return (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-    classType.identity(identity.key)
-  ) as unknown as FactoryRuntimeClass<
+  return runtime as unknown as FactoryRuntimeClass<
     TSchema,
-    Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+    Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
     InitialRuntimeTypeTraits<TSchema>,
     true
   >;
@@ -4351,7 +4469,9 @@ export function entity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
 ): EntityRuntimeClassFor<
   TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
+  Readonly<ATS.TypeofSchema<TSchema>> &
+    StructuralValueMethods &
+    ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
   InitialRuntimeTypeTraits<TSchema>
 >;
 export function entity<TSchema extends ATS.AnyTypeSchema>(
@@ -4359,7 +4479,7 @@ export function entity<TSchema extends ATS.AnyTypeSchema>(
   options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }
 ): FactoryRuntimeClass<
   TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
   InitialRuntimeTypeTraits<TSchema>,
   true
 >;
@@ -4375,7 +4495,9 @@ export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
 ): EntityRuntimeClassFor<
   TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
+  Readonly<ATS.TypeofSchema<TSchema>> &
+    StructuralValueMethods &
+    ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
   InitialRuntimeTypeTraits<TSchema>
 >;
 export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
@@ -4383,7 +4505,7 @@ export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
   options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }
 ): FactoryRuntimeClass<
   TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
   InitialRuntimeTypeTraits<TSchema>,
   true
 >;
@@ -4399,18 +4521,29 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   isAbstract: boolean,
   ...args: AggregateIdentityArguments<TSchema>
-): AggregateRuntimeClass<TSchema, Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>> {
+): AggregateRuntimeClass<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
+> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityState(unwrapped, args[0]?.id, "Aggregate");
   if (identity.state !== "resolved") {
     throw new JITError("DDD_IDENTITY_MISSING", "Aggregate identity must be resolved before materialization");
   }
-  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory", true, undefined, { identity });
-  return (runtime.extends as (extension: AnyClassCapability) => RuntimeClass<TSchema>)(
-    classType.identity(identity.key)
-  ) as unknown as AggregateRuntimeClass<
+  const members = initialEffectiveSchema(unwrapped).members;
+  addMember(members, "equals", "preset", "ddd.aggregateRoot", "method");
+  addMember(members, "hashCode", "preset", "ddd.aggregateRoot", "method");
+  addMember(members, "identity", "preset", "ddd.aggregateRoot", "method");
+  addMember(members, "sameIdentity", "preset", "ddd.aggregateRoot", "method");
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory", true, undefined, {
+    identity,
+    members,
+    capabilities: [classType.equals, classType.hashCode, classType.identity(identity.key)],
+    factoryValidationOptIn: true,
+  });
+  return runtime as unknown as AggregateRuntimeClass<
     TSchema,
-    Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>
+    Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
   >;
 }
 
@@ -4418,7 +4551,10 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
 export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   ...args: AggregateIdentityArguments<TSchema>
-): AggregateRuntimeClass<TSchema, Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>> {
+): AggregateRuntimeClass<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
+> {
   return createAggregateRoot(schema, false, ...args);
 }
 
@@ -4426,7 +4562,10 @@ export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
 export function abstractAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   ...args: AggregateIdentityArguments<TSchema>
-): AggregateRuntimeClass<TSchema, Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>> {
+): AggregateRuntimeClass<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
+> {
   return createAggregateRoot(schema, true, ...args);
 }
 
@@ -4473,11 +4612,9 @@ export function domainEvent<TPayload extends ATS.AnyTypeSchema, TType extends st
 ): DomainEvent<TPayload, TType, TVersion> {
   const payload = unwrapSchema(options.payload);
   const schema = createDomainEventSchema(payload, type, options.version);
-  const event = createRuntimeClass(schema, false, true, false, "factory") as unknown as DomainEvent<
-    TPayload,
-    TType,
-    TVersion
-  >;
+  const event = createRuntimeClass(schema, false, true, false, "factory", false, undefined, {
+    factoryValidationOptIn: true,
+  }) as unknown as DomainEvent<TPayload, TType, TVersion>;
   const createState = (
     event as unknown as {
       create(input: Input<typeof schema>): DomainEventState<TPayload, TType, TVersion>;
@@ -4555,14 +4692,20 @@ function capability<TMethods extends object>(
   kind: string,
   install: (prototype: object, schema: ATS.AnyTypeSchema) => void,
   memberNames: readonly string[] = [kind]
-): ClassCapability<TMethods> {
-  return Object.freeze({
-    kind,
-    __memberNames: Object.freeze([...memberNames]),
-    install(classTarget: Function, schema: ATS.AnyTypeSchema) {
-      install(classTarget.prototype, schema);
+): CallableClassCapability<TMethods> {
+  let callable: CallableClassCapability<TMethods>;
+  callable = (() => callable) as CallableClassCapability<TMethods>;
+  Object.defineProperties(callable, {
+    kind: { enumerable: true, value: kind },
+    __memberNames: { enumerable: false, value: Object.freeze([...memberNames]) },
+    install: {
+      enumerable: false,
+      value: (classTarget: Function, schema: ATS.AnyTypeSchema) => {
+        install(classTarget.prototype, schema);
+      },
     },
   });
+  return Object.freeze(callable);
 }
 
 /**

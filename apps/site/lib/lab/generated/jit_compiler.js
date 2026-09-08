@@ -1750,6 +1750,36 @@ function isPlainObject(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
+// ../../packages/jit/src/compiler/runtime-type/resolve-runtime-type.ts
+function resolveRuntimeTypeOperation(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.runtimeType) {
+      const runtime = current;
+      const artifact = getArtifact(runtime.def.materialize);
+      const trusted = runtime.def.materialize.__jitMaterialize;
+      return {
+        schema: runtime,
+        innerType: runtime.def.innerType,
+        representation: runtime.def.representation,
+        identifier: runtime.def.identifier,
+        materialize: runtime.def.materialize,
+        trustedMaterialize: typeof trusted === "function" ? trusted : void 0,
+        immutable: artifact?.kind === "class" ? artifact.frozen : runtime.def.representation === "value"
+      };
+    }
+    if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.default || current.type === TypeName.brand || current.type === TypeName.readonly || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
+      current = current.def.innerType;
+      continue;
+    }
+    if (current.type === TypeName.lazy) {
+      current = current.def.getter();
+      continue;
+    }
+    return void 0;
+  }
+}
+
 // ../../packages/jit/src/compiler/hash.ts
 function emitHashSource(schema) {
   return `function hash(value) {
@@ -1791,6 +1821,22 @@ ${emitHashBody(schema)}
 };`
   )(combineHash, hashNumber, hashString, hashBoolean, hashBigInt, hashUnknown);
 }
+function compileHashMethod(schema, options) {
+  return getCompileCached(
+    schema,
+    "hash:method",
+    () => {
+      const compute = compileUncachedHash(schema);
+      return globalThis.Function(
+        "__hash",
+        `return function hashCode() {
+return __hash(this);
+};`
+      )(compute);
+    },
+    options
+  );
+}
 function emitHashBody(schema) {
   const lines = [];
   emitHashInto(lines, schema, "value", "h", 1);
@@ -1800,6 +1846,17 @@ function emitHashBody(schema) {
 function emitHashInto(lines, schema, value, target, depth) {
   const pad = "  ".repeat(depth);
   const next = `${target}_${depth}`;
+  const runtime = resolveRuntimeTypeOperation(schema);
+  if (runtime !== void 0) {
+    emitHashInto(
+      lines,
+      runtime.innerType,
+      runtime.representation === "value" ? emitPropertyAccess(value, "value") : value,
+      target,
+      depth
+    );
+    return;
+  }
   switch (schema.type) {
     case "number":
     case "int":
@@ -2898,6 +2955,17 @@ function findRecursiveSchemas(schema) {
 
 // ../../packages/jit/src/compiler/schema-nodes.ts
 function buildSchemaNode(schema, buildNode) {
+  const runtime = resolveRuntimeTypeOperation(schema);
+  if (runtime !== void 0) {
+    return {
+      kind: "runtimeType",
+      representation: runtime.representation,
+      inner: buildNode(runtime.innerType),
+      materializer: runtime.materialize,
+      trustedMaterializer: runtime.trustedMaterialize,
+      immutable: runtime.immutable
+    };
+  }
   switch (schema.type) {
     case TypeName.optional:
       return { kind: "guard", optional: true, nullable: false, inner: buildNode(innerType2(schema)) };
@@ -3218,6 +3286,13 @@ function buildEqualProgram(schema, strategy, recursion) {
   return { kind: "program", params: [left, right], body };
 }
 function appendSchemaCompare(body, schema, left, right, scope, strategy, recursion) {
+  const runtime = resolveRuntimeTypeOperation(schema);
+  if (runtime !== void 0) {
+    const nextLeft = runtime.representation === "value" ? loadProp(left, "value") : left;
+    const nextRight = runtime.representation === "value" ? loadProp(right, "value") : right;
+    appendSchemaCompare(body, runtime.innerType, nextLeft, nextRight, scope, strategy, recursion);
+    return;
+  }
   const resolved = resolveWrappers(schema);
   if (resolved.optional || resolved.nullable) {
     appendResolvedWrapperCompare(body, resolved, left, right, scope, strategy, recursion);
@@ -4200,7 +4275,7 @@ function compileEqualMethod(schema, options) {
       const strategy = resolveEqualStrategy(schema);
       const program = optimizeIR(buildEqualIR(schema, strategy));
       const body = emitEqualBody(program);
-      const hash4 = strategy.hash.type === "hash-short-circuit" ? compileHash(schema, options) : void 0;
+      const hash4 = strategy.hash.type === "hash-short-circuit" ? compileUncachedHash(schema) : void 0;
       return globalThis.Function(
         "__hash",
         "__getIndex",
@@ -4385,77 +4460,93 @@ function createEmitState() {
 // ../../packages/jit/src/compiler/clone/emit-clone.ts
 function emitClone(program) {
   const writer = new CodeWriter();
-  emitHelpers2(writer, program);
+  const context = createContext(false, true);
+  emitHelpers2(writer, program, context);
   writer.line(`function clone(${program.param}) {`);
   writer.indent(() => {
-    emitCloneReturn(writer, program.body, program.param);
+    emitCloneReturn(writer, program.body, program.param, context);
   });
   writer.line("}");
   return writer.toString();
 }
-function emitCloneBody(program) {
+function emitCloneBodyWithBindings(program, options = {}) {
   const writer = new CodeWriter();
-  emitHelpers2(writer, program);
-  emitCloneReturn(writer, program.body, program.param);
-  return writer.toString();
+  const context = createContext(
+    options.allowRuntimeTypeBindings ?? true,
+    options.useTrustedRuntimeTypeMaterializers ?? true
+  );
+  emitHelpers2(writer, program, context);
+  emitCloneReturn(writer, program.body, program.param, context);
+  return { source: writer.toString(), bindings: context.bindings };
 }
-function emitHelpers2(writer, program) {
+function createContext(allowRuntimeTypeBindings, useTrustedRuntimeTypeMaterializers) {
+  return {
+    bindings: { names: [], values: [] },
+    allowRuntimeTypeBindings,
+    useTrustedRuntimeTypeMaterializers,
+    ids: /* @__PURE__ */ new Map()
+  };
+}
+function emitHelpers2(writer, program, context) {
   for (const helper of program.helpers) {
     writer.line(`function ${helperName(helper.id)}(${program.param}) {`);
     writer.indent(() => {
-      emitCloneReturn(writer, helper.node, program.param);
+      emitCloneReturn(writer, helper.node, program.param, context);
     });
     writer.line("}");
   }
 }
-function emitCloneReturn(writer, node, source) {
-  const inline = emitInlineClone(node, source);
+function emitCloneReturn(writer, node, source, context) {
+  const inline = emitInlineClone(node, source, context);
   if (inline) {
     writer.line(`return ${inline};`);
     return;
   }
-  emitCloneTo(writer, createEmitState(), node, source, "out");
+  emitCloneTo(writer, createEmitState(), node, source, "out", context);
   writer.line("return out;");
 }
 function helperName(id) {
   return `clone_${id}`;
 }
-function emitCloneTo(writer, state3, node, source, target) {
-  const inline = emitInlineClone(node, source);
+function emitCloneTo(writer, state3, node, source, target, context) {
+  const inline = emitInlineClone(node, source, context);
   if (inline) {
     writer.line(`const ${target} = ${inline};`);
     return;
   }
   switch (node.kind) {
     case "array":
-      emitArrayClone(writer, state3, node, source, target);
+      emitArrayClone(writer, state3, node, source, target, context);
       return;
     case "tuple":
-      emitTupleClone(writer, state3, node, source, target);
+      emitTupleClone(writer, state3, node, source, target, context);
       return;
     case "record":
-      emitRecordClone(writer, state3, node, source, target);
+      emitRecordClone(writer, state3, node, source, target, context);
       return;
     case "set":
-      emitSetClone(writer, state3, node, source, target);
+      emitSetClone(writer, state3, node, source, target, context);
       return;
     case "map":
-      emitMapClone(writer, state3, node, source, target);
+      emitMapClone(writer, state3, node, source, target, context);
+      return;
+    case "runtimeType":
+      emitRuntimeTypeClone(writer, state3, node, source, target, context);
       return;
     case "guard":
-      emitGuardClone(writer, state3, node, source, target);
+      emitGuardClone(writer, state3, node, source, target, context);
       return;
     case "union":
-      emitUnionClone(writer, state3, node, source, target);
+      emitUnionClone(writer, state3, node, source, target, context);
       return;
     case "intersection":
-      emitIntersectionClone(writer, state3, node, source, target);
+      emitIntersectionClone(writer, state3, node, source, target, context);
       return;
     case "discriminatedUnion":
-      emitDiscriminatedUnionClone(writer, state3, node, source, target);
+      emitDiscriminatedUnionClone(writer, state3, node, source, target, context);
       return;
     case "object":
-      emitObjectClone(writer, state3, node, source, target);
+      emitObjectClone(writer, state3, node, source, target, context);
       return;
     case "date":
     case "reuse":
@@ -4463,7 +4554,7 @@ function emitCloneTo(writer, state3, node, source, target) {
       return;
   }
 }
-function emitInlineClone(node, source) {
+function emitInlineClone(node, source, context) {
   switch (node.kind) {
     case "reuse":
       return source;
@@ -4472,9 +4563,11 @@ function emitInlineClone(node, source) {
     case "date":
       return `new Date(${source}.getTime())`;
     case "object":
-      return emitInlineObjectClone(node, source);
+      return emitInlineObjectClone(node, source, context);
     case "tuple":
-      return emitInlineTupleClone(node, source);
+      return emitInlineTupleClone(node, source, context);
+    case "runtimeType":
+      return node.immutable ? source : void 0;
     case "array":
     case "record":
     case "set":
@@ -4486,11 +4579,11 @@ function emitInlineClone(node, source) {
       return void 0;
   }
 }
-function emitInlineObjectClone(node, source) {
+function emitInlineObjectClone(node, source, context) {
   const props = [];
   for (const prop of node.props) {
     const propSource = emitDefaultedValue(prop.schema, emitPropertyAccess(source, prop.key));
-    const cloned = emitInlineClone(prop.value, propSource);
+    const cloned = emitInlineClone(prop.value, propSource, context);
     if (!cloned) {
       return void 0;
     }
@@ -4498,10 +4591,10 @@ function emitInlineObjectClone(node, source) {
   }
   return `{ ${props.join(", ")} }`;
 }
-function emitInlineTupleClone(node, source) {
+function emitInlineTupleClone(node, source, context) {
   const items = [];
   for (let index2 = 0; index2 < node.items.length; index2++) {
-    const cloned = emitInlineClone(node.items[index2], `${source}[${index2}]`);
+    const cloned = emitInlineClone(node.items[index2], `${source}[${index2}]`, context);
     if (!cloned) {
       return void 0;
     }
@@ -4509,37 +4602,37 @@ function emitInlineTupleClone(node, source) {
   }
   return `[${items.join(", ")}]`;
 }
-function emitObjectClone(writer, state3, node, source, target) {
+function emitObjectClone(writer, state3, node, source, target, context) {
   const entries = [];
   for (const prop of node.props) {
     const propSource = emitDefaultedValue(prop.schema, emitPropertyAccess(source, prop.key));
-    const inline = emitInlineClone(prop.value, propSource);
+    const inline = emitInlineClone(prop.value, propSource, context);
     if (inline) {
       entries.push(`${emitObjectKey(prop.key)}: ${inline}`);
       continue;
     }
     const propTarget = state3.nextVar(`${target}_${prop.key}`);
-    emitCloneTo(writer, state3, prop.value, propSource, propTarget);
+    emitCloneTo(writer, state3, prop.value, propSource, propTarget, context);
     entries.push(`${emitLiteral(prop.key)}: ${propTarget}`);
   }
   writer.line(`const ${target} = { ${entries.join(", ")} };`);
 }
-function emitTupleClone(writer, state3, node, source, target) {
+function emitTupleClone(writer, state3, node, source, target, context) {
   const entries = [];
   for (let index2 = 0; index2 < node.items.length; index2++) {
     const itemSource = `${source}[${index2}]`;
-    const inline = emitInlineClone(node.items[index2], itemSource);
+    const inline = emitInlineClone(node.items[index2], itemSource, context);
     if (inline) {
       entries.push(inline);
       continue;
     }
     const itemTarget = state3.nextVar(`${target}_${index2}`);
-    emitCloneTo(writer, state3, node.items[index2], itemSource, itemTarget);
+    emitCloneTo(writer, state3, node.items[index2], itemSource, itemTarget, context);
     entries.push(itemTarget);
   }
   writer.line(`const ${target} = [${entries.join(", ")}];`);
 }
-function emitArrayClone(writer, state3, node, source, target) {
+function emitArrayClone(writer, state3, node, source, target, context) {
   const len = state3.nextVar("len");
   const index2 = state3.nextVar("i");
   const item = state3.nextVar("item");
@@ -4548,17 +4641,17 @@ function emitArrayClone(writer, state3, node, source, target) {
   writer.line(`for (let ${index2} = 0; ${index2} < ${len}; ${index2}++) {`);
   writer.indent(() => {
     const itemSource = `${source}[${index2}]`;
-    const inline = emitInlineClone(node.element, itemSource);
+    const inline = emitInlineClone(node.element, itemSource, context);
     if (inline) {
       writer.line(`${target}[${index2}] = ${inline};`);
       return;
     }
-    emitCloneTo(writer, state3, node.element, itemSource, item);
+    emitCloneTo(writer, state3, node.element, itemSource, item, context);
     writer.line(`${target}[${index2}] = ${item};`);
   });
   writer.line("}");
 }
-function emitRecordClone(writer, state3, node, source, target) {
+function emitRecordClone(writer, state3, node, source, target, context) {
   const keys = state3.nextVar("keys");
   const len = state3.nextVar("len");
   const index2 = state3.nextVar("i");
@@ -4569,23 +4662,23 @@ function emitRecordClone(writer, state3, node, source, target) {
   writer.line(`for (let ${index2} = 0, ${len} = ${keys}.length; ${index2} < ${len}; ${index2}++) {`);
   writer.indent(() => {
     writer.line(`const ${key} = ${keys}[${index2}];`);
-    emitCloneTo(writer, state3, node.value, `${source}[${key}]`, clonedValue);
+    emitCloneTo(writer, state3, node.value, `${source}[${key}]`, clonedValue, context);
     writer.line(`${target}[${key}] = ${clonedValue};`);
   });
   writer.line("}");
 }
-function emitSetClone(writer, state3, node, source, target) {
+function emitSetClone(writer, state3, node, source, target, context) {
   const item = state3.nextVar("item");
   const clonedValue = state3.nextVar("clonedValue");
   writer.line(`const ${target} = new Set();`);
   writer.line(`for (const ${item} of ${source}) {`);
   writer.indent(() => {
-    emitCloneTo(writer, state3, node.element, item, clonedValue);
+    emitCloneTo(writer, state3, node.element, item, clonedValue, context);
     writer.line(`${target}.add(${clonedValue});`);
   });
   writer.line("}");
 }
-function emitMapClone(writer, state3, node, source, target) {
+function emitMapClone(writer, state3, node, source, target, context) {
   const entry = state3.nextVar("entry");
   const key = state3.nextVar("key");
   const mapValue = state3.nextVar("mapValue");
@@ -4596,23 +4689,50 @@ function emitMapClone(writer, state3, node, source, target) {
   writer.indent(() => {
     writer.line(`const ${key} = ${entry}[0];`);
     writer.line(`const ${mapValue} = ${entry}[1];`);
-    emitCloneTo(writer, state3, node.key, key, nextKey);
-    emitCloneTo(writer, state3, node.value, mapValue, nextValue);
+    emitCloneTo(writer, state3, node.key, key, nextKey, context);
+    emitCloneTo(writer, state3, node.value, mapValue, nextValue, context);
     writer.line(`${target}.set(${nextKey}, ${nextValue});`);
   });
   writer.line("}");
 }
-function emitGuardClone(writer, state3, node, source, target) {
+function emitRuntimeTypeClone(writer, state3, node, source, target, context) {
+  if (!context.allowRuntimeTypeBindings) {
+    throw new JITError(
+      "UNSUPPORTED_SCHEMA",
+      "AOT cannot reconstruct a clone for a Runtime Type without a declarative materializer"
+    );
+  }
+  const innerTarget = state3.nextVar(`${target}_inner`);
+  const innerSource = node.representation === "value" ? emitPropertyAccess(source, "value") : source;
+  emitCloneTo(writer, state3, node.inner, innerSource, innerTarget, context);
+  const materializer = context.useTrustedRuntimeTypeMaterializers && node.trustedMaterializer !== void 0 ? node.trustedMaterializer : node.materializer;
+  const binding = bindCloneValue(context, materializer);
+  if (context.useTrustedRuntimeTypeMaterializers && node.trustedMaterializer !== void 0) {
+    writer.line(`const ${target} = ${binding}(${innerTarget});`);
+  } else {
+    writer.line(`const ${target} = new ${binding}(${innerTarget}, true);`);
+  }
+}
+function bindCloneValue(context, value) {
+  const existing = context.ids.get(value);
+  if (existing !== void 0) return existing;
+  const name = `__m${context.bindings.names.length}`;
+  context.ids.set(value, name);
+  context.bindings.names.push(name);
+  context.bindings.values.push(value);
+  return name;
+}
+function emitGuardClone(writer, state3, node, source, target, context) {
   writer.line(`let ${target} = ${source};`);
   writer.line(`if (${emitGuardTest(node.optional, node.nullable, source)}) {`);
   writer.indent(() => {
     const inner = state3.nextVar(`${target}_inner`);
-    emitCloneTo(writer, state3, node.inner, source, inner);
+    emitCloneTo(writer, state3, node.inner, source, inner, context);
     writer.line(`${target} = ${inner};`);
   });
   writer.line("}");
 }
-function emitUnionClone(writer, state3, node, source, target) {
+function emitUnionClone(writer, state3, node, source, target, context) {
   writer.line(`let ${target};`);
   for (let index2 = 0; index2 < node.options.length; index2++) {
     const option = node.options[index2];
@@ -4620,22 +4740,22 @@ function emitUnionClone(writer, state3, node, source, target) {
     writer.line(`${keyword} (${emitSchemaGuard(option.schema, source)}) {`);
     writer.indent(() => {
       const optionTarget = state3.nextVar(`${target}_${index2}`);
-      emitCloneTo(writer, state3, option.node, source, optionTarget);
+      emitCloneTo(writer, state3, option.node, source, optionTarget, context);
       writer.line(`${target} = ${optionTarget};`);
     });
     writer.line("}");
   }
 }
-function emitIntersectionClone(writer, state3, node, source, target) {
+function emitIntersectionClone(writer, state3, node, source, target, context) {
   const parts = [];
   for (let index2 = 0; index2 < node.options.length; index2++) {
     const optionTarget = state3.nextVar(`${target}_${index2}`);
-    emitCloneTo(writer, state3, node.options[index2], source, optionTarget);
+    emitCloneTo(writer, state3, node.options[index2], source, optionTarget, context);
     parts.push(optionTarget);
   }
   writer.line(`const ${target} = Object.assign({}, ${parts.join(", ")});`);
 }
-function emitDiscriminatedUnionClone(writer, state3, node, source, target) {
+function emitDiscriminatedUnionClone(writer, state3, node, source, target, context) {
   const tag = emitPropertyAccess(source, node.discriminator);
   writer.line(`let ${target};`);
   for (let index2 = 0; index2 < node.options.length; index2++) {
@@ -4646,7 +4766,7 @@ function emitDiscriminatedUnionClone(writer, state3, node, source, target) {
     writer.line(`${keyword} (${tag} === ${emitLiteral(value)}) {`);
     writer.indent(() => {
       const optionTarget = state3.nextVar(`${target}_${index2}`);
-      emitCloneTo(writer, state3, option.node, source, optionTarget);
+      emitCloneTo(writer, state3, option.node, source, optionTarget, context);
       writer.line(`${target} = ${optionTarget};`);
     });
     writer.line("}");
@@ -4663,16 +4783,38 @@ function compileClone(schema, options) {
     "clone",
     () => {
       const program = buildCloneIR(schema);
-      const body = emitCloneBody(program);
-      const compiled = globalThis.Function(`return function clone(value) {
-${body}
-};`)();
+      const emitted = emitCloneBodyWithBindings(program);
+      const compiled = globalThis.Function(
+        ...emitted.bindings.names,
+        `return function clone(value) {
+${emitted.source}
+};`
+      )(...emitted.bindings.values);
       registerArtifact(compiled, {
         kind: "operation",
         schema,
         op: "clone"
       });
       return compiled;
+    },
+    options
+  );
+}
+function compileCloneMethod(schema, options) {
+  return getCompileCached(
+    schema,
+    "clone:method",
+    () => {
+      const emitted = emitCloneBodyWithBindings(buildCloneIR(schema));
+      return globalThis.Function(
+        ...emitted.bindings.names,
+        `return function clone() {
+const value = this;
+return this.constructor["__jitMaterialize"]((() => {
+${emitted.source}
+})());
+};`
+      )(...emitted.bindings.values);
     },
     options
   );
@@ -6025,7 +6167,7 @@ function emitCheckParams(params) {
 var EMAIL_REGEX = regexes_exports.email;
 var UUID_REGEX = /* @__PURE__ */ regexes_exports.uuid();
 var ValidatorEmitter = class {
-  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true, maxIssues = void 0) {
+  constructor(mode, awaited = false, resolveDefaults = true, materializeRuntimeTypes = true, maxIssues = void 0, validationEnabled = true) {
     this.mode = mode;
     this.awaited = awaited;
     this.resolveDefaults = resolveDefaults;
@@ -6043,6 +6185,7 @@ var ValidatorEmitter = class {
     this.helperCounter = 0;
     this.varCounter = 0;
     this.rootMode = mode;
+    this.validationEnabled = validationEnabled;
   }
   bindings() {
     return { names: this.bindingNames, values: this.bindingValues };
@@ -6066,6 +6209,9 @@ var ValidatorEmitter = class {
     this.bindingIds.set(value, name);
     return name;
   }
+  bindValidation(value) {
+    return this.validationEnabled ? this.bind(value) : "undefined";
+  }
   nextVar(prefix) {
     return `${prefix}${++this.varCounter}`;
   }
@@ -6088,13 +6234,18 @@ var ValidatorEmitter = class {
       return this.emitWhen(current, valueExpr, path, contextExpr);
     }
     const unwrapped = unwrapValidation(schema, this);
+    const previousValidation = this.validationEnabled;
+    this.validationEnabled = previousValidation || unwrapped.nestedValidation;
     const writer = this.writer;
     const holder = this.nextVar("v");
     const output = this.nextVar("o");
     const builds = this.mode !== "is" && needsBuild(schema);
     writer.line(`let ${holder} = ${valueExpr};`);
     if (builds) writer.line(`let ${output} = ${holder};`);
-    const finish = () => builds ? output : holder;
+    const finish = () => {
+      this.validationEnabled = previousValidation;
+      return builds ? output : holder;
+    };
     if (unwrapped.emptyAsUndefined) {
       writer.line(`if (${holder} === "") {`);
       writer.indent(() => {
@@ -6232,6 +6383,7 @@ var ValidatorEmitter = class {
   }
   /** Emits `if (<failCondition>) { fail }` — early return or issue push. */
   failIf(failCondition, path, code, expected, message, params) {
+    if (!this.validationEnabled) return;
     const writer = this.writer;
     writer.line(`if (${failCondition}) {`);
     writer.indent(() => {
@@ -6240,6 +6392,7 @@ var ValidatorEmitter = class {
     writer.line("}");
   }
   emitFail(path, code, expected, message, received, params) {
+    if (!this.validationEnabled) return;
     const writer = this.writer;
     if (this.mode === "is") {
       writer.line("return false;");
@@ -6259,6 +6412,7 @@ var ValidatorEmitter = class {
     if (this.maxIssues !== void 0) writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
   }
   emitNestedAssertion(binding, value, path) {
+    if (!this.validationEnabled) return;
     if (this.mode === "is") {
       this.writer.line(`if (${binding}(${value}) !== undefined) return false;`);
       return;
@@ -6499,6 +6653,10 @@ var ValidatorEmitter = class {
    */
   typeGate(failCondition, path, code, expected, message, body, received) {
     const writer = this.writer;
+    if (!this.validationEnabled) {
+      body();
+      return;
+    }
     if (this.mode === "is") {
       writer.line(`if (${failCondition}) {`);
       writer.indent(() => {
@@ -6543,7 +6701,7 @@ var ValidatorEmitter = class {
     const predicate = schema.def.predicate;
     if (predicate) {
       this.failIf(
-        `!${this.bind(predicate)}(${value})`,
+        `!${this.bindValidation(predicate)}(${value})`,
         path,
         "custom",
         "custom",
@@ -6573,7 +6731,7 @@ var ValidatorEmitter = class {
       this.requiredMessage(schema, "expected string"),
       () => {
         this.failIf(
-          `!${this.bind(regex2)}.test(${value})`,
+          `!${this.bindValidation(regex2)}.test(${value})`,
           path,
           "invalid_template_literal",
           "template literal",
@@ -6916,7 +7074,7 @@ var ValidatorEmitter = class {
           switch (check.kind) {
             case "regex":
               this.failIf(
-                `!${this.bind(check.value)}.test(${value})`,
+                `!${this.bindValidation(check.value)}.test(${value})`,
                 path,
                 "invalid_format",
                 "regex",
@@ -6925,7 +7083,7 @@ var ValidatorEmitter = class {
               break;
             case "email":
               this.failIf(
-                `!${this.bind(check.value instanceof RegExp ? check.value : EMAIL_REGEX)}.test(${value})`,
+                `!${this.bindValidation(check.value instanceof RegExp ? check.value : EMAIL_REGEX)}.test(${value})`,
                 path,
                 "invalid_format",
                 "email",
@@ -6934,7 +7092,7 @@ var ValidatorEmitter = class {
               break;
             case "uuid":
               this.failIf(
-                `!${this.bind(check.value instanceof RegExp ? check.value : UUID_REGEX)}.test(${value})`,
+                `!${this.bindValidation(check.value instanceof RegExp ? check.value : UUID_REGEX)}.test(${value})`,
                 path,
                 "invalid_format",
                 "uuid",
@@ -6967,7 +7125,7 @@ var ValidatorEmitter = class {
             case "stringFormat": {
               const spec = check.value;
               this.failIf(
-                `!${this.bind(spec.pattern)}.test(${value})`,
+                `!${this.bindValidation(spec.pattern)}.test(${value})`,
                 path,
                 "invalid_format",
                 spec.name,
@@ -6978,7 +7136,7 @@ var ValidatorEmitter = class {
             default:
               if (check.value instanceof RegExp) {
                 this.failIf(
-                  `!${this.bind(check.value)}.test(${value})`,
+                  `!${this.bindValidation(check.value)}.test(${value})`,
                   path,
                   "invalid_format",
                   check.kind,
@@ -7783,6 +7941,7 @@ function unwrapValidation(schema, emitter2) {
   let materialize;
   let trustedMaterialize = false;
   let assertion;
+  let nestedValidation = false;
   while (true) {
     if (current.type === TypeName.optional) {
       optional3 = true;
@@ -7848,11 +8007,16 @@ function unwrapValidation(schema, emitter2) {
       continue;
     }
     if (current.type === TypeName.runtimeType) {
+      const traits = current.def.traits;
+      nestedValidation ||= traits.factoryPolicy.validationConfigured === true;
       if (emitter2.materializeRuntimeTypes) {
         materialize = emitter2.bind(current.def.materialize);
         trustedMaterialize = typeof current.def.materialize === "function" && typeof current.def.materialize.__jitMaterialize === "function";
       }
-      if (current.def.assertion !== void 0) assertion = emitter2.bind(current.def.assertion);
+      if (current.def.assertion !== void 0) {
+        assertion = emitter2.bind(current.def.assertion);
+        nestedValidation = true;
+      }
       current = current.def.innerType;
       continue;
     }
@@ -7870,7 +8034,8 @@ function unwrapValidation(schema, emitter2) {
     fieldTransforms,
     materialize,
     trustedMaterialize,
-    assertion
+    assertion,
+    nestedValidation
   };
 }
 function bindFieldTransforms(spec, emitter2) {
@@ -8067,12 +8232,20 @@ function emitValidator(schema, options = {}) {
   const emitFastParse = options.fastParse ?? false;
   const resolveDefaults = options.resolveDefaults ?? true;
   const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
+  const validateChecks = options.validateChecks ?? true;
   const maxIssues = options.maxIssues;
   const freezesOutput = rootHasReadonly(schema);
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter;
   if (emitFastParse) {
-    const emitter2 = new ValidatorEmitter("fast", false, resolveDefaults, materializeRuntimeTypes);
+    const emitter2 = new ValidatorEmitter(
+      "fast",
+      false,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      void 0,
+      validateChecks
+    );
     emitter2.markRecursive(recursive);
     parseEmitter = emitter2;
     emitter2.writer.line("function parse(value) {");
@@ -8083,7 +8256,14 @@ function emitValidator(schema, options = {}) {
     emitter2.writer.line("}");
   }
   if (emitSafeParse && !emitFastParse) {
-    const emitter2 = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes, maxIssues);
+    const emitter2 = new ValidatorEmitter(
+      "parse",
+      false,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      maxIssues,
+      validateChecks
+    );
     emitter2.markRecursive(recursive);
     parseEmitter = emitter2;
     emitter2.writer.line("function safeParse(value) {");
@@ -8116,7 +8296,14 @@ function emitValidator(schema, options = {}) {
   }
   let asyncEmitter;
   if (emitSafeParseAsync && !emitFastParse && containsPromise(schema)) {
-    const emitter2 = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes, maxIssues);
+    const emitter2 = new ValidatorEmitter(
+      "parse",
+      true,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      maxIssues,
+      validateChecks
+    );
     emitter2.markRecursive(recursive);
     asyncEmitter = emitter2;
     for (const value of parseEmitter?.bindings().values ?? []) emitter2.bind(value);
@@ -8150,7 +8337,14 @@ function emitValidator(schema, options = {}) {
   }
   let isEmitter;
   if (emitIs && !emitFastParse) {
-    const emitter2 = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes);
+    const emitter2 = new ValidatorEmitter(
+      "is",
+      false,
+      resolveDefaults,
+      materializeRuntimeTypes,
+      void 0,
+      validateChecks
+    );
     emitter2.markRecursive(recursive);
     isEmitter = emitter2;
     for (const value of (asyncEmitter ?? parseEmitter)?.bindings().values ?? []) emitter2.bind(value);
@@ -8204,6 +8398,36 @@ function compileHydrator(schema, options) {
       return (state3) => {
         try {
           return parse3(state3);
+        } catch (error) {
+          if (typeof error === "object" && error !== null && error.__jitFastValidation === true) {
+            throw new JITValidationError(error.issues);
+          }
+          throw error;
+        }
+      };
+    },
+    options
+  );
+}
+function compileMaterializer(schema, options) {
+  const resolveDefaults = options?.resolveDefaults ?? true;
+  return getCompileCached(
+    schema,
+    `materializer:defaults=${resolveDefaults}`,
+    () => {
+      const emitted = emitValidator(schema, {
+        is: false,
+        safeParse: false,
+        safeParseAsync: false,
+        fastParse: true,
+        resolveDefaults,
+        materializeRuntimeTypes: true,
+        validateChecks: false
+      });
+      const parse3 = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).parse;
+      return (input) => {
+        try {
+          return parse3(input);
         } catch (error) {
           if (typeof error === "object" && error !== null && error.__jitFastValidation === true) {
             throw new JITValidationError(error.issues);
@@ -8807,7 +9031,19 @@ function emitDiffNode(writer, state3, node, left, right, path) {
     case "map":
       emitMapDiff(writer, state3, left, right, path);
       return;
+    case "runtimeType":
+      emitRuntimeTypeDiff(writer, state3, node, left, right, path);
+      return;
   }
+}
+function emitRuntimeTypeDiff(writer, state3, node, left, right, path) {
+  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  writer.indent(() => {
+    const leftValue = node.representation === "value" ? emitPropertyAccess(left, "value") : left;
+    const rightValue = node.representation === "value" ? emitPropertyAccess(right, "value") : right;
+    emitDiffNode(writer, state3, node.inner, leftValue, rightValue, path);
+  });
+  writer.line("}");
 }
 function emitGuardDiff(writer, state3, node, left, right, path) {
   writer.line(`if (!Object.is(${left}, ${right})) {`);
@@ -9067,6 +9303,11 @@ function emitPathPart(part) {
 function emitDiffSource(schema) {
   return emitDiff(buildDiffIR(schema));
 }
+function emitDiffMethodBody(schema) {
+  return `const left = this;
+const right = other;
+${emitDiffBody(buildDiffIR(schema))}`;
+}
 function compileDiff(schema, options) {
   return getCompileCached(
     schema,
@@ -9084,6 +9325,18 @@ ${body}
       });
       return compiled;
     },
+    options
+  );
+}
+function compileDiffMethod(schema, options) {
+  return getCompileCached(
+    schema,
+    "diff:method",
+    () => globalThis.Function(
+      `return function diff(other) {
+${emitDiffMethodBody(schema)}
+};`
+    )(),
     options
   );
 }
@@ -15132,7 +15385,7 @@ function buildUpdateIR(schema) {
   return { kind: "program", valueParam: "value", patchParam: "patch", body, helpers };
 }
 function buildUpdateNode(schema, recurse) {
-  if (schema.type === TypeName.runtimeType) return { kind: "reuse" };
+  if (resolveRuntimeTypeOperation(schema) !== void 0) return { kind: "reuse" };
   if (schema.type === TypeName.date) return { kind: "date" };
   if (schema.type === TypeName.union) return buildUnionNode3(schema, recurse);
   if (schema.type === TypeName.discriminatedUnion)
@@ -15142,6 +15395,7 @@ function buildUpdateNode(schema, recurse) {
     if (flattened !== void 0) return buildUpdateNode(flattened, recurse);
   }
   const node = buildSchemaNode(schema, recurse);
+  if (node?.kind === "runtimeType") return { kind: "reuse" };
   if (node) return node;
   if (isPrimitiveLikeSchema(schema)) return { kind: "reuse" };
   throw new JITError("UNSUPPORTED_SCHEMA", `Unimplemented compiler update IR for type: ${schema.type}`);
@@ -19301,20 +19555,37 @@ function emitModule(plan, options, layout) {
     const hydrateSchema = artifact.hydrateSchema ?? artifact.schema;
     const fastPolicyCreate = artifact.policy?.maxIssues === void 0 && canUseFastParse(creationSchema);
     const fastPolicyHydrate = artifact.policy?.maxIssues === void 0 && canUseFastParse(hydrateSchema);
-    const validator = emitValidatorBinding(binding, creationSchema, reportName, "class", {
+    const unvalidatedDdd = artifact.domainEvent === void 0 && artifact.factoryValidationOptIn === true && artifact.policy?.validationConfigured !== true;
+    const materializerNeedsIssues = hasNestedValidation(creationSchema) || hasNestedValidation(hydrateSchema);
+    const validator = unvalidatedDdd ? void 0 : emitValidatorBinding(binding, creationSchema, reportName, "class", {
       is: fastPolicyCreate,
       safeParse: true,
       ...artifact.policy?.maxIssues === void 0 ? {} : { maxIssues: artifact.policy.maxIssues }
     });
-    if (!validator) return void 0;
-    const hydrateValidator = artifact.domainEvent ? validator : emitValidatorBinding(binding, hydrateSchema, reportName, "class.hydrate", {
+    const hydrateValidator = unvalidatedDdd ? void 0 : artifact.domainEvent ? validator : emitValidatorBinding(binding, hydrateSchema, reportName, "class.hydrate", {
       is: fastPolicyHydrate,
       safeParse: true,
       resolveDefaults: false,
       ...artifact.policy?.maxIssues === void 0 ? {} : { maxIssues: artifact.policy.maxIssues }
     });
-    if (!hydrateValidator) return void 0;
-    needsValidationError = true;
+    if (!unvalidatedDdd && (validator === void 0 || hydrateValidator === void 0)) return void 0;
+    const materializer = unvalidatedDdd ? emitValidatorBinding(binding, creationSchema, reportName, "class.materialize", {
+      is: false,
+      safeParse: artifact.policy !== void 0 || materializerNeedsIssues,
+      parse: artifact.policy === void 0 && !materializerNeedsIssues,
+      validateChecks: false
+    }) : void 0;
+    const hydrateMaterializer = unvalidatedDdd ? emitValidatorBinding(binding, hydrateSchema, reportName, "class.materializeHydrate", {
+      is: false,
+      safeParse: artifact.policy !== void 0 || materializerNeedsIssues,
+      parse: artifact.policy === void 0 && !materializerNeedsIssues,
+      resolveDefaults: false,
+      validateChecks: false
+    }) : void 0;
+    if (unvalidatedDdd && (materializer === void 0 || hydrateMaterializer === void 0)) return void 0;
+    const validationBinding = validator ?? materializer;
+    const hydrateBinding = hydrateValidator ?? hydrateMaterializer;
+    if (!unvalidatedDdd || materializerNeedsIssues) needsValidationError = true;
     const helpers2 = [];
     const methods = [];
     const capabilities = new Set(artifact.capabilities);
@@ -19402,7 +19673,7 @@ function emitModule(plan, options, layout) {
         if (body.includes("__getIndex")) needsRuntimeGetIndex = true;
         if (body.includes("__hash")) {
           const hash4 = internalIdentifier(`${binding}_equal_hash`);
-          if (!emitHashBinding(hash4, artifact.schema, reportName)) return void 0;
+          if (!emitHashBinding(hash4, artifact.schema, reportName, artifact.frozen)) return void 0;
           helpers2.push(`const __hash = ${hash4};`);
         }
         methods.push(`equals(other) { ${body} }`);
@@ -19410,22 +19681,50 @@ function emitModule(plan, options, layout) {
     }
     if (capabilities.has("hashCode")) {
       const hash4 = internalIdentifier(`${binding}_hash`);
-      if (!emitHashBinding(hash4, artifact.schema, reportName)) return void 0;
+      if (!emitHashBinding(hash4, artifact.schema, reportName, artifact.frozen)) return void 0;
       methods.push(`hashCode() { return ${hash4}(${valueRepresentation ? "this.value" : "this"}); }`);
     }
     if (capabilities.has("diff")) {
-      const source2 = tryEmit(reportName, "class.diff", skipped, () => emitDiffSource(artifact.schema));
+      const source2 = tryEmit(reportName, "class.diff", skipped, () => emitDiffMethodBody(artifact.schema));
       if (!source2) return void 0;
-      const diff3 = internalIdentifier(`${binding}_diff`);
-      helpers2.push(`const ${diff3} = ${asExpression(source2, "diff")};`);
-      methods.push(`diff(other) { return ${diff3}(this, other); }`);
+      methods.push(`diff(other) { ${source2} }`);
     }
     if (capabilities.has("clone")) {
-      const source2 = tryEmit(reportName, "class.clone", skipped, () => emitCloneSource(artifact.schema));
-      if (!source2) return void 0;
+      const emitted = tryEmit(
+        reportName,
+        "class.clone",
+        skipped,
+        () => emitCloneBodyWithBindings(buildCloneIR(artifact.schema), {
+          allowRuntimeTypeBindings: true,
+          useTrustedRuntimeTypeMaterializers: false
+        })
+      );
+      if (!emitted) return void 0;
+      const inlined = emitted.bindings.names.map((name, index2) => {
+        const value = emitted.bindings.values[index2];
+        const classBinding = classBindings.get(value);
+        if (classBinding !== void 0) return `const ${name} = ${classBinding};`;
+        const literal4 = serializeBindingValue(value);
+        return literal4 === void 0 ? void 0 : `const ${name} = ${literal4};`;
+      });
+      if (inlined.some((line) => line === void 0)) {
+        skipped.push({
+          schema: reportName,
+          operation: "class.clone",
+          reason: "nested Runtime Type materializers cannot be serialized ahead of time"
+        });
+        return void 0;
+      }
       const clone3 = internalIdentifier(`${binding}_clone`);
-      helpers2.push(`const ${clone3} = ${asExpression(source2, "clone")};`);
-      methods.push(`clone() { return new this.constructor(${clone3}(this), __construct, true); }`);
+      helpers2.push(`const ${clone3} = /*#__PURE__*/ (() => {`);
+      helpers2.push(...inlined.map((line) => `  ${line}`));
+      helpers2.push(
+        ...indentBlock(`return function clone(value) {
+${emitted.source}
+};`)
+      );
+      helpers2.push("})();");
+      methods.push(`clone() { return this.constructor["__jitMaterialize"](${clone3}(this)); }`);
     }
     if (capabilities.has("value")) methods.push("get value() { return this; }");
     const needsUpdate = artifact.aggregate || capabilities.has("with") || artifact.mutation?.updatedAt !== void 0 || artifact.mutation?.version !== void 0;
@@ -19562,12 +19861,12 @@ function emitModule(plan, options, layout) {
     const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
     const policy = artifact.policy;
     const assertionCall = (value) => policy?.assertions === void 0 ? "" : `const outcome = __assert(${value}); if (outcome !== undefined) return __failure(__assertFailure(outcome, ${value})); `;
-    const policyCreate = policy === void 0 || !policy.create ? void 0 : fastPolicyCreate ? `let __createdState; if (${validator}.is(${creationInput})) __createdState = ${creationInput}; else { const result = ${validator}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); __createdState = result.data; } ${assertionCall("__createdState")}return __success(new this(__createdState, __construct, true));` : `const result = ${validator}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
-    const policyHydrate = policy === void 0 || !policy.hydrate ? void 0 : fastPolicyHydrate ? `let __hydratedState; if (${hydrateValidator}.is(${hydrationInput})) __hydratedState = ${hydrationInput}; else { const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); __hydratedState = result.data; } ${assertionCall("__hydratedState")}return __success(new this(__hydratedState, __construct, true));` : `const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
-    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? `return new this(${creationInput}, __construct);`;
-    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : policyHydrate ?? `const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
+    const policyCreate = unvalidatedDdd ? policy === void 0 ? materializerNeedsIssues ? `const result = ${materializer}.safeParse(${creationInput}); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);` : `return new this(${materializer}.parse(${creationInput}), __construct, true);` : !policy.create ? void 0 : `const result = ${materializer}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));` : policy === void 0 || !policy.create ? void 0 : fastPolicyCreate ? `let __createdState; if (${validationBinding}.is(${creationInput})) __createdState = ${creationInput}; else { const result = ${validationBinding}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); __createdState = result.data; } ${assertionCall("__createdState")}return __success(new this(__createdState, __construct, true));` : `const result = ${validationBinding}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
+    const policyHydrate = unvalidatedDdd ? policy === void 0 ? materializerNeedsIssues ? `const result = ${hydrateMaterializer}.safeParse(${hydrationInput}); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);` : `return new this(${hydrateMaterializer}.parse(${hydrationInput}), __construct, true);` : !policy.hydrate ? void 0 : `const result = ${hydrateMaterializer}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));` : policy === void 0 || !policy.hydrate ? void 0 : fastPolicyHydrate ? `let __hydratedState; if (${hydrateBinding}.is(${hydrationInput})) __hydratedState = ${hydrationInput}; else { const result = ${hydrateBinding}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); __hydratedState = result.data; } ${assertionCall("__hydratedState")}return __success(new this(__hydratedState, __construct, true));` : `const result = ${hydrateBinding}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
+    const create = artifact.domainEvent ? `const result = ${validationBinding}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? `return new this(${creationInput}, __construct);`;
+    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validationBinding}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : policyHydrate ?? `const result = ${hydrateBinding}.safeParse(${hydrationInput}); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
     const constructionGuard = artifact.construction === "factory" ? `if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ` : "";
-    const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(${creationInput}); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
+    const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : ${unvalidatedDdd && policy === void 0 && !materializerNeedsIssues ? `${validationBinding}.parse(${creationInput})` : `(() => { const result = ${validationBinding}.safeParse(${creationInput}); if (!result.success) throw new JITValidationError(result.issues); return result.data; })()`}; ${assignments}${events}${freeze} }`;
     const trustedMaterializer = slots.size > 0 ? `static ["__jitMaterialize"](state) { return new this(state, __construct, true); }` : `static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); ${trustedAssignments}${artifact.aggregate ? ' Object.defineProperty(instance, "__jitEvents", { value: [], writable: true });' : ""}${artifact.frozen ? " Object.freeze(instance);" : ""} return instance; }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push("  const __construct = Symbol();");
@@ -19645,9 +19944,11 @@ function emitModule(plan, options, layout) {
         is: selection.is,
         safeParse: selection.safeParse,
         safeParseAsync: false,
+        fastParse: selection.parse === true,
         ...selection.resolveDefaults === void 0 ? {} : { resolveDefaults: selection.resolveDefaults },
         ...selection.materializeRuntimeTypes === void 0 ? {} : { materializeRuntimeTypes: selection.materializeRuntimeTypes },
-        ...selection.maxIssues === void 0 ? {} : { maxIssues: selection.maxIssues }
+        ...selection.maxIssues === void 0 ? {} : { maxIssues: selection.maxIssues },
+        ...selection.validateChecks === void 0 ? {} : { validateChecks: selection.validateChecks }
       })
     );
     if (!validator) return void 0;
@@ -20795,6 +21096,17 @@ function serializeBindingValue(value) {
     return `[${parts.join(", ")}]`;
   }
   return void 0;
+}
+function hasNestedValidation(schema, seen = /* @__PURE__ */ new Set()) {
+  const current = resolveLazySchema(schema);
+  if (seen.has(current)) return false;
+  seen.add(current);
+  if (current.type === TypeName.runtimeType) {
+    const runtime = current;
+    if (runtime.def.traits.factoryPolicy.validationConfigured === true || runtime.def.assertion !== void 0)
+      return true;
+  }
+  return schemaChildren(current).some((child) => hasNestedValidation(child, seen));
 }
 function serializeStaticData(value, seen = /* @__PURE__ */ new Set()) {
   if (value === null) return "null";
@@ -22339,7 +22651,7 @@ var MODE_RANK = Object.freeze({
   throw: 2
 });
 function normalizeFactoryReturnMode(mode) {
-  return mode === "result" ? "either" : mode;
+  return mode;
 }
 function selectFactoryPolicyCandidate(candidates) {
   let selected;
@@ -23868,6 +24180,15 @@ function createPolicyState() {
     nestedErrors: []
   };
 }
+function clonePolicyState(source) {
+  if (source === void 0) return createPolicyState();
+  return {
+    ...source,
+    assertions: [...source.assertions],
+    assertionErrors: [...source.assertionErrors],
+    nestedErrors: [...source.nestedErrors]
+  };
+}
 function runtimeTypeTraits(representation, identifier2, policy) {
   return Object.freeze({
     representation,
@@ -23879,7 +24200,8 @@ function runtimeTypeTraits(representation, identifier2, policy) {
       resultModeInherited: policy.inheritedResultMode,
       errorType: void 0,
       priority: policy.modePriority,
-      hasAssertions: policy.assertions.length > 0
+      hasAssertions: policy.assertions.length > 0,
+      validationConfigured: policy.validationConfigured
     })
   });
 }
@@ -24018,6 +24340,7 @@ function policyArtifact(policy) {
       result: policy.mode,
       create: policy.create,
       hydrate: policy.hydrate,
+      validationConfigured: policy.validationConfigured,
       ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues },
       ...policy.error === void 0 ? {} : { errorPriority: policy.errorPriority },
       ...policy.error === void 0 ? {} : { errorPriorityExplicit: policy.errorPriorityExplicit },
@@ -24140,7 +24463,7 @@ var RESERVED_EXTENSION_NAMES = /* @__PURE__ */ new Set([
   "assert"
 ]);
 function isClassCapability(value) {
-  return typeof value === "object" && value !== null && typeof value.install === "function" && typeof value.kind === "string";
+  return (typeof value === "object" || typeof value === "function") && value !== null && typeof value.install === "function" && typeof value.kind === "string";
 }
 function classFactory2(schema) {
   return createRuntimeClass(
@@ -24202,6 +24525,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     freezeInstances,
     aggregate,
     construction,
+    factoryValidationOptIn: seed?.factoryValidationOptIn ?? false,
     constructionConfigured: seed?.constructionConfigured ?? false,
     // Factory-first presets still allow one explicit `.construction(...)` or
     // `.factories(...)` decision; the default mode is not itself a lock.
@@ -24217,7 +24541,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     fieldPolicies: new Map(seed?.fieldPolicies ?? []),
     encapsulateFields: seed?.encapsulateFields ?? encapsulateFields,
     mutationGate: seed?.mutationGate ?? /* @__PURE__ */ new WeakSet(),
-    policy: seed?.policy ?? createPolicyState(),
+    policy: clonePolicyState(seed?.policy),
     identity: seed?.identity ?? { state: "none" }
   };
   const policy = state3.policy;
@@ -24260,6 +24584,16 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
   const hydrateInput = (input) => {
     hydrateState ??= compileHydrator(hydrateSchema);
     return hydrateState(boundaryInput(input));
+  };
+  let materializeCreation;
+  const materialize = (input) => {
+    materializeCreation ??= compileMaterializer(creationSchema);
+    return materializeCreation(boundaryInput(input));
+  };
+  let materializeHydrate;
+  const materializeHydrated = (input) => {
+    materializeHydrate ??= compileMaterializer(hydrateSchema, { resolveDefaults: false });
+    return materializeHydrate(boundaryInput(input));
   };
   const initializers = compileNoConstructorInitializers(state3.schema, state3.fieldPolicies);
   let safeParse;
@@ -24347,6 +24681,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
       frozen: state3.freezeInstances,
       aggregate: state3.aggregate,
       construction: state3.construction,
+      factoryValidationOptIn: state3.factoryValidationOptIn,
       representation: "object",
       capabilities: state3.capabilities.map((capability2) => capability2.kind),
       managedFields: state3.managedFields,
@@ -24384,7 +24719,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     const construct2 = this;
     const customFactory = state3.customFactories.create;
     if (customFactory !== void 0) {
-      const parsed2 = policy.configured && policy.create ? policySafeParse()(boundaryInput(input)) : { success: true, data: parse3(input) };
+      const parsed2 = policy.validationConfigured && policy.create ? policySafeParse()(boundaryInput(input)) : policy.configured && !policy.create ? { success: true, data: parse3(input) } : { success: true, data: materialize(input) };
       if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
       if (policy.assert !== void 0) {
         const failure = policy.assert(parsed2.data);
@@ -24409,7 +24744,32 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
       }
       return policy.configured ? policySuccess(policy, instance) : instance;
     }
-    if (!policy.configured || !policy.create) {
+    if (!policy.configured && state3.factoryValidationOptIn) {
+      return new construct2(materialize(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.configured) {
+      if (state3.lifecycle.timestamps === void 0 && state3.lifecycle.softDelete === void 0 && state3.lifecycle.versioned === void 0) {
+        return new construct2(input, INTERNAL_CONSTRUCT);
+      }
+      return new construct2(parse3(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.validationConfigured && policy.create) {
+      let materialized;
+      try {
+        materialized = materialize(input);
+      } catch (error) {
+        if (policy.configured && error instanceof JITValidationError) {
+          return policyFailure(policy, policyError(policy, error.issues));
+        }
+        throw error;
+      }
+      if (policy.assert !== void 0) {
+        const failure = policy.assert(materialized);
+        if (failure !== void 0) return policyFailure(policy, failure);
+      }
+      return policySuccess(policy, new construct2(materialized, INTERNAL_CONSTRUCT, true));
+    }
+    if (!policy.create) {
       if (state3.lifecycle.timestamps === void 0 && state3.lifecycle.softDelete === void 0 && state3.lifecycle.versioned === void 0) {
         return new construct2(input, INTERNAL_CONSTRUCT);
       }
@@ -24444,7 +24804,7 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     const construct2 = this;
     const customFactory = state3.customFactories.hydrate;
     if (customFactory !== void 0) {
-      const parsed2 = policy.configured && policy.hydrate ? policySafeHydrate()(boundaryInput(input)) : { success: true, data: hydrateInput(input) };
+      const parsed2 = policy.validationConfigured && policy.hydrate ? policySafeHydrate()(boundaryInput(input)) : policy.configured && !policy.hydrate ? { success: true, data: hydrateInput(input) } : { success: true, data: materializeHydrated(input) };
       if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
       if (policy.assert !== void 0) {
         const failure = policy.assert(parsed2.data);
@@ -24469,7 +24829,27 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
       }
       return policy.configured ? policySuccess(policy, instance) : instance;
     }
-    if (!policy.configured || !policy.hydrate) {
+    if (!policy.configured && state3.factoryValidationOptIn) {
+      return new construct2(materializeHydrated(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.configured) return new construct2(hydrateInput(input), INTERNAL_CONSTRUCT, true);
+    if (!policy.validationConfigured && policy.hydrate) {
+      let materialized;
+      try {
+        materialized = materializeHydrated(input);
+      } catch (error) {
+        if (policy.configured && error instanceof JITValidationError) {
+          return policyFailure(policy, policyError(policy, error.issues));
+        }
+        throw error;
+      }
+      if (policy.assert !== void 0) {
+        const failure = policy.assert(materialized);
+        if (failure !== void 0) return policyFailure(policy, failure);
+      }
+      return policySuccess(policy, new construct2(materialized, INTERNAL_CONSTRUCT, true));
+    }
+    if (!policy.hydrate) {
       return new construct2(hydrateInput(input), INTERNAL_CONSTRUCT, true);
     }
     if (policy.maxIssues === void 0 && policy.assert === void 0) {
@@ -24511,15 +24891,17 @@ function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, cons
     validate: {
       enumerable: false,
       value: (options) => {
-        applyValidationPolicy(state3.policy, options);
-        return materializeClassState(state3);
+        const policy2 = clonePolicyState(state3.policy);
+        applyValidationPolicy(policy2, options);
+        return materializeClassState({ ...state3, policy: policy2 });
       }
     },
     assert: {
       enumerable: false,
       value: (predicate, options) => {
-        applyAssertion(state3.policy, state3.schema, predicate, options);
-        return materializeClassState(state3);
+        const policy2 = clonePolicyState(state3.policy);
+        applyAssertion(policy2, state3.schema, predicate, options);
+        return materializeClassState({ ...state3, policy: policy2 });
       }
     },
     factories: {
@@ -25261,15 +25643,17 @@ function resolveFactoryOption(option, previous, phase) {
   }
   return { name: option };
 }
-function createScalarValueObject(schema, identifier2, isAbstract) {
+function createScalarValueObject(schema, identifier2, isAbstract, seed) {
   const parse3 = compileValidator(schema).parse;
   const hydrateState = compileHydrator(schema);
-  const policy = createPolicyState();
+  const materialize = compileMaterializer(schema);
+  const materializeHydrated = compileMaterializer(schema, { resolveDefaults: false });
+  const policy = clonePolicyState(seed?.policy);
   let safeParse;
   let safeHydrate;
   const equal3 = compileEqual(schema);
   const hash4 = compileHash(schema);
-  const constructionState = { mode: "factory" };
+  const constructionState = { mode: seed?.construction ?? "factory" };
   const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
   const classTarget = globalThis.Function(
     "__parse",
@@ -25286,16 +25670,22 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
       return Object.freeze(instance);
     }
   });
-  const installedCapabilities = ["equals", "hashCode"];
-  const installedMethods = [];
+  const installedCapabilities = [
+    "equals",
+    "hashCode",
+    ...(seed?.capabilities ?? []).map((capability2) => capability2.kind)
+  ];
+  const installedCapabilityValues = [...seed?.capabilities ?? []];
+  const installedMethods = [...seed?.methods ?? []];
   const installedMethodNames = new Set(SCALAR_MEMBERS);
-  let factoryNames = {
+  for (const method of installedMethods) installedMethodNames.add(method.name);
+  let factoryNames = seed?.factoryNames ?? {
     create: "create",
     hydrate: "hydrate"
   };
-  let customFactories = {};
-  let constructionConfigured = false;
-  let factoriesConfigured = false;
+  let customFactories = seed?.customFactories ?? {};
+  let constructionConfigured = seed?.constructionConfigured ?? false;
+  let factoriesConfigured = seed?.factoriesConfigured ?? false;
   const updateSchema = () => {
     Object.defineProperty(classTarget, "schema", {
       configurable: true,
@@ -25316,10 +25706,10 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     }
     const construct2 = this;
     if (customFactories.create !== void 0) {
-      const parsed2 = policy.configured && policy.create ? (() => {
+      const parsed2 = policy.validationConfigured && policy.create ? (() => {
         safeParse ??= compileValidatorSelection(schema, ["safeParse"], {}).safeParse;
         return safeParse(args[0]);
-      })() : { success: true, data: parse3(args[0]) };
+      })() : policy.configured && !policy.create ? { success: true, data: parse3(args[0]) } : { success: true, data: materialize(args[0]) };
       if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
       const result = customFactories.create.call(this, parsed2.data, {
         construct: (value) => new construct2(value, INTERNAL_CONSTRUCT, true)
@@ -25332,7 +25722,8 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
       }
       return policy.configured ? policySuccess(policy, instance) : instance;
     }
-    if (!policy.configured || !policy.create) return new construct2(args[0], INTERNAL_CONSTRUCT);
+    if (!policy.configured) return new construct2(materialize(args[0]), INTERNAL_CONSTRUCT, true);
+    if (!policy.create) return new construct2(args[0], INTERNAL_CONSTRUCT);
     if (policy.maxIssues === void 0) {
       try {
         return policySuccess(policy, new construct2(parse3(args[0]), INTERNAL_CONSTRUCT, true));
@@ -25354,10 +25745,10 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     }
     const construct2 = this;
     if (customFactories.hydrate !== void 0) {
-      const parsed2 = policy.configured && policy.hydrate ? (() => {
+      const parsed2 = policy.validationConfigured && policy.hydrate ? (() => {
         safeHydrate ??= compileSafeHydrator(schema);
         return safeHydrate(state3);
-      })() : { success: true, data: hydrateState(state3) };
+      })() : policy.configured && !policy.hydrate ? { success: true, data: hydrateState(state3) } : { success: true, data: materializeHydrated(state3) };
       if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
       const result = customFactories.hydrate.call(this, parsed2.data, {
         construct: (value) => new construct2(value, INTERNAL_CONSTRUCT, true)
@@ -25370,7 +25761,10 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
       }
       return policy.configured ? policySuccess(policy, instance) : instance;
     }
-    if (!policy.configured || !policy.hydrate) {
+    if (!policy.configured) {
+      return new construct2(materializeHydrated(state3), INTERNAL_CONSTRUCT, true);
+    }
+    if (!policy.hydrate) {
       return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
     }
     if (policy.maxIssues === void 0) {
@@ -25401,6 +25795,7 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
       frozen: true,
       aggregate: false,
       construction: constructionState.mode,
+      factoryValidationOptIn: true,
       representation: "value",
       ...policyArtifact(policy),
       capabilities: installedCapabilities,
@@ -25443,6 +25838,7 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
               if (!before.has(name)) installedMethodNames.add(name);
             }
             installedCapabilities.push(extension.kind);
+            installedCapabilityValues.push(extension);
             continue;
           }
           installScalarExtension(classTarget, extension, installedMethods, installedMethodNames);
@@ -25523,9 +25919,18 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
     validate: {
       enumerable: false,
       value: (options) => {
-        applyValidationPolicy(policy, options);
-        register();
-        return classTarget;
+        const nextPolicy = clonePolicyState(policy);
+        applyValidationPolicy(nextPolicy, options);
+        return createScalarValueObject(schema, identifier2, isAbstract, {
+          policy: nextPolicy,
+          capabilities: installedCapabilityValues,
+          methods: installedMethods,
+          factoryNames,
+          customFactories,
+          construction: constructionState.mode,
+          constructionConfigured,
+          factoriesConfigured
+        });
       }
     },
     assert: {
@@ -25554,6 +25959,17 @@ function createScalarValueObject(schema, identifier2, isAbstract) {
   definePrototype(classTarget.prototype, "toJSON", function scalarToJson() {
     return this.value;
   });
+  for (const capability2 of seed?.capabilities ?? []) capability2.install(classTarget, schema);
+  for (const method of seed?.methods ?? []) {
+    const descriptor2 = {
+      configurable: true,
+      enumerable: false
+    };
+    if (method.kind === "method") descriptor2.value = method.source;
+    else if (method.kind === "get") descriptor2.get = method.source;
+    else descriptor2.set = method.source;
+    Object.defineProperty(classTarget.prototype, method.name, descriptor2);
+  }
   register();
   return classTarget;
 }
@@ -25742,15 +26158,7 @@ var classType = Object.assign(classFactory2, {
     definePrototype(prototype, "equals", compileEqualMethod(schema), true);
   }),
   hashCode: capability("hashCode", (prototype, schema) => {
-    const hash4 = compileHash(schema);
-    definePrototype(
-      prototype,
-      "hashCode",
-      function hashCode() {
-        return hash4(this);
-      },
-      true
-    );
+    definePrototype(prototype, "hashCode", compileHashMethod(schema), true);
   }),
   with: (() => {
     const base = capability("with", (prototype, schema) => {
@@ -25768,36 +26176,16 @@ var classType = Object.assign(classFactory2, {
         true
       );
     });
-    return Object.freeze({ ...base, __with: true });
+    return base;
   })(),
   diff: capability("diff", (prototype, schema) => {
-    const diff3 = compileDiff(schema);
-    definePrototype(
-      prototype,
-      "diff",
-      function diffInstance(other) {
-        return diff3(this, other);
-      },
-      true
-    );
+    definePrototype(prototype, "diff", compileDiffMethod(schema), true);
   }),
   clone: (() => {
     const base = capability("clone", (prototype, schema) => {
-      const clone3 = compileClone(schema);
-      definePrototype(
-        prototype,
-        "clone",
-        function cloneInstance() {
-          return new this.constructor(
-            clone3(this),
-            INTERNAL_CONSTRUCT,
-            true
-          );
-        },
-        true
-      );
+      definePrototype(prototype, "clone", compileCloneMethod(schema), true);
     });
-    return Object.freeze({ ...base, __clone: true });
+    return base;
   })(),
   override,
   public: classPublic,
@@ -25881,7 +26269,9 @@ function valueObject(schema) {
     }
     return createScalarValueObject(unwrapped, false, false);
   }
-  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
+  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory", false, void 0, {
+    factoryValidationOptIn: true
+  });
   return "value" in base.def.props ? runtime.extends(
     classType.equals,
     classType.hashCode
@@ -25900,7 +26290,9 @@ function abstractValueObject(schema) {
     }
     return createScalarValueObject(unwrapped, false, true);
   }
-  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
+  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory", false, void 0, {
+    factoryValidationOptIn: true
+  });
   return "value" in base.def.props ? runtime.extends(
     classType.equals,
     classType.hashCode
@@ -25998,17 +26390,27 @@ function versioned(options) {
 function createEntity(schema, isAbstract, ...args) {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityState(unwrapped, args[0]?.id, "Entity");
+  const members = initialEffectiveSchema(unwrapped).members;
+  addMember(members, "equals", "preset", "ddd.entity", "method");
+  addMember(members, "hashCode", "preset", "ddd.entity", "method");
+  const capabilities = [classType.equals, classType.hashCode];
+  if (identity.state === "resolved") {
+    addMember(members, "identity", "preset", "ddd.entity", "method");
+    addMember(members, "sameIdentity", "preset", "ddd.entity", "method");
+    capabilities.push(classType.identity(identity.key));
+  }
   const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory", true, void 0, {
-    identity
+    identity,
+    members,
+    capabilities,
+    factoryValidationOptIn: true
   });
   if (identity.state !== "resolved") {
     Reflect.deleteProperty(runtime, "create");
     Reflect.deleteProperty(runtime, "hydrate");
     return runtime;
   }
-  return runtime.extends(
-    classType.identity(identity.key)
-  );
+  return runtime;
 }
 function entity(schema, ...args) {
   return createEntity(schema, false, ...args);
@@ -26022,10 +26424,18 @@ function createAggregateRoot(schema, isAbstract, ...args) {
   if (identity.state !== "resolved") {
     throw new JITError("DDD_IDENTITY_MISSING", "Aggregate identity must be resolved before materialization");
   }
-  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory", true, void 0, { identity });
-  return runtime.extends(
-    classType.identity(identity.key)
-  );
+  const members = initialEffectiveSchema(unwrapped).members;
+  addMember(members, "equals", "preset", "ddd.aggregateRoot", "method");
+  addMember(members, "hashCode", "preset", "ddd.aggregateRoot", "method");
+  addMember(members, "identity", "preset", "ddd.aggregateRoot", "method");
+  addMember(members, "sameIdentity", "preset", "ddd.aggregateRoot", "method");
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory", true, void 0, {
+    identity,
+    members,
+    capabilities: [classType.equals, classType.hashCode, classType.identity(identity.key)],
+    factoryValidationOptIn: true
+  });
+  return runtime;
 }
 function aggregateRoot(schema, ...args) {
   return createAggregateRoot(schema, false, ...args);
@@ -26036,7 +26446,9 @@ function abstractAggregateRoot(schema, ...args) {
 function domainEvent(type, options) {
   const payload = unwrapSchema(options.payload);
   const schema = createDomainEventSchema(payload, type, options.version);
-  const event = createRuntimeClass(schema, false, true, false, "factory");
+  const event = createRuntimeClass(schema, false, true, false, "factory", false, void 0, {
+    factoryValidationOptIn: true
+  });
   const createState = event.create.bind(event);
   Object.defineProperties(event, {
     create: {
@@ -26095,13 +26507,19 @@ function createIdentifierValue() {
   return crypto.randomUUID();
 }
 function capability(kind, install, memberNames = [kind]) {
-  return Object.freeze({
-    kind,
-    __memberNames: Object.freeze([...memberNames]),
-    install(classTarget, schema) {
-      install(classTarget.prototype, schema);
+  let callable;
+  callable = (() => callable);
+  Object.defineProperties(callable, {
+    kind: { enumerable: true, value: kind },
+    __memberNames: { enumerable: false, value: Object.freeze([...memberNames]) },
+    install: {
+      enumerable: false,
+      value: (classTarget, schema) => {
+        install(classTarget.prototype, schema);
+      }
     }
   });
+  return Object.freeze(callable);
 }
 function installMethods(classTarget, methods, taken, installed) {
   const recorded = [];
@@ -28056,7 +28474,6 @@ __export(factories_exports, {
   object: () => object,
   ops: () => ops,
   optional: () => optional2,
-  overwrite: () => override,
   pipe: () => pipe2,
   process: () => process,
   project: () => project,
@@ -31951,17 +32368,20 @@ function defineArtifactFailure() {
   throw new JITError("JIT_AOT_001_ARTIFACT_EXECUTED", DEFINE_EXECUTION_ERROR);
 }
 function defineCapability(kind, memberNames = [], options) {
-  return Object.freeze({
-    kind,
-    __memberNames: Object.freeze([...memberNames]),
-    ...options === void 0 ? {} : { __options: options },
-    install() {
-    }
+  let capability2;
+  capability2 = (() => capability2);
+  Object.defineProperties(capability2, {
+    kind: { enumerable: true, value: kind },
+    __memberNames: { enumerable: false, value: Object.freeze([...memberNames]) },
+    ...options === void 0 ? {} : { __options: { enumerable: false, value: options } },
+    install: { enumerable: false, value: () => void 0 }
   });
+  return Object.freeze(capability2);
 }
 function defineClassState(schema, abstract, aggregate, encapsulateFields = false) {
-  const initial = initialEffectiveSchema(schema);
-  const members = initial.members.clone();
+  const base = resolveWrappers(schema).base;
+  const initial = base.type === TypeName.object ? initialEffectiveSchema(schema) : void 0;
+  const members = initial?.members.clone() ?? new ResolvedMemberTable();
   const capabilities = [];
   if (aggregate) {
     for (const name of ["update", "raise", "peekEvents", "pullEvents", "commit"])
@@ -31970,13 +32390,17 @@ function defineClassState(schema, abstract, aggregate, encapsulateFields = false
   return {
     declaredSchema: schema,
     schema,
+    representation: "object",
+    identifier: false,
     abstract,
     aggregate,
+    frozen: false,
     construction: aggregate ? "factory" : "constructor",
+    factoryValidationOptIn: false,
     factories: aggregate ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false },
     capabilities,
     methods: [],
-    lifecycle: {},
+    lifecycle: initial?.lifecycle ?? {},
     managedFields: [],
     members,
     fieldPolicies: [],
@@ -32021,7 +32445,7 @@ function defineClassExtensions(state3, extensions) {
   let next = state3;
   for (const rawExtension of extensions) {
     const extension = isDefinedClassMixin(rawExtension) ? rawExtension() : rawExtension;
-    if (typeof extension === "object" && extension !== null && typeof extension.install === "function") {
+    if ((typeof extension === "object" || typeof extension === "function") && extension !== null && typeof extension.install === "function") {
       const capability2 = extension;
       if (next.capabilities.includes(capability2.kind)) {
         throw new JITError(
@@ -32478,10 +32902,11 @@ function defineRuntimeClass(state3) {
     creationSchema,
     wireSchema: hydrateSchema,
     abstract: resolvedState.abstract,
-    frozen: false,
+    frozen: resolvedState.frozen || resolvedState.representation === "value",
     aggregate: resolvedState.aggregate,
     construction: resolvedState.construction,
-    representation: "object",
+    factoryValidationOptIn: resolvedState.factoryValidationOptIn,
+    representation: resolvedState.representation,
     capabilities: resolvedState.capabilities,
     managedFields: resolvedState.managedFields,
     hydrateSchema,
@@ -32491,8 +32916,9 @@ function defineRuntimeClass(state3) {
     resolvedMembers: resolvedState.members.entries(),
     ...mutation === void 0 ? {} : { mutation },
     ...resolvedState.methods.length === 0 ? {} : { methods: resolvedState.methods },
-    ...policy === void 0 ? {} : { policy },
+    ...policy === void 0 ? {} : { policy: { ...policy, validationConfigured: resolvedState.validationConfigured } },
     ...resolvedState.customFactories === void 0 ? {} : { customFactories: resolvedState.customFactories },
+    ...resolvedState.domainEvent === void 0 ? {} : { domainEvent: resolvedState.domainEvent },
     factories: resolvedState.factories,
     accessors: resolvedState.accessors
   });
@@ -32502,11 +32928,11 @@ function defineRuntimeClass(state3) {
       value: createSchema(TypeName.runtimeType, {
         innerType: resolvedState.schema,
         materialize,
-        representation: "object",
-        identifier: false,
+        representation: resolvedState.representation,
+        identifier: resolvedState.identifier,
         traits: {
-          representation: "object",
-          identifier: false,
+          representation: resolvedState.representation,
+          identifier: resolvedState.identifier,
           factoryPolicy: {
             configured: policy !== void 0,
             resultMode: policy?.result ?? "throw",
@@ -32514,7 +32940,8 @@ function defineRuntimeClass(state3) {
             resultModeInherited: policy?.resultModeInherited === true,
             errorType: void 0,
             priority: policy?.errorPriority ?? 1e3,
-            hasAssertions: policy?.assertions !== void 0
+            hasAssertions: policy?.assertions !== void 0,
+            validationConfigured: resolvedState.validationConfigured
           }
         },
         assertion
@@ -32661,6 +33088,62 @@ function defineFindRuntimeTypeSchema(schema) {
     return void 0;
   }
 }
+function defineScalarValueObject(schema, identifier2, abstract) {
+  const state3 = defineClassState(unwrapSchema(schema), abstract, false);
+  return defineRuntimeClass(
+    defineClassExtensions(
+      {
+        ...state3,
+        representation: "value",
+        identifier: identifier2,
+        construction: "factory",
+        factoryValidationOptIn: true,
+        factories: { create: "create", hydrate: "hydrate" }
+      },
+      [defineClass.equals(), defineClass.hashCode()]
+    )
+  );
+}
+var defineValueObject = ((schema) => defineScalarValueObject(schema, false, false));
+var defineAbstractValueObject = ((schema) => defineScalarValueObject(schema, false, true));
+var defineUniqueIdentifier = ((schema) => {
+  const identifierSchema = schema === void 0 ? createSchema(TypeName.default, {
+    innerType: createSchema(TypeName.string, { checks: [{ kind: "uuid" }] }),
+    defaultValue: () => crypto.randomUUID()
+  }) : schema;
+  return defineScalarValueObject(identifierSchema, true, false);
+});
+function createDefinedDomainEventSchema(payload, type, version) {
+  return createSchema(TypeName.object, {
+    props: {
+      id: createSchema(TypeName.default, {
+        innerType: createSchema(TypeName.string, {}),
+        defaultValue: () => crypto.randomUUID()
+      }),
+      type: createSchema(TypeName.literal, { value: type }),
+      version: createSchema(TypeName.literal, { value: version }),
+      occurredAt: createSchema(TypeName.default, {
+        innerType: createSchema(TypeName.date, { coerce: true }),
+        defaultValue: () => /* @__PURE__ */ new Date()
+      }),
+      payload
+    },
+    unknownKeys: void 0,
+    catchall: void 0,
+    checks: []
+  });
+}
+var defineDomainEvent = ((type, options) => {
+  const schema = createDefinedDomainEventSchema(unwrapSchema(options.payload), type, options.version);
+  return defineRuntimeClass({
+    ...defineClassState(schema, false, false),
+    frozen: true,
+    construction: "factory",
+    factoryValidationOptIn: true,
+    factories: { create: "create", hydrate: "hydrate" },
+    domainEvent: { type, version: options.version }
+  });
+});
 var defineEntity = ((schema, options) => {
   const unwrapped = unwrapSchema(schema);
   const object2 = resolveWrappers(unwrapped).base;
@@ -32671,9 +33154,15 @@ var defineEntity = ((schema, options) => {
   );
   const state3 = defineClassState(unwrapped, false, false, true);
   return defineRuntimeClass(
-    defineClassExtensions({ ...state3, construction: "factory", factories: { create: "create", hydrate: "hydrate" } }, [
-      defineClass.identity(id)
-    ])
+    defineClassExtensions(
+      {
+        ...state3,
+        construction: "factory",
+        factoryValidationOptIn: true,
+        factories: { create: "create", hydrate: "hydrate" }
+      },
+      [defineClass.equals(), defineClass.hashCode(), defineClass.identity(id)]
+    )
   );
 });
 var defineAggregateRoot = ((schema, options) => {
@@ -32684,8 +33173,13 @@ var defineAggregateRoot = ((schema, options) => {
     options?.id ?? (object2.type === TypeName.object && "id" in object2.def.props ? "id" : void 0),
     "Aggregate"
   );
+  const state3 = defineClassState(unwrapped, false, true, true);
   return defineRuntimeClass(
-    defineClassExtensions(defineClassState(unwrapped, false, true, true), [defineClass.identity(id)])
+    defineClassExtensions({ ...state3, factoryValidationOptIn: true }, [
+      defineClass.equals(),
+      defineClass.hashCode(),
+      defineClass.identity(id)
+    ])
   );
 });
 var defineTimestamps = ((options) => defineCapability(
@@ -32708,6 +33202,9 @@ function extendDefineDdd(extensions) {
 }
 var defineDdd = Object.freeze({
   ...ddd,
+  valueObject: defineValueObject,
+  uniqueIdentifier: defineUniqueIdentifier,
+  domainEvent: defineDomainEvent,
   entity: defineEntity,
   aggregateRoot: defineAggregateRoot,
   timestamps: defineTimestamps,
@@ -32716,6 +33213,7 @@ var defineDdd = Object.freeze({
   $extends: extendDefineDdd,
   abstract: Object.freeze({
     ...ddd.abstract,
+    valueObject: defineAbstractValueObject,
     entity: ((schema, options) => {
       const value = defineEntity(schema, options);
       return value;
@@ -32740,8 +33238,6 @@ var JIT = {
   ...factories_exports,
   class: defineClass,
   ddd: defineDdd,
-  /** @deprecated Use `JIT.class.override(...)` instead. */
-  overwrite: override,
   validate: validate2,
   json: json2,
   binary: binary3,

@@ -1,5 +1,7 @@
 import * as ATS from "../core/ats/index.js";
 import { resolveWrappers } from "./resolvers/resolve-wrappers.js";
+import { resolveRuntimeTypeOperation } from "./runtime-type/resolve-runtime-type.js";
+import type { RuntimeTypeNode } from "./runtime-type/runtime-type-node.js";
 import { resolveLazySchema } from "./schema-recursion.js";
 
 export interface GuardNode<TNode> {
@@ -48,6 +50,16 @@ export interface MapNode<TNode> {
   readonly value: TNode;
 }
 
+export type SchemaNode<TNode> =
+  | GuardNode<TNode>
+  | ObjectNode<TNode>
+  | RecordNode<TNode>
+  | TupleNode<TNode>
+  | ArrayNode<TNode>
+  | SetNode<TNode>
+  | MapNode<TNode>
+  | RuntimeTypeNode<TNode>;
+
 type InnerWrappedSchema = ATS.AnyTypeSchema & { readonly def: ATS.InnerTypeDef<ATS.AnyTypeSchema> };
 type LazyWrappedSchema = ATS.AnyTypeSchema & { readonly def: ATS.LazyDef<ATS.AnyTypeSchema> };
 type ObjectSchema = ATS.AnyTypeSchema & { readonly def: ATS.ObjectDef };
@@ -67,7 +79,21 @@ export function buildSchemaNode<TNode>(
   | ArrayNode<TNode>
   | SetNode<TNode>
   | MapNode<TNode>
+  | RuntimeTypeNode<TNode>
   | undefined {
+  const runtime = resolveRuntimeTypeOperation(schema);
+
+  if (runtime !== undefined) {
+    return {
+      kind: "runtimeType",
+      representation: runtime.representation,
+      inner: buildNode(runtime.innerType),
+      materializer: runtime.materialize,
+      trustedMaterializer: runtime.trustedMaterialize,
+      immutable: runtime.immutable,
+    };
+  }
+
   switch (schema.type) {
     case ATS.TypeName.optional:
       return { kind: "guard", optional: true, nullable: false, inner: buildNode(innerType(schema)) };

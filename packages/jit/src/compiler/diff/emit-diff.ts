@@ -1,6 +1,7 @@
 import { emitDefaultedValue } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
 import { createEmitState, type EmitState } from "../emitter/emit-state.js";
+import type { RuntimeTypeNode } from "../runtime-type/runtime-type-node.js";
 import { emitGuardTest } from "../schema-nodes.js";
 import { emitPropertyAccess } from "../source/access.js";
 import { emitSchemaGuard } from "../source/guard.js";
@@ -115,7 +116,27 @@ function emitDiffNode(
     case "map":
       emitMapDiff(writer, state, left, right, path);
       return;
+    case "runtimeType":
+      emitRuntimeTypeDiff(writer, state, node, left, right, path);
+      return;
   }
+}
+
+function emitRuntimeTypeDiff(
+  writer: CodeWriter,
+  state: EmitState,
+  node: RuntimeTypeNode<DiffIRNode>,
+  left: string,
+  right: string,
+  path: readonly PathPart[]
+): void {
+  writer.line(`if (!Object.is(${left}, ${right})) {`);
+  writer.indent(() => {
+    const leftValue = node.representation === "value" ? emitPropertyAccess(left, "value") : left;
+    const rightValue = node.representation === "value" ? emitPropertyAccess(right, "value") : right;
+    emitDiffNode(writer, state, node.inner, leftValue, rightValue, path);
+  });
+  writer.line("}");
 }
 
 function emitGuardDiff(

@@ -19,24 +19,3 @@ describe("public surface smoke test", () => {
     expect(equal({ id: 1, name: "Ada" }, { id: 2, name: "Ada" })).toBe(false);
   });
 });
-
-const { JIT } = jit;
-
-const EntityId = JIT.ddd.uniqueIdentifier(
-  JIT.string()
-    .uuid()
-    .default(() => crypto.randomUUID())
-);
-const Email = JIT.ddd.valueObject(JIT.string().email());
-const userSchema = JIT.object({
-  id: EntityId,
-  name: JIT.string().min(3).max(100),
-  email: Email,
-  users: JIT.array(
-    JIT.object({
-      id: JIT.number(),
-      name: JIT.string(),
-    })
-  ),
-});
-void userSchema;

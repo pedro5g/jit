@@ -293,6 +293,8 @@ interface ClassArtifact {
   readonly frozen: boolean;
   readonly aggregate: boolean;
   readonly construction: "constructor" | "factory";
+  /** DDD factory presets use materialization until `.validate()` opts in. */
+  readonly factoryValidationOptIn?: boolean;
   readonly representation: "object" | "value";
   readonly capabilities: readonly string[];
   /** Effective DDD ownership and lifecycle plan, resolved before compilation. */
@@ -351,6 +353,7 @@ interface ClassArtifact {
     readonly result: "throw" | "either" | "tuple";
     readonly create: boolean;
     readonly hydrate: boolean;
+    readonly validationConfigured?: boolean;
     readonly maxIssues?: number;
     readonly errorPriority?: number;
     readonly errorPriorityExplicit?: boolean;

@@ -2,6 +2,7 @@ import * as ATS from "../../../core/ats/index.js";
 import { JITError } from "../../../errors/index.js";
 import { staticDefaultIRExpr } from "../../defaults.js";
 import { resolveWrappers } from "../../resolvers/resolve-wrappers.js";
+import { resolveRuntimeTypeOperation } from "../../runtime-type/resolve-runtime-type.js";
 import { flattenObjectIntersection, isPrimitiveLikeSchema } from "../../schema-nodes.js";
 import { findRecursiveSchemas } from "../../schema-recursion.js";
 import { literalDiscriminatorValue } from "../../source/guard.js";
@@ -111,6 +112,15 @@ function appendSchemaCompare(
   strategy: EqualStrategy,
   recursion: RecursionState
 ): void {
+  const runtime = resolveRuntimeTypeOperation(schema);
+
+  if (runtime !== undefined) {
+    const nextLeft = runtime.representation === "value" ? loadProp(left, "value") : left;
+    const nextRight = runtime.representation === "value" ? loadProp(right, "value") : right;
+    appendSchemaCompare(body, runtime.innerType as EqualSchema, nextLeft, nextRight, scope, strategy, recursion);
+    return;
+  }
+
   const resolved = resolveWrappers(schema);
 
   if (resolved.optional || resolved.nullable) {

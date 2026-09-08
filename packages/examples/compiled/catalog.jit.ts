@@ -27,6 +27,10 @@ const PublicUser = JIT.object({
   role: JIT.union(JIT.literal("admin"), JIT.literal("member")),
 });
 
+export type User = JIT.Typeof<typeof User>;
+export type UserList = JIT.Typeof<typeof UserList>;
+export type PublicUser = JIT.Typeof<typeof PublicUser>;
+
 export const Users = {
   is: JIT.validate.is(User),
   parse: JIT.validate.parse(User),

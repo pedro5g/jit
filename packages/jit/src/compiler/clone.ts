@@ -2,7 +2,7 @@ import type * as ATS from "../core/ats/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
 import { buildCloneIR } from "./clone/build-clone-ir.js";
-import { emitClone, emitCloneBody } from "./clone/emit-clone.js";
+import { emitClone, emitCloneBodyWithBindings } from "./clone/emit-clone.js";
 
 /**
  * A compiled deep-clone function.
@@ -12,6 +12,7 @@ import { emitClone, emitCloneBody } from "./clone/emit-clone.js";
  * @returns A deep clone of `value`.
  */
 export type Clone<T = unknown> = (value: T) => T;
+export type CloneMethod<T = unknown> = (this: T) => T;
 
 /**
  * Emits the JavaScript source of a schema-aware deep-clone function.
@@ -50,11 +51,12 @@ export function compileClone<TSchema extends ATS.AnyTypeSchema>(
     "clone",
     () => {
       const program = buildCloneIR(schema);
-      const body = emitCloneBody(program);
+      const emitted = emitCloneBodyWithBindings(program);
 
-      const compiled = globalThis.Function(`return function clone(value) {\n${body}\n};`)() as Clone<
-        ATS.Typeof<TSchema>
-      >;
+      const compiled = globalThis.Function(
+        ...emitted.bindings.names,
+        `return function clone(value) {\n${emitted.source}\n};`
+      )(...emitted.bindings.values) as Clone<ATS.Typeof<TSchema>>;
 
       registerArtifact(compiled as object, {
         kind: "operation",
@@ -62,6 +64,30 @@ export function compileClone<TSchema extends ATS.AnyTypeSchema>(
         op: "clone",
       });
       return compiled;
+    },
+    options
+  );
+}
+
+/** Compiles a clone method that re-enters the receiver's trusted materializer. */
+export function compileCloneMethod<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  options?: CompileCacheOptions
+): CloneMethod<ATS.TypeofSchema<TSchema>> {
+  return getCompileCached(
+    schema,
+    "clone:method",
+    () => {
+      const emitted = emitCloneBodyWithBindings(buildCloneIR(schema));
+      return globalThis.Function(
+        ...emitted.bindings.names,
+        `return function clone() {
+const value = this;
+return this.constructor["__jitMaterialize"]((() => {
+${emitted.source}
+})());
+};`
+      )(...emitted.bindings.values) as CloneMethod<ATS.TypeofSchema<TSchema>>;
     },
     options
   );

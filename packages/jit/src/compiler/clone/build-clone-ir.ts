@@ -1,5 +1,6 @@
 import * as ATS from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
+import type { RuntimeTypeNode } from "../runtime-type/runtime-type-node.js";
 import {
   type ArrayNode,
   buildRecursiveProgram,
@@ -29,6 +30,7 @@ export type CloneIRNode =
   | ArrayNode<CloneIRNode>
   | SetNode<CloneIRNode>
   | MapNode<CloneIRNode>
+  | RuntimeTypeNode<CloneIRNode>
   | GuardNode<CloneIRNode>
   | RecursiveNode;
 

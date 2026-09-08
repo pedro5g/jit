@@ -24,7 +24,7 @@ import {
   classSetter,
   isClassMemberDescriptor,
 } from "./classes/member-descriptors.js";
-import type { ResolvedMemberTable } from "./classes/members.js";
+import { ResolvedMemberTable } from "./classes/members.js";
 import { isOverrideDescriptor, override } from "./classes/override.js";
 import {
   type AccessRule,
@@ -1772,6 +1772,7 @@ interface DefinedClassPolicy {
   readonly result: FactoryReturnMode;
   readonly create: boolean;
   readonly hydrate: boolean;
+  readonly validationConfigured?: boolean;
   readonly resultModeExplicit?: boolean;
   readonly resultModeInherited?: boolean;
   readonly maxIssues?: number;
@@ -1784,9 +1785,13 @@ interface DefinedClassPolicy {
 interface DefinedClassState {
   readonly declaredSchema: ATS.AnyTypeSchema;
   readonly schema: ATS.AnyTypeSchema;
+  readonly representation: "object" | "value";
+  readonly identifier: boolean;
   readonly abstract: boolean;
   readonly aggregate: boolean;
+  readonly frozen: boolean;
   readonly construction: "constructor" | "factory";
+  readonly factoryValidationOptIn: boolean;
   readonly factories: { readonly create: string | false; readonly hydrate: string | false };
   readonly capabilities: readonly string[];
   readonly methods: readonly DefinedClassMethod[];
@@ -1799,6 +1804,7 @@ interface DefinedClassState {
   readonly customFactories?: { readonly create?: Function; readonly hydrate?: Function };
   readonly validationConfigured: boolean;
   readonly policy: DefinedClassPolicy | undefined;
+  readonly domainEvent?: { readonly type: string; readonly version: number };
 }
 
 const DEFINED_RESERVED_MEMBER_NAMES: ReadonlySet<string> = new Set([
@@ -1815,10 +1821,11 @@ const DEFINED_RESERVED_MEMBER_NAMES: ReadonlySet<string> = new Set([
   "assert",
 ]);
 
-type DefinedCapability = ClassCapability<object> & {
-  readonly __memberNames?: readonly string[];
-  readonly __options?: unknown;
-};
+type DefinedCapability = ClassCapability<object> &
+  (() => DefinedCapability) & {
+    readonly __memberNames?: readonly string[];
+    readonly __options?: unknown;
+  };
 
 const DEFINE_EXECUTION_ERROR =
   "AOT artifacts cannot be executed from definition files. Run `jit generate` and import the generated artifact instead.";
@@ -1832,12 +1839,15 @@ function defineCapability(
   memberNames: readonly string[] = [],
   options?: CapabilityOptions
 ): DefinedCapability {
-  return Object.freeze({
-    kind,
-    __memberNames: Object.freeze([...memberNames]),
-    ...(options === undefined ? {} : { __options: options }),
-    install() {},
-  }) as DefinedCapability;
+  let capability: DefinedCapability;
+  capability = (() => capability) as DefinedCapability;
+  Object.defineProperties(capability, {
+    kind: { enumerable: true, value: kind },
+    __memberNames: { enumerable: false, value: Object.freeze([...memberNames]) },
+    ...(options === undefined ? {} : { __options: { enumerable: false, value: options } }),
+    install: { enumerable: false, value: () => undefined },
+  });
+  return Object.freeze(capability);
 }
 
 function defineClassState(
@@ -1846,8 +1856,9 @@ function defineClassState(
   aggregate: boolean,
   encapsulateFields = false
 ): DefinedClassState {
-  const initial = initialEffectiveSchema(schema);
-  const members = initial.members.clone();
+  const base = resolveWrappers(schema).base;
+  const initial = base.type === TypeName.object ? initialEffectiveSchema(schema) : undefined;
+  const members = initial?.members.clone() ?? new ResolvedMemberTable();
   const capabilities: string[] = [];
   if (aggregate) {
     for (const name of ["update", "raise", "peekEvents", "pullEvents", "commit"])
@@ -1856,13 +1867,17 @@ function defineClassState(
   return {
     declaredSchema: schema,
     schema,
+    representation: "object",
+    identifier: false,
     abstract,
     aggregate,
+    frozen: false,
     construction: aggregate ? "factory" : "constructor",
+    factoryValidationOptIn: false,
     factories: aggregate ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false },
     capabilities,
     methods: [],
-    lifecycle: {},
+    lifecycle: initial?.lifecycle ?? {},
     managedFields: [],
     members,
     fieldPolicies: [],
@@ -1925,7 +1940,7 @@ function defineClassExtensions(
   for (const rawExtension of extensions) {
     const extension = isDefinedClassMixin(rawExtension) ? rawExtension() : rawExtension;
     if (
-      typeof extension === "object" &&
+      (typeof extension === "object" || typeof extension === "function") &&
       extension !== null &&
       typeof (extension as { install?: unknown }).install === "function"
     ) {
@@ -2470,10 +2485,11 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
     creationSchema,
     wireSchema: hydrateSchema,
     abstract: resolvedState.abstract,
-    frozen: false,
+    frozen: resolvedState.frozen || resolvedState.representation === "value",
     aggregate: resolvedState.aggregate,
     construction: resolvedState.construction,
-    representation: "object",
+    factoryValidationOptIn: resolvedState.factoryValidationOptIn,
+    representation: resolvedState.representation,
     capabilities: resolvedState.capabilities,
     managedFields: resolvedState.managedFields,
     hydrateSchema,
@@ -2483,8 +2499,11 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
     resolvedMembers: resolvedState.members.entries(),
     ...(mutation === undefined ? {} : { mutation }),
     ...(resolvedState.methods.length === 0 ? {} : { methods: resolvedState.methods }),
-    ...(policy === undefined ? {} : { policy }),
+    ...(policy === undefined
+      ? {}
+      : { policy: { ...policy, validationConfigured: resolvedState.validationConfigured } }),
     ...(resolvedState.customFactories === undefined ? {} : { customFactories: resolvedState.customFactories }),
+    ...(resolvedState.domainEvent === undefined ? {} : { domainEvent: resolvedState.domainEvent }),
     factories: resolvedState.factories,
     accessors: resolvedState.accessors as never,
   });
@@ -2494,11 +2513,11 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
       value: createSchema(TypeName.runtimeType, {
         innerType: resolvedState.schema,
         materialize,
-        representation: "object",
-        identifier: false,
+        representation: resolvedState.representation,
+        identifier: resolvedState.identifier,
         traits: {
-          representation: "object",
-          identifier: false,
+          representation: resolvedState.representation,
+          identifier: resolvedState.identifier,
           factoryPolicy: {
             configured: policy !== undefined,
             resultMode: policy?.result ?? "throw",
@@ -2507,6 +2526,7 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
             errorType: undefined,
             priority: policy?.errorPriority ?? 1000,
             hasAssertions: policy?.assertions !== undefined,
+            validationConfigured: resolvedState.validationConfigured,
           },
         },
         assertion,
@@ -2684,6 +2704,96 @@ function defineFindRuntimeTypeSchema(schema: ATS.AnyTypeSchema): ATS.RuntimeType
   }
 }
 
+function defineScalarValueObject(
+  schema: SchemaInput<ATS.AnyTypeSchema>,
+  identifier: boolean,
+  abstract: boolean
+): unknown {
+  const state = defineClassState(unwrapSchema(schema), abstract, false);
+  return defineRuntimeClass(
+    defineClassExtensions(
+      {
+        ...state,
+        representation: "value",
+        identifier,
+        construction: "factory",
+        factoryValidationOptIn: true,
+        factories: { create: "create", hydrate: "hydrate" },
+      },
+      [defineClass.equals(), defineClass.hashCode()]
+    )
+  );
+}
+
+const defineValueObject = ((schema: SchemaInput<ATS.AnyTypeSchema>) =>
+  defineScalarValueObject(schema, false, false)) as typeof RuntimeJIT.ddd.valueObject;
+
+const defineAbstractValueObject = ((schema: SchemaInput<ATS.AnyTypeSchema>) =>
+  defineScalarValueObject(schema, false, true)) as typeof RuntimeJIT.ddd.abstract.valueObject;
+
+const defineUniqueIdentifier = ((schema?: SchemaInput<ATS.AnyTypeSchema>) => {
+  const identifierSchema =
+    schema === undefined
+      ? createSchema(TypeName.default, {
+          innerType: createSchema(TypeName.string, { checks: [{ kind: "uuid" }] }),
+          defaultValue: () => crypto.randomUUID(),
+        })
+      : schema;
+  return defineScalarValueObject(identifierSchema, true, false);
+}) as typeof RuntimeJIT.ddd.uniqueIdentifier;
+
+type DefinedEventSchema<
+  TPayload extends ATS.AnyTypeSchema,
+  TType extends string,
+  TVersion extends number,
+> = ATS.ObjectSchema<{
+  readonly id: ATS.DefaultSchema<ATS.StringSchema>;
+  readonly type: ATS.LiteralSchema<TType>;
+  readonly version: ATS.LiteralSchema<TVersion>;
+  readonly occurredAt: ATS.DefaultSchema<ATS.DateSchema>;
+  readonly payload: TPayload;
+}>;
+
+function createDefinedDomainEventSchema<
+  TPayload extends ATS.AnyTypeSchema,
+  TType extends string,
+  TVersion extends number,
+>(payload: TPayload, type: TType, version: TVersion): DefinedEventSchema<TPayload, TType, TVersion> {
+  return createSchema(TypeName.object, {
+    props: {
+      id: createSchema(TypeName.default, {
+        innerType: createSchema(TypeName.string, {}),
+        defaultValue: () => crypto.randomUUID(),
+      }),
+      type: createSchema(TypeName.literal, { value: type }),
+      version: createSchema(TypeName.literal, { value: version }),
+      occurredAt: createSchema(TypeName.default, {
+        innerType: createSchema(TypeName.date, { coerce: true }),
+        defaultValue: () => new Date(),
+      }),
+      payload,
+    },
+    unknownKeys: undefined,
+    catchall: undefined,
+    checks: [],
+  }) as unknown as DefinedEventSchema<TPayload, TType, TVersion>;
+}
+
+const defineDomainEvent = ((
+  type: string,
+  options: { readonly version: number; readonly payload: SchemaInput<ATS.AnyTypeSchema> }
+) => {
+  const schema = createDefinedDomainEventSchema(unwrapSchema(options.payload), type, options.version);
+  return defineRuntimeClass({
+    ...defineClassState(schema, false, false),
+    frozen: true,
+    construction: "factory",
+    factoryValidationOptIn: true,
+    factories: { create: "create", hydrate: "hydrate" },
+    domainEvent: { type, version: options.version },
+  });
+}) as typeof RuntimeJIT.ddd.domainEvent;
+
 const defineEntity = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { readonly id?: string }) => {
   const unwrapped = unwrapSchema(schema);
   const object = resolveWrappers(unwrapped).base;
@@ -2695,9 +2805,15 @@ const defineEntity = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { reado
   );
   const state = defineClassState(unwrapped, false, false, true);
   return defineRuntimeClass(
-    defineClassExtensions({ ...state, construction: "factory", factories: { create: "create", hydrate: "hydrate" } }, [
-      defineClass.identity(id),
-    ])
+    defineClassExtensions(
+      {
+        ...state,
+        construction: "factory",
+        factoryValidationOptIn: true,
+        factories: { create: "create", hydrate: "hydrate" },
+      },
+      [defineClass.equals(), defineClass.hashCode(), defineClass.identity(id)]
+    )
   );
 }) as typeof RuntimeJIT.ddd.entity;
 
@@ -2710,8 +2826,13 @@ const defineAggregateRoot = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: 
       (object.type === TypeName.object && "id" in (object as ATS.ObjectSchema).def.props ? "id" : undefined),
     "Aggregate"
   );
+  const state = defineClassState(unwrapped, false, true, true);
   return defineRuntimeClass(
-    defineClassExtensions(defineClassState(unwrapped, false, true, true), [defineClass.identity(id)])
+    defineClassExtensions({ ...state, factoryValidationOptIn: true }, [
+      defineClass.equals(),
+      defineClass.hashCode(),
+      defineClass.identity(id),
+    ])
   );
 }) as typeof RuntimeJIT.ddd.aggregateRoot;
 
@@ -2740,6 +2861,9 @@ function extendDefineDdd<T extends Record<string, (...args: never[]) => unknown>
 }
 const defineDdd = Object.freeze({
   ...RuntimeJIT.ddd,
+  valueObject: defineValueObject,
+  uniqueIdentifier: defineUniqueIdentifier,
+  domainEvent: defineDomainEvent,
   entity: defineEntity,
   aggregateRoot: defineAggregateRoot,
   timestamps: defineTimestamps,
@@ -2748,6 +2872,7 @@ const defineDdd = Object.freeze({
   $extends: extendDefineDdd,
   abstract: Object.freeze({
     ...RuntimeJIT.ddd.abstract,
+    valueObject: defineAbstractValueObject,
     entity: ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { readonly id?: string }) => {
       const value = (
         defineEntity as (value: SchemaInput<ATS.AnyTypeSchema>, options?: { readonly id?: string }) => unknown
@@ -2778,8 +2903,6 @@ export const JIT = {
   ...RuntimeJIT,
   class: defineClass,
   ddd: defineDdd,
-  /** @deprecated Use `JIT.class.override(...)` instead. */
-  overwrite: override,
   validate,
   json,
   binary,
@@ -2821,7 +2944,6 @@ export const JIT = {
   | "from"
   | "class"
   | "ddd"
-  | "overwrite"
   | "map"
   | "clone"
   | "format"
@@ -2852,7 +2974,6 @@ export const JIT = {
   readonly from: typeof from;
   readonly class: typeof defineClass;
   readonly ddd: typeof defineDdd;
-  readonly overwrite: typeof override;
   readonly map: typeof RuntimeJIT.map;
   readonly clone: typeof clone;
   readonly format: typeof format;

@@ -16,6 +16,8 @@ import { bench, do_not_optimize, group } from "mitata";
 export interface Competitor {
   readonly name: string;
   readonly fn: (...args: never[]) => unknown;
+  /** Optional implementation-specific inputs for fair cross-class comparisons. */
+  readonly args?: readonly unknown[];
   readonly biased?: string;
 }
 
@@ -75,12 +77,15 @@ export function registerScenario(scenario: Scenario): void {
 
     for (const competitor of scenario.competitors) {
       const marker = competitor.biased ? " [not comparable]" : "";
-      const name = `${competitor.name}${marker} / ${scenario.name}`;
+      // Competitor labels repeat across operations (for example, `JIT AOT`),
+      // so keep the persisted benchmark name globally unique. The scenario
+      // registry still lets reports display the short scenario name.
+      const name = `${competitor.name}${marker} / ${scenario.op} / ${scenario.name}`;
 
       if (competitor.biased) biasRegistry.set(name, competitor.biased);
       scenarioRegistry.set(name, scenarioKey);
 
-      bench(name, toThunk(competitor.fn, scenario.args));
+      bench(name, toThunk(competitor.fn, competitor.args ?? scenario.args));
     }
   });
 }
