@@ -987,6 +987,72 @@ describe("JIT AOT generate", () => {
     expect(money.hashCode()).toBe(generated.Money.create({ amount: 10, currency: "BRL" }).hashCode());
   });
 
+  it("snapshots reconstructive plain, DDD and lifecycle class layouts", () => {
+    const Plain = JIT.class(JIT.object({ id: JIT.string(), name: JIT.string(), age: JIT.number() }));
+    const User = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
+    const UserId = JIT.ddd.uniqueIdentifier(JIT.string().uuid());
+    const Order = JIT.ddd
+      .aggregateRoot(JIT.object({ id: UserId, status: JIT.string() }))
+      .extends(JIT.ddd.timestamps(), JIT.ddd.softDelete(), JIT.ddd.versioned());
+
+    const result = AOT.generate({ artifacts: { Plain, User, UserId, Order }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toMatchSnapshot("reconstructive runtime class layouts");
+    expect(source).not.toContain('Object.defineProperty(this, "name"');
+    expect(source).toContain('get ["name"]()');
+    expect(source).toContain("if (!changed) return;");
+  });
+
+  it("lowers the class JSON capability through the serializer compiler", async () => {
+    const User = JIT.ddd
+      .entity(JIT.object({ id: JIT.string(), name: JIT.string(), tags: JIT.array(JIT.string()) }), { id: "id" })
+      .extends(
+        {
+          secret: JIT.class.private(JIT.string()),
+          cache: JIT.class.noConstructor(JIT.array(JIT.string()).default(() => [])),
+        },
+        JIT.class.json({ method: "serialize" })
+      );
+    const result = AOT.generate({ artifacts: { User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: typeof User;
+    };
+
+    expect(result.skipped).toEqual([]);
+    expect(source).toContain("serialize() { return User_json(this); }");
+    expect(source).not.toContain("JSON.stringify(this)");
+    const user = generated.User.create({ id: "u_1", name: "Ada", tags: ["admin"], secret: "hidden" });
+    expect(user.serialize()).toBe('{"id":"u_1","name":"Ada","tags":["admin"],"secret":"hidden"}');
+    expect(user.serialize()).not.toContain("cache");
+  });
+
+  it("reconstructs nested assertion guards without a runtime callback binding", async () => {
+    const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number() })).assert((query) => query.gte("amount", 0));
+    const Order = JIT.ddd.entity(JIT.object({ id: JIT.string(), total: Money }), { id: "id" });
+    const result = AOT.generate({ groups: {}, artifacts: { Money, Order }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly Order: typeof Order;
+    };
+
+    expect(result.skipped).toHaveLength(0);
+    expect(source).toContain("Money_assertion");
+    try {
+      generated.Order.create({ id: "o_1", total: { amount: -1 } });
+      throw new Error("expected nested assertion failure");
+    } catch (error) {
+      expect(error).toMatchObject({ name: "JITValidationError", code: "VALIDATION_FAILED" });
+      expect((error as { readonly issues: readonly { readonly path: readonly unknown[] }[] }).issues[0]?.path).toEqual([
+        "total",
+        "amount",
+      ]);
+    }
+    expect(generated.Order.create({ id: "o_2", total: { amount: 1 } }).total.amount).toBe(1);
+  });
+
   it("should reject application methods because function source is not an AOT artifact", () => {
     const Schema = JIT.object({ id: JIT.string(), name: JIT.string() });
     const User = JIT.class(Schema)
@@ -1046,7 +1112,7 @@ describe("JIT AOT generate", () => {
 
   it("should preserve a factory diagnostic issue limit in standalone AOT", async () => {
     const Schema = JIT.object({ first: JIT.string(), second: JIT.string(), third: JIT.string() });
-    const Limited = JIT.ddd.valueObject(Schema).validate({ result: "result", maxIssues: 2 });
+    const Limited = JIT.ddd.valueObject(Schema).validate({ result: "either", maxIssues: 2 });
     const result = AOT.generate({ groups: {}, artifacts: { Limited }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly Limited: typeof Limited;
@@ -1056,13 +1122,12 @@ describe("JIT AOT generate", () => {
     const aot = generated.Limited.create(input);
 
     expect(result.skipped).toEqual([]);
-    expect(aot.ok).toBe(false);
-    expect(runtime.ok).toBe(false);
-    if (aot.ok || runtime.ok) throw new Error("expected both factories to reject the input");
-    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toEqual(
-      (runtime.error as { readonly issues: readonly unknown[] }).issues
-    );
-    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toHaveLength(2);
+    expect(JIT.class.isFailure(aot)).toBe(true);
+    expect(JIT.class.isFailure(runtime)).toBe(true);
+    if (!JIT.class.isFailure(aot) || !JIT.class.isFailure(runtime))
+      throw new Error("expected both factories to reject the input");
+    expect(aot.error.issues).toEqual(runtime.error.issues);
+    expect(aot.error.issues).toHaveLength(2);
   });
 
   it("should preserve null tuple factory channels in standalone AOT", async () => {
@@ -1098,7 +1163,7 @@ describe("JIT AOT generate", () => {
       .assert((query) => query.gte("a", 0))
       .assert((query) => query.gte("b", 0))
       .assert((query) => query.gte("c", 0))
-      .validate({ result: "result", maxIssues: 2 });
+      .validate({ result: "either", maxIssues: 2 });
     const result = AOT.generate({ groups: {}, artifacts: { Limited }, outDir });
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly Limited: typeof Limited;
@@ -1107,13 +1172,12 @@ describe("JIT AOT generate", () => {
     const aot = generated.Limited.create({ a: -1, b: -1, c: -1 });
 
     expect(result.skipped).toEqual([]);
-    expect(runtime.ok).toBe(false);
-    expect(aot.ok).toBe(false);
-    if (runtime.ok || aot.ok) throw new Error("expected both factories to reject the assertions");
-    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toEqual(
-      (runtime.error as { readonly issues: readonly unknown[] }).issues
-    );
-    expect((aot.error as { readonly issues: readonly unknown[] }).issues).toHaveLength(2);
+    expect(JIT.class.isFailure(runtime)).toBe(true);
+    expect(JIT.class.isFailure(aot)).toBe(true);
+    if (!JIT.class.isFailure(runtime) || !JIT.class.isFailure(aot))
+      throw new Error("expected both factories to reject the assertions");
+    expect(aot.error.issues).toEqual(runtime.error.issues);
+    expect(aot.error.issues).toHaveLength(2);
   });
 
   it("should skip a class whose extension reaches outside its own body", () => {
@@ -1170,19 +1234,12 @@ describe("JIT AOT generate", () => {
     const MoneySchema = JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) });
     const Money = JIT.ddd
       .valueObject(MoneySchema)
-      .validate({ result: "result" })
+      .validate({ result: "either" })
       .assert((query) => query.gte("amount", 0), { rule: "non-negative" });
     const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
-      readonly Money: {
-        create(input: unknown): {
-          ok: boolean;
-          value?: { amount: number };
-          error?: { rule?: string; issues?: readonly unknown[] };
-        };
-        hydrate(input: unknown): { ok: boolean };
-      };
+      readonly Money: typeof Money;
     };
 
     expect(result.skipped).toEqual([]);
@@ -1194,21 +1251,22 @@ describe("JIT AOT generate", () => {
       Money.create({ amount: 10, currency: "BRL" })
     );
     const rejected = generated.Money.create({ amount: -1, currency: "BRL" });
-    expect(rejected.ok).toBe(false);
-    expect(rejected.error?.rule).toBe("non-negative");
+    expect(JIT.class.isFailure(rejected)).toBe(true);
+    if (!JIT.class.isFailure(rejected)) throw new Error("expected assertion failure");
+    expect((rejected.error as { readonly rule?: string }).rule).toBe("non-negative");
     // The generated module reports the same issues the runtime host does.
     expect(rejected.error?.issues).toEqual(
       (Money.create({ amount: -1, currency: "BRL" }) as { error: { issues: unknown } }).error.issues
     );
-    expect(generated.Money.create({ amount: "x", currency: "BRL" }).ok).toBe(false);
-    expect(generated.Money.hydrate({ amount: -1, currency: "BRL" }).ok).toBe(false);
+    expect(JIT.class.isFailure(generated.Money.create({ amount: "x", currency: "BRL" } as never))).toBe(true);
+    expect(JIT.class.isFailure(generated.Money.hydrate({ amount: -1, currency: "BRL" }))).toBe(true);
   });
 
   it("should skip a class whose configured error factory cannot be serialized", () => {
     const external = { label: "external" };
     const Money = JIT.ddd
       .valueObject(JIT.object({ amount: JIT.number() }))
-      .validate({ result: "result", error: () => new Error(external.label) });
+      .validate({ result: "either", error: () => new Error(external.label) });
     const result = AOT.generate({ groups: {}, artifacts: { Money }, outDir });
 
     expect(result.skipped).toEqual([
@@ -1919,6 +1977,71 @@ describe("JIT AOT generate", () => {
     expect(result.skipped).toEqual([]);
     expect(generated.User.create({ id: "u_1", age: 18 })).toMatchObject({ id: "u_1", age: 18 });
     expect(() => generated.User.create({ id: "u_1", age: 17 })).toThrow(/adult/);
+  });
+
+  it("preserves define-host member layout descriptors in AOT", async () => {
+    const User = DefineJIT.ddd
+      .entity(DefineJIT.object({ id: DefineJIT.string(), name: DefineJIT.string() }), {
+        id: "id",
+      })
+      .extends({
+        age: DefineJIT.class.public(DefineJIT.number()),
+        cache: DefineJIT.class.noConstructor(DefineJIT.array(DefineJIT.string()).default([])),
+      });
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+    const source = readFileSync(join(outDir, "index.js"), "utf8");
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        create(input: unknown): { readonly name: string; age: number; cache: string[] };
+      };
+    };
+
+    expect(result.skipped).toEqual([]);
+    const user = generated.User.create({ id: "u_1", name: "Ada", age: 37 });
+    expect(user.cache).toEqual([]);
+    user.age = 38;
+    expect(user.age).toBe(38);
+    expect(() => {
+      (user as unknown as { name: string }).name = "Grace";
+    }).toThrow(TypeError);
+    expect(source).toContain('get ["name"]()');
+    expect(source).toContain('get ["cache"]()');
+  });
+
+  it("inherits nested Runtime Type result modes on the define host", async () => {
+    const TupleEmail = JIT.ddd.valueObject(JIT.string().email()).validate({ result: "tuple" });
+    const User = DefineJIT.ddd.entity(DefineJIT.object({ id: DefineJIT.string(), email: TupleEmail }), { id: "id" });
+    const result = AOT.generate({ groups: {}, artifacts: { TupleEmail, User }, outDir });
+    expect(result.skipped).toEqual([]);
+    const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
+      readonly User: {
+        create(input: {
+          readonly id: string;
+          readonly email: string;
+        }):
+          | { readonly id: string; readonly email: string }
+          | [Error | null, { readonly id: string; readonly email: string } | null];
+      };
+    };
+
+    const created = generated.User.create({ id: "u_1", email: "ada@example.com" });
+    expect(Array.isArray(created)).toBe(true);
+    if (Array.isArray(created)) expect(created[0]).toBeNull();
+  });
+
+  it("reports define-host custom factories as explicit AOT bindings", () => {
+    const User = DefineJIT.class(DefineJIT.object({ id: DefineJIT.string() })).factories({
+      create: DefineJIT.class.factory("make", () => undefined),
+    });
+    const result = AOT.generate({ groups: {}, artifacts: { User }, outDir });
+
+    expect(result.skipped).toEqual([
+      expect.objectContaining({
+        schema: "User",
+        operation: "class.factories",
+        reason: expect.stringContaining("runtime binding"),
+      }),
+    ]);
   });
 
   it("should lower static CQRS queries through the existing query artifact", async () => {

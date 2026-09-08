@@ -115,12 +115,29 @@ export function compileHydrator<TSchema extends ATS.AnyTypeSchema>(
     schema,
     "hydrator",
     () => {
-      const safeParse = compileSafeHydrator(schema, options);
+      const emitted = emitValidator(schema, {
+        is: false,
+        safeParse: false,
+        safeParseAsync: false,
+        fastParse: true,
+        resolveDefaults: false,
+      });
+      const parse = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values)
+        .parse as (value: unknown) => ATS.TypeofSchema<TSchema>;
 
       return (state: unknown) => {
-        const result = safeParse(state);
-        if (result.success) return result.data;
-        throw new JITValidationError(result.issues);
+        try {
+          return parse(state);
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            (error as { readonly __jitFastValidation?: unknown }).__jitFastValidation === true
+          ) {
+            throw new JITValidationError((error as { readonly issues: readonly ValidationIssue[] }).issues);
+          }
+          throw error;
+        }
       };
     },
     options

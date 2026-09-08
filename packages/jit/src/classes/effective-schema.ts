@@ -214,7 +214,7 @@ export function applyDddCapability(
   });
 }
 
-/** Rechecks all ownership contracts after an explicit field overwrite. */
+/** Rechecks all ownership contracts after an explicit field override. */
 export function validateManagedFields(schema: ATS.AnyTypeSchema, managed: readonly ManagedFieldDescriptor[]): void {
   const object = resolveEffectiveObjectSchema(schema);
   for (const descriptor of managed) {
@@ -243,7 +243,7 @@ export function validateManagedFields(schema: ATS.AnyTypeSchema, managed: readon
 }
 
 /**
- * Restores only the managed semantics after an explicit field overwrite.
+ * Restores only the managed semantics after an explicit field override.
  * User-compatible defaults are retained; missing lifecycle wrappers are
  * re-added before the final compatibility check.
  */
@@ -293,7 +293,7 @@ export function initialEffectiveSchema(schema: ATS.AnyTypeSchema): EffectiveSche
 export function addMember(
   members: ResolvedMemberTable,
   name: string,
-  source: "preset" | "capability" | "extension" | "overwrite",
+  source: "preset" | "capability" | "extension" | "override",
   owner: string,
   kind: "method" | "getter" | "setter" | "factory"
 ): void {

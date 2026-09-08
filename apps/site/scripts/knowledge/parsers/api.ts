@@ -301,7 +301,7 @@ function mismatches(documented: DocumentedMember[], namespaces: Record<string, s
     const members = namespaces[member.name];
     if (!members) continue;
 
-    const cited = [...member.purpose.matchAll(/\b([a-z][A-Za-z0-9]*)\b/g)].map((match) => match[1]);
+    const cited = [...member.purpose.matchAll(/(?:^|[^A-Za-z0-9_$])(\$?[a-z][A-Za-z0-9]*)/g)].map((match) => match[1]);
     const missing = members.filter((name) => !cited.includes(name));
     if (missing.length > 0 && cited.some((name) => members.includes(name))) {
       problems.push(`the API index row for JIT.${member.name} omits: ${missing.join(", ")}`);

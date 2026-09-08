@@ -1,6 +1,7 @@
 import type * as ATS from "../../core/ats/index.js";
 import { TypeName } from "../../core/ats/index.js";
 import { JITError } from "../../errors/index.js";
+import { getArtifact } from "../../runtime/artifact-registry.js";
 import { Parse } from "../../shared/index.js";
 import { emitDefaultedValue, emitStaticDefaultSource } from "../defaults.js";
 import { CodeWriter } from "../emitter/code-writer.js";
@@ -19,6 +20,8 @@ interface SerializeContext {
   /** Helpers whose body has been emitted or is being emitted. */
   readonly emitted: Set<ATS.AnyTypeSchema>;
   readonly pending: ATS.AnyTypeSchema[];
+  readonly rootPropertyAccess: ReadonlyMap<string, string> | undefined;
+  rootObject: boolean;
 }
 
 /**
@@ -29,7 +32,12 @@ interface SerializeContext {
  * falls back to native `JSON.stringify` when an escapable character exists.
  * Classic indexed loops, no `Object.keys` on known shapes, no closures.
  */
-export function emitSerialize(schema: ATS.AnyTypeSchema): string {
+export interface SerializeEmitOptions {
+  /** Optional physical reads for the root object, used by class layout plans. */
+  readonly rootPropertyAccess?: ReadonlyMap<string, string>;
+}
+
+export function emitSerialize(schema: ATS.AnyTypeSchema, options?: SerializeEmitOptions): string {
   const writer = new CodeWriter();
   const context: SerializeContext = {
     writer,
@@ -38,6 +46,8 @@ export function emitSerialize(schema: ATS.AnyTypeSchema): string {
     helperIds: new Map(),
     emitted: new Set(),
     pending: [],
+    rootPropertyAccess: options?.rootPropertyAccess,
+    rootObject: true,
   };
   const needsStringHelper = hasStringLeaf(schema, new Set());
 
@@ -340,6 +350,8 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
   const writer = context.writer;
   const props = schema.def.props as Readonly<Record<string, ATS.AnyTypeSchema>>;
   const keys = Object.keys(props);
+  const rootPropertyAccess = context.rootObject ? context.rootPropertyAccess : undefined;
+  context.rootObject = false;
   const holder = hoist(context, valueExpr);
   const optionality = keys.map(
     (key) => resolveSerializeWrappers(props[key]).optional && emitStaticDefaultSource(props[key]) === undefined
@@ -361,7 +373,7 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
 
     writer.line(`let ${flag} = false;`);
     keys.forEach((key, position) => {
-      const rawPropExpr = emitPropertyAccess(holder, key);
+      const rawPropExpr = rootPropertyAccess?.get(key) ?? emitPropertyAccess(holder, key);
       const propExpr = emitDefaultedValue(props[key], rawPropExpr);
       const keyPrefix = JSON.stringify(`${JSON.stringify(key)}:`);
       const emitProp = () => {
@@ -387,7 +399,7 @@ function emitObjectAppend(context: SerializeContext, schema: AnySchema, valueExp
   let hasPrevious = false;
 
   keys.forEach((key, position) => {
-    const rawPropExpr = emitPropertyAccess(holder, key);
+    const rawPropExpr = rootPropertyAccess?.get(key) ?? emitPropertyAccess(holder, key);
     const propExpr = emitDefaultedValue(props[key], rawPropExpr);
     const keyToken = `${JSON.stringify(key)}:`;
     const prefix = hasPrevious ? `,${keyToken}` : keyToken;
@@ -453,10 +465,16 @@ function resolveSerializeWrappers(schema: ATS.AnyTypeSchema): ResolvedSerializeW
       case TypeName.coerce:
       case TypeName.pipe:
       case TypeName.transform:
-      case TypeName.runtimeType:
+      case TypeName.runtimeType: {
         valueRepresentation ||= (current.def as unknown as ATS.RuntimeTypeDef).representation === "value";
+        const artifact = getArtifact((current.def as unknown as ATS.RuntimeTypeDef).materialize);
+        if (artifact?.kind === "class" && artifact.wireSchema !== undefined) {
+          current = artifact.wireSchema as AnySchema;
+          continue;
+        }
         current = current.def.innerType as AnySchema;
         continue;
+      }
       case TypeName.lazy:
         current = (current.def.getter as () => AnySchema)();
         continue;

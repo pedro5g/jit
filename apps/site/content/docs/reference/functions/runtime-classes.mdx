@@ -71,7 +71,7 @@ keep their inference, and the methods become part of the instance type.
 A name that already means something is refused, in the types and at run time:
 a schema field, a factory, `constructor`, or a capability installed earlier. A
 silent shadow would look like it worked and change what the class is. Use the
-explicit `JIT.overwrite(value)` marker when replacement is intentional:
+explicit `JIT.class.override(value)` marker when replacement is intentional:
 
 ```ts
 JIT.class(UserSchema).extends({ name() {} });
@@ -80,7 +80,7 @@ JIT.class(UserSchema).extends({ name() {} });
 
 ## Overwriting members
 
-`JIT.overwrite(value)` replaces exactly one member that already exists. It is
+`JIT.class.override(value)` replaces exactly one member that already exists. It is
 resolved while the class definition is accumulated and disappears before
 runtime or AOT compilation, so generated methods have no marker checks or
 dispatch:
@@ -93,17 +93,63 @@ const Named = JIT.class(UserSchema).extends({
 });
 
 const Upper = Named.extends({
-  label: JIT.overwrite(function label() {
+  label: JIT.class.override(function label() {
     return this.name.toUpperCase();
   }),
 });
 ```
 
 The same marker can replace a built-in method, an earlier extension, or a
-managed lifecycle field. A missing target is an error, and a field overwrite
+managed lifecycle field. A missing target is an error, and a field override
 is checked again against any capability that still owns it. Arbitrary
 application functions remain runtime bindings and make standalone AOT skip
 the complete class with an explicit reason.
+
+Use method shorthand or `function` for members that read `this`. Arrow
+functions keep lexical `this`; JIT does not bind them or pretend they have the
+class surface. Method shorthand receives the prefix surface automatically. For
+a function expression, the explicit fallback is
+`JIT.class.override<InstanceType<typeof Base>>(function () { ... })`.
+
+`JIT.overwrite(value)` remains a deprecated compatibility alias for the same
+declaration-only marker.
+
+## Class member descriptors
+
+Fields added through `.extends({ age: JIT.number() })` enter the effective
+schema and every create, hydrate, wire and AOT boundary. The descriptor forms
+compose into one declaration-time member IR:
+
+```ts
+const User = JIT.ddd.entity(UserSchema, { id: "id" }).extends({
+  age: JIT.class.public(JIT.int().min(0)),
+  fullName: JIT.class.public(
+    JIT.class.getter(function () {
+      return this.name;
+    }),
+  ),
+  secret: JIT.class.private(JIT.string()),
+});
+```
+
+DDD fields are backed by stable slots and prototype accessors. Public reads are
+available while ordinary writes are rejected; domain methods and compiled
+aggregate mutation retain the internal write surface. `protected` and
+`private` members are hidden from the consumer type, with private-like storage
+kept behind the generated class layout. `noConstructor(schema.default(...))`
+declares transient generated state outside constructor, create, hydrate and
+wire input.
+
+`JIT.class.method({ input, output }).implement(fn)` adds a direct prototype
+method with one compiled argument/output contract. `implementAsync` applies
+the same contract to a Promise-returning method. `JIT.class.factory(name, fn)`
+is used inside `.factories()`; its callback receives validated, materialized
+state and may return trusted state or use `ctx.construct(state)`. Arbitrary
+factory callbacks are runtime bindings and are skipped by standalone AOT.
+
+`JIT.class.mixin({ fields, methods })` resolves into the same member system.
+`JIT.ddd.$extends({...})` returns an immutable DDD namespace for application
+vocabulary without mutating the global namespace.
 
 ## Accessors
 
@@ -190,8 +236,8 @@ user.deletedAt; // null until softDelete()
 user.version; // 0
 ```
 
-Those managed fields are required by `hydrate()` and excluded from ordinary
-create/update input. `touch()`, `softDelete()`, and `restore()` are specialized
+Those managed fields are required by `hydrate()` and optional on `create()`;
+they remain excluded from ordinary update input. `touch()`, `softDelete()`, and `restore()` are specialized
 prototype methods with no lifecycle discovery in their hot path.
 
 ## Validation policies
@@ -204,16 +250,16 @@ than to the call, so the factory's signature says which shape a caller gets.
 ```ts
 const Money = JIT.ddd.valueObject(
   JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) }),
-).validate({ result: "result" });
+).validate({ result: "either" });
 
 const outcome = Money.create({ amount: 10, currency: "BRL" });
-outcome.ok === true && outcome.value.amount; // 10
+if (!JIT.class.isFailure(outcome)) outcome.amount; // 10
 ```
 
 | `result` | `create(input)` returns |
 | --- | --- |
 | `"throw"` (default) | the instance, or throws `JITValidationError` |
-| `"result"` | `{ ok: true; value }` or `{ ok: false; error }` |
+| `"either"` (`"result"` deprecated alias) | the instance on success, or `{ ok: false; error }` on failure |
 | `"tuple"` | `[null, value]` or `[error, null]` |
 
 The tuple puts the error first so it destructures the way callers read it.
@@ -222,6 +268,12 @@ the built-in throwing path. A class that never calls `.validate()` carries no
 policy at all, in the runtime and in the generated module. The policy is a
 singleton declaration: after `.validate(...)`, the method is removed from the
 fluent type, and a repeated JavaScript call is rejected.
+
+An explicitly declared result mode is the outer boundary and always wins. When
+the parent has no mode, nested policies are resolved by numeric `priority`; an
+equal-priority tie uses the safety order `throw > either > tuple`. Nested
+factories never return nested tuples or either wrappers: they contribute values,
+issues, and error candidates to the one outer policy.
 
 ## Domain assertions
 

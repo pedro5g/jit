@@ -214,7 +214,7 @@ type CompareDigits<TLeft extends string, TRight extends string> =
 
 type Magnitude<TValue extends number> = `${TValue}` extends `-${infer TRest}` ? TRest : `${TValue}`;
 
-type NumericCompare<TLeft extends number, TRight extends number> = number extends TLeft | TRight
+export type CompareNumericLiteral<TLeft extends number, TRight extends number> = number extends TLeft | TRight
   ? "unknown"
   : IsIntegerNumber<TLeft> extends false
     ? "unknown"
@@ -230,7 +230,11 @@ type NumericCompare<TLeft extends number, TRight extends number> = number extend
           : CompareDigits<Magnitude<TLeft>, Magnitude<TRight>>;
 
 type NumericLessThan<TLeft extends number, TRight extends number> =
-  NumericCompare<TLeft, TRight> extends "unknown" ? boolean : NumericCompare<TLeft, TRight> extends "lt" ? true : false;
+  CompareNumericLiteral<TLeft, TRight> extends "unknown"
+    ? boolean
+    : CompareNumericLiteral<TLeft, TRight> extends "lt"
+      ? true
+      : false;
 
 type NumericGreaterThan<TLeft extends number, TRight extends number> = NumericLessThan<TRight, TLeft>;
 

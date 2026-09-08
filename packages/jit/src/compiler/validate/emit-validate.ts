@@ -45,6 +45,8 @@ interface UnwrappedSchema {
   readonly pipes: readonly PipeStep[];
   readonly fieldTransforms: Readonly<Record<string, string>> | undefined;
   readonly materialize: string | undefined;
+  readonly trustedMaterialize: boolean;
+  readonly assertion: string | undefined;
 }
 
 /**
@@ -83,7 +85,7 @@ const UUID_REGEX = /*@__PURE__*/ Regexes.uuid();
 
 class ValidatorEmitter {
   writer = new CodeWriter();
-  private readonly rootMode: "is" | "parse";
+  private readonly rootMode: "is" | "parse" | "fast";
   private readonly bindingNames: string[] = [];
   private readonly bindingValues: unknown[] = [];
   private readonly bindingIds = new Map<unknown, string>();
@@ -96,7 +98,7 @@ class ValidatorEmitter {
   private varCounter = 0;
 
   constructor(
-    private mode: "is" | "parse",
+    private mode: "is" | "parse" | "fast",
     private awaited = false,
     readonly resolveDefaults = true,
     readonly materializeRuntimeTypes = true,
@@ -170,7 +172,7 @@ class ValidatorEmitter {
     // The output variable is only real when parse can produce a value that
     // differs from the input. Otherwise every write to it is a dead store and
     // the holder already is the answer, so the subtree emits neither.
-    const builds = this.mode === "parse" && needsBuild(schema);
+    const builds = this.mode !== "is" && needsBuild(schema);
 
     writer.line(`let ${holder} = ${valueExpr};`);
     if (builds) writer.line(`let ${output} = ${holder};`);
@@ -228,7 +230,11 @@ class ValidatorEmitter {
               : `${output} = ${pipe.binding}(${output});`
           );
         }
-        if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
+        if (unwrapped.materialize)
+          writer.line(
+            `${output} = ${unwrapped.trustedMaterialize ? `${unwrapped.materialize}.__jitMaterialize` : `new ${unwrapped.materialize}`}(${output}${unwrapped.trustedMaterialize ? "" : ", true"});`
+          );
+        if (unwrapped.assertion) this.emitNestedAssertion(unwrapped.assertion, output, path);
       }
     };
 
@@ -236,11 +242,15 @@ class ValidatorEmitter {
       const { binding, isFactory } = unwrapped.defaultValue;
       const defaultExpr = isFactory ? `${binding}()` : binding;
 
-      if (this.mode === "parse") {
+      if (this.mode !== "is") {
         writer.line(`if (${holder} === undefined) {`);
         writer.indent(() => {
           writer.line(`${output} = ${defaultExpr};`);
-          if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
+          if (unwrapped.materialize)
+            writer.line(
+              `${output} = ${unwrapped.trustedMaterialize ? `${unwrapped.materialize}.__jitMaterialize` : `new ${unwrapped.materialize}`}(${output}${unwrapped.trustedMaterialize ? "" : ", true"});`
+            );
+          if (unwrapped.assertion) this.emitNestedAssertion(unwrapped.assertion, output, path);
         });
         if (unwrapped.nullable) {
           writer.line(`} else if (${holder} === null) {`);
@@ -374,10 +384,40 @@ class ValidatorEmitter {
     // no issue carries an empty object nobody asked for.
     const paramsPart = params === undefined ? "" : `, params: ${emitCheckParams(params)}`;
 
+    if (this.mode === "fast") {
+      writer.line(
+        `throw { __jitFastValidation: true, issues: [{ path: ${path.source}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} }] };`
+      );
+      return;
+    }
+
     writer.line(
       `(issues ||= [])[issues.length] = { path: ${path.source}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
     );
     if (this.maxIssues !== undefined) writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
+  }
+
+  private emitNestedAssertion(binding: string, value: string, path: PathRef): void {
+    if (this.mode === "is") {
+      this.writer.line(`if (${binding}(${value}) !== undefined) return false;`);
+      return;
+    }
+    const outcome = this.nextVar("assertion");
+    this.writer.line(`const ${outcome} = ${binding}(${value});`);
+    this.writer.line(`if (${outcome} !== undefined) {`);
+    this.writer.indent(() => {
+      this.writer.line(`for (const issue of ${outcome}.issues) {`);
+      this.writer.indent(() => {
+        const issuePath = path.source === "[]" ? "issue.path" : `[...${path.source}, ...issue.path]`;
+        this.writer.line(
+          `(issues ||= [])[issues.length] = { path: ${issuePath}, code: issue.code, expected: issue.expected, message: issue.message };`
+        );
+        if (this.maxIssues !== undefined)
+          this.writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
+      });
+      this.writer.line("}");
+    });
+    this.writer.line("}");
   }
 
   /** Type guard + checks + children for the unwrapped base schema. */
@@ -537,7 +577,7 @@ class ValidatorEmitter {
         return this.emitDiscriminatedUnion(schema, value, path);
       case TypeName.intersection: {
         const options = schema.def.options as ATS.AnyTypeSchema[];
-        const rebuild = this.mode === "parse" && options.some((option) => needsBuild(option));
+        const rebuild = this.mode !== "is" && options.some((option) => needsBuild(option));
         const outputs = options.map((option) => this.emitNode(option, value, path));
 
         if (!rebuild) return value;
@@ -1377,7 +1417,7 @@ class ValidatorEmitter {
   private emitArray(schema: AnySchema, value: string, path: PathRef): string {
     const element = schema.def.element as ATS.AnyTypeSchema;
     const checks = (schema.def.checks as readonly SchemaCheckRecord[] | undefined) ?? [];
-    const build = this.mode === "parse" && needsBuild(element);
+    const build = this.mode !== "is" && needsBuild(element);
     const out = build ? this.nextVar("b") : value;
 
     if (build) this.writer.line(`let ${out};`);
@@ -1456,7 +1496,7 @@ class ValidatorEmitter {
     const items = (schema.def.items as readonly ATS.AnyTypeSchema[] | undefined) ?? [];
     const rest = schema.def.rest as ATS.AnyTypeSchema | undefined;
     const build =
-      this.mode === "parse" && (items.some((item) => needsBuild(item)) || (rest !== undefined && needsBuild(rest)));
+      this.mode !== "is" && (items.some((item) => needsBuild(item)) || (rest !== undefined && needsBuild(rest)));
     const out = build ? this.nextVar("b") : value;
 
     if (build) this.writer.line(`let ${out};`);
@@ -1507,7 +1547,7 @@ class ValidatorEmitter {
 
   private emitSet(schema: AnySchema, value: string, path: PathRef): string {
     const element = schema.def.element as ATS.AnyTypeSchema;
-    const build = this.mode === "parse" && needsBuild(element);
+    const build = this.mode !== "is" && needsBuild(element);
     const out = build ? this.nextVar("b") : value;
 
     if (build) this.writer.line(`let ${out};`);
@@ -1540,7 +1580,7 @@ class ValidatorEmitter {
   private emitMap(schema: AnySchema, value: string, path: PathRef): string {
     const keySchema = schema.def.key as ATS.AnyTypeSchema;
     const valueSchema = schema.def.value as ATS.AnyTypeSchema;
-    const build = this.mode === "parse" && (needsBuild(keySchema) || needsBuild(valueSchema));
+    const build = this.mode !== "is" && (needsBuild(keySchema) || needsBuild(valueSchema));
     const out = build ? this.nextVar("b") : value;
 
     if (build) this.writer.line(`let ${out};`);
@@ -1573,7 +1613,7 @@ class ValidatorEmitter {
 
   private emitRecord(schema: AnySchema, value: string, path: PathRef): string {
     const valueSchema = schema.def.value as ATS.AnyTypeSchema;
-    const build = this.mode === "parse" && needsBuild(valueSchema);
+    const build = this.mode !== "is" && needsBuild(valueSchema);
     const out = build ? this.nextVar("b") : value;
 
     if (build) this.writer.line(`let ${out};`);
@@ -1622,7 +1662,7 @@ class ValidatorEmitter {
     const catchallBuild = catchall !== undefined && needsBuild(catchall);
     const preserveUnknownKeys = unknownKeys === "passthrough" || catchall !== undefined;
     const build =
-      this.mode === "parse" &&
+      this.mode !== "is" &&
       (fieldTransforms !== undefined ||
         unknownKeys === "strip" ||
         catchallBuild ||
@@ -1763,7 +1803,7 @@ class ValidatorEmitter {
     const options = schema.def.options as ATS.AnyTypeSchema[];
     const tests = options.map((option) => `${this.emitOptionPredicate(option)}(${value})`);
     const count = tests.length === 0 ? "0" : tests.map((test) => `(${test} ? 1 : 0)`).join(" + ");
-    const build = this.mode === "parse" && options.some(needsBuild);
+    const build = this.mode !== "is" && options.some(needsBuild);
 
     if (this.mode === "is" || !build) {
       this.failIf(
@@ -1836,7 +1876,7 @@ class ValidatorEmitter {
     const tagged = options
       .map((option) => ({ option, tag: literalTag(option, discriminator) }))
       .filter((entry): entry is { option: ATS.AnyTypeSchema; tag: string | number } => entry.tag !== undefined);
-    const build = this.mode === "parse" && tagged.some((entry) => needsBuild(entry.option));
+    const build = this.mode !== "is" && tagged.some((entry) => needsBuild(entry.option));
     const out = build ? this.nextVar("o") : value;
 
     if (build) this.writer.line(`let ${out} = ${value};`);
@@ -2125,6 +2165,8 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
   const pipes: PipeStep[] = [];
   let fieldTransforms: Record<string, string> | undefined;
   let materialize: string | undefined;
+  let trustedMaterialize = false;
+  let assertion: string | undefined;
 
   while (true) {
     if (current.type === TypeName.optional) {
@@ -2204,7 +2246,13 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     }
 
     if (current.type === TypeName.runtimeType) {
-      if (emitter.materializeRuntimeTypes) materialize = emitter.bind(current.def.materialize);
+      if (emitter.materializeRuntimeTypes) {
+        materialize = emitter.bind(current.def.materialize);
+        trustedMaterialize =
+          typeof current.def.materialize === "function" &&
+          typeof (current.def.materialize as { readonly __jitMaterialize?: unknown }).__jitMaterialize === "function";
+      }
+      if (current.def.assertion !== undefined) assertion = emitter.bind(current.def.assertion);
       current = current.def.innerType as AnySchema;
       continue;
     }
@@ -2223,6 +2271,8 @@ function unwrapValidation(schema: ATS.AnyTypeSchema, emitter: ValidatorEmitter):
     pipes,
     fieldTransforms,
     materialize,
+    trustedMaterialize,
+    assertion,
   };
 }
 
@@ -2408,6 +2458,8 @@ export interface EmitValidatorOptions {
   readonly is?: boolean;
   readonly safeParse?: boolean;
   readonly safeParseAsync?: boolean;
+  /** Emit a fail-fast parse function without a success result object. */
+  readonly fastParse?: boolean;
   /** Keep defaults as required fields, for trusted persisted-state hydration. */
   readonly resolveDefaults?: boolean;
   /** Leave Runtime Type construction to an explicit execution `construct` stage. */
@@ -2512,6 +2564,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const emitIs = options.is ?? true;
   const emitSafeParse = options.safeParse ?? true;
   const emitSafeParseAsync = options.safeParseAsync ?? true;
+  const emitFastParse = options.fastParse ?? false;
   const resolveDefaults = options.resolveDefaults ?? true;
   const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
   const maxIssues = options.maxIssues;
@@ -2519,7 +2572,19 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter: ValidatorEmitter | undefined;
 
-  if (emitSafeParse) {
+  if (emitFastParse) {
+    const emitter = new ValidatorEmitter("fast", false, resolveDefaults, materializeRuntimeTypes);
+    emitter.markRecursive(recursive);
+    parseEmitter = emitter;
+    emitter.writer.line("function parse(value) {");
+    emitter.writer.indent(() => {
+      const output = emitter.emitNode(schema, "value", rootPath());
+      emitter.writer.line(`return ${output};`);
+    });
+    emitter.writer.line("}");
+  }
+
+  if (emitSafeParse && !emitFastParse) {
     const emitter = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes, maxIssues);
 
     emitter.markRecursive(recursive);
@@ -2559,7 +2624,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   // but promise wrappers settle (`await`) and validate the resolved value.
   let asyncEmitter: ValidatorEmitter | undefined;
 
-  if (emitSafeParseAsync && containsPromise(schema)) {
+  if (emitSafeParseAsync && !emitFastParse && containsPromise(schema)) {
     const emitter = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes, maxIssues);
 
     emitter.markRecursive(recursive);
@@ -2601,7 +2666,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
 
   // Bind the same values in the same order so every function can share one
   // Function parameter list; extras from either emitter are appended after.
-  if (emitIs) {
+  if (emitIs && !emitFastParse) {
     const emitter = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes);
 
     emitter.markRecursive(recursive);
@@ -2629,7 +2694,7 @@ export function emitValidator(schema: ATS.AnyTypeSchema, options: EmitValidatorO
   const functionSource = emitters.map((emitter) => emitter.writer.toString()).join("\n");
   const returnedEntries = [
     ...(isEmitter ? ["is: is"] : []),
-    ...(parseEmitter ? ["safeParse: safeParse"] : []),
+    ...(emitFastParse ? ["parse: parse"] : parseEmitter ? ["safeParse: safeParse"] : []),
     ...(asyncEmitter ? ["safeParseAsync: safeParseAsync"] : []),
   ];
   const returned = `return { ${returnedEntries.join(", ")} };`;

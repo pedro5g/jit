@@ -1,7 +1,7 @@
 import type * as ATS from "../core/ats/index.js";
 import { registerArtifact } from "../runtime/artifact-registry.js";
 import { type CompileCacheOptions, getCompileCached } from "../runtime/cache/compile-cache.js";
-import { emitSerialize } from "./serialize/emit-serialize.js";
+import { emitSerialize, type SerializeEmitOptions } from "./serialize/emit-serialize.js";
 
 /**
  * A compiled shape-specialized JSON serializer.
@@ -54,4 +54,16 @@ export function compileSerialize<TSchema extends ATS.AnyTypeSchema>(
     },
     options
   );
+}
+
+/** Compiles one class-layout serializer with direct physical root reads. */
+export function compileSerializeWithRootAccess<TSchema extends ATS.AnyTypeSchema>(
+  schema: TSchema,
+  rootPropertyAccess: ReadonlyMap<string, string>,
+  bindings: readonly unknown[] = [],
+  options?: SerializeEmitOptions
+): Serialize<ATS.TypeofSchema<TSchema>> {
+  const bindingNames = bindings.map((_, index) => `__root${index}`);
+  const source = emitSerialize(schema, { ...options, rootPropertyAccess });
+  return globalThis.Function(...bindingNames, `return ${source};`)(...bindings) as Serialize<ATS.TypeofSchema<TSchema>>;
 }

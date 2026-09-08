@@ -275,6 +275,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   // constructor as an external closure value.
   const classBindings = new Map<unknown, string>();
   const classArtifacts = new Map<unknown, Extract<CompiledArtifact, { readonly kind: "class" }>>();
+  const assertionBindings = new Map<unknown, string>();
+  const assertionSources: string[] = [];
   const publicNames = new Set([...Object.keys(plan.artifacts), ...Object.keys(plan.groups)]);
   const internalNames = new Set<string>();
   const exported = options.exported ?? new Set<string>();
@@ -296,6 +298,45 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       classBindings.set(value, name);
       classArtifacts.set(value, artifact);
     }
+  }
+
+  // Runtime Type schemas carry a compiled assertion guard so the runtime
+  // validator can fuse child invariants into the parent's issue buffer. AOT
+  // can reconstruct that guard from the declaration-time assertion IR; keep
+  // the generated function at module scope so nested validators bind it like
+  // any other emitted class artifact.
+  for (const [value, artifact] of classArtifacts) {
+    const assertion = artifact.policy?.assertions;
+    const schema = (value as { readonly schema?: ATS.AnyTypeSchema }).schema;
+    if (assertion === undefined || schema?.type !== TypeName.runtimeType) continue;
+    const runtimeSchema = schema as ATS.RuntimeTypeSchema;
+    if (runtimeSchema.def.assertion === undefined) continue;
+    const helper = internalIdentifier(`${classBindings.get(value) ?? "runtime"}_assertion`);
+    const lines = [`const ${helper} = /*#__PURE__*/ (() => {`];
+    const bindingLines = inlineBindings(assertion.bindingNames, assertion.bindingValues);
+    if (bindingLines === undefined) {
+      skipped.push({
+        schema: classBindings.get(value) ?? "runtime class",
+        operation: "class.assert",
+        reason: "an assertion value cannot be serialized ahead of time",
+      });
+      continue;
+    }
+    lines.push(...bindingLines.map((line) => `  ${line}`));
+    for (const [index, failure] of assertion.failures.entries()) {
+      lines.push(
+        `  const __issue${index} = Object.freeze(${JSON.stringify({
+          path: failure.field === undefined ? [] : [failure.field],
+          code: failure.code,
+          expected: failure.rule ?? "a domain invariant",
+          message: failure.message,
+        })});`,
+        `  const __fail${index} = () => undefined;`
+      );
+    }
+    lines.push(...indentBlock(assertion.source).map((line) => `  ${line}`), "  return __assert;", "})();");
+    assertionSources.push(...lines);
+    assertionBindings.set(runtimeSchema.def.assertion, helper);
   }
 
   // Every explicitly requested type is named first, so a schema nested inside another
@@ -320,6 +361,8 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
 
   js.push(GENERATED_BANNER);
   if (ts) js.push("// @ts-nocheck -- generated internals are typed at the public export boundary.");
+  js.push(...assertionSources);
+  if (assertionSources.length > 0) js.push("");
 
   for (const [name, members] of Object.entries(plan.groups)) {
     if (!isValidIdentifier(name)) {
@@ -989,6 +1032,9 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
   ): string[] | undefined {
     const lines: string[] = [];
     const errorBinding = policy.error === undefined ? undefined : serializeBindingValue(policy.error);
+    const nestedAssertions = (policy.nestedErrors ?? []).filter(
+      (candidate) => candidate.runtimeBinding !== true && candidate.assertion !== undefined
+    );
 
     if (policy.error !== undefined && errorBinding === undefined) {
       skipped.push({
@@ -999,18 +1045,52 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       return undefined;
     }
     lines.push(
-      `  const __error = ${errorBinding ?? "(issues) => new JITValidationError(issues)"};`,
-      policy.result === "result"
-        ? "  const __success = (value) => ({ ok: true, value });"
+      `  const __baseError = ${errorBinding ?? "(issues) => new JITValidationError(issues)"};`,
+      policy.result === "either"
+        ? "  const __success = (value) => value;"
         : policy.result === "tuple"
           ? "  const __success = (value) => [null, value];"
           : "  const __success = (value) => value;",
-      policy.result === "result"
-        ? "  const __failure = (error) => ({ ok: false, error });"
+      policy.result === "either"
+        ? '  const __factoryFailure = Symbol.for("jit.factory.failure"); const __failure = (error) => Object.defineProperties({ ok: false, error }, { [__factoryFailure]: { enumerable: false, value: true } });'
         : policy.result === "tuple"
           ? "  const __failure = (error) => [error, null];"
           : "  const __failure = (error) => { throw error; };"
     );
+    if (nestedAssertions.length === 0) {
+      lines.push("  const __error = __baseError;");
+    } else {
+      needsAssertionError = true;
+      lines.push(
+        "  const __error = (issues) => {",
+        `    let __selectedPriority = ${policy.error === undefined ? "-Infinity" : String(policy.errorPriority ?? 1000)};`,
+        `    let __selectedDepth = ${policy.error === undefined ? "Infinity" : "0"};`,
+        `    let __selectedOrder = ${policy.error === undefined ? "Infinity" : "-1"};`,
+        "    let __selectedNested = -1;"
+      );
+      nestedAssertions.forEach((candidate, index) => {
+        lines.push(
+          `    if (issues.some((issue) => ${JSON.stringify(candidate.path)}.every((part, index) => issue.path[index] === part)) && (${candidate.priority} > __selectedPriority || (${candidate.priority} === __selectedPriority && (${candidate.depth} < __selectedDepth || (${candidate.depth} === __selectedDepth && ${candidate.order} < __selectedOrder))))) {`,
+          `      __selectedPriority = ${candidate.priority}; __selectedDepth = ${candidate.depth}; __selectedOrder = ${candidate.order}; __selectedNested = ${index};`,
+          "    }"
+        );
+      });
+      nestedAssertions.forEach((candidate, index) => {
+        const assertion = candidate.assertion as {
+          readonly rule: string | undefined;
+          readonly field: string | undefined;
+          readonly message: string;
+        };
+        const details = JSON.stringify({
+          ...(assertion.rule === undefined ? {} : { rule: assertion.rule }),
+          ...(assertion.field === undefined ? {} : { field: assertion.field }),
+        });
+        lines.push(
+          `    if (__selectedNested === ${index}) return new DomainAssertionError(${JSON.stringify(assertion.message)}, { ...${details}, issues });`
+        );
+      });
+      lines.push("    return __baseError(issues);", "  };");
+    }
     if (policy.result === "throw") needsValidationError = true;
 
     const assertions = policy.assertions;
@@ -1056,7 +1136,13 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
           .map((failure, index) =>
             failure.error === undefined
               ? ""
-              : `if (outcome.errorIndex === ${index}) return __errorCandidate${index}(value, ${JSON.stringify({ ...failure, error: undefined })});`
+              : `if (outcome.errorIndex === ${index}) return __errorCandidate${index}(value, ${JSON.stringify({
+                  rule: failure.rule,
+                  field: failure.field,
+                  code: failure.code,
+                  message: failure.message,
+                  priority: failure.priority,
+                })});`
           )
           .join(
             " "
@@ -1098,6 +1184,14 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
       return undefined;
     }
+    if (artifact.customFactories?.create !== undefined || artifact.customFactories?.hydrate !== undefined) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.factories",
+        reason: "a custom factory is a runtime binding and has no standalone AOT representation",
+      });
+      return undefined;
+    }
     if (artifact.mutation?.timestampClock !== undefined || artifact.mutation?.deletionClock !== undefined) {
       skipped.push({
         schema: reportName,
@@ -1106,7 +1200,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
       return undefined;
     }
-    if ((artifact.policy?.nestedErrors?.length ?? 0) > 0) {
+    if (artifact.policy?.nestedErrors?.some((candidate) => candidate.runtimeBinding === true) === true) {
       skipped.push({
         schema: reportName,
         operation: "class.validate",
@@ -1114,23 +1208,23 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       });
       return undefined;
     }
-    const validator = emitValidatorBinding(
-      binding,
-      artifact.domainEvent ? (base as ATS.ObjectSchema).def.props.payload : artifact.schema,
-      reportName,
-      "class",
-      {
-        is: false,
-        safeParse: true,
-        ...(artifact.policy?.maxIssues === undefined ? {} : { maxIssues: artifact.policy.maxIssues }),
-      }
-    );
+    const creationSchema = artifact.domainEvent
+      ? (base as ATS.ObjectSchema).def.props.payload
+      : (artifact.creationSchema ?? artifact.schema);
+    const hydrateSchema = artifact.hydrateSchema ?? artifact.schema;
+    const fastPolicyCreate = artifact.policy?.maxIssues === undefined && canUseFastParse(creationSchema);
+    const fastPolicyHydrate = artifact.policy?.maxIssues === undefined && canUseFastParse(hydrateSchema);
+    const validator = emitValidatorBinding(binding, creationSchema, reportName, "class", {
+      is: fastPolicyCreate,
+      safeParse: true,
+      ...(artifact.policy?.maxIssues === undefined ? {} : { maxIssues: artifact.policy.maxIssues }),
+    });
 
     if (!validator) return undefined;
     const hydrateValidator = artifact.domainEvent
       ? validator
-      : emitValidatorBinding(binding, artifact.schema, reportName, "class.hydrate", {
-          is: false,
+      : emitValidatorBinding(binding, hydrateSchema, reportName, "class.hydrate", {
+          is: fastPolicyHydrate,
           safeParse: true,
           resolveDefaults: false,
           ...(artifact.policy?.maxIssues === undefined ? {} : { maxIssues: artifact.policy.maxIssues }),
@@ -1142,12 +1236,39 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const capabilities = new Set(artifact.capabilities);
     const fields = valueRepresentation ? ["value"] : Object.keys((base as ATS.ObjectSchema).def.props);
     const managedFieldNames = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
+    const fieldPolicies = new Map((artifact.fieldPolicies ?? []).map((policy) => [policy.name, policy] as const));
+    const noConstructorFields = [...fieldPolicies.values()]
+      .filter((policy) => policy.noConstructor)
+      .map((policy) => policy.name);
+    const boundaryInputName =
+      noConstructorFields.length === 0 ? undefined : internalIdentifier(`${binding}_withoutGenerated`);
+    const creationInput = boundaryInputName === undefined ? "input" : `${boundaryInputName}(input)`;
+    const hydrationInput = boundaryInputName === undefined ? "state" : `${boundaryInputName}(state)`;
     const managedStorage = new Map(
-      (artifact.managedFields ?? []).map((managed, index) => [managed.field, `__managed${index}`] as const)
+      fields
+        .filter((field) => {
+          const policy = fieldPolicies.get(field);
+          return artifact.encapsulateFields === true || managedFieldNames.has(field) || policy !== undefined;
+        })
+        .map((field, index) => [field, `__managed${index}`] as const)
     );
     const accessorByKey = new Map(artifact.accessors?.map((accessor) => [accessor.key, accessor]));
     const slots = new Map<string, string>();
     let slotIndex = 0;
+
+    const fieldInitializers = new Map<string, string>();
+    for (const field of fields) {
+      if (fieldPolicies.get(field)?.noConstructor !== true) continue;
+      const initializer = emitValidatorBinding(
+        `${binding}_initializer_${field}`,
+        (base as ATS.ObjectSchema).def.props[field],
+        reportName,
+        "class.noConstructor",
+        { is: false, safeParse: true }
+      );
+      if (!initializer) return undefined;
+      fieldInitializers.set(field, initializer);
+    }
 
     for (const field of fields) {
       if (accessorByKey.get(field)?.field === "private" && !managedStorage.has(field))
@@ -1189,10 +1310,23 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
         return definitions;
       });
 
-    for (const field of managedFieldNames) {
-      if (accessorByKey.get(field)?.field === "private") continue;
+    for (const field of fields) {
       const managed = managedStorage.get(field);
-      if (managed !== undefined) methods.push(`get [${JSON.stringify(field)}]() { return this[${managed}]; }`);
+      if (managed === undefined) continue;
+      const policy = fieldPolicies.get(field);
+      const defaultDdd = artifact.encapsulateFields === true && policy === undefined;
+      const getter = policy?.getter === true || defaultDdd || (policy === undefined && managedFieldNames.has(field));
+      const setter = policy?.setter === true || defaultDdd;
+      if (getter) methods.push(`get [${JSON.stringify(field)}]() { return this[${managed}]; }`);
+      if (setter) {
+        const guarded =
+          artifact.encapsulateFields === true && (policy?.visibility !== "public" || policy?.noConstructor === true);
+        methods.push(
+          guarded
+            ? `set [${JSON.stringify(field)}](value) { throw new TypeError("Field ${field} is readonly"); }`
+            : `set [${JSON.stringify(field)}](value) { this[${managed}] = value; }`
+        );
+      }
     }
 
     if (capabilities.has("equals")) {
@@ -1289,6 +1423,18 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     }
     if (capabilities.has("with") && update)
       methods.push(`with(patch) { return new this.constructor(${update}(this, patch), __construct); }`);
+    const classJsonMember = artifact.resolvedMembers?.find(
+      (member) => member.owner === "class.json" && member.kind === "method"
+    )?.name;
+    if (classJsonMember !== undefined) {
+      const source = tryEmit(reportName, "class.json", skipped, () =>
+        emitSerialize(artifact.wireSchema ?? artifact.schema)
+      );
+      if (!source) return undefined;
+      const stringify = internalIdentifier(`${binding}_json`);
+      helpers.push(`const ${stringify} = ${asExpression(source, "stringify")};`);
+      methods.push(`${classMemberName(classJsonMember)}() { return ${stringify}(this); }`);
+    }
     const identity = artifact.capabilities.find((capability) => capability.startsWith("identity:"));
     if (identity) {
       const identityField = identity.slice("identity:".length);
@@ -1348,13 +1494,31 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     }
     const assignments = valueRepresentation
       ? "this.value = state;"
-      : fields.map((field) => `${readField(field)} = state[${JSON.stringify(field)}];`).join(" ");
-    const managedAccessors = [...managedStorage.entries()]
-      .filter(([field]) => accessorByKey.get(field)?.field !== "private")
-      .map(
-        ([field]) =>
-          `Object.defineProperty(this, ${JSON.stringify(field)}, { get: Object.getOwnPropertyDescriptor(${binding}.prototype, ${JSON.stringify(field)}).get, enumerable: true, configurable: false });`
-      )
+      : fields
+          .map((field) => {
+            const initializer = fieldInitializers.get(field);
+            const value =
+              initializer === undefined
+                ? `state[${JSON.stringify(field)}]`
+                : `state[${JSON.stringify(field)}] === undefined ? ${initializer}.safeParse(undefined).data : state[${JSON.stringify(field)}]`;
+            return `${readField(field)} = ${value};`;
+          })
+          .join(" ");
+    const trustedAssignments = fields
+      .map((field) => {
+        const initializer = fieldInitializers.get(field);
+        const value = valueRepresentation
+          ? "state"
+          : initializer === undefined
+            ? `state[${JSON.stringify(field)}]`
+            : `state[${JSON.stringify(field)}] === undefined ? ${initializer}.safeParse(undefined).data : state[${JSON.stringify(field)}]`;
+        const target = valueRepresentation
+          ? "instance.value"
+          : managedStorage.has(field)
+            ? `instance[${managedStorage.get(field)}]`
+            : `instance[${JSON.stringify(field)}]`;
+        return `${target} = ${value};`;
+      })
       .join(" ");
     const events = artifact.aggregate
       ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });'
@@ -1363,50 +1527,55 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     const abstractGuard = artifact.abstract
       ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); `
       : "";
-    const managedCreation = artifact.managedFields ?? [];
-    const creationAssignments = managedCreation
-      .map((managed) => {
-        const field = JSON.stringify(managed.field);
-        if (managed.role === "createdAt") return `if (input[${field}] !== undefined) state[${field}] = new Date();`;
-        if (managed.role === "updatedAt" || managed.role === "deletedAt") return `state[${field}] = null;`;
-        return `state[${field}] = 0;`;
-      })
-      .join(" ");
-    const creationToken = creationAssignments.length === 0 ? "__construct" : "__create";
     // A configured policy needs the issues rather than an exception, so the
     // factory validates first and constructs a value it already trusts. An
     // unconfigured class keeps the constructor-validating shape it had.
     const policy = artifact.policy;
-    const assertionCall =
+    const assertionCall = (value: string): string =>
       policy?.assertions === undefined
         ? ""
-        : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome, result.data)); ";
+        : `const outcome = __assert(${value}); if (outcome !== undefined) return __failure(__assertFailure(outcome, ${value})); `;
     const policyCreate =
       policy === undefined || !policy.create
         ? undefined
-        : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${creationAssignments.replace(/state\[/g, "result.data[")} ${assertionCall}return __success(new this(result.data, __construct, true));`;
+        : fastPolicyCreate
+          ? `let __createdState; if (${validator}.is(${creationInput})) __createdState = ${creationInput}; else { const result = ${validator}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); __createdState = result.data; } ${assertionCall("__createdState")}return __success(new this(__createdState, __construct, true));`
+          : `const result = ${validator}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
     const policyHydrate =
       policy === undefined || !policy.hydrate
         ? undefined
-        : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
+        : fastPolicyHydrate
+          ? `let __hydratedState; if (${hydrateValidator}.is(${hydrationInput})) __hydratedState = ${hydrationInput}; else { const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); __hydratedState = result.data; } ${assertionCall("__hydratedState")}return __success(new this(__hydratedState, __construct, true));`
+          : `const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
     const create = artifact.domainEvent
       ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);`
-      : (policyCreate ?? `return new this(input, ${creationToken});`);
+      : (policyCreate ?? `return new this(${creationInput}, __construct);`);
     const hydrate = artifact.domainEvent
       ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);`
       : (policyHydrate ??
-        `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`);
+        `const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`);
     const constructionGuard =
       artifact.construction === "factory"
-        ? `if (token !== __construct${creationAssignments.length === 0 ? "" : " && token !== __create"} && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); `
+        ? `if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); `
         : "";
     const constructorSource = artifact.domainEvent
       ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }`
-      : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${creationAssignments.length === 0 ? "" : `if (token === __create) { ${creationAssignments} } `}${assignments}${managedAccessors.length === 0 ? "" : ` ${managedAccessors}`}${events}${freeze} }`;
+      : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(${creationInput}); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
+    const trustedMaterializer =
+      slots.size > 0
+        ? `static ["__jitMaterialize"](state) { return new this(state, __construct, true); }`
+        : `static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); ${trustedAssignments}${artifact.aggregate ? ' Object.defineProperty(instance, "__jitEvents", { value: [], writable: true });' : ""}${artifact.frozen ? " Object.freeze(instance);" : ""} return instance; }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push("  const __construct = Symbol();");
     for (const managed of managedStorage.values()) js.push(`  const ${managed} = Symbol();`);
-    if (creationAssignments.length > 0) js.push("  const __create = Symbol();");
+    if (boundaryInputName !== undefined) {
+      const checks = noConstructorFields
+        .map((field) => `Object.prototype.hasOwnProperty.call(input, ${JSON.stringify(field)})`)
+        .join(" || ");
+      js.push(
+        `  const ${boundaryInputName} = (input) => { if (input === null || typeof input !== "object" || !(${checks})) return input; const state = { ...input }; ${noConstructorFields.map((field) => `delete state[${JSON.stringify(field)}];`).join(" ")} return state; };`
+      );
+    }
     if (policy !== undefined) {
       const policyLines = emitClassPolicy(policy, reportName);
       if (policyLines === undefined) return undefined;
@@ -1416,6 +1585,7 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
     js.push(`  return class ${binding} {`);
     js.push(...[...slots.values()].map((slot) => `    ${slot};`));
     js.push(`    ${constructorSource}`);
+    js.push(`    ${trustedMaterializer}`);
     if (artifact.factories.create !== false)
       js.push(`    static ${classMemberName(artifact.factories.create)}(input) { ${abstractGuard}${create} }`);
     if (artifact.factories.hydrate !== false)
@@ -1519,6 +1689,11 @@ function emitModule(plan: ModulePlan, options: GenerateOptions, layout: OutputLa
       const classBinding = classBindings.get(value);
       if (classBinding !== undefined) {
         inlined.push(`const ${name} = ${classBinding};`);
+        continue;
+      }
+      const assertionBinding = assertionBindings.get(value);
+      if (assertionBinding !== undefined) {
+        inlined.push(`const ${name} = ${assertionBinding};`);
         continue;
       }
       const literal = serializeBindingValue(value);

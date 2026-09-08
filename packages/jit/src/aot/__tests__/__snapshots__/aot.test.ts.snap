@@ -13,6 +13,21 @@ class JITValidationError extends Error {
   }
 }
 const User_validator = /*#__PURE__*/ (() => {
+  function is(value) {
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      return false;
+    }
+    let v3 = v1.id;
+    if (typeof v3 !== "string") {
+      return false;
+    }
+    let v5 = v1.name;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    return true;
+  }
   function safeParse(value) {
     let issues;
     let v1 = value;
@@ -35,9 +50,24 @@ const User_validator = /*#__PURE__*/ (() => {
     }
     return { success: true, data: v1 };
   }
-  return { safeParse: safeParse };
+  return { is: is, safeParse: safeParse };
 })();
 const User_validator_1 = /*#__PURE__*/ (() => {
+  function is(value) {
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      return false;
+    }
+    let v3 = v1.id;
+    if (typeof v3 !== "string") {
+      return false;
+    }
+    let v5 = v1.name;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    return true;
+  }
   function safeParse(value) {
     let issues;
     let v1 = value;
@@ -60,12 +90,13 @@ const User_validator_1 = /*#__PURE__*/ (() => {
     }
     return { success: true, data: v1 };
   }
-  return { safeParse: safeParse };
+  return { is: is, safeParse: safeParse };
 })();
 const User = /*#__PURE__*/ (() => {
   const __construct = Symbol();
   return class User {
     constructor(input, token, validated) { const state = token === true || validated === true ? input : (() => { const result = User_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this["id"] = state["id"]; this["name"] = state["name"]; }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance["id"] = state["id"]; instance["name"] = state["name"]; return instance; }
   };
 })();
 const parseUser_validator = /*#__PURE__*/ (() => {
@@ -307,6 +338,9 @@ const OrderBase_validator_1 = /*#__PURE__*/ (() => {
 })();
 const OrderBase = /*#__PURE__*/ (() => {
   const __construct = Symbol();
+  const __managed0 = Symbol();
+  const __managed1 = Symbol();
+  const __managed2 = Symbol();
   const OrderBase_update_1 = (function update(value, patch) {
   let out = value;
   if (patch !== undefined) {
@@ -325,19 +359,26 @@ const OrderBase = /*#__PURE__*/ (() => {
   return out;
 });
   return class OrderBase {
-    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : (() => { const result = OrderBase_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this["id"] = state["id"]; this["status"] = state["status"]; this["shipping"] = state["shipping"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
+    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : (() => { const result = OrderBase_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this[__managed0] = state["id"]; this[__managed1] = state["status"]; this[__managed2] = state["shipping"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance[__managed0] = state["id"]; instance[__managed1] = state["status"]; instance[__managed2] = state["shipping"]; Object.defineProperty(instance, "__jitEvents", { value: [], writable: true }); return instance; }
     static create(input) { return new this(input, __construct); }
     static hydrate(state) { const result = OrderBase_validator_1.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true); }
+    get ["id"]() { return this[__managed0]; }
+    set ["id"](value) { throw new TypeError("Field id is readonly"); }
+    get ["status"]() { return this[__managed1]; }
+    set ["status"](value) { throw new TypeError("Field status is readonly"); }
+    get ["shipping"]() { return this[__managed2]; }
+    set ["shipping"](value) { throw new TypeError("Field shipping is readonly"); }
     identity() { return this["id"]; }
     sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this["id"], other["id"]); }
     update(patch) { let changed = false;
 if (patch.status !== undefined) {
   const next = patch.status;
-  if (next !== this.status) { this.status = next; changed = true; }
+  if (next !== this[__managed1]) { this[__managed1] = next; changed = true; }
 }
 if (patch.shipping !== undefined) {
-  const next = OrderBase_update_1(this.shipping, patch.shipping);
-  if (next !== this.shipping) { this.shipping = next; changed = true; }
+  const next = OrderBase_update_1(this[__managed2], patch.shipping);
+  if (next !== this[__managed2]) { this[__managed2] = next; changed = true; }
 }
 if (!changed) return; }
     raise(event) { this.__jitEvents.push(event); }
@@ -347,5 +388,566 @@ if (!changed) return; }
   };
 })();
 export { OrderBase };
+"
+`;
+
+exports[`JIT AOT generate > snapshots reconstructive plain, DDD and lifecycle class layouts > reconstructive runtime class layouts 1`] = `
+"// Generated by jit — do not edit.
+const __hashCache = new WeakMap();
+class JITValidationError extends Error {
+  constructor(issues) {
+    const first = issues[0];
+    const path = first ? first.path.map((segment, index) => typeof segment === "number" ? "[" + segment + "]" : (index === 0 ? "" : ".") + String(segment)).join("") : "";
+    super(first ? (path === "" ? "" : path + ": ") + first.message : "validation failed");
+    this.name = "JITValidationError";
+    this.code = "VALIDATION_FAILED";
+    this.issues = issues;
+  }
+}
+function __hashNumber(value) { return value | 0; }
+function __hashBoolean(value) { return value ? 1 : 0; }
+function __hashBigInt(value) { return Number(value & 0xffffffffn) | 0; }
+function __hashString(value) {
+  let hash = 0;
+  for (let i = 0, len = value.length; i < len; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
+function __hashUnknown(value) {
+  switch (typeof value) {
+    case "string": return __hashString(value);
+    case "number": return __hashNumber(value);
+    case "boolean": return __hashBoolean(value);
+    case "bigint": return __hashBigInt(value);
+    case "undefined": return 0;
+    case "symbol": return __hashString(String(value));
+    case "object": return value === null ? 1 : __hashString(Object.prototype.toString.call(value));
+    case "function": return __hashString("function");
+  }
+}
+function __combineHash(left, right) { return ((left << 5) - left + right) | 0; }
+const Plain_validator = /*#__PURE__*/ (() => {
+  function is(value) {
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      return false;
+    }
+    let v3 = v1.id;
+    if (typeof v3 !== "string") {
+      return false;
+    }
+    let v5 = v1.name;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    let v7 = v1.age;
+    if (typeof v7 !== "number") {
+      return false;
+    }
+    return true;
+  }
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+    } else {
+      let v3 = v1.id;
+      if (typeof v3 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+      } else {
+      }
+      let v5 = v1.name;
+      if (typeof v5 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+      } else {
+      }
+      let v7 = v1.age;
+      if (typeof v7 !== "number") {
+        (issues ||= [])[issues.length] = { path: ["age"], code: "expected_number", expected: "number", message: "expected number", received: typeof v7 };
+      } else {
+      }
+    }
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: v1 };
+  }
+  return { is: is, safeParse: safeParse };
+})();
+const Plain_validator_1 = /*#__PURE__*/ (() => {
+  function is(value) {
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      return false;
+    }
+    let v3 = v1.id;
+    if (typeof v3 !== "string") {
+      return false;
+    }
+    let v5 = v1.name;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    let v7 = v1.age;
+    if (typeof v7 !== "number") {
+      return false;
+    }
+    return true;
+  }
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+    } else {
+      let v3 = v1.id;
+      if (typeof v3 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+      } else {
+      }
+      let v5 = v1.name;
+      if (typeof v5 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+      } else {
+      }
+      let v7 = v1.age;
+      if (typeof v7 !== "number") {
+        (issues ||= [])[issues.length] = { path: ["age"], code: "expected_number", expected: "number", message: "expected number", received: typeof v7 };
+      } else {
+      }
+    }
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: v1 };
+  }
+  return { is: is, safeParse: safeParse };
+})();
+const Plain = /*#__PURE__*/ (() => {
+  const __construct = Symbol();
+  return class Plain {
+    constructor(input, token, validated) { const state = token === true || validated === true ? input : (() => { const result = Plain_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this["id"] = state["id"]; this["name"] = state["name"]; this["age"] = state["age"]; }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance["id"] = state["id"]; instance["name"] = state["name"]; instance["age"] = state["age"]; return instance; }
+  };
+})();
+const User_validator = /*#__PURE__*/ (() => {
+  function is(value) {
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      return false;
+    }
+    let v3 = v1.id;
+    if (typeof v3 !== "string") {
+      return false;
+    }
+    let v5 = v1.name;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    return true;
+  }
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+    } else {
+      let v3 = v1.id;
+      if (typeof v3 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+      } else {
+      }
+      let v5 = v1.name;
+      if (typeof v5 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+      } else {
+      }
+    }
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: v1 };
+  }
+  return { is: is, safeParse: safeParse };
+})();
+const User_validator_1 = /*#__PURE__*/ (() => {
+  function is(value) {
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      return false;
+    }
+    let v3 = v1.id;
+    if (typeof v3 !== "string") {
+      return false;
+    }
+    let v5 = v1.name;
+    if (typeof v5 !== "string") {
+      return false;
+    }
+    return true;
+  }
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+    } else {
+      let v3 = v1.id;
+      if (typeof v3 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v3 };
+      } else {
+      }
+      let v5 = v1.name;
+      if (typeof v5 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["name"], code: "expected_string", expected: "string", message: "expected string", received: typeof v5 };
+      } else {
+      }
+    }
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: v1 };
+  }
+  return { is: is, safeParse: safeParse };
+})();
+const User = /*#__PURE__*/ (() => {
+  const __construct = Symbol();
+  const __managed0 = Symbol();
+  const __managed1 = Symbol();
+  return class User {
+    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : (() => { const result = User_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this[__managed0] = state["id"]; this[__managed1] = state["name"]; }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance[__managed0] = state["id"]; instance[__managed1] = state["name"]; return instance; }
+    static create(input) { return new this(input, __construct); }
+    static hydrate(state) { const result = User_validator_1.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true); }
+    get ["id"]() { return this[__managed0]; }
+    set ["id"](value) { throw new TypeError("Field id is readonly"); }
+    get ["name"]() { return this[__managed1]; }
+    set ["name"](value) { throw new TypeError("Field name is readonly"); }
+    identity() { return this["id"]; }
+    sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this["id"], other["id"]); }
+  };
+})();
+const UserId_validator = /*#__PURE__*/ (() => {
+  const __v0 = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
+  function is(value) {
+    let v1 = value;
+    if (typeof v1 !== "string") {
+      return false;
+    }
+    if (!__v0.test(v1)) {
+      return false;
+    }
+    return true;
+  }
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    if (typeof v1 !== "string") {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_string", expected: "string", message: "expected string", received: typeof v1 };
+    } else {
+      if (!__v0.test(v1)) {
+        (issues ||= [])[issues.length] = { path: [], code: "invalid_format", expected: "uuid", message: "expected a valid uuid" };
+      }
+    }
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: v1 };
+  }
+  return { is: is, safeParse: safeParse };
+})();
+const UserId_validator_1 = /*#__PURE__*/ (() => {
+  const __v0 = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
+  function is(value) {
+    let v1 = value;
+    if (typeof v1 !== "string") {
+      return false;
+    }
+    if (!__v0.test(v1)) {
+      return false;
+    }
+    return true;
+  }
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    if (typeof v1 !== "string") {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_string", expected: "string", message: "expected string", received: typeof v1 };
+    } else {
+      if (!__v0.test(v1)) {
+        (issues ||= [])[issues.length] = { path: [], code: "invalid_format", expected: "uuid", message: "expected a valid uuid" };
+      }
+    }
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: v1 };
+  }
+  return { is: is, safeParse: safeParse };
+})();
+const UserId_hash = /*#__PURE__*/ (() => {
+  const compute = (function hash(value) {
+    let h = __hashString(value);
+    return h;
+  });
+  return (value) => {
+    if ((typeof value === "object" && value !== null) || typeof value === "function") {
+      const cached = __hashCache.get(value);
+      if (cached !== undefined) return cached;
+      const hash = compute(value);
+      __hashCache.set(value, hash);
+      return hash;
+    }
+    return compute(value);
+  };
+})();
+const UserId = /*#__PURE__*/ (() => {
+  const __construct = Symbol();
+  const UserId_equal = (function equal(l, r) {
+  if (l === r) {
+    return true;
+  }
+  if (l !== r) {
+    return false;
+  }
+  return true;
+});
+  return class UserId {
+    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : (() => { const result = UserId_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this.value = state; Object.freeze(this); }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance.value = state; Object.freeze(instance); return instance; }
+    static create(input) { return new this(input, __construct); }
+    static hydrate(state) { const result = UserId_validator_1.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true); }
+    toJSON() { return this.value; }
+    equals(other) { return other instanceof UserId && UserId_equal(this.value, other.value); }
+    hashCode() { return UserId_hash(this.value); }
+  };
+})();
+const Order_validator = /*#__PURE__*/ (() => {
+  const __v0 = UserId;
+  const __v1 = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
+  const __v2 = (() => new Date());
+  const __v3 = null;
+  const __v4 = 0;
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    let o2 = v1;
+    let b3;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+    } else {
+      let v4 = v1.id;
+      let o5 = v4;
+      if (typeof v4 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+      } else {
+        if (!__v1.test(v4)) {
+          (issues ||= [])[issues.length] = { path: ["id"], code: "invalid_format", expected: "uuid", message: "expected a valid uuid" };
+        }
+      }
+      o5 = v4;
+      o5 = __v0.__jitMaterialize(o5);
+      let v6 = v1.status;
+      if (typeof v6 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["status"], code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
+      } else {
+      }
+      let v8 = v1.createdAt;
+      let o9 = v8;
+      if (v8 === undefined) {
+        o9 = __v2();
+      } else {
+        if (!(v8 instanceof Date) || v8.getTime() !== v8.getTime()) {
+          (issues ||= [])[issues.length] = { path: ["createdAt"], code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+        } else {
+        }
+        o9 = v8;
+      }
+      let v10 = v1.updatedAt;
+      let o11 = v10;
+      if (v10 === undefined) {
+        o11 = __v3;
+      } else if (v10 === null) {
+        o11 = v10;
+      } else {
+        if (!(v10 instanceof Date) || v10.getTime() !== v10.getTime()) {
+          (issues ||= [])[issues.length] = { path: ["updatedAt"], code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+        } else {
+        }
+        o11 = v10;
+      }
+      let v12 = v1.deletedAt;
+      let o13 = v12;
+      if (v12 === undefined) {
+        o13 = __v3;
+      } else if (v12 === null) {
+        o13 = v12;
+      } else {
+        if (!(v12 instanceof Date) || v12.getTime() !== v12.getTime()) {
+          (issues ||= [])[issues.length] = { path: ["deletedAt"], code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+        } else {
+        }
+        o13 = v12;
+      }
+      let v14 = v1.version;
+      let o15 = v14;
+      if (v14 === undefined) {
+        o15 = __v4;
+      } else {
+        if (typeof v14 !== "number") {
+          (issues ||= [])[issues.length] = { path: ["version"], code: "expected_number", expected: "number", message: "expected number", received: typeof v14 };
+        } else {
+          if (!Number.isInteger(v14)) {
+            (issues ||= [])[issues.length] = { path: ["version"], code: "not_integer", expected: "integer", message: "expected an integer" };
+          }
+        }
+        o15 = v14;
+      }
+      b3 = { "id": o5, "status": v6, "createdAt": o9, "updatedAt": o11, "deletedAt": o13, "version": o15 };
+    }
+    if (b3 === undefined) { b3 = v1; }
+    o2 = b3;
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: o2 };
+  }
+  return { safeParse: safeParse };
+})();
+const Order_validator_1 = /*#__PURE__*/ (() => {
+  const __v0 = UserId;
+  const __v1 = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
+  function safeParse(value) {
+    let issues;
+    let v1 = value;
+    let o2 = v1;
+    let b3;
+    if (v1 === null || typeof v1 !== "object" || Array.isArray(v1)) {
+      (issues ||= [])[issues.length] = { path: [], code: "expected_object", expected: "object", message: "expected object", received: typeof v1 };
+    } else {
+      let v4 = v1.id;
+      let o5 = v4;
+      if (typeof v4 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["id"], code: "expected_string", expected: "string", message: "expected string", received: typeof v4 };
+      } else {
+        if (!__v1.test(v4)) {
+          (issues ||= [])[issues.length] = { path: ["id"], code: "invalid_format", expected: "uuid", message: "expected a valid uuid" };
+        }
+      }
+      o5 = v4;
+      o5 = __v0.__jitMaterialize(o5);
+      let v6 = v1.status;
+      if (typeof v6 !== "string") {
+        (issues ||= [])[issues.length] = { path: ["status"], code: "expected_string", expected: "string", message: "expected string", received: typeof v6 };
+      } else {
+      }
+      let v8 = v1.createdAt;
+      let o9 = v8;
+      if (!(v8 instanceof Date) || v8.getTime() !== v8.getTime()) {
+        (issues ||= [])[issues.length] = { path: ["createdAt"], code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+      } else {
+      }
+      o9 = v8;
+      let v10 = v1.updatedAt;
+      let o11 = v10;
+      if (v10 !== null) {
+        if (!(v10 instanceof Date) || v10.getTime() !== v10.getTime()) {
+          (issues ||= [])[issues.length] = { path: ["updatedAt"], code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+        } else {
+        }
+        o11 = v10;
+      }
+      let v12 = v1.deletedAt;
+      let o13 = v12;
+      if (v12 !== null) {
+        if (!(v12 instanceof Date) || v12.getTime() !== v12.getTime()) {
+          (issues ||= [])[issues.length] = { path: ["deletedAt"], code: "invalid_date", expected: "Date", message: "expected a valid Date" };
+        } else {
+        }
+        o13 = v12;
+      }
+      let v14 = v1.version;
+      let o15 = v14;
+      if (typeof v14 !== "number") {
+        (issues ||= [])[issues.length] = { path: ["version"], code: "expected_number", expected: "number", message: "expected number", received: typeof v14 };
+      } else {
+        if (!Number.isInteger(v14)) {
+          (issues ||= [])[issues.length] = { path: ["version"], code: "not_integer", expected: "integer", message: "expected an integer" };
+        }
+      }
+      o15 = v14;
+      b3 = { "id": o5, "status": v6, "createdAt": o9, "updatedAt": o11, "deletedAt": o13, "version": o15 };
+    }
+    if (b3 === undefined) { b3 = v1; }
+    o2 = b3;
+    if (issues !== undefined) {
+      return { success: false, issues: issues };
+    }
+    return { success: true, data: o2 };
+  }
+  return { safeParse: safeParse };
+})();
+const Order = /*#__PURE__*/ (() => {
+  const __construct = Symbol();
+  const __managed0 = Symbol();
+  const __managed1 = Symbol();
+  const __managed2 = Symbol();
+  const __managed3 = Symbol();
+  const __managed4 = Symbol();
+  const __managed5 = Symbol();
+  const Order_identity_equal = (function equal(l, r) {
+  if (l === r) {
+    return true;
+  }
+  if (l !== r) {
+    return false;
+  }
+  return true;
+});
+  return class Order {
+    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : (() => { const result = Order_validator.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); this[__managed0] = state["id"]; this[__managed1] = state["status"]; this[__managed2] = state["createdAt"]; this[__managed3] = state["updatedAt"]; this[__managed4] = state["deletedAt"]; this[__managed5] = state["version"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance[__managed0] = state["id"]; instance[__managed1] = state["status"]; instance[__managed2] = state["createdAt"]; instance[__managed3] = state["updatedAt"]; instance[__managed4] = state["deletedAt"]; instance[__managed5] = state["version"]; Object.defineProperty(instance, "__jitEvents", { value: [], writable: true }); return instance; }
+    static create(input) { return new this(input, __construct); }
+    static hydrate(state) { const result = Order_validator_1.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true); }
+    get ["id"]() { return this[__managed0]; }
+    set ["id"](value) { throw new TypeError("Field id is readonly"); }
+    get ["status"]() { return this[__managed1]; }
+    set ["status"](value) { throw new TypeError("Field status is readonly"); }
+    get ["createdAt"]() { return this[__managed2]; }
+    set ["createdAt"](value) { throw new TypeError("Field createdAt is readonly"); }
+    get ["updatedAt"]() { return this[__managed3]; }
+    set ["updatedAt"](value) { throw new TypeError("Field updatedAt is readonly"); }
+    get ["deletedAt"]() { return this[__managed4]; }
+    set ["deletedAt"](value) { throw new TypeError("Field deletedAt is readonly"); }
+    get ["version"]() { return this[__managed5]; }
+    set ["version"](value) { throw new TypeError("Field version is readonly"); }
+    identity() { return this["id"]; }
+    sameIdentity(other) { return typeof other === "object" && other !== null && Order_identity_equal(this["id"].value, other["id"].value); }
+    update(patch) { let changed = false;
+if (patch.id !== undefined) {
+  const next = patch.id;
+  if (next !== this[__managed0]) { this[__managed0] = next; changed = true; }
+}
+if (patch.status !== undefined) {
+  const next = patch.status;
+  if (next !== this[__managed1]) { this[__managed1] = next; changed = true; }
+}
+if (!changed) return;
+const now = new Date();
+this[__managed3] = now;
+this[__managed5] = this[__managed5] + 1; }
+    raise(event) { this.__jitEvents.push(event); }
+    peekEvents() { return this.__jitEvents.slice(); }
+    pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }
+    async commit(publisher) { const pending = this.__jitEvents; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); this.__jitEvents.splice(0, pending.length); }
+    softDelete() { if (this[__managed4] !== null) return; const now = new Date(); this[__managed4] = now; this[__managed3] = now; this[__managed5] = this[__managed5] + 1; }
+    restore() { if (this[__managed4] === null) return; this[__managed4] = null; const now = new Date(); this[__managed3] = now; this[__managed5] = this[__managed5] + 1; }
+    get isDeleted() { return this[__managed4] !== null; }
+    touch() { const now = new Date(); this[__managed3] = now; this[__managed5] = this[__managed5] + 1; }
+  };
+})();
+export { Plain, User, UserId, Order };
 "
 `;

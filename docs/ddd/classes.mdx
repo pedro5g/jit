@@ -33,8 +33,10 @@ never regenerates missing persisted values. Both preserve the subclass type
 when called on a derived class.
 
 Use `.factories({ create, hydrate })` to enter factory mode and configure its
-names. At least one factory must remain enabled. Use `.accessors(...)` for
-visibility/storage policy and `.extends(...)` for capabilities such as
+names. At least one factory must remain enabled. Create accepts optional
+managed lifecycle fields and preserves supplied values; hydrate accepts the
+complete persisted state. Use `.accessors(...)` for legacy visibility/storage
+policy and `.extends(...)` for capabilities such as
 `JIT.class.equals`, `hashCode`, `diff`, `clone` and `with`, and for
 application-owned methods. Compiled helpers and extension methods live on the
 prototype, never per instance.
@@ -65,7 +67,7 @@ same function.
 
 `.extends()` is stateful: each call sees the fields, built-in members,
 capabilities, and custom members accumulated by previous calls. Existing
-members are never silently replaced. Use `JIT.overwrite(...)` on the specific
+members are never silently replaced. Use `JIT.class.override(...)` on the specific
 member when replacement is intentional:
 
 ```ts
@@ -76,14 +78,14 @@ const NamedUser = User.extends({
 });
 
 const UpperUser = NamedUser.extends({
-  label: JIT.overwrite(function label() {
+  label: JIT.class.override(function label() {
     return this.name.toUpperCase();
   }),
 });
 ```
 
 The marker is declaration-only. It disappears before class compilation, so
-the generated method has no overwrite check or dispatch. Overwriting a
+the generated method has no override check or dispatch. Overriding a
 managed lifecycle field is also declaration-only and the final schema is
 rechecked against its capability contract.
 
@@ -94,6 +96,11 @@ method through `Function#toString`, because moving source would lose its lexical
 environment and could silently change behavior. A future AOT form requires a
 declarative method IR or an explicit external-module binding contract.
 
+Use a method shorthand or `function` when an extension needs `this`. An arrow
+function keeps JavaScript's lexical `this`; the runtime does not bind or wrap
+it, and TypeScript cannot safely infer a future class surface into an earlier
+generic descriptor expression.
+
 `pnpm bench:validate` measures a custom prototype call at 5.76 ns against
 5.44 ns for the equivalent handwritten class method (Node 22.17.1, Ryzen 7
 5800H), with about 6.1 sampled bytes per call for both. There is no extension
@@ -103,3 +110,66 @@ capabilities retain their normal runtime/AOT benchmarks.
 
 `JIT.class.abstract(schema)` is an abstract constructor-first base. Configure
 factories explicitly when its concrete subclasses should be factory-built.
+
+## DDD field surfaces
+
+Entity and Aggregate Root fields use stable internal slots and prototype
+getters. Their public surface is readonly: domain methods can mutate the
+backing state through the internal `this` surface, while ordinary assignment
+is rejected by TypeScript and throws at runtime. Plain `JIT.class` remains
+public and writable unless a member descriptor changes it.
+
+Schema fields can be added by an extension and participate in every boundary:
+
+```ts
+const User = JIT.ddd.entity(UserSchema, { id: "id" }).extends({
+  age: JIT.class.public(JIT.int().min(0)),
+  secret: JIT.class.private(JIT.string()),
+});
+```
+
+`protected` and `private` hide members from the consumer type while keeping
+them available to the generated internal surface. `getter()` and `setter()`
+compose with a field descriptor and custom callbacks are installed once on the
+prototype. `noConstructor(schema.default(...))` creates transient/generated
+state excluded from constructor, create, hydrate, and wire input.
+
+`JIT.class.method({ input, output })` reuses the FunctionSchema validator and
+installs one direct prototype method. `JIT.class.factory("make", callback)`
+receives validated, materialized data and `ctx.construct(state)` for trusted
+construction; arbitrary callbacks are runtime bindings and explicitly skip
+standalone AOT generation.
+
+`JIT.class.mixin({ requires, fields, methods })` feeds the same member resolver.
+Mixin methods are contextualized with the mixin's own fields and required host
+fields; applying the mixin also adds its fields to the host's EffectiveSchema.
+Runtime Type fields use their normal `Input`, `Typeof`, `Hydrate`, and `Wire`
+representations, so a scalar Value Object field can accept its scalar boundary
+value and still materialize as an object.
+
+`JIT.ddd.$extends({...})` returns an inferred local namespace while registering
+the extension in the runtime DDD registry. Built-ins remain protected. Runtime
+registration cannot mutate an already-imported TypeScript type, so global use
+also supports module augmentation:
+
+```ts
+const uuid = () => JIT.class.mixin({ fields: { id: JIT.string().uuid() } });
+
+JIT.ddd.$extends({ uuid });
+
+declare module "@jit-compiler/jit" {
+  interface DddExtensions {
+    uuid: typeof uuid;
+  }
+}
+
+JIT.ddd.uuid(); // typed through the augmentation
+```
+
+For code that should not augment a module, keep the inferred return value:
+`const DDD = JIT.ddd.$extends({ uuid }); DDD.uuid();`.
+
+Nested Runtime Types contribute a declared factory result mode and priority to
+their containing class. An explicit outer mode wins; otherwise the highest
+priority wins and equal priorities use `throw > either > tuple`. The resolved
+policy is carried by the generated artifact, not interpreted per call.

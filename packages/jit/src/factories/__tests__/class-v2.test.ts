@@ -216,37 +216,37 @@ describe("Runtime Class DDD V2", () => {
     });
     const User = JIT.ddd
       .entity(JIT.object({ id: JIT.string(), email: Email }), { id: "id" })
-      .validate({ result: "result", error: (issues) => new OuterUserError(issues) });
+      .validate({ result: "either", error: (issues) => new OuterUserError(issues) });
     const NestedOnly = JIT.ddd
       .entity(JIT.object({ id: JIT.string(), email: Email }), { id: "id" })
-      .validate({ result: "result" });
+      .validate({ result: "either" });
 
     const rejected = User.create({ id: "u_1", email: "invalid" });
 
-    expect(rejected.ok).toBe(false);
-    if (rejected.ok) throw new Error("expected a validation rejection");
+    expect(JIT.class.isFailure(rejected)).toBe(true);
+    if (!JIT.class.isFailure(rejected)) throw new Error("expected a validation rejection");
     expect(rejected.error).toBeInstanceOf(OuterUserError);
     expect((rejected.error as OuterUserError).issues).toMatchObject([{ path: ["email"] }]);
     expect(nestedErrorCalls).toBe(0);
 
     const nestedRejected = NestedOnly.create({ id: "u_1", email: "invalid" });
-    expect(nestedRejected.ok).toBe(false);
-    if (nestedRejected.ok) throw new Error("expected a nested validation rejection");
+    expect(JIT.class.isFailure(nestedRejected)).toBe(true);
+    if (!JIT.class.isFailure(nestedRejected)) throw new Error("expected a nested validation rejection");
     expect(nestedRejected.error).toBeInstanceOf(NestedEmailError);
     expect(nestedErrorCalls).toBe(1);
 
     class HigherNestedError extends Error {}
     const HighPriorityEmail = JIT.ddd.valueObject(JIT.string().email()).validate({
-      result: "result",
+      result: "either",
       error: () => new HigherNestedError(),
       priority: 1200,
     });
     const HighPriorityUser = JIT.ddd
       .entity(JIT.object({ id: JIT.string(), email: HighPriorityEmail }), { id: "id" })
-      .validate({ result: "result", error: () => new OuterUserError([]) });
+      .validate({ result: "either", error: () => new OuterUserError([]) });
     const highPriorityRejected = HighPriorityUser.create({ id: "u_1", email: "invalid" });
-    expect(highPriorityRejected.ok).toBe(false);
-    if (highPriorityRejected.ok) throw new Error("expected a high-priority nested rejection");
+    expect(JIT.class.isFailure(highPriorityRejected)).toBe(true);
+    if (!JIT.class.isFailure(highPriorityRejected)) throw new Error("expected a high-priority nested rejection");
     expect(highPriorityRejected.error).toBeInstanceOf(HigherNestedError);
   });
 });

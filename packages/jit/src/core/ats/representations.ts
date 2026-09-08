@@ -2,6 +2,7 @@ import type {
   AnyTypeSchema,
   ArraySchema,
   DefaultSchema,
+  NO_CONSTRUCTOR_FIELD_MARKER,
   NullableSchema,
   NullishSchema,
   ObjectSchema,
@@ -23,8 +24,14 @@ type SchemaOf<TSchemaLike> = TSchemaLike extends { readonly schema: infer TSchem
     ? TSchemaLike
     : never;
 
+type BoundaryFieldKey<TValue> = TValue extends {
+  readonly [TKey in typeof NO_CONSTRUCTOR_FIELD_MARKER]: true;
+}
+  ? never
+  : PropertyKey;
+
 type HydrateShape<TShape extends SchemaShape> = {
-  -readonly [TKey in keyof TShape]: HydrateSchema<TShape[TKey]>;
+  -readonly [TKey in keyof TShape as TKey & BoundaryFieldKey<TShape[TKey]>]: HydrateSchema<TShape[TKey]>;
 };
 
 type HydrateSchema<TSchema extends AnyTypeSchema> =

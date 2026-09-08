@@ -285,6 +285,10 @@ interface ClassArtifact {
   /** Schema supplied by the declaration before structural DDD resolution. */
   readonly declaredSchema?: ATS.AnyTypeSchema;
   readonly schema: ATS.AnyTypeSchema;
+  /** Creation boundary after generated/transient fields are removed. */
+  readonly creationSchema?: ATS.AnyTypeSchema;
+  /** Persistence/wire boundary after generated/transient fields are removed. */
+  readonly wireSchema?: ATS.AnyTypeSchema;
   readonly abstract: boolean;
   readonly frozen: boolean;
   readonly aggregate: boolean;
@@ -293,6 +297,17 @@ interface ClassArtifact {
   readonly capabilities: readonly string[];
   /** Effective DDD ownership and lifecycle plan, resolved before compilation. */
   readonly managedFields?: readonly ManagedFieldDescriptor[];
+  /** The boundary used by hydrate; transient class fields are excluded. */
+  readonly hydrateSchema?: ATS.AnyTypeSchema;
+  /** DDD fields use prototype accessors over stable symbol slots. */
+  readonly encapsulateFields?: boolean;
+  readonly fieldPolicies?: readonly {
+    readonly name: string;
+    readonly visibility: "public" | "protected" | "private";
+    readonly getter: boolean;
+    readonly setter: boolean;
+    readonly noConstructor: boolean;
+  }[];
   readonly lifecycle?: LifecycleDefinition;
   readonly resolvedMembers?: readonly ResolvedClassMember[];
   /** Application-owned prototype members added through `.extends({...})`. */
@@ -304,6 +319,11 @@ interface ClassArtifact {
   readonly factories: {
     readonly create: string | false;
     readonly hydrate: string | false;
+  };
+  /** Custom factory callbacks remain runtime bindings and make standalone AOT skip the class. */
+  readonly customFactories?: {
+    readonly create?: Function;
+    readonly hydrate?: Function;
   };
   readonly accessors?:
     | readonly {
@@ -328,7 +348,7 @@ interface ClassArtifact {
   readonly domainEvent?: { readonly type: string; readonly version: number };
   /** Failure policy and domain invariants, present only when configured. */
   readonly policy?: {
-    readonly result: "throw" | "result" | "tuple";
+    readonly result: "throw" | "either" | "tuple";
     readonly create: boolean;
     readonly hydrate: boolean;
     readonly maxIssues?: number;
@@ -343,6 +363,12 @@ interface ClassArtifact {
       readonly order: number;
       readonly path: readonly (string | number)[];
       readonly error: unknown;
+      readonly runtimeBinding?: boolean;
+      readonly assertion?: {
+        readonly rule: string | undefined;
+        readonly field: string | undefined;
+        readonly message: string;
+      };
     }[];
     /** One generated guard over the validated state; absent without assertions. */
     readonly assertions?: {
@@ -356,6 +382,8 @@ interface ClassArtifact {
         readonly message: string;
         readonly priority: number;
         readonly error?: unknown;
+        /** Runtime-only descriptor passed to an assertion error factory. */
+        readonly descriptor?: unknown;
       }[];
     };
   };

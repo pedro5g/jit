@@ -24,17 +24,17 @@ The choice belongs to the artifact, never to the call, so the factory's
 signature says exactly which shape a caller receives.
 
 ```ts
-const Money = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
+const Money = JIT.ddd.valueObject(MoneySchema).validate({ result: "either" });
 
 const outcome = Money.create({ amount: 10, currency: "BRL" });
-if (outcome.ok) outcome.value.amount;
-else outcome.error;
+if (JIT.class.isFailure(outcome)) outcome.error;
+else outcome.amount;
 ```
 
 | `result` | `create(input)` returns |
 | --- | --- |
 | `"throw"` (default) | the instance, or throws |
-| `"result"` | `{ ok: true; value }` or `{ ok: false; error }` |
+| `"either"` (`"result"` deprecated alias) | the instance on success or `{ ok: false; error }` on failure |
 | `"tuple"` | `[null, value]` or `[error, null]` |
 
 The tuple puts the error first so it destructures the way callers read it:
@@ -46,15 +46,16 @@ const [error, money] = JIT.ddd
   .create(input);
 ```
 
-It is `Result`, not `Either`: the shape is a discriminated union, and it does
-not imply the rest of the conventions `Either` carries with it.
+Success is unwrapped, so the common path does not allocate an outcome wrapper.
+Use `JIT.class.isFailure(value)` for the branded failure-only branch; checking
+an `error` field would be ambiguous for domain objects.
 
 Pass `error` to build your own, and `create` / `hydrate` to leave one phase on
 the built-in throwing path:
 
 ```ts
 JIT.ddd.entity(UserSchema).validate({
-  result: "result",
+  result: "either",
   maxIssues: 100,
   error: (issues) => new InvalidUser(issues),
   hydrate: false,
@@ -150,10 +151,10 @@ failure.
 | Factory | accepted input | rejected input |
 | --- | --- | --- |
 | runtime, no policy (throws) | 46 ns | 7.2 µs |
-| runtime, `result: "result"` | 43 ns | 6.6 µs |
+| runtime, `result: "either"` | 43 ns | 6.6 µs |
 | runtime, result + one assertion | 49 ns | 6.8 µs |
 | AOT, no policy | 46 ns | — |
-| AOT, `result: "result"` | 58 ns | 5.9 µs |
+| AOT, `result: "either"` | 58 ns | 5.9 µs |
 | AOT, result + one assertion | 49 ns | 5.8 µs |
 
 The stable accepted-path samples keep the configured assertion close to the

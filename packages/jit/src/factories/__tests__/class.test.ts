@@ -386,14 +386,15 @@ describe("JIT.class", () => {
     expect(() => (JIT.ddd.entity as (schema: unknown) => unknown)(AmbiguousSchema)).toThrow(
       /multiple unique identifiers/i
     );
-    expect(() => (JIT.ddd.entity as (schema: unknown) => unknown)(PlainSchema)).toThrow(/no unique identifier/i);
+    const Pending = JIT.ddd.entity(PlainSchema);
+    expect((Pending as unknown as { readonly create?: unknown }).create).toBeUndefined();
     expect(JIT.ddd.entity(AmbiguousSchema, { id: "id" }).schema).toBeDefined();
     expect(JIT.ddd.entity(PlainSchema, { id: "id" }).schema).toBeDefined();
     if (Object.is(1, 2)) {
       // @ts-expect-error ambiguous identifier metadata requires an explicit field
       JIT.ddd.entity(AmbiguousSchema);
-      // @ts-expect-error schemas without identifier metadata require an explicit field
-      JIT.ddd.entity(PlainSchema);
+      // @ts-expect-error pending entities do not expose factories before an identifier extension
+      Pending.create({ id: "u_1" });
     }
   });
 
@@ -414,7 +415,7 @@ describe("JIT.class", () => {
 
     it("reports a rejected input in the shape the artifact declared", () => {
       const Throwing = JIT.ddd.valueObject(MoneySchema).validate();
-      const Result = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
+      const Result = JIT.ddd.valueObject(MoneySchema).validate({ result: "either" });
       const Tuple = JIT.ddd.valueObject(MoneySchema).validate({ result: "tuple" });
 
       expect(() => Throwing.create(invalid)).toThrow(JITValidationError);
@@ -422,10 +423,11 @@ describe("JIT.class", () => {
 
       const ok = Result.create(valid);
       const bad = Result.create(invalid);
-      expect(ok.ok).toBe(true);
-      expect(ok.ok === true && ok.value.amount).toBe(10);
-      expect(bad.ok).toBe(false);
-      expect(bad.ok === false && bad.error).toBeInstanceOf(JITValidationError);
+      expect(JIT.class.isFailure(ok)).toBe(false);
+      if (JIT.class.isFailure(ok)) throw new Error("expected a successful either value");
+      expect(ok.amount).toBe(10);
+      expect(JIT.class.isFailure(bad)).toBe(true);
+      if (JIT.class.isFailure(bad)) expect(bad.error).toBeInstanceOf(JITValidationError);
 
       const [noError, value] = Tuple.create(valid);
       const [error, noValue] = Tuple.create(invalid);
@@ -435,7 +437,11 @@ describe("JIT.class", () => {
       expect(noValue).toBeNull();
 
       expectTypeOf(Throwing.create(valid)).toHaveProperty("amount");
-      expectTypeOf(Result.create(valid)).toHaveProperty("ok");
+      if (Object.is(1, 2)) {
+        const result = Result.create(valid);
+        if (JIT.class.isFailure(result)) throw new Error("expected a successful either value");
+        expectTypeOf(result).toHaveProperty("amount");
+      }
       expectTypeOf(Tuple.create(valid)).toHaveProperty(0);
     });
 
@@ -453,7 +459,7 @@ describe("JIT.class", () => {
     });
 
     it("fixes validation policy exactly once", () => {
-      const Money = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
+      const Money = JIT.ddd.valueObject(MoneySchema).validate({ result: "either" });
 
       if (Object.is(1, 2)) {
         // @ts-expect-error validation is a singleton artifact policy
@@ -463,27 +469,28 @@ describe("JIT.class", () => {
     });
 
     it("covers hydration and lets a phase keep the built-in behavior", () => {
-      const Both = JIT.ddd.valueObject(MoneySchema).validate({ result: "result" });
-      const CreateOnly = JIT.ddd.valueObject(MoneySchema).validate({ result: "result", hydrate: false });
+      const Both = JIT.ddd.valueObject(MoneySchema).validate({ result: "either" });
+      const CreateOnly = JIT.ddd.valueObject(MoneySchema).validate({ result: "either", hydrate: false });
 
-      expect(Both.hydrate(invalid).ok).toBe(false);
-      expect(Both.hydrate(valid).ok).toBe(true);
+      expect(JIT.class.isFailure(Both.hydrate(invalid))).toBe(true);
+      expect(JIT.class.isFailure(Both.hydrate(valid))).toBe(false);
       // hydrate was left out of the policy, so it keeps throwing.
       expect(() => CreateOnly.hydrate(invalid)).toThrow(JITValidationError);
-      expect(CreateOnly.create(invalid).ok).toBe(false);
+      expect(JIT.class.isFailure(CreateOnly.create(invalid))).toBe(true);
     });
 
     it("builds the error the artifact configured", () => {
       class InvalidMoney extends Error {}
       const Money = JIT.ddd
         .valueObject(MoneySchema)
-        .validate({ result: "result", error: (issues) => new InvalidMoney(issues[0]?.message) });
+        .validate({ result: "either", error: (issues) => new InvalidMoney(issues[0]?.message) });
       const rejected = Money.create(invalid);
 
-      expect(rejected.ok).toBe(false);
-      expect(rejected.ok === false && rejected.error).toBeInstanceOf(InvalidMoney);
-      expectTypeOf(rejected).toHaveProperty("ok");
-      if (rejected.ok === false) expectTypeOf(rejected.error).toEqualTypeOf<InvalidMoney>();
+      expect(JIT.class.isFailure(rejected)).toBe(true);
+      if (JIT.class.isFailure(rejected)) {
+        expect(rejected.error).toBeInstanceOf(InvalidMoney);
+        expectTypeOf(rejected.error).toEqualTypeOf<InvalidMoney>();
+      }
     });
 
     it("compiles a domain invariant from the shared condition builder", () => {
@@ -509,16 +516,16 @@ describe("JIT.class", () => {
       class NegativeMoney extends Error {}
       const Money = JIT.ddd
         .valueObject(MoneySchema)
-        .validate({ result: "result" })
+        .validate({ result: "either" })
         .assert((query) => query.gte("amount", 0), {
           rule: "non-negative",
           error: () => new NegativeMoney("negative"),
         });
       const rejected = Money.create({ amount: -1, currency: "BRL" });
 
-      expect(rejected.ok).toBe(false);
-      expect(rejected.ok === false && rejected.error).toBeInstanceOf(NegativeMoney);
-      expect(Money.create(valid).ok).toBe(true);
+      expect(JIT.class.isFailure(rejected)).toBe(true);
+      if (JIT.class.isFailure(rejected)) expect(rejected.error).toBeInstanceOf(NegativeMoney);
+      expect(JIT.class.isFailure(Money.create(valid))).toBe(false);
     });
 
     it("selects one deterministic error candidate after collecting assertion issues", () => {
@@ -530,32 +537,35 @@ describe("JIT.class", () => {
       class AssertionError extends Error {}
       const Default = JIT.ddd
         .valueObject(JIT.object({ amount: JIT.number(), fee: JIT.number() }))
-        .validate({ result: "result", error: (issues) => new OuterError(issues) })
+        .validate({ result: "either", error: (issues) => new OuterError(issues) })
         .assert((query) => query.gte("amount", 0), { error: () => new AssertionError("assertion") })
         .assert((query) => query.gte("fee", 0), { error: () => new AssertionError("assertion-2") });
       const HigherAssertion = JIT.ddd
         .valueObject(JIT.object({ amount: JIT.number() }))
-        .validate({ result: "result", error: (issues) => new OuterError(issues), priority: 1000 })
+        .validate({ result: "either", error: (issues) => new OuterError(issues), priority: 1000 })
         .assert((query) => query.gte("amount", 0), { error: () => new AssertionError("assertion"), priority: 1200 });
 
       const outer = Default.create({ amount: -1, fee: -2 });
       const assertion = HigherAssertion.create({ amount: -1 });
 
-      expect(outer.ok === false && outer.error).toBeInstanceOf(OuterError);
-      expect(assertion.ok === false && assertion.error).toBeInstanceOf(AssertionError);
-      expect(outer.ok === false && outer.error instanceof OuterError && outer.error.issues).toHaveLength(2);
+      expect(JIT.class.isFailure(outer)).toBe(true);
+      expect(JIT.class.isFailure(assertion)).toBe(true);
+      if (JIT.class.isFailure(outer)) {
+        expect(outer.error).toBeInstanceOf(OuterError);
+        expect(outer.error instanceof OuterError && outer.error.issues).toHaveLength(2);
+      }
     });
 
     it("collects every invariant that did not hold, as issues", () => {
       const Money = JIT.ddd
         .valueObject(JIT.object({ amount: JIT.number(), fee: JIT.number() }))
-        .validate({ result: "result" })
+        .validate({ result: "either" })
         .assert((query) => query.gte("amount", 0), { code: "negative_amount", message: "Amount cannot be negative" })
         .assert((query) => query.gte("fee", 0), { code: "negative_fee" });
       const rejected = Money.create({ amount: -1, fee: -2 });
 
-      expect(rejected.ok).toBe(false);
-      if (rejected.ok !== false) throw new Error("expected a rejection");
+      expect(JIT.class.isFailure(rejected)).toBe(true);
+      if (!JIT.class.isFailure(rejected)) throw new Error("expected a rejection");
       const error = rejected.error as DomainAssertionError;
       // Independent invariants are independent answers, the way sibling schema
       // failures are, and they arrive in the same shape.
@@ -569,30 +579,30 @@ describe("JIT.class", () => {
         },
       ]);
       expect(error.rule).toBe("amount");
-      expect(Money.create({ amount: 0, fee: 0 }).ok).toBe(true);
+      expect(JIT.class.isFailure(Money.create({ amount: 0, fee: 0 }))).toBe(false);
     });
 
     it("does not run an assertion over data the schema already rejected", () => {
       const Money = JIT.ddd
         .valueObject(JIT.object({ amount: JIT.number() }))
-        .validate({ result: "result" })
+        .validate({ result: "either" })
         .assert((query) => query.gte("amount", 0));
       const rejected = Money.create({ amount: "x" } as never);
 
-      expect(rejected.ok).toBe(false);
+      expect(JIT.class.isFailure(rejected)).toBe(true);
       // A domain invariant over a value that is not even a number would be
       // noise; only the schema failure is reported.
-      expect(rejected.ok === false && rejected.error).toBeInstanceOf(JITValidationError);
+      if (JIT.class.isFailure(rejected)) expect(rejected.error).toBeInstanceOf(JITValidationError);
     });
 
     it("collects every schema failure a factory input has", () => {
       const User = JIT.ddd
         .valueObject(JIT.object({ name: JIT.string().min(2, "Name is too short"), email: JIT.string().email() }))
-        .validate({ result: "result" });
+        .validate({ result: "either" });
       const rejected = User.create({ name: "", email: "x" });
 
-      expect(rejected.ok).toBe(false);
-      if (rejected.ok !== false) throw new Error("expected a rejection");
+      expect(JIT.class.isFailure(rejected)).toBe(true);
+      if (!JIT.class.isFailure(rejected)) throw new Error("expected a rejection");
       // The factory uses the ordinary validation plan, so it reports what
       // safeParse reports — not the first failure it happened to reach.
       expect((rejected.error as JITValidationError).issues.map((issue) => issue.path)).toEqual([["name"], ["email"]]);
@@ -612,12 +622,12 @@ describe("JIT.class", () => {
             status: JIT.string(),
           })
         )
-        .validate({ result: "result", maxIssues: 2 });
+        .validate({ result: "either", maxIssues: 2 });
       const rejected = User.create({ name: 1, email: 2, status: 3 } as never);
       const hydrated = User.hydrate({ name: 1, email: 2, status: 3 } as never);
 
-      expect(rejected.ok === false && (rejected.error as JITValidationError).issues).toHaveLength(2);
-      expect(hydrated.ok === false && (hydrated.error as JITValidationError).issues).toHaveLength(2);
+      expect(JIT.class.isFailure(rejected) && (rejected.error as JITValidationError).issues).toHaveLength(2);
+      expect(JIT.class.isFailure(hydrated) && (hydrated.error as JITValidationError).issues).toHaveLength(2);
       expect(() => JIT.ddd.valueObject(MoneySchema).validate({ maxIssues: 0 })).toThrow(/positive safe integer/);
     });
 
@@ -627,11 +637,11 @@ describe("JIT.class", () => {
         .assert((query) => query.gte("a", 0))
         .assert((query) => query.gte("b", 0))
         .assert((query) => query.gte("c", 0))
-        .validate({ result: "result", maxIssues: 2 });
+        .validate({ result: "either", maxIssues: 2 });
       const rejected = Values.create({ a: -1, b: -1, c: -1 });
 
-      expect(rejected.ok).toBe(false);
-      if (rejected.ok) throw new Error("expected an assertion rejection");
+      expect(JIT.class.isFailure(rejected)).toBe(true);
+      if (!JIT.class.isFailure(rejected)) throw new Error("expected an assertion rejection");
       expect((rejected.error as DomainAssertionError).issues).toHaveLength(2);
     });
 
@@ -646,16 +656,17 @@ describe("JIT.class", () => {
     it("applies the policy to entities and their subclasses", () => {
       const UserBase = JIT.ddd
         .entity(JIT.object({ id: JIT.string(), age: JIT.number() }), { id: "id" })
-        .validate({ result: "result" })
+        .validate({ result: "either" })
         .assert((query) => query.gte("age", 18), { rule: "adult" });
       class User extends UserBase {}
 
       const ok = User.create({ id: "u_1", age: 20 });
       const tooYoung = User.create({ id: "u_1", age: 10 });
 
-      expect(ok.ok === true && ok.value).toBeInstanceOf(User);
-      expect(tooYoung.ok).toBe(false);
-      expect(tooYoung.ok === false && (tooYoung.error as { rule?: string }).rule).toBe("adult");
+      expect(JIT.class.isFailure(ok)).toBe(false);
+      expect(ok).toBeInstanceOf(User);
+      expect(JIT.class.isFailure(tooYoung)).toBe(true);
+      if (JIT.class.isFailure(tooYoung)) expect((tooYoung.error as { rule?: string }).rule).toBe("adult");
     });
   });
 
@@ -1312,6 +1323,7 @@ describe("JIT.ddd", () => {
       "versioned",
       "watchedList",
       "abstract",
+      "$extends",
     ]);
 
     // The presets are a vocabulary, not schema factories: they do not sit next

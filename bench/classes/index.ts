@@ -123,6 +123,7 @@ const runtimeSameUser = User.create({ ...userInput, name: "Grace" });
 const runtimeMoney = Money.create(moneyInput);
 const runtimeSameMoney = Money.create(moneyInput);
 const runtimeOrder = Order.create({ id: "o_1", status: "draft" });
+const runtimeNoopOrder = Order.create({ id: "o_noop", status: "draft" });
 const runtimeTimestampedOrder = TimestampedOrder.create({
   id: "o_2",
   status: "draft",
@@ -136,6 +137,8 @@ const runtimeClockedOrder = ClockedOrder.create({
 const handwrittenOrder = new HandwrittenOrder("o_1", "draft");
 const handwrittenTimestampedOrder = new HandwrittenTimestampedOrder("o_2", "draft", new Date(0), () => new Date());
 const handwrittenClockedOrder = new HandwrittenTimestampedOrder("o_3", "draft", new Date(0), () => fixedClockValue);
+const userAot = await loadAotArtifacts<{ readonly UserBase: typeof UserBase }>({ UserBase });
+const aotUser = userAot.UserBase.create(userInput);
 const timestampAot = await loadAotArtifacts({ TimestampedOrderBase });
 class AotTimestampedOrder extends timestampAot.TimestampedOrderBase {
   toggleStatus(): void {
@@ -149,6 +152,12 @@ const aotTimestampedOrder = AotTimestampedOrder.create({
 });
 const parseUser = JIT.json.parse(User).validate();
 const userJson = JSON.stringify(userInput);
+const JsonUserBase = UserBase.extends(JIT.class.json());
+class JsonUser extends JsonUserBase {}
+const jsonUserAot = await loadAotArtifacts({ JsonUserBase });
+const jsonUser = JsonUser.create(userInput);
+const jsonUserAotInstance = jsonUserAot.JsonUserBase.create(userInput);
+const externalJsonStringify = JIT.json.stringify(JsonUser);
 
 registerScenario({
   op: "class create",
@@ -161,7 +170,38 @@ registerScenario({
       fn: (input: typeof userInput) => new HandwrittenUser(input.id, input.name, input.active),
       biased: "constructs trusted fields without applying the schema validation performed by User.create",
     },
+    {
+      name: "JIT AOT",
+      fn: (input: typeof userInput) => userAot.UserBase.create(input),
+    },
   ],
+});
+
+registerScenario({
+  op: "entity field read",
+  name: "public DDD getter",
+  args: [runtimeUser],
+  jit: (user: User) => user.name,
+  competitors: [
+    { name: "handwritten class", fn: (user: HandwrittenUser) => user.name },
+    { name: "JIT AOT", fn: () => aotUser.name },
+  ],
+});
+
+registerScenario({
+  op: "entity create",
+  name: "flat entity AOT parity",
+  args: [userInput],
+  jit: (input: typeof userInput) => User.create(input),
+  competitors: [{ name: "JIT AOT", fn: (input: typeof userInput) => userAot.UserBase.create(input) }],
+});
+
+registerScenario({
+  op: "entity hydrate",
+  name: "flat entity AOT parity",
+  args: [userInput],
+  jit: (input: typeof userInput) => User.hydrate(input),
+  competitors: [{ name: "JIT AOT", fn: (input: typeof userInput) => userAot.UserBase.hydrate(input) }],
 });
 
 registerScenario({
@@ -197,6 +237,21 @@ registerScenario({
   args: [runtimeOrder],
   jit: (order: Order) => order.toggleStatus(),
   competitors: [{ name: "handwritten class", fn: () => handwrittenOrder.update() }],
+});
+
+registerScenario({
+  op: "aggregate mutation",
+  name: "no-op update",
+  args: [runtimeNoopOrder],
+  jit: (order: Order) => order.update({ status: "draft" }),
+  competitors: [
+    {
+      name: "handwritten class",
+      fn: () => {
+        if (handwrittenOrder.status !== "draft") handwrittenOrder.status = "draft";
+      },
+    },
+  ],
 });
 
 registerScenario({
@@ -263,6 +318,34 @@ registerScenario({
         return new HandwrittenUser(input.id, input.name, input.active);
       },
       biased: "does not apply schema validation before construction",
+    },
+  ],
+});
+
+registerScenario({
+  op: "class JSON",
+  name: "flat entity serializer",
+  args: [jsonUser],
+  jit: (user: JsonUser) => user.toJson(),
+  competitors: [
+    {
+      name: "external JIT JSON",
+      fn: (user: JsonUser) => externalJsonStringify(user),
+    },
+    {
+      name: "JIT AOT",
+      fn: () => jsonUserAotInstance.toJson(),
+    },
+    {
+      name: "handwritten serializer",
+      fn: (user: typeof userInput) =>
+        `{"id":${JSON.stringify(user.id)},"name":${JSON.stringify(user.name)},"active":${user.active ? "true" : "false"}}`,
+      biased: "trusted hand-written field reads do not validate or materialize input",
+    },
+    {
+      name: "JSON.stringify",
+      fn: (user: JsonUser) => JSON.stringify(user),
+      biased: "native JSON.stringify cannot see the entity's symbol-backed storage",
     },
   ],
 });
@@ -360,6 +443,28 @@ const nestedState = {
   email: "ada@example.com",
   aliases: [aliasId],
 };
+const uuidPattern = /^[0-9a-f-]{36}$/i;
+function handwrittenEquivalentNestedHydrate(state: typeof nestedState): {
+  id: HandwrittenEmail;
+  name: string;
+  email: HandwrittenEmail;
+  aliases: HandwrittenEmail[];
+} {
+  if (
+    !uuidPattern.test(state.id) ||
+    typeof state.name !== "string" ||
+    !state.email.includes("@") ||
+    !state.aliases.every((alias) => uuidPattern.test(alias))
+  ) {
+    throw new Error("validation failed");
+  }
+  return {
+    id: new HandwrittenEmail(state.id),
+    name: state.name,
+    email: new HandwrittenEmail(state.email),
+    aliases: state.aliases.map((alias) => new HandwrittenEmail(alias)),
+  };
+}
 
 registerScenario({
   op: "entity hydrate",
@@ -367,6 +472,10 @@ registerScenario({
   args: [nestedState],
   jit: (state: typeof nestedState) => NestedUser.hydrate(state),
   competitors: [
+    {
+      name: "handwritten equivalent",
+      fn: (state: typeof nestedState) => handwrittenEquivalentNestedHydrate(state),
+    },
     {
       name: "handwritten materialization",
       fn: (state: typeof nestedState) => ({
@@ -399,11 +508,11 @@ registerScenario({
 
 const PlainMoney = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
 const ResultMoney = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() })).validate({
-  result: "result",
+  result: "either",
 });
 const AssertedMoney = JIT.ddd
   .valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }))
-  .validate({ result: "result" })
+  .validate({ result: "either" })
   .assert((query) => query.gte("amount", 0));
 const policyAot = await loadAotArtifacts({
   PlainMoney,
@@ -467,6 +576,119 @@ registerScenario({
     {
       name: "JIT AOT result + assertion",
       fn: (input: unknown) => policyAot.AssertedMoney.create(input as typeof moneyInput),
+    },
+  ],
+});
+
+const DisplayUser = JIT.class(JIT.object({ first: JIT.string(), last: JIT.string() })).extends({
+  fullName: JIT.class.public(
+    JIT.class.getter(function (this: { first: string; last: string }) {
+      return `${this.first} ${this.last}`;
+    })
+  ),
+});
+const displayUser = new DisplayUser({ first: "Ada", last: "Lovelace" });
+class HandwrittenDisplayUser {
+  constructor(
+    readonly first: string,
+    readonly last: string
+  ) {}
+
+  get fullName(): string {
+    return `${this.first} ${this.last}`;
+  }
+}
+const handwrittenDisplayUser = new HandwrittenDisplayUser("Ada", "Lovelace");
+
+registerScenario({
+  op: "class getter",
+  name: "custom getter",
+  args: [displayUser],
+  jit: (user: typeof displayUser) => user.fullName,
+  competitors: [{ name: "handwritten class", fn: () => handwrittenDisplayUser.fullName }],
+});
+
+const VisibilityUser = JIT.class(JIT.object({ id: JIT.string() })).extends({
+  secret: JIT.class.private(JIT.number()),
+  protectedValue: JIT.class.protected(JIT.number()),
+});
+const visibilityUser = new VisibilityUser({ id: "v_1", secret: 7, protectedValue: 11 });
+const visibilityAot = await loadAotArtifacts({ VisibilityUser });
+const aotVisibilityUser = new visibilityAot.VisibilityUser({ id: "v_2", secret: 7, protectedValue: 11 });
+
+class HandwrittenVisibilityUser {
+  #secret: number;
+  #protectedValue: number;
+
+  constructor(secret: number, protectedValue: number) {
+    this.#secret = secret;
+    this.#protectedValue = protectedValue;
+  }
+
+  get secret(): number {
+    return this.#secret;
+  }
+
+  get protectedValue(): number {
+    return this.#protectedValue;
+  }
+}
+
+const handwrittenVisibilityUser = new HandwrittenVisibilityUser(7, 11);
+
+registerScenario({
+  op: "class private field read",
+  name: "private field",
+  args: [visibilityUser],
+  jit: (user: typeof visibilityUser) => (user as unknown as { readonly secret: number }).secret,
+  competitors: [
+    {
+      name: "handwritten class",
+      fn: () => handwrittenVisibilityUser.secret,
+    },
+    {
+      name: "JIT AOT",
+      fn: () => (aotVisibilityUser as unknown as { readonly secret: number }).secret,
+    },
+  ],
+});
+
+registerScenario({
+  op: "class protected-like field read",
+  name: "protected-like field",
+  args: [visibilityUser],
+  jit: (user: typeof visibilityUser) => (user as unknown as { readonly protectedValue: number }).protectedValue,
+  competitors: [
+    {
+      name: "handwritten class",
+      fn: () => handwrittenVisibilityUser.protectedValue,
+    },
+    {
+      name: "JIT AOT",
+      fn: () => (aotVisibilityUser as unknown as { readonly protectedValue: number }).protectedValue,
+    },
+  ],
+});
+
+const Rename = JIT.class.method({ input: [JIT.string()], output: JIT.void() });
+const MethodUser = JIT.class(JIT.object({ name: JIT.string() })).extends({
+  rename: Rename.implement(function (this: { name: string }, name: string) {
+    this.name = name;
+  }),
+});
+const methodUser = new MethodUser({ name: "Ada" });
+
+registerScenario({
+  op: "class method",
+  name: "validated prototype method",
+  args: [methodUser, "Grace"],
+  jit: (user: typeof methodUser, name: string) => user.rename(name),
+  competitors: [
+    {
+      name: "handwritten class",
+      fn: (user: { name: string }, name: string) => {
+        user.name = name;
+      },
     },
   ],
 });

@@ -1019,8 +1019,8 @@ function emitQueryValueSource(value, context) {
 
 // ../../packages/jit/src/compiler/access.ts
 var ACCESS_ABILITIES = /* @__PURE__ */ new WeakMap();
-function registerAccessAbility(ability, descriptor, actor) {
-  ACCESS_ABILITIES.set(ability, Object.freeze({ descriptor, actor }));
+function registerAccessAbility(ability, descriptor2, actor) {
+  ACCESS_ABILITIES.set(ability, Object.freeze({ descriptor: descriptor2, actor }));
 }
 function getAccessAbility(ability) {
   return ACCESS_ABILITIES.get(ability);
@@ -1090,10 +1090,10 @@ function collectConditionPaths(condition, subject, actor) {
     else if (value.kind === "param") actor.add(value.name);
   }
 }
-function actionPlan(descriptor, action) {
-  return descriptor.actionPlans.find((plan) => plan.action === action);
+function actionPlan(descriptor2, action) {
+  return descriptor2.actionPlans.find((plan) => plan.action === action);
 }
-function emitAccessSource(descriptor) {
+function emitAccessSource(descriptor2) {
   const writer = new CodeWriter();
   writer.line("function ability(actor) {");
   writer.indent(() => {
@@ -1101,9 +1101,9 @@ function emitAccessSource(descriptor) {
     writer.indent(() => {
       writer.line("switch (action) {");
       writer.indent(() => {
-        for (const action of descriptor.actions) {
+        for (const action of descriptor2.actions) {
           writer.line(`case ${JSON.stringify(action)}:`);
-          writer.indent(() => writer.line(`return ${emitAction(descriptor, action)};`));
+          writer.indent(() => writer.line(`return ${emitAction(descriptor2, action)};`));
         }
         writer.line("default:");
         writer.indent(() => writer.line("return false;"));
@@ -1115,7 +1115,7 @@ function emitAccessSource(descriptor) {
     writer.indent(() => {
       writer.line("switch (action) {");
       writer.indent(() => {
-        for (const action of descriptor.actions) emitExplainCase(writer, descriptor, action);
+        for (const action of descriptor2.actions) emitExplainCase(writer, descriptor2, action);
         writer.line("default:");
         writer.indent(() => writer.line('return { allowed: false, reason: "default-deny" };'));
       });
@@ -1135,10 +1135,10 @@ function emitAccessSource(descriptor) {
       writer.indent(() => {
         writer.line("switch (action) {");
         writer.indent(() => {
-          const object3 = expectProjectionObject(descriptor.subject, "JIT.access()");
+          const object3 = expectProjectionObject(descriptor2.subject, "JIT.access()");
           const allFields = Object.keys(object3.def.props);
-          for (const action of descriptor.actions) {
-            const fields = unconditionalFields(descriptor, action) ?? allFields;
+          for (const action of descriptor2.actions) {
+            const fields = unconditionalFields(descriptor2, action) ?? allFields;
             writer.line(`case ${JSON.stringify(action)}:`);
             writer.indent(() => writer.line(`return ${JSON.stringify(fields)};`));
           }
@@ -1150,7 +1150,7 @@ function emitAccessSource(descriptor) {
       writer.line("}");
       writer.line("const out = [];");
       writer.line("let j = 0;");
-      const object2 = expectProjectionObject(descriptor.subject, "JIT.access()");
+      const object2 = expectProjectionObject(descriptor2.subject, "JIT.access()");
       for (const field of Object.keys(object2.def.props)) {
         writer.line(`if (can(action, subject, ${JSON.stringify(field)})) out[j++] = ${JSON.stringify(field)};`);
       }
@@ -1164,8 +1164,8 @@ function emitAccessSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function emitExplainCase(writer, descriptor, action) {
-  const plan = actionPlan(descriptor, action);
+function emitExplainCase(writer, descriptor2, action) {
+  const plan = actionPlan(descriptor2, action);
   const cans = plan?.allow ?? [];
   const cannots = plan?.deny ?? [];
   writer.line(`case ${JSON.stringify(action)}:`);
@@ -1186,11 +1186,11 @@ function diagnosticLiteral(rule) {
   entries.push("matchedProhibition: true");
   return `{ ${entries.join(", ")} }`;
 }
-function emitAction(descriptor, action) {
-  return emitAccessActionExpression(descriptor, action, "subject", "field", "actor");
+function emitAction(descriptor2, action) {
+  return emitAccessActionExpression(descriptor2, action, "subject", "field", "actor");
 }
-function emitAccessActionExpression(descriptor, action, subject, field, actor) {
-  const plan = actionPlan(descriptor, action);
+function emitAccessActionExpression(descriptor2, action, subject, field, actor) {
+  const plan = actionPlan(descriptor2, action);
   const cans = plan?.allow ?? [];
   const cannots = plan?.deny ?? [];
   if (cans.length === 0) return "false";
@@ -1219,25 +1219,25 @@ function emitRuleAt(rule, effect, subject, field, actor) {
 function emitConditionAt(condition, subject, actor) {
   return emitQueryConditionSource(condition, { fieldBase: subject, paramBase: actor });
 }
-function accessCacheKey(descriptor) {
-  return `access:${JSON.stringify(descriptor.rules)}`;
+function accessCacheKey(descriptor2) {
+  return `access:${JSON.stringify(descriptor2.rules)}`;
 }
-function compileAccess(descriptor, options) {
+function compileAccess(descriptor2, options) {
   const template = getCompileCached(
-    descriptor.subject,
-    accessCacheKey(descriptor),
+    descriptor2.subject,
+    accessCacheKey(descriptor2),
     () => {
-      const source = emitAccessSource(descriptor);
+      const source = emitAccessSource(descriptor2);
       return { source, create: globalThis.Function("__AccessDeniedError", `return ${source};`) };
     },
     options
   );
   const compiled = template.create(AccessDeniedError);
-  registerArtifact(compiled, { kind: "access-plan", schema: descriptor.subject, descriptor });
+  registerArtifact(compiled, { kind: "access-plan", schema: descriptor2.subject, descriptor: descriptor2 });
   return compiled;
 }
-function composeAccessCondition(descriptor, action) {
-  const plan = actionPlan(descriptor, action);
+function composeAccessCondition(descriptor2, action) {
+  const plan = actionPlan(descriptor2, action);
   const cans = plan?.allow ?? [];
   const cannots = (plan?.deny ?? []).filter((rule) => rule.fields === void 0);
   if (cans.length === 0 || cannots.some((rule) => rule.condition === void 0)) {
@@ -1269,14 +1269,14 @@ function compileAccessMutationGuard(context, action) {
   const source = emitAccessMutationGuardSource(context.descriptor, action);
   return globalThis.Function("actor", "__AccessDeniedError", `return ${source};`)(context.actor, AccessDeniedError);
 }
-function emitAccessMutationGuardSource(descriptor, action) {
-  const object2 = expectProjectionObject(descriptor.subject, "authorized mutation");
+function emitAccessMutationGuardSource(descriptor2, action) {
+  const object2 = expectProjectionObject(descriptor2.subject, "authorized mutation");
   const writer = new CodeWriter();
   writer.line("function authorizeMutation(subject, patch) {");
   writer.indent(() => {
     for (const field of Object.keys(object2.def.props)) {
       const patchValue = emitPropertyAccess("patch", field);
-      const check = emitAccessActionExpression(descriptor, action, "subject", JSON.stringify(field), "actor");
+      const check = emitAccessActionExpression(descriptor2, action, "subject", JSON.stringify(field), "actor");
       if (check === "true") continue;
       const denied = `throw new __AccessDeniedError(${JSON.stringify(action)}, ${JSON.stringify(field)}, "field-denied")`;
       writer.line(`if (${patchValue} !== undefined${check === "false" ? "" : ` && !(${check})`}) ${denied};`);
@@ -1328,31 +1328,31 @@ function bindActorValue(value, actor, bindingOffset, bindings) {
   bindings.push(record2?.[value.name]);
   return { kind: "binding", name };
 }
-function unconditionalFields(descriptor, action) {
-  const cans = descriptor.rules.filter(
+function unconditionalFields(descriptor2, action) {
+  const cans = descriptor2.rules.filter(
     (rule) => rule.effect === "can" && rule.action === action && rule.condition === void 0
   );
   if (cans.length === 0) return [];
   if (cans.some((rule) => rule.fields === void 0)) {
-    const denied = descriptor.rules.filter(
+    const denied = descriptor2.rules.filter(
       (rule) => rule.effect === "cannot" && rule.action === action && rule.condition === void 0
     );
     if (denied.length === 0) return void 0;
-    const object2 = expectProjectionObject(descriptor.subject, "JIT.access()");
+    const object2 = expectProjectionObject(descriptor2.subject, "JIT.access()");
     const blocked = new Set(denied.flatMap((rule) => rule.fields ?? Object.keys(object2.def.props)));
     return Object.keys(object2.def.props).filter((field) => !blocked.has(field));
   }
   const allowed = new Set(cans.flatMap((rule) => rule.fields ?? []));
-  for (const rule of descriptor.rules) {
+  for (const rule of descriptor2.rules) {
     if (rule.effect !== "cannot" || rule.action !== action || rule.condition !== void 0) continue;
     for (const field of rule.fields ?? allowed) allowed.delete(field);
   }
   return [...allowed];
 }
-function accessProjectionFields(descriptor, action) {
-  const plan = actionPlan(descriptor, action);
+function accessProjectionFields(descriptor2, action) {
+  const plan = actionPlan(descriptor2, action);
   if (plan === void 0 || plan.allow.length === 0) return [];
-  const object2 = expectProjectionObject(descriptor.subject, "authorized query projection");
+  const object2 = expectProjectionObject(descriptor2.subject, "authorized query projection");
   const all = Object.keys(object2.def.props);
   const allowed = new Set(
     all.filter(
@@ -1932,14 +1932,14 @@ function partKind(base) {
       return "structural";
   }
 }
-function emitCacheKeySource(descriptor) {
-  return descriptor.form === "string" ? emitStringKey(descriptor) : emitHashKey(descriptor);
+function emitCacheKeySource(descriptor2) {
+  return descriptor2.form === "string" ? emitStringKey(descriptor2) : emitHashKey(descriptor2);
 }
-function emitStringKey(descriptor) {
+function emitStringKey(descriptor2) {
   const writer = new CodeWriter();
   writer.line("function cacheKey(value) {");
   writer.indent(() => {
-    const parts = descriptor.parts.map((part, index2) => {
+    const parts = descriptor2.parts.map((part, index2) => {
       const read = readPath("value", part);
       const text = toText(part, read);
       return index2 === 0 ? text : `${JSON.stringify(SEPARATOR)} + ${text}`;
@@ -1968,12 +1968,12 @@ function textExpression(part, read) {
       return `__cacheKeyHash(${read})`;
   }
 }
-function emitHashKey(descriptor) {
+function emitHashKey(descriptor2) {
   const writer = new CodeWriter();
   writer.line("function cacheKey(value) {");
   writer.indent(() => {
     writer.line("let h = 23;");
-    descriptor.parts.forEach((part, index2) => {
+    descriptor2.parts.forEach((part, index2) => {
       const read = readPath("value", part);
       const term = hashExpression(part, read, index2);
       writer.line(`h = ((h << 5) - h + ${term}) | 0;`);
@@ -2019,24 +2019,24 @@ function leafSchema(tree, path) {
   if (dot === -1) return node.schema;
   return leafSchema(node.children, path.slice(dot + 1));
 }
-function cacheKeyHashBindings(descriptor) {
+function cacheKeyHashBindings(descriptor2) {
   const bindings = [];
-  descriptor.parts.forEach((part, index2) => {
+  descriptor2.parts.forEach((part, index2) => {
     if (part.kind !== "structural") return;
     bindings.push({
-      name: descriptor.form === "string" ? "__cacheKeyHash" : `__cacheKeyHash${index2}`,
+      name: descriptor2.form === "string" ? "__cacheKeyHash" : `__cacheKeyHash${index2}`,
       source: emitHashSource(part.schema)
     });
   });
   return bindings;
 }
-function cacheKeyCacheKey(descriptor) {
-  return `cacheKey:${descriptor.form}:${projectionCacheKey(descriptor.tree)}`;
+function cacheKeyCacheKey(descriptor2) {
+  return `cacheKey:${descriptor2.form}:${projectionCacheKey(descriptor2.tree)}`;
 }
-function compileCacheKey(schema, descriptor, hashHelpers, options) {
-  const bindings = cacheKeyHashBindings(descriptor);
+function compileCacheKey(schema, descriptor2, hashHelpers, options) {
+  const bindings = cacheKeyHashBindings(descriptor2);
   const helperNames = Object.keys(hashHelpers);
-  if (descriptor.form === "string" && bindings.length > 1) {
+  if (descriptor2.form === "string" && bindings.length > 1) {
     throw new JITError(
       "UNSUPPORTED_SCHEMA",
       "JIT.cacheKey.string() supports at most one structural field; select scalar fields, or use JIT.cacheKey.hash()"
@@ -2044,9 +2044,9 @@ function compileCacheKey(schema, descriptor, hashHelpers, options) {
   }
   const template = getCompileCached(
     schema,
-    cacheKeyCacheKey(descriptor),
+    cacheKeyCacheKey(descriptor2),
     () => {
-      const source = emitCacheKeySource(descriptor);
+      const source = emitCacheKeySource(descriptor2);
       return {
         source,
         create: globalThis.Function(...helperNames, ...bindings.map((binding) => binding.name), `return ${source};`)
@@ -2060,7 +2060,7 @@ function compileCacheKey(schema, descriptor, hashHelpers, options) {
       (binding) => globalThis.Function(...helperNames, `return ${binding.source};`)(...helperNames.map((name) => hashHelpers[name]))
     )
   );
-  registerArtifact(compiled, { kind: "cache-key-plan", schema, descriptor });
+  registerArtifact(compiled, { kind: "cache-key-plan", schema, descriptor: descriptor2 });
   return compiled;
 }
 
@@ -2292,11 +2292,11 @@ function resolveOrderingDescriptor(schema, criteria) {
   });
   return Object.freeze({ criteria: Object.freeze(resolved) });
 }
-function emitOrderingComparatorBody(writer, descriptor, left = "left", right = "right") {
-  const last2 = descriptor.criteria.length - 1;
+function emitOrderingComparatorBody(writer, descriptor2, left = "left", right = "right") {
+  const last2 = descriptor2.criteria.length - 1;
   let terminated = false;
-  descriptor.criteria.forEach((criterion, index2) => {
-    const suffix = descriptor.criteria.length === 1 ? "" : String(index2);
+  descriptor2.criteria.forEach((criterion, index2) => {
+    const suffix = descriptor2.criteria.length === 1 ? "" : String(index2);
     const date3 = criterion.valueKind === "date";
     const leftRaw = `left${date3 ? "Raw" : "Value"}${suffix}`;
     const rightRaw = `right${date3 ? "Raw" : "Value"}${suffix}`;
@@ -2342,9 +2342,9 @@ function emitOrderingComparatorBody(writer, descriptor, left = "left", right = "
   });
   if (!terminated) writer.line("return 0;");
 }
-function emitOrderingComparatorBodySource(descriptor) {
+function emitOrderingComparatorBodySource(descriptor2) {
   const writer = new CodeWriter();
-  emitOrderingComparatorBody(writer, descriptor);
+  emitOrderingComparatorBody(writer, descriptor2);
   return writer.toString();
 }
 
@@ -4248,15 +4248,15 @@ function resolveChangedDescriptor(schema, paths) {
     representation: fields.length > INT32_MASK_LIMIT ? "bigint" : "int32"
   });
 }
-function emitChangedSource(descriptor) {
+function emitChangedSource(descriptor2) {
   const writer = new CodeWriter();
-  const zero = descriptor.representation === "bigint" ? "0n" : "0";
+  const zero = descriptor2.representation === "bigint" ? "0n" : "0";
   writer.line("function changed(left, right) {");
   writer.indent(() => {
     writer.line(`if (left === right) return ${zero};`);
     writer.line(`let mask = ${zero};`);
-    descriptor.fields.forEach((field, index2) => {
-      const bit = descriptor.representation === "bigint" ? `(1n << ${index2}n)` : `${1 << index2}`;
+    descriptor2.fields.forEach((field, index2) => {
+      const bit = descriptor2.representation === "bigint" ? `(1n << ${index2}n)` : `${1 << index2}`;
       const left = readPath2("left", field);
       const right = readPath2("right", field);
       const differs = field.structural ? `!__changedEqual${index2}(${left}, ${right})` : `${left} !== ${right}`;
@@ -4276,9 +4276,9 @@ function readPath2(source, field) {
 function optionalSegment2(segment) {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment) ? segment : `[${JSON.stringify(segment)}]`;
 }
-function changedEqualBindings(descriptor) {
+function changedEqualBindings(descriptor2) {
   const bindings = [];
-  descriptor.fields.forEach((field, index2) => {
+  descriptor2.fields.forEach((field, index2) => {
     if (!field.structural) return;
     bindings.push({ name: `__changedEqual${index2}`, source: emitEqualSource(field.schema) });
   });
@@ -4291,16 +4291,16 @@ function leafSchema2(tree, path) {
   if (dot === -1) return node.schema;
   return leafSchema2(node.children, path.slice(dot + 1));
 }
-function changedCacheKey(descriptor) {
-  return `changed:${descriptor.representation}:${descriptor.fields.map((field) => field.path).join(",")}`;
+function changedCacheKey(descriptor2) {
+  return `changed:${descriptor2.representation}:${descriptor2.fields.map((field) => field.path).join(",")}`;
 }
-function compileChanged(schema, descriptor, options) {
-  const bindings = changedEqualBindings(descriptor);
+function compileChanged(schema, descriptor2, options) {
+  const bindings = changedEqualBindings(descriptor2);
   const template = getCompileCached(
     schema,
-    changedCacheKey(descriptor),
+    changedCacheKey(descriptor2),
     () => {
-      const source = emitChangedSource(descriptor);
+      const source = emitChangedSource(descriptor2);
       return {
         source,
         create: globalThis.Function(...bindings.map((binding) => binding.name), `return ${source};`)
@@ -4311,7 +4311,7 @@ function compileChanged(schema, descriptor, options) {
   const compiled = template.create(
     ...bindings.map((binding) => globalThis.Function(`return ${binding.source};`)())
   );
-  registerArtifact(compiled, { kind: "changed-plan", schema, descriptor });
+  registerArtifact(compiled, { kind: "changed-plan", schema, descriptor: descriptor2 });
   return compiled;
 }
 
@@ -6091,7 +6091,7 @@ var ValidatorEmitter = class {
     const writer = this.writer;
     const holder = this.nextVar("v");
     const output = this.nextVar("o");
-    const builds = this.mode === "parse" && needsBuild(schema);
+    const builds = this.mode !== "is" && needsBuild(schema);
     writer.line(`let ${holder} = ${valueExpr};`);
     if (builds) writer.line(`let ${output} = ${holder};`);
     const finish = () => builds ? output : holder;
@@ -6135,17 +6135,25 @@ var ValidatorEmitter = class {
             pipe3.kind === "inline" ? `${output} = ${emitOpChain(pipe3.chain, output, (value) => this.bind(value))};` : `${output} = ${pipe3.binding}(${output});`
           );
         }
-        if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
+        if (unwrapped.materialize)
+          writer.line(
+            `${output} = ${unwrapped.trustedMaterialize ? `${unwrapped.materialize}.__jitMaterialize` : `new ${unwrapped.materialize}`}(${output}${unwrapped.trustedMaterialize ? "" : ", true"});`
+          );
+        if (unwrapped.assertion) this.emitNestedAssertion(unwrapped.assertion, output, path);
       }
     };
     if (unwrapped.defaultValue) {
       const { binding, isFactory } = unwrapped.defaultValue;
       const defaultExpr = isFactory ? `${binding}()` : binding;
-      if (this.mode === "parse") {
+      if (this.mode !== "is") {
         writer.line(`if (${holder} === undefined) {`);
         writer.indent(() => {
           writer.line(`${output} = ${defaultExpr};`);
-          if (unwrapped.materialize) writer.line(`${output} = new ${unwrapped.materialize}(${output}, true);`);
+          if (unwrapped.materialize)
+            writer.line(
+              `${output} = ${unwrapped.trustedMaterialize ? `${unwrapped.materialize}.__jitMaterialize` : `new ${unwrapped.materialize}`}(${output}${unwrapped.trustedMaterialize ? "" : ", true"});`
+            );
+          if (unwrapped.assertion) this.emitNestedAssertion(unwrapped.assertion, output, path);
         });
         if (unwrapped.nullable) {
           writer.line(`} else if (${holder} === null) {`);
@@ -6239,10 +6247,38 @@ var ValidatorEmitter = class {
     }
     const receivedPart = received ? `, received: ${received}` : "";
     const paramsPart = params === void 0 ? "" : `, params: ${emitCheckParams(params)}`;
+    if (this.mode === "fast") {
+      writer.line(
+        `throw { __jitFastValidation: true, issues: [{ path: ${path.source}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} }] };`
+      );
+      return;
+    }
     writer.line(
       `(issues ||= [])[issues.length] = { path: ${path.source}, code: ${emitLiteral(code)}, expected: ${emitLiteral(expected)}, message: ${emitLiteral(message)}${receivedPart}${paramsPart} };`
     );
     if (this.maxIssues !== void 0) writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
+  }
+  emitNestedAssertion(binding, value, path) {
+    if (this.mode === "is") {
+      this.writer.line(`if (${binding}(${value}) !== undefined) return false;`);
+      return;
+    }
+    const outcome = this.nextVar("assertion");
+    this.writer.line(`const ${outcome} = ${binding}(${value});`);
+    this.writer.line(`if (${outcome} !== undefined) {`);
+    this.writer.indent(() => {
+      this.writer.line(`for (const issue of ${outcome}.issues) {`);
+      this.writer.indent(() => {
+        const issuePath = path.source === "[]" ? "issue.path" : `[...${path.source}, ...issue.path]`;
+        this.writer.line(
+          `(issues ||= [])[issues.length] = { path: ${issuePath}, code: issue.code, expected: issue.expected, message: issue.message };`
+        );
+        if (this.maxIssues !== void 0)
+          this.writer.line(`if (issues.length === ${this.maxIssues}) throw __issueLimit;`);
+      });
+      this.writer.line("}");
+    });
+    this.writer.line("}");
   }
   /** Type guard + checks + children for the unwrapped base schema. */
   emitBase(unwrapped, value, path) {
@@ -6390,7 +6426,7 @@ var ValidatorEmitter = class {
         return this.emitDiscriminatedUnion(schema, value, path);
       case TypeName.intersection: {
         const options = schema.def.options;
-        const rebuild = this.mode === "parse" && options.some((option) => needsBuild(option));
+        const rebuild = this.mode !== "is" && options.some((option) => needsBuild(option));
         const outputs = options.map((option) => this.emitNode(option, value, path));
         if (!rebuild) return value;
         const merged = this.nextVar("o");
@@ -7129,7 +7165,7 @@ var ValidatorEmitter = class {
   emitArray(schema, value, path) {
     const element = schema.def.element;
     const checks = schema.def.checks ?? [];
-    const build = this.mode === "parse" && needsBuild(element);
+    const build = this.mode !== "is" && needsBuild(element);
     const out = build ? this.nextVar("b") : value;
     if (build) this.writer.line(`let ${out};`);
     this.typeGate(
@@ -7200,7 +7236,7 @@ var ValidatorEmitter = class {
   emitTuple(schema, value, path) {
     const items = schema.def.items ?? [];
     const rest = schema.def.rest;
-    const build = this.mode === "parse" && (items.some((item) => needsBuild(item)) || rest !== void 0 && needsBuild(rest));
+    const build = this.mode !== "is" && (items.some((item) => needsBuild(item)) || rest !== void 0 && needsBuild(rest));
     const out = build ? this.nextVar("b") : value;
     if (build) this.writer.line(`let ${out};`);
     this.typeGate(
@@ -7240,7 +7276,7 @@ var ValidatorEmitter = class {
   }
   emitSet(schema, value, path) {
     const element = schema.def.element;
-    const build = this.mode === "parse" && needsBuild(element);
+    const build = this.mode !== "is" && needsBuild(element);
     const out = build ? this.nextVar("b") : value;
     if (build) this.writer.line(`let ${out};`);
     this.typeGate(
@@ -7267,7 +7303,7 @@ var ValidatorEmitter = class {
   emitMap(schema, value, path) {
     const keySchema = schema.def.key;
     const valueSchema = schema.def.value;
-    const build = this.mode === "parse" && (needsBuild(keySchema) || needsBuild(valueSchema));
+    const build = this.mode !== "is" && (needsBuild(keySchema) || needsBuild(valueSchema));
     const out = build ? this.nextVar("b") : value;
     if (build) this.writer.line(`let ${out};`);
     this.typeGate(
@@ -7294,7 +7330,7 @@ var ValidatorEmitter = class {
   }
   emitRecord(schema, value, path) {
     const valueSchema = schema.def.value;
-    const build = this.mode === "parse" && needsBuild(valueSchema);
+    const build = this.mode !== "is" && needsBuild(valueSchema);
     const out = build ? this.nextVar("b") : value;
     if (build) this.writer.line(`let ${out};`);
     this.typeGate(
@@ -7331,7 +7367,7 @@ var ValidatorEmitter = class {
     const keys = Object.keys(props);
     const catchallBuild = catchall2 !== void 0 && needsBuild(catchall2);
     const preserveUnknownKeys = unknownKeys === "passthrough" || catchall2 !== void 0;
-    const build = this.mode === "parse" && (fieldTransforms !== void 0 || unknownKeys === "strip" || catchallBuild || keys.some((key) => needsBuild(props[key])));
+    const build = this.mode !== "is" && (fieldTransforms !== void 0 || unknownKeys === "strip" || catchallBuild || keys.some((key) => needsBuild(props[key])));
     const out = build ? this.nextVar("b") : value;
     if (build) this.writer.line(`let ${out};`);
     this.typeGate(
@@ -7448,7 +7484,7 @@ var ValidatorEmitter = class {
     const options = schema.def.options;
     const tests = options.map((option) => `${this.emitOptionPredicate(option)}(${value})`);
     const count = tests.length === 0 ? "0" : tests.map((test) => `(${test} ? 1 : 0)`).join(" + ");
-    const build = this.mode === "parse" && options.some(needsBuild);
+    const build = this.mode !== "is" && options.some(needsBuild);
     if (this.mode === "is" || !build) {
       this.failIf(
         `${count} !== 1`,
@@ -7509,7 +7545,7 @@ var ValidatorEmitter = class {
     const discriminator = schema.def.discriminator;
     const options = schema.def.options;
     const tagged = options.map((option) => ({ option, tag: literalTag(option, discriminator) })).filter((entry) => entry.tag !== void 0);
-    const build = this.mode === "parse" && tagged.some((entry) => needsBuild(entry.option));
+    const build = this.mode !== "is" && tagged.some((entry) => needsBuild(entry.option));
     const out = build ? this.nextVar("o") : value;
     if (build) this.writer.line(`let ${out} = ${value};`);
     this.typeGate(
@@ -7745,6 +7781,8 @@ function unwrapValidation(schema, emitter2) {
   const pipes = [];
   let fieldTransforms;
   let materialize;
+  let trustedMaterialize = false;
+  let assertion;
   while (true) {
     if (current.type === TypeName.optional) {
       optional3 = true;
@@ -7810,7 +7848,11 @@ function unwrapValidation(schema, emitter2) {
       continue;
     }
     if (current.type === TypeName.runtimeType) {
-      if (emitter2.materializeRuntimeTypes) materialize = emitter2.bind(current.def.materialize);
+      if (emitter2.materializeRuntimeTypes) {
+        materialize = emitter2.bind(current.def.materialize);
+        trustedMaterialize = typeof current.def.materialize === "function" && typeof current.def.materialize.__jitMaterialize === "function";
+      }
+      if (current.def.assertion !== void 0) assertion = emitter2.bind(current.def.assertion);
       current = current.def.innerType;
       continue;
     }
@@ -7826,7 +7868,9 @@ function unwrapValidation(schema, emitter2) {
     refines,
     pipes,
     fieldTransforms,
-    materialize
+    materialize,
+    trustedMaterialize,
+    assertion
   };
 }
 function bindFieldTransforms(spec, emitter2) {
@@ -8020,13 +8064,25 @@ function emitValidator(schema, options = {}) {
   const emitIs = options.is ?? true;
   const emitSafeParse = options.safeParse ?? true;
   const emitSafeParseAsync = options.safeParseAsync ?? true;
+  const emitFastParse = options.fastParse ?? false;
   const resolveDefaults = options.resolveDefaults ?? true;
   const materializeRuntimeTypes = options.materializeRuntimeTypes ?? true;
   const maxIssues = options.maxIssues;
   const freezesOutput = rootHasReadonly(schema);
   const recursive = findRecursiveSchemas(schema);
   let parseEmitter;
-  if (emitSafeParse) {
+  if (emitFastParse) {
+    const emitter2 = new ValidatorEmitter("fast", false, resolveDefaults, materializeRuntimeTypes);
+    emitter2.markRecursive(recursive);
+    parseEmitter = emitter2;
+    emitter2.writer.line("function parse(value) {");
+    emitter2.writer.indent(() => {
+      const output = emitter2.emitNode(schema, "value", rootPath());
+      emitter2.writer.line(`return ${output};`);
+    });
+    emitter2.writer.line("}");
+  }
+  if (emitSafeParse && !emitFastParse) {
     const emitter2 = new ValidatorEmitter("parse", false, resolveDefaults, materializeRuntimeTypes, maxIssues);
     emitter2.markRecursive(recursive);
     parseEmitter = emitter2;
@@ -8059,7 +8115,7 @@ function emitValidator(schema, options = {}) {
     emitter2.writer.line("}");
   }
   let asyncEmitter;
-  if (emitSafeParseAsync && containsPromise(schema)) {
+  if (emitSafeParseAsync && !emitFastParse && containsPromise(schema)) {
     const emitter2 = new ValidatorEmitter("parse", true, resolveDefaults, materializeRuntimeTypes, maxIssues);
     emitter2.markRecursive(recursive);
     asyncEmitter = emitter2;
@@ -8093,7 +8149,7 @@ function emitValidator(schema, options = {}) {
     emitter2.writer.line("}");
   }
   let isEmitter;
-  if (emitIs) {
+  if (emitIs && !emitFastParse) {
     const emitter2 = new ValidatorEmitter("is", false, resolveDefaults, materializeRuntimeTypes);
     emitter2.markRecursive(recursive);
     isEmitter = emitter2;
@@ -8118,7 +8174,7 @@ function emitValidator(schema, options = {}) {
   const functionSource = emitters.map((emitter2) => emitter2.writer.toString()).join("\n");
   const returnedEntries = [
     ...isEmitter ? ["is: is"] : [],
-    ...parseEmitter ? ["safeParse: safeParse"] : [],
+    ...emitFastParse ? ["parse: parse"] : parseEmitter ? ["safeParse: safeParse"] : [],
     ...asyncEmitter ? ["safeParseAsync: safeParseAsync"] : []
   ];
   const returned = `return { ${returnedEntries.join(", ")} };`;
@@ -8137,11 +8193,23 @@ function compileHydrator(schema, options) {
     schema,
     "hydrator",
     () => {
-      const safeParse = compileSafeHydrator(schema, options);
+      const emitted = emitValidator(schema, {
+        is: false,
+        safeParse: false,
+        safeParseAsync: false,
+        fastParse: true,
+        resolveDefaults: false
+      });
+      const parse3 = globalThis.Function(...emitted.bindings.names, emitted.source)(...emitted.bindings.values).parse;
       return (state3) => {
-        const result = safeParse(state3);
-        if (result.success) return result.data;
-        throw new JITValidationError(result.issues);
+        try {
+          return parse3(state3);
+        } catch (error) {
+          if (typeof error === "object" && error !== null && error.__jitFastValidation === true) {
+            throw new JITValidationError(error.issues);
+          }
+          throw error;
+        }
       };
     },
     options
@@ -8333,23 +8401,23 @@ function hasDefault(schema) {
     return false;
   }
 }
-function emitCsvSource(descriptor, validator = "__csvValidator") {
-  const source = descriptor.operation === "parse" ? emitCsvParseSource(descriptor, validator) : emitCsvStringifySource(descriptor);
-  const main = descriptor.operation === "parse" ? "csvParse" : "csvStringify";
+function emitCsvSource(descriptor2, validator = "__csvValidator") {
+  const source = descriptor2.operation === "parse" ? emitCsvParseSource(descriptor2, validator) : emitCsvStringifySource(descriptor2);
+  const main = descriptor2.operation === "parse" ? "csvParse" : "csvStringify";
   return `(() => {
 ${source.trimEnd().split("\n").map((line) => `  ${line}`).join("\n")}
   return ${main};
 })()`;
 }
-function emitCsvParseSource(descriptor, validator) {
+function emitCsvParseSource(descriptor2, validator) {
   const writer = new CodeWriter();
-  const generator = descriptor.sink === "iterator" ? "function*" : "function";
-  const parameters = descriptor.sink === "visitor" ? "input, consume" : "input";
-  if (descriptor.header) emitHeaderResolver(writer, descriptor);
-  emitCsvRowParser(writer, descriptor, validator);
+  const generator = descriptor2.sink === "iterator" ? "function*" : "function";
+  const parameters = descriptor2.sink === "visitor" ? "input, consume" : "input";
+  if (descriptor2.header) emitHeaderResolver(writer, descriptor2);
+  emitCsvRowParser(writer, descriptor2, validator);
   writer.line(`${generator} csvParse(${parameters}) {`);
   writer.indent(() => {
-    if (descriptor.sink === "result") writer.line("const out = [];");
+    if (descriptor2.sink === "result") writer.line("const out = [];");
     writer.line(
       'const single = typeof input === "string" || input instanceof Uint8Array; const iterator = single ? undefined : input[Symbol.iterator]();'
     );
@@ -8357,7 +8425,7 @@ function emitCsvParseSource(descriptor, validator) {
     writer.line(
       'let field = "", record = [], quoted = false, afterQuote = false, skipLf = false, dirty = false, singleDone = false;'
     );
-    emitPositionDeclarations(writer, descriptor);
+    emitPositionDeclarations(writer, descriptor2);
     writer.line("let row = 0;");
     writer.line("while (true) {");
     writer.indent(() => {
@@ -8369,19 +8437,19 @@ function emitCsvParseSource(descriptor, validator) {
         'const text = done ? decoder.decode() : (typeof chunk === "string" ? decoder.decode() + chunk : decoder.decode(chunk, { stream: true }));'
       );
       writer.line("for (let i = 0; i < text.length; i++) {");
-      writer.indent(() => emitCsvCharacter(writer, descriptor));
+      writer.indent(() => emitCsvCharacter(writer, descriptor2));
       writer.line("}");
       writer.line("if (!done) continue;");
       writer.line('if (quoted) throw new SyntaxError("unterminated quoted CSV field");');
       writer.line("if (dirty || field.length !== 0 || record.length !== 0) {");
       writer.indent(() => {
         writer.line("record[record.length] = field;");
-        emitCsvRecord(writer, descriptor);
+        emitCsvRecord(writer, descriptor2);
       });
       writer.line("}");
-      if (descriptor.header) writer.line('if (headerPending) throw new SyntaxError("CSV header is missing");');
-      if (descriptor.sink === "result") writer.line("return out;");
-      else if (descriptor.sink === "visitor") writer.line("return row;");
+      if (descriptor2.header) writer.line('if (headerPending) throw new SyntaxError("CSV header is missing");');
+      if (descriptor2.sink === "result") writer.line("return out;");
+      else if (descriptor2.sink === "visitor") writer.line("return row;");
       else writer.line("return;");
     });
     writer.line("}");
@@ -8389,17 +8457,17 @@ function emitCsvParseSource(descriptor, validator) {
   writer.line("}");
   return writer.toString();
 }
-function emitHeaderResolver(writer, descriptor) {
+function emitHeaderResolver(writer, descriptor2) {
   writer.line("function csvHeader(header) {");
   writer.indent(() => {
-    descriptor.fields.forEach((_, index2) => {
+    descriptor2.fields.forEach((_, index2) => {
       writer.line(`let p${index2} = -1;`);
     });
     writer.line("for (let h = 0; h < header.length; h++) {");
     writer.indent(() => {
       writer.line("switch (header[h]) {");
       writer.indent(() => {
-        descriptor.fields.forEach((field, index2) => {
+        descriptor2.fields.forEach((field, index2) => {
           writer.line(`case ${JSON.stringify(field.column)}:`);
           writer.indent(() => {
             writer.line(
@@ -8412,22 +8480,22 @@ function emitHeaderResolver(writer, descriptor) {
       writer.line("}");
     });
     writer.line("}");
-    descriptor.fields.forEach((field, index2) => {
+    descriptor2.fields.forEach((field, index2) => {
       writer.line(
         `if (p${index2} === -1) throw new SyntaxError(${JSON.stringify(`missing CSV column ${field.column}`)});`
       );
     });
-    writer.line(`return [${descriptor.fields.map((_, index2) => `p${index2}`).join(", ")}];`);
+    writer.line(`return [${descriptor2.fields.map((_, index2) => `p${index2}`).join(", ")}];`);
   });
   writer.line("}");
 }
-function emitPositionDeclarations(writer, descriptor) {
-  descriptor.fields.forEach((_, index2) => {
-    writer.line(`${descriptor.header ? "let" : "const"} p${index2} = ${descriptor.header ? -1 : index2};`);
+function emitPositionDeclarations(writer, descriptor2) {
+  descriptor2.fields.forEach((_, index2) => {
+    writer.line(`${descriptor2.header ? "let" : "const"} p${index2} = ${descriptor2.header ? -1 : index2};`);
   });
-  if (descriptor.header) writer.line("let headerPending = true;");
+  if (descriptor2.header) writer.line("let headerPending = true;");
 }
-function emitCsvCharacter(writer, descriptor) {
+function emitCsvCharacter(writer, descriptor2) {
   writer.line("const ch = text[i];");
   writer.line('if (skipLf) { skipLf = false; if (ch === "\\n") continue; }');
   writer.line("if (quoted) {");
@@ -8440,12 +8508,12 @@ function emitCsvCharacter(writer, descriptor) {
   writer.indent(() => {
     writer.line(`if (ch === '"') { field += '"'; quoted = true; afterQuote = false; dirty = true; continue; }`);
     writer.line(
-      `if (ch === ${JSON.stringify(descriptor.delimiter)}) { record[record.length] = field; field = ""; afterQuote = false; dirty = true; continue; }`
+      `if (ch === ${JSON.stringify(descriptor2.delimiter)}) { record[record.length] = field; field = ""; afterQuote = false; dirty = true; continue; }`
     );
     writer.line('if (ch === "\\r" || ch === "\\n") {');
     writer.indent(() => {
       writer.line("record[record.length] = field;");
-      emitCsvRecord(writer, descriptor);
+      emitCsvRecord(writer, descriptor2);
       writer.line('record = []; field = ""; afterQuote = false; dirty = false; skipLf = ch === "\\r"; continue;');
     });
     writer.line("}");
@@ -8453,7 +8521,7 @@ function emitCsvCharacter(writer, descriptor) {
   });
   writer.line("}");
   writer.line(
-    `if (ch === ${JSON.stringify(descriptor.delimiter)}) { record[record.length] = field; field = ""; dirty = true; continue; }`
+    `if (ch === ${JSON.stringify(descriptor2.delimiter)}) { record[record.length] = field; field = ""; dirty = true; continue; }`
   );
   writer.line(
     `if (ch === '"') { if (field.length !== 0) throw new SyntaxError("quote inside unquoted CSV field"); quoted = true; dirty = true; continue; }`
@@ -8461,47 +8529,47 @@ function emitCsvCharacter(writer, descriptor) {
   writer.line('if (ch === "\\r" || ch === "\\n") {');
   writer.indent(() => {
     writer.line("record[record.length] = field;");
-    emitCsvRecord(writer, descriptor);
+    emitCsvRecord(writer, descriptor2);
     writer.line('record = []; field = ""; dirty = false; skipLf = ch === "\\r"; continue;');
   });
   writer.line("}");
   writer.line("field += ch; dirty = true;");
 }
-function emitCsvRecord(writer, descriptor) {
-  if (descriptor.header) {
+function emitCsvRecord(writer, descriptor2) {
+  if (descriptor2.header) {
     writer.line("if (headerPending) {");
     writer.indent(() => {
       writer.line("const positions = csvHeader(record);");
-      descriptor.fields.forEach((_, index2) => {
+      descriptor2.fields.forEach((_, index2) => {
         writer.line(`p${index2} = positions[${index2}];`);
       });
       writer.line("headerPending = false;");
     });
     writer.line("} else {");
-    writer.indent(() => emitCsvDataRecord(writer, descriptor));
+    writer.indent(() => emitCsvDataRecord(writer, descriptor2));
     writer.line("}");
     return;
   }
-  emitCsvDataRecord(writer, descriptor);
+  emitCsvDataRecord(writer, descriptor2);
 }
-function emitCsvDataRecord(writer, descriptor) {
-  const args = descriptor.fields.map((_, index2) => `p${index2}`).join(", ");
+function emitCsvDataRecord(writer, descriptor2) {
+  const args = descriptor2.fields.map((_, index2) => `p${index2}`).join(", ");
   writer.line(`const value = csvRow(record, row${args ? `, ${args}` : ""});`);
-  if (descriptor.sink === "result") writer.line("out[row] = value;");
-  else if (descriptor.sink === "iterator") writer.line("yield value;");
+  if (descriptor2.sink === "result") writer.line("out[row] = value;");
+  else if (descriptor2.sink === "iterator") writer.line("yield value;");
   else writer.line("consume(value, row);");
   writer.line("row += 1;");
 }
-function emitCsvRowParser(writer, descriptor, validator) {
-  const positions = descriptor.fields.map((_, index2) => `p${index2}`).join(", ");
+function emitCsvRowParser(writer, descriptor2, validator) {
+  const positions = descriptor2.fields.map((_, index2) => `p${index2}`).join(", ");
   writer.line(`function csvRow(record, row${positions ? `, ${positions}` : ""}) {`);
   writer.indent(() => {
-    descriptor.fields.forEach((_, index2) => {
+    descriptor2.fields.forEach((_, index2) => {
       writer.line(`const c${index2} = record[p${index2}];`);
     });
     writer.line("const result = " + validator + ".safeParse({");
     writer.indent(() => {
-      descriptor.fields.forEach((field, index2) => {
+      descriptor2.fields.forEach((field, index2) => {
         writer.line(`${JSON.stringify(field.key)}: ${csvParseExpression(field, `c${index2}`)},`);
       });
     });
@@ -8540,30 +8608,30 @@ function csvParseExpression(field, cell) {
   if (field.kind === "number") return `${cell} === "" || ${cell} === undefined ? NaN : ${value}`;
   return value;
 }
-function emitCsvStringifySource(descriptor) {
+function emitCsvStringifySource(descriptor2) {
   const writer = new CodeWriter();
   writer.line("function csvEscape(value) {");
   writer.indent(() => {
     writer.line(
-      `return value.indexOf('"') === -1 && value.indexOf(${JSON.stringify(descriptor.delimiter)}) === -1 && value.indexOf("\\r") === -1 && value.indexOf("\\n") === -1 ? value : '"' + value.replace(/"/g, '""') + '"';`
+      `return value.indexOf('"') === -1 && value.indexOf(${JSON.stringify(descriptor2.delimiter)}) === -1 && value.indexOf("\\r") === -1 && value.indexOf("\\n") === -1 ? value : '"' + value.replace(/"/g, '""') + '"';`
     );
   });
   writer.line("}");
-  const iterator = descriptor.sink === "iterator";
+  const iterator = descriptor2.sink === "iterator";
   writer.line(`${iterator ? "function*" : "function"} csvStringify(value) {`);
   writer.indent(() => {
-    const header = descriptor.fields.map((field) => csvStaticEscape(field.column, descriptor.delimiter)).join(descriptor.delimiter);
+    const header = descriptor2.fields.map((field) => csvStaticEscape(field.column, descriptor2.delimiter)).join(descriptor2.delimiter);
     if (iterator) {
-      if (descriptor.header) writer.line(`yield ${JSON.stringify(header + "\r\n")};`);
+      if (descriptor2.header) writer.line(`yield ${JSON.stringify(header + "\r\n")};`);
       writer.line("for (let i = 0; i < value.length; i++) {");
-      writer.indent(() => writer.line(`yield ${csvRowStringExpression(descriptor, "value[i]")} + "\\r\\n";`));
+      writer.indent(() => writer.line(`yield ${csvRowStringExpression(descriptor2, "value[i]")} + "\\r\\n";`));
       writer.line("}");
     } else {
-      writer.line(`let out = ${JSON.stringify(descriptor.header ? header : "")};`);
+      writer.line(`let out = ${JSON.stringify(descriptor2.header ? header : "")};`);
       writer.line("for (let i = 0; i < value.length; i++) {");
       writer.indent(() => {
         writer.line(`if (out.length !== 0) out += "\\r\\n";`);
-        writer.line(`out += ${csvRowStringExpression(descriptor, "value[i]")};`);
+        writer.line(`out += ${csvRowStringExpression(descriptor2, "value[i]")};`);
       });
       writer.line("}");
       writer.line("return out;");
@@ -8572,32 +8640,32 @@ function emitCsvStringifySource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function csvRowStringExpression(descriptor, value) {
-  return descriptor.fields.map((field) => {
+function csvRowStringExpression(descriptor2, value) {
+  return descriptor2.fields.map((field) => {
     const access2 = emitPropertyAccess(value, field.key);
     const encoded = field.kind === "date" ? `${access2}.toISOString()` : `String(${access2})`;
     const scalar = field.optional || field.nullable ? `${access2} == null ? "" : ${encoded}` : encoded;
     return `csvEscape(${scalar})`;
-  }).join(` + ${JSON.stringify(descriptor.delimiter)} + `);
+  }).join(` + ${JSON.stringify(descriptor2.delimiter)} + `);
 }
 function csvStaticEscape(value, delimiter) {
   return value.includes('"') || value.includes(delimiter) || value.includes("\r") || value.includes("\n") ? `"${value.replace(/"/g, '""')}"` : value;
 }
-function compileCsvParse(descriptor) {
-  const validator = compileValidator(descriptor.schema);
-  const source = emitCsvSource(descriptor);
+function compileCsvParse(descriptor2) {
+  const validator = compileValidator(descriptor2.schema);
+  const source = emitCsvSource(descriptor2);
   const compiled = globalThis.Function(
     "__csvValidator",
     "JITValidationError",
     `return ${source};`
   )(validator, JITValidationError);
-  registerArtifact(compiled, { kind: "csv-plan", descriptor });
+  registerArtifact(compiled, { kind: "csv-plan", descriptor: descriptor2 });
   return compiled;
 }
-function compileCsvStringify(descriptor) {
-  const source = emitCsvSource(descriptor);
+function compileCsvStringify(descriptor2) {
+  const source = emitCsvSource(descriptor2);
   const compiled = globalThis.Function(`return ${source};`)();
-  registerArtifact(compiled, { kind: "csv-plan", descriptor });
+  registerArtifact(compiled, { kind: "csv-plan", descriptor: descriptor2 });
   return compiled;
 }
 
@@ -9153,8 +9221,8 @@ function resolveIndexDescriptor(schema, keys, shape) {
     uniqueByFact: hints.collection?.unique === true || hints.entity?.key !== void 0
   });
 }
-function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}") {
-  const depth = descriptor.keys.length;
+function emitIndexBuilder(writer, descriptor2, open = "(value) => {", close = "}") {
+  const depth = descriptor2.keys.length;
   writer.line(open);
   writer.indent(() => {
     writer.line("const index = new Map();");
@@ -9162,7 +9230,7 @@ function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}"
     writer.line("for (let i = 0; i < len; i++) {");
     writer.indent(() => {
       writer.line("const row = value[i];");
-      descriptor.keys.forEach((key, level) => {
+      descriptor2.keys.forEach((key, level) => {
         writer.line(`const key${level} = ${emitIndexKeyRead("row", key)};`);
       });
       for (let level = 0; level < depth - 1; level++) {
@@ -9177,14 +9245,14 @@ function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}"
       }
       const bucket = depth === 1 ? "index" : `level${depth - 1}`;
       const lastKey = `key${depth - 1}`;
-      if (descriptor.shape === "grouped") {
+      if (descriptor2.shape === "grouped") {
         writer.line(`const group = ${bucket}.get(${lastKey});`);
         writer.line("if (group === undefined) {");
         writer.indent(() => writer.line(`${bucket}.set(${lastKey}, [row]);`));
         writer.line("} else {");
         writer.indent(() => writer.line("group[group.length] = row;"));
         writer.line("}");
-      } else if (descriptor.shape === "position") {
+      } else if (descriptor2.shape === "position") {
         writer.line(`${bucket}.set(${lastKey}, i);`);
       } else {
         writer.line(`${bucket}.set(${lastKey}, row);`);
@@ -9195,11 +9263,11 @@ function emitIndexBuilder(writer, descriptor, open = "(value) => {", close = "}"
   });
   writer.line(close);
 }
-function emitIndexPlanSource(descriptor, cacheKey3) {
+function emitIndexPlanSource(descriptor2, cacheKey3) {
   const writer = new CodeWriter();
   writer.line("((__cache) => {");
   writer.indent(() => {
-    emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
+    emitIndexBuilder(writer, descriptor2, "const build = (value) => {", "};");
     writer.line(`const cached = (value) => __cache(value, ${JSON.stringify(cacheKey3)}, build);`);
     writer.line('Object.defineProperty(build, "cached", { value: cached });');
     writer.line("return build;");
@@ -9212,22 +9280,22 @@ function emitIndexKeyRead(row, key) {
   if (key.valueKind !== "date") return access2;
   return key.nullish ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : `${access2}.getTime()`;
 }
-function indexCacheKey(descriptor) {
-  return `index:${descriptor.shape}:${descriptor.keys.map(({ key, valueKind, nullish: nullish3 }) => `${key}:${valueKind}:${nullish3}`).join(",")}`;
+function indexCacheKey(descriptor2) {
+  return `index:${descriptor2.shape}:${descriptor2.keys.map(({ key, valueKind, nullish: nullish3 }) => `${key}:${valueKind}:${nullish3}`).join(",")}`;
 }
-function compileIndex(schema, descriptor, runtimeIndexCache, options) {
-  const cacheKey3 = indexCacheKey(descriptor);
+function compileIndex(schema, descriptor2, runtimeIndexCache, options) {
+  const cacheKey3 = indexCacheKey(descriptor2);
   const template = getCompileCached(
     schema,
     cacheKey3,
     () => {
-      const source = emitIndexPlanSource(descriptor, cacheKey3);
+      const source = emitIndexPlanSource(descriptor2, cacheKey3);
       return { source, create: globalThis.Function(`return ${source};`) };
     },
     options
   );
   const compiled = template.create()(runtimeIndexCache);
-  registerArtifact(compiled, { kind: "index-plan", schema, descriptor });
+  registerArtifact(compiled, { kind: "index-plan", schema, descriptor: descriptor2 });
   return compiled;
 }
 function resolveIndexKeyKind(schema, key) {
@@ -9352,10 +9420,10 @@ function emitMergeJoin(writer, plan) {
   const rightKey = plan.rightIndex.keys[0];
   const leftKeyDescriptor = plan.leftIndex.keys[0];
   if (!rightKey || !leftKeyDescriptor) throw new JITError("INVALID_QUERY", "merge join requires scalar keys");
-  const readKey2 = (row, key, descriptor) => {
+  const readKey2 = (row, key, descriptor2) => {
     const access2 = emitPropertyAccess(row, key);
-    if (descriptor.valueKind !== "date") return access2;
-    return descriptor.nullish ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : `${access2}.getTime()`;
+    if (descriptor2.valueKind !== "date") return access2;
+    return descriptor2.nullish ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : `${access2}.getTime()`;
   };
   const leftBefore = plan.direction === "asc" ? "leftKey < rightKey" : "leftKey > rightKey";
   const leftAfter = plan.direction === "asc" ? "leftKey > rightKey" : "leftKey < rightKey";
@@ -9496,7 +9564,7 @@ function compileJoin(plan, options) {
 }
 
 // ../../packages/jit/src/compiler/serialize/emit-serialize.ts
-function emitSerialize(schema) {
+function emitSerialize(schema, options) {
   const writer = new CodeWriter();
   const context = {
     writer,
@@ -9504,7 +9572,9 @@ function emitSerialize(schema) {
     recursive: findRecursiveSchemas(schema),
     helperIds: /* @__PURE__ */ new Map(),
     emitted: /* @__PURE__ */ new Set(),
-    pending: []
+    pending: [],
+    rootPropertyAccess: options?.rootPropertyAccess,
+    rootObject: true
   };
   const needsStringHelper = hasStringLeaf2(schema, /* @__PURE__ */ new Set());
   writer.line("(function () {");
@@ -9751,6 +9821,8 @@ function emitObjectAppend(context, schema, valueExpr) {
   const writer = context.writer;
   const props = schema.def.props;
   const keys = Object.keys(props);
+  const rootPropertyAccess = context.rootObject ? context.rootPropertyAccess : void 0;
+  context.rootObject = false;
   const holder = hoist3(context, valueExpr);
   const optionality = keys.map(
     (key) => resolveSerializeWrappers(props[key]).optional && emitStaticDefaultSource(props[key]) === void 0
@@ -9766,7 +9838,7 @@ function emitObjectAppend(context, schema, valueExpr) {
     const flag = nextVar3(context, "f");
     writer.line(`let ${flag} = false;`);
     keys.forEach((key, position) => {
-      const rawPropExpr = emitPropertyAccess(holder, key);
+      const rawPropExpr = rootPropertyAccess?.get(key) ?? emitPropertyAccess(holder, key);
       const propExpr = emitDefaultedValue(props[key], rawPropExpr);
       const keyPrefix = JSON.stringify(`${JSON.stringify(key)}:`);
       const emitProp = () => {
@@ -9788,7 +9860,7 @@ function emitObjectAppend(context, schema, valueExpr) {
   }
   let hasPrevious = false;
   keys.forEach((key, position) => {
-    const rawPropExpr = emitPropertyAccess(holder, key);
+    const rawPropExpr = rootPropertyAccess?.get(key) ?? emitPropertyAccess(holder, key);
     const propExpr = emitDefaultedValue(props[key], rawPropExpr);
     const keyToken = `${JSON.stringify(key)}:`;
     const prefix = hasPrevious ? `,${keyToken}` : keyToken;
@@ -9840,10 +9912,16 @@ function resolveSerializeWrappers(schema) {
       case TypeName.coerce:
       case TypeName.pipe:
       case TypeName.transform:
-      case TypeName.runtimeType:
+      case TypeName.runtimeType: {
         valueRepresentation ||= current.def.representation === "value";
+        const artifact = getArtifact(current.def.materialize);
+        if (artifact?.kind === "class" && artifact.wireSchema !== void 0) {
+          current = artifact.wireSchema;
+          continue;
+        }
         current = current.def.innerType;
         continue;
+      }
       case TypeName.lazy:
         current = current.def.getter();
         continue;
@@ -9872,6 +9950,11 @@ function compileSerialize(schema, options) {
     },
     options
   );
+}
+function compileSerializeWithRootAccess(schema, rootPropertyAccess, bindings = [], options) {
+  const bindingNames = bindings.map((_, index2) => `__root${index2}`);
+  const source = emitSerialize(schema, { ...options, rootPropertyAccess });
+  return globalThis.Function(...bindingNames, `return ${source};`)(...bindings);
 }
 
 // ../../packages/jit/src/compiler/json-chunks.ts
@@ -10801,8 +10884,8 @@ function resolveDistinctDescriptor(schema, node) {
     strategy: adjacent ? "adjacent" : fields.length === 1 ? "set" : "compound-trie"
   });
 }
-function emitDistinctAcceptSource(descriptor) {
-  if (descriptor.strategy === "structural-hash") {
+function emitDistinctAcceptSource(descriptor2) {
+  if (descriptor2.strategy === "structural-hash") {
     return `function __distinctAccept(seen, item) {
   const hash = __distinctHash(item);
   const bucket = seen.get(hash);
@@ -10814,8 +10897,8 @@ function emitDistinctAcceptSource(descriptor) {
   return true;
 }`;
   }
-  if (descriptor.strategy === "adjacent") {
-    const access2 = emitDistinctKey(descriptor, 0);
+  if (descriptor2.strategy === "adjacent") {
+    const access2 = emitDistinctKey(descriptor2, 0);
     return `function __distinctAccept(state, item) {
   const key = ${access2};
   if (state.has && (state.value === key || (state.value !== state.value && key !== key))) return false;
@@ -10824,8 +10907,8 @@ function emitDistinctAcceptSource(descriptor) {
   return true;
 }`;
   }
-  if (descriptor.strategy === "set") {
-    const access2 = emitDistinctKey(descriptor, 0);
+  if (descriptor2.strategy === "set") {
+    const access2 = emitDistinctKey(descriptor2, 0);
     return `function __distinctAccept(seen, item) {
   const key = ${access2};
   if (seen.has(key)) return false;
@@ -10834,10 +10917,10 @@ function emitDistinctAcceptSource(descriptor) {
 }`;
   }
   const lines = ["function __distinctAccept(root, item) {", "  let map = root;"];
-  descriptor.fields.forEach((_field, index2) => {
+  descriptor2.fields.forEach((_field, index2) => {
     const key = `key${index2}`;
-    lines.push(`  const ${key} = ${emitDistinctKey(descriptor, index2)};`);
-    if (index2 === descriptor.fields.length - 1) {
+    lines.push(`  const ${key} = ${emitDistinctKey(descriptor2, index2)};`);
+    if (index2 === descriptor2.fields.length - 1) {
       lines.push(`  if (map.has(${key})) return false;`, `  map.set(${key}, true);`);
     } else {
       const next = `next${index2}`;
@@ -10851,14 +10934,14 @@ function emitDistinctAcceptSource(descriptor) {
   lines.push("  return true;", "}");
   return lines.join("\n");
 }
-function emitDistinctKey(descriptor, index2) {
-  const access2 = emitPropertyAccess("item", descriptor.fields[index2]);
-  return descriptor.valueKinds[index2] === "date" ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : access2;
+function emitDistinctKey(descriptor2, index2) {
+  const access2 = emitPropertyAccess("item", descriptor2.fields[index2]);
+  return descriptor2.valueKinds[index2] === "date" ? `(${access2} == null ? ${access2} : ${access2}.getTime())` : access2;
 }
-function wrapDistinctSource(source, descriptor) {
-  if (!descriptor) return source;
+function wrapDistinctSource(source, descriptor2) {
+  if (!descriptor2) return source;
   return `(function () {
-${emitDistinctAcceptSource(descriptor)}
+${emitDistinctAcceptSource(descriptor2)}
 return (${source});
 })()`;
 }
@@ -11407,15 +11490,15 @@ function resolveKeyedAccessChoice(schema, key) {
     direction: "asc"
   });
 }
-function emitCachedIndexLookup(descriptor, shape) {
+function emitCachedIndexLookup(descriptor2, shape) {
   const writer = new CodeWriter();
   writer.line("(() => {");
   writer.indent(() => {
-    emitIndexBuilder(writer, descriptor, "const build = (value) => {", "};");
+    emitIndexBuilder(writer, descriptor2, "const build = (value) => {", "};");
     writer.line(`function query(${shape.signature}) {`);
     writer.indent(() => {
       writer.line(
-        `const row = __cachedIndex(value, ${JSON.stringify(indexCacheKey(descriptor))}, build).get(${shape.probe});`
+        `const row = __cachedIndex(value, ${JSON.stringify(indexCacheKey(descriptor2))}, build).get(${shape.probe});`
       );
       if (shape.answers === "exists") writer.line("return row !== undefined;");
       else if (shape.answers === "position") writer.line("return row === undefined ? ~value.length : row;");
@@ -11427,8 +11510,8 @@ function emitCachedIndexLookup(descriptor, shape) {
   writer.line("})()");
   return writer.toString();
 }
-function emitBinarySearch(key, descriptor, direction, shape) {
-  const access2 = { key, descriptor, direction };
+function emitBinarySearch(key, descriptor2, direction, shape) {
+  const access2 = { key, descriptor: descriptor2, direction };
   const writer = new CodeWriter();
   const probe = shape.probe;
   const read = (row) => {
@@ -11469,9 +11552,9 @@ function emitBinarySearch(key, descriptor, direction, shape) {
   writer.line("})()");
   return writer.toString();
 }
-function emitEarlyExitScan(key, descriptor, shape) {
+function emitEarlyExitScan(key, descriptor2, shape) {
   const writer = new CodeWriter();
-  const isDate = descriptor.keys[0]?.valueKind === "date";
+  const isDate = descriptor2.keys[0]?.valueKind === "date";
   const read = (row) => {
     const value = emitPropertyAccess(row, key);
     return isDate ? `${value}.getTime()` : value;
@@ -11668,8 +11751,8 @@ function explainPhysicalQuery(schema, program) {
 function compileQuery(schema, program, options) {
   const bindingNames = program.bindings.map((_, index2) => `__q${index2}`);
   const plan = optimizeQueryPlan(createQueryPlan(program.nodes));
-  const descriptor = resolvePlanDistinct(schema, plan);
-  const structural = descriptor?.strategy === "structural-hash";
+  const descriptor2 = resolvePlanDistinct(schema, plan);
+  const structural = descriptor2?.strategy === "structural-hash";
   const template = getCompileCached(
     schema,
     `query:${serializeQueryNodes(program.nodes)}`,
@@ -12714,9 +12797,9 @@ function planObjectFields(source, target, overrides, bind, path) {
   for (const key of Object.keys(target.def.props)) {
     const targetProp = target.def.props[key];
     const fieldPath = [...path, key];
-    const override = overrides[key];
-    if (override !== void 0) {
-      fields[fields.length] = { key, source: planOverride(source, key, override, bind, fieldPath) };
+    const override2 = overrides[key];
+    if (override2 !== void 0) {
+      fields[fields.length] = { key, source: planOverride(source, key, override2, bind, fieldPath) };
       continue;
     }
     const planned = planAutoMatch(source, key, targetProp, bind, fieldPath);
@@ -12724,39 +12807,39 @@ function planObjectFields(source, target, overrides, bind, path) {
   }
   return fields;
 }
-function planOverride(source, key, override, bind, path) {
-  if (typeof override === "function") {
-    return { kind: "computed", binding: bind(override) };
+function planOverride(source, key, override2, bind, path) {
+  if (typeof override2 === "function") {
+    return { kind: "computed", binding: bind(override2) };
   }
-  if (typeof override !== "object" || override === null) {
+  if (typeof override2 !== "object" || override2 === null) {
     throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must be a function or object`, {
       path
     });
   }
-  if (override.via !== void 0) {
-    if (typeof override.from !== "string") {
+  if (override2.via !== void 0) {
+    if (typeof override2.from !== "string") {
       throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} with via requires from`, {
         path
       });
     }
-    expectSourceField(source, override.from, path);
-    return { kind: "via", from: override.from, binding: bind(override.via) };
+    expectSourceField(source, override2.from, path);
+    return { kind: "via", from: override2.from, binding: bind(override2.via) };
   }
-  if (override.from !== void 0) {
-    expectSourceField(source, override.from, path);
-    const planned = planAutoMatch(source, override.from, void 0, bind, path);
+  if (override2.from !== void 0) {
+    expectSourceField(source, override2.from, path);
+    const planned = planAutoMatch(source, override2.from, void 0, bind, path);
     if (!planned) {
       throw new JITError(
         "INVALID_MAPPER",
-        `mapper cannot copy source field ${JSON.stringify(override.from)}; use via to convert it`,
+        `mapper cannot copy source field ${JSON.stringify(override2.from)}; use via to convert it`,
         { path }
       );
     }
     return planned;
   }
-  if ("default" in override) {
+  if ("default" in override2) {
     const from3 = key in source.def.props ? key : void 0;
-    return { kind: "default", from: from3, binding: bind(override.default) };
+    return { kind: "default", from: from3, binding: bind(override2.default) };
   }
   throw new JITError("INVALID_MAPPER", `mapper override for ${JSON.stringify(key)} must define from, via, or default`, {
     path
@@ -13078,18 +13161,18 @@ function tagOf(option, discriminator) {
   }
   return literal4.def.value;
 }
-function emitMatchSource(descriptor) {
+function emitMatchSource(descriptor2) {
   const writer = new CodeWriter();
-  const read = emitPropertyAccess("value", descriptor.discriminator);
+  const read = emitPropertyAccess("value", descriptor2.discriminator);
   writer.line("function match(value) {");
   writer.indent(() => {
     writer.line(`switch (${read}) {`);
     writer.indent(() => {
-      descriptor.handled.forEach((tag, index2) => {
+      descriptor2.handled.forEach((tag, index2) => {
         writer.line(`case ${emitLiteral(tag)}:`);
         writer.indent(() => writer.line(`return __case${index2}(value);`));
       });
-      if (descriptor.hasFallback) {
+      if (descriptor2.hasFallback) {
         writer.line("default:");
         writer.indent(() => writer.line("return __fallback(value);"));
         return;
@@ -13097,7 +13180,7 @@ function emitMatchSource(descriptor) {
       writer.line("default:");
       writer.indent(
         () => writer.line(
-          `throw new Error("unmatched " + ${JSON.stringify(descriptor.discriminator)} + ": " + String(${read}));`
+          `throw new Error("unmatched " + ${JSON.stringify(descriptor2.discriminator)} + ": " + String(${read}));`
         )
       );
     });
@@ -13106,19 +13189,19 @@ function emitMatchSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function matchCacheKey(descriptor) {
-  return `match:${descriptor.discriminator}:${JSON.stringify(descriptor.handled)}:${descriptor.hasFallback}`;
+function matchCacheKey(descriptor2) {
+  return `match:${descriptor2.discriminator}:${JSON.stringify(descriptor2.handled)}:${descriptor2.hasFallback}`;
 }
-function compileMatch(descriptor, handlers, fallback, options) {
-  const names = descriptor.handled.map((_, index2) => `__case${index2}`);
+function compileMatch(descriptor2, handlers, fallback, options) {
+  const names = descriptor2.handled.map((_, index2) => `__case${index2}`);
   const template = getCompileCached(
-    descriptor.schema,
-    matchCacheKey(descriptor),
+    descriptor2.schema,
+    matchCacheKey(descriptor2),
     () => {
-      const source = emitMatchSource(descriptor);
+      const source = emitMatchSource(descriptor2);
       return {
         source,
-        create: globalThis.Function(...names, ...descriptor.hasFallback ? ["__fallback"] : [], `return ${source};`)
+        create: globalThis.Function(...names, ...descriptor2.hasFallback ? ["__fallback"] : [], `return ${source};`)
       };
     },
     options
@@ -13126,9 +13209,9 @@ function compileMatch(descriptor, handlers, fallback, options) {
   const compiled = template.create(...handlers, ...fallback === void 0 ? [] : [fallback]);
   registerArtifact(compiled, {
     kind: "match-plan",
-    schema: descriptor.schema,
-    descriptor,
-    bindingNames: names.concat(descriptor.hasFallback ? "__fallback" : []),
+    schema: descriptor2.schema,
+    descriptor: descriptor2,
+    bindingNames: names.concat(descriptor2.hasFallback ? "__fallback" : []),
     bindingValues: handlers.concat(fallback === void 0 ? [] : [fallback])
   });
   return compiled;
@@ -13145,32 +13228,32 @@ function createMigrationDescriptor(schema) {
     bindingValues: Object.freeze([])
   });
 }
-function appendMigrationEdge(descriptor, target, overrides = {}) {
-  const source = descriptor.schemas[descriptor.schemas.length - 1];
-  const from3 = descriptor.versions[descriptor.versions.length - 1];
+function appendMigrationEdge(descriptor2, target, overrides = {}) {
+  const source = descriptor2.schemas[descriptor2.schemas.length - 1];
+  const from3 = descriptor2.versions[descriptor2.versions.length - 1];
   const to = resolveMigrationVersion(target);
-  if (descriptor.versions.includes(to)) {
+  if (descriptor2.versions.includes(to)) {
     throw new JITError("INVALID_OPERATION", `JIT.migrate() repeats version ${JSON.stringify(to)}`);
   }
-  const edgeIndex = descriptor.edges.length;
+  const edgeIndex = descriptor2.edges.length;
   const mapper = prefixMapperBindings(
     forceVersionConstant(buildMapperPlan(source, target, { ...overrides, version: { default: to } })),
     `__migration${edgeIndex}_`
   );
   const edge = Object.freeze({ source, target, from: from3, to, mapper });
   return Object.freeze({
-    schemas: Object.freeze([...descriptor.schemas, target]),
-    versions: Object.freeze([...descriptor.versions, to]),
-    edges: Object.freeze([...descriptor.edges, edge]),
-    bindingNames: Object.freeze([...descriptor.bindingNames, ...mapper.bindingNames]),
-    bindingValues: Object.freeze([...descriptor.bindingValues, ...mapper.bindings])
+    schemas: Object.freeze([...descriptor2.schemas, target]),
+    versions: Object.freeze([...descriptor2.versions, to]),
+    edges: Object.freeze([...descriptor2.edges, edge]),
+    bindingNames: Object.freeze([...descriptor2.bindingNames, ...mapper.bindingNames]),
+    bindingValues: Object.freeze([...descriptor2.bindingValues, ...mapper.bindings])
   });
 }
-function emitMigrationSource(descriptor) {
+function emitMigrationSource(descriptor2) {
   const writer = new CodeWriter();
   writer.line("(() => {");
   writer.indent(() => {
-    descriptor.edges.forEach((edge, index2) => {
+    descriptor2.edges.forEach((edge, index2) => {
       for (const line of emitMapperPlanFunctionSource(edge.mapper, "map", `migrateEdge${index2}`).trimEnd().split("\n")) {
         writer.line(line);
       }
@@ -13182,17 +13265,17 @@ function emitMigrationSource(descriptor) {
       );
       writer.line("switch (value.version) {");
       writer.indent(() => {
-        descriptor.edges.forEach((edge, index2) => {
+        descriptor2.edges.forEach((edge, index2) => {
           writer.line(`case ${emitLiteral(edge.from)}:`);
           writer.indent(() => writer.line(`value = migrateEdge${index2}(value);`));
         });
-        const current = descriptor.versions[descriptor.versions.length - 1];
+        const current = descriptor2.versions[descriptor2.versions.length - 1];
         writer.line(`case ${emitLiteral(current)}:`);
         writer.indent(() => writer.line("return value;"));
         writer.line("default:");
         writer.indent(
           () => writer.line(
-            `throw new RangeError("unsupported migration version: " + String(value.version) + "; expected one of ${descriptor.versions.map(String).join(", ")}");`
+            `throw new RangeError("unsupported migration version: " + String(value.version) + "; expected one of ${descriptor2.versions.map(String).join(", ")}");`
           )
         );
       });
@@ -13204,13 +13287,13 @@ function emitMigrationSource(descriptor) {
   writer.line("})()");
   return writer.toString();
 }
-function compileMigration(descriptor) {
-  const source = emitMigrationSource(descriptor);
+function compileMigration(descriptor2) {
+  const source = emitMigrationSource(descriptor2);
   const compiled = globalThis.Function(
-    ...descriptor.bindingNames,
+    ...descriptor2.bindingNames,
     `return ${source};`
-  )(...descriptor.bindingValues);
-  registerArtifact(compiled, { kind: "migration-plan", descriptor });
+  )(...descriptor2.bindingValues);
+  registerArtifact(compiled, { kind: "migration-plan", descriptor: descriptor2 });
   return compiled;
 }
 function resolveMigrationVersion(schema) {
@@ -13550,27 +13633,27 @@ function createNdjsonDescriptor(schema, operation) {
     sink: operation === "parse" ? "result" : "ndjson"
   });
 }
-function appendNdjsonFilter(descriptor, condition, bindings) {
-  validateCondition2(expectNdjsonObject(descriptor.schema), condition);
-  const start = descriptor.bindingValues.length;
+function appendNdjsonFilter(descriptor2, condition, bindings) {
+  validateCondition2(expectNdjsonObject(descriptor2.schema), condition);
+  const start = descriptor2.bindingValues.length;
   const names = bindings.map((_, index2) => `__q${start + index2}`);
   return Object.freeze({
-    ...descriptor,
-    filters: Object.freeze([...descriptor.filters, condition]),
-    bindingNames: Object.freeze([...descriptor.bindingNames, ...names]),
-    bindingValues: Object.freeze([...descriptor.bindingValues, ...bindings])
+    ...descriptor2,
+    filters: Object.freeze([...descriptor2.filters, condition]),
+    bindingNames: Object.freeze([...descriptor2.bindingNames, ...names]),
+    bindingValues: Object.freeze([...descriptor2.bindingValues, ...bindings])
   });
 }
-function selectNdjson(descriptor, fields) {
-  const tree = buildProjectionTree(descriptor.schema, fields, "JIT.ndjson.parse().select()");
+function selectNdjson(descriptor2, fields) {
+  const tree = buildProjectionTree(descriptor2.schema, fields, "JIT.ndjson.parse().select()");
   return Object.freeze({
-    ...descriptor,
+    ...descriptor2,
     outputSchema: tree.schema,
     select: Object.freeze([...fields])
   });
 }
-function withNdjsonSink(descriptor, sink) {
-  return Object.freeze({ ...descriptor, sink });
+function withNdjsonSink(descriptor2, sink) {
+  return Object.freeze({ ...descriptor2, sink });
 }
 function expectNdjsonObject(schema) {
   const base = resolveWrappers(schema).base;
@@ -13594,19 +13677,19 @@ function validateCondition2(schema, condition) {
     }
   }
 }
-function emitNdjsonSource(descriptor, validator = "__ndjsonValidator") {
+function emitNdjsonSource(descriptor2, validator = "__ndjsonValidator") {
   const writer = new CodeWriter();
   writer.line("(() => {");
   writer.indent(() => {
-    if (descriptor.operation === "parse") {
+    if (descriptor2.operation === "parse") {
       emitRowParser(writer, validator);
     }
-    if (descriptor.operation === "stringify" || descriptor.sink === "ndjson") {
-      writer.line(`const ndjsonStringifyRow = ${emitSerializeSource(descriptor.outputSchema)};`);
+    if (descriptor2.operation === "stringify" || descriptor2.sink === "ndjson") {
+      writer.line(`const ndjsonStringifyRow = ${emitSerializeSource(descriptor2.outputSchema)};`);
     }
-    if (descriptor.operation === "stringify") emitStringify(writer, descriptor);
-    else emitParse(writer, descriptor);
-    writer.line(`return ${descriptor.operation === "stringify" ? "ndjsonStringify" : "ndjsonParse"};`);
+    if (descriptor2.operation === "stringify") emitStringify(writer, descriptor2);
+    else emitParse(writer, descriptor2);
+    writer.line(`return ${descriptor2.operation === "stringify" ? "ndjsonStringify" : "ndjsonParse"};`);
   });
   writer.line("})()");
   return writer.toString();
@@ -13626,13 +13709,13 @@ function emitRowParser(writer, validator) {
   });
   writer.line("}");
 }
-function emitParse(writer, descriptor) {
-  const generator = descriptor.sink === "iterator" ? "function*" : "function";
-  const params = descriptor.sink === "visitor" ? "input, consume" : "input";
+function emitParse(writer, descriptor2) {
+  const generator = descriptor2.sink === "iterator" ? "function*" : "function";
+  const params = descriptor2.sink === "visitor" ? "input, consume" : "input";
   writer.line(`${generator} ndjsonParse(${params}) {`);
   writer.indent(() => {
-    if (descriptor.sink === "result") writer.line("const out = [];");
-    else if (descriptor.sink === "ndjson") writer.line('let out = "";');
+    if (descriptor2.sink === "result") writer.line("const out = [];");
+    else if (descriptor2.sink === "ndjson") writer.line('let out = "";');
     writer.line('const single = typeof input === "string" || input instanceof Uint8Array;');
     writer.line("const iterator = single ? undefined : input[Symbol.iterator]();");
     writer.line("const decoder = new TextDecoder();");
@@ -13651,7 +13734,7 @@ function emitParse(writer, descriptor) {
       writer.indent(() => {
         writer.line("let line = buffer.slice(start, cut);");
         writer.line('if (line.endsWith("\\r")) line = line.slice(0, -1);');
-        emitNdjsonLine(writer, descriptor);
+        emitNdjsonLine(writer, descriptor2);
         writer.line("lineNumber += 1;");
         writer.line("start = cut + 1;");
         writer.line('cut = buffer.indexOf("\\n", start);');
@@ -13662,47 +13745,47 @@ function emitParse(writer, descriptor) {
       writer.line('if (buffer.trim() !== "") {');
       writer.indent(() => {
         writer.line("const line = buffer;");
-        emitNdjsonLine(writer, descriptor);
+        emitNdjsonLine(writer, descriptor2);
       });
       writer.line("}");
-      if (descriptor.sink === "result" || descriptor.sink === "ndjson") writer.line("return out;");
-      else if (descriptor.sink === "visitor") writer.line("return emitted;");
+      if (descriptor2.sink === "result" || descriptor2.sink === "ndjson") writer.line("return out;");
+      else if (descriptor2.sink === "visitor") writer.line("return emitted;");
       else writer.line("return;");
     });
     writer.line("}");
   });
   writer.line("}");
 }
-function emitNdjsonLine(writer, descriptor) {
+function emitNdjsonLine(writer, descriptor2) {
   writer.line('if (line.trim() !== "") {');
   writer.indent(() => {
     writer.line("const item = ndjsonRow(line, lineNumber);");
-    const filters = descriptor.filters.map((condition) => `(${emitCondition3(condition)})`).join(" && ");
+    const filters = descriptor2.filters.map((condition) => `(${emitCondition3(condition)})`).join(" && ");
     if (filters.length > 0) {
       writer.line(`if (${filters}) {`);
-      writer.indent(() => emitNdjsonSink(writer, descriptor));
+      writer.indent(() => emitNdjsonSink(writer, descriptor2));
       writer.line("}");
     } else {
-      emitNdjsonSink(writer, descriptor);
+      emitNdjsonSink(writer, descriptor2);
     }
   });
   writer.line("}");
 }
-function emitNdjsonSink(writer, descriptor) {
-  const value = emitProjection2(descriptor.select);
-  if (descriptor.sink === "result") writer.line(`out[emitted++] = ${value};`);
-  else if (descriptor.sink === "iterator") {
+function emitNdjsonSink(writer, descriptor2) {
+  const value = emitProjection2(descriptor2.select);
+  if (descriptor2.sink === "result") writer.line(`out[emitted++] = ${value};`);
+  else if (descriptor2.sink === "iterator") {
     writer.line(`yield ${value};`);
     writer.line("emitted += 1;");
-  } else if (descriptor.sink === "visitor") writer.line(`consume(${value}, emitted++);`);
+  } else if (descriptor2.sink === "visitor") writer.line(`consume(${value}, emitted++);`);
   else {
     writer.line('if (out.length !== 0) out += "\\n";');
     writer.line("out += ndjsonStringifyRow(item);");
     writer.line("emitted += 1;");
   }
 }
-function emitStringify(writer, descriptor) {
-  const iterator = descriptor.sink === "iterator";
+function emitStringify(writer, descriptor2) {
+  const iterator = descriptor2.sink === "iterator";
   writer.line(`${iterator ? "function*" : "function"} ndjsonStringify(value) {`);
   writer.indent(() => {
     if (iterator) {
@@ -13738,21 +13821,21 @@ function emitProjection2(fields) {
   if (fields === void 0) return "item";
   return `{ ${fields.map((field) => `${JSON.stringify(field)}: ${emitPropertyAccess("item", field)}`).join(", ")} }`;
 }
-function compileNdjsonParse(descriptor) {
-  const validator = compileValidator(descriptor.schema);
-  const source = emitNdjsonSource(descriptor);
+function compileNdjsonParse(descriptor2) {
+  const validator = compileValidator(descriptor2.schema);
+  const source = emitNdjsonSource(descriptor2);
   const compiled = globalThis.Function(
-    ...descriptor.bindingNames,
+    ...descriptor2.bindingNames,
     "__ndjsonValidator",
     "JITValidationError",
     `return ${source};`
-  )(...descriptor.bindingValues, validator, JITValidationError);
-  registerArtifact(compiled, { kind: "ndjson-plan", descriptor });
+  )(...descriptor2.bindingValues, validator, JITValidationError);
+  registerArtifact(compiled, { kind: "ndjson-plan", descriptor: descriptor2 });
   return compiled;
 }
-function compileNdjsonStringify(descriptor) {
-  const compiled = globalThis.Function(`return ${emitNdjsonSource(descriptor)};`)();
-  registerArtifact(compiled, { kind: "ndjson-plan", descriptor });
+function compileNdjsonStringify(descriptor2) {
+  const compiled = globalThis.Function(`return ${emitNdjsonSource(descriptor2)};`)();
+  registerArtifact(compiled, { kind: "ndjson-plan", descriptor: descriptor2 });
   return compiled;
 }
 
@@ -14091,11 +14174,11 @@ function resolveReconcileDescriptor(schema, key, channels, changes, sink) {
     sink
   });
 }
-function emitReconcileSource(descriptor) {
+function emitReconcileSource(descriptor2) {
   const writer = new CodeWriter();
-  const { channels, sink } = descriptor;
-  const previousKey = readKey(descriptor, "previousItem");
-  const currentKey = readKey(descriptor, "item");
+  const { channels, sink } = descriptor2;
+  const previousKey = readKey(descriptor2, "previousItem");
+  const currentKey = readKey(descriptor2, "item");
   const consumes = channels.removed;
   const emit = emitter(sink);
   writer.line(`${sink === "iterator" ? "function*" : "function"} reconcile(previous, current${sinkParam(sink)}) {`);
@@ -14126,7 +14209,7 @@ function emitReconcileSource(descriptor) {
       writer.line("const previousItem = index.get(id);");
       const writeMatched = () => {
         if (consumes) writer.line("index.delete(id);");
-        emitMatched(writer, descriptor, emit);
+        emitMatched(writer, descriptor2, emit);
       };
       if (channels.added) {
         writer.line("if (previousItem === undefined) {");
@@ -14154,12 +14237,12 @@ function emitReconcileSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function emitMatched(writer, descriptor, emit) {
-  const { changed: changed3, unchanged } = descriptor.channels;
+function emitMatched(writer, descriptor2, emit) {
+  const { changed: changed3, unchanged } = descriptor2.channels;
   if (!changed3 && !unchanged) return;
   if (changed3 && !unchanged) {
     writer.line("if (previousItem !== item && !__reconcileEqual(previousItem, item)) {");
-    writer.indent(() => emitChanged(writer, descriptor, emit));
+    writer.indent(() => emitChanged(writer, descriptor2, emit));
     writer.line("}");
     return;
   }
@@ -14172,11 +14255,11 @@ function emitMatched(writer, descriptor, emit) {
   writer.line("if (previousItem === item || __reconcileEqual(previousItem, item)) {");
   writer.indent(() => emit(writer, "unchanged", "item"));
   writer.line("} else {");
-  writer.indent(() => emitChanged(writer, descriptor, emit));
+  writer.indent(() => emitChanged(writer, descriptor2, emit));
   writer.line("}");
 }
-function emitChanged(writer, descriptor, emit) {
-  if (descriptor.changes === "diff") {
+function emitChanged(writer, descriptor2, emit) {
+  if (descriptor2.changes === "diff") {
     writer.line("const delta = __reconcileDiff(previousItem, item);");
     emit(writer, "changed", "{ before: previousItem, after: item, diff: delta }", "previousItem, item, delta");
     return;
@@ -14207,22 +14290,22 @@ function resultLiteral(channels) {
   if (channels.unchanged) parts.push("unchanged");
   return `{ ${parts.join(", ")} }`;
 }
-function readKey(descriptor, row) {
-  const access2 = emitPropertyAccess(row, descriptor.key);
-  return descriptor.date ? `${access2}.getTime()` : access2;
+function readKey(descriptor2, row) {
+  const access2 = emitPropertyAccess(row, descriptor2.key);
+  return descriptor2.date ? `${access2}.getTime()` : access2;
 }
-function reconcileCacheKey(descriptor) {
-  const { channels } = descriptor;
+function reconcileCacheKey(descriptor2) {
+  const { channels } = descriptor2;
   const on = [channels.added && "a", channels.removed && "r", channels.changed && "c", channels.unchanged && "u"].filter(Boolean).join("");
-  return `reconcile:${descriptor.sink}:${descriptor.key}:${descriptor.date}:${descriptor.changes}:${on}`;
+  return `reconcile:${descriptor2.sink}:${descriptor2.key}:${descriptor2.date}:${descriptor2.changes}:${on}`;
 }
-function compileReconcile(schema, descriptor, options) {
+function compileReconcile(schema, descriptor2, options) {
   const object2 = resolveRowObjectSchema(schema, "reconcile");
   const template = getCompileCached(
     schema,
-    reconcileCacheKey(descriptor),
+    reconcileCacheKey(descriptor2),
     () => {
-      const source = emitReconcileSource(descriptor);
+      const source = emitReconcileSource(descriptor2);
       return {
         source,
         create: globalThis.Function("__reconcileEqual", "__reconcileDiff", `return ${source};`)
@@ -14232,9 +14315,9 @@ function compileReconcile(schema, descriptor, options) {
   );
   const compiled = template.create(
     compileEqual(object2),
-    descriptor.changes === "diff" ? compileDiff(object2) : void 0
+    descriptor2.changes === "diff" ? compileDiff(object2) : void 0
   );
-  registerArtifact(compiled, { kind: "reconcile-plan", schema, descriptor });
+  registerArtifact(compiled, { kind: "reconcile-plan", schema, descriptor: descriptor2 });
   return compiled;
 }
 
@@ -14473,14 +14556,14 @@ function freezeCondition(condition) {
 }
 var SUBJECT = "subject";
 var INPUTS = "inputs";
-function paramList(descriptor, head, tail) {
+function paramList(descriptor2, head, tail) {
   const parts = [head];
-  if (descriptor.inputs !== void 0) parts[parts.length] = INPUTS;
+  if (descriptor2.inputs !== void 0) parts[parts.length] = INPUTS;
   if (tail !== void 0) parts[parts.length] = tail;
   return parts.join(", ");
 }
-function orderedRules(descriptor) {
-  const live = descriptor.rules.filter((rule) => rule.constant !== false);
+function orderedRules(descriptor2) {
+  const live = descriptor2.rules.filter((rule) => rule.constant !== false);
   return [...live].sort((left, right) => right.priority - left.priority || left.order - right.order);
 }
 var EMPTY_PLAN = Object.freeze({
@@ -14608,13 +14691,13 @@ function emitOutcome(rule, plan, options) {
 function emitBindings(writer, bindings) {
   for (const binding of bindings) writer.line(`const ${binding.local} = ${binding.source};`);
 }
-function emitRulesTestSource(descriptor) {
+function emitRulesTestSource(descriptor2) {
   const writer = new CodeWriter();
-  writer.line(`function rulesTest(${paramList(descriptor, "rule, subject")}) {`);
+  writer.line(`function rulesTest(${paramList(descriptor2, "rule, subject")}) {`);
   writer.indent(() => {
     writer.line("switch (rule) {");
     writer.indent(() => {
-      for (const rule of descriptor.rules) {
+      for (const rule of descriptor2.rules) {
         writer.line(`case ${JSON.stringify(rule.id)}:`);
         writer.indent(() => writer.line(`return ${emitCondition4(rule, EMPTY_PLAN)};`));
       }
@@ -14626,30 +14709,30 @@ function emitRulesTestSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesPredicateSource(descriptor, ruleId) {
-  const rule = descriptor.rules.find((candidate) => candidate.id === ruleId);
+function emitRulesPredicateSource(descriptor2, ruleId) {
+  const rule = descriptor2.rules.find((candidate) => candidate.id === ruleId);
   if (rule === void 0) {
     throw new JITError("INVALID_OPERATION", `unknown rule ${JSON.stringify(ruleId)}`);
   }
-  return `function rulesPredicate(${paramList(descriptor, SUBJECT)}) {
+  return `function rulesPredicate(${paramList(descriptor2, SUBJECT)}) {
   return ${emitCondition4(rule, EMPTY_PLAN)};
 }
 `;
 }
-function emitRulesSomeSource(descriptor) {
-  const rules2 = descriptor.rules.filter((rule) => rule.constant !== false);
+function emitRulesSomeSource(descriptor2) {
+  const rules2 = descriptor2.rules.filter((rule) => rule.constant !== false);
   const always = rules2.some((rule) => rule.constant === true);
   const expression = always ? "true" : rules2.length === 0 ? "false" : rules2.map((rule) => `(${emitCondition4(rule, EMPTY_PLAN)})`).join(" || ");
-  return `function rulesSome(${paramList(descriptor, SUBJECT)}) {
+  return `function rulesSome(${paramList(descriptor2, SUBJECT)}) {
   return ${expression};
 }
 `;
 }
-function emitRulesFirstSource(descriptor) {
+function emitRulesFirstSource(descriptor2) {
   const writer = new CodeWriter();
-  writer.line(`function rulesFirst(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesFirst(${paramList(descriptor2, SUBJECT)}) {`);
   writer.indent(() => {
-    for (const rule of orderedRules(descriptor)) {
+    for (const rule of orderedRules(descriptor2)) {
       if (rule.constant === true) {
         writer.line(`return ${JSON.stringify(rule.id)};`);
         return;
@@ -14661,11 +14744,11 @@ function emitRulesFirstSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesMatchSource(descriptor) {
-  const rules2 = orderedRules(descriptor);
+function emitRulesMatchSource(descriptor2) {
+  const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesMatch(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesMatch(${paramList(descriptor2, SUBJECT)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -14681,14 +14764,14 @@ function emitRulesMatchSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function outcomeRules(descriptor) {
-  return orderedRules(descriptor).filter((rule) => rule.outcome !== void 0);
+function outcomeRules(descriptor2) {
+  return orderedRules(descriptor2).filter((rule) => rule.outcome !== void 0);
 }
-function emitRulesRunSource(descriptor, options = {}) {
-  const rules2 = outcomeRules(descriptor);
+function emitRulesRunSource(descriptor2, options = {}) {
+  const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesRun(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesRun(${paramList(descriptor2, SUBJECT)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -14704,11 +14787,11 @@ function emitRulesRunSource(descriptor, options = {}) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesVisitorSource(descriptor, options = {}) {
-  const rules2 = orderedRules(descriptor);
+function emitRulesVisitorSource(descriptor2, options = {}) {
+  const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesVisit(${paramList(descriptor, SUBJECT, "consume")}) {`);
+  writer.line(`function rulesVisit(${paramList(descriptor2, SUBJECT, "consume")}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -14723,11 +14806,11 @@ function emitRulesVisitorSource(descriptor, options = {}) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesIteratorSource(descriptor, options = {}) {
-  const rules2 = outcomeRules(descriptor);
+function emitRulesIteratorSource(descriptor2, options = {}) {
+  const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function* rulesIterate(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function* rulesIterate(${paramList(descriptor2, SUBJECT)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -14755,11 +14838,11 @@ function emitManyBody(writer, rules2, plan, options, statement) {
   });
   writer.line("}");
 }
-function emitRulesManySource(descriptor, options = {}) {
-  const rules2 = outcomeRules(descriptor);
+function emitRulesManySource(descriptor2, options = {}) {
+  const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2, true);
   const writer = new CodeWriter();
-  writer.line(`function rulesMany(${paramList(descriptor, "list")}) {`);
+  writer.line(`function rulesMany(${paramList(descriptor2, "list")}) {`);
   writer.indent(() => {
     writer.line("const out = [];");
     writer.line("let j = 0;");
@@ -14769,11 +14852,11 @@ function emitRulesManySource(descriptor, options = {}) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesManyVisitorSource(descriptor, options = {}) {
-  const rules2 = orderedRules(descriptor);
+function emitRulesManyVisitorSource(descriptor2, options = {}) {
+  const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2, true);
   const writer = new CodeWriter();
-  writer.line(`function rulesManyVisit(${paramList(descriptor, "list", "consume")}) {`);
+  writer.line(`function rulesManyVisit(${paramList(descriptor2, "list", "consume")}) {`);
   writer.indent(() => {
     writer.line("let n = 0;");
     emitManyBody(
@@ -14788,22 +14871,22 @@ function emitRulesManyVisitorSource(descriptor, options = {}) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesManyIteratorSource(descriptor, options = {}) {
-  const rules2 = outcomeRules(descriptor);
+function emitRulesManyIteratorSource(descriptor2, options = {}) {
+  const rules2 = outcomeRules(descriptor2);
   const plan = planShared(rules2, true);
   const writer = new CodeWriter();
-  writer.line(`function* rulesManyIterate(${paramList(descriptor, "list")}) {`);
+  writer.line(`function* rulesManyIterate(${paramList(descriptor2, "list")}) {`);
   writer.indent(() => {
     emitManyBody(writer, rules2, plan, options, (_rule, outcome) => `yield ${outcome};`);
   });
   writer.line("}");
   return writer.toString();
 }
-function emitRulesExplainSource(descriptor) {
-  const rules2 = orderedRules(descriptor);
+function emitRulesExplainSource(descriptor2) {
+  const rules2 = orderedRules(descriptor2);
   const plan = planShared(rules2);
   const writer = new CodeWriter();
-  writer.line(`function rulesExplain(${paramList(descriptor, SUBJECT)}) {`);
+  writer.line(`function rulesExplain(${paramList(descriptor2, SUBJECT)}) {`);
   writer.indent(() => {
     emitBindings(writer, plan.invariant);
     emitBindings(writer, plan.variant);
@@ -14819,8 +14902,8 @@ function emitRulesExplainSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesInspectSource(descriptor) {
-  const inspection = inspectRules(descriptor);
+function emitRulesInspectSource(descriptor2) {
+  const inspection = inspectRules(descriptor2);
   const writer = new CodeWriter();
   writer.line("function rulesInspect() {");
   writer.indent(() => {
@@ -14843,23 +14926,23 @@ function emitRulesInspectSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function emitRulesPlanSource(descriptor, options) {
+function emitRulesPlanSource(descriptor2, options) {
   const writer = new CodeWriter();
   writer.line("(() => {");
   writer.indent(() => {
     for (const source of [
-      emitRulesTestSource(descriptor),
-      emitRulesSomeSource(descriptor),
-      emitRulesFirstSource(descriptor),
-      emitRulesMatchSource(descriptor),
-      emitRulesRunSource(descriptor, options),
-      emitRulesVisitorSource(descriptor, options),
-      emitRulesIteratorSource(descriptor, options),
-      emitRulesManySource(descriptor, options),
-      emitRulesManyVisitorSource(descriptor, options),
-      emitRulesManyIteratorSource(descriptor, options),
-      emitRulesExplainSource(descriptor),
-      emitRulesInspectSource(descriptor)
+      emitRulesTestSource(descriptor2),
+      emitRulesSomeSource(descriptor2),
+      emitRulesFirstSource(descriptor2),
+      emitRulesMatchSource(descriptor2),
+      emitRulesRunSource(descriptor2, options),
+      emitRulesVisitorSource(descriptor2, options),
+      emitRulesIteratorSource(descriptor2, options),
+      emitRulesManySource(descriptor2, options),
+      emitRulesManyVisitorSource(descriptor2, options),
+      emitRulesManyIteratorSource(descriptor2, options),
+      emitRulesExplainSource(descriptor2),
+      emitRulesInspectSource(descriptor2)
     ]) {
       for (const line of source.split("\n")) writer.line(line);
     }
@@ -14870,8 +14953,8 @@ function emitRulesPlanSource(descriptor, options) {
     writer.line("});");
     writer.line("const predicates = Object.freeze({");
     writer.indent(() => {
-      for (const rule of descriptor.rules) {
-        writer.line(`${emitObjectKey(rule.id)}: ${emitRulesPredicateSource(descriptor, rule.id).trim()},`);
+      for (const rule of descriptor2.rules) {
+        writer.line(`${emitObjectKey(rule.id)}: ${emitRulesPredicateSource(descriptor2, rule.id).trim()},`);
       }
     });
     writer.line("});");
@@ -14887,55 +14970,55 @@ function emitRulesPlanSource(descriptor, options) {
       writer.line("predicate: (rule) => predicates[rule],");
       writer.line("many: () => many,");
       writer.line("to: Object.freeze({ visitor: () => rulesVisit, iterator: () => rulesIterate }),");
-      writer.line(`ids: Object.freeze(${JSON.stringify(descriptor.ids)}),`);
+      writer.line(`ids: Object.freeze(${JSON.stringify(descriptor2.ids)}),`);
     });
     writer.line("});");
   });
   writer.line("})()");
   return writer.toString();
 }
-function emitRulesSinkSource(descriptor, sink, options = {}) {
+function emitRulesSinkSource(descriptor2, sink, options = {}) {
   switch (sink) {
     case "test":
-      return emitRulesTestSource(descriptor);
+      return emitRulesTestSource(descriptor2);
     case "some":
-      return emitRulesSomeSource(descriptor);
+      return emitRulesSomeSource(descriptor2);
     case "first":
-      return emitRulesFirstSource(descriptor);
+      return emitRulesFirstSource(descriptor2);
     case "match":
-      return emitRulesMatchSource(descriptor);
+      return emitRulesMatchSource(descriptor2);
     case "run":
-      return emitRulesRunSource(descriptor, options);
+      return emitRulesRunSource(descriptor2, options);
     case "visitor":
-      return emitRulesVisitorSource(descriptor, options);
+      return emitRulesVisitorSource(descriptor2, options);
     case "iterator":
-      return emitRulesIteratorSource(descriptor, options);
+      return emitRulesIteratorSource(descriptor2, options);
     case "many":
-      return emitRulesManySource(descriptor, options);
+      return emitRulesManySource(descriptor2, options);
     case "many-visitor":
-      return emitRulesManyVisitorSource(descriptor, options);
+      return emitRulesManyVisitorSource(descriptor2, options);
     case "many-iterator":
-      return emitRulesManyIteratorSource(descriptor, options);
+      return emitRulesManyIteratorSource(descriptor2, options);
     case "explain":
-      return emitRulesExplainSource(descriptor);
+      return emitRulesExplainSource(descriptor2);
     case "predicate":
-      return emitRulesPredicateSource(descriptor, options.ruleId);
+      return emitRulesPredicateSource(descriptor2, options.ruleId);
     default:
-      return emitRulesPlanSource(descriptor, options);
+      return emitRulesPlanSource(descriptor2, options);
   }
 }
-function compileRulesSink(descriptor, sink, options) {
-  const source = emitRulesSinkSource(descriptor, sink, { ruleId: options?.ruleId });
+function compileRulesSink(descriptor2, sink, options) {
+  const source = emitRulesSinkSource(descriptor2, sink, { ruleId: options?.ruleId });
   const template = getCompileCached(
-    descriptor.subject,
+    descriptor2.subject,
     `rules:${sink}:${source}`,
-    () => ({ source, create: globalThis.Function(...descriptor.bindingNames, `return ${source};`) }),
+    () => ({ source, create: globalThis.Function(...descriptor2.bindingNames, `return ${source};`) }),
     options
   );
-  return template.create(...descriptor.bindings);
+  return template.create(...descriptor2.bindings);
 }
-function inspectRules(descriptor) {
-  const live = orderedRules(descriptor);
+function inspectRules(descriptor2) {
+  const live = orderedRules(descriptor2);
   const plan = planShared(live);
   const subjectPaths = /* @__PURE__ */ new Set();
   const inputPaths = /* @__PURE__ */ new Set();
@@ -14943,23 +15026,23 @@ function inspectRules(descriptor) {
     for (const path of rule.subjectPaths) subjectPaths.add(path);
     for (const path of rule.inputPaths) inputPaths.add(path);
   }
-  const declared = descriptor.inputs === void 0 ? [] : Object.keys(expectProjectionObject(descriptor.inputs, "JIT.rules().inputs()").def.props);
+  const declared = descriptor2.inputs === void 0 ? [] : Object.keys(expectProjectionObject(descriptor2.inputs, "JIT.rules().inputs()").def.props);
   return Object.freeze({
-    rules: descriptor.rules.length,
+    rules: descriptor2.rules.length,
     liveRules: live.length,
-    deadRules: Object.freeze(descriptor.rules.filter((rule) => rule.constant === false).map((rule) => rule.id)),
+    deadRules: Object.freeze(descriptor2.rules.filter((rule) => rule.constant === false).map((rule) => rule.id)),
     subjectPaths: Object.freeze([...subjectPaths]),
     inputPaths: Object.freeze([...inputPaths]),
     deadInputs: Object.freeze(declared.filter((name) => !inputPaths.has(name))),
     sharedReads: plan.reads.size,
     sharedPredicates: plan.predicates.size,
     priorityGroups: new Set(live.map((rule) => rule.priority)).size,
-    outcomes: descriptor.rules.filter((rule) => rule.outcome !== void 0).length,
+    outcomes: descriptor2.rules.filter((rule) => rule.outcome !== void 0).length,
     strategy: "inline"
   });
 }
-function lowerRuleToQueryCondition(descriptor, ruleId, inputs, bindingOffset) {
-  const rule = descriptor.rules.find((candidate) => candidate.id === ruleId);
+function lowerRuleToQueryCondition(descriptor2, ruleId, inputs, bindingOffset) {
+  const rule = descriptor2.rules.find((candidate) => candidate.id === ruleId);
   if (rule === void 0) throw new JITError("INVALID_OPERATION", `unknown rule ${JSON.stringify(ruleId)}`);
   if (rule.constant !== void 0) {
     return Object.freeze({ kind: rule.constant ? "always" : "never", bindings: Object.freeze([]) });
@@ -14996,12 +15079,12 @@ function bindInputValue(value, inputs, offset, bindings) {
 }
 
 // ../../packages/jit/src/compiler/sort.ts
-function emitSortSource(descriptor) {
+function emitSortSource(descriptor2) {
   const writer = new CodeWriter();
   writer.line("(() => {");
   writer.indent(() => {
     writer.line("const compare = (left, right) => {");
-    writer.indent(() => emitOrderingComparatorBody(writer, descriptor));
+    writer.indent(() => emitOrderingComparatorBody(writer, descriptor2));
     writer.line("};");
     writer.line("const sort = (value) => {");
     writer.indent(() => {
@@ -15021,8 +15104,8 @@ function emitSortSource(descriptor) {
   writer.line("})()");
   return writer.toString();
 }
-function compileSort(schema, descriptor, options) {
-  const ordering = resolveOrderingDescriptor(schema, descriptor.criteria);
+function compileSort(schema, descriptor2, options) {
+  const ordering = resolveOrderingDescriptor(schema, descriptor2.criteria);
   const cacheKey3 = `sort:${ordering.criteria.map(({ key, direction, valueKind, nullish: nullish3 }) => `${key}:${direction}:${valueKind}:${nullish3}`).join(",")}`;
   const template = getCompileCached(
     schema,
@@ -16016,8 +16099,8 @@ function createObjectSchema(fields) {
   return createSchema(TypeName.object, { props });
 }
 function fieldSignature(key, schema) {
-  const descriptor = describeField(key, schema);
-  return JSON.stringify([descriptor.kind, descriptor.size, descriptor.values, descriptor.literal]);
+  const descriptor2 = describeField(key, schema);
+  return JSON.stringify([descriptor2.kind, descriptor2.size, descriptor2.values, descriptor2.literal]);
 }
 function createBinaryRowLayout(schema, requestedLayout = "auto", adaptiveStringFields, union3 = void 0) {
   const props = schema.def.props;
@@ -16034,8 +16117,8 @@ function createBinaryRowLayout(schema, requestedLayout = "auto", adaptiveStringF
   let payloadBytes = maskBytes;
   for (const key of Object.keys(props)) {
     const resolved = resolveWrappers(props[key]);
-    const descriptor = describeField(key, resolved.base, adaptiveStringFields);
-    const fieldAlignment = alignmentForSize(descriptor.size);
+    const descriptor2 = describeField(key, resolved.base, adaptiveStringFields);
+    const fieldAlignment = alignmentForSize(descriptor2.size);
     if (fieldAlignment > alignment) alignment = fieldAlignment;
     const guard = resolved.optional || resolved.nullable ? {
       maskOffset: guardIndex >> 2,
@@ -16044,11 +16127,11 @@ function createBinaryRowLayout(schema, requestedLayout = "auto", adaptiveStringF
     } : void 0;
     entries[entries.length] = {
       key,
-      descriptor,
+      descriptor: descriptor2,
       guard,
-      dictionaryIndex: descriptor.dictionary ? dictionaryIndex++ : void 0
+      dictionaryIndex: descriptor2.dictionary ? dictionaryIndex++ : void 0
     };
-    payloadBytes += descriptor.size;
+    payloadBytes += descriptor2.size;
   }
   const packedOffsets = /* @__PURE__ */ new Map();
   let packedRowSize = maskBytes;
@@ -16124,11 +16207,11 @@ function createBinaryRowLayout(schema, requestedLayout = "auto", adaptiveStringF
     union: union3
   };
 }
-function fieldAccess(descriptor, memoryLayout) {
-  if (descriptor.size === 0) return "none";
-  if (descriptor.size === 1) return "byte";
+function fieldAccess(descriptor2, memoryLayout) {
+  if (descriptor2.size === 0) return "none";
+  if (descriptor2.size === 1) return "byte";
   if (memoryLayout === "packed") return "dataView";
-  switch (descriptor.kind) {
+  switch (descriptor2.kind) {
     case "int32":
       return "int32";
     case "float32":
@@ -16143,7 +16226,7 @@ function fieldAccess(descriptor, memoryLayout) {
     case "literalUnion":
       return "uint32";
     default:
-      throw new JITError("INVALID_OPERATION", `binary field ${descriptor.kind} has no aligned access strategy`);
+      throw new JITError("INVALID_OPERATION", `binary field ${descriptor2.kind} has no aligned access strategy`);
   }
 }
 function alignTo(value, alignment) {
@@ -17170,9 +17253,9 @@ var baseBuilderPrototype = {
   // string is still the message, and nobody has to remember an argument order.
   email(patternOrMessageOrOptions, message) {
     const options = isCheckOptions(patternOrMessageOrOptions);
-    const override = options?.pattern ?? (patternOrMessageOrOptions instanceof RegExp ? patternOrMessageOrOptions : void 0);
+    const override2 = options?.pattern ?? (patternOrMessageOrOptions instanceof RegExp ? patternOrMessageOrOptions : void 0);
     const text = options?.message ?? (typeof patternOrMessageOrOptions === "string" ? patternOrMessageOrOptions : message);
-    return createBuilder(appendCheck(this.schema, { kind: "email", value: override, message: text }));
+    return createBuilder(appendCheck(this.schema, { kind: "email", value: override2, message: text }));
   },
   uuid(versionOrMessageOrOptions, message) {
     const options = isCheckOptions(versionOrMessageOrOptions);
@@ -17961,12 +18044,12 @@ function accessPlanType(artifact, typeNames) {
   return `(actor: ${actor}) => { can: ${check}; cannot: ${check}; assert(action: ${actions}, subject: ${subject}, field?: keyof ${subject} & string): ${subject}; explain: ${explain}; fields: ${fields} }`;
 }
 function rulesPlanType(artifact, typeNames) {
-  const descriptor = artifact.descriptor;
+  const descriptor2 = artifact.descriptor;
   const subject = namedType(artifact.schema, typeNames);
-  const ids = descriptor.ids.map((id) => JSON.stringify(id)).join(" | ") || "never";
-  const outcomes = descriptor.rules.map((rule) => rule.outcome).filter((outcome2) => outcome2 !== void 0).map((outcome2) => namedType(outcome2.type, typeNames));
+  const ids = descriptor2.ids.map((id) => JSON.stringify(id)).join(" | ") || "never";
+  const outcomes = descriptor2.rules.map((rule) => rule.outcome).filter((outcome2) => outcome2 !== void 0).map((outcome2) => namedType(outcome2.type, typeNames));
   const outcome = outcomes.length === 0 ? "never" : [...new Set(outcomes)].join(" | ");
-  const inputs = descriptor.inputs;
+  const inputs = descriptor2.inputs;
   const input = inputs === void 0 ? "" : `, inputs: ${namedType(inputs, typeNames)}`;
   const list = `subjects: readonly ${subject}[]`;
   const consume = `consume: (rule: ${ids}, outcome: (${outcome}) | undefined) => void`;
@@ -18481,6 +18564,8 @@ function emitModule(plan, options, layout) {
   const typeNames = /* @__PURE__ */ new Map();
   const classBindings = /* @__PURE__ */ new Map();
   const classArtifacts = /* @__PURE__ */ new Map();
+  const assertionBindings = /* @__PURE__ */ new Map();
+  const assertionSources = [];
   const publicNames = /* @__PURE__ */ new Set([...Object.keys(plan.artifacts), ...Object.keys(plan.groups)]);
   const internalNames = /* @__PURE__ */ new Set();
   const exported = options.exported ?? /* @__PURE__ */ new Set();
@@ -18501,6 +18586,39 @@ function emitModule(plan, options, layout) {
       classArtifacts.set(value, artifact);
     }
   }
+  for (const [value, artifact] of classArtifacts) {
+    const assertion = artifact.policy?.assertions;
+    const schema = value.schema;
+    if (assertion === void 0 || schema?.type !== TypeName.runtimeType) continue;
+    const runtimeSchema = schema;
+    if (runtimeSchema.def.assertion === void 0) continue;
+    const helper = internalIdentifier(`${classBindings.get(value) ?? "runtime"}_assertion`);
+    const lines = [`const ${helper} = /*#__PURE__*/ (() => {`];
+    const bindingLines = inlineBindings(assertion.bindingNames, assertion.bindingValues);
+    if (bindingLines === void 0) {
+      skipped.push({
+        schema: classBindings.get(value) ?? "runtime class",
+        operation: "class.assert",
+        reason: "an assertion value cannot be serialized ahead of time"
+      });
+      continue;
+    }
+    lines.push(...bindingLines.map((line) => `  ${line}`));
+    for (const [index2, failure] of assertion.failures.entries()) {
+      lines.push(
+        `  const __issue${index2} = Object.freeze(${JSON.stringify({
+          path: failure.field === void 0 ? [] : [failure.field],
+          code: failure.code,
+          expected: failure.rule ?? "a domain invariant",
+          message: failure.message
+        })});`,
+        `  const __fail${index2} = () => undefined;`
+      );
+    }
+    lines.push(...indentBlock(assertion.source).map((line) => `  ${line}`), "  return __assert;", "})();");
+    assertionSources.push(...lines);
+    assertionBindings.set(runtimeSchema.def.assertion, helper);
+  }
   for (const name of Object.keys(plan.schemas)) {
     if (!isValidIdentifier(name)) continue;
     const schema = unwrapSchema(plan.schemas[name]);
@@ -18514,6 +18632,8 @@ function emitModule(plan, options, layout) {
   });
   js.push(GENERATED_BANNER);
   if (ts) js.push("// @ts-nocheck -- generated internals are typed at the public export boundary.");
+  js.push(...assertionSources);
+  if (assertionSources.length > 0) js.push("");
   for (const [name, members] of Object.entries(plan.groups)) {
     if (!isValidIdentifier(name)) {
       skipped.push({
@@ -19036,6 +19156,9 @@ function emitModule(plan, options, layout) {
   function emitClassPolicy(policy, reportName) {
     const lines = [];
     const errorBinding = policy.error === void 0 ? void 0 : serializeBindingValue(policy.error);
+    const nestedAssertions = (policy.nestedErrors ?? []).filter(
+      (candidate) => candidate.runtimeBinding !== true && candidate.assertion !== void 0
+    );
     if (policy.error !== void 0 && errorBinding === void 0) {
       skipped.push({
         schema: reportName,
@@ -19045,10 +19168,40 @@ function emitModule(plan, options, layout) {
       return void 0;
     }
     lines.push(
-      `  const __error = ${errorBinding ?? "(issues) => new JITValidationError(issues)"};`,
-      policy.result === "result" ? "  const __success = (value) => ({ ok: true, value });" : policy.result === "tuple" ? "  const __success = (value) => [null, value];" : "  const __success = (value) => value;",
-      policy.result === "result" ? "  const __failure = (error) => ({ ok: false, error });" : policy.result === "tuple" ? "  const __failure = (error) => [error, null];" : "  const __failure = (error) => { throw error; };"
+      `  const __baseError = ${errorBinding ?? "(issues) => new JITValidationError(issues)"};`,
+      policy.result === "either" ? "  const __success = (value) => value;" : policy.result === "tuple" ? "  const __success = (value) => [null, value];" : "  const __success = (value) => value;",
+      policy.result === "either" ? '  const __factoryFailure = Symbol.for("jit.factory.failure"); const __failure = (error) => Object.defineProperties({ ok: false, error }, { [__factoryFailure]: { enumerable: false, value: true } });' : policy.result === "tuple" ? "  const __failure = (error) => [error, null];" : "  const __failure = (error) => { throw error; };"
     );
+    if (nestedAssertions.length === 0) {
+      lines.push("  const __error = __baseError;");
+    } else {
+      needsAssertionError = true;
+      lines.push(
+        "  const __error = (issues) => {",
+        `    let __selectedPriority = ${policy.error === void 0 ? "-Infinity" : String(policy.errorPriority ?? 1e3)};`,
+        `    let __selectedDepth = ${policy.error === void 0 ? "Infinity" : "0"};`,
+        `    let __selectedOrder = ${policy.error === void 0 ? "Infinity" : "-1"};`,
+        "    let __selectedNested = -1;"
+      );
+      nestedAssertions.forEach((candidate, index2) => {
+        lines.push(
+          `    if (issues.some((issue) => ${JSON.stringify(candidate.path)}.every((part, index) => issue.path[index] === part)) && (${candidate.priority} > __selectedPriority || (${candidate.priority} === __selectedPriority && (${candidate.depth} < __selectedDepth || (${candidate.depth} === __selectedDepth && ${candidate.order} < __selectedOrder))))) {`,
+          `      __selectedPriority = ${candidate.priority}; __selectedDepth = ${candidate.depth}; __selectedOrder = ${candidate.order}; __selectedNested = ${index2};`,
+          "    }"
+        );
+      });
+      nestedAssertions.forEach((candidate, index2) => {
+        const assertion = candidate.assertion;
+        const details = JSON.stringify({
+          ...assertion.rule === void 0 ? {} : { rule: assertion.rule },
+          ...assertion.field === void 0 ? {} : { field: assertion.field }
+        });
+        lines.push(
+          `    if (__selectedNested === ${index2}) return new DomainAssertionError(${JSON.stringify(assertion.message)}, { ...${details}, issues });`
+        );
+      });
+      lines.push("    return __baseError(issues);", "  };");
+    }
     if (policy.result === "throw") needsValidationError = true;
     const assertions = policy.assertions;
     if (assertions !== void 0) {
@@ -19086,7 +19239,13 @@ function emitModule(plan, options, layout) {
       lines.push(...indentBlock(assertions.source));
       lines.push(
         `  const __assertFailure = (outcome, value) => { ${policy.error === void 0 ? "" : `if (outcome.errorIndex < 0 || ${policy.errorPriority ?? 1e3} >= (outcome.errorIndex < 0 ? -1 : [${assertions.failures.map((failure) => failure.priority).join(", ")}][outcome.errorIndex])) return __error(outcome.issues);`} ${assertions.failures.map(
-          (failure, index2) => failure.error === void 0 ? "" : `if (outcome.errorIndex === ${index2}) return __errorCandidate${index2}(value, ${JSON.stringify({ ...failure, error: void 0 })});`
+          (failure, index2) => failure.error === void 0 ? "" : `if (outcome.errorIndex === ${index2}) return __errorCandidate${index2}(value, ${JSON.stringify({
+            rule: failure.rule,
+            field: failure.field,
+            code: failure.code,
+            message: failure.message,
+            priority: failure.priority
+          })});`
         ).join(
           " "
         )} const first = outcome.issues[0]; const rule = first?.expected === "a domain invariant" ? undefined : first?.expected; return new DomainAssertionError(first?.message ?? "a domain assertion does not hold", { rule, field: first?.path?.[0] === undefined ? undefined : String(first.path[0]), issues: outcome.issues }); };`
@@ -19114,6 +19273,14 @@ function emitModule(plan, options, layout) {
       });
       return void 0;
     }
+    if (artifact.customFactories?.create !== void 0 || artifact.customFactories?.hydrate !== void 0) {
+      skipped.push({
+        schema: reportName,
+        operation: "class.factories",
+        reason: "a custom factory is a runtime binding and has no standalone AOT representation"
+      });
+      return void 0;
+    }
     if (artifact.mutation?.timestampClock !== void 0 || artifact.mutation?.deletionClock !== void 0) {
       skipped.push({
         schema: reportName,
@@ -19122,7 +19289,7 @@ function emitModule(plan, options, layout) {
       });
       return void 0;
     }
-    if ((artifact.policy?.nestedErrors?.length ?? 0) > 0) {
+    if (artifact.policy?.nestedErrors?.some((candidate) => candidate.runtimeBinding === true) === true) {
       skipped.push({
         schema: reportName,
         operation: "class.validate",
@@ -19130,20 +19297,18 @@ function emitModule(plan, options, layout) {
       });
       return void 0;
     }
-    const validator = emitValidatorBinding(
-      binding,
-      artifact.domainEvent ? base.def.props.payload : artifact.schema,
-      reportName,
-      "class",
-      {
-        is: false,
-        safeParse: true,
-        ...artifact.policy?.maxIssues === void 0 ? {} : { maxIssues: artifact.policy.maxIssues }
-      }
-    );
+    const creationSchema = artifact.domainEvent ? base.def.props.payload : artifact.creationSchema ?? artifact.schema;
+    const hydrateSchema = artifact.hydrateSchema ?? artifact.schema;
+    const fastPolicyCreate = artifact.policy?.maxIssues === void 0 && canUseFastParse(creationSchema);
+    const fastPolicyHydrate = artifact.policy?.maxIssues === void 0 && canUseFastParse(hydrateSchema);
+    const validator = emitValidatorBinding(binding, creationSchema, reportName, "class", {
+      is: fastPolicyCreate,
+      safeParse: true,
+      ...artifact.policy?.maxIssues === void 0 ? {} : { maxIssues: artifact.policy.maxIssues }
+    });
     if (!validator) return void 0;
-    const hydrateValidator = artifact.domainEvent ? validator : emitValidatorBinding(binding, artifact.schema, reportName, "class.hydrate", {
-      is: false,
+    const hydrateValidator = artifact.domainEvent ? validator : emitValidatorBinding(binding, hydrateSchema, reportName, "class.hydrate", {
+      is: fastPolicyHydrate,
       safeParse: true,
       resolveDefaults: false,
       ...artifact.policy?.maxIssues === void 0 ? {} : { maxIssues: artifact.policy.maxIssues }
@@ -19155,12 +19320,33 @@ function emitModule(plan, options, layout) {
     const capabilities = new Set(artifact.capabilities);
     const fields = valueRepresentation ? ["value"] : Object.keys(base.def.props);
     const managedFieldNames = new Set((artifact.managedFields ?? []).map((managed) => managed.field));
+    const fieldPolicies = new Map((artifact.fieldPolicies ?? []).map((policy2) => [policy2.name, policy2]));
+    const noConstructorFields = [...fieldPolicies.values()].filter((policy2) => policy2.noConstructor).map((policy2) => policy2.name);
+    const boundaryInputName = noConstructorFields.length === 0 ? void 0 : internalIdentifier(`${binding}_withoutGenerated`);
+    const creationInput = boundaryInputName === void 0 ? "input" : `${boundaryInputName}(input)`;
+    const hydrationInput = boundaryInputName === void 0 ? "state" : `${boundaryInputName}(state)`;
     const managedStorage = new Map(
-      (artifact.managedFields ?? []).map((managed, index2) => [managed.field, `__managed${index2}`])
+      fields.filter((field) => {
+        const policy2 = fieldPolicies.get(field);
+        return artifact.encapsulateFields === true || managedFieldNames.has(field) || policy2 !== void 0;
+      }).map((field, index2) => [field, `__managed${index2}`])
     );
     const accessorByKey = new Map(artifact.accessors?.map((accessor) => [accessor.key, accessor]));
     const slots = /* @__PURE__ */ new Map();
     let slotIndex = 0;
+    const fieldInitializers = /* @__PURE__ */ new Map();
+    for (const field of fields) {
+      if (fieldPolicies.get(field)?.noConstructor !== true) continue;
+      const initializer = emitValidatorBinding(
+        `${binding}_initializer_${field}`,
+        base.def.props[field],
+        reportName,
+        "class.noConstructor",
+        { is: false, safeParse: true }
+      );
+      if (!initializer) return void 0;
+      fieldInitializers.set(field, initializer);
+    }
     for (const field of fields) {
       if (accessorByKey.get(field)?.field === "private" && !managedStorage.has(field))
         slots.set(field, `#p${slotIndex++}`);
@@ -19188,10 +19374,20 @@ function emitModule(plan, options, layout) {
       }
       return definitions;
     });
-    for (const field of managedFieldNames) {
-      if (accessorByKey.get(field)?.field === "private") continue;
+    for (const field of fields) {
       const managed = managedStorage.get(field);
-      if (managed !== void 0) methods.push(`get [${JSON.stringify(field)}]() { return this[${managed}]; }`);
+      if (managed === void 0) continue;
+      const policy2 = fieldPolicies.get(field);
+      const defaultDdd = artifact.encapsulateFields === true && policy2 === void 0;
+      const getter = policy2?.getter === true || defaultDdd || policy2 === void 0 && managedFieldNames.has(field);
+      const setter = policy2?.setter === true || defaultDdd;
+      if (getter) methods.push(`get [${JSON.stringify(field)}]() { return this[${managed}]; }`);
+      if (setter) {
+        const guarded = artifact.encapsulateFields === true && (policy2?.visibility !== "public" || policy2?.noConstructor === true);
+        methods.push(
+          guarded ? `set [${JSON.stringify(field)}](value) { throw new TypeError("Field ${field} is readonly"); }` : `set [${JSON.stringify(field)}](value) { this[${managed}] = value; }`
+        );
+      }
     }
     if (capabilities.has("equals")) {
       if (valueRepresentation) {
@@ -19278,6 +19474,21 @@ function emitModule(plan, options, layout) {
     }
     if (capabilities.has("with") && update2)
       methods.push(`with(patch) { return new this.constructor(${update2}(this, patch), __construct); }`);
+    const classJsonMember = artifact.resolvedMembers?.find(
+      (member) => member.owner === "class.json" && member.kind === "method"
+    )?.name;
+    if (classJsonMember !== void 0) {
+      const source2 = tryEmit(
+        reportName,
+        "class.json",
+        skipped,
+        () => emitSerialize(artifact.wireSchema ?? artifact.schema)
+      );
+      if (!source2) return void 0;
+      const stringify3 = internalIdentifier(`${binding}_json`);
+      helpers2.push(`const ${stringify3} = ${asExpression(source2, "stringify")};`);
+      methods.push(`${classMemberName(classJsonMember)}() { return ${stringify3}(this); }`);
+    }
     const identity = artifact.capabilities.find((capability2) => capability2.startsWith("identity:"));
     if (identity) {
       const identityField = identity.slice("identity:".length);
@@ -19335,33 +19546,38 @@ function emitModule(plan, options, layout) {
         `${classMemberName(artifact.mutation.touchMethod ?? "touch")}() { const now = new Date(); ${writeField(artifact.mutation.touchAt, "now")}${version === void 0 ? "" : ` ${writeField(version, `${readField(version)} + 1`)}`} }`
       );
     }
-    const assignments = valueRepresentation ? "this.value = state;" : fields.map((field) => `${readField(field)} = state[${JSON.stringify(field)}];`).join(" ");
-    const managedAccessors = [...managedStorage.entries()].filter(([field]) => accessorByKey.get(field)?.field !== "private").map(
-      ([field]) => `Object.defineProperty(this, ${JSON.stringify(field)}, { get: Object.getOwnPropertyDescriptor(${binding}.prototype, ${JSON.stringify(field)}).get, enumerable: true, configurable: false });`
-    ).join(" ");
+    const assignments = valueRepresentation ? "this.value = state;" : fields.map((field) => {
+      const initializer = fieldInitializers.get(field);
+      const value = initializer === void 0 ? `state[${JSON.stringify(field)}]` : `state[${JSON.stringify(field)}] === undefined ? ${initializer}.safeParse(undefined).data : state[${JSON.stringify(field)}]`;
+      return `${readField(field)} = ${value};`;
+    }).join(" ");
+    const trustedAssignments = fields.map((field) => {
+      const initializer = fieldInitializers.get(field);
+      const value = valueRepresentation ? "state" : initializer === void 0 ? `state[${JSON.stringify(field)}]` : `state[${JSON.stringify(field)}] === undefined ? ${initializer}.safeParse(undefined).data : state[${JSON.stringify(field)}]`;
+      const target = valueRepresentation ? "instance.value" : managedStorage.has(field) ? `instance[${managedStorage.get(field)}]` : `instance[${JSON.stringify(field)}]`;
+      return `${target} = ${value};`;
+    }).join(" ");
     const events = artifact.aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
     const freeze = artifact.frozen ? " Object.freeze(this);" : "";
     const abstractGuard = artifact.abstract ? `if (this === ${binding}) throw new Error("Cannot create an instance of an abstract JIT class"); ` : "";
-    const managedCreation = artifact.managedFields ?? [];
-    const creationAssignments = managedCreation.map((managed) => {
-      const field = JSON.stringify(managed.field);
-      if (managed.role === "createdAt") return `if (input[${field}] !== undefined) state[${field}] = new Date();`;
-      if (managed.role === "updatedAt" || managed.role === "deletedAt") return `state[${field}] = null;`;
-      return `state[${field}] = 0;`;
-    }).join(" ");
-    const creationToken = creationAssignments.length === 0 ? "__construct" : "__create";
     const policy = artifact.policy;
-    const assertionCall = policy?.assertions === void 0 ? "" : "const outcome = __assert(result.data); if (outcome !== undefined) return __failure(__assertFailure(outcome, result.data)); ";
-    const policyCreate = policy === void 0 || !policy.create ? void 0 : `const result = ${validator}.safeParse(input); if (!result.success) return __failure(__error(result.issues)); ${creationAssignments.replace(/state\[/g, "result.data[")} ${assertionCall}return __success(new this(result.data, __construct, true));`;
-    const policyHydrate = policy === void 0 || !policy.hydrate ? void 0 : `const result = ${hydrateValidator}.safeParse(state); if (!result.success) return __failure(__error(result.issues)); ${assertionCall}return __success(new this(result.data, __construct, true));`;
-    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? `return new this(input, ${creationToken});`;
-    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : policyHydrate ?? `const result = ${hydrateValidator}.safeParse(state); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
-    const constructionGuard = artifact.construction === "factory" ? `if (token !== __construct${creationAssignments.length === 0 ? "" : " && token !== __create"} && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ` : "";
-    const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${creationAssignments.length === 0 ? "" : `if (token === __create) { ${creationAssignments} } `}${assignments}${managedAccessors.length === 0 ? "" : ` ${managedAccessors}`}${events}${freeze} }`;
+    const assertionCall = (value) => policy?.assertions === void 0 ? "" : `const outcome = __assert(${value}); if (outcome !== undefined) return __failure(__assertFailure(outcome, ${value})); `;
+    const policyCreate = policy === void 0 || !policy.create ? void 0 : fastPolicyCreate ? `let __createdState; if (${validator}.is(${creationInput})) __createdState = ${creationInput}; else { const result = ${validator}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); __createdState = result.data; } ${assertionCall("__createdState")}return __success(new this(__createdState, __construct, true));` : `const result = ${validator}.safeParse(${creationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
+    const policyHydrate = policy === void 0 || !policy.hydrate ? void 0 : fastPolicyHydrate ? `let __hydratedState; if (${hydrateValidator}.is(${hydrationInput})) __hydratedState = ${hydrationInput}; else { const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); __hydratedState = result.data; } ${assertionCall("__hydratedState")}return __success(new this(__hydratedState, __construct, true));` : `const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) return __failure(__error(result.issues)); ${assertionCall("result.data")}return __success(new this(result.data, __construct, true));`;
+    const create = artifact.domainEvent ? `const result = ${validator}.safeParse(input); if (!result.success) throw new JITValidationError(result.issues); return new this({ id: globalThis.crypto?.randomUUID?.() ?? \`evt_\${Date.now().toString(36)}_\${Math.random().toString(36).slice(2)}\`, type: ${JSON.stringify(artifact.domainEvent.type)}, version: ${artifact.domainEvent.version}, occurredAt: new Date(), payload: result.data }, __construct);` : policyCreate ?? `return new this(${creationInput}, __construct);`;
+    const hydrate = artifact.domainEvent ? `if (state === null || typeof state !== "object" || state.type !== ${JSON.stringify(artifact.domainEvent.type)} || state.version !== ${artifact.domainEvent.version} || typeof state.id !== "string") throw new JITValidationError([]); const occurredAt = state.occurredAt instanceof Date ? state.occurredAt : new Date(state.occurredAt); if (Number.isNaN(occurredAt.getTime())) throw new JITValidationError([]); const result = ${validator}.safeParse(state.payload); if (!result.success) throw new JITValidationError(result.issues); return new this({ ...state, occurredAt, payload: result.data }, __construct);` : policyHydrate ?? `const result = ${hydrateValidator}.safeParse(${hydrationInput}); if (!result.success) throw new JITValidationError(result.issues); return new this(result.data, __construct, true);`;
+    const constructionGuard = artifact.construction === "factory" ? `if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); ` : "";
+    const constructorSource = artifact.domainEvent ? `constructor(state, token) { ${constructionGuard}${assignments}${events}${freeze} }` : `constructor(input, token, validated) { ${constructionGuard}const state = token === true || validated === true ? input : (() => { const result = ${validator}.safeParse(${creationInput}); if (!result.success) throw new JITValidationError(result.issues); return result.data; })(); ${assignments}${events}${freeze} }`;
+    const trustedMaterializer = slots.size > 0 ? `static ["__jitMaterialize"](state) { return new this(state, __construct, true); }` : `static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); ${trustedAssignments}${artifact.aggregate ? ' Object.defineProperty(instance, "__jitEvents", { value: [], writable: true });' : ""}${artifact.frozen ? " Object.freeze(instance);" : ""} return instance; }`;
     js.push(`${declaration} /*#__PURE__*/ (() => {`);
     js.push("  const __construct = Symbol();");
     for (const managed of managedStorage.values()) js.push(`  const ${managed} = Symbol();`);
-    if (creationAssignments.length > 0) js.push("  const __create = Symbol();");
+    if (boundaryInputName !== void 0) {
+      const checks = noConstructorFields.map((field) => `Object.prototype.hasOwnProperty.call(input, ${JSON.stringify(field)})`).join(" || ");
+      js.push(
+        `  const ${boundaryInputName} = (input) => { if (input === null || typeof input !== "object" || !(${checks})) return input; const state = { ...input }; ${noConstructorFields.map((field) => `delete state[${JSON.stringify(field)}];`).join(" ")} return state; };`
+      );
+    }
     if (policy !== void 0) {
       const policyLines = emitClassPolicy(policy, reportName);
       if (policyLines === void 0) return void 0;
@@ -19371,6 +19587,7 @@ function emitModule(plan, options, layout) {
     js.push(`  return class ${binding} {`);
     js.push(...[...slots.values()].map((slot) => `    ${slot};`));
     js.push(`    ${constructorSource}`);
+    js.push(`    ${trustedMaterializer}`);
     if (artifact.factories.create !== false)
       js.push(`    static ${classMemberName(artifact.factories.create)}(input) { ${abstractGuard}${create} }`);
     if (artifact.factories.hydrate !== false)
@@ -19441,6 +19658,11 @@ function emitModule(plan, options, layout) {
       const classBinding = classBindings.get(value);
       if (classBinding !== void 0) {
         inlined.push(`const ${name} = ${classBinding};`);
+        continue;
+      }
+      const assertionBinding = assertionBindings.get(value);
+      if (assertionBinding !== void 0) {
+        inlined.push(`const ${name} = ${assertionBinding};`);
         continue;
       }
       const literal4 = serializeBindingValue(value);
@@ -20613,9 +20835,9 @@ function serializeStaticData(value, seen = /* @__PURE__ */ new Set()) {
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const entries = [];
     for (const key of Object.keys(descriptors)) {
-      const descriptor = descriptors[key];
-      if (descriptor === void 0 || !("value" in descriptor)) return void 0;
-      const entry = serializeStaticData(descriptor.value, seen);
+      const descriptor2 = descriptors[key];
+      if (descriptor2 === void 0 || !("value" in descriptor2)) return void 0;
+      const entry = serializeStaticData(descriptor2.value, seen);
       if (entry === void 0) return void 0;
       entries.push(`${JSON.stringify(key)}: ${entry}`);
     }
@@ -20863,22 +21085,22 @@ function applyDddCapability(state3, kind, rawOptions) {
 }
 function validateManagedFields(schema, managed) {
   const object2 = resolveEffectiveObjectSchema(schema);
-  for (const descriptor of managed) {
-    const field = object2.def.props[descriptor.field];
+  for (const descriptor2 of managed) {
+    const field = object2.def.props[descriptor2.field];
     if (field === void 0) {
-      throw new Error(`Managed field ${JSON.stringify(descriptor.field)} was removed from the class schema`);
+      throw new Error(`Managed field ${JSON.stringify(descriptor2.field)} was removed from the class schema`);
     }
     const resolved = resolveWrappers(field);
-    const expected = descriptor.role === "version" ? "int or number" : descriptor.role === "createdAt" ? "Date" : "nullable Date";
-    const validType = descriptor.role === "version" ? resolved.base.type === TypeName.int || resolved.base.type === TypeName.number : resolved.base.type === TypeName.date;
-    const validNullability = descriptor.role === "updatedAt" || descriptor.role === "deletedAt" ? resolved.nullable : !resolved.nullable;
+    const expected = descriptor2.role === "version" ? "int or number" : descriptor2.role === "createdAt" ? "Date" : "nullable Date";
+    const validType = descriptor2.role === "version" ? resolved.base.type === TypeName.int || resolved.base.type === TypeName.number : resolved.base.type === TypeName.date;
+    const validNullability = descriptor2.role === "updatedAt" || descriptor2.role === "deletedAt" ? resolved.nullable : !resolved.nullable;
     if (!validType || !validNullability) {
       throw new Error(
-        `DDD capability ${descriptor.owner} cannot manage ${descriptor.role} ${JSON.stringify(descriptor.field)}: expected ${expected}`
+        `DDD capability ${descriptor2.owner} cannot manage ${descriptor2.role} ${JSON.stringify(descriptor2.field)}: expected ${expected}`
       );
     }
     if (!resolved.readonly) {
-      throw new Error(`Managed field ${JSON.stringify(descriptor.field)} must remain readonly`);
+      throw new Error(`Managed field ${JSON.stringify(descriptor2.field)} must remain readonly`);
     }
   }
 }
@@ -20886,12 +21108,12 @@ function reapplyManagedFields(schema, managed) {
   const object2 = resolveEffectiveObjectSchema(schema);
   if (managed.length === 0) return schema;
   const props = { ...object2.def.props };
-  for (const descriptor of managed) {
-    props[descriptor.field] = resolveManagedField(
-      props[descriptor.field],
-      descriptor.role,
-      descriptor.owner,
-      descriptor.clock
+  for (const descriptor2 of managed) {
+    props[descriptor2.field] = resolveManagedField(
+      props[descriptor2.field],
+      descriptor2.role,
+      descriptor2.owner,
+      descriptor2.clock
     );
   }
   const next = createSchema(
@@ -20923,17 +21145,17 @@ function initialEffectiveSchema(schema) {
 function addMember(members, name, source, owner, kind) {
   members.add({ name, kind, source, owner });
 }
-function addManaged(target, descriptor) {
-  const index2 = target.findIndex((item) => item.field === descriptor.field);
-  if (index2 === -1) target.push(Object.freeze(descriptor));
+function addManaged(target, descriptor2) {
+  const index2 = target.findIndex((item) => item.field === descriptor2.field);
+  if (index2 === -1) target.push(Object.freeze(descriptor2));
   else {
     const previous = target[index2];
-    if (previous?.owner !== descriptor.owner || previous.role !== descriptor.role) {
+    if (previous?.owner !== descriptor2.owner || previous.role !== descriptor2.role) {
       throw new Error(
-        `Managed field ${JSON.stringify(descriptor.field)} is already owned by ${previous?.owner ?? "another capability"}`
+        `Managed field ${JSON.stringify(descriptor2.field)} is already owned by ${previous?.owner ?? "another capability"}`
       );
     }
-    target[index2] = Object.freeze(descriptor);
+    target[index2] = Object.freeze(descriptor2);
   }
 }
 function ensureDistinctFields(left, right, owner) {
@@ -21028,16 +21250,152 @@ function findDefault(schema) {
   }
 }
 
-// ../../packages/jit/src/classes/overwrite.ts
-var OVERWRITE = /* @__PURE__ */ Symbol("jit.class.overwrite");
-function overwrite(value) {
+// ../../packages/jit/src/classes/member-descriptors.ts
+var CLASS_MEMBER_DESCRIPTOR = /* @__PURE__ */ Symbol("jit.class.member");
+function isClassMemberDescriptor(value) {
+  return typeof value === "object" && value !== null && value[CLASS_MEMBER_DESCRIPTOR] === true;
+}
+function descriptor(definition) {
   return Object.freeze({
-    [OVERWRITE]: true,
+    [CLASS_MEMBER_DESCRIPTOR]: true,
+    definition
+  });
+}
+function mergeDefinitions(values, visibility) {
+  let schema;
+  let getter;
+  let setter;
+  let noConstructor;
+  let method;
+  let nestedVisibility;
+  for (const value of values) {
+    if (isClassMemberDescriptor(value)) {
+      const definition = value.definition;
+      if (definition.kind === "factory") {
+        throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "Factory descriptors cannot be used as member modifiers");
+      }
+      const definitionVisibility = "visibility" in definition ? definition.visibility : void 0;
+      if (definitionVisibility !== void 0) {
+        if (nestedVisibility !== void 0 && nestedVisibility !== definitionVisibility) {
+          throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "A class member cannot be both public and hidden");
+        }
+        nestedVisibility = definitionVisibility;
+      }
+      if (definition.kind === "method") {
+        if (method !== void 0 || schema !== void 0 || getter !== void 0 || setter !== void 0) {
+          throw new JITError(
+            "CLASS_MEMBER_ALREADY_EXISTS",
+            "A member descriptor cannot combine methods with fields or accessors"
+          );
+        }
+        method = definition;
+      }
+      if (definition.kind === "field" || definition.kind === "accessor") {
+        const nextSchema = definition.schema;
+        if (nextSchema !== void 0 && schema !== void 0) {
+          throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "A member descriptor cannot declare two schemas");
+        }
+        schema ??= nextSchema;
+        if (definition.getter !== void 0) {
+          if (getter !== void 0)
+            throw new JITError("CLASS_ACCESSOR_CONFLICT", "A member descriptor cannot declare two getters");
+          getter = definition.getter;
+        }
+        if (definition.setter !== void 0) {
+          if (setter !== void 0)
+            throw new JITError("CLASS_ACCESSOR_CONFLICT", "A member descriptor cannot declare two setters");
+          setter = definition.setter;
+        }
+        noConstructor ??= definition.kind === "field" ? definition.noConstructor : void 0;
+      }
+      continue;
+    }
+    if (schema !== void 0) {
+      throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "A member descriptor cannot declare two schemas");
+    }
+    schema ??= value;
+  }
+  if (visibility !== void 0 && nestedVisibility !== void 0 && visibility !== nestedVisibility) {
+    throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "A class member cannot be both public and hidden");
+  }
+  if (method !== void 0) {
+    const resolvedVisibility2 = visibility ?? nestedVisibility;
+    return descriptor({
+      ...method,
+      ...resolvedVisibility2 === void 0 ? {} : { visibility: resolvedVisibility2 }
+    });
+  }
+  const resolvedVisibility = visibility ?? nestedVisibility;
+  return descriptor({
+    kind: schema === void 0 ? "accessor" : "field",
+    ...schema === void 0 ? {} : { schema },
+    ...resolvedVisibility === void 0 ? {} : { visibility: resolvedVisibility },
+    ...getter === void 0 ? {} : { getter },
+    ...setter === void 0 ? {} : { setter },
+    ...noConstructor === void 0 ? {} : { noConstructor }
+  });
+}
+function classPublic(value, ...members) {
+  return mergeDefinitions(value === void 0 ? members : [value, ...members], "public");
+}
+function classProtected(value, ...members) {
+  return mergeDefinitions(value === void 0 ? members : [value, ...members], "protected");
+}
+function classPrivate(value, ...members) {
+  return mergeDefinitions(value === void 0 ? members : [value, ...members], "private");
+}
+function classGetter(schemaOrImplementation) {
+  if (typeof schemaOrImplementation === "function")
+    return descriptor({ kind: "accessor", getter: schemaOrImplementation });
+  return descriptor({
+    kind: "accessor",
+    ...schemaOrImplementation === void 0 ? {} : { schema: schemaOrImplementation },
+    getter: true
+  });
+}
+function classSetter(implementation) {
+  return descriptor({ kind: "accessor", setter: implementation ?? true });
+}
+function classNoConstructor(value) {
+  const merged = mergeDefinitions([value]);
+  const definition = merged.definition;
+  if (definition.kind === "method" || definition.kind === "factory" || definition.kind === "accessor") {
+    throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "noConstructor() requires a schema field");
+  }
+  return descriptor({
+    ...definition,
+    kind: "field",
+    noConstructor: true
+  });
+}
+function classMethod(options) {
+  const input = options.input.map((item) => unwrapSchema(item));
+  const output = options.output === void 0 ? void 0 : unwrapSchema(options.output);
+  const args = createSchema(TypeName.tuple, { items: input, rest: void 0 });
+  const schema = createSchema(TypeName.function, { input, output, args });
+  return {
+    implement(implementation) {
+      return descriptor({ kind: "method", schema, implementation, async: false });
+    },
+    implementAsync(implementation) {
+      return descriptor({ kind: "method", schema, implementation, async: true });
+    }
+  };
+}
+function classFactory(name, implementation, phase = "create") {
+  return descriptor({ kind: "factory", name, implementation, phase });
+}
+
+// ../../packages/jit/src/classes/override.ts
+var OVERRIDE = /* @__PURE__ */ Symbol("jit.class.override");
+function override(value) {
+  return Object.freeze({
+    [OVERRIDE]: true,
     value
   });
 }
-function isOverwriteDescriptor(value) {
-  return typeof value === "object" && value !== null && value[OVERWRITE] === true;
+function isOverrideDescriptor(value) {
+  return typeof value === "object" && value !== null && value[OVERRIDE] === true;
 }
 
 // ../../packages/jit/src/compiler/assertion.ts
@@ -21064,13 +21422,13 @@ function emitAssertionSource(descriptors, maxIssues) {
     writer.line("let issues;");
     writer.line("let errorIndex = -1;");
     writer.line("let errorPriority = -1;");
-    descriptors.forEach((descriptor, index2) => {
-      const test = emitQueryConditionSource(descriptor.condition, { fieldBase: "value", paramBase: "value" });
+    descriptors.forEach((descriptor2, index2) => {
+      const test = emitQueryConditionSource(descriptor2.condition, { fieldBase: "value", paramBase: "value" });
       writer.line(`if (!(${test})) {`);
       writer.indent(() => {
         writer.line(`const failure = __fail${index2}(value);`);
         writer.line(
-          `if (failure !== undefined && ${descriptor.priority} > errorPriority) { errorIndex = ${index2}; errorPriority = ${descriptor.priority}; }`
+          `if (failure !== undefined && ${descriptor2.priority} > errorPriority) { errorIndex = ${index2}; errorPriority = ${descriptor2.priority}; }`
         );
         writer.line(`(issues ??= [])[issues.length] = __issue${index2};`);
         if (maxIssues !== void 0) writer.line(`if (issues.length === ${maxIssues}) return { issues, errorIndex };`);
@@ -21084,11 +21442,11 @@ function emitAssertionSource(descriptors, maxIssues) {
 }
 function assertionIssues(descriptors) {
   return descriptors.map(
-    (descriptor) => Object.freeze({
-      path: descriptor.field === void 0 ? [] : [descriptor.field],
-      code: descriptor.code,
-      expected: descriptor.rule ?? GENERIC_RULE,
-      message: descriptor.message
+    (descriptor2) => Object.freeze({
+      path: descriptor2.field === void 0 ? [] : [descriptor2.field],
+      code: descriptor2.code,
+      expected: descriptor2.rule ?? GENERIC_RULE,
+      message: descriptor2.message
     })
   );
 }
@@ -21125,12 +21483,12 @@ function conditionFields(condition, into) {
 function resolveChangeLayout(schema, paths) {
   return changeLayoutOf(resolveChangedDescriptor(schema, paths ?? allFieldPaths(schema, "JIT.compare.changed()")));
 }
-function changeLayoutOf(descriptor) {
-  const paths = descriptor.fields.map((field) => field.path);
+function changeLayoutOf(descriptor2) {
+  const paths = descriptor2.fields.map((field) => field.path);
   return Object.freeze({
     paths: Object.freeze(paths),
-    representation: descriptor.representation,
-    id: `${descriptor.representation}:${paths.join(",")}`
+    representation: descriptor2.representation,
+    id: `${descriptor2.representation}:${paths.join(",")}`
   });
 }
 function changeLayoutBitFor(layout, path) {
@@ -21631,130 +21989,130 @@ function writesOrderingKey(row, ordering) {
   if (row === void 0 || ordering === void 0) return false;
   return row.writes.some((write) => write.path.length === 1 && write.path[0] === ordering.key);
 }
-function explainCollectionMutation(descriptor) {
-  const positional = POSITIONAL_KINDS.has(descriptor.kind);
+function explainCollectionMutation(descriptor2) {
+  const positional = POSITIONAL_KINDS.has(descriptor2.kind);
   return Object.freeze({
-    operation: descriptor.kind,
-    key: descriptor.key,
+    operation: descriptor2.kind,
+    key: descriptor2.key,
     physical: Object.freeze({
-      strategy: positional ? "DirectPosition" : descriptor.choice.strategy,
-      reason: descriptor.choice.reason,
-      complexity: descriptor.choice.complexity,
-      facts: descriptor.choice.facts
+      strategy: positional ? "DirectPosition" : descriptor2.choice.strategy,
+      reason: descriptor2.choice.reason,
+      complexity: descriptor2.choice.complexity,
+      facts: descriptor2.choice.facts
     }),
     // Finding the row can be O(1) or O(log n); rebuilding the array cannot.
     // Saying so is the honest half of the claim.
     copy: "O(n)",
-    mutation: descriptor.facts
+    mutation: descriptor2.facts
   });
 }
-function collectionMutationCacheKey(descriptor) {
-  return `collection:${descriptor.kind}:${descriptor.mode}:${descriptor.choice.strategy}:${descriptor.key}:${descriptor.date}:${descriptor.choice.direction}`;
+function collectionMutationCacheKey(descriptor2) {
+  return `collection:${descriptor2.kind}:${descriptor2.mode}:${descriptor2.choice.strategy}:${descriptor2.key}:${descriptor2.date}:${descriptor2.choice.direction}`;
 }
-function emitFindPosition(descriptor) {
+function emitFindPosition(descriptor2) {
   const shape = {
     signature: "value, params",
-    probe: descriptor.date && descriptor.probe === "params.key" ? "(params.key == null ? params.key : params.key.getTime())" : descriptor.probe,
+    probe: descriptor2.date && descriptor2.probe === "params.key" ? "(params.key == null ? params.key : params.key.getTime())" : descriptor2.probe,
     answers: "position"
   };
-  if (descriptor.choice.strategy === "CachedIndexLookup") return emitCachedIndexLookup(descriptor.descriptor, shape);
-  if (descriptor.choice.strategy === "BinarySearch") {
-    return emitBinarySearch(descriptor.key, descriptor.descriptor, descriptor.choice.direction, shape);
+  if (descriptor2.choice.strategy === "CachedIndexLookup") return emitCachedIndexLookup(descriptor2.descriptor, shape);
+  if (descriptor2.choice.strategy === "BinarySearch") {
+    return emitBinarySearch(descriptor2.key, descriptor2.descriptor, descriptor2.choice.direction, shape);
   }
-  return emitEarlyExitScan(descriptor.key, descriptor.descriptor, shape);
+  return emitEarlyExitScan(descriptor2.key, descriptor2.descriptor, shape);
 }
-function emitCollectionMutationSource(descriptor) {
+function emitCollectionMutationSource(descriptor2) {
   const writer = new CodeWriter();
   writer.line("(() => {");
   writer.indent(() => {
-    if (needsPositionFinder(descriptor)) writer.line(`const find = ${emitFindPosition(descriptor)};`);
+    if (needsPositionFinder(descriptor2)) writer.line(`const find = ${emitFindPosition(descriptor2)};`);
     writer.line("function mutate(value, params) {");
-    writer.indent(() => emitBody(writer, descriptor));
+    writer.indent(() => emitBody(writer, descriptor2));
     writer.line("}");
     writer.line("return mutate;");
   });
   writer.line("})()");
   return writer.toString();
 }
-function needsPositionFinder(descriptor) {
-  if (POSITIONAL_KINDS.has(descriptor.kind)) return false;
-  if (descriptor.kind !== "updateWhere" && descriptor.kind !== "removeWhere" && descriptor.kind !== "replaceWhere")
+function needsPositionFinder(descriptor2) {
+  if (POSITIONAL_KINDS.has(descriptor2.kind)) return false;
+  if (descriptor2.kind !== "updateWhere" && descriptor2.kind !== "removeWhere" && descriptor2.kind !== "replaceWhere")
     return true;
-  return descriptor.choice.strategy !== "EarlyExitScan";
+  return descriptor2.choice.strategy !== "EarlyExitScan";
 }
-function emitBody(writer, descriptor) {
-  if (descriptor.kind === "append" || descriptor.kind === "prepend") {
-    emitInsertEnd(writer, descriptor.kind);
+function emitBody(writer, descriptor2) {
+  if (descriptor2.kind === "append" || descriptor2.kind === "prepend") {
+    emitInsertEnd(writer, descriptor2.kind);
     return;
   }
-  if (descriptor.kind === "insertAt") {
+  if (descriptor2.kind === "insertAt") {
     emitInsertAt(writer);
     return;
   }
-  if (descriptor.kind === "removeAt") {
+  if (descriptor2.kind === "removeAt") {
     emitPositionalRemoveAt(writer);
     return;
   }
-  if (descriptor.kind === "replaceAt" || descriptor.kind === "updateAt") {
+  if (descriptor2.kind === "replaceAt" || descriptor2.kind === "updateAt") {
     writer.line("const at = params.index;");
     writer.line("if (!Number.isInteger(at) || at < 0 || at >= value.length) return value;");
-    emitReplaceAt(writer, descriptor, "row");
+    emitReplaceAt(writer, descriptor2, "row");
     return;
   }
-  if (descriptor.kind === "swap") {
+  if (descriptor2.kind === "swap") {
     emitSwap(writer);
     return;
   }
-  if (descriptor.kind === "move") {
+  if (descriptor2.kind === "move") {
     emitMove(writer);
     return;
   }
-  if (descriptor.kind === "truncate") {
+  if (descriptor2.kind === "truncate") {
     emitTruncate(writer);
     return;
   }
-  if (descriptor.kind === "updateWhere" || descriptor.kind === "removeWhere" || descriptor.kind === "replaceWhere") {
-    if (descriptor.choice.strategy === "EarlyExitScan") {
-      if (descriptor.kind === "updateWhere") emitUpdateWhereScan(writer, descriptor);
-      else if (descriptor.kind === "removeWhere") {
-        if (descriptor.mode === "first") emitRemoveWhereFirst(writer, descriptor);
-        else emitRemoveWhereScan(writer, descriptor);
-      } else emitReplaceWhereScan(writer, descriptor);
+  if (descriptor2.kind === "updateWhere" || descriptor2.kind === "removeWhere" || descriptor2.kind === "replaceWhere") {
+    if (descriptor2.choice.strategy === "EarlyExitScan") {
+      if (descriptor2.kind === "updateWhere") emitUpdateWhereScan(writer, descriptor2);
+      else if (descriptor2.kind === "removeWhere") {
+        if (descriptor2.mode === "first") emitRemoveWhereFirst(writer, descriptor2);
+        else emitRemoveWhereScan(writer, descriptor2);
+      } else emitReplaceWhereScan(writer, descriptor2);
       return;
     }
     writer.line("const at = find(value, params);");
     writer.line("if (at < 0) return value;");
-    if (descriptor.kind === "removeWhere") emitRemoveAt(writer);
-    else emitReplaceAt(writer, descriptor, "row");
+    if (descriptor2.kind === "removeWhere") emitRemoveAt(writer);
+    else emitReplaceAt(writer, descriptor2, "row");
     return;
   }
   writer.line("const at = find(value, params);");
-  if (descriptor.kind === "removeByKey") {
+  if (descriptor2.kind === "removeByKey") {
     writer.line("if (at < 0) return value;");
     emitRemoveAt(writer);
     return;
   }
-  if (descriptor.kind === "updateByKey" || descriptor.kind === "replaceByKey") {
+  if (descriptor2.kind === "updateByKey" || descriptor2.kind === "replaceByKey") {
     writer.line("if (at < 0) return value;");
-    emitReplaceAt(writer, descriptor, "row");
+    emitReplaceAt(writer, descriptor2, "row");
     return;
   }
   emitUpsert(writer);
 }
-function emitReplaceAt(writer, descriptor, rowVar) {
+function emitReplaceAt(writer, descriptor2, rowVar) {
   writer.line(`const ${rowVar} = value[at];`);
   writer.line("const next = (() => {");
   writer.indent(() => {
     writer.line(`const value = ${rowVar};`);
-    if (descriptor.row === void 0) writer.line("return params.row;");
-    else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
+    if (descriptor2.row === void 0) writer.line("return params.row;");
+    else for (const line of emitMutationBody(descriptor2.row).split("\n")) writer.line(line);
   });
   writer.line("})();");
   writer.line(
-    descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere" ? `if (__equal(${rowVar}, next)) return value;` : `if (next === ${rowVar}) return value;`
+    descriptor2.kind === "replaceAt" || descriptor2.kind === "replaceByKey" || descriptor2.kind === "replaceWhere" ? `if (__equal(${rowVar}, next)) return value;` : `if (next === ${rowVar}) return value;`
   );
-  if (descriptor.reposition !== void 0) {
-    emitReposition(writer, descriptor.reposition);
+  if (descriptor2.reposition !== void 0) {
+    emitReposition(writer, descriptor2.reposition);
     return;
   }
   writer.line("const out = value.slice();");
@@ -21888,18 +22246,18 @@ function emitUpsert(writer) {
   writer.line("for (let i = insertion; i < len; i++) out[i + 1] = value[i];");
   writer.line("return out;");
 }
-function emitUpdateWhereScan(writer, descriptor) {
+function emitUpdateWhereScan(writer, descriptor2) {
   writer.line("const len = value.length;");
   writer.line("let out = null;");
   writer.line("for (let i = 0; i < len; i++) {");
   writer.indent(() => {
     writer.line("const row = value[i];");
-    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
+    writer.line(`if (!(${emitPredicate(descriptor2)})) continue;`);
     writer.line("const next = (() => {");
     writer.indent(() => {
       writer.line("const value = row;");
-      if (descriptor.row === void 0) writer.line("return params.row;");
-      else for (const line of emitMutationBody(descriptor.row).split("\n")) writer.line(line);
+      if (descriptor2.row === void 0) writer.line("return params.row;");
+      else for (const line of emitMutationBody(descriptor2.row).split("\n")) writer.line(line);
     });
     writer.line("})();");
     writer.line("if (next === row) continue;");
@@ -21909,13 +22267,13 @@ function emitUpdateWhereScan(writer, descriptor) {
   writer.line("}");
   writer.line("return out === null ? value : out;");
 }
-function emitReplaceWhereScan(writer, descriptor) {
+function emitReplaceWhereScan(writer, descriptor2) {
   writer.line("const len = value.length;");
   writer.line("let out = null;");
   writer.line("for (let i = 0; i < len; i++) {");
   writer.indent(() => {
     writer.line("const row = value[i];");
-    writer.line(`if (!(${emitPredicate(descriptor)})) continue;`);
+    writer.line(`if (!(${emitPredicate(descriptor2)})) continue;`);
     writer.line("if (__equal(row, params.row)) continue;");
     writer.line("if (out === null) out = value.slice();");
     writer.line("out[i] = params.row;");
@@ -21923,8 +22281,8 @@ function emitReplaceWhereScan(writer, descriptor) {
   writer.line("}");
   writer.line("return out === null ? value : out;");
 }
-function emitRemoveWhereScan(writer, descriptor) {
-  const predicate = emitPredicate(descriptor);
+function emitRemoveWhereScan(writer, descriptor2) {
+  const predicate = emitPredicate(descriptor2);
   writer.line("const len = value.length;");
   writer.line("let removed = 0;");
   writer.line("for (let i = 0; i < len; i++) {");
@@ -21944,19 +22302,19 @@ function emitRemoveWhereScan(writer, descriptor) {
   writer.line("}");
   writer.line("return out;");
 }
-function emitRemoveWhereFirst(writer, descriptor) {
+function emitRemoveWhereFirst(writer, descriptor2) {
   writer.line("let at = -1;");
   writer.line("for (let i = 0; i < value.length; i++) {");
   writer.indent(() => {
     writer.line("const row = value[i];");
-    writer.line(`if (${emitPredicate(descriptor)}) { at = i; break; }`);
+    writer.line(`if (${emitPredicate(descriptor2)}) { at = i; break; }`);
   });
   writer.line("}");
   writer.line("if (at < 0) return value;");
   emitRemoveAt(writer);
 }
-function emitPredicate(descriptor) {
-  return emitQueryConditionSource(descriptor.condition, {
+function emitPredicate(descriptor2) {
+  return emitQueryConditionSource(descriptor2.condition, {
     fieldBase: "row",
     paramBase: "params"
   });
@@ -21974,8 +22332,1034 @@ function emitInsertEnd(writer, kind) {
   writer.line("return out;");
 }
 
+// ../../packages/jit/src/core/factory-policy.ts
+var MODE_RANK = Object.freeze({
+  tuple: 0,
+  either: 1,
+  throw: 2
+});
+function normalizeFactoryReturnMode(mode) {
+  return mode === "result" ? "either" : mode;
+}
+function selectFactoryPolicyCandidate(candidates) {
+  let selected;
+  for (const candidate of candidates) {
+    if (selected === void 0 || candidate.priority > selected.priority || candidate.priority === selected.priority && MODE_RANK[candidate.mode] > MODE_RANK[selected.mode] || candidate.priority === selected.priority && MODE_RANK[candidate.mode] === MODE_RANK[selected.mode] && (candidate.depth < selected.depth || candidate.depth === selected.depth && candidate.source < selected.source)) {
+      selected = candidate;
+    }
+  }
+  return selected;
+}
+
 // ../../packages/jit/src/core/host.ts
 var AOT_ARTIFACT = /* @__PURE__ */ Symbol.for("@jit/aot-artifact");
+
+// ../../packages/jit/src/compiler/codec.ts
+function compileCodec(schema, options) {
+  const version = options?.version ?? 1;
+  return getCompileCached(
+    schema,
+    `codec:v${version}`,
+    () => {
+      const emitted = emitCodec(schema, { version });
+      const compiled = globalThis.Function(
+        ...emitted.bindingNames,
+        emitted.source
+      )(...emitted.bindingValues);
+      registerArtifact(compiled, {
+        kind: "operation",
+        schema,
+        op: "codec"
+      });
+      return compiled;
+    },
+    options
+  );
+}
+
+// ../../packages/jit/src/compiler/json-parse.ts
+function compileJsonParse(schema) {
+  warmJsonParseShape(schema);
+  return JSON.parse;
+}
+function warmJsonParseShape(schema) {
+  const sample = jsonWarmupSample(schema);
+  if (sample === void 0) return false;
+  JSON.parse(sample);
+  JSON.parse(sample);
+  return true;
+}
+function jsonWarmupSample(schema) {
+  const value = emitWarmupValue(schema, /* @__PURE__ */ new Set(), 0);
+  if (value === void 0) return void 0;
+  if (rootIsArray(schema)) {
+    const element = rootArrayElement(schema);
+    const item = element ? emitWarmupValue(element, /* @__PURE__ */ new Set(), 1) : void 0;
+    if (item !== void 0) return `[${item},${item}]`;
+  }
+  return value;
+}
+function emitWarmupValue(schema, seen, depth) {
+  if (depth > 12 || seen.has(schema)) return "null";
+  seen.add(schema);
+  const current = schema;
+  let output;
+  switch (current.type) {
+    case TypeName.string:
+      output = '""';
+      break;
+    case TypeName.number:
+    case TypeName.int:
+    case TypeName.bigint:
+    case TypeName.nan:
+      output = "0";
+      break;
+    case TypeName.boolean:
+      output = "false";
+      break;
+    case TypeName.null:
+    case TypeName.undefined:
+    case TypeName.void:
+    case TypeName.never:
+    case TypeName.unknown:
+    case TypeName.any:
+    case TypeName.json:
+      output = "null";
+      break;
+    case TypeName.literal:
+      output = jsonPrimitive(current.def.value);
+      break;
+    case TypeName.enum: {
+      const values = Object.values(current.def.values);
+      output = values.map(jsonPrimitive).find((value) => value !== void 0) ?? "null";
+      break;
+    }
+    case TypeName.array: {
+      const item = emitWarmupValue(current.def.element, seen, depth + 1);
+      output = item === void 0 ? "[]" : `[${item},${item}]`;
+      break;
+    }
+    case TypeName.tuple: {
+      const items = current.def.items ?? [];
+      output = `[${items.map((item) => emitWarmupValue(item, seen, depth + 1) ?? "null").join(",")}]`;
+      break;
+    }
+    case TypeName.object: {
+      const props = current.def.props;
+      const entries = Object.keys(props).map((key) => {
+        const value = emitWarmupValue(props[key], seen, depth + 1) ?? "null";
+        return `${JSON.stringify(key)}:${value}`;
+      });
+      output = `{${entries.join(",")}}`;
+      break;
+    }
+    case TypeName.record:
+    case TypeName.map:
+      output = "{}";
+      break;
+    case TypeName.set:
+      output = "[]";
+      break;
+    case TypeName.union:
+    case TypeName.xor:
+    case TypeName.discriminatedUnion:
+    case TypeName.intersection: {
+      const options = current.def.options ?? [];
+      output = options.length === 0 ? "null" : emitWarmupValue(options[0], seen, depth + 1);
+      break;
+    }
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.not:
+      output = emitWarmupValue(current.def.innerType, seen, depth + 1);
+      break;
+    case TypeName.lazy:
+      output = emitWarmupValue(current.def.getter(), seen, depth + 1);
+      break;
+    case TypeName.when:
+      output = emitWarmupValue(current.def.thenType, seen, depth + 1);
+      break;
+    case TypeName.codec:
+      output = emitWarmupValue(current.def.input, seen, depth + 1);
+      break;
+    default:
+      output = "null";
+  }
+  seen.delete(schema);
+  return output;
+}
+function jsonPrimitive(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return void 0;
+}
+function rootIsArray(schema, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  const current = schema;
+  if (current.type === TypeName.array) return true;
+  const inner = wrapperInner(current);
+  return inner === void 0 ? false : rootIsArray(inner, seen);
+}
+function rootArrayElement(schema, seen = /* @__PURE__ */ new Set()) {
+  if (seen.has(schema)) return void 0;
+  seen.add(schema);
+  const current = schema;
+  if (current.type === TypeName.array) return current.def.element;
+  const inner = wrapperInner(current);
+  return inner === void 0 ? void 0 : rootArrayElement(inner, seen);
+}
+function wrapperInner(schema) {
+  switch (schema.type) {
+    case TypeName.optional:
+    case TypeName.nullable:
+    case TypeName.nullish:
+    case TypeName.default:
+    case TypeName.brand:
+    case TypeName.readonly:
+    case TypeName.refine:
+    case TypeName.coerce:
+    case TypeName.pipe:
+    case TypeName.transform:
+    case TypeName.not:
+      return schema.def.innerType;
+    case TypeName.lazy:
+      return schema.def.getter();
+    default:
+      return void 0;
+  }
+}
+
+// ../../packages/jit/src/compiler/execution-lower.ts
+function emitExecutionPlan(plan) {
+  const optimized = optimizeExecutionPlan(plan);
+  const setup = [];
+  const body = ["let value = input;"];
+  const bindingNames = [];
+  const bindingValues = [];
+  let helperIndex = 0;
+  let valueIndex = 0;
+  const bind = (value) => {
+    const name = `__e${bindingNames.length}`;
+    bindingNames.push(name);
+    bindingValues.push(value);
+    return name;
+  };
+  const helper = (prefix) => `__${prefix}${helperIndex++}`;
+  const emitBoundBlock = (prefix, localNames, values, source, expression = false) => {
+    const name = helper(prefix);
+    const args = values.map(bind);
+    setup.push(`const ${name} = ((${localNames.join(", ")}) => {`);
+    if (expression) setup.push(...indent(`return (${source});`));
+    else setup.push(...indent(source));
+    setup.push(`})(${args.join(", ")});`);
+    return name;
+  };
+  const emitMany = (helperName4, patchName) => {
+    const list = `__list${valueIndex}`;
+    const length = `__len${valueIndex}`;
+    const out = `__out${valueIndex}`;
+    const index2 = `__i${valueIndex++}`;
+    body.push(`const ${list} = value;`);
+    body.push(`const ${length} = ${list}.length;`);
+    body.push(`const ${out} = new Array(${length});`);
+    body.push(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
+    body.push(`  ${out}[${index2}] = ${helperName4}(${list}[${index2}]${patchName ? `, ${patchName}` : ""});`);
+    body.push("}");
+    body.push(`value = ${out};`);
+  };
+  const stages = optimized.stages;
+  for (let index2 = 0; index2 < stages.length; index2++) {
+    const stage2 = stages[index2];
+    switch (stage2.kind) {
+      case "value":
+      case "to.array":
+        break;
+      case "json.decode":
+        body.push("value = JSON.parse(value);");
+        break;
+      case "binary.decode": {
+        const codec2 = emitCodec(stage2.schema);
+        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
+        body.push(`value = ${codecName}.decode(value);`);
+        break;
+      }
+      case "validate": {
+        const nextStage = stages[index2 + 1];
+        const constructNext = nextStage?.kind === "construct";
+        const constructArtifact = constructNext ? getArtifact(nextStage.target) : void 0;
+        const strictDomainEvent = constructArtifact?.kind === "class" && constructArtifact.domainEvent !== void 0;
+        const fastParse = stage2.operation === "parse" && canUseFastParse(stage2.schema);
+        const validator = emitValidator(stage2.schema, {
+          is: stage2.operation === "is" || fastParse,
+          safeParse: stage2.operation === "parse" || stage2.operation === "safeParse" || stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync" || stage2.operation === "issues",
+          safeParseAsync: stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync",
+          materializeRuntimeTypes: !constructNext,
+          resolveDefaults: !strictDomainEvent,
+          ...stage2.maxIssues === void 0 ? {} : { maxIssues: stage2.maxIssues }
+        });
+        const validatorName = emitBoundBlock(
+          "validator",
+          validator.bindings.names,
+          validator.bindings.values,
+          validator.source
+        );
+        switch (stage2.operation) {
+          case "is":
+            body.push(`value = ${validatorName}.is(value);`);
+            break;
+          case "parse": {
+            const error = bind(JITValidationError);
+            if (fastParse) {
+              const result = `__result${valueIndex++}`;
+              body.push(`if (!${validatorName}.is(value)) {`);
+              body.push(`  const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`  if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`  value = ${result}.data;`);
+              body.push("}");
+            } else {
+              const result = `__result${valueIndex++}`;
+              body.push(`const ${result} = ${validatorName}.safeParse(value);`);
+              body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
+              body.push(`value = ${result}.data;`);
+            }
+            break;
+          }
+          case "safeParse":
+            body.push(`value = ${validatorName}.safeParse(value);`);
+            break;
+          case "parseAsync": {
+            const error = bind(JITValidationError);
+            body.push(
+              `return ${validatorName}.safeParseAsync(value).then((result) => { if (!result.success) throw new ${error}(result.issues); return result.data; });`
+            );
+            break;
+          }
+          case "safeParseAsync":
+            body.push(`return ${validatorName}.safeParseAsync(value);`);
+            break;
+          case "issues": {
+            const result = `__result${valueIndex++}`;
+            body.push(`const ${result} = ${validatorName}.safeParse(value);`);
+            body.push(`return (function* issues() { if (!${result}.success) yield* ${result}.issues; })();`);
+            break;
+          }
+        }
+        break;
+      }
+      case "construct": {
+        const target = bind(stage2.target);
+        body.push(`value = new ${target}(value, true);`);
+        break;
+      }
+      case "query": {
+        let finalStage = stage2;
+        while (index2 + 1 < stages.length && stages[index2 + 1]?.kind === "query") {
+          index2++;
+          finalStage = stages[index2];
+        }
+        const aggregate = stages[index2 + 1];
+        if (aggregate?.kind === "aggregate") {
+          index2++;
+          finalStage = aggregate;
+        }
+        const queryName = emitBoundBlock(
+          "query",
+          finalStage.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
+          finalStage.program.bindings,
+          emitQuerySource(finalStage.source, finalStage.program),
+          true
+        );
+        body.push(`value = ${queryName}(value);`);
+        break;
+      }
+      case "aggregate": {
+        const queryName = emitBoundBlock(
+          "query",
+          stage2.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
+          stage2.program.bindings,
+          emitQuerySource(stage2.source, stage2.program),
+          true
+        );
+        body.push(`value = ${queryName}(value);`);
+        break;
+      }
+      case "map": {
+        const mapping = stage2.bindings[0];
+        const nextStage = stages[index2 + 1];
+        const fuseJsonEncode = nextStage?.kind === "json.encode";
+        if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
+          throw new JITError("INVALID_OPERATION", "mapping descriptor is malformed");
+        }
+        const mapperPlan = buildMapperPlan(stage2.source, stage2.target, mapping);
+        const mapperName = emitBoundBlock(
+          "mapper",
+          mapperPlan.bindingNames,
+          mapperPlan.bindings,
+          emitMapperSource(stage2.source, stage2.target, mapping, [
+            fuseJsonEncode || !stage2.many ? "map" : "many"
+          ]),
+          true
+        );
+        if (fuseJsonEncode) {
+          const stringifyName = helper("stringify");
+          setup.push(`const ${stringifyName} = ${emitSerialize(stage2.target)};`);
+          if (stage2.many) emitMappedJsonArray(mapperName, stringifyName, body, valueIndex++);
+          else body.push(`value = ${stringifyName}(${mapperName}.map(value));`);
+          index2++;
+        } else {
+          body.push(`value = ${mapperName}.${stage2.many ? "many" : "map"}(value);`);
+        }
+        break;
+      }
+      case "transform": {
+        const keys = Object.keys(stage2.transforms);
+        const callbacks = keys.map((key) => stage2.transforms[key]);
+        const transformName = emitBoundBlock(
+          "transform",
+          keys.map((_, transformIndex) => `__t${transformIndex}`),
+          callbacks,
+          emitTransformSource(stage2.source, stage2.transforms),
+          true
+        );
+        if (stage2.many) emitMany(transformName);
+        else body.push(`value = ${transformName}(value);`);
+        break;
+      }
+      case "update": {
+        const updateName = helper("update");
+        const patchName = bind(stage2.patch);
+        setup.push(`const ${updateName} = (${emitUpdateSource(stage2.schema)});`);
+        if (stage2.many) emitMany(updateName, patchName);
+        else body.push(`value = ${updateName}(value, ${patchName});`);
+        break;
+      }
+      case "security": {
+        const source = stage2.operation === "mask" ? emitMaskSource(stage2.schema).replace("function scrub", "function mask") : emitSanitizeSource(stage2.schema).replace("function scrub", "function sanitize");
+        const securityName = stage2.operation === "sanitize" ? emitBoundBlock("sanitize", sanitizeChainBindings.names, sanitizeChainBindings.values, source, true) : (() => {
+          const name = helper("mask");
+          setup.push(`const ${name} = (${source});`);
+          return name;
+        })();
+        if (stage2.many) emitMany(securityName);
+        else body.push(`value = ${securityName}(value);`);
+        break;
+      }
+      case "json.encode": {
+        if (stage2.mode === "chunks") {
+          const chunksName = helper("stringifyChunks");
+          setup.push(
+            `const ${chunksName} = ${emitStringifyChunksSource(stage2.schema ?? optimized.schema, {
+              ...stage2.chunkBytes === void 0 ? {} : { chunkBytes: stage2.chunkBytes }
+            })};`
+          );
+          body.push(`value = ${chunksName}(value);`);
+          break;
+        }
+        const stringifyName = helper("stringify");
+        setup.push(`const ${stringifyName} = ${emitSerialize(stage2.schema ?? optimized.schema)};`);
+        body.push(`value = ${stringifyName}(value);`);
+        break;
+      }
+      case "binary.encode": {
+        const codec2 = emitCodec(stage2.schema);
+        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
+        body.push(`value = ${codecName}.encode(value);`);
+        break;
+      }
+      case "operation":
+        throw new JITError("INVALID_OPERATION", `operation ${stage2.operation} requires its dedicated runtime lowering`);
+    }
+  }
+  body.push("return value;");
+  return {
+    source: ['"use strict";', ...setup, "return function execution(input) {", ...indent(body.join("\n")), "}"].join(
+      "\n"
+    ),
+    bindingNames,
+    bindingValues
+  };
+}
+function lowerExecutionPlan(plan) {
+  const emitted = emitExecutionPlan(plan);
+  const compiled = globalThis.Function(
+    ...emitted.bindingNames,
+    emitted.source
+  )(...emitted.bindingValues);
+  const json3 = plan.stages.find((stage2) => stage2.kind === "json.decode");
+  if (json3?.schema) warmJsonParseShape(json3.schema);
+  return compiled;
+}
+function indent(source) {
+  return source.split("\n").map((line) => `  ${line}`);
+}
+function emitMappedJsonArray(mapper, stringify3, body, index2) {
+  const list = `__list${index2}`;
+  const length = `__len${index2}`;
+  const item = `__item${index2}`;
+  const cursor = `__i${index2}`;
+  const json3 = `__json${index2}`;
+  body.push(`const ${list} = value;`);
+  body.push(`const ${length} = ${list}.length;`);
+  body.push(`let ${json3} = "[";`);
+  body.push(`for (let ${cursor} = 0; ${cursor} < ${length}; ${cursor}++) {`);
+  body.push(`  if (${cursor} !== 0) ${json3} += ",";`);
+  body.push(`  const ${item} = ${mapper}.map(${list}[${cursor}]);`);
+  body.push(`  ${json3} += ${stringify3}(${item});`);
+  body.push("}");
+  body.push(`${json3} += "]";`);
+  body.push(`value = ${json3};`);
+}
+
+// ../../packages/jit/src/runtime/stream/boundary-scanner.ts
+var ArrayBoundaryScanner = class {
+  constructor(hooks) {
+    this.hooks = hooks;
+    this.buffer = "";
+    this.scanPos = 0;
+    this.elementStart = -1;
+    this.depth = 0;
+    this.inString = false;
+    this.escaped = false;
+    this.rootStarted = false;
+    this.rootClosed = false;
+  }
+  get done() {
+    return this.rootClosed;
+  }
+  get hasOpenElement() {
+    return this.elementStart !== -1 || this.rootStarted && !this.rootClosed;
+  }
+  push(text) {
+    this.buffer += text;
+    const buf = this.buffer;
+    const len = buf.length;
+    let pos = this.scanPos;
+    for (; pos < len; pos++) {
+      const code = buf.charCodeAt(pos);
+      if (this.inString) {
+        if (this.escaped) {
+          this.escaped = false;
+        } else if (code === 92) {
+          this.escaped = true;
+        } else if (code === 34) {
+          this.inString = false;
+        }
+        continue;
+      }
+      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
+      if (this.rootClosed) {
+        this.hooks.fail("unexpected content after the root array closed");
+      }
+      if (!this.rootStarted) {
+        if (code !== 91) this.hooks.fail("expected the stream to start with an array");
+        this.rootStarted = true;
+        this.depth = 1;
+        continue;
+      }
+      if (this.depth === 1) {
+        if (code === 93) {
+          if (this.elementStart !== -1) {
+            this.hooks.onElement(buf.slice(this.elementStart, pos));
+            this.elementStart = -1;
+          }
+          this.depth = 0;
+          this.rootClosed = true;
+          continue;
+        }
+        if (code === 44) {
+          if (this.elementStart === -1) this.hooks.fail("unexpected comma in the root array");
+          this.hooks.onElement(buf.slice(this.elementStart, pos));
+          this.elementStart = -1;
+          continue;
+        }
+        if (this.elementStart === -1) this.elementStart = pos;
+        if (code === 123 || code === 91) this.depth++;
+        else if (code === 34) this.inString = true;
+        else if (code === 125) this.hooks.fail("unbalanced '}' in the root array");
+        continue;
+      }
+      if (code === 34) this.inString = true;
+      else if (code === 123 || code === 91) this.depth++;
+      else if (code === 125 || code === 93) {
+        this.depth--;
+        if (this.depth < 1) this.hooks.fail("unbalanced closing bracket");
+      }
+    }
+    if (this.elementStart !== -1) {
+      this.buffer = buf.slice(this.elementStart);
+      this.scanPos = this.buffer.length;
+      this.elementStart = 0;
+    } else {
+      this.buffer = "";
+      this.scanPos = 0;
+    }
+  }
+};
+var ValueBoundaryScanner = class {
+  constructor(hooks) {
+    this.hooks = hooks;
+    this.depth = 0;
+    this.inString = false;
+    this.escaped = false;
+    this.started = false;
+    this.closed = false;
+  }
+  /** True once a bracketed root has balanced back to depth zero. */
+  get complete() {
+    return this.closed;
+  }
+  push(text) {
+    const len = text.length;
+    for (let pos = 0; pos < len; pos++) {
+      const code = text.charCodeAt(pos);
+      if (this.inString) {
+        if (this.escaped) {
+          this.escaped = false;
+        } else if (code === 92) {
+          this.escaped = true;
+        } else if (code === 34) {
+          this.inString = false;
+          if (this.depth === 0 && this.started) this.closed = true;
+        }
+        continue;
+      }
+      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
+      if (this.closed) this.hooks.fail("unexpected content after the root value closed");
+      if (code === 34) {
+        this.inString = true;
+        this.started = true;
+      } else if (code === 123 || code === 91) {
+        this.depth++;
+        this.started = true;
+      } else if (code === 125 || code === 93) {
+        this.depth--;
+        if (this.depth < 0) this.hooks.fail("unbalanced closing bracket");
+        if (this.depth === 0) this.closed = true;
+      } else {
+        this.started = true;
+      }
+    }
+  }
+};
+
+// ../../packages/jit/src/compiler/stream.ts
+function resolveRoot(schema) {
+  let current = schema;
+  while (true) {
+    switch (current.type) {
+      case TypeName.default:
+      case TypeName.brand:
+      case TypeName.readonly:
+      case TypeName.refine:
+      case TypeName.coerce:
+      case TypeName.pipe:
+      case TypeName.transform:
+        current = current.def.innerType;
+        continue;
+      case TypeName.lazy:
+        current = current.def.getter();
+        continue;
+      default:
+        return current;
+    }
+  }
+}
+function rootGate(schema) {
+  switch (schema.type) {
+    case TypeName.array:
+    case TypeName.tuple:
+      return { test: (code) => code === 91, expected: "array" };
+    case TypeName.object:
+    case TypeName.record:
+      return { test: (code) => code === 123, expected: "object" };
+    case TypeName.string:
+      return { test: (code) => code === 34, expected: "string" };
+    case TypeName.number:
+    case TypeName.int:
+      return {
+        test: (code) => code === 45 || code >= 48 && code <= 57,
+        expected: "number"
+      };
+    case TypeName.boolean:
+      return {
+        test: (code) => code === 116 || code === 102,
+        expected: "boolean"
+      };
+    case TypeName.null:
+      return { test: (code) => code === 110, expected: "null" };
+    default:
+      return void 0;
+  }
+}
+function structuralIssue(message, path = []) {
+  return { path, code: "invalid_json", expected: "well-formed JSON", message };
+}
+function throwStructural(message, path = []) {
+  throw new JITValidationError([structuralIssue(message, path)]);
+}
+function prefixIssues(issues, prefix) {
+  return issues.map((issue) => ({
+    ...issue,
+    path: [prefix, ...issue.path]
+  }));
+}
+function compileStream(schema, options = {}) {
+  const format3 = options.format ?? "json";
+  const root = resolveRoot(schema);
+  if (format3 === "ndjson") return createNdjsonStream(schema, options);
+  if (root.type === TypeName.array) return createArrayStream(root, options);
+  return createValueStream(schema, root, options);
+}
+function createDecoder() {
+  const decoder = new TextDecoder();
+  return (chunk, last2) => typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: !last2 });
+}
+function gateFirstChar(text, gateRef) {
+  const gate = gateRef.pending;
+  if (!gate) return;
+  for (let index2 = 0; index2 < text.length; index2++) {
+    const code = text.charCodeAt(index2);
+    if (code === 32 || code === 9 || code === 10 || code === 13) continue;
+    gateRef.pending = void 0;
+    if (!gate.test(code)) {
+      throw new JITValidationError([
+        {
+          path: [],
+          code: "invalid_type",
+          expected: gate.expected,
+          message: `stream root must be ${gate.expected}`,
+          received: JSON.stringify(text[index2])
+        }
+      ]);
+    }
+    return;
+  }
+}
+function createArrayStream(root, options) {
+  const element = root.def.element;
+  const checks = (root.def.checks ?? []).filter(
+    (check) => check.kind === "min" || check.kind === "max" || check.kind === "length" || check.kind === "nonEmpty"
+  );
+  const validator = compileValidator(element);
+  const decode = createDecoder();
+  const items = [];
+  const gateRef = { pending: rootGate(root) };
+  let failed = false;
+  let ended = false;
+  const scanner = new ArrayBoundaryScanner({
+    onElement(text) {
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throwStructural(`malformed JSON element at index ${items.length}`, [items.length]);
+      }
+      const result = validator.safeParse(parsed);
+      if (!result.success) {
+        throw new JITValidationError(prefixIssues(result.issues, items.length));
+      }
+      const index2 = items.length;
+      items.push(result.data);
+      for (const check of checks) {
+        if (check.kind === "max" && items.length > check.value) {
+          throwStructural(`expected at most ${check.value} items`);
+        }
+      }
+      options.onItem?.(result.data, index2);
+    },
+    fail(message) {
+      throwStructural(message);
+    }
+  });
+  const guard = () => {
+    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
+    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
+  };
+  return {
+    items,
+    write(chunk) {
+      guard();
+      try {
+        const text = decode(chunk, false);
+        gateFirstChar(text, gateRef);
+        scanner.push(text);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    },
+    end() {
+      guard();
+      ended = true;
+      if (!scanner.done) {
+        failed = true;
+        throwStructural("unexpected end of stream: root array never closed");
+      }
+      for (const check of checks) {
+        if (check.kind === "min" && items.length < check.value) {
+          throwStructural(`expected at least ${check.value} items`);
+        }
+        if (check.kind === "nonEmpty" && items.length === 0) {
+          throwStructural("expected a non-empty array");
+        }
+        if (check.kind === "length" && items.length !== check.value) {
+          throwStructural(`expected exactly ${check.value} items`);
+        }
+        if (check.kind === "max" && items.length > check.value) {
+          throwStructural(`expected at most ${check.value} items`);
+        }
+      }
+      return items;
+    }
+  };
+}
+function createValueStream(schema, root, options) {
+  const validator = compileValidator(schema, options);
+  const decode = createDecoder();
+  const gateRef = { pending: rootGate(root) };
+  const scanner = new ValueBoundaryScanner({
+    fail(message) {
+      throwStructural(message);
+    }
+  });
+  let buffer = "";
+  let failed = false;
+  let ended = false;
+  const guard = () => {
+    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
+    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
+  };
+  return {
+    items: [],
+    write(chunk) {
+      guard();
+      try {
+        const text = decode(chunk, false);
+        gateFirstChar(text, gateRef);
+        scanner.push(text);
+        buffer += text;
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    },
+    end() {
+      guard();
+      ended = true;
+      let parsed;
+      try {
+        parsed = JSON.parse(buffer);
+      } catch {
+        failed = true;
+        throwStructural("unexpected end of stream: incomplete JSON document");
+      }
+      return validator.parse(parsed);
+    }
+  };
+}
+function createNdjsonStream(schema, options) {
+  const validator = compileValidator(schema, options);
+  const decode = createDecoder();
+  const items = [];
+  let buffer = "";
+  let line = 0;
+  let failed = false;
+  let ended = false;
+  const consume = (text) => {
+    if (text.trim() === "") {
+      line++;
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throwStructural(`malformed JSON on line ${line}`, [`line ${line}`]);
+    }
+    const result = validator.safeParse(parsed);
+    if (!result.success) {
+      throw new JITValidationError(prefixIssues(result.issues, `line ${line}`));
+    }
+    const index2 = items.length;
+    items.push(result.data);
+    line++;
+    options.onItem?.(result.data, index2);
+  };
+  const guard = () => {
+    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
+    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
+  };
+  return {
+    items,
+    write(chunk) {
+      guard();
+      try {
+        buffer += decode(chunk, false);
+        let cut = buffer.indexOf("\n");
+        while (cut !== -1) {
+          consume(buffer.slice(0, cut));
+          buffer = buffer.slice(cut + 1);
+          cut = buffer.indexOf("\n");
+        }
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    },
+    end() {
+      guard();
+      ended = true;
+      try {
+        if (buffer.trim() !== "") consume(buffer);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+      return items;
+    }
+  };
+}
+
+// ../../packages/jit/src/compiler/watch.ts
+function compileWatch(schema, options) {
+  const program = emitWatchProgram(schema, options);
+  const bindingNames = program.bindings.map((_, index2) => `__w${index2}`);
+  const compiled = globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings);
+  registerArtifact(compiled, {
+    kind: "watch",
+    source: program.source,
+    bindingNames,
+    bindingValues: program.bindings
+  });
+  return compiled;
+}
+function emitWatchProgram(schema, options) {
+  const target = expectWatchTarget(schema, "emitWatchSource");
+  const key = options.key;
+  validateObjectKeys3(target.objectSchema, [key], "watch");
+  const bindings = [];
+  const changedBy = options.fields === void 0 || options.fields.length === 0 ? void 0 : addOptionalBinding(
+    bindings,
+    compileEqual(buildProjectionTree(target.objectSchema, options.fields, "watch").schema)
+  );
+  const onAdd = addOptionalBinding(bindings, options.onAdd);
+  const onRemove = addOptionalBinding(bindings, options.onRemove);
+  const onUpdate = addOptionalBinding(bindings, options.onUpdate);
+  const keyAccess = emitPropertyAccess("item", key);
+  const previousKeyAccess = emitPropertyAccess("previousItem", key);
+  const writer = new CodeWriter();
+  writer.line("function watch(previous, current) {");
+  writer.indent(() => {
+    writer.line("const previousIndex = new Map();");
+    writer.line("const currentIndex = new Map();");
+    writer.line("const initialItems = [];");
+    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
+      writer.line(`const id = ${previousKeyAccess};`);
+      writer.line("previousIndex.set(id, previousItem);");
+      writer.line("initialItems[initialItems.length] = previousItem;");
+    });
+    writer.line("const currentItems = [];");
+    writer.line("const newItems = [];");
+    writer.line("const removedItems = [];");
+    writer.line("const updatedItems = [];");
+    emitCollectionLoop(writer, target, "current", "item", () => {
+      writer.line(`const id = ${keyAccess};`);
+      writer.line("currentIndex.set(id, item);");
+      writer.line("currentItems[currentItems.length] = item;");
+      writer.line("const previousItem = previousIndex.get(id);");
+      writer.line("if (previousItem === undefined) {");
+      writer.indent(() => {
+        writer.line("newItems[newItems.length] = item;");
+        if (onAdd) writer.line(`${onAdd}(item);`);
+      });
+      writer.line(
+        changedBy === void 0 ? "} else if (previousItem !== item) {" : `} else if (previousItem !== item && !${changedBy}(previousItem, item)) {`
+      );
+      writer.indent(() => {
+        writer.line("updatedItems[updatedItems.length] = { previous: previousItem, current: item };");
+        if (onUpdate) writer.line(`${onUpdate}(previousItem, item);`);
+      });
+      writer.line("}");
+    });
+    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
+      writer.line(`const id = ${previousKeyAccess};`);
+      writer.line("if (!currentIndex.has(id)) {");
+      writer.indent(() => {
+        writer.line("removedItems[removedItems.length] = previousItem;");
+        if (onRemove) writer.line(`${onRemove}(previousItem);`);
+      });
+      writer.line("}");
+    });
+    writer.line("const isChanged = newItems.length !== 0 || removedItems.length !== 0 || updatedItems.length !== 0;");
+    writer.line("return { currentItems, initialItems, newItems, removedItems, updatedItems, isChanged };");
+  });
+  writer.line("}");
+  return { source: writer.toString(), bindings };
+}
+function emitCollectionLoop(writer, target, collection2, itemName, body) {
+  switch (target.kind) {
+    case "array":
+      writer.line(`for (let i = 0, len = ${collection2}.length; i < len; i++) {`);
+      writer.indent(() => {
+        writer.line(`const ${itemName} = ${collection2}[i];`);
+        body();
+      });
+      writer.line("}");
+      return;
+    case "set":
+      writer.line(`for (const ${itemName} of ${collection2}) {`);
+      writer.indent(body);
+      writer.line("}");
+      return;
+    case "map":
+      writer.line(`for (const entry of ${collection2}) {`);
+      writer.indent(() => {
+        writer.line(`const ${itemName} = entry[1];`);
+        body();
+      });
+      writer.line("}");
+      return;
+  }
+}
+function addOptionalBinding(bindings, value) {
+  if (value === void 0) return void 0;
+  const name = `__w${bindings.length}`;
+  bindings[bindings.length] = value;
+  return name;
+}
+function expectWatchTarget(schema, compilerName) {
+  const resolved = resolveWrappers(schema).base;
+  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array, set, or map schema`);
+  }
+  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
+  if (element.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${compilerName} expects a collection of object schema`);
+  }
+  return {
+    kind: resolved.type,
+    objectSchema: element
+  };
+}
+function validateObjectKeys3(schema, keys, compilerName) {
+  const props = schema.def.props;
+  for (const key of keys) {
+    if (!(key in props)) {
+      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
+        path: [key]
+      });
+    }
+  }
+}
 
 // ../../packages/jit/src/factories/query.ts
 var QUERY_PROGRAMS = /* @__PURE__ */ new WeakMap();
@@ -22456,6 +23840,2406 @@ function lowerRulePredicate(predicate, inputs, bindingOffset) {
   if (lowered.kind === "always") return { condition: void 0, bindings: lowered.bindings };
   if (lowered.kind === "never") return { condition: IMPOSSIBLE, bindings: lowered.bindings };
   return { condition: lowered.condition, bindings: lowered.bindings };
+}
+
+// ../../packages/jit/src/factories/class.ts
+var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
+var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
+var TRUSTED_MATERIALIZER = "__jitMaterialize";
+var FACTORY_FAILURE = /* @__PURE__ */ Symbol.for("jit.factory.failure");
+function createPolicyState() {
+  return {
+    mode: "throw",
+    resultModeExplicit: false,
+    inheritedResultMode: false,
+    error: void 0,
+    create: true,
+    hydrate: true,
+    configured: false,
+    validationConfigured: false,
+    maxIssues: void 0,
+    modePriority: 1e3,
+    errorPriority: 1e3,
+    errorPriorityExplicit: false,
+    assertions: [],
+    assertionErrors: [],
+    assertionGuard: void 0,
+    assert: void 0,
+    nestedErrors: []
+  };
+}
+function runtimeTypeTraits(representation, identifier2, policy) {
+  return Object.freeze({
+    representation,
+    identifier: identifier2,
+    factoryPolicy: Object.freeze({
+      configured: policy.configured,
+      resultMode: policy.mode,
+      resultModeExplicit: policy.validationConfigured && policy.resultModeExplicit,
+      resultModeInherited: policy.inheritedResultMode,
+      errorType: void 0,
+      priority: policy.modePriority,
+      hasAssertions: policy.assertions.length > 0
+    })
+  });
+}
+function compileAssertions(policy) {
+  if (policy.assertions.length === 0) {
+    policy.assertionGuard = void 0;
+    policy.assert = void 0;
+    return;
+  }
+  const failures = assertionFailures(policy.assertions, policy.assertionErrors);
+  const issues = assertionIssues(policy.assertions);
+  const bindings = policy.assertions.flatMap((descriptor2) => descriptor2.bindings);
+  const bindingNames = bindings.map((_, index2) => `__q${index2}`);
+  const failureNames = failures.map((_, index2) => `__fail${index2}`);
+  const issueNames = issues.map((_, index2) => `__issue${index2}`);
+  const guard = globalThis.Function(
+    ...bindingNames,
+    ...failureNames,
+    ...issueNames,
+    `${emitAssertionSource(policy.assertions, policy.maxIssues)}
+return __assert;`
+  )(...bindings, ...failures, ...issues);
+  policy.assertionGuard = guard;
+  policy.assert = (value) => {
+    const outcome = guard(value);
+    if (outcome === void 0) return void 0;
+    const selectedPriority = outcome.errorIndex === void 0 || outcome.errorIndex < 0 ? -1 : policy.assertions[outcome.errorIndex]?.priority ?? -1;
+    if (policy.error !== void 0 && policy.errorPriority >= selectedPriority) {
+      return policy.error(outcome.issues);
+    }
+    if (outcome.errorIndex !== void 0 && outcome.errorIndex >= 0) {
+      const factory = policy.assertionErrors[outcome.errorIndex];
+      if (factory !== void 0) return factory(value, policy.assertions[outcome.errorIndex]);
+    }
+    return assertionError(outcome.issues ?? []);
+  };
+}
+function policySuccess(policy, value) {
+  if (policy.mode === "either") return value;
+  if (policy.mode === "tuple") return [null, value];
+  return value;
+}
+function policyFailure(policy, error) {
+  if (policy.mode === "either") {
+    return Object.defineProperties({ ok: false, error }, { [FACTORY_FAILURE]: { enumerable: false, value: true } });
+  }
+  if (policy.mode === "tuple") return [error, null];
+  throw error;
+}
+function isFailure(value) {
+  return Object_hasOwn(value, FACTORY_FAILURE) && value[FACTORY_FAILURE] === true;
+}
+function policyError(policy, issues) {
+  let selected = policy.error === void 0 ? void 0 : { priority: policy.errorPriority, depth: 0, order: -1, factory: policy.error };
+  for (const candidate of policy.nestedErrors) {
+    if (!hasIssueAtPath(issues, candidate.path)) continue;
+    if (selected === void 0 || candidate.priority > selected.priority || candidate.priority === selected.priority && candidate.depth < selected.depth || candidate.priority === selected.priority && candidate.depth === selected.depth && candidate.order < selected.order) {
+      selected = candidate;
+    }
+  }
+  return selected === void 0 ? new JITValidationError(issues) : selected.factory(issues);
+}
+function hasIssueAtPath(issues, prefix) {
+  return issues.some((issue) => prefix.every((part, index2) => issue.path[index2] === part));
+}
+function collectNestedErrorCandidates(schema) {
+  const candidates = [];
+  const active = /* @__PURE__ */ new Set();
+  let order = 0;
+  const walk = (current, path, depth) => {
+    if (active.has(current)) return;
+    active.add(current);
+    if (current.type === TypeName.runtimeType) {
+      const nested = getArtifact(current.def.materialize);
+      if (nested?.kind === "class" && typeof nested.policy?.error === "function") {
+        candidates.push({
+          priority: nested.policy.errorPriorityExplicit ? nested.policy.errorPriority ?? 800 : 800,
+          depth,
+          order: order++,
+          path,
+          factory: nested.policy.error,
+          runtimeBinding: true
+        });
+      }
+      if (nested?.kind === "class") {
+        for (const failure of nested.policy?.assertions?.failures ?? []) {
+          const assertionPath = failure.field === void 0 ? path : [...path, failure.field];
+          candidates.push({
+            priority: failure.priority,
+            depth: depth + 1,
+            order: order++,
+            path: assertionPath,
+            runtimeBinding: typeof failure.error === "function",
+            ...typeof failure.error === "function" ? {} : {
+              assertion: {
+                rule: failure.rule,
+                field: failure.field,
+                message: failure.message
+              }
+            },
+            factory: typeof failure.error === "function" ? () => failure.error(void 0, failure.descriptor) : (issues) => new DomainAssertionError(failure.message, {
+              ...failure.rule === void 0 ? {} : { rule: failure.rule },
+              ...failure.field === void 0 ? {} : { field: failure.field },
+              issues
+            })
+          });
+        }
+      }
+    }
+    if (current.type === TypeName.object) {
+      for (const [key, child] of Object.entries(current.def.props))
+        walk(child, [...path, key], depth + 1);
+      active.delete(current);
+      return;
+    }
+    if (current.type === TypeName.array || current.type === TypeName.set) {
+      walk(
+        current.def.element,
+        path,
+        depth + 1
+      );
+      active.delete(current);
+      return;
+    }
+    for (const child of schemaChildren(current)) walk(child, path, depth + 1);
+    active.delete(current);
+  };
+  walk(schema, [], 0);
+  return candidates;
+}
+function policyArtifact(policy) {
+  if (!policy.configured) return {};
+  const bindings = policy.assertions.flatMap((descriptor2) => descriptor2.bindings);
+  return {
+    policy: {
+      result: policy.mode,
+      create: policy.create,
+      hydrate: policy.hydrate,
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues },
+      ...policy.error === void 0 ? {} : { errorPriority: policy.errorPriority },
+      ...policy.error === void 0 ? {} : { errorPriorityExplicit: policy.errorPriorityExplicit },
+      ...policy.error === void 0 ? {} : { error: policy.error },
+      ...policy.nestedErrors.length === 0 ? {} : {
+        nestedErrors: policy.nestedErrors.map((candidate) => ({
+          priority: candidate.priority,
+          depth: candidate.depth,
+          order: candidate.order,
+          path: candidate.path,
+          error: candidate.factory,
+          runtimeBinding: candidate.runtimeBinding,
+          ...candidate.assertion === void 0 ? {} : { assertion: candidate.assertion }
+        }))
+      },
+      ...policy.assertions.length === 0 ? {} : {
+        assertions: {
+          source: emitAssertionSource(policy.assertions, policy.maxIssues),
+          bindingNames: bindings.map((_, index2) => `__q${index2}`),
+          bindingValues: bindings,
+          failures: policy.assertions.map((descriptor2, index2) => ({
+            rule: descriptor2.rule,
+            field: descriptor2.field,
+            code: descriptor2.code,
+            message: descriptor2.message,
+            priority: descriptor2.priority,
+            descriptor: descriptor2,
+            ...policy.assertionErrors[index2] === void 0 ? {} : { error: policy.assertionErrors[index2] }
+          }))
+        }
+      }
+    }
+  };
+}
+function applyValidationPolicy(policy, options) {
+  if (policy.validationConfigured) {
+    throw new JITError("INVALID_OPERATION", "Factory validation is already configured for this Runtime Class");
+  }
+  if (options?.maxIssues !== void 0 && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
+    throw new RangeError("maxIssues must be a positive safe integer");
+  }
+  if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
+    throw new RangeError("priority must be a finite number");
+  }
+  policy.configured = true;
+  policy.validationConfigured = true;
+  if (options?.result !== void 0) {
+    policy.mode = normalizeFactoryReturnMode(options.result);
+    policy.resultModeExplicit = true;
+    policy.inheritedResultMode = false;
+  }
+  if (options?.error !== void 0) policy.error = options.error;
+  if (options?.create !== void 0) policy.create = options.create;
+  if (options?.hydrate !== void 0) policy.hydrate = options.hydrate;
+  if (options?.maxIssues !== void 0) policy.maxIssues = options.maxIssues;
+  if (options?.priority !== void 0) {
+    policy.modePriority = options.priority;
+    policy.errorPriority = options.priority;
+    policy.errorPriorityExplicit = true;
+  }
+  if (policy.assertions.length > 0) compileAssertions(policy);
+}
+function applyAssertion(policy, schema, predicate, options) {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "Assertions describe object fields; a scalar schema has none to name");
+  }
+  const builder2 = createConditionBuilder(policy.assertions.reduce((total, item) => total + item.bindings.length, 0));
+  const condition = predicate(builder2.builder);
+  if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
+    throw new RangeError("priority must be a finite number");
+  }
+  policy.assertions.push(
+    resolveAssertionDescriptor({
+      condition,
+      bindings: builder2.bindings,
+      ...options?.rule === void 0 ? {} : { rule: options.rule },
+      ...options?.code === void 0 ? {} : { code: options.code },
+      ...options?.message === void 0 ? {} : { message: options.message },
+      ...options?.priority === void 0 ? {} : { priority: options.priority }
+    })
+  );
+  policy.assertionErrors.push(options?.error);
+  policy.configured = true;
+  compileAssertions(policy);
+}
+var CLASS_MIXIN = /* @__PURE__ */ Symbol("jit.class.mixin");
+function classMixin(definition) {
+  const fieldNames = new Set(Object.getOwnPropertyNames(definition.fields ?? {}));
+  const methodNames = Object.getOwnPropertyNames(definition.methods ?? {});
+  if (methodNames.some((name) => fieldNames.has(name))) {
+    throw new JITError(
+      "CLASS_MEMBER_ALREADY_EXISTS",
+      "A class mixin cannot declare the same member as a field and method"
+    );
+  }
+  const mixin = (() => Object.freeze({ ...definition.fields ?? {}, ...definition.methods ?? {} }));
+  Object.defineProperties(mixin, {
+    [CLASS_MIXIN]: { enumerable: false, value: true },
+    __classMixin: { enumerable: false, value: true },
+    __requires: { enumerable: false, value: definition.requires ?? {} }
+  });
+  return Object.freeze(mixin);
+}
+function isClassMixin(value) {
+  return typeof value === "function" && value[CLASS_MIXIN] === true;
+}
+var SCALAR_MEMBERS = /* @__PURE__ */ new Set(["value", "equals", "hashCode", "toJSON"]);
+var RESERVED_EXTENSION_NAMES = /* @__PURE__ */ new Set([
+  "constructor",
+  "schema",
+  "create",
+  "hydrate",
+  "extends",
+  "factories",
+  "construction",
+  "accessors",
+  "identity",
+  "validate",
+  "assert"
+]);
+function isClassCapability(value) {
+  return typeof value === "object" && value !== null && typeof value.install === "function" && typeof value.kind === "string";
+}
+function classFactory2(schema) {
+  return createRuntimeClass(
+    unwrapSchema(schema),
+    false,
+    false,
+    false,
+    "constructor"
+  );
+}
+function abstractClass(schema) {
+  return createRuntimeClass(unwrapSchema(schema), true, false, false, "constructor");
+}
+function resolveNestedResultPolicy(schema) {
+  const candidates = [];
+  const active = /* @__PURE__ */ new Set();
+  const visit = (current, depth) => {
+    if (active.has(current)) return;
+    active.add(current);
+    if (current.type === TypeName.runtimeType) {
+      const runtime = current;
+      const traits = runtime.def.traits.factoryPolicy;
+      if (traits.configured && (traits.resultModeExplicit || traits.resultModeInherited)) {
+        candidates.push({
+          mode: traits.resultMode,
+          priority: traits.priority,
+          explicitMode: traits.resultModeExplicit,
+          depth,
+          source: String(candidates.length)
+        });
+      }
+      active.delete(current);
+      return;
+    }
+    if (current.type === TypeName.object) {
+      for (const child of Object.values(current.def.props)) visit(child, depth + 1);
+    } else {
+      for (const child of schemaChildren(current)) visit(child, depth + 1);
+    }
+    active.delete(current);
+  };
+  visit(schema, 0);
+  return selectFactoryPolicyCandidate(candidates);
+}
+function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, construction, encapsulateFields = false, accessors, seed) {
+  const baseState = initialEffectiveSchema(schema);
+  const members = seed?.members?.clone() ?? baseState.members;
+  if (aggregate && !members.has("update")) addMember(members, "update", "preset", "ddd.aggregateRoot", "method");
+  if (aggregate) {
+    addMember(members, "raise", "preset", "ddd.aggregateRoot", "method");
+    addMember(members, "peekEvents", "preset", "ddd.aggregateRoot", "method");
+    addMember(members, "pullEvents", "preset", "ddd.aggregateRoot", "method");
+    addMember(members, "commit", "preset", "ddd.aggregateRoot", "method");
+  }
+  const state3 = {
+    declaredSchema: seed?.declaredSchema ?? schema,
+    schema,
+    isAbstract,
+    freezeInstances,
+    aggregate,
+    construction,
+    constructionConfigured: seed?.constructionConfigured ?? false,
+    // Factory-first presets still allow one explicit `.construction(...)` or
+    // `.factories(...)` decision; the default mode is not itself a lock.
+    factoriesConfigured: seed?.factoriesConfigured ?? false,
+    factoryNames: seed?.factoryNames ?? (construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }),
+    customFactories: seed?.customFactories ?? {},
+    accessors,
+    capabilities: Object.freeze([...seed?.capabilities ?? []]),
+    methods: Object.freeze([...seed?.methods ?? []]),
+    lifecycle: seed?.lifecycle ?? baseState.lifecycle,
+    managedFields: Object.freeze([...seed?.managedFields ?? baseState.managedFields]),
+    members,
+    fieldPolicies: new Map(seed?.fieldPolicies ?? []),
+    encapsulateFields: seed?.encapsulateFields ?? encapsulateFields,
+    mutationGate: seed?.mutationGate ?? /* @__PURE__ */ new WeakSet(),
+    policy: seed?.policy ?? createPolicyState(),
+    identity: seed?.identity ?? { state: "none" }
+  };
+  const policy = state3.policy;
+  policy.nestedErrors = collectNestedErrorCandidates(state3.schema);
+  if (!policy.validationConfigured) {
+    const nestedPolicy = resolveNestedResultPolicy(state3.schema);
+    if (nestedPolicy === void 0) {
+      if (policy.inheritedResultMode) {
+        policy.configured = false;
+        policy.mode = "throw";
+        policy.inheritedResultMode = false;
+        policy.resultModeExplicit = false;
+      }
+    } else {
+      policy.configured = true;
+      policy.mode = nestedPolicy.mode;
+      policy.modePriority = nestedPolicy.priority;
+      policy.inheritedResultMode = true;
+      policy.resultModeExplicit = false;
+    }
+  }
+  const objectSchema = resolveEffectiveObjectSchema(state3.schema);
+  const properties = Object.keys(objectSchema.def.props);
+  const creationSchema = removeNoConstructorFields(state3.schema, state3.fieldPolicies);
+  const noConstructorFields = [...state3.fieldPolicies.entries()].filter(([, policy2]) => policy2.noConstructor).map(([field]) => field);
+  const boundaryInput = (input) => {
+    if (noConstructorFields.length === 0 || input === null || typeof input !== "object") return input;
+    if (!noConstructorFields.some((field) => Object_hasOwn(input, field))) return input;
+    const copy = { ...input };
+    for (const field of noConstructorFields) delete copy[field];
+    return copy;
+  };
+  const hydrateSchema = removeNoConstructorFields(state3.schema, state3.fieldPolicies);
+  let parseCreation;
+  const parse3 = (input) => {
+    parseCreation ??= compileValidator(creationSchema).parse;
+    return parseCreation(boundaryInput(input));
+  };
+  let hydrateState;
+  const hydrateInput = (input) => {
+    hydrateState ??= compileHydrator(hydrateSchema);
+    return hydrateState(boundaryInput(input));
+  };
+  const initializers = compileNoConstructorInitializers(state3.schema, state3.fieldPolicies);
+  let safeParse;
+  let safeHydrate;
+  const policySafeParse = () => {
+    safeParse ??= compileValidatorSelection(creationSchema, ["safeParse"], {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    }).safeParse;
+    return safeParse;
+  };
+  const policySafeHydrate = () => {
+    safeHydrate ??= compileSafeHydrator(hydrateSchema, {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    });
+    return safeHydrate;
+  };
+  const constructionState = { mode: state3.construction };
+  const managedStorage = resolveManagedStorage(
+    properties,
+    state3.accessors,
+    state3.managedFields,
+    state3.encapsulateFields,
+    state3.fieldPolicies
+  );
+  const layout = createClassLayoutPlan(
+    properties,
+    state3.accessors,
+    managedStorage,
+    state3.fieldPolicies,
+    state3.encapsulateFields,
+    initializers
+  );
+  const mutationGate = state3.encapsulateFields ? state3.mutationGate : void 0;
+  const classTarget = emitConstructor(
+    layout,
+    state3.freezeInstances,
+    state3.aggregate,
+    parse3,
+    constructionState,
+    mutationGate
+  );
+  installTrustedMaterializer(classTarget, layout, state3.freezeInstances, state3.aggregate);
+  parseCreation = compileValidator(creationSchema).parse;
+  hydrateState = compileHydrator(hydrateSchema);
+  for (const capabilityValue of state3.capabilities) {
+    if (capabilityValue.kind === "class.json") {
+      const method = capabilityMemberNames(capabilityValue)[0] ?? "toJson";
+      const jsonFields = Object.keys(resolveEffectiveObjectSchema(hydrateSchema).def.props);
+      const rootPropertyAccess = /* @__PURE__ */ new Map();
+      const bindings = [];
+      for (const field of jsonFields) {
+        const managed = managedStorage.get(field);
+        if (managed === void 0) rootPropertyAccess.set(field, `value[${JSON.stringify(field)}]`);
+        else {
+          const index2 = bindings.length;
+          bindings.push(managed.value);
+          rootPropertyAccess.set(field, `value[__root${index2}]`);
+        }
+      }
+      const stringify3 = compileSerializeWithRootAccess(hydrateSchema, rootPropertyAccess, bindings);
+      definePrototype(
+        classTarget.prototype,
+        method,
+        function toJson() {
+          return stringify3(this);
+        },
+        true
+      );
+    } else {
+      capabilityValue.install(classTarget, state3.schema);
+    }
+  }
+  installLifecycleMethods(classTarget, state3, managedStorage);
+  installFieldDescriptorAccessors(classTarget, state3.fieldPolicies);
+  for (const method of state3.methods) installMethodDefinition(classTarget, method, mutationGate);
+  function registerClass() {
+    const mutation = lifecycleArtifact(state3.lifecycle);
+    registerArtifact(classTarget, {
+      kind: "class",
+      declaredSchema: state3.declaredSchema,
+      schema: state3.schema,
+      creationSchema,
+      wireSchema: hydrateSchema,
+      abstract: state3.isAbstract,
+      frozen: state3.freezeInstances,
+      aggregate: state3.aggregate,
+      construction: state3.construction,
+      representation: "object",
+      capabilities: state3.capabilities.map((capability2) => capability2.kind),
+      managedFields: state3.managedFields,
+      hydrateSchema,
+      encapsulateFields: state3.encapsulateFields,
+      ...state3.fieldPolicies.size === 0 ? {} : {
+        fieldPolicies: [...state3.fieldPolicies.entries()].map(([name, policy2]) => ({
+          name,
+          visibility: policy2.visibility,
+          getter: policy2.getter !== false,
+          setter: policy2.setter !== false,
+          noConstructor: policy2.noConstructor
+        }))
+      },
+      lifecycle: state3.lifecycle,
+      resolvedMembers: state3.members.entries(),
+      ...mutation === void 0 ? {} : { mutation },
+      ...policyArtifact(policy),
+      ...state3.methods.length === 0 ? {} : { methods: state3.methods },
+      factories: state3.factoryNames,
+      ...state3.customFactories.create === void 0 && state3.customFactories.hydrate === void 0 ? {} : { customFactories: state3.customFactories },
+      accessors: state3.accessors
+    });
+  }
+  function create(input) {
+    if (state3.isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
+    }
+    if (state3.identity.state === "pending") {
+      throw new JITError("DDD_IDENTITY_MISSING", "Entity identity is pending a structural identifier extension");
+    }
+    if (state3.identity.state === "ambiguous") {
+      throw new JITError("DDD_IDENTITY_AMBIGUOUS", "Entity identity has multiple structural identifier candidates");
+    }
+    const construct2 = this;
+    const customFactory = state3.customFactories.create;
+    if (customFactory !== void 0) {
+      const parsed2 = policy.configured && policy.create ? policySafeParse()(boundaryInput(input)) : { success: true, data: parse3(input) };
+      if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
+      if (policy.assert !== void 0) {
+        const failure = policy.assert(parsed2.data);
+        if (failure !== void 0) return policyFailure(policy, failure);
+      }
+      const result = customFactory.call(this, parsed2.data, {
+        construct: (value) => new construct2(value, INTERNAL_CONSTRUCT, true)
+      });
+      let instance;
+      if (result instanceof this) {
+        instance = result;
+      } else {
+        if (result === null || typeof result !== "object") {
+          const error = new JITError(
+            "CLASS_FACTORY_RESULT_INVALID",
+            "A custom object factory must return state or an instance"
+          );
+          if (policy.configured) return policyFailure(policy, error);
+          throw error;
+        }
+        instance = new construct2(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured ? policySuccess(policy, instance) : instance;
+    }
+    if (!policy.configured || !policy.create) {
+      if (state3.lifecycle.timestamps === void 0 && state3.lifecycle.softDelete === void 0 && state3.lifecycle.versioned === void 0) {
+        return new construct2(input, INTERNAL_CONSTRUCT);
+      }
+      return new construct2(parse3(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (policy.maxIssues === void 0 && policy.assert === void 0) {
+      try {
+        return policySuccess(policy, new construct2(parse3(input), INTERNAL_CONSTRUCT, true));
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues));
+      }
+    }
+    const parsed = policySafeParse()(boundaryInput(input));
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    if (policy.assert !== void 0) {
+      const failure = policy.assert(parsed.data);
+      if (failure !== void 0) return policyFailure(policy, failure);
+    }
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
+  }
+  function hydrate(input) {
+    if (state3.isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
+    }
+    if (state3.identity.state === "pending") {
+      throw new JITError("DDD_IDENTITY_MISSING", "Entity identity is pending a structural identifier extension");
+    }
+    if (state3.identity.state === "ambiguous") {
+      throw new JITError("DDD_IDENTITY_AMBIGUOUS", "Entity identity has multiple structural identifier candidates");
+    }
+    const construct2 = this;
+    const customFactory = state3.customFactories.hydrate;
+    if (customFactory !== void 0) {
+      const parsed2 = policy.configured && policy.hydrate ? policySafeHydrate()(boundaryInput(input)) : { success: true, data: hydrateInput(input) };
+      if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
+      if (policy.assert !== void 0) {
+        const failure = policy.assert(parsed2.data);
+        if (failure !== void 0) return policyFailure(policy, failure);
+      }
+      const result = customFactory.call(this, parsed2.data, {
+        construct: (value) => new construct2(value, INTERNAL_CONSTRUCT, true)
+      });
+      let instance;
+      if (result instanceof this) {
+        instance = result;
+      } else {
+        if (result === null || typeof result !== "object") {
+          const error = new JITError(
+            "CLASS_FACTORY_RESULT_INVALID",
+            "A custom object factory must return state or an instance"
+          );
+          if (policy.configured) return policyFailure(policy, error);
+          throw error;
+        }
+        instance = new construct2(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured ? policySuccess(policy, instance) : instance;
+    }
+    if (!policy.configured || !policy.hydrate) {
+      return new construct2(hydrateInput(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (policy.maxIssues === void 0 && policy.assert === void 0) {
+      try {
+        return policySuccess(
+          policy,
+          new construct2(hydrateInput(input), INTERNAL_CONSTRUCT, true)
+        );
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues));
+      }
+    }
+    const parsed = policySafeHydrate()(boundaryInput(input));
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    if (policy.assert !== void 0) {
+      const failure = policy.assert(parsed.data);
+      if (failure !== void 0) return policyFailure(policy, failure);
+    }
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
+  }
+  Object.defineProperties(classTarget, {
+    [CLASS_TARGET]: { enumerable: false, value: true },
+    schema: {
+      enumerable: true,
+      value: createSchema(TypeName.runtimeType, {
+        innerType: state3.schema,
+        materialize: classTarget,
+        representation: "object",
+        identifier: false,
+        traits: runtimeTypeTraits("object", false, policy),
+        assertion: policy.assertionGuard
+      })
+    },
+    extends: {
+      enumerable: false,
+      value: (...extensions) => materializeClassState(resolveClassExtensions(state3, extensions))
+    },
+    validate: {
+      enumerable: false,
+      value: (options) => {
+        applyValidationPolicy(state3.policy, options);
+        return materializeClassState(state3);
+      }
+    },
+    assert: {
+      enumerable: false,
+      value: (predicate, options) => {
+        applyAssertion(state3.policy, state3.schema, predicate, options);
+        return materializeClassState(state3);
+      }
+    },
+    factories: {
+      enumerable: false,
+      value: (options) => {
+        if (state3.factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
+        }
+        if (state3.constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        const createOption = resolveFactoryOption(options.create, state3.factoryNames.create, "create");
+        const hydrateOption = resolveFactoryOption(options.hydrate, state3.factoryNames.hydrate, "hydrate");
+        const next = {
+          create: createOption.name,
+          hydrate: hydrateOption.name
+        };
+        if (next.create === false && next.hydrate === false) {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory construction requires at least one create or hydrate factory"
+          );
+        }
+        return materializeClassState({
+          ...state3,
+          construction: "factory",
+          factoriesConfigured: true,
+          factoryNames: next,
+          customFactories: {
+            ...state3.customFactories.create === void 0 && createOption.implementation === void 0 ? {} : { create: createOption.implementation ?? state3.customFactories.create },
+            ...state3.customFactories.hydrate === void 0 && hydrateOption.implementation === void 0 ? {} : { hydrate: hydrateOption.implementation ?? state3.customFactories.hydrate }
+          }
+        });
+      }
+    },
+    construction: {
+      enumerable: false,
+      value: (mode) => {
+        if (state3.constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        if (state3.factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
+        }
+        if (mode !== "constructor" && mode !== "factory") {
+          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
+        }
+        if (state3.isAbstract && mode === "constructor") {
+          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
+        }
+        if (state3.policy.configured) {
+          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+        }
+        return materializeClassState({
+          ...state3,
+          construction: mode,
+          constructionConfigured: true,
+          factoryNames: mode === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }
+        });
+      }
+    },
+    accessors: {
+      enumerable: false,
+      value: (options) => {
+        if (state3.accessors !== void 0) {
+          throw new JITError("INVALID_OPERATION", "Accessors are already configured for this Runtime Class");
+        }
+        return materializeClassState({
+          ...state3,
+          accessors: resolveAccessors(properties, options)
+        });
+      }
+    },
+    identity: {
+      enumerable: false,
+      value: (key) => {
+        if (state3.capabilities.some((capability2) => capability2.kind.startsWith("identity:"))) {
+          throw new JITError("INVALID_OPERATION", "Identity is already configured for this Runtime Class");
+        }
+        return materializeClassState(resolveClassExtensions(state3, [classType.identity(key)]));
+      }
+    }
+  });
+  installFactory(classTarget, false, state3.factoryNames.create, create);
+  installFactory(classTarget, false, state3.factoryNames.hydrate, hydrate);
+  registerClass();
+  return classTarget;
+}
+function materializeClassState(state3) {
+  return createRuntimeClass(
+    state3.schema,
+    state3.isAbstract,
+    state3.freezeInstances,
+    state3.aggregate,
+    state3.construction,
+    state3.encapsulateFields,
+    state3.accessors,
+    state3
+  );
+}
+function resolveClassExtensions(current, extensions) {
+  let next = {
+    ...current,
+    capabilities: [...current.capabilities],
+    methods: [...current.methods],
+    managedFields: [...current.managedFields],
+    members: current.members.clone(),
+    fieldPolicies: new Map(current.fieldPolicies)
+  };
+  for (const rawExtension of extensions) {
+    const mixin = isClassMixin(rawExtension) ? rawExtension : void 0;
+    if (mixin !== void 0) validateMixinRequirements(next.schema, mixin.__requires);
+    const extension = mixin === void 0 ? rawExtension : mixin();
+    if (isClassCapability(extension)) {
+      if (next.capabilities.some((capability2) => capability2.kind === extension.kind)) {
+        throw new JITError(
+          "INVALID_OPERATION",
+          `Class capability ${JSON.stringify(extension.kind)} is already installed`
+        );
+      }
+      for (const name of capabilityMemberNames(extension)) assertNewMember(next.members, name, extension.kind);
+      if (extension.kind === "ddd.timestamps" || extension.kind === "ddd.softDelete" || extension.kind === "ddd.versioned") {
+        try {
+          const resolved = applyDddCapability(
+            {
+              schema: next.schema,
+              lifecycle: next.lifecycle,
+              managedFields: next.managedFields,
+              members: next.members
+            },
+            extension.kind,
+            capabilityOptions(extension)
+          );
+          next = {
+            ...next,
+            schema: resolved.schema,
+            lifecycle: resolved.lifecycle,
+            managedFields: resolved.managedFields,
+            members: resolved.members,
+            capabilities: [...next.capabilities, extension]
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", `${extension.kind} declaration conflict: ${message}`);
+        }
+      } else {
+        const names = capabilityMemberNames(extension);
+        for (const name of names) assertNewMember(next.members, name, extension.kind);
+        const members2 = next.members.clone();
+        for (const name of names) addMember(members2, name, "capability", extension.kind, "method");
+        next = {
+          ...next,
+          members: members2,
+          capabilities: [...next.capabilities, extension],
+          ...extension.kind.startsWith("identity:") ? {
+            identity: {
+              state: "resolved",
+              key: extension.kind.slice("identity:".length),
+              explicit: true
+            }
+          } : {}
+        };
+      }
+      continue;
+    }
+    const members = next.members.clone();
+    const methods = [...next.methods];
+    const fieldPolicies = new Map(next.fieldPolicies);
+    let schema = next.schema;
+    for (const name of Object.getOwnPropertyNames(extension)) {
+      const descriptor2 = Object.getOwnPropertyDescriptor(extension, name);
+      if (descriptor2 === void 0) continue;
+      const value = descriptor2.value;
+      if (isOverrideDescriptor(value)) {
+        const existing = members.get(name);
+        if (existing === void 0) {
+          throw new JITError(
+            "CLASS_OVERRIDE_TARGET_NOT_FOUND",
+            `Class member ${JSON.stringify(name)} does not exist. JIT.class.override() can only replace an existing member.`
+          );
+        }
+        if (isClassMemberDescriptor(value.value)) {
+          const definition = value.value.definition;
+          if (definition.kind === "method") {
+            if (existing.kind === "field") {
+              throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is a schema field`);
+            }
+            replaceMethod(methods, name, methodDefinitionFromContract(name, definition));
+            members.replace(name, {
+              ...existing,
+              source: "override",
+              descriptor: { value: definition.implementation }
+            });
+          } else {
+            if (definition.kind === "factory") {
+              throw new JITError("CLASS_FACTORY_CONFLICT", "Factory descriptors cannot override instance members");
+            }
+            if (existing.kind !== "field") {
+              throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
+            }
+            if (definition.kind === "field" && definition.schema !== void 0) {
+              schema = replaceSchemaField(schema, name, unwrapSchema(definition.schema));
+              schema = reapplyManagedAfterOverride(schema, next.managedFields);
+              members.replace(name, {
+                ...existing,
+                source: "override",
+                schema: resolveEffectiveObjectSchema(schema).def.props[name]
+              });
+            }
+            applyFieldPolicy(fieldPolicies, name, definition);
+          }
+          continue;
+        }
+        if (isSchemaInputValue(value.value)) {
+          if (existing.kind !== "field") {
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
+          }
+          schema = replaceSchemaField(schema, name, unwrapSchema(value.value));
+          schema = reapplyManagedAfterOverride(schema, next.managedFields);
+          const effectiveField = resolveEffectiveObjectSchema(schema).def.props[name];
+          members.replace(name, {
+            ...existing,
+            source: "override",
+            schema: effectiveField
+          });
+        } else {
+          if (existing.kind === "field") {
+            throw new JITError(
+              "CLASS_MEMBER_ALREADY_EXISTS",
+              `Member ${JSON.stringify(name)} is a schema field; use a schema value with JIT.class.override(...)`
+            );
+          }
+          const replacement = methodDefinitionFromValue(name, value.value);
+          replaceMethod(methods, name, replacement);
+          members.replace(name, { ...existing, source: "override", descriptor: { value: replacement.source } });
+        }
+        continue;
+      }
+      if (members.has(name) || RESERVED_EXTENSION_NAMES.has(name)) {
+        throw new JITError(
+          "CLASS_MEMBER_ALREADY_EXISTS",
+          `Class member ${JSON.stringify(name)} would shadow an existing member. Use ${JSON.stringify(`${name}: JIT.class.override(...)`)} to replace it explicitly.`
+        );
+      }
+      if (isClassMemberDescriptor(value)) {
+        const definition = value.definition;
+        if (definition.kind === "method") {
+          if (definition.implementation === void 0) {
+            throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+          }
+          const method2 = methodDefinitionFromContract(name, definition);
+          methods.push(method2);
+          addMember(members, name, "extension", "custom extension", "method");
+          continue;
+        }
+        if (definition.kind === "factory") {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory descriptors belong in .factories(), not an instance extension"
+          );
+        }
+        const fieldSchema = definition.schema;
+        if (fieldSchema !== void 0) {
+          const field = unwrapSchema(fieldSchema);
+          if (definition.kind === "field" && definition.noConstructor && !hasDefault3(field)) {
+            throw new JITError(
+              "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+              `No-constructor field ${JSON.stringify(name)} requires a default initializer`
+            );
+          }
+          schema = addSchemaField(schema, name, field);
+          members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+        } else {
+          const hasCustomAccessor = definition.kind === "accessor" && (typeof definition.getter === "function" || typeof definition.setter === "function");
+          if (!hasCustomAccessor) {
+            throw new JITError(
+              "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+              `Class member ${JSON.stringify(name)} needs a schema or a custom getter/setter`
+            );
+          }
+          const methodDefinitions = descriptorMethods(name, definition);
+          methods.push(...methodDefinitions);
+          addMember(
+            members,
+            name,
+            "extension",
+            "custom extension",
+            methodDefinitions[0]?.kind === "get" ? "getter" : "setter"
+          );
+        }
+        applyFieldPolicy(fieldPolicies, name, definition);
+        continue;
+      }
+      if (isSchemaInputValue(value)) {
+        const field = unwrapSchema(value);
+        schema = addSchemaField(schema, name, field);
+        members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+        continue;
+      }
+      const method = methodDefinitionFromDescriptor(name, descriptor2);
+      methods.push(method);
+      addMember(
+        members,
+        name,
+        "extension",
+        "custom extension",
+        method.kind === "get" ? "getter" : method.kind === "set" ? "setter" : "method"
+      );
+    }
+    validateManagedFields(schema, next.managedFields);
+    next = { ...next, schema, methods, members, fieldPolicies };
+  }
+  if (next.identity.state === "pending") {
+    const object2 = resolveEffectiveObjectSchema(next.schema);
+    const candidates = Object.keys(object2.def.props).filter((key) => isIdentifierSchema(object2.def.props[key]));
+    if (candidates.length === 1) {
+      const key = candidates[0];
+      const identity = classType.identity(key);
+      const members = next.members.clone();
+      for (const name of capabilityMemberNames(identity))
+        addMember(members, name, "capability", identity.kind, "method");
+      next = {
+        ...next,
+        members,
+        capabilities: [...next.capabilities, identity],
+        identity: { state: "resolved", key, explicit: false }
+      };
+    } else if (candidates.length > 1) {
+      next = { ...next, identity: { state: "ambiguous", candidates: Object.freeze(candidates) } };
+    }
+  }
+  validateManagedFields(next.schema, next.managedFields);
+  return next;
+}
+function validateMixinRequirements(schema, requirements) {
+  if (requirements === void 0) return;
+  const object2 = resolveEffectiveObjectSchema(schema);
+  for (const name of Object.getOwnPropertyNames(requirements)) {
+    const required2 = requirements[name];
+    const actual = object2.def.props[name];
+    if (actual === void 0) {
+      throw new JITError(
+        "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+        `Class mixin requires the host field ${JSON.stringify(name)}`
+      );
+    }
+    if (!isSchemaInputValue(required2)) {
+      throw new JITError(
+        "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+        `Mixin requirement ${JSON.stringify(name)} must be a schema`
+      );
+    }
+    const expectedBase = resolveWrappers(unwrapSchema(required2)).base;
+    const actualBase = resolveWrappers(actual).base;
+    if (expectedBase.type !== actualBase.type) {
+      throw new JITError(
+        "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+        `Class mixin requirement ${JSON.stringify(name)} is incompatible with the host field`
+      );
+    }
+  }
+}
+function capabilityOptions(capability2) {
+  return capability2.__options;
+}
+function capabilityMemberNames(capability2) {
+  return capability2.__memberNames ?? [];
+}
+function assertNewMember(members, name, owner) {
+  const existing = members.get(name);
+  if (existing !== void 0) {
+    if (existing.kind === "field") {
+      throw new JITError(
+        "CLASS_MEMBER_ALREADY_EXISTS",
+        `Member ${JSON.stringify(name)} is a schema field and cannot be installed by ${owner}`
+      );
+    }
+    throw new JITError(
+      "CLASS_MEMBER_ALREADY_EXISTS",
+      `Member ${JSON.stringify(name)} already exists. Existing source conflicts with ${owner}; use JIT.class.override(...) explicitly.`
+    );
+  }
+}
+function isSchemaInputValue(value) {
+  return (typeof value === "object" || typeof value === "function") && value !== null && "schema" in value && typeof value.schema === "object" || typeof value === "object" && value !== null && "type" in value && "def" in value;
+}
+function replaceSchemaField(schema, name, replacement) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  const props = { ...object2.def.props, [name]: replacement };
+  return createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+}
+function addSchemaField(schema, name, field) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  return createSchema(
+    TypeName.object,
+    {
+      props: { ...object2.def.props, [name]: field },
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+}
+function reapplyManagedAfterOverride(schema, managedFields) {
+  try {
+    return reapplyManagedFields(schema, managedFields);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", message);
+  }
+}
+function methodDefinitionFromDescriptor(name, descriptor2) {
+  if (descriptor2.get !== void 0 || descriptor2.set !== void 0) {
+    return {
+      name,
+      kind: descriptor2.get === void 0 ? "set" : "get",
+      source: descriptor2.get ?? descriptor2.set
+    };
+  }
+  if (typeof descriptor2.value !== "function") {
+    throw new JITError(
+      "INVALID_OPERATION",
+      `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
+    );
+  }
+  return { name, kind: "method", source: descriptor2.value };
+}
+function methodDefinitionFromContract(name, definition) {
+  if (definition.implementation === void 0) {
+    throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+  }
+  return {
+    name,
+    kind: "method",
+    source: definition.implementation,
+    schema: definition.schema,
+    ...definition.async === void 0 ? {} : { async: definition.async }
+  };
+}
+function descriptorMethods(name, definition) {
+  const methods = [];
+  if (typeof definition.getter === "function") methods.push({ name, kind: "get", source: definition.getter });
+  if (typeof definition.setter === "function") methods.push({ name, kind: "set", source: definition.setter });
+  return methods;
+}
+function applyFieldPolicy(policies, name, definition) {
+  const previous = policies.get(name);
+  const visibility = definition.visibility ?? previous?.visibility ?? "public";
+  const hasAccessorIntent = definition.getter !== void 0 || definition.setter !== void 0;
+  const defaultPublicField = definition.kind === "field" && (definition.visibility === "public" || definition.noConstructor === true) && !hasAccessorIntent;
+  const internalVisibilityField = definition.kind === "field" && (definition.visibility === "protected" || definition.visibility === "private") && !hasAccessorIntent;
+  const getter = definition.getter ?? previous?.getter ?? (defaultPublicField || internalVisibilityField);
+  const setter = definition.setter ?? previous?.setter ?? (defaultPublicField || internalVisibilityField);
+  if (previous !== void 0) {
+    if (definition.getter !== void 0 && previous.getter !== false) {
+      throw new JITError("CLASS_ACCESSOR_CONFLICT", `Field ${JSON.stringify(name)} declares more than one getter`);
+    }
+    if (definition.setter !== void 0 && previous.setter !== false) {
+      throw new JITError("CLASS_ACCESSOR_CONFLICT", `Field ${JSON.stringify(name)} declares more than one setter`);
+    }
+    if (definition.visibility !== void 0 && previous.visibility !== definition.visibility) {
+      throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", `Field ${JSON.stringify(name)} has conflicting visibility`);
+    }
+  }
+  policies.set(name, {
+    visibility,
+    getter,
+    setter,
+    noConstructor: definition.kind === "field" && definition.noConstructor === true ? true : previous?.noConstructor ?? false
+  });
+}
+function hasDefault3(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.default) return true;
+    if (current.type === TypeName.lazy) {
+      current = current.def.getter();
+      continue;
+    }
+    if (current.type === TypeName.readonly || current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.brand || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
+      current = current.def.innerType;
+      continue;
+    }
+    return false;
+  }
+}
+function methodDefinitionFromValue(name, value) {
+  if (typeof value !== "function") {
+    throw new JITError(
+      "INVALID_OPERATION",
+      `Override ${JSON.stringify(name)} must provide a method function or schema`
+    );
+  }
+  return { name, kind: "method", source: value };
+}
+function replaceMethod(methods, name, replacement) {
+  const index2 = methods.findIndex((method) => method.name === name);
+  if (index2 === -1) methods.push(replacement);
+  else methods[index2] = replacement;
+}
+function installMethodDefinition(classTarget, method, mutationGate) {
+  let source = method.source;
+  if (method.schema !== void 0) {
+    const args = compileValidator(method.schema.def.args);
+    const output = method.schema.def.output === void 0 ? void 0 : compileValidator(method.schema.def.output);
+    if (method.async === true) {
+      source = async function validatedAsyncMethod(...rawArgs) {
+        const parsed = args.parse(rawArgs);
+        const result = await method.source.apply(this, parsed);
+        return output === void 0 ? result : output.parseAsync(result);
+      };
+    } else {
+      source = function validatedMethod(...rawArgs) {
+        const parsed = args.parse(rawArgs);
+        const result = method.source.apply(this, parsed);
+        return output === void 0 ? result : output.parse(result);
+      };
+    }
+  }
+  if (mutationGate !== void 0 && method.kind === "method") {
+    const body = source;
+    source = function domainMethod(...args) {
+      mutationGate.add(this);
+      try {
+        return body.apply(this, args);
+      } finally {
+        mutationGate.delete(this);
+      }
+    };
+  }
+  const descriptor2 = method.kind === "method" ? { value: source, writable: false } : method.kind === "get" ? { get: source } : { set: source };
+  Object.defineProperty(classTarget.prototype, method.name, {
+    ...descriptor2,
+    configurable: true,
+    enumerable: false
+  });
+}
+function lifecycleArtifact(lifecycle) {
+  const timestamps2 = lifecycle.timestamps;
+  const deletion = lifecycle.softDelete;
+  const versioned2 = lifecycle.versioned;
+  if (timestamps2 === void 0 && deletion === void 0 && versioned2 === void 0) return void 0;
+  return {
+    ...timestamps2?.touch === "manual" || timestamps2 === void 0 ? {} : { updatedAt: timestamps2.updatedAt },
+    ...timestamps2 === void 0 ? {} : { touchAt: timestamps2.updatedAt, touchMethod: timestamps2.touchMethod },
+    ...versioned2 === void 0 ? {} : { version: versioned2.field },
+    ...deletion === void 0 ? {} : {
+      deletedAt: deletion.field,
+      deleteMethod: deletion.deleteMethod,
+      restoreMethod: deletion.restoreMethod,
+      isDeletedMember: deletion.isDeletedMember
+    },
+    ...timestamps2?.clock === void 0 ? {} : { timestampClock: timestamps2.clock },
+    ...deletion?.clock === void 0 ? {} : { deletionClock: deletion.clock }
+  };
+}
+function installLifecycleMethods(classTarget, state3, managedStorage) {
+  const lifecycle = state3.lifecycle;
+  const timestamps2 = lifecycle.timestamps;
+  const deletion = lifecycle.softDelete;
+  const versioned2 = lifecycle.versioned;
+  const needsMutation = state3.aggregate || timestamps2 !== void 0 || deletion !== void 0 || versioned2 !== void 0;
+  const managedAccess = (field) => {
+    const storage = managedStorage.get(field);
+    return storage === void 0 ? `this[${JSON.stringify(field)}]` : `this[${storage.name}]`;
+  };
+  const managedWrite = (field, value) => {
+    const storage = managedStorage.get(field);
+    return storage === void 0 ? `Object.defineProperty(this, ${JSON.stringify(field)}, { value: ${value}, writable: false, enumerable: true, configurable: true });` : `${managedAccess(field)} = ${value};`;
+  };
+  const installLifecycleMethod = (name, clock, body) => {
+    const source = `return function() { ${body} };`;
+    const storageEntries = [...managedStorage.values()];
+    const storageNames = storageEntries.map((entry) => entry.name);
+    const storageValues = storageEntries.map((entry) => entry.value);
+    const method = globalThis.Function(
+      ...storageNames,
+      ...clock === void 0 ? [] : ["__clock"],
+      source
+    )(...storageValues, ...clock === void 0 ? [] : [() => checkedClock(clock)]);
+    definePrototype(classTarget.prototype, name, method, true);
+  };
+  if (needsMutation) {
+    const object2 = resolveEffectiveObjectSchema(state3.schema);
+    const fields = Object.keys(object2.def.props);
+    const readonlyFields = fields.filter((field) => resolveWrappers(object2.def.props[field]).readonly);
+    const mutableFields = fields.filter((field) => !readonlyFields.includes(field));
+    const updates = /* @__PURE__ */ new Map();
+    const names = [];
+    const values = [];
+    for (const field of mutableFields) {
+      if (state3.managedFields.some((managed) => managed.field === field)) continue;
+      const fieldSchema = object2.def.props[field];
+      if (isPrimitiveLikeSchema(resolveWrappers(fieldSchema).base)) updates.set(field, null);
+      else {
+        const name = `__update${names.length}`;
+        names.push(name);
+        values.push(compileUpdate(fieldSchema));
+        updates.set(field, name);
+      }
+    }
+    const mutation = buildAggregateMutationPlan({
+      fields: mutableFields,
+      readonlyFields: [...readonlyFields, ...state3.managedFields.map((managed) => managed.field)],
+      ...timestamps2?.touch !== "manual" && timestamps2 !== void 0 ? { updatedAt: timestamps2.updatedAt } : {},
+      ...versioned2 === void 0 ? {} : { version: versioned2.field },
+      managedFields: state3.managedFields.map((managed) => managed.field),
+      fieldAccess: new Map(
+        [...managedStorage.entries()].map(([field, storage]) => [field, `this[${storage.name}]`])
+      )
+    });
+    const clock = timestamps2?.clock;
+    const clockNames = mutation.updatedAt === void 0 || clock === void 0 ? [] : ["__clock"];
+    const clockValues = clockNames.length === 0 ? [] : [() => checkedClock(clock)];
+    const storageEntries = [...managedStorage.values()];
+    const storageNames = storageEntries.map((entry) => entry.name);
+    const storageValues = storageEntries.map((entry) => entry.value);
+    const update2 = globalThis.Function(
+      ...names,
+      ...storageNames,
+      ...clockNames,
+      `return function update(patch) { ${emitAggregateMutationBody(mutation, updates, clockNames.length === 0 ? "new Date()" : "__clock()")} };`
+    )(...values, ...storageValues, ...clockValues);
+    definePrototype(classTarget.prototype, "update", update2, true);
+  }
+  if (timestamps2 !== void 0) {
+    const clock = timestamps2.clock;
+    const field = timestamps2.updatedAt;
+    const version = versioned2?.field;
+    installLifecycleMethod(
+      timestamps2.touchMethod,
+      clock,
+      `const now = ${clock === void 0 ? "new Date()" : "__clock()"}; ${managedWrite(field, "now")} ${version === void 0 ? "" : managedWrite(version, `${managedAccess(version)} + 1`)}`
+    );
+  }
+  if (deletion !== void 0) {
+    const timestampField = timestamps2?.touch === "manual" || timestamps2 === void 0 ? void 0 : timestamps2.updatedAt;
+    const clock = deletion.clock ?? timestamps2?.clock;
+    installLifecycleMethod(
+      deletion.deleteMethod,
+      clock,
+      `if (${managedAccess(deletion.field)} !== null) return; const now = ${clock === void 0 ? "new Date()" : "__clock()"}; ${managedWrite(deletion.field, "now")} ${timestampField === void 0 ? "" : managedWrite(timestampField, "now")} ${versioned2 === void 0 ? "" : managedWrite(versioned2.field, `${managedAccess(versioned2.field)} + 1`)}`
+    );
+    installLifecycleMethod(
+      deletion.restoreMethod,
+      timestampField === void 0 ? void 0 : clock,
+      `if (${managedAccess(deletion.field)} === null) return; ${managedWrite(deletion.field, "null")} ${timestampField === void 0 ? "" : managedWrite(timestampField, clock === void 0 ? "new Date()" : "__clock()")} ${versioned2 === void 0 ? "" : managedWrite(versioned2.field, `${managedAccess(versioned2.field)} + 1`)}`
+    );
+    const deletionStorage = managedStorage.get(deletion.field);
+    Object.defineProperty(classTarget.prototype, deletion.isDeletedMember, {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return deletionStorage === void 0 ? this[deletion.field] !== null : this[deletionStorage.value] !== null;
+      }
+    });
+  }
+  if (state3.aggregate) {
+    definePrototype(
+      classTarget.prototype,
+      "raise",
+      function raise(event) {
+        this.__jitEvents[this.__jitEvents.length] = event;
+      },
+      true
+    );
+    definePrototype(
+      classTarget.prototype,
+      "peekEvents",
+      function peekEvents() {
+        return this.__jitEvents.slice();
+      },
+      true
+    );
+    definePrototype(
+      classTarget.prototype,
+      "pullEvents",
+      function pullEvents() {
+        const events = this.__jitEvents;
+        this.__jitEvents = [];
+        return events;
+      },
+      true
+    );
+    definePrototype(
+      classTarget.prototype,
+      "commit",
+      async function commit(publisher) {
+        const pending = this.__jitEvents;
+        for (let index2 = 0; index2 < pending.length; index2++) await publisher.publish(pending[index2]);
+        this.__jitEvents.splice(0, pending.length);
+      },
+      true
+    );
+  }
+}
+function checkedClock(clock) {
+  const value = clock();
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new JITError("INVALID_OPERATION", "A DDD clock must return a valid Date");
+  }
+  return value;
+}
+function installFactory(classTarget, previous, next, factory) {
+  if (previous !== false && previous !== next) Reflect.deleteProperty(classTarget, previous);
+  if (next === false) return;
+  if (next === "schema" || next === "use" || next === "extends" || next === "factories" || next === "construction" || next === "accessors" || next === "identity" || next === "validate" || next === "assert") {
+    throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
+  }
+  Object.defineProperty(classTarget, next, {
+    configurable: true,
+    enumerable: false,
+    value: factory
+  });
+}
+function resolveFactoryOption(option, previous, phase) {
+  if (option === void 0) return { name: previous };
+  if (typeof option === "object") {
+    if (!isClassMemberDescriptor(option) || option.definition.kind !== "factory") {
+      throw new JITError("CLASS_FACTORY_CONFLICT", "Invalid class factory descriptor");
+    }
+    if (option.definition.phase !== phase) {
+      throw new JITError(
+        "CLASS_FACTORY_CONFLICT",
+        `A ${option.definition.phase} factory descriptor cannot configure ${phase}`
+      );
+    }
+    return { name: option.definition.name, implementation: option.definition.implementation };
+  }
+  return { name: option };
+}
+function createScalarValueObject(schema, identifier2, isAbstract) {
+  const parse3 = compileValidator(schema).parse;
+  const hydrateState = compileHydrator(schema);
+  const policy = createPolicyState();
+  let safeParse;
+  let safeHydrate;
+  const equal3 = compileEqual(schema);
+  const hash4 = compileHash(schema);
+  const constructionState = { mode: "factory" };
+  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
+  const classTarget = globalThis.Function(
+    "__parse",
+    "__construct",
+    "__construction",
+    source
+  )(parse3, INTERNAL_CONSTRUCT, constructionState);
+  Object.defineProperty(classTarget, TRUSTED_MATERIALIZER, {
+    configurable: false,
+    enumerable: false,
+    value: (value) => {
+      const instance = Object.create(classTarget.prototype);
+      instance.value = value;
+      return Object.freeze(instance);
+    }
+  });
+  const installedCapabilities = ["equals", "hashCode"];
+  const installedMethods = [];
+  const installedMethodNames = new Set(SCALAR_MEMBERS);
+  let factoryNames = {
+    create: "create",
+    hydrate: "hydrate"
+  };
+  let customFactories = {};
+  let constructionConfigured = false;
+  let factoriesConfigured = false;
+  const updateSchema = () => {
+    Object.defineProperty(classTarget, "schema", {
+      configurable: true,
+      enumerable: true,
+      value: createSchema(TypeName.runtimeType, {
+        innerType: schema,
+        materialize: classTarget,
+        representation: "value",
+        identifier: identifier2,
+        traits: runtimeTypeTraits("value", identifier2, policy),
+        assertion: void 0
+      })
+    });
+  };
+  function create(...args) {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
+    }
+    const construct2 = this;
+    if (customFactories.create !== void 0) {
+      const parsed2 = policy.configured && policy.create ? (() => {
+        safeParse ??= compileValidatorSelection(schema, ["safeParse"], {}).safeParse;
+        return safeParse(args[0]);
+      })() : { success: true, data: parse3(args[0]) };
+      if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
+      const result = customFactories.create.call(this, parsed2.data, {
+        construct: (value) => new construct2(value, INTERNAL_CONSTRUCT, true)
+      });
+      let instance;
+      if (result instanceof this) {
+        instance = result;
+      } else {
+        instance = new construct2(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured ? policySuccess(policy, instance) : instance;
+    }
+    if (!policy.configured || !policy.create) return new construct2(args[0], INTERNAL_CONSTRUCT);
+    if (policy.maxIssues === void 0) {
+      try {
+        return policySuccess(policy, new construct2(parse3(args[0]), INTERNAL_CONSTRUCT, true));
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues));
+      }
+    }
+    safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    }).safeParse;
+    const parsed = safeParse(args[0]);
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
+  }
+  function hydrate(state3) {
+    if (isAbstract && this === classTarget) {
+      throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
+    }
+    const construct2 = this;
+    if (customFactories.hydrate !== void 0) {
+      const parsed2 = policy.configured && policy.hydrate ? (() => {
+        safeHydrate ??= compileSafeHydrator(schema);
+        return safeHydrate(state3);
+      })() : { success: true, data: hydrateState(state3) };
+      if (!parsed2.success) return policyFailure(policy, policyError(policy, parsed2.issues));
+      const result = customFactories.hydrate.call(this, parsed2.data, {
+        construct: (value) => new construct2(value, INTERNAL_CONSTRUCT, true)
+      });
+      let instance;
+      if (result instanceof this) {
+        instance = result;
+      } else {
+        instance = new construct2(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured ? policySuccess(policy, instance) : instance;
+    }
+    if (!policy.configured || !policy.hydrate) {
+      return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
+    }
+    if (policy.maxIssues === void 0) {
+      try {
+        return policySuccess(
+          policy,
+          new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true)
+        );
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues));
+      }
+    }
+    safeHydrate ??= compileSafeHydrator(schema, {
+      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
+    });
+    const parsed = safeHydrate(state3);
+    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
+    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
+  }
+  const register = () => {
+    updateSchema();
+    registerArtifact(classTarget, {
+      kind: "class",
+      schema,
+      wireSchema: schema,
+      abstract: isAbstract,
+      frozen: true,
+      aggregate: false,
+      construction: constructionState.mode,
+      representation: "value",
+      ...policyArtifact(policy),
+      capabilities: installedCapabilities,
+      ...installedMethods.length === 0 ? {} : { methods: installedMethods },
+      factories: factoryNames,
+      ...customFactories.create === void 0 && customFactories.hydrate === void 0 ? {} : { customFactories }
+    });
+  };
+  Object.defineProperties(classTarget, {
+    [CLASS_TARGET]: { enumerable: false, value: true },
+    schema: {
+      configurable: true,
+      enumerable: true,
+      value: createSchema(TypeName.runtimeType, {
+        innerType: schema,
+        materialize: classTarget,
+        representation: "value",
+        identifier: identifier2,
+        traits: runtimeTypeTraits("value", identifier2, policy),
+        assertion: void 0
+      })
+    },
+    create: { configurable: true, enumerable: false, value: create },
+    hydrate: { configurable: true, enumerable: false, value: hydrate },
+    extends: {
+      enumerable: false,
+      value: (...extensions) => {
+        for (const rawExtension of extensions) {
+          const extension = isClassMixin(rawExtension) ? rawExtension() : rawExtension;
+          if (isClassCapability(extension)) {
+            if (installedCapabilities.includes(extension.kind)) {
+              throw new JITError(
+                "INVALID_OPERATION",
+                `Class capability ${JSON.stringify(extension.kind)} is already installed`
+              );
+            }
+            const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
+            extension.install(classTarget, schema);
+            for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
+              if (!before.has(name)) installedMethodNames.add(name);
+            }
+            installedCapabilities.push(extension.kind);
+            continue;
+          }
+          installScalarExtension(classTarget, extension, installedMethods, installedMethodNames);
+        }
+        register();
+        return classTarget;
+      }
+    },
+    factories: {
+      enumerable: false,
+      value: (options) => {
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
+        }
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        const createOption = resolveFactoryOption(options.create, factoryNames.create, "create");
+        const hydrateOption = resolveFactoryOption(options.hydrate, factoryNames.hydrate, "hydrate");
+        const next = { create: createOption.name, hydrate: hydrateOption.name };
+        if (next.create === false && next.hydrate === false) {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory construction requires at least one create or hydrate factory"
+          );
+        }
+        installFactory(classTarget, factoryNames.create, next.create, create);
+        installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
+        factoriesConfigured = true;
+        factoryNames = next;
+        customFactories = {
+          ...createOption.implementation === void 0 ? {} : { create: createOption.implementation },
+          ...hydrateOption.implementation === void 0 ? {} : { hydrate: hydrateOption.implementation }
+        };
+        register();
+        return classTarget;
+      }
+    },
+    construction: {
+      enumerable: false,
+      value: (mode) => {
+        if (constructionConfigured) {
+          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
+        }
+        if (factoriesConfigured) {
+          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
+        }
+        if (mode !== "constructor" && mode !== "factory") {
+          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
+        }
+        if (isAbstract && mode === "constructor") {
+          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
+        }
+        if (policy.configured) {
+          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
+        }
+        constructionConfigured = true;
+        constructionState.mode = mode;
+        if (mode === "factory") {
+          installFactory(classTarget, factoryNames.create, "create", create);
+          installFactory(classTarget, factoryNames.hydrate, "hydrate", hydrate);
+          factoryNames = { create: "create", hydrate: "hydrate" };
+        } else {
+          installFactory(classTarget, factoryNames.create, false, create);
+          installFactory(classTarget, factoryNames.hydrate, false, hydrate);
+          factoryNames = { create: false, hydrate: false };
+        }
+        register();
+        return classTarget;
+      }
+    },
+    accessors: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Scalar Value Objects expose only their readonly value accessor");
+      }
+    },
+    validate: {
+      enumerable: false,
+      value: (options) => {
+        applyValidationPolicy(policy, options);
+        register();
+        return classTarget;
+      }
+    },
+    assert: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Assertions describe object fields; refine the scalar schema instead");
+      }
+    },
+    identity: {
+      enumerable: false,
+      value: () => {
+        throw new JITError("INVALID_OPERATION", "Scalar Value Objects do not have object fields");
+      }
+    }
+  });
+  definePrototype(
+    classTarget.prototype,
+    "equals",
+    function equalsScalar(other) {
+      return other instanceof classTarget && equal3(this.value, other.value);
+    }
+  );
+  definePrototype(classTarget.prototype, "hashCode", function hashScalar() {
+    return hash4(this.value);
+  });
+  definePrototype(classTarget.prototype, "toJSON", function scalarToJson() {
+    return this.value;
+  });
+  register();
+  return classTarget;
+}
+function createClassLayoutPlan(properties, accessors, managedStorage, fieldPolicies, encapsulateFields, initializers) {
+  return Object.freeze({
+    properties: Object.freeze([...properties]),
+    accessors,
+    managedStorage,
+    fieldPolicies,
+    encapsulateFields,
+    initializers
+  });
+}
+function installTrustedMaterializer(classTarget, layout, freezeInstances, aggregate) {
+  const accessorByKey = new Map(layout.accessors?.map((accessor) => [accessor.key, accessor]));
+  const hasNativePrivateSlot = layout.properties.some(
+    (property) => accessorByKey.get(property)?.field === "private" && !layout.managedStorage.has(property)
+  );
+  const materialize = (state3) => {
+    if (hasNativePrivateSlot) {
+      return new classTarget(
+        state3,
+        INTERNAL_CONSTRUCT,
+        true
+      );
+    }
+    const instance = Object.create(classTarget.prototype);
+    for (const property of layout.properties) {
+      const initializer = layout.initializers.get(property);
+      const input = state3;
+      const value = input[property] === void 0 && initializer !== void 0 ? initializer() : input[property];
+      const managed = layout.managedStorage.get(property);
+      if (managed === void 0) instance[property] = value;
+      else instance[managed.value] = value;
+    }
+    if (aggregate) Object.defineProperty(instance, "__jitEvents", { value: [], writable: true });
+    return freezeInstances ? Object.freeze(instance) : instance;
+  };
+  Object.defineProperty(classTarget, TRUSTED_MATERIALIZER, {
+    configurable: false,
+    enumerable: false,
+    value: materialize
+  });
+}
+function emitConstructor(layout, freezeInstances, aggregate, parse3, construction, mutationGate) {
+  const { properties, accessors, managedStorage, fieldPolicies, encapsulateFields, initializers } = layout;
+  const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
+  const slots = [];
+  const definitions = [];
+  const initializerEntries = [...initializers.entries()];
+  const initializerBindings = new Map(initializerEntries.map(([field], index2) => [field, `__init${index2}`]));
+  let slotIndex = 0;
+  const assignments = properties.map((property) => {
+    const accessor = accessorByKey.get(property);
+    const managed = managedStorage.get(property);
+    if (managed !== void 0) {
+      const policy = fieldPolicies.get(property);
+      const defaultDdd = encapsulateFields && policy === void 0;
+      const getter = policy?.getter === true || defaultDdd || policy === void 0 && accessor?.field !== "private";
+      const setter = policy?.setter === true;
+      if (getter) definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
+      if (setter || defaultDdd) {
+        const guarded = encapsulateFields && (policy?.visibility !== "public" || policy?.noConstructor === true);
+        definitions.push(
+          guarded ? `set [${JSON.stringify(property)}](value) { if (!__mutationGate.has(this)) throw new TypeError("Field ${property} is readonly"); this[${managed.name}] = value; }` : `set [${JSON.stringify(property)}](value) { this[${managed.name}] = value; }`
+        );
+      }
+      const initializer2 = initializerBindings.get(property);
+      const value = initializer2 !== void 0 ? `(state${emitPropertyAccess("", property)} === undefined ? ${initializer2}() : state${emitPropertyAccess("", property)})` : `state${emitPropertyAccess("", property)}`;
+      return `this[${managed.name}] = ${value};`;
+    }
+    if (accessor?.field !== "private") {
+      const initializer2 = initializers.get(property);
+      return initializer2 === void 0 ? `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};` : `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
+    }
+    const slot = `#p${slotIndex++}`;
+    slots.push(slot);
+    if (accessor.get !== false) definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
+    if (accessor.set !== false)
+      definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
+    const initializer = initializers.get(property);
+    return initializer === void 0 ? `this.${slot} = state${emitPropertyAccess("", property)};` : `this.${slot} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
+  });
+  const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
+  const storageEntries = [...managedStorage.values()];
+  const storageNames = storageEntries.map((entry) => entry.name);
+  const storageValues = storageEntries.map((entry) => entry.value);
+  const initializerNames = initializerEntries.map(([field]) => initializerBindings.get(field));
+  const initializerValues = initializerEntries.map(([, initializer]) => initializer);
+  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
+  return globalThis.Function(
+    ...storageNames,
+    ...initializerNames,
+    "__parse",
+    "__construct",
+    "__construction",
+    ...mutationGate === void 0 ? [] : ["__mutationGate"],
+    source
+  )(
+    ...storageValues,
+    ...initializerValues,
+    parse3,
+    INTERNAL_CONSTRUCT,
+    construction,
+    ...mutationGate === void 0 ? [] : [mutationGate]
+  );
+}
+function resolveManagedStorage(properties, _accessors, managedFields, encapsulateFields, fieldPolicies) {
+  const storage = /* @__PURE__ */ new Map();
+  let index2 = 0;
+  for (const field of properties) {
+    const managed = managedFields.some((item) => item.field === field);
+    const policy = fieldPolicies.get(field);
+    const needsAccessorStorage = policy !== void 0 && (policy.visibility !== "public" || policy.getter !== false || policy.setter !== false || policy.noConstructor);
+    if (!managed && !encapsulateFields && !needsAccessorStorage) continue;
+    storage.set(field, { name: `__managed${index2++}`, value: /* @__PURE__ */ Symbol(`jit.${field}`) });
+  }
+  return storage;
+}
+function removeNoConstructorFields(schema, policies) {
+  const noConstructor = new Set(
+    [...policies.entries()].filter(([, policy]) => policy.noConstructor).map(([field]) => field)
+  );
+  if (noConstructor.size === 0) return schema;
+  const object2 = resolveEffectiveObjectSchema(schema);
+  const props = Object.fromEntries(Object.entries(object2.def.props).filter(([field]) => !noConstructor.has(field)));
+  return createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+}
+function compileNoConstructorInitializers(schema, policies) {
+  const object2 = resolveEffectiveObjectSchema(schema);
+  const initializers = /* @__PURE__ */ new Map();
+  for (const [field, policy] of policies) {
+    if (!policy.noConstructor) continue;
+    const fieldSchema = object2.def.props[field];
+    if (fieldSchema === void 0) continue;
+    const parse3 = compileValidator(fieldSchema).parse;
+    initializers.set(field, () => parse3(void 0));
+  }
+  return initializers;
+}
+function installFieldDescriptorAccessors(classTarget, policies) {
+  for (const [name, policy] of policies) {
+    const previous = Object.getOwnPropertyDescriptor(classTarget.prototype, name) ?? {
+      configurable: true,
+      enumerable: false
+    };
+    const next = { ...previous };
+    if (typeof policy.getter === "function") next.get = policy.getter;
+    if (typeof policy.setter === "function") next.set = policy.setter;
+    if (typeof policy.getter === "function" || typeof policy.setter === "function") {
+      Object.defineProperty(classTarget.prototype, name, next);
+    }
+  }
+}
+function resolveAccessors(properties, options) {
+  return properties.map((key) => {
+    const configured = {
+      ...options.default,
+      ...options.fields?.[key]
+    };
+    const get = resolveAccessorMember(key, configured.get);
+    const set2 = resolveAccessorMember(key, configured.set);
+    if (configured.field === "private" && get === false && set2 === false) {
+      throw new JITError("INVALID_OPERATION", `Private field ${JSON.stringify(key)} must expose a getter or setter`);
+    }
+    return { key, field: configured.field ?? "public", get, set: set2 };
+  });
+}
+function resolveAccessorMember(key, member) {
+  if (member === void 0) return key;
+  if (member === false) return false;
+  return typeof member === "string" ? key : member.name ?? key;
+}
+var classType = Object.assign(classFactory2, {
+  abstract: abstractClass,
+  equals: capability("equals", (prototype, schema) => {
+    definePrototype(prototype, "equals", compileEqualMethod(schema), true);
+  }),
+  hashCode: capability("hashCode", (prototype, schema) => {
+    const hash4 = compileHash(schema);
+    definePrototype(
+      prototype,
+      "hashCode",
+      function hashCode() {
+        return hash4(this);
+      },
+      true
+    );
+  }),
+  with: (() => {
+    const base = capability("with", (prototype, schema) => {
+      const update2 = compileUpdate(schema);
+      definePrototype(
+        prototype,
+        "with",
+        function withPatch(patch3) {
+          const next = update2(this, patch3);
+          return new this.constructor(
+            next,
+            INTERNAL_CONSTRUCT
+          );
+        },
+        true
+      );
+    });
+    return Object.freeze({ ...base, __with: true });
+  })(),
+  diff: capability("diff", (prototype, schema) => {
+    const diff3 = compileDiff(schema);
+    definePrototype(
+      prototype,
+      "diff",
+      function diffInstance(other) {
+        return diff3(this, other);
+      },
+      true
+    );
+  }),
+  clone: (() => {
+    const base = capability("clone", (prototype, schema) => {
+      const clone3 = compileClone(schema);
+      definePrototype(
+        prototype,
+        "clone",
+        function cloneInstance() {
+          return new this.constructor(
+            clone3(this),
+            INTERNAL_CONSTRUCT,
+            true
+          );
+        },
+        true
+      );
+    });
+    return Object.freeze({ ...base, __clone: true });
+  })(),
+  override,
+  public: classPublic,
+  protected: classProtected,
+  private: classPrivate,
+  getter: classGetter,
+  setter: classSetter,
+  method: classMethod,
+  factory: classFactory,
+  noConstructor: classNoConstructor,
+  mixin: classMixin,
+  json(options) {
+    const method = options?.method ?? "toJson";
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(method)) {
+      throw new JITError("INVALID_OPERATION", `Invalid class JSON method name ${JSON.stringify(method)}`);
+    }
+    return Object.freeze({
+      kind: "class.json",
+      __options: options ?? {},
+      __memberNames: Object.freeze([method]),
+      install() {
+      }
+    });
+  },
+  isFailure,
+  identity(key) {
+    return capability(
+      `identity:${key}`,
+      (prototype, schema) => {
+        const base = resolveWrappers(schema).base;
+        const props = base.type === TypeName.object ? base.def.props : void 0;
+        if (!props || !(key in props)) {
+          throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
+        }
+        const runtimeIdentity = findRuntimeTypeSchema(props[key]);
+        const valueIdentity = runtimeIdentity?.def.representation === "value";
+        const equalIdentity = valueIdentity ? compileEqual(runtimeIdentity.def.innerType) : void 0;
+        definePrototype(
+          prototype,
+          "identity",
+          function identity() {
+            return this[key];
+          },
+          true
+        );
+        definePrototype(
+          prototype,
+          "sameIdentity",
+          function sameIdentity(other) {
+            if (typeof other !== "object" || other === null) return false;
+            const left = this[key];
+            const right = other[key];
+            if (!valueIdentity) return Object.is(left, right);
+            return typeof left === "object" && left !== null && typeof right === "object" && right !== null && equalIdentity(
+              left.value,
+              right.value
+            );
+          },
+          true
+        );
+      },
+      ["identity", "sameIdentity"]
+    );
+  }
+});
+var valueAccessorCapability = capability("value", (prototype) => {
+  Object.defineProperty(prototype, "value", {
+    configurable: false,
+    enumerable: false,
+    get() {
+      return this;
+    }
+  });
+});
+function valueObject(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const base = resolveWrappers(unwrapped).base;
+  if (base.type !== TypeName.object) {
+    if (!isPrimitiveLikeSchema(base)) {
+      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
+    }
+    return createScalarValueObject(unwrapped, false, false);
+  }
+  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
+  return "value" in base.def.props ? runtime.extends(
+    classType.equals,
+    classType.hashCode
+  ) : runtime.extends(
+    valueAccessorCapability,
+    classType.equals,
+    classType.hashCode
+  );
+}
+function abstractValueObject(schema) {
+  const unwrapped = unwrapSchema(schema);
+  const base = resolveWrappers(unwrapped).base;
+  if (base.type !== TypeName.object) {
+    if (!isPrimitiveLikeSchema(base)) {
+      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
+    }
+    return createScalarValueObject(unwrapped, false, true);
+  }
+  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
+  return "value" in base.def.props ? runtime.extends(
+    classType.equals,
+    classType.hashCode
+  ) : runtime.extends(
+    valueAccessorCapability,
+    classType.equals,
+    classType.hashCode
+  );
+}
+function uniqueIdentifier(schema) {
+  const identifierSchema = schema === void 0 ? defaultTo(
+    createSchema(TypeName.string, {
+      checks: [{ kind: "uuid" }]
+    }),
+    createIdentifierValue
+  ) : unwrapSchema(schema);
+  const base = resolveWrappers(identifierSchema).base;
+  if (!isPrimitiveLikeSchema(base) || base.type === TypeName.object) {
+    throw new JITError("INVALID_OPERATION", "JIT.ddd.uniqueIdentifier() requires a primitive-like schema");
+  }
+  return createScalarValueObject(identifierSchema, true, false);
+}
+function resolveIdentityState(schema, explicit, label) {
+  const base = resolveWrappers(schema).base;
+  if (base.type !== TypeName.object) {
+    throw new JITError("INVALID_OPERATION", `${label} identity requires an object schema`);
+  }
+  if (explicit !== void 0) return { state: "resolved", key: explicit, explicit: true };
+  const candidates = Object.keys(base.def.props).filter(
+    (key) => isIdentifierSchema(base.def.props[key])
+  );
+  if (candidates.length === 1) return { state: "resolved", key: candidates[0], explicit: false };
+  if (candidates.length === 0) return { state: "pending" };
+  throw new JITError(
+    "DDD_IDENTITY_AMBIGUOUS",
+    `${label} identity must be explicit when the schema has multiple unique identifiers`
+  );
+}
+function isIdentifierSchema(schema) {
+  return findRuntimeTypeSchema(schema)?.def.identifier === true;
+}
+function findRuntimeTypeSchema(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.runtimeType) {
+      return current;
+    }
+    if (current.type === TypeName.lazy) {
+      current = current.def.getter();
+      continue;
+    }
+    if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.default || current.type === TypeName.brand || current.type === TypeName.readonly || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
+      current = current.def.innerType;
+      continue;
+    }
+    return void 0;
+  }
+}
+function timestamps(options) {
+  const resolved = options ?? {};
+  const touch = resolved.methods?.touch ?? "touch";
+  return Object.freeze({
+    kind: "ddd.timestamps",
+    __options: resolved,
+    __memberNames: Object.freeze([touch]),
+    install() {
+    }
+  });
+}
+function softDelete(options) {
+  const resolved = options ?? {};
+  const names = [
+    resolved.methods?.delete ?? "softDelete",
+    resolved.methods?.restore ?? "restore",
+    resolved.methods?.isDeleted ?? "isDeleted"
+  ];
+  return Object.freeze({
+    kind: "ddd.softDelete",
+    __options: resolved,
+    __memberNames: Object.freeze(names),
+    install() {
+    }
+  });
+}
+function versioned(options) {
+  const resolved = options ?? {};
+  return Object.freeze({
+    kind: "ddd.versioned",
+    __options: resolved,
+    __memberNames: Object.freeze([]),
+    install() {
+    }
+  });
+}
+function createEntity(schema, isAbstract, ...args) {
+  const unwrapped = unwrapSchema(schema);
+  const identity = resolveIdentityState(unwrapped, args[0]?.id, "Entity");
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory", true, void 0, {
+    identity
+  });
+  if (identity.state !== "resolved") {
+    Reflect.deleteProperty(runtime, "create");
+    Reflect.deleteProperty(runtime, "hydrate");
+    return runtime;
+  }
+  return runtime.extends(
+    classType.identity(identity.key)
+  );
+}
+function entity(schema, ...args) {
+  return createEntity(schema, false, ...args);
+}
+function abstractEntity(schema, ...args) {
+  return createEntity(schema, true, ...args);
+}
+function createAggregateRoot(schema, isAbstract, ...args) {
+  const unwrapped = unwrapSchema(schema);
+  const identity = resolveIdentityState(unwrapped, args[0]?.id, "Aggregate");
+  if (identity.state !== "resolved") {
+    throw new JITError("DDD_IDENTITY_MISSING", "Aggregate identity must be resolved before materialization");
+  }
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory", true, void 0, { identity });
+  return runtime.extends(
+    classType.identity(identity.key)
+  );
+}
+function aggregateRoot(schema, ...args) {
+  return createAggregateRoot(schema, false, ...args);
+}
+function abstractAggregateRoot(schema, ...args) {
+  return createAggregateRoot(schema, true, ...args);
+}
+function domainEvent(type, options) {
+  const payload = unwrapSchema(options.payload);
+  const schema = createDomainEventSchema(payload, type, options.version);
+  const event = createRuntimeClass(schema, false, true, false, "factory");
+  const createState = event.create.bind(event);
+  Object.defineProperties(event, {
+    create: {
+      configurable: false,
+      enumerable: false,
+      value: (input) => createState({ type, version: options.version, payload: input })
+    },
+    type: { enumerable: true, value: type },
+    version: { enumerable: true, value: options.version }
+  });
+  Object.defineProperty(event.prototype, "~event", {
+    configurable: false,
+    enumerable: false,
+    value: Object.freeze({
+      version: 1,
+      type,
+      schemaVersion: options.version
+    }),
+    writable: false
+  });
+  registerArtifact(event, {
+    kind: "class",
+    schema,
+    abstract: false,
+    frozen: true,
+    aggregate: false,
+    construction: "factory",
+    representation: "object",
+    capabilities: [],
+    factories: { create: "create", hydrate: "hydrate" },
+    domainEvent: { type, version: options.version }
+  });
+  return event;
+}
+function createDomainEventSchema(payload, type, version) {
+  const id = defaultTo(createSchema(TypeName.string, {}), createEventId);
+  const occurredAt = defaultTo(createSchema(TypeName.date, { coerce: true }), () => /* @__PURE__ */ new Date());
+  return createSchema(TypeName.object, {
+    props: {
+      id,
+      type: createSchema(TypeName.literal, { value: type }),
+      version: createSchema(TypeName.literal, { value: version }),
+      occurredAt,
+      payload
+    },
+    unknownKeys: void 0,
+    catchall: void 0,
+    checks: []
+  });
+}
+function createEventId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+function createIdentifierValue() {
+  return crypto.randomUUID();
+}
+function capability(kind, install, memberNames = [kind]) {
+  return Object.freeze({
+    kind,
+    __memberNames: Object.freeze([...memberNames]),
+    install(classTarget, schema) {
+      install(classTarget.prototype, schema);
+    }
+  });
+}
+function installMethods(classTarget, methods, taken, installed) {
+  const recorded = [];
+  for (const name of Object.getOwnPropertyNames(methods)) {
+    if (RESERVED_EXTENSION_NAMES.has(name) || taken.has(name) || installed.has(name)) {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `Class extension ${JSON.stringify(name)} would shadow an existing member; rename it`
+      );
+    }
+    const descriptor2 = Object.getOwnPropertyDescriptor(methods, name);
+    if (descriptor2 === void 0) continue;
+    if (descriptor2.get === void 0 && descriptor2.set === void 0 && typeof descriptor2.value !== "function") {
+      throw new JITError(
+        "INVALID_OPERATION",
+        `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
+      );
+    }
+    Object.defineProperty(classTarget.prototype, name, {
+      ...descriptor2,
+      enumerable: false,
+      configurable: true
+    });
+    installed.add(name);
+    if (descriptor2.get !== void 0) recorded.push({ name, kind: "get", source: descriptor2.get });
+    if (descriptor2.set !== void 0) recorded.push({ name, kind: "set", source: descriptor2.set });
+    if (descriptor2.get === void 0 && descriptor2.set === void 0) {
+      recorded.push({
+        name,
+        kind: "method",
+        source: descriptor2.value
+      });
+    }
+  }
+  return recorded;
+}
+function installScalarExtension(classTarget, extension, installedMethods, installedMethodNames) {
+  for (const name of Object.getOwnPropertyNames(extension)) {
+    const property = Object.getOwnPropertyDescriptor(extension, name);
+    if (property === void 0) continue;
+    const value = property.value;
+    if (isOverrideDescriptor(value)) {
+      if (!installedMethodNames.has(name) || SCALAR_MEMBERS.has(name)) {
+        throw new JITError(
+          "CLASS_OVERRIDE_TARGET_NOT_FOUND",
+          `Scalar member ${JSON.stringify(name)} does not have an overridable custom declaration`
+        );
+      }
+      const replacement = value.value;
+      if (isClassMemberDescriptor(replacement)) {
+        installScalarDescriptor(classTarget, name, replacement.definition, installedMethods);
+      } else if (typeof replacement === "function") {
+        installScalarMethod(classTarget, { name, kind: "method", source: replacement }, installedMethods);
+      } else {
+        throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Scalar member ${JSON.stringify(name)} must be a method`);
+      }
+      continue;
+    }
+    if (SCALAR_MEMBERS.has(name) || installedMethodNames.has(name)) {
+      throw new JITError(
+        "CLASS_MEMBER_ALREADY_EXISTS",
+        `Scalar member ${JSON.stringify(name)} would shadow an existing member; use JIT.class.override(...) explicitly`
+      );
+    }
+    if (isClassMemberDescriptor(value)) {
+      installScalarDescriptor(classTarget, name, value.definition, installedMethods);
+    } else {
+      const recorded = installMethods(classTarget, { [name]: value }, SCALAR_MEMBERS, installedMethodNames);
+      installedMethods.push(...recorded);
+    }
+    installedMethodNames.add(name);
+  }
+}
+function installScalarDescriptor(classTarget, name, definition, installedMethods) {
+  if (definition.kind === "factory") {
+    throw new JITError(
+      "CLASS_FACTORY_CONFLICT",
+      "Factory descriptors belong in .factories(), not an instance extension"
+    );
+  }
+  if (definition.kind === "field") {
+    throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "Scalar Runtime Types do not expose schema fields");
+  }
+  if (definition.kind === "method") {
+    if (definition.implementation === void 0) {
+      throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+    }
+    installScalarMethod(
+      classTarget,
+      {
+        name,
+        kind: "method",
+        source: definition.implementation,
+        schema: definition.schema,
+        ...definition.async === void 0 ? {} : { async: definition.async }
+      },
+      installedMethods
+    );
+    return;
+  }
+  const getter = typeof definition.getter === "function" ? definition.getter : void 0;
+  const setter = typeof definition.setter === "function" ? definition.setter : void 0;
+  if (getter === void 0 && setter === void 0) {
+    throw new JITError("CLASS_ACCESSOR_CONFLICT", `Scalar accessor ${JSON.stringify(name)} needs an implementation`);
+  }
+  const previous = Object.getOwnPropertyDescriptor(classTarget.prototype, name);
+  const accessor = {
+    configurable: true,
+    enumerable: false
+  };
+  const resolvedGetter = getter ?? previous?.get;
+  const resolvedSetter = setter ?? previous?.set;
+  if (resolvedGetter !== void 0) accessor.get = resolvedGetter;
+  if (resolvedSetter !== void 0) accessor.set = resolvedSetter;
+  Object.defineProperty(classTarget.prototype, name, accessor);
+  if (getter !== void 0) replaceInstalledScalarMethod(installedMethods, { name, kind: "get", source: getter });
+  if (setter !== void 0) replaceInstalledScalarMethod(installedMethods, { name, kind: "set", source: setter });
+}
+function installScalarMethod(classTarget, method, installedMethods) {
+  installMethodDefinition(classTarget, method);
+  replaceInstalledScalarMethod(installedMethods, {
+    name: method.name,
+    kind: method.kind,
+    source: method.source
+  });
+}
+function replaceInstalledScalarMethod(installedMethods, method) {
+  const index2 = installedMethods.findIndex((item) => item.name === method.name && item.kind === method.kind);
+  if (index2 === -1) installedMethods.push(method);
+  else installedMethods[index2] = method;
+}
+function definePrototype(prototype, key, value, configurable = false) {
+  Object.defineProperty(prototype, key, {
+    configurable,
+    enumerable: false,
+    value,
+    writable: false
+  });
 }
 
 // ../../packages/jit/src/runtime/update/reactive-update.ts
@@ -23058,11 +26842,11 @@ function createCollectionState(schema, compile) {
   };
   return Object.freeze(state3);
 }
-function compileCollectionMutation(schema, descriptor, bindings) {
+function compileCollectionMutation(schema, descriptor2, bindings) {
   const elementSchema = schema.def.element;
-  const source = emitCollectionMutationSource(descriptor);
+  const source = emitCollectionMutationSource(descriptor2);
   const names = bindings.map((_, index2) => `__q${index2}`);
-  const needsEqual = descriptor.kind === "upsert" || descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere";
+  const needsEqual = descriptor2.kind === "upsert" || descriptor2.kind === "replaceAt" || descriptor2.kind === "replaceByKey" || descriptor2.kind === "replaceWhere";
   const equal3 = needsEqual ? compileEqual(elementSchema) : void 0;
   const mutate = globalThis.Function(
     "__cachedIndex",
@@ -23070,7 +26854,7 @@ function compileCollectionMutation(schema, descriptor, bindings) {
     ...names,
     `return ${source};`
   )(getCachedIndex, equal3, ...bindings);
-  const explanation = explainCollectionMutation(descriptor);
+  const explanation = explainCollectionMutation(descriptor2);
   Object.defineProperty(mutate, "explain", {
     enumerable: false,
     value: () => explanation
@@ -23084,18 +26868,18 @@ function compileCollectionMutation(schema, descriptor, bindings) {
     // The upsert no-op test is schema-specialized equality, emitted as a local
     // helper by AOT rather than carried as a runtime binding.
     equalSource: needsEqual ? emitEqualSource(elementSchema) : void 0,
-    cacheKey: collectionMutationCacheKey(descriptor),
+    cacheKey: collectionMutationCacheKey(descriptor2),
     explanation
   });
   return mutate;
 }
 
 // ../../packages/jit/src/compiler/api-authorization.ts
-function resolveApiAuthorization(boundary, descriptor, action) {
-  if (!descriptor.actions.includes(action)) {
+function resolveApiAuthorization(boundary, descriptor2, action) {
+  if (!descriptor2.actions.includes(action)) {
     throw new JITError("INVALID_QUERY", `API query authorization action ${JSON.stringify(action)} has no access rule`);
   }
-  const composed = composeAccessCondition(descriptor, action);
+  const composed = composeAccessCondition(descriptor2, action);
   if (composed.kind === "deny") {
     return Object.freeze({
       fields: Object.freeze([]),
@@ -23104,7 +26888,7 @@ function resolveApiAuthorization(boundary, descriptor, action) {
       denied: true
     });
   }
-  const allowed = accessProjectionFields(descriptor, action);
+  const allowed = accessProjectionFields(descriptor2, action);
   const fields = allowed === void 0 ? void 0 : Object.freeze([...allowed]);
   if (fields !== void 0 && fields.length === 0) {
     return Object.freeze({ fields, conditionSource: void 0, bindings: Object.freeze([]), denied: true });
@@ -24272,7 +28056,7 @@ __export(factories_exports, {
   object: () => object,
   ops: () => ops,
   optional: () => optional2,
-  overwrite: () => overwrite,
+  overwrite: () => override,
   pipe: () => pipe2,
   process: () => process,
   project: () => project,
@@ -24318,11 +28102,11 @@ function access(schema) {
   return createPlan(unwrapSchema(schema), void 0, []);
 }
 function createPlan(subject, actor, rules2) {
-  const descriptor = resolveAccessDescriptor(subject, actor, rules2);
-  const compiled = compileAccess(descriptor);
+  const descriptor2 = resolveAccessDescriptor(subject, actor, rules2);
+  const compiled = compileAccess(descriptor2);
   const plan = ((actorValue) => {
     const ability = compiled(actorValue);
-    registerAccessAbility(ability, descriptor, actorValue);
+    registerAccessAbility(ability, descriptor2, actorValue);
     return ability;
   });
   const add = (effect) => (action, rule) => createPlan(subject, actor, [...rules2, toRule(effect, action, rule)]);
@@ -24330,10 +28114,10 @@ function createPlan(subject, actor, rules2) {
     actor: { value: (next) => createPlan(subject, unwrapSchema(next), rules2) },
     can: { value: add("can") },
     cannot: { value: add("cannot") },
-    actions: { value: descriptor.actions },
-    fields: { value: (action) => unconditionalFields(descriptor, action) }
+    actions: { value: descriptor2.actions },
+    fields: { value: (action) => unconditionalFields(descriptor2, action) }
   });
-  registerArtifact(plan, { kind: "access-plan", schema: subject, descriptor });
+  registerArtifact(plan, { kind: "access-plan", schema: subject, descriptor: descriptor2 });
   return plan;
 }
 function toRule(effect, action, rule) {
@@ -24416,2538 +28200,6 @@ function builder(schema, form) {
 // ../../packages/jit/src/factories/canonical.ts
 function canonical(schema) {
   return compileCanonical(unwrapSchema(schema));
-}
-
-// ../../packages/jit/src/compiler/codec.ts
-function compileCodec(schema, options) {
-  const version = options?.version ?? 1;
-  return getCompileCached(
-    schema,
-    `codec:v${version}`,
-    () => {
-      const emitted = emitCodec(schema, { version });
-      const compiled = globalThis.Function(
-        ...emitted.bindingNames,
-        emitted.source
-      )(...emitted.bindingValues);
-      registerArtifact(compiled, {
-        kind: "operation",
-        schema,
-        op: "codec"
-      });
-      return compiled;
-    },
-    options
-  );
-}
-
-// ../../packages/jit/src/compiler/json-parse.ts
-function compileJsonParse(schema) {
-  warmJsonParseShape(schema);
-  return JSON.parse;
-}
-function warmJsonParseShape(schema) {
-  const sample = jsonWarmupSample(schema);
-  if (sample === void 0) return false;
-  JSON.parse(sample);
-  JSON.parse(sample);
-  return true;
-}
-function jsonWarmupSample(schema) {
-  const value = emitWarmupValue(schema, /* @__PURE__ */ new Set(), 0);
-  if (value === void 0) return void 0;
-  if (rootIsArray(schema)) {
-    const element = rootArrayElement(schema);
-    const item = element ? emitWarmupValue(element, /* @__PURE__ */ new Set(), 1) : void 0;
-    if (item !== void 0) return `[${item},${item}]`;
-  }
-  return value;
-}
-function emitWarmupValue(schema, seen, depth) {
-  if (depth > 12 || seen.has(schema)) return "null";
-  seen.add(schema);
-  const current = schema;
-  let output;
-  switch (current.type) {
-    case TypeName.string:
-      output = '""';
-      break;
-    case TypeName.number:
-    case TypeName.int:
-    case TypeName.bigint:
-    case TypeName.nan:
-      output = "0";
-      break;
-    case TypeName.boolean:
-      output = "false";
-      break;
-    case TypeName.null:
-    case TypeName.undefined:
-    case TypeName.void:
-    case TypeName.never:
-    case TypeName.unknown:
-    case TypeName.any:
-    case TypeName.json:
-      output = "null";
-      break;
-    case TypeName.literal:
-      output = jsonPrimitive(current.def.value);
-      break;
-    case TypeName.enum: {
-      const values = Object.values(current.def.values);
-      output = values.map(jsonPrimitive).find((value) => value !== void 0) ?? "null";
-      break;
-    }
-    case TypeName.array: {
-      const item = emitWarmupValue(current.def.element, seen, depth + 1);
-      output = item === void 0 ? "[]" : `[${item},${item}]`;
-      break;
-    }
-    case TypeName.tuple: {
-      const items = current.def.items ?? [];
-      output = `[${items.map((item) => emitWarmupValue(item, seen, depth + 1) ?? "null").join(",")}]`;
-      break;
-    }
-    case TypeName.object: {
-      const props = current.def.props;
-      const entries = Object.keys(props).map((key) => {
-        const value = emitWarmupValue(props[key], seen, depth + 1) ?? "null";
-        return `${JSON.stringify(key)}:${value}`;
-      });
-      output = `{${entries.join(",")}}`;
-      break;
-    }
-    case TypeName.record:
-    case TypeName.map:
-      output = "{}";
-      break;
-    case TypeName.set:
-      output = "[]";
-      break;
-    case TypeName.union:
-    case TypeName.xor:
-    case TypeName.discriminatedUnion:
-    case TypeName.intersection: {
-      const options = current.def.options ?? [];
-      output = options.length === 0 ? "null" : emitWarmupValue(options[0], seen, depth + 1);
-      break;
-    }
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.readonly:
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-    case TypeName.not:
-      output = emitWarmupValue(current.def.innerType, seen, depth + 1);
-      break;
-    case TypeName.lazy:
-      output = emitWarmupValue(current.def.getter(), seen, depth + 1);
-      break;
-    case TypeName.when:
-      output = emitWarmupValue(current.def.thenType, seen, depth + 1);
-      break;
-    case TypeName.codec:
-      output = emitWarmupValue(current.def.input, seen, depth + 1);
-      break;
-    default:
-      output = "null";
-  }
-  seen.delete(schema);
-  return output;
-}
-function jsonPrimitive(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return void 0;
-}
-function rootIsArray(schema, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(schema)) return false;
-  seen.add(schema);
-  const current = schema;
-  if (current.type === TypeName.array) return true;
-  const inner = wrapperInner(current);
-  return inner === void 0 ? false : rootIsArray(inner, seen);
-}
-function rootArrayElement(schema, seen = /* @__PURE__ */ new Set()) {
-  if (seen.has(schema)) return void 0;
-  seen.add(schema);
-  const current = schema;
-  if (current.type === TypeName.array) return current.def.element;
-  const inner = wrapperInner(current);
-  return inner === void 0 ? void 0 : rootArrayElement(inner, seen);
-}
-function wrapperInner(schema) {
-  switch (schema.type) {
-    case TypeName.optional:
-    case TypeName.nullable:
-    case TypeName.nullish:
-    case TypeName.default:
-    case TypeName.brand:
-    case TypeName.readonly:
-    case TypeName.refine:
-    case TypeName.coerce:
-    case TypeName.pipe:
-    case TypeName.transform:
-    case TypeName.not:
-      return schema.def.innerType;
-    case TypeName.lazy:
-      return schema.def.getter();
-    default:
-      return void 0;
-  }
-}
-
-// ../../packages/jit/src/compiler/execution-lower.ts
-function emitExecutionPlan(plan) {
-  const optimized = optimizeExecutionPlan(plan);
-  const setup = [];
-  const body = ["let value = input;"];
-  const bindingNames = [];
-  const bindingValues = [];
-  let helperIndex = 0;
-  let valueIndex = 0;
-  const bind = (value) => {
-    const name = `__e${bindingNames.length}`;
-    bindingNames.push(name);
-    bindingValues.push(value);
-    return name;
-  };
-  const helper = (prefix) => `__${prefix}${helperIndex++}`;
-  const emitBoundBlock = (prefix, localNames, values, source, expression = false) => {
-    const name = helper(prefix);
-    const args = values.map(bind);
-    setup.push(`const ${name} = ((${localNames.join(", ")}) => {`);
-    if (expression) setup.push(...indent(`return (${source});`));
-    else setup.push(...indent(source));
-    setup.push(`})(${args.join(", ")});`);
-    return name;
-  };
-  const emitMany = (helperName4, patchName) => {
-    const list = `__list${valueIndex}`;
-    const length = `__len${valueIndex}`;
-    const out = `__out${valueIndex}`;
-    const index2 = `__i${valueIndex++}`;
-    body.push(`const ${list} = value;`);
-    body.push(`const ${length} = ${list}.length;`);
-    body.push(`const ${out} = new Array(${length});`);
-    body.push(`for (let ${index2} = 0; ${index2} < ${length}; ${index2}++) {`);
-    body.push(`  ${out}[${index2}] = ${helperName4}(${list}[${index2}]${patchName ? `, ${patchName}` : ""});`);
-    body.push("}");
-    body.push(`value = ${out};`);
-  };
-  const stages = optimized.stages;
-  for (let index2 = 0; index2 < stages.length; index2++) {
-    const stage2 = stages[index2];
-    switch (stage2.kind) {
-      case "value":
-      case "to.array":
-        break;
-      case "json.decode":
-        body.push("value = JSON.parse(value);");
-        break;
-      case "binary.decode": {
-        const codec2 = emitCodec(stage2.schema);
-        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
-        body.push(`value = ${codecName}.decode(value);`);
-        break;
-      }
-      case "validate": {
-        const nextStage = stages[index2 + 1];
-        const constructNext = nextStage?.kind === "construct";
-        const constructArtifact = constructNext ? getArtifact(nextStage.target) : void 0;
-        const strictDomainEvent = constructArtifact?.kind === "class" && constructArtifact.domainEvent !== void 0;
-        const fastParse = stage2.operation === "parse" && canUseFastParse(stage2.schema);
-        const validator = emitValidator(stage2.schema, {
-          is: stage2.operation === "is" || fastParse,
-          safeParse: stage2.operation === "parse" || stage2.operation === "safeParse" || stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync" || stage2.operation === "issues",
-          safeParseAsync: stage2.operation === "parseAsync" || stage2.operation === "safeParseAsync",
-          materializeRuntimeTypes: !constructNext,
-          resolveDefaults: !strictDomainEvent,
-          ...stage2.maxIssues === void 0 ? {} : { maxIssues: stage2.maxIssues }
-        });
-        const validatorName = emitBoundBlock(
-          "validator",
-          validator.bindings.names,
-          validator.bindings.values,
-          validator.source
-        );
-        switch (stage2.operation) {
-          case "is":
-            body.push(`value = ${validatorName}.is(value);`);
-            break;
-          case "parse": {
-            const error = bind(JITValidationError);
-            if (fastParse) {
-              const result = `__result${valueIndex++}`;
-              body.push(`if (!${validatorName}.is(value)) {`);
-              body.push(`  const ${result} = ${validatorName}.safeParse(value);`);
-              body.push(`  if (!${result}.success) throw new ${error}(${result}.issues);`);
-              body.push(`  value = ${result}.data;`);
-              body.push("}");
-            } else {
-              const result = `__result${valueIndex++}`;
-              body.push(`const ${result} = ${validatorName}.safeParse(value);`);
-              body.push(`if (!${result}.success) throw new ${error}(${result}.issues);`);
-              body.push(`value = ${result}.data;`);
-            }
-            break;
-          }
-          case "safeParse":
-            body.push(`value = ${validatorName}.safeParse(value);`);
-            break;
-          case "parseAsync": {
-            const error = bind(JITValidationError);
-            body.push(
-              `return ${validatorName}.safeParseAsync(value).then((result) => { if (!result.success) throw new ${error}(result.issues); return result.data; });`
-            );
-            break;
-          }
-          case "safeParseAsync":
-            body.push(`return ${validatorName}.safeParseAsync(value);`);
-            break;
-          case "issues": {
-            const result = `__result${valueIndex++}`;
-            body.push(`const ${result} = ${validatorName}.safeParse(value);`);
-            body.push(`return (function* issues() { if (!${result}.success) yield* ${result}.issues; })();`);
-            break;
-          }
-        }
-        break;
-      }
-      case "construct": {
-        const target = bind(stage2.target);
-        body.push(`value = new ${target}(value, true);`);
-        break;
-      }
-      case "query": {
-        let finalStage = stage2;
-        while (index2 + 1 < stages.length && stages[index2 + 1]?.kind === "query") {
-          index2++;
-          finalStage = stages[index2];
-        }
-        const aggregate = stages[index2 + 1];
-        if (aggregate?.kind === "aggregate") {
-          index2++;
-          finalStage = aggregate;
-        }
-        const queryName = emitBoundBlock(
-          "query",
-          finalStage.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
-          finalStage.program.bindings,
-          emitQuerySource(finalStage.source, finalStage.program),
-          true
-        );
-        body.push(`value = ${queryName}(value);`);
-        break;
-      }
-      case "aggregate": {
-        const queryName = emitBoundBlock(
-          "query",
-          stage2.program.bindings.map((_, bindingIndex) => `__q${bindingIndex}`),
-          stage2.program.bindings,
-          emitQuerySource(stage2.source, stage2.program),
-          true
-        );
-        body.push(`value = ${queryName}(value);`);
-        break;
-      }
-      case "map": {
-        const mapping = stage2.bindings[0];
-        const nextStage = stages[index2 + 1];
-        const fuseJsonEncode = nextStage?.kind === "json.encode";
-        if (mapping === null || typeof mapping !== "object" || Array.isArray(mapping)) {
-          throw new JITError("INVALID_OPERATION", "mapping descriptor is malformed");
-        }
-        const mapperPlan = buildMapperPlan(stage2.source, stage2.target, mapping);
-        const mapperName = emitBoundBlock(
-          "mapper",
-          mapperPlan.bindingNames,
-          mapperPlan.bindings,
-          emitMapperSource(stage2.source, stage2.target, mapping, [
-            fuseJsonEncode || !stage2.many ? "map" : "many"
-          ]),
-          true
-        );
-        if (fuseJsonEncode) {
-          const stringifyName = helper("stringify");
-          setup.push(`const ${stringifyName} = ${emitSerialize(stage2.target)};`);
-          if (stage2.many) emitMappedJsonArray(mapperName, stringifyName, body, valueIndex++);
-          else body.push(`value = ${stringifyName}(${mapperName}.map(value));`);
-          index2++;
-        } else {
-          body.push(`value = ${mapperName}.${stage2.many ? "many" : "map"}(value);`);
-        }
-        break;
-      }
-      case "transform": {
-        const keys = Object.keys(stage2.transforms);
-        const callbacks = keys.map((key) => stage2.transforms[key]);
-        const transformName = emitBoundBlock(
-          "transform",
-          keys.map((_, transformIndex) => `__t${transformIndex}`),
-          callbacks,
-          emitTransformSource(stage2.source, stage2.transforms),
-          true
-        );
-        if (stage2.many) emitMany(transformName);
-        else body.push(`value = ${transformName}(value);`);
-        break;
-      }
-      case "update": {
-        const updateName = helper("update");
-        const patchName = bind(stage2.patch);
-        setup.push(`const ${updateName} = (${emitUpdateSource(stage2.schema)});`);
-        if (stage2.many) emitMany(updateName, patchName);
-        else body.push(`value = ${updateName}(value, ${patchName});`);
-        break;
-      }
-      case "security": {
-        const source = stage2.operation === "mask" ? emitMaskSource(stage2.schema).replace("function scrub", "function mask") : emitSanitizeSource(stage2.schema).replace("function scrub", "function sanitize");
-        const securityName = stage2.operation === "sanitize" ? emitBoundBlock("sanitize", sanitizeChainBindings.names, sanitizeChainBindings.values, source, true) : (() => {
-          const name = helper("mask");
-          setup.push(`const ${name} = (${source});`);
-          return name;
-        })();
-        if (stage2.many) emitMany(securityName);
-        else body.push(`value = ${securityName}(value);`);
-        break;
-      }
-      case "json.encode": {
-        if (stage2.mode === "chunks") {
-          const chunksName = helper("stringifyChunks");
-          setup.push(
-            `const ${chunksName} = ${emitStringifyChunksSource(stage2.schema ?? optimized.schema, {
-              ...stage2.chunkBytes === void 0 ? {} : { chunkBytes: stage2.chunkBytes }
-            })};`
-          );
-          body.push(`value = ${chunksName}(value);`);
-          break;
-        }
-        const stringifyName = helper("stringify");
-        setup.push(`const ${stringifyName} = ${emitSerialize(stage2.schema ?? optimized.schema)};`);
-        body.push(`value = ${stringifyName}(value);`);
-        break;
-      }
-      case "binary.encode": {
-        const codec2 = emitCodec(stage2.schema);
-        const codecName = emitBoundBlock("codec", codec2.bindingNames, codec2.bindingValues, codec2.source);
-        body.push(`value = ${codecName}.encode(value);`);
-        break;
-      }
-      case "operation":
-        throw new JITError("INVALID_OPERATION", `operation ${stage2.operation} requires its dedicated runtime lowering`);
-    }
-  }
-  body.push("return value;");
-  return {
-    source: ['"use strict";', ...setup, "return function execution(input) {", ...indent(body.join("\n")), "}"].join(
-      "\n"
-    ),
-    bindingNames,
-    bindingValues
-  };
-}
-function lowerExecutionPlan(plan) {
-  const emitted = emitExecutionPlan(plan);
-  const compiled = globalThis.Function(
-    ...emitted.bindingNames,
-    emitted.source
-  )(...emitted.bindingValues);
-  const json3 = plan.stages.find((stage2) => stage2.kind === "json.decode");
-  if (json3?.schema) warmJsonParseShape(json3.schema);
-  return compiled;
-}
-function indent(source) {
-  return source.split("\n").map((line) => `  ${line}`);
-}
-function emitMappedJsonArray(mapper, stringify3, body, index2) {
-  const list = `__list${index2}`;
-  const length = `__len${index2}`;
-  const item = `__item${index2}`;
-  const cursor = `__i${index2}`;
-  const json3 = `__json${index2}`;
-  body.push(`const ${list} = value;`);
-  body.push(`const ${length} = ${list}.length;`);
-  body.push(`let ${json3} = "[";`);
-  body.push(`for (let ${cursor} = 0; ${cursor} < ${length}; ${cursor}++) {`);
-  body.push(`  if (${cursor} !== 0) ${json3} += ",";`);
-  body.push(`  const ${item} = ${mapper}.map(${list}[${cursor}]);`);
-  body.push(`  ${json3} += ${stringify3}(${item});`);
-  body.push("}");
-  body.push(`${json3} += "]";`);
-  body.push(`value = ${json3};`);
-}
-
-// ../../packages/jit/src/runtime/stream/boundary-scanner.ts
-var ArrayBoundaryScanner = class {
-  constructor(hooks) {
-    this.hooks = hooks;
-    this.buffer = "";
-    this.scanPos = 0;
-    this.elementStart = -1;
-    this.depth = 0;
-    this.inString = false;
-    this.escaped = false;
-    this.rootStarted = false;
-    this.rootClosed = false;
-  }
-  get done() {
-    return this.rootClosed;
-  }
-  get hasOpenElement() {
-    return this.elementStart !== -1 || this.rootStarted && !this.rootClosed;
-  }
-  push(text) {
-    this.buffer += text;
-    const buf = this.buffer;
-    const len = buf.length;
-    let pos = this.scanPos;
-    for (; pos < len; pos++) {
-      const code = buf.charCodeAt(pos);
-      if (this.inString) {
-        if (this.escaped) {
-          this.escaped = false;
-        } else if (code === 92) {
-          this.escaped = true;
-        } else if (code === 34) {
-          this.inString = false;
-        }
-        continue;
-      }
-      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
-      if (this.rootClosed) {
-        this.hooks.fail("unexpected content after the root array closed");
-      }
-      if (!this.rootStarted) {
-        if (code !== 91) this.hooks.fail("expected the stream to start with an array");
-        this.rootStarted = true;
-        this.depth = 1;
-        continue;
-      }
-      if (this.depth === 1) {
-        if (code === 93) {
-          if (this.elementStart !== -1) {
-            this.hooks.onElement(buf.slice(this.elementStart, pos));
-            this.elementStart = -1;
-          }
-          this.depth = 0;
-          this.rootClosed = true;
-          continue;
-        }
-        if (code === 44) {
-          if (this.elementStart === -1) this.hooks.fail("unexpected comma in the root array");
-          this.hooks.onElement(buf.slice(this.elementStart, pos));
-          this.elementStart = -1;
-          continue;
-        }
-        if (this.elementStart === -1) this.elementStart = pos;
-        if (code === 123 || code === 91) this.depth++;
-        else if (code === 34) this.inString = true;
-        else if (code === 125) this.hooks.fail("unbalanced '}' in the root array");
-        continue;
-      }
-      if (code === 34) this.inString = true;
-      else if (code === 123 || code === 91) this.depth++;
-      else if (code === 125 || code === 93) {
-        this.depth--;
-        if (this.depth < 1) this.hooks.fail("unbalanced closing bracket");
-      }
-    }
-    if (this.elementStart !== -1) {
-      this.buffer = buf.slice(this.elementStart);
-      this.scanPos = this.buffer.length;
-      this.elementStart = 0;
-    } else {
-      this.buffer = "";
-      this.scanPos = 0;
-    }
-  }
-};
-var ValueBoundaryScanner = class {
-  constructor(hooks) {
-    this.hooks = hooks;
-    this.depth = 0;
-    this.inString = false;
-    this.escaped = false;
-    this.started = false;
-    this.closed = false;
-  }
-  /** True once a bracketed root has balanced back to depth zero. */
-  get complete() {
-    return this.closed;
-  }
-  push(text) {
-    const len = text.length;
-    for (let pos = 0; pos < len; pos++) {
-      const code = text.charCodeAt(pos);
-      if (this.inString) {
-        if (this.escaped) {
-          this.escaped = false;
-        } else if (code === 92) {
-          this.escaped = true;
-        } else if (code === 34) {
-          this.inString = false;
-          if (this.depth === 0 && this.started) this.closed = true;
-        }
-        continue;
-      }
-      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
-      if (this.closed) this.hooks.fail("unexpected content after the root value closed");
-      if (code === 34) {
-        this.inString = true;
-        this.started = true;
-      } else if (code === 123 || code === 91) {
-        this.depth++;
-        this.started = true;
-      } else if (code === 125 || code === 93) {
-        this.depth--;
-        if (this.depth < 0) this.hooks.fail("unbalanced closing bracket");
-        if (this.depth === 0) this.closed = true;
-      } else {
-        this.started = true;
-      }
-    }
-  }
-};
-
-// ../../packages/jit/src/compiler/stream.ts
-function resolveRoot(schema) {
-  let current = schema;
-  while (true) {
-    switch (current.type) {
-      case TypeName.default:
-      case TypeName.brand:
-      case TypeName.readonly:
-      case TypeName.refine:
-      case TypeName.coerce:
-      case TypeName.pipe:
-      case TypeName.transform:
-        current = current.def.innerType;
-        continue;
-      case TypeName.lazy:
-        current = current.def.getter();
-        continue;
-      default:
-        return current;
-    }
-  }
-}
-function rootGate(schema) {
-  switch (schema.type) {
-    case TypeName.array:
-    case TypeName.tuple:
-      return { test: (code) => code === 91, expected: "array" };
-    case TypeName.object:
-    case TypeName.record:
-      return { test: (code) => code === 123, expected: "object" };
-    case TypeName.string:
-      return { test: (code) => code === 34, expected: "string" };
-    case TypeName.number:
-    case TypeName.int:
-      return {
-        test: (code) => code === 45 || code >= 48 && code <= 57,
-        expected: "number"
-      };
-    case TypeName.boolean:
-      return {
-        test: (code) => code === 116 || code === 102,
-        expected: "boolean"
-      };
-    case TypeName.null:
-      return { test: (code) => code === 110, expected: "null" };
-    default:
-      return void 0;
-  }
-}
-function structuralIssue(message, path = []) {
-  return { path, code: "invalid_json", expected: "well-formed JSON", message };
-}
-function throwStructural(message, path = []) {
-  throw new JITValidationError([structuralIssue(message, path)]);
-}
-function prefixIssues(issues, prefix) {
-  return issues.map((issue) => ({
-    ...issue,
-    path: [prefix, ...issue.path]
-  }));
-}
-function compileStream(schema, options = {}) {
-  const format3 = options.format ?? "json";
-  const root = resolveRoot(schema);
-  if (format3 === "ndjson") return createNdjsonStream(schema, options);
-  if (root.type === TypeName.array) return createArrayStream(root, options);
-  return createValueStream(schema, root, options);
-}
-function createDecoder() {
-  const decoder = new TextDecoder();
-  return (chunk, last2) => typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: !last2 });
-}
-function gateFirstChar(text, gateRef) {
-  const gate = gateRef.pending;
-  if (!gate) return;
-  for (let index2 = 0; index2 < text.length; index2++) {
-    const code = text.charCodeAt(index2);
-    if (code === 32 || code === 9 || code === 10 || code === 13) continue;
-    gateRef.pending = void 0;
-    if (!gate.test(code)) {
-      throw new JITValidationError([
-        {
-          path: [],
-          code: "invalid_type",
-          expected: gate.expected,
-          message: `stream root must be ${gate.expected}`,
-          received: JSON.stringify(text[index2])
-        }
-      ]);
-    }
-    return;
-  }
-}
-function createArrayStream(root, options) {
-  const element = root.def.element;
-  const checks = (root.def.checks ?? []).filter(
-    (check) => check.kind === "min" || check.kind === "max" || check.kind === "length" || check.kind === "nonEmpty"
-  );
-  const validator = compileValidator(element);
-  const decode = createDecoder();
-  const items = [];
-  const gateRef = { pending: rootGate(root) };
-  let failed = false;
-  let ended = false;
-  const scanner = new ArrayBoundaryScanner({
-    onElement(text) {
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throwStructural(`malformed JSON element at index ${items.length}`, [items.length]);
-      }
-      const result = validator.safeParse(parsed);
-      if (!result.success) {
-        throw new JITValidationError(prefixIssues(result.issues, items.length));
-      }
-      const index2 = items.length;
-      items.push(result.data);
-      for (const check of checks) {
-        if (check.kind === "max" && items.length > check.value) {
-          throwStructural(`expected at most ${check.value} items`);
-        }
-      }
-      options.onItem?.(result.data, index2);
-    },
-    fail(message) {
-      throwStructural(message);
-    }
-  });
-  const guard = () => {
-    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
-    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
-  };
-  return {
-    items,
-    write(chunk) {
-      guard();
-      try {
-        const text = decode(chunk, false);
-        gateFirstChar(text, gateRef);
-        scanner.push(text);
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-    },
-    end() {
-      guard();
-      ended = true;
-      if (!scanner.done) {
-        failed = true;
-        throwStructural("unexpected end of stream: root array never closed");
-      }
-      for (const check of checks) {
-        if (check.kind === "min" && items.length < check.value) {
-          throwStructural(`expected at least ${check.value} items`);
-        }
-        if (check.kind === "nonEmpty" && items.length === 0) {
-          throwStructural("expected a non-empty array");
-        }
-        if (check.kind === "length" && items.length !== check.value) {
-          throwStructural(`expected exactly ${check.value} items`);
-        }
-        if (check.kind === "max" && items.length > check.value) {
-          throwStructural(`expected at most ${check.value} items`);
-        }
-      }
-      return items;
-    }
-  };
-}
-function createValueStream(schema, root, options) {
-  const validator = compileValidator(schema, options);
-  const decode = createDecoder();
-  const gateRef = { pending: rootGate(root) };
-  const scanner = new ValueBoundaryScanner({
-    fail(message) {
-      throwStructural(message);
-    }
-  });
-  let buffer = "";
-  let failed = false;
-  let ended = false;
-  const guard = () => {
-    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
-    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
-  };
-  return {
-    items: [],
-    write(chunk) {
-      guard();
-      try {
-        const text = decode(chunk, false);
-        gateFirstChar(text, gateRef);
-        scanner.push(text);
-        buffer += text;
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-    },
-    end() {
-      guard();
-      ended = true;
-      let parsed;
-      try {
-        parsed = JSON.parse(buffer);
-      } catch {
-        failed = true;
-        throwStructural("unexpected end of stream: incomplete JSON document");
-      }
-      return validator.parse(parsed);
-    }
-  };
-}
-function createNdjsonStream(schema, options) {
-  const validator = compileValidator(schema, options);
-  const decode = createDecoder();
-  const items = [];
-  let buffer = "";
-  let line = 0;
-  let failed = false;
-  let ended = false;
-  const consume = (text) => {
-    if (text.trim() === "") {
-      line++;
-      return;
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throwStructural(`malformed JSON on line ${line}`, [`line ${line}`]);
-    }
-    const result = validator.safeParse(parsed);
-    if (!result.success) {
-      throw new JITValidationError(prefixIssues(result.issues, `line ${line}`));
-    }
-    const index2 = items.length;
-    items.push(result.data);
-    line++;
-    options.onItem?.(result.data, index2);
-  };
-  const guard = () => {
-    if (failed) throw new JITError("INVALID_OPERATION", "stream already failed");
-    if (ended) throw new JITError("INVALID_OPERATION", "stream already ended");
-  };
-  return {
-    items,
-    write(chunk) {
-      guard();
-      try {
-        buffer += decode(chunk, false);
-        let cut = buffer.indexOf("\n");
-        while (cut !== -1) {
-          consume(buffer.slice(0, cut));
-          buffer = buffer.slice(cut + 1);
-          cut = buffer.indexOf("\n");
-        }
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-    },
-    end() {
-      guard();
-      ended = true;
-      try {
-        if (buffer.trim() !== "") consume(buffer);
-      } catch (error) {
-        failed = true;
-        throw error;
-      }
-      return items;
-    }
-  };
-}
-
-// ../../packages/jit/src/compiler/watch.ts
-function compileWatch(schema, options) {
-  const program = emitWatchProgram(schema, options);
-  const bindingNames = program.bindings.map((_, index2) => `__w${index2}`);
-  const compiled = globalThis.Function(...bindingNames, `return ${program.source};`)(...program.bindings);
-  registerArtifact(compiled, {
-    kind: "watch",
-    source: program.source,
-    bindingNames,
-    bindingValues: program.bindings
-  });
-  return compiled;
-}
-function emitWatchProgram(schema, options) {
-  const target = expectWatchTarget(schema, "emitWatchSource");
-  const key = options.key;
-  validateObjectKeys3(target.objectSchema, [key], "watch");
-  const bindings = [];
-  const changedBy = options.fields === void 0 || options.fields.length === 0 ? void 0 : addOptionalBinding(
-    bindings,
-    compileEqual(buildProjectionTree(target.objectSchema, options.fields, "watch").schema)
-  );
-  const onAdd = addOptionalBinding(bindings, options.onAdd);
-  const onRemove = addOptionalBinding(bindings, options.onRemove);
-  const onUpdate = addOptionalBinding(bindings, options.onUpdate);
-  const keyAccess = emitPropertyAccess("item", key);
-  const previousKeyAccess = emitPropertyAccess("previousItem", key);
-  const writer = new CodeWriter();
-  writer.line("function watch(previous, current) {");
-  writer.indent(() => {
-    writer.line("const previousIndex = new Map();");
-    writer.line("const currentIndex = new Map();");
-    writer.line("const initialItems = [];");
-    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
-      writer.line(`const id = ${previousKeyAccess};`);
-      writer.line("previousIndex.set(id, previousItem);");
-      writer.line("initialItems[initialItems.length] = previousItem;");
-    });
-    writer.line("const currentItems = [];");
-    writer.line("const newItems = [];");
-    writer.line("const removedItems = [];");
-    writer.line("const updatedItems = [];");
-    emitCollectionLoop(writer, target, "current", "item", () => {
-      writer.line(`const id = ${keyAccess};`);
-      writer.line("currentIndex.set(id, item);");
-      writer.line("currentItems[currentItems.length] = item;");
-      writer.line("const previousItem = previousIndex.get(id);");
-      writer.line("if (previousItem === undefined) {");
-      writer.indent(() => {
-        writer.line("newItems[newItems.length] = item;");
-        if (onAdd) writer.line(`${onAdd}(item);`);
-      });
-      writer.line(
-        changedBy === void 0 ? "} else if (previousItem !== item) {" : `} else if (previousItem !== item && !${changedBy}(previousItem, item)) {`
-      );
-      writer.indent(() => {
-        writer.line("updatedItems[updatedItems.length] = { previous: previousItem, current: item };");
-        if (onUpdate) writer.line(`${onUpdate}(previousItem, item);`);
-      });
-      writer.line("}");
-    });
-    emitCollectionLoop(writer, target, "previous", "previousItem", () => {
-      writer.line(`const id = ${previousKeyAccess};`);
-      writer.line("if (!currentIndex.has(id)) {");
-      writer.indent(() => {
-        writer.line("removedItems[removedItems.length] = previousItem;");
-        if (onRemove) writer.line(`${onRemove}(previousItem);`);
-      });
-      writer.line("}");
-    });
-    writer.line("const isChanged = newItems.length !== 0 || removedItems.length !== 0 || updatedItems.length !== 0;");
-    writer.line("return { currentItems, initialItems, newItems, removedItems, updatedItems, isChanged };");
-  });
-  writer.line("}");
-  return { source: writer.toString(), bindings };
-}
-function emitCollectionLoop(writer, target, collection2, itemName, body) {
-  switch (target.kind) {
-    case "array":
-      writer.line(`for (let i = 0, len = ${collection2}.length; i < len; i++) {`);
-      writer.indent(() => {
-        writer.line(`const ${itemName} = ${collection2}[i];`);
-        body();
-      });
-      writer.line("}");
-      return;
-    case "set":
-      writer.line(`for (const ${itemName} of ${collection2}) {`);
-      writer.indent(body);
-      writer.line("}");
-      return;
-    case "map":
-      writer.line(`for (const entry of ${collection2}) {`);
-      writer.indent(() => {
-        writer.line(`const ${itemName} = entry[1];`);
-        body();
-      });
-      writer.line("}");
-      return;
-  }
-}
-function addOptionalBinding(bindings, value) {
-  if (value === void 0) return void 0;
-  const name = `__w${bindings.length}`;
-  bindings[bindings.length] = value;
-  return name;
-}
-function expectWatchTarget(schema, compilerName) {
-  const resolved = resolveWrappers(schema).base;
-  if (resolved.type !== TypeName.array && resolved.type !== TypeName.set && resolved.type !== TypeName.map) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} expects an array, set, or map schema`);
-  }
-  const element = resolved.type === TypeName.map ? resolveWrappers(resolved.def.value).base : resolveWrappers(resolved.def.element).base;
-  if (element.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", `${compilerName} expects a collection of object schema`);
-  }
-  return {
-    kind: resolved.type,
-    objectSchema: element
-  };
-}
-function validateObjectKeys3(schema, keys, compilerName) {
-  const props = schema.def.props;
-  for (const key of keys) {
-    if (!(key in props)) {
-      throw new JITError("INVALID_OPERATION", `${compilerName} received unknown key ${JSON.stringify(key)}`, {
-        path: [key]
-      });
-    }
-  }
-}
-
-// ../../packages/jit/src/factories/class.ts
-var CLASS_TARGET = /* @__PURE__ */ Symbol("jit.class.target");
-var INTERNAL_CONSTRUCT = /* @__PURE__ */ Symbol("jit.class.construct");
-function createPolicyState() {
-  return {
-    mode: "throw",
-    error: void 0,
-    create: true,
-    hydrate: true,
-    configured: false,
-    validationConfigured: false,
-    maxIssues: void 0,
-    errorPriority: 1e3,
-    errorPriorityExplicit: false,
-    assertions: [],
-    assertionErrors: [],
-    assert: void 0,
-    nestedErrors: []
-  };
-}
-function compileAssertions(policy) {
-  if (policy.assertions.length === 0) {
-    policy.assert = void 0;
-    return;
-  }
-  const failures = assertionFailures(policy.assertions, policy.assertionErrors);
-  const issues = assertionIssues(policy.assertions);
-  const bindings = policy.assertions.flatMap((descriptor) => descriptor.bindings);
-  const bindingNames = bindings.map((_, index2) => `__q${index2}`);
-  const failureNames = failures.map((_, index2) => `__fail${index2}`);
-  const issueNames = issues.map((_, index2) => `__issue${index2}`);
-  const guard = globalThis.Function(
-    ...bindingNames,
-    ...failureNames,
-    ...issueNames,
-    `${emitAssertionSource(policy.assertions, policy.maxIssues)}
-return __assert;`
-  )(...bindings, ...failures, ...issues);
-  policy.assert = (value) => {
-    const outcome = guard(value);
-    if (outcome === void 0) return void 0;
-    const selectedPriority = outcome.errorIndex === void 0 || outcome.errorIndex < 0 ? -1 : policy.assertions[outcome.errorIndex]?.priority ?? -1;
-    if (policy.error !== void 0 && policy.errorPriority >= selectedPriority) {
-      return policy.error(outcome.issues);
-    }
-    if (outcome.errorIndex !== void 0 && outcome.errorIndex >= 0) {
-      const factory = policy.assertionErrors[outcome.errorIndex];
-      if (factory !== void 0) return factory(value, policy.assertions[outcome.errorIndex]);
-    }
-    return assertionError(outcome.issues ?? []);
-  };
-}
-function policySuccess(policy, value) {
-  if (policy.mode === "result") return { ok: true, value };
-  if (policy.mode === "tuple") return [null, value];
-  return value;
-}
-function policyFailure(policy, error) {
-  if (policy.mode === "result") return { ok: false, error };
-  if (policy.mode === "tuple") return [error, null];
-  throw error;
-}
-function policyError(policy, issues) {
-  let selected = policy.error === void 0 ? void 0 : { priority: policy.errorPriority, depth: 0, order: -1, factory: policy.error };
-  for (const candidate of policy.nestedErrors) {
-    if (!hasIssueAtPath(issues, candidate.path)) continue;
-    if (selected === void 0 || candidate.priority > selected.priority || candidate.priority === selected.priority && candidate.depth < selected.depth || candidate.priority === selected.priority && candidate.depth === selected.depth && candidate.order < selected.order) {
-      selected = candidate;
-    }
-  }
-  return selected === void 0 ? new JITValidationError(issues) : selected.factory(issues);
-}
-function hasIssueAtPath(issues, prefix) {
-  return issues.some((issue) => prefix.every((part, index2) => issue.path[index2] === part));
-}
-function collectNestedErrorCandidates(schema) {
-  const candidates = [];
-  const active = /* @__PURE__ */ new Set();
-  let order = 0;
-  const walk = (current, path, depth) => {
-    if (active.has(current)) return;
-    active.add(current);
-    if (current.type === TypeName.runtimeType) {
-      const nested = getArtifact(current.def.materialize);
-      if (nested?.kind === "class" && typeof nested.policy?.error === "function") {
-        candidates.push({
-          priority: nested.policy.errorPriorityExplicit ? nested.policy.errorPriority ?? 800 : 800,
-          depth,
-          order: order++,
-          path,
-          factory: nested.policy.error
-        });
-      }
-    }
-    if (current.type === TypeName.object) {
-      for (const [key, child] of Object.entries(current.def.props))
-        walk(child, [...path, key], depth + 1);
-      active.delete(current);
-      return;
-    }
-    if (current.type === TypeName.array || current.type === TypeName.set) {
-      walk(
-        current.def.element,
-        path,
-        depth + 1
-      );
-      active.delete(current);
-      return;
-    }
-    for (const child of schemaChildren(current)) walk(child, path, depth + 1);
-    active.delete(current);
-  };
-  walk(schema, [], 0);
-  return candidates;
-}
-function policyArtifact(policy) {
-  if (!policy.configured) return {};
-  const bindings = policy.assertions.flatMap((descriptor) => descriptor.bindings);
-  return {
-    policy: {
-      result: policy.mode,
-      create: policy.create,
-      hydrate: policy.hydrate,
-      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues },
-      ...policy.error === void 0 ? {} : { errorPriority: policy.errorPriority },
-      ...policy.error === void 0 ? {} : { errorPriorityExplicit: policy.errorPriorityExplicit },
-      ...policy.error === void 0 ? {} : { error: policy.error },
-      ...policy.nestedErrors.length === 0 ? {} : {
-        nestedErrors: policy.nestedErrors.map((candidate) => ({
-          priority: candidate.priority,
-          depth: candidate.depth,
-          order: candidate.order,
-          path: candidate.path,
-          error: candidate.factory
-        }))
-      },
-      ...policy.assertions.length === 0 ? {} : {
-        assertions: {
-          source: emitAssertionSource(policy.assertions, policy.maxIssues),
-          bindingNames: bindings.map((_, index2) => `__q${index2}`),
-          bindingValues: bindings,
-          failures: policy.assertions.map((descriptor, index2) => ({
-            rule: descriptor.rule,
-            field: descriptor.field,
-            code: descriptor.code,
-            message: descriptor.message,
-            priority: descriptor.priority,
-            ...policy.assertionErrors[index2] === void 0 ? {} : { error: policy.assertionErrors[index2] }
-          }))
-        }
-      }
-    }
-  };
-}
-function applyValidationPolicy(policy, options) {
-  if (policy.validationConfigured) {
-    throw new JITError("INVALID_OPERATION", "Factory validation is already configured for this Runtime Class");
-  }
-  if (options?.maxIssues !== void 0 && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
-    throw new RangeError("maxIssues must be a positive safe integer");
-  }
-  if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
-    throw new RangeError("priority must be a finite number");
-  }
-  policy.configured = true;
-  policy.validationConfigured = true;
-  if (options?.result !== void 0) policy.mode = options.result;
-  if (options?.error !== void 0) policy.error = options.error;
-  if (options?.create !== void 0) policy.create = options.create;
-  if (options?.hydrate !== void 0) policy.hydrate = options.hydrate;
-  if (options?.maxIssues !== void 0) policy.maxIssues = options.maxIssues;
-  if (options?.priority !== void 0) {
-    policy.errorPriority = options.priority;
-    policy.errorPriorityExplicit = true;
-  }
-  if (policy.assertions.length > 0) compileAssertions(policy);
-}
-function applyAssertion(policy, schema, predicate, options) {
-  const base = resolveWrappers(schema).base;
-  if (base.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "Assertions describe object fields; a scalar schema has none to name");
-  }
-  const builder2 = createConditionBuilder(policy.assertions.reduce((total, item) => total + item.bindings.length, 0));
-  const condition = predicate(builder2.builder);
-  if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
-    throw new RangeError("priority must be a finite number");
-  }
-  policy.assertions.push(
-    resolveAssertionDescriptor({
-      condition,
-      bindings: builder2.bindings,
-      ...options?.rule === void 0 ? {} : { rule: options.rule },
-      ...options?.code === void 0 ? {} : { code: options.code },
-      ...options?.message === void 0 ? {} : { message: options.message },
-      ...options?.priority === void 0 ? {} : { priority: options.priority }
-    })
-  );
-  policy.assertionErrors.push(options?.error);
-  policy.configured = true;
-  compileAssertions(policy);
-}
-var SCALAR_MEMBERS = /* @__PURE__ */ new Set(["value", "equals", "hashCode", "toJSON"]);
-var RESERVED_EXTENSION_NAMES = /* @__PURE__ */ new Set([
-  "constructor",
-  "schema",
-  "create",
-  "hydrate",
-  "extends",
-  "factories",
-  "construction",
-  "accessors",
-  "identity",
-  "validate",
-  "assert"
-]);
-function isClassCapability(value) {
-  return typeof value === "object" && value !== null && typeof value.install === "function" && typeof value.kind === "string";
-}
-function classFactory(schema) {
-  return createRuntimeClass(
-    unwrapSchema(schema),
-    false,
-    false,
-    false,
-    "constructor"
-  );
-}
-function abstractClass(schema) {
-  return createRuntimeClass(unwrapSchema(schema), true, false, false, "constructor");
-}
-function createRuntimeClass(schema, isAbstract, freezeInstances, aggregate, construction, accessors, seed) {
-  const baseState = initialEffectiveSchema(schema);
-  const members = seed?.members?.clone() ?? baseState.members;
-  if (aggregate && !members.has("update")) addMember(members, "update", "preset", "ddd.aggregateRoot", "method");
-  if (aggregate) {
-    addMember(members, "raise", "preset", "ddd.aggregateRoot", "method");
-    addMember(members, "peekEvents", "preset", "ddd.aggregateRoot", "method");
-    addMember(members, "pullEvents", "preset", "ddd.aggregateRoot", "method");
-    addMember(members, "commit", "preset", "ddd.aggregateRoot", "method");
-  }
-  const state3 = {
-    declaredSchema: seed?.declaredSchema ?? schema,
-    schema,
-    isAbstract,
-    freezeInstances,
-    aggregate,
-    construction,
-    constructionConfigured: seed?.constructionConfigured ?? false,
-    // Factory-first presets still allow one explicit `.construction(...)` or
-    // `.factories(...)` decision; the default mode is not itself a lock.
-    factoriesConfigured: seed?.factoriesConfigured ?? false,
-    factoryNames: seed?.factoryNames ?? (construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }),
-    accessors,
-    capabilities: Object.freeze([...seed?.capabilities ?? []]),
-    methods: Object.freeze([...seed?.methods ?? []]),
-    lifecycle: seed?.lifecycle ?? baseState.lifecycle,
-    managedFields: Object.freeze([...seed?.managedFields ?? baseState.managedFields]),
-    members,
-    policy: seed?.policy ?? createPolicyState()
-  };
-  const policy = {
-    ...state3.policy,
-    nestedErrors: collectNestedErrorCandidates(state3.schema)
-  };
-  const objectSchema = resolveEffectiveObjectSchema(state3.schema);
-  const properties = Object.keys(objectSchema.def.props);
-  const parse3 = compileValidator(state3.schema).parse;
-  const hydrateState = compileHydrator(state3.schema);
-  let safeParse;
-  let safeHydrate;
-  const policySafeParse = () => {
-    safeParse ??= compileValidatorSelection(state3.schema, ["safeParse"], {
-      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
-    }).safeParse;
-    return safeParse;
-  };
-  const policySafeHydrate = () => {
-    safeHydrate ??= compileSafeHydrator(state3.schema, {
-      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
-    });
-    return safeHydrate;
-  };
-  const constructionState = { mode: state3.construction };
-  const managedStorage = resolveManagedStorage(properties, state3.accessors, state3.managedFields);
-  const classTarget = emitConstructor(
-    properties,
-    state3.freezeInstances,
-    state3.aggregate,
-    parse3,
-    constructionState,
-    state3.accessors,
-    managedStorage
-  );
-  for (const capabilityValue of state3.capabilities) capabilityValue.install(classTarget, state3.schema);
-  installLifecycleMethods(classTarget, state3, managedStorage);
-  for (const method of state3.methods) installMethodDefinition(classTarget, method);
-  function registerClass() {
-    const mutation = lifecycleArtifact(state3.lifecycle);
-    registerArtifact(classTarget, {
-      kind: "class",
-      declaredSchema: state3.declaredSchema,
-      schema: state3.schema,
-      abstract: state3.isAbstract,
-      frozen: state3.freezeInstances,
-      aggregate: state3.aggregate,
-      construction: state3.construction,
-      representation: "object",
-      capabilities: state3.capabilities.map((capability2) => capability2.kind),
-      managedFields: state3.managedFields,
-      lifecycle: state3.lifecycle,
-      resolvedMembers: state3.members.entries(),
-      ...mutation === void 0 ? {} : { mutation },
-      ...policyArtifact(policy),
-      ...state3.methods.length === 0 ? {} : { methods: state3.methods },
-      factories: state3.factoryNames,
-      accessors: state3.accessors
-    });
-  }
-  function create(input) {
-    if (state3.isAbstract && this === classTarget) {
-      throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
-    }
-    const construct2 = this;
-    if (!policy.configured || !policy.create) {
-      if (state3.lifecycle.timestamps === void 0 && state3.lifecycle.softDelete === void 0 && state3.lifecycle.versioned === void 0) {
-        return new construct2(input, INTERNAL_CONSTRUCT);
-      }
-      return new construct2(initializeCreatedLifecycle(parse3(input), input, state3.lifecycle), INTERNAL_CONSTRUCT, true);
-    }
-    const parsed = policySafeParse()(input);
-    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
-    const created = initializeCreatedLifecycle(parsed.data, input, state3.lifecycle);
-    if (policy.assert !== void 0) {
-      const failure = policy.assert(created);
-      if (failure !== void 0) return policyFailure(policy, failure);
-    }
-    return policySuccess(policy, new construct2(created, INTERNAL_CONSTRUCT, true));
-  }
-  function hydrate(input) {
-    if (state3.isAbstract && this === classTarget) {
-      throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
-    }
-    const construct2 = this;
-    if (!policy.configured || !policy.hydrate) {
-      return new construct2(hydrateState(input), INTERNAL_CONSTRUCT, true);
-    }
-    const parsed = policySafeHydrate()(input);
-    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
-    if (policy.assert !== void 0) {
-      const failure = policy.assert(parsed.data);
-      if (failure !== void 0) return policyFailure(policy, failure);
-    }
-    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
-  }
-  Object.defineProperties(classTarget, {
-    [CLASS_TARGET]: { enumerable: false, value: true },
-    schema: {
-      enumerable: true,
-      value: createSchema(TypeName.runtimeType, {
-        innerType: state3.schema,
-        materialize: classTarget,
-        representation: "object",
-        identifier: false
-      })
-    },
-    extends: {
-      enumerable: false,
-      value: (...extensions) => materializeClassState(resolveClassExtensions(state3, extensions))
-    },
-    validate: {
-      enumerable: false,
-      value: (options) => {
-        applyValidationPolicy(state3.policy, options);
-        return materializeClassState(state3);
-      }
-    },
-    assert: {
-      enumerable: false,
-      value: (predicate, options) => {
-        applyAssertion(state3.policy, state3.schema, predicate, options);
-        return materializeClassState(state3);
-      }
-    },
-    factories: {
-      enumerable: false,
-      value: (options) => {
-        if (state3.factoriesConfigured) {
-          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
-        }
-        if (state3.constructionConfigured) {
-          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
-        }
-        const next = {
-          create: options.create === void 0 ? state3.factoryNames.create : options.create,
-          hydrate: options.hydrate === void 0 ? state3.factoryNames.hydrate : options.hydrate
-        };
-        if (next.create === false && next.hydrate === false) {
-          throw new JITError(
-            "INVALID_OPERATION",
-            "Factory construction requires at least one create or hydrate factory"
-          );
-        }
-        return materializeClassState({
-          ...state3,
-          construction: "factory",
-          factoriesConfigured: true,
-          factoryNames: next
-        });
-      }
-    },
-    construction: {
-      enumerable: false,
-      value: (mode) => {
-        if (state3.constructionConfigured) {
-          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
-        }
-        if (state3.factoriesConfigured) {
-          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
-        }
-        if (mode !== "constructor" && mode !== "factory") {
-          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
-        }
-        if (state3.isAbstract && mode === "constructor") {
-          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
-        }
-        if (state3.policy.configured) {
-          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
-        }
-        return materializeClassState({
-          ...state3,
-          construction: mode,
-          constructionConfigured: true,
-          factoryNames: mode === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }
-        });
-      }
-    },
-    accessors: {
-      enumerable: false,
-      value: (options) => {
-        if (state3.accessors !== void 0) {
-          throw new JITError("INVALID_OPERATION", "Accessors are already configured for this Runtime Class");
-        }
-        return materializeClassState({
-          ...state3,
-          accessors: resolveAccessors(properties, options)
-        });
-      }
-    },
-    identity: {
-      enumerable: false,
-      value: (key) => {
-        if (state3.capabilities.some((capability2) => capability2.kind.startsWith("identity:"))) {
-          throw new JITError("INVALID_OPERATION", "Identity is already configured for this Runtime Class");
-        }
-        return materializeClassState(resolveClassExtensions(state3, [classType.identity(key)]));
-      }
-    }
-  });
-  installFactory(classTarget, false, state3.factoryNames.create, create);
-  installFactory(classTarget, false, state3.factoryNames.hydrate, hydrate);
-  registerClass();
-  return classTarget;
-}
-function materializeClassState(state3) {
-  return createRuntimeClass(
-    state3.schema,
-    state3.isAbstract,
-    state3.freezeInstances,
-    state3.aggregate,
-    state3.construction,
-    state3.accessors,
-    state3
-  );
-}
-function resolveClassExtensions(current, extensions) {
-  let next = {
-    ...current,
-    capabilities: [...current.capabilities],
-    methods: [...current.methods],
-    managedFields: [...current.managedFields],
-    members: current.members.clone()
-  };
-  for (const extension of extensions) {
-    if (isClassCapability(extension)) {
-      if (next.capabilities.some((capability2) => capability2.kind === extension.kind)) {
-        throw new JITError(
-          "INVALID_OPERATION",
-          `Class capability ${JSON.stringify(extension.kind)} is already installed`
-        );
-      }
-      for (const name of capabilityMemberNames(extension)) assertNewMember(next.members, name, extension.kind);
-      if (extension.kind === "ddd.timestamps" || extension.kind === "ddd.softDelete" || extension.kind === "ddd.versioned") {
-        try {
-          const resolved = applyDddCapability(
-            {
-              schema: next.schema,
-              lifecycle: next.lifecycle,
-              managedFields: next.managedFields,
-              members: next.members
-            },
-            extension.kind,
-            capabilityOptions(extension)
-          );
-          next = {
-            ...next,
-            schema: resolved.schema,
-            lifecycle: resolved.lifecycle,
-            managedFields: resolved.managedFields,
-            members: resolved.members,
-            capabilities: [...next.capabilities, extension]
-          };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", `${extension.kind} declaration conflict: ${message}`);
-        }
-      } else {
-        const names = capabilityMemberNames(extension);
-        for (const name of names) assertNewMember(next.members, name, extension.kind);
-        const members2 = next.members.clone();
-        for (const name of names) addMember(members2, name, "capability", extension.kind, "method");
-        next = { ...next, members: members2, capabilities: [...next.capabilities, extension] };
-      }
-      continue;
-    }
-    const members = next.members.clone();
-    const methods = [...next.methods];
-    let schema = next.schema;
-    for (const name of Object.getOwnPropertyNames(extension)) {
-      const descriptor = Object.getOwnPropertyDescriptor(extension, name);
-      if (descriptor === void 0) continue;
-      const value = descriptor.value;
-      if (isOverwriteDescriptor(value)) {
-        const existing = members.get(name);
-        if (existing === void 0) {
-          throw new JITError(
-            "CLASS_OVERWRITE_TARGET_NOT_FOUND",
-            `Class member ${JSON.stringify(name)} does not exist. JIT.overwrite() can only replace an existing member.`
-          );
-        }
-        if (isSchemaInputValue(value.value)) {
-          if (existing.kind !== "field") {
-            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
-          }
-          schema = replaceSchemaField(schema, name, unwrapSchema(value.value));
-          schema = reapplyManagedAfterOverwrite(schema, next.managedFields);
-          const effectiveField = resolveEffectiveObjectSchema(schema).def.props[name];
-          members.replace(name, {
-            ...existing,
-            source: "overwrite",
-            schema: effectiveField
-          });
-        } else {
-          if (existing.kind === "field") {
-            throw new JITError(
-              "CLASS_MEMBER_ALREADY_EXISTS",
-              `Member ${JSON.stringify(name)} is a schema field; use a schema value with JIT.overwrite(...)`
-            );
-          }
-          const replacement = methodDefinitionFromValue(name, value.value);
-          replaceMethod(methods, name, replacement);
-          members.replace(name, { ...existing, source: "overwrite", descriptor: { value: replacement.source } });
-        }
-        continue;
-      }
-      if (members.has(name) || RESERVED_EXTENSION_NAMES.has(name)) {
-        throw new JITError(
-          "CLASS_MEMBER_ALREADY_EXISTS",
-          `Class member ${JSON.stringify(name)} would shadow an existing member. Use ${JSON.stringify(`${name}: JIT.overwrite(...)`)} to replace it explicitly.`
-        );
-      }
-      const method = methodDefinitionFromDescriptor(name, descriptor);
-      methods.push(method);
-      addMember(
-        members,
-        name,
-        "extension",
-        "custom extension",
-        method.kind === "get" ? "getter" : method.kind === "set" ? "setter" : "method"
-      );
-    }
-    validateManagedFields(schema, next.managedFields);
-    next = { ...next, schema, methods, members };
-  }
-  validateManagedFields(next.schema, next.managedFields);
-  return next;
-}
-function capabilityOptions(capability2) {
-  return capability2.__options;
-}
-function capabilityMemberNames(capability2) {
-  return capability2.__memberNames ?? [];
-}
-function assertNewMember(members, name, owner) {
-  const existing = members.get(name);
-  if (existing !== void 0) {
-    if (existing.kind === "field") {
-      throw new JITError(
-        "CLASS_MEMBER_ALREADY_EXISTS",
-        `Member ${JSON.stringify(name)} is a schema field and cannot be installed by ${owner}`
-      );
-    }
-    throw new JITError(
-      "CLASS_MEMBER_ALREADY_EXISTS",
-      `Member ${JSON.stringify(name)} already exists. Existing source conflicts with ${owner}; use JIT.overwrite(...) explicitly.`
-    );
-  }
-}
-function isSchemaInputValue(value) {
-  return typeof value === "object" && value !== null && "schema" in value && typeof value.schema === "object" || typeof value === "object" && value !== null && "type" in value && "def" in value;
-}
-function replaceSchemaField(schema, name, replacement) {
-  const object2 = resolveEffectiveObjectSchema(schema);
-  const props = { ...object2.def.props, [name]: replacement };
-  return createSchema(
-    TypeName.object,
-    {
-      props,
-      unknownKeys: object2.def.unknownKeys,
-      catchall: object2.def.catchall,
-      checks: object2.def.checks
-    },
-    object2.annotations
-  );
-}
-function reapplyManagedAfterOverwrite(schema, managedFields) {
-  try {
-    return reapplyManagedFields(schema, managedFields);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new JITError("DDD_CAPABILITY_SCHEMA_CONFLICT", message);
-  }
-}
-function methodDefinitionFromDescriptor(name, descriptor) {
-  if (descriptor.get !== void 0 || descriptor.set !== void 0) {
-    return {
-      name,
-      kind: descriptor.get === void 0 ? "set" : "get",
-      source: descriptor.get ?? descriptor.set
-    };
-  }
-  if (typeof descriptor.value !== "function") {
-    throw new JITError(
-      "INVALID_OPERATION",
-      `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
-    );
-  }
-  return { name, kind: "method", source: descriptor.value };
-}
-function methodDefinitionFromValue(name, value) {
-  if (typeof value !== "function") {
-    throw new JITError(
-      "INVALID_OPERATION",
-      `Overwrite ${JSON.stringify(name)} must provide a method function or schema`
-    );
-  }
-  return { name, kind: "method", source: value };
-}
-function replaceMethod(methods, name, replacement) {
-  const index2 = methods.findIndex((method) => method.name === name);
-  if (index2 === -1) methods.push(replacement);
-  else methods[index2] = replacement;
-}
-function installMethodDefinition(classTarget, method) {
-  const descriptor = method.kind === "method" ? { value: method.source, writable: false } : method.kind === "get" ? { get: method.source } : { set: method.source };
-  Object.defineProperty(classTarget.prototype, method.name, {
-    ...descriptor,
-    configurable: true,
-    enumerable: false
-  });
-}
-function lifecycleArtifact(lifecycle) {
-  const timestamps2 = lifecycle.timestamps;
-  const deletion = lifecycle.softDelete;
-  const versioned2 = lifecycle.versioned;
-  if (timestamps2 === void 0 && deletion === void 0 && versioned2 === void 0) return void 0;
-  return {
-    ...timestamps2?.touch === "manual" || timestamps2 === void 0 ? {} : { updatedAt: timestamps2.updatedAt },
-    ...timestamps2 === void 0 ? {} : { touchAt: timestamps2.updatedAt, touchMethod: timestamps2.touchMethod },
-    ...versioned2 === void 0 ? {} : { version: versioned2.field },
-    ...deletion === void 0 ? {} : {
-      deletedAt: deletion.field,
-      deleteMethod: deletion.deleteMethod,
-      restoreMethod: deletion.restoreMethod,
-      isDeletedMember: deletion.isDeletedMember
-    },
-    ...timestamps2?.clock === void 0 ? {} : { timestampClock: timestamps2.clock },
-    ...deletion?.clock === void 0 ? {} : { deletionClock: deletion.clock }
-  };
-}
-function installLifecycleMethods(classTarget, state3, managedStorage) {
-  const lifecycle = state3.lifecycle;
-  const timestamps2 = lifecycle.timestamps;
-  const deletion = lifecycle.softDelete;
-  const versioned2 = lifecycle.versioned;
-  const needsMutation = state3.aggregate || timestamps2 !== void 0 || deletion !== void 0 || versioned2 !== void 0;
-  const managedAccess = (field) => {
-    const storage = managedStorage.get(field);
-    return storage === void 0 ? `this[${JSON.stringify(field)}]` : `this[${storage.name}]`;
-  };
-  const managedWrite = (field, value) => {
-    const storage = managedStorage.get(field);
-    return storage === void 0 ? `Object.defineProperty(this, ${JSON.stringify(field)}, { value: ${value}, writable: false, enumerable: true, configurable: true });` : `${managedAccess(field)} = ${value};`;
-  };
-  const installLifecycleMethod = (name, clock, body) => {
-    const source = `return function() { ${body} };`;
-    const storageEntries = [...managedStorage.values()];
-    const storageNames = storageEntries.map((entry) => entry.name);
-    const storageValues = storageEntries.map((entry) => entry.value);
-    const method = globalThis.Function(
-      ...storageNames,
-      ...clock === void 0 ? [] : ["__clock"],
-      source
-    )(...storageValues, ...clock === void 0 ? [] : [() => checkedClock(clock)]);
-    definePrototype(classTarget.prototype, name, method, true);
-  };
-  if (needsMutation) {
-    const object2 = resolveEffectiveObjectSchema(state3.schema);
-    const fields = Object.keys(object2.def.props);
-    const readonlyFields = fields.filter((field) => resolveWrappers(object2.def.props[field]).readonly);
-    const mutableFields = fields.filter((field) => !readonlyFields.includes(field));
-    const updates = /* @__PURE__ */ new Map();
-    const names = [];
-    const values = [];
-    for (const field of mutableFields) {
-      if (state3.managedFields.some((managed) => managed.field === field)) continue;
-      const fieldSchema = object2.def.props[field];
-      if (isPrimitiveLikeSchema(resolveWrappers(fieldSchema).base)) updates.set(field, null);
-      else {
-        const name = `__update${names.length}`;
-        names.push(name);
-        values.push(compileUpdate(fieldSchema));
-        updates.set(field, name);
-      }
-    }
-    const mutation = buildAggregateMutationPlan({
-      fields: mutableFields,
-      readonlyFields: [...readonlyFields, ...state3.managedFields.map((managed) => managed.field)],
-      ...timestamps2?.touch !== "manual" && timestamps2 !== void 0 ? { updatedAt: timestamps2.updatedAt } : {},
-      ...versioned2 === void 0 ? {} : { version: versioned2.field },
-      managedFields: state3.managedFields.map((managed) => managed.field),
-      fieldAccess: new Map(
-        [...managedStorage.entries()].map(([field, storage]) => [field, `this[${storage.name}]`])
-      )
-    });
-    const clock = timestamps2?.clock;
-    const clockNames = mutation.updatedAt === void 0 || clock === void 0 ? [] : ["__clock"];
-    const clockValues = clockNames.length === 0 ? [] : [() => checkedClock(clock)];
-    const storageEntries = [...managedStorage.values()];
-    const storageNames = storageEntries.map((entry) => entry.name);
-    const storageValues = storageEntries.map((entry) => entry.value);
-    const update2 = globalThis.Function(
-      ...names,
-      ...storageNames,
-      ...clockNames,
-      `return function update(patch) { ${emitAggregateMutationBody(mutation, updates, clockNames.length === 0 ? "new Date()" : "__clock()")} };`
-    )(...values, ...storageValues, ...clockValues);
-    definePrototype(classTarget.prototype, "update", update2, true);
-  }
-  if (timestamps2 !== void 0) {
-    const clock = timestamps2.clock;
-    const field = timestamps2.updatedAt;
-    const version = versioned2?.field;
-    installLifecycleMethod(
-      timestamps2.touchMethod,
-      clock,
-      `const now = ${clock === void 0 ? "new Date()" : "__clock()"}; ${managedWrite(field, "now")} ${version === void 0 ? "" : managedWrite(version, `${managedAccess(version)} + 1`)}`
-    );
-  }
-  if (deletion !== void 0) {
-    const timestampField = timestamps2?.touch === "manual" || timestamps2 === void 0 ? void 0 : timestamps2.updatedAt;
-    const clock = deletion.clock ?? timestamps2?.clock;
-    installLifecycleMethod(
-      deletion.deleteMethod,
-      clock,
-      `if (${managedAccess(deletion.field)} !== null) return; const now = ${clock === void 0 ? "new Date()" : "__clock()"}; ${managedWrite(deletion.field, "now")} ${timestampField === void 0 ? "" : managedWrite(timestampField, "now")} ${versioned2 === void 0 ? "" : managedWrite(versioned2.field, `${managedAccess(versioned2.field)} + 1`)}`
-    );
-    installLifecycleMethod(
-      deletion.restoreMethod,
-      timestampField === void 0 ? void 0 : clock,
-      `if (${managedAccess(deletion.field)} === null) return; ${managedWrite(deletion.field, "null")} ${timestampField === void 0 ? "" : managedWrite(timestampField, clock === void 0 ? "new Date()" : "__clock()")} ${versioned2 === void 0 ? "" : managedWrite(versioned2.field, `${managedAccess(versioned2.field)} + 1`)}`
-    );
-    const deletionStorage = managedStorage.get(deletion.field);
-    Object.defineProperty(classTarget.prototype, deletion.isDeletedMember, {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return deletionStorage === void 0 ? this[deletion.field] !== null : this[deletionStorage.value] !== null;
-      }
-    });
-  }
-  if (state3.aggregate) {
-    definePrototype(
-      classTarget.prototype,
-      "raise",
-      function raise(event) {
-        this.__jitEvents[this.__jitEvents.length] = event;
-      },
-      true
-    );
-    definePrototype(
-      classTarget.prototype,
-      "peekEvents",
-      function peekEvents() {
-        return this.__jitEvents.slice();
-      },
-      true
-    );
-    definePrototype(
-      classTarget.prototype,
-      "pullEvents",
-      function pullEvents() {
-        const events = this.__jitEvents;
-        this.__jitEvents = [];
-        return events;
-      },
-      true
-    );
-    definePrototype(
-      classTarget.prototype,
-      "commit",
-      async function commit(publisher) {
-        const pending = this.__jitEvents;
-        for (let index2 = 0; index2 < pending.length; index2++) await publisher.publish(pending[index2]);
-        this.__jitEvents.splice(0, pending.length);
-      },
-      true
-    );
-  }
-}
-function checkedClock(clock) {
-  const value = clock();
-  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-    throw new JITError("INVALID_OPERATION", "A DDD clock must return a valid Date");
-  }
-  return value;
-}
-function initializeCreatedLifecycle(value, input, lifecycle) {
-  if (typeof value !== "object" || value === null) return value;
-  const result = value;
-  const supplied = typeof input === "object" && input !== null ? input : void 0;
-  const timestamps2 = lifecycle.timestamps;
-  if (timestamps2 !== void 0) {
-    if (supplied?.[timestamps2.createdAt] !== void 0) {
-      result[timestamps2.createdAt] = timestamps2.clock === void 0 ? /* @__PURE__ */ new Date() : checkedClock(timestamps2.clock);
-    }
-    result[timestamps2.updatedAt] = null;
-  }
-  if (lifecycle.softDelete !== void 0) result[lifecycle.softDelete.field] = null;
-  if (lifecycle.versioned !== void 0) result[lifecycle.versioned.field] = 0;
-  return result;
-}
-function installFactory(classTarget, previous, next, factory) {
-  if (previous !== false && previous !== next) Reflect.deleteProperty(classTarget, previous);
-  if (next === false) return;
-  if (next === "schema" || next === "use" || next === "extends" || next === "factories" || next === "construction" || next === "accessors" || next === "identity" || next === "validate" || next === "assert") {
-    throw new JITError("INVALID_OPERATION", `Factory name ${JSON.stringify(next)} is reserved`);
-  }
-  Object.defineProperty(classTarget, next, {
-    configurable: true,
-    enumerable: false,
-    value: factory
-  });
-}
-function createScalarValueObject(schema, identifier2, isAbstract) {
-  const parse3 = compileValidator(schema).parse;
-  const hydrateState = compileHydrator(schema);
-  const policy = createPolicyState();
-  let safeParse;
-  let safeHydrate;
-  const equal3 = compileEqual(schema);
-  const hash4 = compileHash(schema);
-  const constructionState = { mode: "factory" };
-  const source = `return class JITScalarValueObject { constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); this.value = token === true || validated === true ? input : __parse(input); Object.freeze(this); } };`;
-  const classTarget = globalThis.Function(
-    "__parse",
-    "__construct",
-    "__construction",
-    source
-  )(parse3, INTERNAL_CONSTRUCT, constructionState);
-  const installedCapabilities = ["equals", "hashCode"];
-  const installedMethods = [];
-  const installedMethodNames = new Set(SCALAR_MEMBERS);
-  let factoryNames = {
-    create: "create",
-    hydrate: "hydrate"
-  };
-  let constructionConfigured = false;
-  let factoriesConfigured = false;
-  function create(...args) {
-    if (isAbstract && this === classTarget) {
-      throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
-    }
-    const construct2 = this;
-    if (!policy.configured || !policy.create) return new construct2(args[0], INTERNAL_CONSTRUCT);
-    safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
-      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
-    }).safeParse;
-    const parsed = safeParse(args[0]);
-    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
-    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
-  }
-  function hydrate(state3) {
-    if (isAbstract && this === classTarget) {
-      throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
-    }
-    const construct2 = this;
-    if (!policy.configured || !policy.hydrate) {
-      return new construct2(hydrateState(state3), INTERNAL_CONSTRUCT, true);
-    }
-    safeHydrate ??= compileSafeHydrator(schema, {
-      ...policy.maxIssues === void 0 ? {} : { maxIssues: policy.maxIssues }
-    });
-    const parsed = safeHydrate(state3);
-    if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues));
-    return policySuccess(policy, new construct2(parsed.data, INTERNAL_CONSTRUCT, true));
-  }
-  const register = () => registerArtifact(classTarget, {
-    kind: "class",
-    schema,
-    abstract: isAbstract,
-    frozen: true,
-    aggregate: false,
-    construction: constructionState.mode,
-    representation: "value",
-    ...policyArtifact(policy),
-    capabilities: installedCapabilities,
-    ...installedMethods.length === 0 ? {} : { methods: installedMethods },
-    factories: factoryNames
-  });
-  Object.defineProperties(classTarget, {
-    [CLASS_TARGET]: { enumerable: false, value: true },
-    schema: {
-      enumerable: true,
-      value: createSchema(TypeName.runtimeType, {
-        innerType: schema,
-        materialize: classTarget,
-        representation: "value",
-        identifier: identifier2
-      })
-    },
-    create: { configurable: true, enumerable: false, value: create },
-    hydrate: { configurable: true, enumerable: false, value: hydrate },
-    extends: {
-      enumerable: false,
-      value: (...extensions) => {
-        for (const extension of extensions) {
-          if (isClassCapability(extension)) {
-            if (installedCapabilities.includes(extension.kind)) {
-              throw new JITError(
-                "INVALID_OPERATION",
-                `Class capability ${JSON.stringify(extension.kind)} is already installed`
-              );
-            }
-            const before = new Set(Object.getOwnPropertyNames(classTarget.prototype));
-            extension.install(classTarget, schema);
-            for (const name of Object.getOwnPropertyNames(classTarget.prototype)) {
-              if (!before.has(name)) installedMethodNames.add(name);
-            }
-            installedCapabilities.push(extension.kind);
-            continue;
-          }
-          installedMethods.push(...installMethods(classTarget, extension, SCALAR_MEMBERS, installedMethodNames));
-        }
-        register();
-        return classTarget;
-      }
-    },
-    factories: {
-      enumerable: false,
-      value: (options) => {
-        if (factoriesConfigured) {
-          throw new JITError("INVALID_OPERATION", "Factories are already configured for this Runtime Class");
-        }
-        if (constructionConfigured) {
-          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
-        }
-        const next = {
-          create: options.create === void 0 ? factoryNames.create : options.create,
-          hydrate: options.hydrate === void 0 ? factoryNames.hydrate : options.hydrate
-        };
-        if (next.create === false && next.hydrate === false) {
-          throw new JITError(
-            "INVALID_OPERATION",
-            "Factory construction requires at least one create or hydrate factory"
-          );
-        }
-        installFactory(classTarget, factoryNames.create, next.create, create);
-        installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
-        factoriesConfigured = true;
-        factoryNames = next;
-        register();
-        return classTarget;
-      }
-    },
-    construction: {
-      enumerable: false,
-      value: (mode) => {
-        if (constructionConfigured) {
-          throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
-        }
-        if (factoriesConfigured) {
-          throw new JITError("INVALID_OPERATION", "Factories already fixed the construction boundary");
-        }
-        if (mode !== "constructor" && mode !== "factory") {
-          throw new JITError("INVALID_OPERATION", "Construction mode must be constructor or factory");
-        }
-        if (isAbstract && mode === "constructor") {
-          throw new JITError("INVALID_OPERATION", "An abstract Runtime Class cannot use constructor construction");
-        }
-        if (policy.configured) {
-          throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
-        }
-        constructionConfigured = true;
-        constructionState.mode = mode;
-        if (mode === "factory") {
-          installFactory(classTarget, factoryNames.create, "create", create);
-          installFactory(classTarget, factoryNames.hydrate, "hydrate", hydrate);
-          factoryNames = { create: "create", hydrate: "hydrate" };
-        } else {
-          installFactory(classTarget, factoryNames.create, false, create);
-          installFactory(classTarget, factoryNames.hydrate, false, hydrate);
-          factoryNames = { create: false, hydrate: false };
-        }
-        register();
-        return classTarget;
-      }
-    },
-    accessors: {
-      enumerable: false,
-      value: () => {
-        throw new JITError("INVALID_OPERATION", "Scalar Value Objects expose only their readonly value accessor");
-      }
-    },
-    validate: {
-      enumerable: false,
-      value: (options) => {
-        applyValidationPolicy(policy, options);
-        register();
-        return classTarget;
-      }
-    },
-    assert: {
-      enumerable: false,
-      value: () => {
-        throw new JITError("INVALID_OPERATION", "Assertions describe object fields; refine the scalar schema instead");
-      }
-    },
-    identity: {
-      enumerable: false,
-      value: () => {
-        throw new JITError("INVALID_OPERATION", "Scalar Value Objects do not have object fields");
-      }
-    }
-  });
-  definePrototype(
-    classTarget.prototype,
-    "equals",
-    function equalsScalar(other) {
-      return other instanceof classTarget && equal3(this.value, other.value);
-    }
-  );
-  definePrototype(classTarget.prototype, "hashCode", function hashScalar() {
-    return hash4(this.value);
-  });
-  definePrototype(classTarget.prototype, "toJSON", function scalarToJson() {
-    return this.value;
-  });
-  register();
-  return classTarget;
-}
-function emitConstructor(properties, freezeInstances, aggregate, parse3, construction, accessors, managedStorage = /* @__PURE__ */ new Map()) {
-  const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
-  const slots = [];
-  const definitions = [];
-  let slotIndex = 0;
-  const assignments = properties.map((property) => {
-    const accessor = accessorByKey.get(property);
-    const managed = managedStorage.get(property);
-    if (managed !== void 0) {
-      if (accessor?.field === "private") {
-        if (accessor.get !== false)
-          definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this[${managed.name}]; }`);
-        if (accessor.set !== false)
-          definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this[${managed.name}] = value; }`);
-      } else {
-        definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
-      }
-      return `this[${managed.name}] = state${emitPropertyAccess("", property)};`;
-    }
-    if (accessor?.field !== "private") {
-      return `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};`;
-    }
-    const slot = `#p${slotIndex++}`;
-    slots.push(slot);
-    if (accessor.get !== false) definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
-    if (accessor.set !== false)
-      definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
-    return `this.${slot} = state${emitPropertyAccess("", property)};`;
-  });
-  const managedAccessors = [...managedStorage.entries()].filter(([field]) => accessorByKey.get(field)?.field !== "private").map(
-    ([field]) => `Object.defineProperty(this, ${JSON.stringify(field)}, { get: Object.getOwnPropertyDescriptor(JITRuntimeClass.prototype, ${JSON.stringify(field)}).get, enumerable: true, configurable: false });`
-  ).join(" ");
-  const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
-  const storageEntries = [...managedStorage.values()];
-  const storageNames = storageEntries.map((entry) => entry.name);
-  const storageValues = storageEntries.map((entry) => entry.value);
-  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${managedAccessors.length === 0 ? "" : ` ${managedAccessors}`}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
-  return globalThis.Function(
-    ...storageNames,
-    "__parse",
-    "__construct",
-    "__construction",
-    source
-  )(...storageValues, parse3, INTERNAL_CONSTRUCT, construction);
-}
-function resolveManagedStorage(properties, _accessors, managedFields) {
-  const storage = /* @__PURE__ */ new Map();
-  for (let index2 = 0; index2 < managedFields.length; index2++) {
-    const field = managedFields[index2]?.field;
-    if (field === void 0 || !properties.includes(field)) continue;
-    storage.set(field, { name: `__managed${index2}`, value: /* @__PURE__ */ Symbol(`jit.${field}`) });
-  }
-  return storage;
-}
-function resolveAccessors(properties, options) {
-  return properties.map((key) => {
-    const configured = {
-      ...options.default,
-      ...options.fields?.[key]
-    };
-    const get = resolveAccessorMember(key, configured.get);
-    const set2 = resolveAccessorMember(key, configured.set);
-    if (configured.field === "private" && get === false && set2 === false) {
-      throw new JITError("INVALID_OPERATION", `Private field ${JSON.stringify(key)} must expose a getter or setter`);
-    }
-    return { key, field: configured.field ?? "public", get, set: set2 };
-  });
-}
-function resolveAccessorMember(key, member) {
-  if (member === void 0) return key;
-  if (member === false) return false;
-  return typeof member === "string" ? key : member.name ?? key;
-}
-var classType = Object.assign(classFactory, {
-  abstract: abstractClass,
-  equals: capability("equals", (prototype, schema) => {
-    definePrototype(prototype, "equals", compileEqualMethod(schema), true);
-  }),
-  hashCode: capability("hashCode", (prototype, schema) => {
-    const hash4 = compileHash(schema);
-    definePrototype(
-      prototype,
-      "hashCode",
-      function hashCode() {
-        return hash4(this);
-      },
-      true
-    );
-  }),
-  with: (() => {
-    const base = capability("with", (prototype, schema) => {
-      const update2 = compileUpdate(schema);
-      definePrototype(
-        prototype,
-        "with",
-        function withPatch(patch3) {
-          const next = update2(this, patch3);
-          return new this.constructor(
-            next,
-            INTERNAL_CONSTRUCT
-          );
-        },
-        true
-      );
-    });
-    return Object.freeze({ ...base, __with: true });
-  })(),
-  diff: capability("diff", (prototype, schema) => {
-    const diff3 = compileDiff(schema);
-    definePrototype(
-      prototype,
-      "diff",
-      function diffInstance(other) {
-        return diff3(this, other);
-      },
-      true
-    );
-  }),
-  clone: (() => {
-    const base = capability("clone", (prototype, schema) => {
-      const clone3 = compileClone(schema);
-      definePrototype(
-        prototype,
-        "clone",
-        function cloneInstance() {
-          return new this.constructor(
-            clone3(this),
-            INTERNAL_CONSTRUCT,
-            true
-          );
-        },
-        true
-      );
-    });
-    return Object.freeze({ ...base, __clone: true });
-  })(),
-  identity(key) {
-    return capability(
-      `identity:${key}`,
-      (prototype, schema) => {
-        const base = resolveWrappers(schema).base;
-        const props = base.type === TypeName.object ? base.def.props : void 0;
-        if (!props || !(key in props)) {
-          throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
-        }
-        const runtimeIdentity = findRuntimeTypeSchema(props[key]);
-        const valueIdentity = runtimeIdentity?.def.representation === "value";
-        const equalIdentity = valueIdentity ? compileEqual(runtimeIdentity.def.innerType) : void 0;
-        definePrototype(
-          prototype,
-          "identity",
-          function identity() {
-            return this[key];
-          },
-          true
-        );
-        definePrototype(
-          prototype,
-          "sameIdentity",
-          function sameIdentity(other) {
-            if (typeof other !== "object" || other === null) return false;
-            const left = this[key];
-            const right = other[key];
-            if (!valueIdentity) return Object.is(left, right);
-            return typeof left === "object" && left !== null && typeof right === "object" && right !== null && equalIdentity(
-              left.value,
-              right.value
-            );
-          },
-          true
-        );
-      },
-      ["identity", "sameIdentity"]
-    );
-  }
-});
-var valueAccessorCapability = capability("value", (prototype) => {
-  Object.defineProperty(prototype, "value", {
-    configurable: false,
-    enumerable: false,
-    get() {
-      return this;
-    }
-  });
-});
-function valueObject(schema) {
-  const unwrapped = unwrapSchema(schema);
-  const base = resolveWrappers(unwrapped).base;
-  if (base.type !== TypeName.object) {
-    if (!isPrimitiveLikeSchema(base)) {
-      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
-    }
-    return createScalarValueObject(unwrapped, false, false);
-  }
-  const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
-  return "value" in base.def.props ? runtime.extends(
-    classType.equals,
-    classType.hashCode
-  ) : runtime.extends(
-    valueAccessorCapability,
-    classType.equals,
-    classType.hashCode
-  );
-}
-function abstractValueObject(schema) {
-  const unwrapped = unwrapSchema(schema);
-  const base = resolveWrappers(unwrapped).base;
-  if (base.type !== TypeName.object) {
-    if (!isPrimitiveLikeSchema(base)) {
-      throw new JITError("INVALID_OPERATION", "Scalar Value Objects require a primitive-like schema");
-    }
-    return createScalarValueObject(unwrapped, false, true);
-  }
-  const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
-  return "value" in base.def.props ? runtime.extends(
-    classType.equals,
-    classType.hashCode
-  ) : runtime.extends(
-    valueAccessorCapability,
-    classType.equals,
-    classType.hashCode
-  );
-}
-function uniqueIdentifier(schema) {
-  const identifierSchema = schema === void 0 ? defaultTo(
-    createSchema(TypeName.string, {
-      checks: [{ kind: "uuid" }]
-    }),
-    createIdentifierValue
-  ) : unwrapSchema(schema);
-  const base = resolveWrappers(identifierSchema).base;
-  if (!isPrimitiveLikeSchema(base) || base.type === TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "JIT.ddd.uniqueIdentifier() requires a primitive-like schema");
-  }
-  return createScalarValueObject(identifierSchema, true, false);
-}
-function resolveIdentityKey(schema, explicit) {
-  const base = resolveWrappers(schema).base;
-  if (base.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "Entity identity requires an object schema");
-  }
-  if (explicit !== void 0) return explicit;
-  const candidates = Object.keys(base.def.props).filter(
-    (key) => isIdentifierSchema(base.def.props[key])
-  );
-  if (candidates.length === 1) return candidates[0];
-  if (candidates.length === 0) {
-    throw new JITError(
-      "INVALID_OPERATION",
-      "Entity identity must be explicit when the schema has no unique identifier"
-    );
-  }
-  throw new JITError(
-    "INVALID_OPERATION",
-    "Entity identity must be explicit when the schema has multiple unique identifiers"
-  );
-}
-function isIdentifierSchema(schema) {
-  return findRuntimeTypeSchema(schema)?.def.identifier === true;
-}
-function findRuntimeTypeSchema(schema) {
-  let current = schema;
-  while (true) {
-    if (current.type === TypeName.runtimeType) {
-      return current;
-    }
-    if (current.type === TypeName.lazy) {
-      current = current.def.getter();
-      continue;
-    }
-    if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.default || current.type === TypeName.brand || current.type === TypeName.readonly || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
-      current = current.def.innerType;
-      continue;
-    }
-    return void 0;
-  }
-}
-function timestamps(options) {
-  const resolved = options ?? {};
-  const touch = resolved.methods?.touch ?? "touch";
-  return Object.freeze({
-    kind: "ddd.timestamps",
-    __options: resolved,
-    __memberNames: Object.freeze([touch]),
-    install() {
-    }
-  });
-}
-function softDelete(options) {
-  const resolved = options ?? {};
-  const names = [
-    resolved.methods?.delete ?? "softDelete",
-    resolved.methods?.restore ?? "restore",
-    resolved.methods?.isDeleted ?? "isDeleted"
-  ];
-  return Object.freeze({
-    kind: "ddd.softDelete",
-    __options: resolved,
-    __memberNames: Object.freeze(names),
-    install() {
-    }
-  });
-}
-function versioned(options) {
-  const resolved = options ?? {};
-  return Object.freeze({
-    kind: "ddd.versioned",
-    __options: resolved,
-    __memberNames: Object.freeze([]),
-    install() {
-    }
-  });
-}
-function createEntity(schema, isAbstract, ...args) {
-  const unwrapped = unwrapSchema(schema);
-  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory");
-  return runtime.extends(
-    classType.identity(identity)
-  );
-}
-function entity(schema, ...args) {
-  return createEntity(schema, false, ...args);
-}
-function abstractEntity(schema, ...args) {
-  return createEntity(schema, true, ...args);
-}
-function createAggregateRoot(schema, isAbstract, ...args) {
-  const unwrapped = unwrapSchema(schema);
-  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory");
-  return runtime.extends(
-    classType.identity(identity)
-  );
-}
-function aggregateRoot(schema, ...args) {
-  return createAggregateRoot(schema, false, ...args);
-}
-function abstractAggregateRoot(schema, ...args) {
-  return createAggregateRoot(schema, true, ...args);
-}
-function domainEvent(type, options) {
-  const payload = unwrapSchema(options.payload);
-  const schema = createDomainEventSchema(payload, type, options.version);
-  const event = createRuntimeClass(schema, false, true, false, "factory");
-  const createState = event.create.bind(event);
-  Object.defineProperties(event, {
-    create: {
-      configurable: false,
-      enumerable: false,
-      value: (input) => createState({ type, version: options.version, payload: input })
-    },
-    type: { enumerable: true, value: type },
-    version: { enumerable: true, value: options.version }
-  });
-  Object.defineProperty(event.prototype, "~event", {
-    configurable: false,
-    enumerable: false,
-    value: Object.freeze({
-      version: 1,
-      type,
-      schemaVersion: options.version
-    }),
-    writable: false
-  });
-  registerArtifact(event, {
-    kind: "class",
-    schema,
-    abstract: false,
-    frozen: true,
-    aggregate: false,
-    construction: "factory",
-    representation: "object",
-    capabilities: [],
-    factories: { create: "create", hydrate: "hydrate" },
-    domainEvent: { type, version: options.version }
-  });
-  return event;
-}
-function createDomainEventSchema(payload, type, version) {
-  const id = defaultTo(createSchema(TypeName.string, {}), createEventId);
-  const occurredAt = defaultTo(createSchema(TypeName.date, { coerce: true }), () => /* @__PURE__ */ new Date());
-  return createSchema(TypeName.object, {
-    props: {
-      id,
-      type: createSchema(TypeName.literal, { value: type }),
-      version: createSchema(TypeName.literal, { value: version }),
-      occurredAt,
-      payload
-    },
-    unknownKeys: void 0,
-    catchall: void 0,
-    checks: []
-  });
-}
-function createEventId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
-}
-function createIdentifierValue() {
-  return crypto.randomUUID();
-}
-function capability(kind, install, memberNames = [kind]) {
-  return Object.freeze({
-    kind,
-    __memberNames: Object.freeze([...memberNames]),
-    install(classTarget, schema) {
-      install(classTarget.prototype, schema);
-    }
-  });
-}
-function installMethods(classTarget, methods, taken, installed) {
-  const recorded = [];
-  for (const name of Object.keys(methods)) {
-    if (RESERVED_EXTENSION_NAMES.has(name) || taken.has(name) || installed.has(name)) {
-      throw new JITError(
-        "INVALID_OPERATION",
-        `Class extension ${JSON.stringify(name)} would shadow an existing member; rename it`
-      );
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(methods, name);
-    if (descriptor === void 0) continue;
-    if (descriptor.get === void 0 && descriptor.set === void 0 && typeof descriptor.value !== "function") {
-      throw new JITError(
-        "INVALID_OPERATION",
-        `Class extension ${JSON.stringify(name)} must be a method, a getter or a setter`
-      );
-    }
-    Object.defineProperty(classTarget.prototype, name, {
-      ...descriptor,
-      enumerable: false,
-      configurable: false
-    });
-    installed.add(name);
-    if (descriptor.get !== void 0) recorded.push({ name, kind: "get", source: descriptor.get });
-    if (descriptor.set !== void 0) recorded.push({ name, kind: "set", source: descriptor.set });
-    if (descriptor.get === void 0 && descriptor.set === void 0) {
-      recorded.push({
-        name,
-        kind: "method",
-        source: descriptor.value
-      });
-    }
-  }
-  return recorded;
-}
-function definePrototype(prototype, key, value, configurable = false) {
-  Object.defineProperty(prototype, key, {
-    configurable,
-    enumerable: false,
-    value,
-    writable: false
-  });
 }
 
 // ../../packages/jit/src/factories/composition/composition.ts
@@ -27269,7 +28521,7 @@ function watchedList(_schema, initialItems = [], options = {}) {
 }
 
 // ../../packages/jit/src/factories/ddd.ts
-var ddd = Object.freeze({
+var dddBase = {
   /** Structural equality, hashing and immutability. */
   valueObject,
   /** Concrete factory-first Runtime Type with identity semantics. */
@@ -27294,7 +28546,42 @@ var ddd = Object.freeze({
     entity: abstractEntity,
     aggregateRoot: abstractAggregateRoot
   })
-});
+};
+var DDD_BUILTINS = new Set(Object.keys(dddBase).concat("$extends"));
+var registered = /* @__PURE__ */ new Map();
+function extendDdd(extensions) {
+  for (const [name, factory] of Object.entries(extensions)) {
+    if (DDD_BUILTINS.has(name)) {
+      throw new JITError("DDD_EXTENSION_ALREADY_EXISTS", `DDD built-in ${JSON.stringify(name)} cannot be replaced`);
+    }
+    const previous = registered.get(name);
+    if (previous !== void 0 && previous !== factory) {
+      throw new JITError("DDD_EXTENSION_ALREADY_EXISTS", `DDD extension ${JSON.stringify(name)} is already registered`);
+    }
+    if (previous === void 0) {
+      registered.set(name, factory);
+      Object.defineProperty(ddd, name, {
+        configurable: false,
+        enumerable: true,
+        value: factory,
+        writable: false
+      });
+    }
+  }
+  return Object.freeze({ ...ddd, $extends: extendDdd });
+}
+var ddd = {
+  ...dddBase,
+  $extends: extendDdd
+};
+for (const name of Object.keys(dddBase)) {
+  Object.defineProperty(ddd, name, {
+    configurable: false,
+    enumerable: true,
+    value: ddd[name],
+    writable: false
+  });
+}
 
 // ../../packages/jit/src/factories/dto.ts
 function dto(schema) {
@@ -27398,19 +28685,19 @@ function createMatch(schema, tags, handlers) {
 function migrate(schema) {
   return createMigrationPlan(createMigrationDescriptor(unwrapSchema(schema)), schema);
 }
-function createMigrationPlan(descriptor, current) {
-  const compiled = compileMigration(descriptor);
+function createMigrationPlan(descriptor2, current) {
+  const compiled = compileMigration(descriptor2);
   Object.defineProperties(compiled, {
     to: {
-      value: (target, overrides) => createMigrationPlan(appendMigrationEdge(descriptor, unwrapSchema(target), overrides), target)
+      value: (target, overrides) => createMigrationPlan(appendMigrationEdge(descriptor2, unwrapSchema(target), overrides), target)
     },
-    versions: { value: descriptor.versions },
+    versions: { value: descriptor2.versions },
     current: { value: current },
     explain: {
       value: () => Object.freeze({
         strategy: "VersionSwitch",
-        versions: descriptor.versions,
-        passes: descriptor.edges.length,
+        versions: descriptor2.versions,
+        passes: descriptor2.edges.length,
         complexity: "O(remaining edges)"
       })
     }
@@ -27422,40 +28709,40 @@ function createMigrationPlan(descriptor, current) {
 function parse2(schema) {
   return createParsePlan(createNdjsonDescriptor(unwrapSchema(schema), "parse"));
 }
-function createParsePlan(descriptor) {
-  const result = compileNdjsonParse(descriptor);
+function createParsePlan(descriptor2) {
+  const result = compileNdjsonParse(descriptor2);
   Object.defineProperties(result, {
     validate: { value: () => result },
     where: {
       value: (predicate, ruleInputs) => {
-        const lowered = lowerRulePredicate(predicate, ruleInputs, descriptor.bindingValues.length);
+        const lowered = lowerRulePredicate(predicate, ruleInputs, descriptor2.bindingValues.length);
         if (lowered !== void 0) {
           return createParsePlan(
-            lowered.condition === void 0 ? descriptor : appendNdjsonFilter(descriptor, lowered.condition, lowered.bindings)
+            lowered.condition === void 0 ? descriptor2 : appendNdjsonFilter(descriptor2, lowered.condition, lowered.bindings)
           );
         }
-        const state3 = createConditionBuilder(descriptor.bindingValues.length);
+        const state3 = createConditionBuilder(descriptor2.bindingValues.length);
         const condition = predicate(state3.builder);
-        return createParsePlan(appendNdjsonFilter(descriptor, condition, state3.bindings));
+        return createParsePlan(appendNdjsonFilter(descriptor2, condition, state3.bindings));
       }
     },
-    select: { value: (...fields) => createParsePlan(selectNdjson(descriptor, fields)) },
+    select: { value: (...fields) => createParsePlan(selectNdjson(descriptor2, fields)) },
     to: {
       value: Object.freeze({
-        iterator: () => compileNdjsonParse(withNdjsonSink(descriptor, "iterator")),
-        visitor: () => compileNdjsonParse(withNdjsonSink(descriptor, "visitor")),
-        ndjson: () => compileNdjsonParse(withNdjsonSink(descriptor, "ndjson"))
+        iterator: () => compileNdjsonParse(withNdjsonSink(descriptor2, "iterator")),
+        visitor: () => compileNdjsonParse(withNdjsonSink(descriptor2, "visitor")),
+        ndjson: () => compileNdjsonParse(withNdjsonSink(descriptor2, "ndjson"))
       })
     }
   });
   return result;
 }
 function stringify2(schema) {
-  const descriptor = createNdjsonDescriptor(unwrapSchema(schema), "stringify");
-  const result = compileNdjsonStringify(descriptor);
+  const descriptor2 = createNdjsonDescriptor(unwrapSchema(schema), "stringify");
+  const result = compileNdjsonStringify(descriptor2);
   Object.defineProperty(result, "to", {
     value: Object.freeze({
-      iterator: () => compileNdjsonStringify(withNdjsonSink(descriptor, "iterator"))
+      iterator: () => compileNdjsonStringify(withNdjsonSink(descriptor2, "iterator"))
     })
   });
   return result;
@@ -27835,11 +29122,11 @@ function rules(schema) {
   return createRulesPlan(unwrapSchema(schema), void 0, []);
 }
 function createRulesPlan(subject, inputs, declarations) {
-  const descriptor = resolveRulesDescriptor(subject, inputs, declarations);
+  const descriptor2 = resolveRulesDescriptor(subject, inputs, declarations);
   const lazy2 = (sink, ruleId) => {
     let compiled;
     return ((...args) => {
-      compiled ??= compileRulesSink(descriptor, sink, ruleId === void 0 ? void 0 : { ruleId });
+      compiled ??= compileRulesSink(descriptor2, sink, ruleId === void 0 ? void 0 : { ruleId });
       return compiled(...args);
     });
   };
@@ -27850,9 +29137,9 @@ function createRulesPlan(subject, inputs, declarations) {
   const run = lazy2("run");
   const explain = lazy2("explain");
   const predicates = /* @__PURE__ */ new Map();
-  const visitor = memoize(() => compileSink(descriptor, "visitor"));
-  const iterator = memoize(() => compileSink(descriptor, "iterator"));
-  const many = memoize(() => createManyPlan(descriptor));
+  const visitor = memoize(() => compileSink(descriptor2, "visitor"));
+  const iterator = memoize(() => compileSink(descriptor2, "iterator"));
+  const many = memoize(() => createManyPlan(descriptor2));
   const plan = {};
   Object.defineProperties(plan, {
     inputs: {
@@ -27880,7 +29167,7 @@ function createRulesPlan(subject, inputs, declarations) {
           registerArtifact(compiled, {
             kind: "rules-plan",
             schema: subject,
-            descriptor,
+            descriptor: descriptor2,
             sink: "predicate",
             ruleId: rule
           });
@@ -27891,40 +29178,40 @@ function createRulesPlan(subject, inputs, declarations) {
     },
     many: { value: many },
     to: { value: Object.freeze({ visitor, iterator }) },
-    ids: { value: descriptor.ids, enumerable: true },
-    inspect: { value: () => inspectRules(descriptor) }
+    ids: { value: descriptor2.ids, enumerable: true },
+    inspect: { value: () => inspectRules(descriptor2) }
   });
   Object.freeze(plan);
-  registerArtifact(plan, { kind: "rules-plan", schema: subject, descriptor, sink: "plan" });
-  registerArtifact(test, { kind: "rules-plan", schema: subject, descriptor, sink: "test" });
-  registerArtifact(some, { kind: "rules-plan", schema: subject, descriptor, sink: "some" });
-  registerArtifact(first, { kind: "rules-plan", schema: subject, descriptor, sink: "first" });
-  registerArtifact(match2, { kind: "rules-plan", schema: subject, descriptor, sink: "match" });
-  registerArtifact(run, { kind: "rules-plan", schema: subject, descriptor, sink: "run" });
-  registerArtifact(explain, { kind: "rules-plan", schema: subject, descriptor, sink: "explain" });
+  registerArtifact(plan, { kind: "rules-plan", schema: subject, descriptor: descriptor2, sink: "plan" });
+  registerArtifact(test, { kind: "rules-plan", schema: subject, descriptor: descriptor2, sink: "test" });
+  registerArtifact(some, { kind: "rules-plan", schema: subject, descriptor: descriptor2, sink: "some" });
+  registerArtifact(first, { kind: "rules-plan", schema: subject, descriptor: descriptor2, sink: "first" });
+  registerArtifact(match2, { kind: "rules-plan", schema: subject, descriptor: descriptor2, sink: "match" });
+  registerArtifact(run, { kind: "rules-plan", schema: subject, descriptor: descriptor2, sink: "run" });
+  registerArtifact(explain, { kind: "rules-plan", schema: subject, descriptor: descriptor2, sink: "explain" });
   return plan;
 }
-function compileSink(descriptor, sink, ruleId) {
-  const compiled = compileRulesSink(descriptor, sink, ruleId === void 0 ? void 0 : { ruleId });
+function compileSink(descriptor2, sink, ruleId) {
+  const compiled = compileRulesSink(descriptor2, sink, ruleId === void 0 ? void 0 : { ruleId });
   registerArtifact(compiled, {
     kind: "rules-plan",
-    schema: descriptor.subject,
-    descriptor,
+    schema: descriptor2.subject,
+    descriptor: descriptor2,
     sink,
     ...ruleId === void 0 ? {} : { ruleId }
   });
   return compiled;
 }
-function createManyPlan(descriptor) {
+function createManyPlan(descriptor2) {
   let compiled;
   const callable = ((...args) => {
-    compiled ??= compileRulesSink(descriptor, "many");
+    compiled ??= compileRulesSink(descriptor2, "many");
     return compiled(...args);
   });
-  const visitor = memoize(() => compileSink(descriptor, "many-visitor"));
-  const iterator = memoize(() => compileSink(descriptor, "many-iterator"));
+  const visitor = memoize(() => compileSink(descriptor2, "many-visitor"));
+  const iterator = memoize(() => compileSink(descriptor2, "many-iterator"));
   Object.defineProperty(callable, "to", { value: Object.freeze({ visitor, iterator }) });
-  registerArtifact(callable, { kind: "rules-plan", schema: descriptor.subject, descriptor, sink: "many" });
+  registerArtifact(callable, { kind: "rules-plan", schema: descriptor2.subject, descriptor: descriptor2, sink: "many" });
   return callable;
 }
 function memoize(build) {
@@ -28901,9 +30188,9 @@ function changed(schema) {
   return plan;
 }
 function createChangedMask(schema, paths) {
-  const descriptor = resolveChangedDescriptor(schema, paths);
-  const compiled = compileChanged(schema, descriptor);
-  const fields = descriptor.fields.map((field) => field.path);
+  const descriptor2 = resolveChangedDescriptor(schema, paths);
+  const compiled = compileChanged(schema, descriptor2);
+  const fields = descriptor2.fields.map((field) => field.path);
   const bits = new Map(fields.map((path, index2) => [path, index2]));
   Object.defineProperties(compiled, {
     fields: { value: Object.freeze(fields) },
@@ -28991,8 +30278,8 @@ function sort(schema) {
   });
 }
 function createSortPlan(schema, criteria) {
-  const descriptor = resolveOrderingDescriptor(schema, criteria);
-  const compiled = compileSort(schema, descriptor);
+  const descriptor2 = resolveOrderingDescriptor(schema, criteria);
+  const compiled = compileSort(schema, descriptor2);
   Object.defineProperties(compiled, {
     by: {
       value: (key, direction = "asc") => createSortPlan(schema, [{ key, direction }])
@@ -29053,19 +30340,19 @@ function resolveDerivedDescriptor(schema, paths, layout) {
   }
   return Object.freeze({ schema, dependencies, layout, mask: mask3 });
 }
-function derivedEqualBindings(descriptor) {
+function derivedEqualBindings(descriptor2) {
   const bindings = [];
-  descriptor.dependencies.forEach((dependency, index2) => {
+  descriptor2.dependencies.forEach((dependency, index2) => {
     if (!dependency.structural) return;
     bindings.push({ name: `__derivedEqual${index2}`, source: emitEqualSource(dependency.schema) });
   });
   return bindings;
 }
-function emitDerivedSource(descriptor) {
+function emitDerivedSource(descriptor2) {
   const writer = new CodeWriter();
   writer.line("function select(state) {");
   writer.indent(() => {
-    const entries = descriptor.dependencies.map(
+    const entries = descriptor2.dependencies.map(
       (dependency) => `${emitObjectKey(dependency.key)}: ${readPath4("state", dependency)}`
     );
     writer.line(`return { ${entries.join(", ")} };`);
@@ -29073,16 +30360,16 @@ function emitDerivedSource(descriptor) {
   writer.line("}");
   return writer.toString();
 }
-function emitDerivedMemoSource(descriptor) {
+function emitDerivedMemoSource(descriptor2) {
   const writer = new CodeWriter();
-  const zero = emitChangeZero(descriptor.layout);
-  const maskLiteral = descriptor.layout.representation === "bigint" ? `${descriptor.mask}n` : `${descriptor.mask}`;
+  const zero = emitChangeZero(descriptor2.layout);
+  const maskLiteral = descriptor2.layout.representation === "bigint" ? `${descriptor2.mask}n` : `${descriptor2.mask}`;
   writer.line("(() => {");
   writer.indent(() => {
     writer.line("const unset = {};");
     writer.line("let previousState = unset;");
     writer.line("let result;");
-    descriptor.dependencies.forEach((_, index2) => {
+    descriptor2.dependencies.forEach((_, index2) => {
       writer.line(`let previous${index2} = unset;`);
     });
     writer.line("function memo(state, mask) {");
@@ -29094,10 +30381,10 @@ function emitDerivedMemoSource(descriptor) {
         writer.line("return result;");
       });
       writer.line("}");
-      descriptor.dependencies.forEach((dependency, index2) => {
+      descriptor2.dependencies.forEach((dependency, index2) => {
         writer.line(`const next${index2} = ${readPath4("state", dependency)};`);
       });
-      const same = descriptor.dependencies.map(
+      const same = descriptor2.dependencies.map(
         (dependency, index2) => dependency.structural ? `previous${index2} !== unset && __derivedEqual${index2}(next${index2}, previous${index2})` : `next${index2} === previous${index2}`
       );
       writer.line(`if (previousState !== unset && ${same.join(" && ")}) {`);
@@ -29106,11 +30393,11 @@ function emitDerivedMemoSource(descriptor) {
         writer.line("return result;");
       });
       writer.line("}");
-      descriptor.dependencies.forEach((_, index2) => {
+      descriptor2.dependencies.forEach((_, index2) => {
         writer.line(`previous${index2} = next${index2};`);
       });
       writer.line("previousState = state;");
-      const entries = descriptor.dependencies.map(
+      const entries = descriptor2.dependencies.map(
         (dependency, index2) => `${emitObjectKey(dependency.key)}: next${index2}`
       );
       writer.line(`result = { ${entries.join(", ")} };`);
@@ -29122,8 +30409,8 @@ function emitDerivedMemoSource(descriptor) {
   writer.line("})()");
   return writer.toString();
 }
-function derivedCacheKey(descriptor, memo) {
-  return `derive:${memo ? "memo" : "select"}:${descriptor.layout.id}:${descriptor.dependencies.map((dependency) => dependency.path).join(",")}`;
+function derivedCacheKey(descriptor2, memo) {
+  return `derive:${memo ? "memo" : "select"}:${descriptor2.layout.id}:${descriptor2.dependencies.map((dependency) => dependency.path).join(",")}`;
 }
 function readPath4(source, dependency) {
   return dependency.segments.reduce(
@@ -29151,20 +30438,20 @@ function derive(schema, options) {
   });
 }
 function createDerived(schema, paths, layout) {
-  const descriptor = resolveDerivedDescriptor(schema, paths, layout);
+  const descriptor2 = resolveDerivedDescriptor(schema, paths, layout);
   const explanation = Object.freeze({
-    reads: Object.freeze(descriptor.dependencies.map((dependency) => dependency.path)),
+    reads: Object.freeze(descriptor2.dependencies.map((dependency) => dependency.path)),
     layout,
-    mask: descriptor.mask
+    mask: descriptor2.mask
   });
-  const select = compileDerived(schema, descriptor, false);
+  const select = compileDerived(schema, descriptor2, false);
   Object.defineProperties(select, {
     explain: { enumerable: false, value: () => explanation },
     layout: { enumerable: false, value: () => layout },
     memo: {
       enumerable: false,
       value: () => {
-        const memo = compileDerived(schema, descriptor, true);
+        const memo = compileDerived(schema, descriptor2, true);
         Object.defineProperties(memo, {
           layout: { enumerable: false, value: () => layout },
           accepts: { enumerable: false, value: (other) => other.id === layout.id }
@@ -29175,9 +30462,9 @@ function createDerived(schema, paths, layout) {
   });
   return select;
 }
-function compileDerived(schema, descriptor, memo) {
-  const bindings = derivedEqualBindings(descriptor);
-  const source = memo ? emitDerivedMemoSource(descriptor) : emitDerivedSource(descriptor);
+function compileDerived(schema, descriptor2, memo) {
+  const bindings = derivedEqualBindings(descriptor2);
+  const source = memo ? emitDerivedMemoSource(descriptor2) : emitDerivedSource(descriptor2);
   const compiled = globalThis.Function(
     ...bindings.map((binding) => binding.name),
     memo ? `return ${source};` : `${source}
@@ -29189,9 +30476,9 @@ return select;`
     source,
     memo,
     equalSources: bindings.map((binding) => ({ name: binding.name, source: binding.source })),
-    layout: descriptor.layout,
-    reads: descriptor.dependencies.map((dependency) => dependency.path),
-    cacheKey: derivedCacheKey(descriptor, memo)
+    layout: descriptor2.layout,
+    reads: descriptor2.dependencies.map((dependency) => dependency.path),
+    cacheKey: derivedCacheKey(descriptor2, memo)
   });
   return compiled;
 }
@@ -29570,8 +30857,8 @@ function changed2(schema) {
   return stub;
 }
 function defineChangedMask(schema, paths) {
-  const descriptor = resolveChangedDescriptor(schema, paths);
-  const fields = descriptor.fields.map((field) => field.path);
+  const descriptor2 = resolveChangedDescriptor(schema, paths);
+  const fields = descriptor2.fields.map((field) => field.path);
   const bits = new Map(fields.map((path, index2) => [path, index2]));
   const stub = function aotChangedArtifact() {
     throw new JITError(
@@ -29596,7 +30883,7 @@ function defineChangedMask(schema, paths) {
       }
     }
   });
-  registerArtifact(stub, { kind: "changed-plan", schema, descriptor });
+  registerArtifact(stub, { kind: "changed-plan", schema, descriptor: descriptor2 });
   return stub;
 }
 function clone2(schema) {
@@ -29652,7 +30939,7 @@ function defineSort(schema) {
   });
 }
 function createDefineSortPlan(schema, criteria) {
-  const descriptor = resolveOrderingDescriptor(schema, criteria);
+  const descriptor2 = resolveOrderingDescriptor(schema, criteria);
   const stub = function aotSortArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -29682,7 +30969,7 @@ function createDefineSortPlan(schema, criteria) {
       value: (key, direction = "asc") => createDefineSortPlan(schema, [...criteria, { key, direction }])
     }
   });
-  registerArtifact(stub, { kind: "sort-plan", schema, descriptor });
+  registerArtifact(stub, { kind: "sort-plan", schema, descriptor: descriptor2 });
   return stub;
 }
 function defineIndex(schema) {
@@ -29763,7 +31050,7 @@ function defineMatch(schema) {
 }
 function createDefineMatch(schema, tags, handlers) {
   const finish = (fallback, exhaustive) => {
-    const descriptor = resolveMatchDescriptor(schema, tags, fallback !== void 0, exhaustive);
+    const descriptor2 = resolveMatchDescriptor(schema, tags, fallback !== void 0, exhaustive);
     const stub = function aotMatchArtifact() {
       throw new JITError(
         "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -29781,7 +31068,7 @@ function createDefineMatch(schema, tags, handlers) {
     registerArtifact(stub, {
       kind: "match-plan",
       schema,
-      descriptor,
+      descriptor: descriptor2,
       bindingNames: names.concat(fallback === void 0 ? [] : ["__fallback"]),
       bindingValues: handlers.concat(fallback === void 0 ? [] : [fallback])
     });
@@ -29796,7 +31083,7 @@ function createDefineMatch(schema, tags, handlers) {
 function defineMigrate(schema) {
   return createDefineMigration(createMigrationDescriptor(unwrapSchema(schema)), schema);
 }
-function createDefineMigration(descriptor, current) {
+function createDefineMigration(descriptor2, current) {
   const stub = function aotMigrationArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -29807,28 +31094,28 @@ function createDefineMigration(descriptor, current) {
     [AOT_ARTIFACT]: {
       value: {
         artifactId: "operation:migrate",
-        schemaId: descriptor.schemas[0]?.type ?? "unknown",
+        schemaId: descriptor2.schemas[0]?.type ?? "unknown",
         operation: { kind: "operation", op: "migrate" }
       }
     },
     to: {
-      value: (target, overrides) => createDefineMigration(appendMigrationEdge(descriptor, unwrapSchema(target), overrides), target)
+      value: (target, overrides) => createDefineMigration(appendMigrationEdge(descriptor2, unwrapSchema(target), overrides), target)
     },
-    versions: { value: descriptor.versions },
+    versions: { value: descriptor2.versions },
     current: { value: current },
     explain: {
       value: () => Object.freeze({
         strategy: "VersionSwitch",
-        versions: descriptor.versions,
-        passes: descriptor.edges.length,
+        versions: descriptor2.versions,
+        passes: descriptor2.edges.length,
         complexity: "O(remaining edges)"
       })
     }
   });
-  registerArtifact(stub, { kind: "migration-plan", descriptor });
+  registerArtifact(stub, { kind: "migration-plan", descriptor: descriptor2 });
   return stub;
 }
-function defineCsvStub(descriptor) {
+function defineCsvStub(descriptor2) {
   const stub = function aotCsvArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -29837,12 +31124,12 @@ function defineCsvStub(descriptor) {
   };
   Object.defineProperty(stub, AOT_ARTIFACT, {
     value: {
-      artifactId: `operation:csv.${descriptor.operation}.${descriptor.sink}`,
-      schemaId: descriptor.schema.type,
+      artifactId: `operation:csv.${descriptor2.operation}.${descriptor2.sink}`,
+      schemaId: descriptor2.schema.type,
       operation: { kind: "operation", op: "csv" }
     }
   });
-  registerArtifact(stub, { kind: "csv-plan", descriptor });
+  registerArtifact(stub, { kind: "csv-plan", descriptor: descriptor2 });
   return stub;
 }
 function defineCsvParse(schema, options) {
@@ -29871,7 +31158,7 @@ function defineCsvStringify(schema, options) {
   return result;
 }
 var csv2 = Object.freeze({ parse: defineCsvParse, stringify: defineCsvStringify });
-function defineNdjsonStub(descriptor) {
+function defineNdjsonStub(descriptor2) {
   const stub = function aotNdjsonArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -29880,30 +31167,30 @@ function defineNdjsonStub(descriptor) {
   };
   Object.defineProperty(stub, AOT_ARTIFACT, {
     value: {
-      artifactId: `operation:ndjson.${descriptor.operation}.${descriptor.sink}`,
-      schemaId: descriptor.schema.type,
+      artifactId: `operation:ndjson.${descriptor2.operation}.${descriptor2.sink}`,
+      schemaId: descriptor2.schema.type,
       operation: { kind: "operation", op: "ndjson" }
     }
   });
-  registerArtifact(stub, { kind: "ndjson-plan", descriptor });
+  registerArtifact(stub, { kind: "ndjson-plan", descriptor: descriptor2 });
   return stub;
 }
-function createDefineNdjsonParse(descriptor) {
-  const result = defineNdjsonStub(descriptor);
+function createDefineNdjsonParse(descriptor2) {
+  const result = defineNdjsonStub(descriptor2);
   Object.defineProperties(result, {
     validate: { value: () => result },
     where: {
       value: (predicate) => {
-        const state3 = createConditionBuilder(descriptor.bindingValues.length);
-        return createDefineNdjsonParse(appendNdjsonFilter(descriptor, predicate(state3.builder), state3.bindings));
+        const state3 = createConditionBuilder(descriptor2.bindingValues.length);
+        return createDefineNdjsonParse(appendNdjsonFilter(descriptor2, predicate(state3.builder), state3.bindings));
       }
     },
-    select: { value: (...fields) => createDefineNdjsonParse(selectNdjson(descriptor, fields)) },
+    select: { value: (...fields) => createDefineNdjsonParse(selectNdjson(descriptor2, fields)) },
     to: {
       value: Object.freeze({
-        iterator: () => defineNdjsonStub(withNdjsonSink(descriptor, "iterator")),
-        visitor: () => defineNdjsonStub(withNdjsonSink(descriptor, "visitor")),
-        ndjson: () => defineNdjsonStub(withNdjsonSink(descriptor, "ndjson"))
+        iterator: () => defineNdjsonStub(withNdjsonSink(descriptor2, "iterator")),
+        visitor: () => defineNdjsonStub(withNdjsonSink(descriptor2, "visitor")),
+        ndjson: () => defineNdjsonStub(withNdjsonSink(descriptor2, "ndjson"))
       })
     }
   });
@@ -29913,10 +31200,10 @@ function defineNdjsonParse(schema) {
   return createDefineNdjsonParse(createNdjsonDescriptor(unwrapSchema(schema), "parse"));
 }
 function defineNdjsonStringify(schema) {
-  const descriptor = createNdjsonDescriptor(unwrapSchema(schema), "stringify");
-  const result = defineNdjsonStub(descriptor);
+  const descriptor2 = createNdjsonDescriptor(unwrapSchema(schema), "stringify");
+  const result = defineNdjsonStub(descriptor2);
   Object.defineProperty(result, "to", {
-    value: Object.freeze({ iterator: () => defineNdjsonStub(withNdjsonSink(descriptor, "iterator")) })
+    value: Object.freeze({ iterator: () => defineNdjsonStub(withNdjsonSink(descriptor2, "iterator")) })
   });
   return result;
 }
@@ -30077,7 +31364,7 @@ function defineAccess(schema) {
   return defineAccessPlan(unwrapSchema(schema), void 0, []);
 }
 function defineAccessPlan(subject, actor, rules2) {
-  const descriptor = resolveAccessDescriptor(subject, actor, rules2);
+  const descriptor2 = resolveAccessDescriptor(subject, actor, rules2);
   const stub = function aotAccessArtifact() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -30102,10 +31389,10 @@ function defineAccessPlan(subject, actor, rules2) {
     actor: { value: (next) => defineAccessPlan(subject, unwrapSchema(next), rules2) },
     can: { value: add("can") },
     cannot: { value: add("cannot") },
-    actions: { value: descriptor.actions },
-    fields: { value: (action) => unconditionalFields(descriptor, action) }
+    actions: { value: descriptor2.actions },
+    fields: { value: (action) => unconditionalFields(descriptor2, action) }
   });
-  registerArtifact(stub, { kind: "access-plan", schema: subject, descriptor });
+  registerArtifact(stub, { kind: "access-plan", schema: subject, descriptor: descriptor2 });
   return stub;
 }
 function defineRules(schema) {
@@ -30384,11 +31671,11 @@ var api2 = Object.freeze({
   parse: defineApiParse,
   authorize: defineApiAuthorize
 });
-function defineCollectionMutation(schema, descriptor, bindings) {
-  const source = emitCollectionMutationSource(descriptor);
+function defineCollectionMutation(schema, descriptor2, bindings) {
+  const source = emitCollectionMutationSource(descriptor2);
   const names = bindings.map((_, index2) => `__q${index2}`);
-  const needsEqual = descriptor.kind === "upsert" || descriptor.kind === "replaceAt" || descriptor.kind === "replaceByKey" || descriptor.kind === "replaceWhere";
-  const explanation = explainCollectionMutation(descriptor);
+  const needsEqual = descriptor2.kind === "upsert" || descriptor2.kind === "replaceAt" || descriptor2.kind === "replaceByKey" || descriptor2.kind === "replaceWhere";
+  const explanation = explainCollectionMutation(descriptor2);
   const stub = function aotCollectionMutation() {
     throw new JITError(
       "JIT_AOT_001_ARTIFACT_EXECUTED",
@@ -30399,7 +31686,7 @@ function defineCollectionMutation(schema, descriptor, bindings) {
     explain: { enumerable: false, value: () => explanation },
     [AOT_ARTIFACT]: {
       value: {
-        artifactId: collectionMutationCacheKey(descriptor),
+        artifactId: collectionMutationCacheKey(descriptor2),
         schemaId: schema.type,
         operation: { kind: "operation", op: "state.collection" }
       }
@@ -30412,7 +31699,7 @@ function defineCollectionMutation(schema, descriptor, bindings) {
     bindingNames: names,
     bindingValues: bindings,
     equalSource: needsEqual ? emitEqualSource(schema.def.element) : void 0,
-    cacheKey: collectionMutationCacheKey(descriptor),
+    cacheKey: collectionMutationCacheKey(descriptor2),
     explanation
   });
   return stub;
@@ -30672,7 +31959,7 @@ function defineCapability(kind, memberNames = [], options) {
     }
   });
 }
-function defineClassState(schema, abstract, aggregate) {
+function defineClassState(schema, abstract, aggregate, encapsulateFields = false) {
   const initial = initialEffectiveSchema(schema);
   const members = initial.members.clone();
   const capabilities = [];
@@ -30692,6 +31979,8 @@ function defineClassState(schema, abstract, aggregate) {
     lifecycle: {},
     managedFields: [],
     members,
+    fieldPolicies: [],
+    encapsulateFields,
     accessors: [],
     validationConfigured: false,
     policy: void 0
@@ -30709,9 +31998,29 @@ function isDefinedSchema(value) {
 function isDefinedSchemaInput(value) {
   return isDefinedSchema(value) || typeof value === "object" && value !== null && "schema" in value && typeof value.schema === "object";
 }
+function isDefinedClassMixin(value) {
+  return typeof value === "function" && value.__classMixin === true;
+}
+function resolveDefinedFactoryName(option, fallback, phase) {
+  if (option === void 0) return { name: fallback };
+  if (typeof option === "object") {
+    if (!isClassMemberDescriptor(option) || option.definition.kind !== "factory") {
+      throw new JITError("CLASS_FACTORY_CONFLICT", "Invalid class factory descriptor");
+    }
+    if (option.definition.phase !== phase) {
+      throw new JITError(
+        "CLASS_FACTORY_CONFLICT",
+        `A ${option.definition.phase} factory descriptor cannot configure ${phase}`
+      );
+    }
+    return { name: option.definition.name, implementation: option.definition.implementation };
+  }
+  return { name: option };
+}
 function defineClassExtensions(state3, extensions) {
   let next = state3;
-  for (const extension of extensions) {
+  for (const rawExtension of extensions) {
+    const extension = isDefinedClassMixin(rawExtension) ? rawExtension() : rawExtension;
     if (typeof extension === "object" && extension !== null && typeof extension.install === "function") {
       const capability2 = extension;
       if (next.capabilities.includes(capability2.kind)) {
@@ -30724,7 +32033,7 @@ function defineClassExtensions(state3, extensions) {
         if (next.members.has(name)) {
           throw new JITError(
             "CLASS_MEMBER_ALREADY_EXISTS",
-            `Member ${JSON.stringify(name)} already exists; use JIT.overwrite(...) explicitly`
+            `Member ${JSON.stringify(name)} already exists; use JIT.class.override(...) explicitly`
           );
         }
       }
@@ -30763,20 +32072,73 @@ function defineClassExtensions(state3, extensions) {
     }
     const members = next.members.clone();
     const methods = [...next.methods];
+    const fieldPolicies = [...next.fieldPolicies];
     let schema = next.schema;
     for (const name of Object.getOwnPropertyNames(extension)) {
-      const descriptor = Object.getOwnPropertyDescriptor(extension, name);
-      if (descriptor === void 0) continue;
-      const value = descriptor.value;
-      if (isOverwriteDescriptor(value)) {
+      const descriptor2 = Object.getOwnPropertyDescriptor(extension, name);
+      if (descriptor2 === void 0) continue;
+      const value = descriptor2.value;
+      if (isOverrideDescriptor(value)) {
         const existing = members.get(name);
         if (existing === void 0) {
           throw new JITError(
-            "CLASS_OVERWRITE_TARGET_NOT_FOUND",
-            `Class member ${JSON.stringify(name)} does not exist. JIT.overwrite() can only replace an existing member.`
+            "CLASS_OVERRIDE_TARGET_NOT_FOUND",
+            `Class member ${JSON.stringify(name)} does not exist. JIT.class.override() can only replace an existing member.`
           );
         }
-        if (isDefinedSchemaInput(value.value)) {
+        const member = isClassMemberDescriptor(value.value) ? value.value.definition : void 0;
+        if (member?.kind === "factory") {
+          throw new JITError("CLASS_FACTORY_CONFLICT", "Factory descriptors cannot override instance members");
+        }
+        if (member?.kind === "method") {
+          if (existing.kind === "field") {
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is a schema field`);
+          }
+          if (member.implementation === void 0) {
+            throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+          }
+          const replacement = { name, kind: "method", source: member.implementation };
+          const index2 = methods.findIndex((method) => method.name === name);
+          if (index2 === -1) methods.push(replacement);
+          else methods[index2] = replacement;
+          members.replace(name, { ...existing, source: "override", descriptor: { value: member.implementation } });
+        } else if (member?.kind === "accessor") {
+          const implementation = member.getter ?? member.setter;
+          if (typeof implementation === "function") {
+            const kind2 = member.getter !== void 0 ? "get" : "set";
+            const replacement = { name, kind: kind2, source: implementation };
+            const index2 = methods.findIndex((method) => method.name === name && method.kind === kind2);
+            if (index2 === -1) methods.push(replacement);
+            else methods[index2] = replacement;
+          }
+          applyDefinedFieldPolicy(fieldPolicies, name, member);
+          members.replace(name, { ...existing, source: "override" });
+        } else if (member?.kind === "field" && member.schema !== void 0) {
+          if (existing.kind !== "field") {
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
+          }
+          const replacement = unwrapSchema(member.schema);
+          const object2 = resolveWrappers(schema).base;
+          if (object2.type !== TypeName.object)
+            throw new JITError("INVALID_OPERATION", "Class schema must be an object");
+          const props = { ...object2.def.props, [name]: replacement };
+          schema = createSchema(
+            TypeName.object,
+            {
+              props,
+              unknownKeys: object2.def.unknownKeys,
+              catchall: object2.def.catchall,
+              checks: object2.def.checks
+            },
+            object2.annotations
+          );
+          const rechecked = applyManagedFieldsForDefine(schema, next.managedFields);
+          schema = rechecked;
+          const effectiveObject = resolveWrappers(schema).base;
+          const effectiveField = effectiveObject.type === TypeName.object ? effectiveObject.def.props[name] : replacement;
+          applyDefinedFieldPolicy(fieldPolicies, name, member);
+          members.replace(name, { ...existing, source: "override", schema: effectiveField });
+        } else if (isDefinedSchemaInput(value.value)) {
           if (existing.kind !== "field")
             throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
           const replacement = unwrapSchema(value.value);
@@ -30798,31 +32160,110 @@ function defineClassExtensions(state3, extensions) {
           schema = rechecked;
           const effectiveObject = resolveWrappers(schema).base;
           const effectiveField = effectiveObject.type === TypeName.object ? effectiveObject.def.props[name] : replacement;
-          members.replace(name, { ...existing, source: "overwrite", schema: effectiveField });
+          members.replace(name, { ...existing, source: "override", schema: effectiveField });
         } else {
           if (existing.kind === "field")
             throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is a schema field`);
           if (typeof value.value !== "function")
-            throw new JITError("INVALID_OPERATION", `Overwrite ${JSON.stringify(name)} must provide a method`);
+            throw new JITError("INVALID_OPERATION", `Override ${JSON.stringify(name)} must provide a method`);
           const replacement = { name, kind: "method", source: value.value };
           const index2 = methods.findIndex((method) => method.name === name);
           if (index2 === -1) methods.push(replacement);
           else methods[index2] = replacement;
-          members.replace(name, { ...existing, source: "overwrite", descriptor: { value: value.value } });
+          members.replace(name, { ...existing, source: "override", descriptor: { value: value.value } });
         }
         continue;
       }
       if (members.has(name) || DEFINED_RESERVED_MEMBER_NAMES.has(name)) {
         throw new JITError(
           "CLASS_MEMBER_ALREADY_EXISTS",
-          `Member ${JSON.stringify(name)} already exists. Use ${JSON.stringify(`${name}: JIT.overwrite(...)`)} to replace it.`
+          `Member ${JSON.stringify(name)} already exists. Use ${JSON.stringify(`${name}: JIT.class.override(...)`)} to replace it.`
         );
       }
-      if (descriptor.get === void 0 && descriptor.set === void 0 && typeof value !== "function") {
+      if (isClassMemberDescriptor(value)) {
+        const definition = value.definition;
+        if (definition.kind === "factory") {
+          throw new JITError(
+            "CLASS_FACTORY_CONFLICT",
+            "Factory descriptors belong in .factories(), not an instance extension"
+          );
+        }
+        if (definition.kind === "method") {
+          if (definition.implementation === void 0) {
+            throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+          }
+          methods.push({ name, kind: "method", source: definition.implementation });
+          addMember(members, name, "extension", "custom extension", "method");
+          continue;
+        }
+        if (definition.kind === "field" && definition.schema !== void 0) {
+          const field = unwrapSchema(definition.schema);
+          if (definition.noConstructor === true && !definedHasDefault(field)) {
+            throw new JITError(
+              "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+              `No-constructor field ${JSON.stringify(name)} requires a default initializer`
+            );
+          }
+          const object2 = resolveWrappers(schema).base;
+          if (object2.type !== TypeName.object)
+            throw new JITError("INVALID_OPERATION", "Class schema must be an object");
+          schema = createSchema(
+            TypeName.object,
+            {
+              props: { ...object2.def.props, [name]: field },
+              unknownKeys: object2.def.unknownKeys,
+              catchall: object2.def.catchall,
+              checks: object2.def.checks
+            },
+            object2.annotations
+          );
+          applyDefinedFieldPolicy(fieldPolicies, name, definition);
+          members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+          continue;
+        }
+        if (definition.kind === "accessor") {
+          const implementation = definition.getter ?? definition.setter;
+          if (typeof implementation === "function") {
+            methods.push({
+              name,
+              kind: definition.getter !== void 0 ? "get" : "set",
+              source: implementation
+            });
+          }
+          addMember(
+            members,
+            name,
+            "extension",
+            "custom extension",
+            definition.getter !== void 0 ? "getter" : "setter"
+          );
+          applyDefinedFieldPolicy(fieldPolicies, name, definition);
+          continue;
+        }
+        throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", `Class member ${JSON.stringify(name)} is invalid`);
+      }
+      if (isDefinedSchemaInput(value)) {
+        const field = unwrapSchema(value);
+        const object2 = resolveWrappers(schema).base;
+        if (object2.type !== TypeName.object) throw new JITError("INVALID_OPERATION", "Class schema must be an object");
+        schema = createSchema(
+          TypeName.object,
+          {
+            props: { ...object2.def.props, [name]: field },
+            unknownKeys: object2.def.unknownKeys,
+            catchall: object2.def.catchall,
+            checks: object2.def.checks
+          },
+          object2.annotations
+        );
+        members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+        continue;
+      }
+      if (descriptor2.get === void 0 && descriptor2.set === void 0 && typeof value !== "function") {
         throw new JITError("INVALID_OPERATION", `Class extension ${JSON.stringify(name)} must be a method or getter`);
       }
-      const kind = descriptor.get === void 0 ? descriptor.set === void 0 ? "method" : "set" : "get";
-      methods.push({ name, kind, source: descriptor.get ?? descriptor.set ?? value });
+      const kind = descriptor2.get === void 0 ? descriptor2.set === void 0 ? "method" : "set" : "get";
+      methods.push({ name, kind, source: descriptor2.get ?? descriptor2.set ?? value });
       addMember(
         members,
         name,
@@ -30831,9 +32272,42 @@ function defineClassExtensions(state3, extensions) {
         kind === "get" ? "getter" : kind === "set" ? "setter" : "method"
       );
     }
-    next = { ...next, schema, methods, members };
+    next = { ...next, schema, methods, members, fieldPolicies };
   }
   return next;
+}
+function applyDefinedFieldPolicy(policies, name, definition) {
+  const previous = policies.find((policy) => policy.name === name);
+  const visibility = definition.visibility ?? previous?.visibility ?? "public";
+  const hasAccessorIntent = definition.getter !== void 0 || definition.setter !== void 0;
+  const defaultField = definition.kind === "field" && (definition.visibility === "public" || definition.noConstructor === true) && !hasAccessorIntent;
+  const getter = definition.getter !== void 0 ? definition.getter === true || typeof definition.getter === "function" : previous?.getter ?? defaultField;
+  const setter = definition.setter !== void 0 ? definition.setter === true || typeof definition.setter === "function" : previous?.setter ?? defaultField;
+  const next = {
+    name,
+    visibility,
+    getter: getter === true || typeof getter === "function",
+    setter: setter === true || typeof setter === "function",
+    noConstructor: definition.noConstructor === true || previous?.noConstructor === true
+  };
+  const index2 = policies.findIndex((policy) => policy.name === name);
+  if (index2 === -1) policies.push(next);
+  else policies[index2] = next;
+}
+function definedHasDefault(schema) {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.default) return true;
+    if (current.type === TypeName.lazy) {
+      current = current.def.getter();
+      continue;
+    }
+    if (current.type === TypeName.optional || current.type === TypeName.nullable || current.type === TypeName.nullish || current.type === TypeName.brand || current.type === TypeName.readonly || current.type === TypeName.refine || current.type === TypeName.coerce || current.type === TypeName.pipe || current.type === TypeName.transform) {
+      current = current.def.innerType;
+      continue;
+    }
+    return false;
+  }
 }
 function applyManagedFieldsForDefine(schema, managedFields) {
   if (managedFields.length === 0) return schema;
@@ -30851,20 +32325,70 @@ function definedPolicyBase(state3) {
     hydrate: true
   };
 }
+function resolveDefinedNestedResultPolicy(schema) {
+  const candidates = [];
+  const active = /* @__PURE__ */ new Set();
+  const visit = (current, depth) => {
+    if (active.has(current)) return;
+    active.add(current);
+    if (current.type === TypeName.runtimeType) {
+      const traits = current.def.traits.factoryPolicy;
+      if (traits.configured && (traits.resultModeExplicit || traits.resultModeInherited)) {
+        candidates.push({
+          mode: traits.resultMode,
+          priority: traits.priority,
+          explicitMode: traits.resultModeExplicit,
+          depth,
+          source: String(candidates.length)
+        });
+      }
+      active.delete(current);
+      return;
+    }
+    if (current.type === TypeName.object) {
+      for (const child of Object.values(current.def.props)) visit(child, depth + 1);
+    } else {
+      for (const child of schemaChildren(current)) visit(child, depth + 1);
+    }
+    active.delete(current);
+  };
+  visit(schema, 0);
+  return selectFactoryPolicyCandidate(candidates);
+}
+function resolveDefinedPolicy(state3) {
+  if (state3.validationConfigured) return state3.policy;
+  const previous = state3.policy;
+  if (previous !== void 0 && previous.resultModeInherited !== true) return previous;
+  const nestedPolicy = resolveDefinedNestedResultPolicy(state3.schema);
+  if (nestedPolicy === void 0) {
+    if (previous === void 0) return void 0;
+    return {
+      ...previous,
+      result: "throw",
+      resultModeInherited: false
+    };
+  }
+  return {
+    ...previous ?? { result: "throw", create: true, hydrate: true },
+    result: nestedPolicy.mode,
+    errorPriority: nestedPolicy.priority,
+    resultModeInherited: true
+  };
+}
 function definedAssertions(descriptors, maxIssues, errors) {
-  const bindingValues = descriptors.flatMap((descriptor) => descriptor.bindings);
+  const bindingValues = descriptors.flatMap((descriptor2) => descriptor2.bindings);
   return {
     descriptors: Object.freeze([...descriptors]),
     source: emitAssertionSource(descriptors, maxIssues),
     bindingNames: Object.freeze(bindingValues.map((_, index2) => `__q${index2}`)),
     bindingValues: Object.freeze(bindingValues),
     failures: Object.freeze(
-      descriptors.map((descriptor, index2) => ({
-        rule: descriptor.rule,
-        field: descriptor.field,
-        code: descriptor.code,
-        message: descriptor.message,
-        priority: descriptor.priority,
+      descriptors.map((descriptor2, index2) => ({
+        rule: descriptor2.rule,
+        field: descriptor2.field,
+        code: descriptor2.code,
+        message: descriptor2.message,
+        priority: descriptor2.priority,
         ...errors[index2] === void 0 ? {} : { error: errors[index2] }
       }))
     )
@@ -30879,7 +32403,7 @@ function defineClassAssertion(state3, predicate, options) {
   if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
     throw new RangeError("priority must be a finite number");
   }
-  const descriptor = resolveAssertionDescriptor({
+  const descriptor2 = resolveAssertionDescriptor({
     condition,
     bindings: builder2.bindings,
     ...options?.rule === void 0 ? {} : { rule: options.rule },
@@ -30887,7 +32411,7 @@ function defineClassAssertion(state3, predicate, options) {
     ...options?.message === void 0 ? {} : { message: options.message },
     ...options?.priority === void 0 ? {} : { priority: options.priority }
   });
-  const descriptors = [...previous?.descriptors ?? [], descriptor];
+  const descriptors = [...previous?.descriptors ?? [], descriptor2];
   const errors = [...previous?.failures.map((failure) => failure.error) ?? [], options?.error];
   return {
     ...state3,
@@ -30916,57 +32440,100 @@ function definedLifecycleMutation(lifecycle) {
     ...deletion?.clock === void 0 ? {} : { deletionClock: deletion.clock }
   };
 }
+function removeDefinedNoConstructorFields(schema, policies) {
+  const excluded = new Set(policies.filter((policy) => policy.noConstructor).map((policy) => policy.name));
+  if (excluded.size === 0) return schema;
+  const object2 = resolveWrappers(schema).base;
+  if (object2.type !== TypeName.object) return schema;
+  return createSchema(
+    TypeName.object,
+    {
+      props: Object.fromEntries(
+        Object.entries(object2.def.props).filter(([name]) => !excluded.has(name))
+      ),
+      unknownKeys: object2.def.unknownKeys,
+      catchall: object2.def.catchall,
+      checks: object2.def.checks
+    },
+    object2.annotations
+  );
+}
 function defineRuntimeClass(state3) {
+  const policy = resolveDefinedPolicy(state3);
+  const resolvedState = policy === state3.policy ? state3 : { ...state3, policy };
   const target = function definedRuntimeClass() {
     return defineArtifactFailure();
   };
   const materialize = function materializeDefinedClass() {
     return defineArtifactFailure();
   };
-  const mutation = definedLifecycleMutation(state3.lifecycle);
+  const mutation = definedLifecycleMutation(resolvedState.lifecycle);
+  const creationSchema = removeDefinedNoConstructorFields(resolvedState.schema, resolvedState.fieldPolicies);
+  const hydrateSchema = removeDefinedNoConstructorFields(resolvedState.schema, resolvedState.fieldPolicies);
+  const assertion = policy?.assertions === void 0 ? void 0 : () => void 0;
   registerArtifact(target, {
     kind: "class",
-    declaredSchema: state3.declaredSchema,
-    schema: state3.schema,
-    abstract: state3.abstract,
+    declaredSchema: resolvedState.declaredSchema,
+    schema: resolvedState.schema,
+    creationSchema,
+    wireSchema: hydrateSchema,
+    abstract: resolvedState.abstract,
     frozen: false,
-    aggregate: state3.aggregate,
-    construction: state3.construction,
+    aggregate: resolvedState.aggregate,
+    construction: resolvedState.construction,
     representation: "object",
-    capabilities: state3.capabilities,
-    managedFields: state3.managedFields,
-    lifecycle: state3.lifecycle,
-    resolvedMembers: state3.members.entries(),
+    capabilities: resolvedState.capabilities,
+    managedFields: resolvedState.managedFields,
+    hydrateSchema,
+    encapsulateFields: resolvedState.encapsulateFields,
+    ...resolvedState.fieldPolicies.length === 0 ? {} : { fieldPolicies: resolvedState.fieldPolicies },
+    lifecycle: resolvedState.lifecycle,
+    resolvedMembers: resolvedState.members.entries(),
     ...mutation === void 0 ? {} : { mutation },
-    ...state3.methods.length === 0 ? {} : { methods: state3.methods },
-    ...state3.policy === void 0 ? {} : { policy: state3.policy },
-    factories: state3.factories,
-    accessors: state3.accessors
+    ...resolvedState.methods.length === 0 ? {} : { methods: resolvedState.methods },
+    ...policy === void 0 ? {} : { policy },
+    ...resolvedState.customFactories === void 0 ? {} : { customFactories: resolvedState.customFactories },
+    factories: resolvedState.factories,
+    accessors: resolvedState.accessors
   });
   Object.defineProperties(target, {
     schema: {
       enumerable: true,
       value: createSchema(TypeName.runtimeType, {
-        innerType: state3.schema,
+        innerType: resolvedState.schema,
         materialize,
         representation: "object",
-        identifier: false
+        identifier: false,
+        traits: {
+          representation: "object",
+          identifier: false,
+          factoryPolicy: {
+            configured: policy !== void 0,
+            resultMode: policy?.result ?? "throw",
+            resultModeExplicit: policy?.resultModeExplicit === true,
+            resultModeInherited: policy?.resultModeInherited === true,
+            errorType: void 0,
+            priority: policy?.errorPriority ?? 1e3,
+            hasAssertions: policy?.assertions !== void 0
+          }
+        },
+        assertion
       })
     },
     create: { enumerable: false, value: defineArtifactFailure },
     hydrate: { enumerable: false, value: defineArtifactFailure },
     extends: {
       enumerable: false,
-      value: (...extensions) => defineRuntimeClass(defineClassExtensions(state3, extensions))
+      value: (...extensions) => defineRuntimeClass(defineClassExtensions(resolvedState, extensions))
     },
     construction: {
       enumerable: false,
       value: (mode) => {
-        if (state3.policy !== void 0) {
+        if (policy !== void 0) {
           throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
         }
         return defineRuntimeClass({
-          ...state3,
+          ...resolvedState,
           construction: mode,
           factories: mode === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }
         });
@@ -30974,26 +32541,32 @@ function defineRuntimeClass(state3) {
     },
     factories: {
       enumerable: false,
-      value: (options) => defineRuntimeClass({
-        ...state3,
-        construction: "factory",
-        factories: {
-          create: options.create === void 0 ? "create" : options.create,
-          hydrate: options.hydrate === void 0 ? "hydrate" : options.hydrate
-        }
-      })
+      value: (options) => {
+        const create = resolveDefinedFactoryName(options.create, "create", "create");
+        const hydrate = resolveDefinedFactoryName(options.hydrate, "hydrate", "hydrate");
+        return defineRuntimeClass({
+          ...resolvedState,
+          construction: "factory",
+          factories: { create: create.name, hydrate: hydrate.name },
+          customFactories: {
+            ...resolvedState.customFactories ?? {},
+            ...create.implementation === void 0 ? {} : { create: create.implementation },
+            ...hydrate.implementation === void 0 ? {} : { hydrate: hydrate.implementation }
+          }
+        });
+      }
     },
-    accessors: { enumerable: false, value: () => defineRuntimeClass(state3) },
+    accessors: { enumerable: false, value: () => defineRuntimeClass(resolvedState) },
     identity: {
       enumerable: false,
       value: (key) => defineRuntimeClass(
-        defineClassExtensions(state3, [defineCapability(`identity:${key}`, ["identity", "sameIdentity"])])
+        defineClassExtensions(resolvedState, [defineCapability(`identity:${key}`, ["identity", "sameIdentity"])])
       )
     },
     validate: {
       enumerable: false,
       value: (options) => {
-        if (state3.validationConfigured) {
+        if (resolvedState.validationConfigured) {
           throw new JITError("INVALID_OPERATION", "Factory validation is already configured for this Runtime Class");
         }
         if (options?.maxIssues !== void 0 && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
@@ -31002,17 +32575,18 @@ function defineRuntimeClass(state3) {
         if (options?.priority !== void 0 && !Number.isFinite(options.priority)) {
           throw new RangeError("priority must be a finite number");
         }
-        const previous = definedPolicyBase(state3);
+        const previous = definedPolicyBase(resolvedState);
         return defineRuntimeClass({
-          ...state3,
+          ...resolvedState,
           validationConfigured: true,
           policy: {
             ...previous,
-            result: options?.result ?? previous.result,
+            result: options?.result === void 0 ? previous.result : normalizeFactoryReturnMode(options.result),
             create: options?.create ?? previous.create,
             hydrate: options?.hydrate ?? previous.hydrate,
+            ...options?.result === void 0 ? {} : { resultModeExplicit: true, resultModeInherited: false },
             ...options?.maxIssues === void 0 ? {} : { maxIssues: options.maxIssues },
-            ...options?.error === void 0 ? {} : { errorPriority: options.priority ?? 1e3, errorPriorityExplicit: options.priority !== void 0 },
+            ...options?.priority === void 0 ? {} : { errorPriority: options.priority, errorPriorityExplicit: true },
             ...options?.error === void 0 ? {} : { error: options.error }
           }
         });
@@ -31020,7 +32594,7 @@ function defineRuntimeClass(state3) {
     },
     assert: {
       enumerable: false,
-      value: (predicate, options) => defineRuntimeClass(defineClassAssertion(state3, predicate, options))
+      value: (predicate, options) => defineRuntimeClass(defineClassAssertion(resolvedState, predicate, options))
     }
   });
   return target;
@@ -31034,6 +32608,17 @@ var defineClass = Object.assign(
     with: defineCapability("with", ["with"]),
     diff: defineCapability("diff", ["diff"]),
     clone: defineCapability("clone", ["clone"]),
+    override,
+    public: classPublic,
+    protected: classProtected,
+    private: classPrivate,
+    getter: classGetter,
+    setter: classSetter,
+    method: classMethod,
+    factory: classFactory,
+    noConstructor: classNoConstructor,
+    mixin: classMixin,
+    json: (options) => defineCapability("class.json", [options?.method ?? "toJson"]),
     identity: (key) => defineCapability(`identity:${key}`, ["identity", "sameIdentity"])
   }
 );
@@ -31049,12 +32634,12 @@ function defineIdentityKey(schema, explicit, label) {
   if (candidates.length === 1) return candidates[0];
   if (candidates.length === 0) {
     throw new JITError(
-      "INVALID_OPERATION",
+      "DDD_IDENTITY_MISSING",
       `${label} identity must be explicit when the schema has no unique identifier`
     );
   }
   throw new JITError(
-    "INVALID_OPERATION",
+    "DDD_IDENTITY_AMBIGUOUS",
     `${label} identity must be explicit when the schema has multiple unique identifiers`
   );
 }
@@ -31084,7 +32669,7 @@ var defineEntity = ((schema, options) => {
     options?.id ?? (object2.type === TypeName.object && "id" in object2.def.props ? "id" : void 0),
     "Entity"
   );
-  const state3 = defineClassState(unwrapped, false, false);
+  const state3 = defineClassState(unwrapped, false, false, true);
   return defineRuntimeClass(
     defineClassExtensions({ ...state3, construction: "factory", factories: { create: "create", hydrate: "hydrate" } }, [
       defineClass.identity(id)
@@ -31100,7 +32685,7 @@ var defineAggregateRoot = ((schema, options) => {
     "Aggregate"
   );
   return defineRuntimeClass(
-    defineClassExtensions(defineClassState(unwrapped, false, true), [defineClass.identity(id)])
+    defineClassExtensions(defineClassState(unwrapped, false, true, true), [defineClass.identity(id)])
   );
 });
 var defineTimestamps = ((options) => defineCapability(
@@ -31118,6 +32703,9 @@ var defineSoftDelete = ((options) => defineCapability(
   options
 ));
 var defineVersioned = ((options) => defineCapability("ddd.versioned", [], options));
+function extendDefineDdd(extensions) {
+  return Object.freeze({ ...defineDdd, ...extensions });
+}
 var defineDdd = Object.freeze({
   ...ddd,
   entity: defineEntity,
@@ -31125,6 +32713,7 @@ var defineDdd = Object.freeze({
   timestamps: defineTimestamps,
   softDelete: defineSoftDelete,
   versioned: defineVersioned,
+  $extends: extendDefineDdd,
   abstract: Object.freeze({
     ...ddd.abstract,
     entity: ((schema, options) => {
@@ -31151,7 +32740,8 @@ var JIT = {
   ...factories_exports,
   class: defineClass,
   ddd: defineDdd,
-  overwrite,
+  /** @deprecated Use `JIT.class.override(...)` instead. */
+  overwrite: override,
   validate: validate2,
   json: json2,
   binary: binary3,

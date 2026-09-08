@@ -22,6 +22,16 @@ export type Update<TSchemaLike> = import("../core/ats/input.js").Update<TSchemaL
 export type Hydrate<TSchemaLike> = import("../core/ats/representations.js").Hydrate<TSchemaLike>;
 /** Resolves the transport representation of a schema or Runtime Type. */
 export type Wire<TSchemaLike> = import("../core/ats/representations.js").Wire<TSchemaLike>;
+export type {
+  ClassFactoryContext,
+  ClassFactoryMemberDescriptor,
+  ClassFieldMemberDescriptor,
+  ClassMemberDefinition,
+  ClassMemberDescriptor,
+  ClassMemberVisibility,
+  ClassMethodBuilder,
+  ClassMethodOptions,
+} from "../classes/member-descriptors.js";
 /** Format regexes behind the string checks — reusable and overridable. */
 export * as regexes from "../shared/regexes.js";
 export {
@@ -38,15 +48,31 @@ export {
 export { type ApiQuery, type ApiQueryOptions, api } from "./api.js";
 export { type CacheKeyBuilder, cacheKey } from "./cache-key.js";
 export { canonical } from "./canonical.js";
-export type { OverwriteDescriptor } from "./class.js";
+export type { OverrideDescriptor, OverwriteDescriptor } from "./class.js";
 export {
   type AbstractRuntimeClass,
+  type ClassConstructorInput,
+  type ClassCreateInput,
   type ClassFactory,
+  type ClassHydrateInput,
+  type ClassJsonCapability,
+  type ClassJsonOptions,
+  type ClassMixin,
+  type ClassMixinDefinition,
   class,
+  type DefaultRuntimeTypeFactoryPolicyTraits,
+  type DefaultRuntimeTypeTraits,
   type DomainEvent,
   type EventPublisher,
+  type FactoryEither,
+  type FactoryFailure,
+  type FactoryResultMode,
+  type FactoryResultModeInput,
+  type FactoryReturnMode,
   overwrite,
   type RuntimeClass,
+  type RuntimeTypeFactoryPolicyTraits,
+  type RuntimeTypeTraits,
   type ScalarValueObject,
   type SoftDeleteCapability,
   type SoftDeleteOptions,
@@ -79,7 +105,7 @@ export {
   type CsvStringifyPlan,
   csv,
 } from "./csv.js";
-export { ddd } from "./ddd.js";
+export { type DddExtensions, type DddNamespace, ddd } from "./ddd.js";
 export type {
   DerivedBuilder,
   DerivedComputation,

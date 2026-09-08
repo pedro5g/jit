@@ -24,11 +24,60 @@ export type AnySchema =
   | AnyWrapperSchema
   | AnySpecialSchema;
 
+/**
+ * Declaration metadata carried by a Runtime Type.
+ *
+ * The branded property is intentionally type-only. It prevents an unrelated
+ * schema with the same visible fields from being mistaken for a Runtime Type
+ * trait while keeping the runtime schema shape compact and stable.
+ */
+declare const RUNTIME_TYPE_TRAITS: unique symbol;
+
+/** Type-only marker for generated class fields outside persistence boundaries. */
+export declare const NO_CONSTRUCTOR_FIELD_MARKER: unique symbol;
+
+export interface RuntimeTypeFactoryPolicyTraits<
+  TResult extends string = string,
+  TConfigured extends boolean = boolean,
+  TError = unknown,
+  TPriority extends number = number,
+> {
+  readonly configured: TConfigured;
+  readonly resultMode: TResult;
+  readonly resultModeExplicit: boolean;
+  readonly resultModeInherited: boolean;
+  readonly errorType: TError;
+  readonly priority: TPriority;
+  readonly hasAssertions: boolean;
+}
+
+export interface DefaultRuntimeTypeFactoryPolicyTraits
+  extends RuntimeTypeFactoryPolicyTraits<"throw", false, unknown, 1000> {
+  readonly resultModeExplicit: false;
+  readonly resultModeInherited: false;
+  readonly priority: 1000;
+  readonly hasAssertions: false;
+}
+
+export interface RuntimeTypeTraits<
+  TRepresentation extends "object" | "value" = "object" | "value",
+  TIdentifier extends boolean = boolean,
+  TFactoryPolicy extends RuntimeTypeFactoryPolicyTraits = RuntimeTypeFactoryPolicyTraits,
+> {
+  readonly [RUNTIME_TYPE_TRAITS]: true;
+  readonly representation: TRepresentation;
+  readonly identifier: TIdentifier;
+  readonly factoryPolicy: TFactoryPolicy;
+}
+
+export type DefaultRuntimeTypeTraits = RuntimeTypeTraits<"object", false, DefaultRuntimeTypeFactoryPolicyTraits>;
+
 /** A schema-backed runtime constructor used when a generated class is nested in another schema. */
 export interface RuntimeTypeDef<
   TInner extends AnyTypeSchema = AnyTypeSchema,
   TRepresentation extends "object" | "value" = "object" | "value",
   TIdentifier extends boolean = boolean,
+  TTraits extends RuntimeTypeTraits<TRepresentation, TIdentifier> = RuntimeTypeTraits<TRepresentation, TIdentifier>,
 > extends InnerTypeDef<TInner> {
   /** Internal validated flag avoids a second parse when validation already built the state. */
   readonly materialize: new (
@@ -37,6 +86,20 @@ export interface RuntimeTypeDef<
   ) => unknown;
   readonly representation: TRepresentation;
   readonly identifier: TIdentifier;
+  readonly traits: TTraits;
+  /** Declaration-time assertion guard used by fused parent validation. */
+  readonly assertion:
+    | ((value: unknown) =>
+        | {
+            readonly issues: readonly {
+              readonly path: readonly PropertyKey[];
+              readonly code: string;
+              readonly expected: string;
+              readonly message: string;
+            }[];
+          }
+        | undefined)
+    | undefined;
 }
 
 export interface RuntimeTypeSchema<
@@ -44,10 +107,11 @@ export interface RuntimeTypeSchema<
   TInstance = TypeofSchema<TInner>,
   TRepresentation extends "object" | "value" = "object" | "value",
   TIdentifier extends boolean = boolean,
+  TTraits extends RuntimeTypeTraits<TRepresentation, TIdentifier> = RuntimeTypeTraits<TRepresentation, TIdentifier>,
 > {
   readonly type: "runtimeType";
   readonly _type: TInstance;
-  readonly def: Readonly<RuntimeTypeDef<TInner, TRepresentation, TIdentifier>>;
+  readonly def: Readonly<RuntimeTypeDef<TInner, TRepresentation, TIdentifier, TTraits>>;
   readonly annotations: unknown;
 }
 

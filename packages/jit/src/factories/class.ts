@@ -9,8 +9,23 @@ import {
   resolveEffectiveObjectSchema,
   validateManagedFields,
 } from "../classes/effective-schema.js";
+import {
+  type ClassFactoryMemberDescriptor,
+  type ClassMemberDefinition,
+  type ClassMemberDescriptor,
+  type ClassMemberVisibility,
+  classFactory as classFactoryDescriptor,
+  classGetter,
+  classMethod,
+  classNoConstructor,
+  classPrivate,
+  classProtected,
+  classPublic,
+  classSetter,
+  isClassMemberDescriptor,
+} from "../classes/member-descriptors.js";
 import type { ResolvedMemberTable } from "../classes/members.js";
-import { isOverwriteDescriptor, type OverwriteDescriptor } from "../classes/overwrite.js";
+import { isOverrideDescriptor, type OverrideDescriptor, override } from "../classes/override.js";
 import { buildAggregateMutationPlan, emitAggregateMutationBody } from "../compiler/aggregate-mutation.js";
 import {
   type AssertionDescriptor,
@@ -30,6 +45,7 @@ import { compileUpdate, type DiffChange, type UpdatePatch } from "../compiler/in
 import { resolveWrappers } from "../compiler/resolvers/resolve-wrappers.js";
 import { isPrimitiveLikeSchema } from "../compiler/schema-nodes.js";
 import { schemaChildren } from "../compiler/schema-recursion.js";
+import { compileSerializeWithRootAccess } from "../compiler/serialize.js";
 import { emitPropertyAccess } from "../compiler/source/access.js";
 import {
   compileHydrator,
@@ -42,23 +58,108 @@ import type * as ATS from "../core/ats/index.js";
 import { createSchema, TypeName } from "../core/ats/index.js";
 import type { Input, Update as SchemaUpdate } from "../core/ats/input.js";
 import type { Hydrate } from "../core/ats/representations.js";
+import type { NO_CONSTRUCTOR_FIELD_MARKER } from "../core/ats/type-schema.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
-import { type DomainAssertionError, JITError, JITValidationError, type ValidationIssue } from "../errors/index.js";
+import type { CompareNumericLiteral } from "../core/builder/types.js";
+import {
+  type FactoryPolicyCandidate,
+  type FactoryReturnMode,
+  type FactoryReturnModeInput,
+  normalizeFactoryReturnMode,
+  selectFactoryPolicyCandidate,
+} from "../core/factory-policy.js";
+import { DomainAssertionError, JITError, JITValidationError, type ValidationIssue } from "../errors/index.js";
 import { type CompiledArtifact, getArtifact, registerArtifact } from "../runtime/artifact-registry.js";
+import { Object_hasOwn } from "../shared/utils.js";
 import * as Transform from "../transforms/index.js";
 import { createConditionBuilder, type QueryConditionBuilder } from "./query.js";
 
 const CLASS_TARGET = Symbol("jit.class.target");
 const INTERNAL_CONSTRUCT = Symbol("jit.class.construct");
+const TRUSTED_MATERIALIZER = "__jitMaterialize";
 export type ConstructionMode = "constructor" | "factory";
 
+export type {
+  ClassFactoryMemberDescriptor,
+  ClassFieldMemberDescriptor,
+  ClassMemberDefinition,
+  ClassMemberDescriptor,
+  ClassMemberVisibility,
+  ClassMethodBuilder,
+  ClassMethodOptions,
+} from "../classes/member-descriptors.js";
+export type {
+  DefaultRuntimeTypeFactoryPolicyTraits,
+  DefaultRuntimeTypeTraits,
+  RuntimeTypeFactoryPolicyTraits,
+  RuntimeTypeTraits,
+} from "../core/ats/type-schema.js";
+
 /** How a factory reports a rejected input. Fixed at declaration, never per call. */
-export type FactoryResultMode = "throw" | "result" | "tuple";
+export type { FactoryReturnMode };
+/** @deprecated Use FactoryReturnMode. */
+export type FactoryResultMode = FactoryReturnMode;
+/** Input spelling retained only as a migration alias; plans use `either`. */
+export type FactoryResultModeInput = FactoryReturnModeInput;
+
+const FACTORY_FAILURE: unique symbol = Symbol.for("jit.factory.failure") as never;
+
+export interface FactoryFailure<TError> {
+  readonly [FACTORY_FAILURE]: true;
+  readonly ok: false;
+  readonly error: TError;
+}
+
+export interface ClassJsonOptions {
+  readonly method?: string;
+}
+
+type ClassJsonMethods<TOptions extends ClassJsonOptions> = NamedMethod<
+  TOptions["method"] extends string ? TOptions["method"] : "toJson",
+  () => string
+>;
+
+export interface ClassJsonCapability<TOptions extends ClassJsonOptions = ClassJsonOptions>
+  extends ClassCapability<ClassJsonMethods<TOptions>> {
+  readonly kind: "class.json";
+  readonly __options?: TOptions;
+}
+
+export type FactoryEither<TValue, TError> = TValue | FactoryFailure<TError>;
+
+type ClassRuntimeTraits = ATS.DefaultRuntimeTypeTraits;
+type FactoryTraits<
+  TTraits extends ATS.RuntimeTypeTraits,
+  TMode extends FactoryReturnMode,
+  TError,
+  TConfigured extends boolean,
+  TAssertions extends boolean = false,
+  TModeExplicit extends boolean = false,
+  TModeInherited extends boolean = false,
+  TPriority extends number = TTraits["factoryPolicy"]["priority"],
+> = ATS.RuntimeTypeTraits<
+  TTraits["representation"],
+  TTraits["identifier"],
+  ATS.RuntimeTypeFactoryPolicyTraits<TMode, TConfigured, TError, TPriority> & {
+    readonly resultModeExplicit: TModeExplicit;
+    readonly resultModeInherited: TModeInherited;
+    readonly hasAssertions: TAssertions;
+  }
+>;
+
+type AssertionTraits<TTraits extends ATS.RuntimeTypeTraits, TError> = ATS.RuntimeTypeTraits<
+  TTraits["representation"],
+  TTraits["identifier"],
+  Omit<TTraits["factoryPolicy"], "errorType" | "hasAssertions"> & {
+    readonly errorType: TError;
+    readonly hasAssertions: true;
+  }
+>;
 
 /** The failure channel and the phases it covers. */
 export interface FactoryValidationOptions {
-  readonly result?: FactoryResultMode;
+  readonly result?: FactoryReturnModeInput;
   /** Stops diagnostic validation as soon as this many issues have been emitted. */
   readonly maxIssues?: number;
   /** Builds the error a rejected input produces; defaults to `JITValidationError`. */
@@ -67,6 +168,10 @@ export interface FactoryValidationOptions {
   readonly priority?: number;
   readonly create?: boolean;
   readonly hydrate?: boolean;
+}
+
+export interface FactoryConstructionContext<TInstance = unknown> {
+  readonly construct: (state: unknown) => TInstance;
 }
 
 export interface AssertionOptions {
@@ -82,8 +187,8 @@ export interface AssertionOptions {
 }
 
 /** A successful or rejected factory call, in the shape the policy declared. */
-export type FactoryOutcome<TInstance, TMode extends FactoryResultMode, TError> = TMode extends "result"
-  ? { readonly ok: true; readonly value: TInstance } | { readonly ok: false; readonly error: TError }
+export type FactoryOutcome<TInstance, TMode, TError> = TMode extends "either"
+  ? FactoryEither<TInstance, TError>
   : TMode extends "tuple"
     ? readonly [TError, null] | readonly [null, TInstance]
     : TInstance;
@@ -99,20 +204,32 @@ interface NestedErrorCandidate {
   readonly order: number;
   readonly path: readonly (string | number)[];
   readonly factory: (issues: readonly ValidationIssue[]) => unknown;
+  /** True when the candidate closes over an application callback. */
+  readonly runtimeBinding: boolean;
+  /** Reconstructive metadata for the built-in assertion error. */
+  readonly assertion?: {
+    readonly rule: string | undefined;
+    readonly field: string | undefined;
+    readonly message: string;
+  };
 }
 
 interface FactoryPolicyState {
-  mode: FactoryResultMode;
+  mode: FactoryReturnMode;
+  resultModeExplicit: boolean;
+  inheritedResultMode: boolean;
   error: ((issues: readonly ValidationIssue[]) => unknown) | undefined;
   create: boolean;
   hydrate: boolean;
   configured: boolean;
   validationConfigured: boolean;
   maxIssues: number | undefined;
+  modePriority: number;
   errorPriority: number;
   errorPriorityExplicit: boolean;
   assertions: AssertionDescriptor[];
   assertionErrors: (AssertionErrorFactory | undefined)[];
+  assertionGuard: ((value: unknown) => AssertionOutcome | undefined) | undefined;
   assert: ((value: unknown) => unknown) | undefined;
   nestedErrors: readonly NestedErrorCandidate[];
 }
@@ -120,19 +237,53 @@ interface FactoryPolicyState {
 function createPolicyState(): FactoryPolicyState {
   return {
     mode: "throw",
+    resultModeExplicit: false,
+    inheritedResultMode: false,
     error: undefined,
     create: true,
     hydrate: true,
     configured: false,
     validationConfigured: false,
     maxIssues: undefined,
+    modePriority: 1000,
     errorPriority: 1000,
     errorPriorityExplicit: false,
     assertions: [],
     assertionErrors: [],
+    assertionGuard: undefined,
     assert: undefined,
     nestedErrors: [],
   };
+}
+
+function runtimeTypeTraits<TRepresentation extends "object" | "value", TIdentifier extends boolean>(
+  representation: TRepresentation,
+  identifier: TIdentifier,
+  policy: Pick<
+    FactoryPolicyState,
+    | "configured"
+    | "mode"
+    | "validationConfigured"
+    | "resultModeExplicit"
+    | "inheritedResultMode"
+    | "modePriority"
+    | "errorPriority"
+    | "assertions"
+  >
+): ATS.RuntimeTypeTraits<TRepresentation, TIdentifier> {
+  return Object.freeze({
+    representation,
+    identifier,
+    factoryPolicy: Object.freeze({
+      configured: policy.configured,
+      resultMode: policy.mode,
+      resultModeExplicit: policy.validationConfigured && policy.resultModeExplicit,
+      resultModeInherited: policy.inheritedResultMode,
+      errorType: undefined,
+      priority: policy.modePriority,
+      hasAssertions: policy.assertions.length > 0,
+    }),
+  }) as ATS.RuntimeTypeTraits<TRepresentation, TIdentifier>;
 }
 
 /**
@@ -144,6 +295,7 @@ function createPolicyState(): FactoryPolicyState {
  */
 function compileAssertions(policy: FactoryPolicyState): void {
   if (policy.assertions.length === 0) {
+    policy.assertionGuard = undefined;
     policy.assert = undefined;
     return;
   }
@@ -159,6 +311,7 @@ function compileAssertions(policy: FactoryPolicyState): void {
     ...issueNames,
     `${emitAssertionSource(policy.assertions, policy.maxIssues)}\nreturn __assert;`
   )(...bindings, ...failures, ...issues) as (value: unknown) => AssertionOutcome | undefined;
+  policy.assertionGuard = guard;
 
   policy.assert = (value: unknown) => {
     const outcome = guard(value);
@@ -181,15 +334,24 @@ function compileAssertions(policy: FactoryPolicyState): void {
 }
 
 function policySuccess(policy: FactoryPolicyState, value: unknown): unknown {
-  if (policy.mode === "result") return { ok: true, value };
+  if (policy.mode === "either") return value;
   if (policy.mode === "tuple") return [null, value];
   return value;
 }
 
 function policyFailure(policy: FactoryPolicyState, error: unknown): never | unknown {
-  if (policy.mode === "result") return { ok: false, error };
+  if (policy.mode === "either") {
+    return Object.defineProperties({ ok: false, error }, { [FACTORY_FAILURE]: { enumerable: false, value: true } });
+  }
   if (policy.mode === "tuple") return [error, null];
   throw error;
+}
+
+export function isFailure<TError>(value: unknown): value is FactoryFailure<TError> {
+  return (
+    Object_hasOwn(value, FACTORY_FAILURE) &&
+    (value as { readonly [FACTORY_FAILURE]?: unknown })[FACTORY_FAILURE] === true
+  );
 }
 
 function policyError(policy: FactoryPolicyState, issues: readonly ValidationIssue[]): unknown {
@@ -243,7 +405,39 @@ function collectNestedErrorCandidates(schema: ATS.AnyTypeSchema): readonly Neste
           order: order++,
           path,
           factory: nested.policy.error as (issues: readonly ValidationIssue[]) => unknown,
+          runtimeBinding: true,
         });
+      }
+      if (nested?.kind === "class") {
+        for (const failure of nested.policy?.assertions?.failures ?? []) {
+          const assertionPath = failure.field === undefined ? path : [...path, failure.field];
+          candidates.push({
+            priority: failure.priority,
+            depth: depth + 1,
+            order: order++,
+            path: assertionPath,
+            runtimeBinding: typeof failure.error === "function",
+            ...(typeof failure.error === "function"
+              ? {}
+              : {
+                  assertion: {
+                    rule: failure.rule,
+                    field: failure.field,
+                    message: failure.message,
+                  },
+                }),
+            factory:
+              typeof failure.error === "function"
+                ? () =>
+                    (failure.error as (value: unknown, descriptor: unknown) => unknown)(undefined, failure.descriptor)
+                : (issues) =>
+                    new DomainAssertionError(failure.message, {
+                      ...(failure.rule === undefined ? {} : { rule: failure.rule }),
+                      ...(failure.field === undefined ? {} : { field: failure.field }),
+                      issues,
+                    }),
+          });
+        }
       }
     }
 
@@ -300,6 +494,8 @@ function policyArtifact(policy: FactoryPolicyState): {
               order: candidate.order,
               path: candidate.path,
               error: candidate.factory,
+              runtimeBinding: candidate.runtimeBinding,
+              ...(candidate.assertion === undefined ? {} : { assertion: candidate.assertion }),
             })),
           }),
       ...(policy.assertions.length === 0
@@ -315,6 +511,7 @@ function policyArtifact(policy: FactoryPolicyState): {
                 code: descriptor.code,
                 message: descriptor.message,
                 priority: descriptor.priority,
+                descriptor,
                 ...(policy.assertionErrors[index] === undefined ? {} : { error: policy.assertionErrors[index] }),
               })),
             },
@@ -342,12 +539,17 @@ function applyValidationPolicy(policy: FactoryPolicyState, options: FactoryValid
   }
   policy.configured = true;
   policy.validationConfigured = true;
-  if (options?.result !== undefined) policy.mode = options.result;
+  if (options?.result !== undefined) {
+    policy.mode = normalizeFactoryReturnMode(options.result);
+    policy.resultModeExplicit = true;
+    policy.inheritedResultMode = false;
+  }
   if (options?.error !== undefined) policy.error = options.error;
   if (options?.create !== undefined) policy.create = options.create;
   if (options?.hydrate !== undefined) policy.hydrate = options.hydrate;
   if (options?.maxIssues !== undefined) policy.maxIssues = options.maxIssues;
   if (options?.priority !== undefined) {
+    policy.modePriority = options.priority;
     policy.errorPriority = options.priority;
     policy.errorPriorityExplicit = true;
   }
@@ -400,36 +602,67 @@ export type ClassExtensionArgs<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TExtensions extends readonly AnyClassExtension[],
-> = {
-  [TKey in keyof TExtensions]: TExtensions[TKey] extends AnyClassCapability
-    ? NonConflictingCapability<TExtensions[TKey], TSchema, TInstance>
-    : TExtensions[TKey] &
-        // The built-ins named in the same call are part of `this`, so a method
-        // may use a capability it was declared beside.
-        ThisType<TInstance & CapabilitiesInCall<TSchema, TInstance, TExtensions>> & {
-          readonly [TName in keyof TExtensions[TKey]]?: TExtensions[TKey][TName] extends OverwriteDescriptor
-            ? TName extends keyof (TInstance & CapabilitiesInCall<TSchema, TInstance, TExtensions>)
-              ? unknown
-              : never
-            : TName extends keyof TInstance
-              ? never
-              : unknown;
-        };
-};
+> = ResolveClassExtensionArgs<TSchema, TInstance, TExtensions>;
 
-type CapabilitiesInCall<
+type ResolveClassExtensionArgs<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TExtensions extends readonly AnyClassExtension[],
-> = UnionToIntersection<
-  TExtensions[number] extends infer TExtension
-    ? TExtension extends AnyClassCapability
-      ? MethodsForCapability<TExtension, TSchema, TInstance>
-      : never
-    : never
->;
+> = number extends TExtensions["length"]
+  ? ClassExtensionArgument<TSchema, TInstance, TExtensions[number]>[]
+  : TExtensions extends readonly [
+        infer THead extends AnyClassExtension,
+        ...infer TTail extends readonly AnyClassExtension[],
+      ]
+    ? [
+        ClassExtensionArgument<TSchema, TInstance, THead>,
+        ...ResolveClassExtensionArgs<
+          ApplyClassExtensionSchema<TSchema, THead>,
+          ExtendedInstance<TSchema, TInstance, [THead]>,
+          TTail
+        >,
+      ]
+    : [];
 
-type AnyClassExtension = AnyClassCapability | ClassMethodsInput;
+type ClassExtensionArgument<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TExtension extends AnyClassExtension,
+> = TExtension extends AnyClassCapability
+  ? NonConflictingCapability<TExtension, TSchema, TInstance>
+  : TExtension extends ClassMixin
+    ? MixinRequirementsMet<TSchema, TExtension> extends true
+      ? TExtension
+      : never
+    : TExtension &
+        ThisType<
+          MutableSurface<TInstance> &
+            ATS.TypeofSchema<AddSchemaFields<ApplySchemaOverride<TSchema, TExtension>, TExtension>> &
+            MethodsForExtension<TExtension, TSchema, TInstance>
+        > &
+        Partial<Record<Extract<NonOverrideMemberKeys<TExtension>, keyof TInstance>, never>> &
+        Partial<Record<Exclude<ExtensionOverrideMemberKeys<TExtension>, keyof TInstance>, never>>;
+
+type NonOverrideMemberKeys<TExtension> =
+  TExtension extends Record<string, unknown>
+    ? {
+        [TName in keyof TExtension]: IsOverrideValue<TExtension[TName]> extends true ? never : TName;
+      }[keyof TExtension]
+    : never;
+type ExtensionOverrideMemberKeys<TExtension> =
+  TExtension extends Record<string, unknown>
+    ? {
+        [TName in keyof TExtension]: IsOverrideValue<TExtension[TName]> extends true ? TName : never;
+      }[keyof TExtension]
+    : never;
+type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
+type IsOverrideValue<TValue> = IsAny<TValue> extends true ? false : TValue extends OverrideDescriptor ? true : false;
+
+type AnyClassExtension = AnyClassCapability | ClassMethodsInput | ClassMixin;
+
+type MixinRequirements<TExtension> = TExtension extends ClassMixin<ClassMethodsInput, infer TRequires> ? TRequires : {};
+type MixinRequirementsMet<TSchema extends ATS.AnyTypeSchema, TExtension> =
+  Exclude<SchemaFieldKeys<MixinRequirements<TExtension>>, keyof ATS.TypeofSchema<TSchema>> extends never ? true : false;
 
 /** Structural capabilities may inject their canonical fields. */
 type CompatibleCapability<TCapability extends AnyClassCapability, _TSchema extends ATS.AnyTypeSchema> = TCapability;
@@ -466,19 +699,43 @@ type NonConflictingCapability<TCapability extends AnyClassCapability, TSchema ex
       : never;
 
 /** Methods an extension contributes, keeping declared signatures intact. */
-type MethodsForExtension<
-  TExtension,
-  TSchema extends ATS.AnyTypeSchema,
-  TInstance,
-> = TExtension extends AnyClassCapability
-  ? MethodsForCapability<TExtension, TSchema, TInstance>
-  : {
-      -readonly [TKey in keyof TExtension as TExtension[TKey] extends OverwriteDescriptor<infer TValue>
-        ? IsSchemaInput<TValue> extends true
-          ? never
-          : TKey
-        : TKey]: TExtension[TKey] extends OverwriteDescriptor<infer TValue> ? TValue : TExtension[TKey];
-    };
+type MethodsForExtension<TExtension, TSchema extends ATS.AnyTypeSchema, TInstance> =
+  TExtension extends ClassMixin<infer TOutput>
+    ? MethodsForExtension<TOutput, TSchema, TInstance>
+    : [TExtension] extends [never]
+      ? {}
+      : TExtension extends AnyClassCapability
+        ? MethodsForCapability<TExtension, TSchema, TInstance>
+        : TExtension extends Record<string, unknown>
+          ? {
+              -readonly [TKey in keyof TExtension as IsOverrideValue<TExtension[TKey]> extends true
+                ? IsSchemaFieldInput<
+                    TExtension[TKey] extends OverrideDescriptor<infer TValue> ? TValue : never
+                  > extends true
+                  ? never
+                  : TKey
+                : [IsHiddenClassMember<TExtension[TKey]>] extends [true]
+                  ? never
+                  : IsSchemaFieldInput<TExtension[TKey]> extends true
+                    ? never
+                    : TKey]: ExtensionMemberType<TExtension[TKey]>;
+            }
+          : {};
+
+type ExtensionMemberType<TValue> =
+  TValue extends OverrideDescriptor<infer TInner>
+    ? ExtensionMemberType<TInner>
+    : TValue extends ClassMemberDescriptor<infer TDefinition>
+      ? TDefinition extends { readonly kind: "method"; readonly implementation?: infer TImplementation }
+        ? TImplementation extends (...args: infer TArgs) => infer TResult
+          ? (...args: TArgs) => TResult
+          : never
+        : TDefinition extends { readonly kind: "accessor"; readonly getter?: infer TGetter }
+          ? TGetter extends (...args: never[]) => infer TResult
+            ? TResult
+            : unknown
+          : never
+      : TValue;
 
 type ExtensionMethods<
   TSchema extends ATS.AnyTypeSchema,
@@ -502,12 +759,54 @@ type UnionToIntersection<TValue> = (TValue extends unknown ? (value: TValue) => 
   ? TIntersection
   : never;
 
-type IsSchemaInput<TValue> = TValue extends ATS.AnyTypeSchema | { readonly schema: ATS.AnyTypeSchema } ? true : false;
-type SchemaFromInput<TValue> = TValue extends { readonly schema: infer TSchema extends ATS.AnyTypeSchema }
-  ? TSchema
-  : TValue extends ATS.AnyTypeSchema
-    ? TValue
+type IsSchemaInput<TValue> =
+  IsAny<TValue> extends true
+    ? false
+    : TValue extends ATS.AnyTypeSchema | { readonly schema: ATS.AnyTypeSchema }
+      ? true
+      : false;
+type MemberDefinition<TValue> =
+  IsAny<TValue> extends true ? never : TValue extends ClassMemberDescriptor<infer TDefinition> ? TDefinition : never;
+type IsHiddenClassMember<TValue> =
+  TValue extends OverrideDescriptor<infer TInner>
+    ? IsHiddenClassMember<TInner>
+    : [MemberDefinition<TValue>] extends [never]
+      ? false
+      : [MemberDefinition<TValue>] extends [{ readonly visibility: "protected" | "private" }]
+        ? true
+        : false;
+type DescriptorSchema<TValue> =
+  IsAny<TValue> extends true
+    ? never
+    : MemberDefinition<TValue> extends infer TDefinition
+      ? TDefinition extends { readonly kind: "field"; readonly schema?: infer TSchema }
+        ? TSchema extends SchemaInput<infer TInner extends ATS.AnyTypeSchema>
+          ? TDefinition extends { readonly noConstructor: true }
+            ? TInner & { readonly [NO_CONSTRUCTOR_FIELD_MARKER]: true }
+            : TInner
+          : never
+        : never
+      : never;
+type IsDescriptorField<TValue> =
+  IsAny<TValue> extends true ? false : [DescriptorSchema<TValue>] extends [never] ? false : true;
+type IsSchemaFieldInput<TValue> = IsDescriptorField<TValue> extends true ? true : IsSchemaInput<TValue>;
+type SchemaFromInput<TValue> = [DescriptorSchema<TValue>] extends [never]
+  ? TValue extends { readonly schema: infer TSchema extends ATS.AnyTypeSchema }
+    ? TSchema
+    : TValue extends ATS.AnyTypeSchema
+      ? TValue
+      : never
+  : DescriptorSchema<TValue>;
+type SchemaFieldKeys<TExtension> =
+  TExtension extends Record<string, unknown>
+    ? {
+        [TKey in keyof TExtension]: IsSchemaFieldInput<TExtension[TKey]> extends true ? TKey : never;
+      }[keyof TExtension]
     : never;
+type SchemaFieldShape<TExtension> =
+  TExtension extends Record<string, unknown>
+    ? { [TKey in SchemaFieldKeys<TExtension>]: SchemaFromInput<TExtension[TKey]> }
+    : {};
 type PreservedManagedMarker<TPrevious> = TPrevious extends {
   readonly [TKey in typeof TIMESTAMPS_FIELD_MARKER]: true;
 }
@@ -517,27 +816,33 @@ type PreservedManagedMarker<TPrevious> = TPrevious extends {
     : TPrevious extends { readonly [TKey in typeof VERSIONED_FIELD_MARKER]: true }
       ? { readonly [TKey in typeof VERSIONED_FIELD_MARKER]: true }
       : {};
-type SchemaOverwriteKeys<TExtension> =
+type SchemaOverrideKeys<TExtension> =
   TExtension extends Record<string, unknown>
     ? {
-        [TKey in keyof TExtension]: TExtension[TKey] extends OverwriteDescriptor<infer TValue>
-          ? IsSchemaInput<TValue> extends true
-            ? TKey
+        [TKey in keyof TExtension]: IsOverrideValue<TExtension[TKey]> extends true
+          ? TExtension[TKey] extends OverrideDescriptor<infer TValue>
+            ? IsSchemaFieldInput<TValue> extends true
+              ? TKey
+              : never
             : never
           : never;
       }[keyof TExtension]
     : never;
-type ApplySchemaOverwrite<TSchema extends ATS.AnyTypeSchema, TExtension> =
+type ApplySchemaOverride<TSchema extends ATS.AnyTypeSchema, TExtension> =
   TSchema extends ATS.ObjectSchema<infer TShape, infer TUnknownKeys, infer TCatchall>
     ? TExtension extends Record<string, unknown>
       ? ATS.ObjectSchema<
-          Omit<TShape, SchemaOverwriteKeys<TExtension>> & {
-            [TKey in keyof TExtension as TExtension[TKey] extends OverwriteDescriptor<infer TValue>
-              ? IsSchemaInput<TValue> extends true
-                ? TKey
+          Omit<TShape, SchemaOverrideKeys<TExtension>> & {
+            [TKey in keyof TExtension as IsOverrideValue<TExtension[TKey]> extends true
+              ? TExtension[TKey] extends OverrideDescriptor<infer TValue>
+                ? IsSchemaFieldInput<TValue> extends true
+                  ? TKey
+                  : never
                 : never
-              : never]: TExtension[TKey] extends OverwriteDescriptor<infer TValue>
-              ? SchemaFromInput<TValue> & PreservedManagedMarker<TShape[TKey & keyof TShape]>
+              : never]: IsOverrideValue<TExtension[TKey]> extends true
+              ? TExtension[TKey] extends OverrideDescriptor<infer TValue>
+                ? SchemaFromInput<TValue> & PreservedManagedMarker<TShape[TKey & keyof TShape]>
+                : never
               : never;
           },
           TUnknownKeys,
@@ -545,10 +850,17 @@ type ApplySchemaOverwrite<TSchema extends ATS.AnyTypeSchema, TExtension> =
         >
       : TSchema
     : TSchema;
-// The runtime node is still `readonly`, but the public materialized value is
-// the ordinary Date/number representation. `ReadonlySchema` would turn Date
-// into `Readonly<Date>`, which is a needless type-level mutation of a scalar
-// lifecycle value.
+type AddSchemaFields<TSchema extends ATS.AnyTypeSchema, TExtension> =
+  TSchema extends ATS.ObjectSchema<infer TShape, infer TUnknownKeys, infer TCatchall>
+    ? ATS.ObjectSchema<
+        Omit<TShape, keyof SchemaFieldShape<TExtension>> & SchemaFieldShape<TExtension>,
+        TUnknownKeys,
+        TCatchall
+      >
+    : TSchema;
+// The public value remains Date/number rather than `Readonly<Date>`. The
+// inner type is retained for the declaration-time managed-field marker; the
+// create boundary makes these fields optional explicitly below.
 type ManagedReadonlySchema<TInner extends ATS.AnyTypeSchema> = ATS.BaseSchema<
   ATS.TypeofSchema<TInner>,
   "readonly",
@@ -578,11 +890,33 @@ type IsManagedFieldSchema<TSchema> = TSchema extends {
 type ManagedInputKeys<TShape extends ATS.SchemaShape> = {
   [TKey in keyof TShape]: IsManagedFieldSchema<TShape[TKey]> extends true ? TKey : never;
 }[keyof TShape];
-/** Create boundaries omit lifecycle state; hydrate boundaries keep it complete. */
-type ClassInput<TSchema extends ATS.AnyTypeSchema> =
-  TSchema extends ATS.ObjectSchema<infer TShape, infer TUnknownKeys, infer TCatchall>
-    ? Input<ATS.ObjectSchema<Omit<TShape, ManagedInputKeys<TShape>>, TUnknownKeys, TCatchall>>
+type IsNoConstructorField<TSchema> = TSchema extends {
+  readonly [TKey in typeof NO_CONSTRUCTOR_FIELD_MARKER]: true;
+}
+  ? true
+  : false;
+type BoundaryExcludedKeys<TShape extends ATS.SchemaShape> = {
+  [TKey in keyof TShape]: IsNoConstructorField<TShape[TKey]> extends true ? TKey : never;
+}[keyof TShape];
+type CreateInputForSchema<TSchema extends ATS.AnyTypeSchema> =
+  TSchema extends ATS.ObjectSchema<infer TShape>
+    ? Omit<Input<TSchema>, ManagedInputKeys<TShape> | BoundaryExcludedKeys<TShape>> &
+        Partial<Pick<Input<TSchema>, Extract<ManagedInputKeys<TShape>, keyof Input<TSchema>>>>
     : Input<TSchema>;
+
+/** Create boundaries resolve defaults while retaining optional managed fields. */
+export type ClassCreateInput<TSchema extends ATS.AnyTypeSchema> = CreateInputForSchema<TSchema>;
+
+/** Hydration is a complete persisted boundary and never resolves defaults. */
+export type ClassHydrateInput<TSchema extends ATS.AnyTypeSchema> =
+  TSchema extends ATS.ObjectSchema<infer TShape>
+    ? Omit<Hydrate<TSchema>, BoundaryExcludedKeys<TShape>>
+    : Hydrate<TSchema>;
+
+/** Constructor input is a creation boundary, excluding generated fields. */
+export type ClassConstructorInput<TSchema extends ATS.AnyTypeSchema> =
+  TSchema extends ATS.ObjectSchema<infer TShape> ? Omit<Input<TSchema>, BoundaryExcludedKeys<TShape>> : Input<TSchema>;
+
 type CapabilityFieldShape<TCapability> =
   TCapability extends TimestampCapability<infer TOptions>
     ? {
@@ -603,24 +937,29 @@ type AddCapabilitySchema<TSchema extends ATS.AnyTypeSchema, TCapability> =
         TCatchall
       >
     : TSchema;
-type ApplyClassExtensionSchema<TSchema extends ATS.AnyTypeSchema, TExtension> = TExtension extends AnyClassCapability
-  ? AddCapabilitySchema<TSchema, TExtension>
-  : ApplySchemaOverwrite<TSchema, TExtension>;
-type ApplySchemaOverwrites<
+type ApplyClassExtensionSchema<TSchema extends ATS.AnyTypeSchema, TExtension> = [TExtension] extends [never]
+  ? TSchema
+  : NormalizedClassExtension<TExtension> extends AnyClassCapability
+    ? AddCapabilitySchema<TSchema, NormalizedClassExtension<TExtension>>
+    : AddSchemaFields<
+        ApplySchemaOverride<TSchema, NormalizedClassExtension<TExtension>>,
+        NormalizedClassExtension<TExtension>
+      >;
+type ApplySchemaOverrides<
   TSchema extends ATS.AnyTypeSchema,
   TExtensions extends readonly AnyClassExtension[],
 > = TExtensions extends readonly [infer THead, ...infer TTail extends readonly AnyClassExtension[]]
-  ? ApplySchemaOverwrites<ApplyClassExtensionSchema<TSchema, THead>, TTail>
+  ? ApplySchemaOverrides<ApplyClassExtensionSchema<TSchema, THead>, TTail>
   : TSchema;
-type OverwriteMemberKeys<TExtension> = TExtension extends AnyClassCapability
+type OverrideMemberKeys<TExtension> = TExtension extends AnyClassCapability
   ? never
   : TExtension extends Record<string, unknown>
     ? {
-        [TKey in keyof TExtension]: TExtension[TKey] extends OverwriteDescriptor ? TKey : never;
+        [TKey in keyof TExtension]: TExtension[TKey] extends OverrideDescriptor ? TKey : never;
       }[keyof TExtension]
     : never;
-type AllOverwriteMemberKeys<TExtensions extends readonly AnyClassExtension[]> =
-  TExtensions[number] extends infer TExtension ? OverwriteMemberKeys<TExtension> : never;
+type AllOverrideMemberKeys<TExtensions extends readonly AnyClassExtension[]> =
+  TExtensions[number] extends infer TExtension ? OverrideMemberKeys<TExtension> : never;
 type LifecycleUpdateMethod<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
@@ -629,43 +968,148 @@ type LifecycleUpdateMethod<
   ? {}
   : "update" extends keyof TInstance
     ? {}
-    : { update(patch: SchemaUpdate<ApplySchemaOverwrites<TSchema, TExtensions>>): void };
+    : { update(patch: SchemaUpdate<ApplySchemaOverrides<TSchema, TExtensions>>): void };
+type ExplicitWritableFieldKeys<TExtension> =
+  TExtension extends Record<string, unknown>
+    ? {
+        [TKey in keyof TExtension]: [
+          MemberDefinition<TExtension[TKey] extends OverrideDescriptor<infer TInner> ? TInner : TExtension[TKey]>,
+        ] extends [never]
+          ? never
+          : MemberDefinition<
+                TExtension[TKey] extends OverrideDescriptor<infer TInner> ? TInner : TExtension[TKey]
+              > extends { readonly kind: "field"; readonly visibility: "public" }
+            ? MemberDefinition<
+                TExtension[TKey] extends OverrideDescriptor<infer TInner> ? TInner : TExtension[TKey]
+              > extends infer TDefinition
+              ? TDefinition extends { readonly setter: true | Function }
+                ? TKey
+                : TDefinition extends { readonly getter: true | Function }
+                  ? never
+                  : TKey
+              : never
+            : never;
+      }[keyof TExtension]
+    : never;
+type AllExplicitPublicFieldKeys<TExtensions extends readonly AnyClassExtension[]> =
+  TExtensions[number] extends infer TExtension
+    ? ExplicitWritableFieldKeys<NormalizedClassExtension<TExtension>>
+    : never;
+type TypeEquals<TLeft, TRight> =
+  (<TValue>() => TValue extends TLeft ? 1 : 2) extends <TValue>() => TValue extends TRight ? 1 : 2 ? true : false;
+type WritableKeys<TValue> = {
+  [TKey in keyof TValue]-?: TypeEquals<Pick<TValue, TKey>, { -readonly [TName in TKey]: TValue[TName] }> extends true
+    ? TKey
+    : never;
+}[keyof TValue];
+type PreservedWritableFieldKeys<TInstance, TSchema extends ATS.AnyTypeSchema> = Extract<
+  WritableKeys<TInstance>,
+  keyof ATS.TypeofSchema<TSchema>
+>;
+type ExistingWritableFieldKeys<
+  TInstance,
+  TSchema extends ATS.AnyTypeSchema,
+  TEncapsulated extends boolean,
+> = TEncapsulated extends true ? PreservedWritableFieldKeys<TInstance, TSchema> : never;
+
 type ExtendedInstance<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TExtensions extends readonly AnyClassExtension[],
-> = [AllOverwriteMemberKeys<TExtensions>] extends [never]
+  TEncapsulated extends boolean = false,
+> = [AllOverrideMemberKeys<TExtensions> | AllHiddenClassMemberKeys<TExtensions>] extends [never]
   ? TInstance &
-      ATS.TypeofSchema<ApplySchemaOverwrites<TSchema, TExtensions>> &
+      ClassFieldSurface<
+        ApplySchemaOverrides<TSchema, TExtensions>,
+        TEncapsulated,
+        | ExistingWritableFieldKeys<TInstance, ApplySchemaOverrides<TSchema, TExtensions>, TEncapsulated>
+        | AllExplicitPublicFieldKeys<TExtensions>
+      > &
       ExtensionMethods<TSchema, TInstance, TExtensions> &
       LifecycleUpdateMethod<TSchema, TInstance, TExtensions>
-  : Omit<TInstance, AllOverwriteMemberKeys<TExtensions>> &
-      ATS.TypeofSchema<ApplySchemaOverwrites<TSchema, TExtensions>> &
+  : Omit<TInstance, AllOverrideMemberKeys<TExtensions> | AllHiddenClassMemberKeys<TExtensions>> &
+      Omit<
+        ClassFieldSurface<
+          ApplySchemaOverrides<TSchema, TExtensions>,
+          TEncapsulated,
+          | ExistingWritableFieldKeys<TInstance, ApplySchemaOverrides<TSchema, TExtensions>, TEncapsulated>
+          | AllExplicitPublicFieldKeys<TExtensions>
+        >,
+        AllHiddenClassMemberKeys<TExtensions>
+      > &
       ExtensionMethods<TSchema, TInstance, TExtensions> &
       LifecycleUpdateMethod<TSchema, TInstance, TExtensions>;
 
-export interface RuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS.TypeofSchema<TSchema>> {
-  new (input: ClassInput<TSchema>): TInstance;
-  readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance>;
-  create<TThis extends RuntimeClass<TSchema>>(this: TThis, input: ClassInput<TSchema>): InstanceType<TThis>;
-  hydrate<TThis extends RuntimeClass<TSchema>>(this: TThis, state: Hydrate<TSchema>): InstanceType<TThis>;
+type ClassFieldSurface<
+  TSchema extends ATS.AnyTypeSchema,
+  TEncapsulated extends boolean,
+  TWritable extends PropertyKey = never,
+> = TEncapsulated extends true
+  ? Omit<Readonly<ATS.TypeofSchema<TSchema>>, TWritable> & {
+      -readonly [TKey in Extract<TWritable, keyof ATS.TypeofSchema<TSchema>>]: ATS.TypeofSchema<TSchema>[TKey];
+    }
+  : ATS.TypeofSchema<TSchema>;
+type HiddenClassMemberKeys<TExtension> =
+  TExtension extends Record<string, unknown>
+    ? {
+        [TKey in keyof TExtension]: IsHiddenClassMember<TExtension[TKey]> extends true ? TKey : never;
+      }[keyof TExtension]
+    : never;
+type AllHiddenClassMemberKeys<TExtensions extends readonly AnyClassExtension[]> =
+  TExtensions[number] extends infer TExtension ? HiddenClassMemberKeys<NormalizedClassExtension<TExtension>> : never;
+type MutableSurface<TValue> = TValue extends object ? { -readonly [TKey in keyof TValue]: TValue[TKey] } : TValue;
+
+export interface RuntimeClass<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance = ATS.TypeofSchema<TSchema>,
+  TTraits extends ATS.RuntimeTypeTraits = ClassRuntimeTraits,
+  TEncapsulated extends boolean = false,
+> {
+  new (input: ClassConstructorInput<TSchema>): TInstance;
+  readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance, TTraits["representation"], TTraits["identifier"], TTraits>;
+  create<TThis extends RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>>(
+    this: TThis,
+    input: ClassCreateInput<TSchema>
+  ): InstanceType<TThis>;
+  hydrate<TThis extends RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>>(
+    this: TThis,
+    state: ClassHydrateInput<TSchema>
+  ): InstanceType<TThis>;
   extends<const TExtensions extends readonly AnyClassExtension[]>(
-    ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
-  ): RuntimeClass<ApplySchemaOverwrites<TSchema, TExtensions>, ExtendedInstance<TSchema, TInstance, TExtensions>>;
+    ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
+  ): RuntimeClass<
+    ApplySchemaOverrides<TSchema, TExtensions>,
+    ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
+    TTraits,
+    TEncapsulated
+  >;
   factories<const TOptions extends FactoryOptions>(
     options: TOptions
-  ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions>;
-  construction(mode: "constructor"): ConstructorRuntimeClass<TSchema, TInstance>;
-  construction(mode: "factory"): FactoryRuntimeClass<TSchema, TInstance>;
-  accessors<TThis extends RuntimeClass<TSchema, TInstance>>(this: TThis, options: AccessorOptions<TSchema>): TThis;
+  ): ConfiguredRuntimeClass<
+    TSchema,
+    TInstance,
+    TOptions,
+    "throw",
+    JITValidationError,
+    false,
+    false,
+    TTraits,
+    TEncapsulated
+  >;
+  construction(mode: "constructor"): ConstructorRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>;
+  construction(mode: "factory"): FactoryRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>;
+  accessors<TThis extends RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>>(
+    this: TThis,
+    options: AccessorOptions<TSchema>
+  ): TThis;
   identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
     key: TKey
-  ): RuntimeClass<TSchema, TInstance & IdentityMethods>;
-  validate(policy?: FactoryValidationOptions): RuntimeClass<TSchema, TInstance>;
+  ): RuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, TEncapsulated>;
+  validate(policy?: FactoryValidationOptions): RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>;
   assert(
     predicate: (query: QueryConditionBuilder<ATS.TypeofSchema<TSchema>>) => QueryConditionNode,
     options?: AssertionOptions
-  ): RuntimeClass<TSchema, TInstance>;
+  ): RuntimeClass<TSchema, TInstance, AssertionTraits<TTraits, TTraits["factoryPolicy"]["errorType"]>, TEncapsulated>;
 }
 
 // A failure policy applies to factories, so a constructor-first class does not
@@ -682,36 +1126,174 @@ type RuntimeClassConstructionMembers =
   | "assert";
 
 /** The default `JIT.class` surface: direct construction, no static factories. */
-export type ConstructorRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance = ATS.TypeofSchema<TSchema>> = (new (
-  input: ClassInput<TSchema>
+export type ConstructorRuntimeClass<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance = ATS.TypeofSchema<TSchema>,
+  TTraits extends ATS.RuntimeTypeTraits = ClassRuntimeTraits,
+  TEncapsulated extends boolean = false,
+> = (new (
+  input: ClassConstructorInput<TSchema>
 ) => TInstance) &
-  Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> & {
+  Omit<RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, RuntimeClassConstructionMembers> & {
     extends<const TExtensions extends readonly AnyClassExtension[]>(
-      ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
+      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
     ): ConstructorRuntimeClass<
-      ApplySchemaOverwrites<TSchema, TExtensions>,
-      ExtendedInstance<TSchema, TInstance, TExtensions>
+      ApplySchemaOverrides<TSchema, TExtensions>,
+      ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
+      TTraits,
+      TEncapsulated
     >;
     factories<const TOptions extends FactoryOptions>(
       options: TOptions
-    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions, "throw", JITValidationError, false, true>;
-    construction(mode: "constructor"): ConstructionFixedConstructor<TSchema, TInstance>;
-    construction(mode: "factory"): ConstructionFixedFactory<TSchema, TInstance>;
+    ): ConfiguredRuntimeClass<
+      TSchema,
+      TInstance,
+      TOptions,
+      "throw",
+      JITValidationError,
+      false,
+      true,
+      TTraits,
+      TEncapsulated
+    >;
+    construction(mode: "constructor"): ConstructionFixedConstructor<TSchema, TInstance, TTraits, TEncapsulated>;
+    construction(mode: "factory"): ConstructionFixedFactory<TSchema, TInstance, TTraits, TEncapsulated>;
     accessors(
       options: AccessorOptions<TSchema>
-    ): (new (input: ClassInput<TSchema>) => TInstance) & Omit<ConstructorRuntimeClass<TSchema, TInstance>, "accessors">;
+    ): (new (
+      input: ClassConstructorInput<TSchema>
+    ) => TInstance) &
+      Omit<ConstructorRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "accessors">;
     identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
       key: TKey
     ): (new (
-      input: ClassInput<TSchema>
+      input: ClassConstructorInput<TSchema>
     ) => TInstance & IdentityMethods) &
-      Omit<ConstructorRuntimeClass<TSchema, TInstance & IdentityMethods>, "identity">;
+      Omit<ConstructorRuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, TEncapsulated>, "identity">;
   };
 
 export interface FactoryOptions {
-  readonly create?: string | false;
-  readonly hydrate?: string | false;
+  readonly create?: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor>;
+  readonly hydrate?: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor>;
 }
+
+type FactoryModeCandidate<TMode extends FactoryReturnMode = FactoryReturnMode, TPriority extends number = number> = {
+  readonly mode: TMode;
+  readonly priority: TPriority;
+};
+
+type NestedFactoryModeCandidates<TSchema extends ATS.AnyTypeSchema> =
+  TSchema extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "object" | "value", boolean, infer TTraits>
+    ? TTraits["factoryPolicy"] extends { readonly configured: true }
+      ? TTraits["factoryPolicy"] extends { readonly resultModeExplicit: true | false }
+        ? TTraits["factoryPolicy"] extends { readonly resultModeExplicit: true }
+          ? FactoryModeCandidate<
+              Extract<TTraits["factoryPolicy"]["resultMode"], FactoryReturnMode>,
+              TTraits["factoryPolicy"]["priority"]
+            >
+          : TTraits["factoryPolicy"] extends { readonly resultModeInherited: true }
+            ? FactoryModeCandidate<
+                Extract<TTraits["factoryPolicy"]["resultMode"], FactoryReturnMode>,
+                TTraits["factoryPolicy"]["priority"]
+              >
+            : never
+        : never
+      : never
+    : TSchema extends ATS.ObjectSchema<infer TShape>
+      ? NestedFactoryModeCandidates<TShape[keyof TShape]>
+      : TSchema extends ATS.ArraySchema<infer TElement> | ATS.SetSchema<infer TElement>
+        ? NestedFactoryModeCandidates<TElement>
+        : TSchema extends ATS.LazySchema<infer TInner>
+          ? NestedFactoryModeCandidates<TInner>
+          : TSchema extends
+                | ATS.OptionalSchema<infer TInner>
+                | ATS.NullableSchema<infer TInner>
+                | ATS.NullishSchema<infer TInner>
+                | ATS.DefaultSchema<infer TInner>
+                | ATS.BrandSchema<infer TInner>
+                | ATS.ReadonlySchema<infer TInner>
+                | ATS.RefineSchema<infer TInner>
+                | ATS.CoerceSchema<infer TInner>
+                | ATS.PipeSchema<infer TInner>
+                | ATS.TransformSchema<infer TInner>
+            ? NestedFactoryModeCandidates<TInner>
+            : never;
+
+type ModeRank<TMode extends FactoryReturnMode> = TMode extends "tuple" ? 0 : TMode extends "either" ? 1 : 2;
+type IsHigherModeCandidate<TLeft, TRight> = TLeft extends FactoryModeCandidate
+  ? TRight extends FactoryModeCandidate
+    ? CompareNumericLiteral<TLeft["priority"], TRight["priority"]> extends "gt"
+      ? true
+      : CompareNumericLiteral<TLeft["priority"], TRight["priority"]> extends "eq"
+        ? ModeRank<TLeft["mode"]> extends ModeRank<TRight["mode"]>
+          ? false
+          : ModeRank<TLeft["mode"]> extends 2
+            ? true
+            : ModeRank<TRight["mode"]> extends 2
+              ? false
+              : ModeRank<TLeft["mode"]> extends 1
+                ? true
+                : false
+        : false
+    : false
+  : false;
+type HasHigherModeCandidate<TCandidate, TAll> = TAll extends unknown ? IsHigherModeCandidate<TAll, TCandidate> : never;
+type HighestModeCandidates<TAll, TCandidate = TAll> = TCandidate extends FactoryModeCandidate
+  ? true extends HasHigherModeCandidate<TCandidate, TAll>
+    ? never
+    : TCandidate
+  : never;
+type InheritedFactoryModeFor<TSchema extends ATS.AnyTypeSchema> = [NestedFactoryModeCandidates<TSchema>] extends [never]
+  ? "throw"
+  : HighestModeCandidates<NestedFactoryModeCandidates<TSchema>>["mode"];
+
+type DeclaredFactoryError<TError> = unknown extends TError ? never : [TError] extends [undefined] ? never : TError;
+
+type NestedFactoryErrors<TSchema extends ATS.AnyTypeSchema> =
+  TSchema extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "object" | "value", boolean, infer TTraits>
+    ? TTraits["factoryPolicy"] extends { readonly configured: true; readonly errorType: infer TError }
+      ? DeclaredFactoryError<TError>
+      : never
+    : TSchema extends ATS.ObjectSchema<infer TShape>
+      ? NestedFactoryErrors<TShape[keyof TShape]>
+      : TSchema extends ATS.ArraySchema<infer TElement> | ATS.SetSchema<infer TElement>
+        ? NestedFactoryErrors<TElement>
+        : TSchema extends ATS.LazySchema<infer TInner>
+          ? NestedFactoryErrors<TInner>
+          : TSchema extends
+                | ATS.OptionalSchema<infer TInner>
+                | ATS.NullableSchema<infer TInner>
+                | ATS.NullishSchema<infer TInner>
+                | ATS.DefaultSchema<infer TInner>
+                | ATS.BrandSchema<infer TInner>
+                | ATS.ReadonlySchema<infer TInner>
+                | ATS.RefineSchema<infer TInner>
+                | ATS.CoerceSchema<infer TInner>
+                | ATS.PipeSchema<infer TInner>
+                | ATS.TransformSchema<infer TInner>
+            ? NestedFactoryErrors<TInner>
+            : never;
+
+type InitialRuntimeTypeTraits<TSchema extends ATS.AnyTypeSchema> = [NestedFactoryModeCandidates<TSchema>] extends [
+  never,
+]
+  ? ClassRuntimeTraits
+  : ATS.RuntimeTypeTraits<
+      "object",
+      false,
+      ATS.RuntimeTypeFactoryPolicyTraits<
+        InheritedFactoryModeFor<TSchema>,
+        true,
+        unknown,
+        NestedFactoryModeCandidates<TSchema>["priority"]
+      > & {
+        readonly resultModeExplicit: false;
+        readonly resultModeInherited: true;
+        readonly hasAssertions: false;
+      }
+    >;
+
+type InheritedFactoryMode<TSchema extends ATS.AnyTypeSchema> = InheritedFactoryModeFor<TSchema>;
 
 export type AccessorVisibility = "public" | "protected" | "private" | false;
 
@@ -733,23 +1315,33 @@ export interface AccessorOptions<TSchema extends ATS.AnyTypeSchema> {
 
 type RuntimeConstructor<TInstance> = abstract new (...args: never[]) => TInstance;
 type CreateArguments<TSchema extends ATS.AnyTypeSchema> =
-  undefined extends ClassInput<TSchema> ? [] | [input: ClassInput<TSchema>] : [input: ClassInput<TSchema>];
+  undefined extends ClassCreateInput<TSchema>
+    ? [] | [input: ClassCreateInput<TSchema>]
+    : [input: ClassCreateInput<TSchema>];
+
+type FactoryOptionName<TValue> = TValue extends string
+  ? TValue
+  : TValue extends ClassMemberDescriptor<infer TDefinition>
+    ? TDefinition extends ClassFactoryMemberDescriptor
+      ? TDefinition["name"]
+      : never
+    : never;
 
 type FactoryMethods<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TOptions extends FactoryOptions,
-  TMode extends FactoryResultMode = "throw",
+  TMode = "throw",
   TError = JITValidationError,
-> = (TOptions extends {
-  readonly create: infer TName extends string;
-}
-  ? {
-      [TKey in TName]: <TThis extends RuntimeConstructor<TInstance>>(
-        this: TThis,
-        ...args: CreateArguments<TSchema>
-      ) => FactoryOutcome<InstanceType<TThis>, TMode, TError>;
-    }
+> = (TOptions extends { readonly create: infer TValue }
+  ? FactoryOptionName<TValue> extends infer TName extends string
+    ? {
+        [TKey in TName]: <TThis extends RuntimeConstructor<TInstance>>(
+          this: TThis,
+          ...args: CreateArguments<TSchema>
+        ) => FactoryOutcome<InstanceType<TThis>, TMode, TError>;
+      }
+    : never
   : TOptions extends { readonly create: false }
     ? {}
     : {
@@ -758,32 +1350,60 @@ type FactoryMethods<
           ...args: CreateArguments<TSchema>
         ): FactoryOutcome<InstanceType<TThis>, TMode, TError>;
       }) &
-  (TOptions extends { readonly hydrate: infer TName extends string }
-    ? {
-        [TKey in TName]: <TThis extends RuntimeConstructor<TInstance>>(
-          this: TThis,
-          state: Hydrate<TSchema>
-        ) => FactoryOutcome<InstanceType<TThis>, TMode, TError>;
-      }
+  (TOptions extends { readonly hydrate: infer TValue }
+    ? FactoryOptionName<TValue> extends infer TName extends string
+      ? {
+          [TKey in TName]: <TThis extends RuntimeConstructor<TInstance>>(
+            this: TThis,
+            state: ClassHydrateInput<TSchema>
+          ) => FactoryOutcome<InstanceType<TThis>, TMode, TError>;
+        }
+      : never
     : TOptions extends { readonly hydrate: false }
       ? {}
       : {
           hydrate<TThis extends RuntimeConstructor<TInstance>>(
             this: TThis,
-            state: Hydrate<TSchema>
+            state: ClassHydrateInput<TSchema>
           ): FactoryOutcome<InstanceType<TThis>, TMode, TError>;
         });
 
-type ResolvedResultMode<TPolicy> = TPolicy extends {
-  readonly result: infer TMode extends FactoryResultMode;
+type ResolvedResultMode<TPolicy, TDefault extends FactoryReturnMode = "throw"> = TPolicy extends {
+  readonly result: infer TMode extends FactoryReturnModeInput;
 }
-  ? TMode
-  : "throw";
-type ResolvedPolicyError<TPolicy, TError> = TPolicy extends {
+  ? TMode extends "result"
+    ? "either"
+    : TMode
+  : TDefault;
+type ResolvedResultModeExplicit<TPolicy> = TPolicy extends {
+  readonly result: FactoryReturnModeInput;
+}
+  ? true
+  : false;
+type ResolvedResultModeInherited<TTraits extends ATS.RuntimeTypeTraits, TPolicy> = TPolicy extends {
+  readonly result: FactoryReturnModeInput;
+}
+  ? false
+  : TTraits["factoryPolicy"]["resultModeInherited"];
+type ResolvedFactoryPriority<TPolicy, TDefault extends number> = TPolicy extends {
+  readonly result: FactoryReturnModeInput;
+}
+  ? TPolicy extends { readonly priority: infer TPriority extends number }
+    ? TPriority
+    : 1000
+  : TPolicy extends { readonly priority: infer TPriority extends number }
+    ? TPriority
+    : TDefault;
+type LiteralPriorityPolicy<TPolicy> = TPolicy extends { readonly priority: infer TPriority extends number }
+  ? number extends TPriority
+    ? { readonly priority: never }
+    : {}
+  : {};
+type ResolvedFactoryError<TPolicy, TError, TSchema extends ATS.AnyTypeSchema> = TPolicy extends {
   readonly error: (...args: never[]) => infer TNext;
 }
   ? TNext
-  : TError;
+  : TError | NestedFactoryErrors<TSchema>;
 type ResolvedAssertionError<TOptions, TError> = TOptions extends {
   readonly error: (...args: never[]) => infer TNext;
 }
@@ -794,33 +1414,47 @@ export type ConfiguredRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TOptions extends FactoryOptions,
-  TMode extends FactoryResultMode = "throw",
+  TMode extends FactoryReturnMode = "throw",
   TError = JITValidationError,
   TValidated extends boolean = false,
   TFactoriesConfigured extends boolean = false,
+  TTraits extends ATS.RuntimeTypeTraits = ClassRuntimeTraits,
+  TEncapsulated extends boolean = false,
 > = (abstract new (
-  input: ClassInput<TSchema>
+  input: ClassConstructorInput<TSchema>
 ) => TInstance) &
-  Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> &
+  Omit<RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, RuntimeClassConstructionMembers> &
   FactoryMethods<TSchema, TInstance, TOptions, TMode, TError> & {
     extends<const TExtensions extends readonly AnyClassExtension[]>(
-      ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
+      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
     ): ConfiguredRuntimeClass<
-      ApplySchemaOverwrites<TSchema, TExtensions>,
-      ExtendedInstance<TSchema, TInstance, TExtensions>,
+      ApplySchemaOverrides<TSchema, TExtensions>,
+      ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
       TOptions,
       TMode,
       TError,
       TValidated,
-      TFactoriesConfigured
+      TFactoriesConfigured,
+      TTraits,
+      TEncapsulated
     >;
     accessors(
       options: AccessorOptions<TSchema>
     ): (abstract new (
-      input: ClassInput<TSchema>
+      input: ClassConstructorInput<TSchema>
     ) => TInstance) &
       Omit<
-        ConfiguredRuntimeClass<TSchema, TInstance, TOptions, TMode, TError, TValidated, TFactoriesConfigured>,
+        ConfiguredRuntimeClass<
+          TSchema,
+          TInstance,
+          TOptions,
+          TMode,
+          TError,
+          TValidated,
+          TFactoriesConfigured,
+          TTraits,
+          TEncapsulated
+        >,
         "accessors"
       >;
     /** Adds one domain invariant, written in the shared condition builder. */
@@ -832,24 +1466,37 @@ export type ConfiguredRuntimeClass<
       TInstance,
       TOptions,
       TMode,
-      ResolvedAssertionError<TAssertion, TError>,
+      ResolvedAssertionError<TAssertion, TError> | NestedFactoryErrors<TSchema>,
       TValidated,
-      TFactoriesConfigured
+      TFactoriesConfigured,
+      AssertionTraits<TTraits, ResolvedAssertionError<TAssertion, TError>>,
+      TEncapsulated
     >;
   } & (TValidated extends true
     ? object
     : {
         /** Fixes the factory validation policy exactly once for this artifact. */
         validate<const TPolicy extends FactoryValidationOptions = Record<never, never>>(
-          policy?: TPolicy & FactoryValidationOptions
+          policy?: TPolicy & FactoryValidationOptions & LiteralPriorityPolicy<TPolicy>
         ): ConfiguredRuntimeClass<
           TSchema,
           TInstance,
           TOptions,
-          ResolvedResultMode<TPolicy>,
-          ResolvedPolicyError<TPolicy, TError>,
+          ResolvedResultMode<TPolicy, TMode>,
+          ResolvedFactoryError<TPolicy, TError, TSchema>,
           true,
-          TFactoriesConfigured
+          TFactoriesConfigured,
+          FactoryTraits<
+            TTraits,
+            Extract<ResolvedResultMode<TPolicy, TMode>, FactoryReturnMode>,
+            ResolvedFactoryError<TPolicy, TError, TSchema>,
+            true,
+            false,
+            ResolvedResultModeExplicit<TPolicy>,
+            ResolvedResultModeInherited<TTraits, TPolicy>,
+            ResolvedFactoryPriority<TPolicy, TTraits["factoryPolicy"]["priority"]>
+          >,
+          TEncapsulated
         >;
       }) &
   (TValidated extends true
@@ -857,14 +1504,24 @@ export type ConfiguredRuntimeClass<
     : TFactoriesConfigured extends true
       ? object
       : {
-          construction(mode: "constructor"): ConstructionFixedConstructor<TSchema, TInstance>;
+          construction(mode: "constructor"): ConstructionFixedConstructor<TSchema, TInstance, TTraits, TEncapsulated>;
           construction(
             mode: "factory"
           ): (abstract new (
-            input: ClassInput<TSchema>
+            input: ClassConstructorInput<TSchema>
           ) => TInstance) &
             Omit<
-              ConfiguredRuntimeClass<TSchema, TInstance, TOptions, TMode, TError, false, TFactoriesConfigured>,
+              ConfiguredRuntimeClass<
+                TSchema,
+                TInstance,
+                TOptions,
+                TMode,
+                TError,
+                false,
+                TFactoriesConfigured,
+                TTraits,
+                TEncapsulated
+              >,
               "construction" | "factories"
             >;
         }) &
@@ -873,34 +1530,87 @@ export type ConfiguredRuntimeClass<
     : {
         factories<const TNext extends FactoryOptions>(
           options: TNext
-        ): ConfiguredRuntimeClass<TSchema, TInstance, TNext, TMode, TError, TValidated, true>;
+        ): ConfiguredRuntimeClass<TSchema, TInstance, TNext, TMode, TError, TValidated, true, TTraits, TEncapsulated>;
       });
 
 export type FactoryRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
-> = ConfiguredRuntimeClass<TSchema, TInstance, {}>;
+  TTraits extends ATS.RuntimeTypeTraits = InitialRuntimeTypeTraits<TSchema>,
+  TEncapsulated extends boolean = false,
+> = ConfiguredRuntimeClass<
+  TSchema,
+  TInstance,
+  {},
+  InheritedFactoryMode<TSchema>,
+  JITValidationError,
+  false,
+  false,
+  TTraits,
+  TEncapsulated
+>;
 
-type ConstructionFixedConstructor<TSchema extends ATS.AnyTypeSchema, TInstance> = (new (
-  input: ClassInput<TSchema>
-) => TInstance) &
-  Omit<ConstructorRuntimeClass<TSchema, TInstance>, "construction" | "factories">;
+/** Entity declaration before a structural identifier extension is applied. */
+export type PendingEntityRuntimeClass<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TTraits extends ATS.RuntimeTypeTraits = InitialRuntimeTypeTraits<TSchema>,
+> = Omit<FactoryRuntimeClass<TSchema, TInstance, TTraits, true>, "create" | "hydrate" | "factories" | "extends"> & {
+  extends<const TExtensions extends readonly AnyClassExtension[]>(
+    ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
+  ): EntityRuntimeClassFor<
+    ApplySchemaOverrides<TSchema, TExtensions>,
+    ExtendedInstance<TSchema, TInstance, TExtensions, true>,
+    TTraits
+  >;
+};
 
-type ConstructionFixedFactory<TSchema extends ATS.AnyTypeSchema, TInstance> = (abstract new (
-  input: ClassInput<TSchema>
-) => TInstance) &
-  Omit<FactoryRuntimeClass<TSchema, TInstance>, "construction" | "factories">;
+type EntityRuntimeClassFor<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TTraits extends ATS.RuntimeTypeTraits = InitialRuntimeTypeTraits<TSchema>,
+> = [IdentityKeys<TSchema>] extends [never]
+  ? PendingEntityRuntimeClass<TSchema, TInstance, TTraits>
+  : FactoryRuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, true>;
 
-type ScalarFactoryRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = (abstract new (
-  input: ClassInput<TSchema>
+type ConstructionFixedConstructor<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TTraits extends ATS.RuntimeTypeTraits = ClassRuntimeTraits,
+  TEncapsulated extends boolean = false,
+> = (new (
+  input: ClassConstructorInput<TSchema>
 ) => TInstance) &
-  Omit<FactoryRuntimeClass<TSchema, TInstance>, "accessors" | "assert">;
+  Omit<ConstructorRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "construction" | "factories">;
+
+type ConstructionFixedFactory<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TTraits extends ATS.RuntimeTypeTraits = ClassRuntimeTraits,
+  TEncapsulated extends boolean = false,
+> = (abstract new (
+  input: ClassConstructorInput<TSchema>
+) => TInstance) &
+  Omit<FactoryRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "construction" | "factories">;
+
+type ScalarFactoryRuntimeClass<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TTraits extends ATS.RuntimeTypeTraits = ClassRuntimeTraits,
+  TEncapsulated extends boolean = false,
+> = (abstract new (
+  input: ClassConstructorInput<TSchema>
+) => TInstance) &
+  Omit<FactoryRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "accessors" | "assert">;
+
+type IdentifierRuntimeTraits = ATS.RuntimeTypeTraits<"value", true, ATS.DefaultRuntimeTypeFactoryPolicyTraits>;
 
 type IdentifierRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = ScalarFactoryRuntimeClass<
   TSchema,
-  TInstance
+  TInstance,
+  IdentifierRuntimeTraits
 > & {
-  readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance, "value", true>;
+  readonly schema: ATS.RuntimeTypeSchema<TSchema, TInstance, "value", true, IdentifierRuntimeTraits>;
 };
 
 type RuntimeClassTarget = RuntimeClass<ATS.AnyTypeSchema> & {
@@ -926,31 +1636,45 @@ export function getRuntimeClassTarget(value: unknown): RuntimeClassTarget | unde
 export type AbstractRuntimeClass<
   TSchema extends ATS.AnyTypeSchema,
   TInstance = ATS.TypeofSchema<TSchema>,
+  TTraits extends ATS.RuntimeTypeTraits = ClassRuntimeTraits,
+  TEncapsulated extends boolean = false,
 > = (abstract new (
-  input: ClassInput<TSchema>
+  input: ClassConstructorInput<TSchema>
 ) => TInstance) &
-  Omit<RuntimeClass<TSchema, TInstance>, RuntimeClassConstructionMembers> & {
+  Omit<RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, RuntimeClassConstructionMembers> & {
     extends<const TExtensions extends readonly AnyClassExtension[]>(
-      ...extensions: ClassExtensionArgs<TSchema, TInstance, TExtensions>
+      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
     ): AbstractRuntimeClass<
-      ApplySchemaOverwrites<TSchema, TExtensions>,
-      ExtendedInstance<TSchema, TInstance, TExtensions>
+      ApplySchemaOverrides<TSchema, TExtensions>,
+      ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
+      TTraits,
+      TEncapsulated
     >;
     factories<const TOptions extends FactoryOptions>(
       options: TOptions
-    ): ConfiguredRuntimeClass<TSchema, TInstance, TOptions, "throw", JITValidationError, false, true>;
+    ): ConfiguredRuntimeClass<
+      TSchema,
+      TInstance,
+      TOptions,
+      "throw",
+      JITValidationError,
+      false,
+      true,
+      TTraits,
+      TEncapsulated
+    >;
     accessors(
       options: AccessorOptions<TSchema>
     ): (abstract new (
-      input: ClassInput<TSchema>
+      input: ClassConstructorInput<TSchema>
     ) => TInstance) &
-      Omit<AbstractRuntimeClass<TSchema, TInstance>, "accessors">;
+      Omit<AbstractRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "accessors">;
     identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
       key: TKey
     ): (abstract new (
-      input: ClassInput<TSchema>
+      input: ClassConstructorInput<TSchema>
     ) => TInstance & IdentityMethods) &
-      Omit<AbstractRuntimeClass<TSchema, TInstance & IdentityMethods>, "identity">;
+      Omit<AbstractRuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, TEncapsulated>, "identity">;
   };
 
 /** An immutable, tree-shakeable operation that installs one prototype capability. */
@@ -971,6 +1695,70 @@ export interface ClassCapability<TMethods extends object = object> {
  * call reaches the prototype the way it reaches a hand-written class method.
  */
 export type ClassMethodsInput = Readonly<Record<string, unknown>>;
+
+/**
+ * The surface available while a structural mixin is declared.  It is
+ * deliberately limited to the mixin's own fields and its host requirements;
+ * fields added by a future host class are not guessed here.
+ */
+type MixinThisSurface<TFields extends ClassMethodsInput, TRequires extends ClassMethodsInput> = ATS.TypeofSchema<
+  ATS.ObjectSchema<SchemaFieldShape<TFields & TRequires>>
+>;
+
+export interface ClassMixinDefinition<
+  TFields extends ClassMethodsInput = ClassMethodsInput,
+  TMethods extends ClassMethodsInput = ClassMethodsInput,
+  TRequires extends ClassMethodsInput = ClassMethodsInput,
+> {
+  /** Existing host fields visible to methods, without adding persistence fields. */
+  readonly requires?: TRequires;
+  readonly fields?: TFields;
+  readonly methods?: TMethods & ThisType<MixinThisSurface<TFields, TRequires>>;
+}
+
+export interface ClassMixin<
+  TOutput extends ClassMethodsInput = ClassMethodsInput,
+  TRequires extends ClassMethodsInput = ClassMethodsInput,
+> {
+  (): TOutput;
+  readonly __classMixin: true;
+  readonly __requires?: TRequires;
+}
+
+const CLASS_MIXIN = Symbol("jit.class.mixin");
+
+export function classMixin<
+  const TRequires extends ClassMethodsInput = {},
+  const TFields extends ClassMethodsInput = {},
+  const TMethods extends ClassMethodsInput = {},
+>(definition: {
+  readonly requires?: TRequires;
+  readonly fields?: TFields;
+  readonly methods?: TMethods & ThisType<MixinThisSurface<TFields, TRequires>>;
+}): ClassMixin<TFields & TMethods, TRequires>;
+export function classMixin(definition: ClassMixinDefinition): ClassMixin {
+  const fieldNames = new Set(Object.getOwnPropertyNames(definition.fields ?? {}));
+  const methodNames = Object.getOwnPropertyNames(definition.methods ?? {});
+  if (methodNames.some((name) => fieldNames.has(name))) {
+    throw new JITError(
+      "CLASS_MEMBER_ALREADY_EXISTS",
+      "A class mixin cannot declare the same member as a field and method"
+    );
+  }
+  const mixin = (() => Object.freeze({ ...(definition.fields ?? {}), ...(definition.methods ?? {}) })) as ClassMixin;
+  Object.defineProperties(mixin, {
+    [CLASS_MIXIN]: { enumerable: false, value: true },
+    __classMixin: { enumerable: false, value: true },
+    __requires: { enumerable: false, value: definition.requires ?? {} },
+  });
+  return Object.freeze(mixin);
+}
+
+function isClassMixin(value: unknown): value is ClassMixin {
+  return typeof value === "function" && (value as { readonly [CLASS_MIXIN]?: unknown })[CLASS_MIXIN] === true;
+}
+
+type NormalizedClassExtension<TExtension> = TExtension extends ClassMixin<infer TOutput> ? TOutput : TExtension;
 
 /** Names a custom extension may not take, whatever the schema declares. */
 /** A scalar Value Object is its value; those members are already taken. */
@@ -1088,7 +1876,12 @@ export interface VersionedCapability<TOptions extends VersionedOptions = Version
   readonly __options?: TOptions;
 }
 
-type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<TSchema, TInstance>;
+type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<
+  TSchema,
+  TInstance,
+  InitialRuntimeTypeTraits<TSchema>,
+  true
+>;
 interface ClassWithCapability extends ClassCapability<object> {
   readonly __with: true;
 }
@@ -1122,6 +1915,29 @@ interface ClassMethodDefinition {
   readonly name: string;
   readonly kind: "method" | "get" | "set";
   readonly source: Function;
+  readonly schema?: ATS.FunctionSchema;
+  readonly async?: boolean;
+}
+
+interface ClassFieldPolicy {
+  readonly visibility: ClassMemberVisibility;
+  readonly getter: true | false | Function;
+  readonly setter: true | false | Function;
+  readonly noConstructor: boolean;
+}
+
+/**
+ * The physical class layout after member descriptors and capabilities have
+ * been resolved. Emitters consume this plan; they never inspect the fluent
+ * descriptor syntax or resolve members on an instance.
+ */
+interface ClassLayoutPlan {
+  readonly properties: readonly string[];
+  readonly accessors: ResolvedAccessors | undefined;
+  readonly managedStorage: ReadonlyMap<string, ManagedStorageBinding>;
+  readonly fieldPolicies: ReadonlyMap<string, ClassFieldPolicy>;
+  readonly encapsulateFields: boolean;
+  readonly initializers: ReadonlyMap<string, () => unknown>;
 }
 
 interface ClassDefinitionState {
@@ -1134,14 +1950,28 @@ interface ClassDefinitionState {
   readonly constructionConfigured: boolean;
   readonly factoriesConfigured: boolean;
   readonly factoryNames: { readonly create: string | false; readonly hydrate: string | false };
+  readonly customFactories: {
+    readonly create?: Function;
+    readonly hydrate?: Function;
+  };
   readonly accessors: ResolvedAccessors | undefined;
+  readonly fieldPolicies: ReadonlyMap<string, ClassFieldPolicy>;
+  readonly encapsulateFields: boolean;
+  readonly mutationGate: WeakSet<object>;
   readonly capabilities: readonly AnyClassCapability[];
   readonly methods: readonly ClassMethodDefinition[];
   readonly lifecycle: LifecycleDefinition;
   readonly managedFields: readonly ManagedFieldDescriptor[];
   readonly members: ResolvedMemberTable;
   readonly policy: FactoryPolicyState;
+  readonly identity: IdentityState;
 }
+
+export type IdentityState =
+  | { readonly state: "none" }
+  | { readonly state: "resolved"; readonly key: string; readonly explicit: boolean }
+  | { readonly state: "pending" }
+  | { readonly state: "ambiguous"; readonly candidates: readonly string[] };
 
 interface ManagedStorageBinding {
   readonly name: string;
@@ -1156,9 +1986,47 @@ interface ClassStateSeed {
   readonly managedFields?: readonly ManagedFieldDescriptor[];
   readonly members?: ResolvedMemberTable;
   readonly policy?: FactoryPolicyState;
+  readonly fieldPolicies?: ReadonlyMap<string, ClassFieldPolicy>;
+  readonly encapsulateFields?: boolean;
+  readonly mutationGate?: WeakSet<object>;
   readonly factoryNames?: { readonly create: string | false; readonly hydrate: string | false };
+  readonly customFactories?: { readonly create?: Function; readonly hydrate?: Function };
   readonly constructionConfigured?: boolean;
   readonly factoriesConfigured?: boolean;
+  readonly identity?: IdentityState;
+}
+
+/** Resolves nested policy candidates once while declaring the outer class. */
+function resolveNestedResultPolicy(schema: ATS.AnyTypeSchema): FactoryPolicyCandidate | undefined {
+  const candidates: FactoryPolicyCandidate[] = [];
+  const active = new Set<ATS.AnyTypeSchema>();
+  const visit = (current: ATS.AnyTypeSchema, depth: number): void => {
+    if (active.has(current)) return;
+    active.add(current);
+    if (current.type === TypeName.runtimeType) {
+      const runtime = current as ATS.RuntimeTypeSchema;
+      const traits = runtime.def.traits.factoryPolicy;
+      if (traits.configured && (traits.resultModeExplicit || traits.resultModeInherited)) {
+        candidates.push({
+          mode: traits.resultMode as FactoryReturnMode,
+          priority: traits.priority,
+          explicitMode: traits.resultModeExplicit,
+          depth,
+          source: String(candidates.length),
+        });
+      }
+      active.delete(current);
+      return;
+    }
+    if (current.type === TypeName.object) {
+      for (const child of Object.values((current as ATS.ObjectSchema).def.props)) visit(child, depth + 1);
+    } else {
+      for (const child of schemaChildren(current)) visit(child, depth + 1);
+    }
+    active.delete(current);
+  };
+  visit(schema, 0);
+  return selectFactoryPolicyCandidate(candidates);
 }
 
 /**
@@ -1172,6 +2040,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
   freezeInstances: boolean,
   aggregate: boolean,
   construction: ConstructionMode,
+  encapsulateFields = false,
   accessors?: ResolvedAccessors,
   seed?: ClassStateSeed
 ): RuntimeClass<TSchema> {
@@ -1198,53 +2067,139 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     factoryNames:
       seed?.factoryNames ??
       (construction === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false }),
+    customFactories: seed?.customFactories ?? {},
     accessors,
     capabilities: Object.freeze([...(seed?.capabilities ?? [])]),
     methods: Object.freeze([...(seed?.methods ?? [])]),
     lifecycle: seed?.lifecycle ?? baseState.lifecycle,
     managedFields: Object.freeze([...(seed?.managedFields ?? baseState.managedFields)]),
     members,
+    fieldPolicies: new Map(seed?.fieldPolicies ?? []),
+    encapsulateFields: seed?.encapsulateFields ?? encapsulateFields,
+    mutationGate: seed?.mutationGate ?? new WeakSet<object>(),
     policy: seed?.policy ?? createPolicyState(),
+    identity: seed?.identity ?? { state: "none" },
   };
-  const policy: FactoryPolicyState = {
-    ...state.policy,
-    nestedErrors: collectNestedErrorCandidates(state.schema),
-  };
+  const policy = state.policy;
+  policy.nestedErrors = collectNestedErrorCandidates(state.schema);
+  if (!policy.validationConfigured) {
+    const nestedPolicy = resolveNestedResultPolicy(state.schema);
+    if (nestedPolicy === undefined) {
+      if (policy.inheritedResultMode) {
+        policy.configured = false;
+        policy.mode = "throw";
+        policy.inheritedResultMode = false;
+        policy.resultModeExplicit = false;
+      }
+    } else {
+      policy.configured = true;
+      policy.mode = nestedPolicy.mode;
+      policy.modePriority = nestedPolicy.priority;
+      policy.inheritedResultMode = true;
+      policy.resultModeExplicit = false;
+    }
+  }
 
   const objectSchema = resolveEffectiveObjectSchema(state.schema);
   const properties = Object.keys(objectSchema.def.props);
-  const parse = compileValidator(state.schema).parse;
-  const hydrateState = compileHydrator(state.schema);
+  const creationSchema = removeNoConstructorFields(state.schema, state.fieldPolicies);
+  const noConstructorFields = [...state.fieldPolicies.entries()]
+    .filter(([, policy]) => policy.noConstructor)
+    .map(([field]) => field);
+  const boundaryInput = (input: unknown): unknown => {
+    if (noConstructorFields.length === 0 || input === null || typeof input !== "object") return input;
+    if (!noConstructorFields.some((field) => Object_hasOwn(input, field))) return input;
+    const copy = { ...(input as Record<string, unknown>) };
+    for (const field of noConstructorFields) delete copy[field];
+    return copy;
+  };
+  const hydrateSchema = removeNoConstructorFields(state.schema, state.fieldPolicies);
+  let parseCreation: ((input: unknown) => unknown) | undefined;
+  const parse = (input: unknown): unknown => {
+    parseCreation ??= compileValidator(creationSchema).parse;
+    return parseCreation(boundaryInput(input));
+  };
+  let hydrateState: ((input: unknown) => unknown) | undefined;
+  const hydrateInput = (input: unknown): unknown => {
+    hydrateState ??= compileHydrator(hydrateSchema);
+    return hydrateState(boundaryInput(input));
+  };
+  const initializers = compileNoConstructorInitializers(state.schema, state.fieldPolicies);
   let safeParse: ((input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
   let safeHydrate: ((input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>) | undefined;
   const policySafeParse = () => {
-    safeParse ??= compileValidatorSelection(state.schema, ["safeParse"], {
+    safeParse ??= compileValidatorSelection(creationSchema, ["safeParse"], {
       ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
     }).safeParse as (input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
     return safeParse;
   };
   const policySafeHydrate = () => {
-    safeHydrate ??= compileSafeHydrator(state.schema, {
+    safeHydrate ??= compileSafeHydrator(hydrateSchema, {
       ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
     }) as (input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
     return safeHydrate;
   };
 
   const constructionState = { mode: state.construction };
-  const managedStorage = resolveManagedStorage(properties, state.accessors, state.managedFields);
-  const classTarget = emitConstructor(
+  const managedStorage = resolveManagedStorage(
     properties,
+    state.accessors,
+    state.managedFields,
+    state.encapsulateFields,
+    state.fieldPolicies
+  );
+  const layout = createClassLayoutPlan(
+    properties,
+    state.accessors,
+    managedStorage,
+    state.fieldPolicies,
+    state.encapsulateFields,
+    initializers
+  );
+  const mutationGate = state.encapsulateFields ? state.mutationGate : undefined;
+  const classTarget = emitConstructor(
+    layout,
     state.freezeInstances,
     state.aggregate,
     parse,
     constructionState,
-    state.accessors,
-    managedStorage
+    mutationGate
   ) as RuntimeClass<TSchema>;
+  installTrustedMaterializer(classTarget, layout, state.freezeInstances, state.aggregate);
+  parseCreation = compileValidator(creationSchema).parse;
+  hydrateState = compileHydrator(hydrateSchema);
 
-  for (const capabilityValue of state.capabilities) capabilityValue.install(classTarget, state.schema);
+  for (const capabilityValue of state.capabilities) {
+    if (capabilityValue.kind === "class.json") {
+      const method = capabilityMemberNames(capabilityValue)[0] ?? "toJson";
+      const jsonFields = Object.keys(resolveEffectiveObjectSchema(hydrateSchema).def.props);
+      const rootPropertyAccess = new Map<string, string>();
+      const bindings: symbol[] = [];
+      for (const field of jsonFields) {
+        const managed = managedStorage.get(field);
+        if (managed === undefined) rootPropertyAccess.set(field, `value[${JSON.stringify(field)}]`);
+        else {
+          const index = bindings.length;
+          bindings.push(managed.value);
+          rootPropertyAccess.set(field, `value[__root${index}]`);
+        }
+      }
+      const stringify = compileSerializeWithRootAccess(hydrateSchema, rootPropertyAccess, bindings);
+      definePrototype(
+        classTarget.prototype,
+        method,
+        function toJson(this: unknown) {
+          return stringify(this as never);
+        },
+        true
+      );
+    } else {
+      capabilityValue.install(classTarget, state.schema);
+    }
+  }
   installLifecycleMethods(classTarget, state, managedStorage);
-  for (const method of state.methods) installMethodDefinition(classTarget, method);
+  installFieldDescriptorAccessors(classTarget, state.fieldPolicies);
+  for (const method of state.methods) installMethodDefinition(classTarget, method, mutationGate);
 
   function registerClass(): void {
     const mutation = lifecycleArtifact(state.lifecycle);
@@ -1252,6 +2207,8 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       kind: "class",
       declaredSchema: state.declaredSchema,
       schema: state.schema,
+      creationSchema,
+      wireSchema: hydrateSchema,
       abstract: state.isAbstract,
       frozen: state.freezeInstances,
       aggregate: state.aggregate,
@@ -1259,12 +2216,28 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       representation: "object",
       capabilities: state.capabilities.map((capability) => capability.kind),
       managedFields: state.managedFields,
+      hydrateSchema,
+      encapsulateFields: state.encapsulateFields,
+      ...(state.fieldPolicies.size === 0
+        ? {}
+        : {
+            fieldPolicies: [...state.fieldPolicies.entries()].map(([name, policy]) => ({
+              name,
+              visibility: policy.visibility,
+              getter: policy.getter !== false,
+              setter: policy.setter !== false,
+              noConstructor: policy.noConstructor,
+            })),
+          }),
       lifecycle: state.lifecycle,
       resolvedMembers: state.members.entries(),
       ...(mutation === undefined ? {} : { mutation }),
       ...policyArtifact(policy),
       ...(state.methods.length === 0 ? {} : { methods: state.methods }),
       factories: state.factoryNames,
+      ...(state.customFactories.create === undefined && state.customFactories.hydrate === undefined
+        ? {}
+        : { customFactories: state.customFactories }),
       accessors: state.accessors,
     });
   }
@@ -1273,11 +2246,49 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     if (state.isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot create an instance of an abstract JIT class");
     }
+    if (state.identity.state === "pending") {
+      throw new JITError("DDD_IDENTITY_MISSING", "Entity identity is pending a structural identifier extension");
+    }
+    if (state.identity.state === "ambiguous") {
+      throw new JITError("DDD_IDENTITY_AMBIGUOUS", "Entity identity has multiple structural identifier candidates");
+    }
     const construct = this as unknown as new (
       input: unknown,
       token: symbol,
       validated?: boolean
     ) => InstanceType<TThis>;
+    const customFactory = state.customFactories.create;
+    if (customFactory !== undefined) {
+      const parsed =
+        policy.configured && policy.create
+          ? policySafeParse()(boundaryInput(input))
+          : { success: true as const, data: parse(input) };
+      if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
+      if (policy.assert !== undefined) {
+        const failure = policy.assert(parsed.data);
+        if (failure !== undefined) return policyFailure(policy, failure) as InstanceType<TThis>;
+      }
+      const result = customFactory.call(this, parsed.data, {
+        construct: (value: unknown) => new construct(value, INTERNAL_CONSTRUCT, true),
+      } satisfies FactoryConstructionContext<InstanceType<TThis>>);
+      let instance: InstanceType<TThis>;
+      if (result instanceof this) {
+        instance = result as InstanceType<TThis>;
+      } else {
+        if (result === null || typeof result !== "object") {
+          const error = new JITError(
+            "CLASS_FACTORY_RESULT_INVALID",
+            "A custom object factory must return state or an instance"
+          );
+          if (policy.configured) return policyFailure(policy, error) as InstanceType<TThis>;
+          throw error;
+        }
+        instance = new construct(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured
+        ? (policySuccess(policy, instance) as InstanceType<TThis>)
+        : (instance as InstanceType<TThis>);
+    }
     if (!policy.configured || !policy.create) {
       if (
         state.lifecycle.timestamps === undefined &&
@@ -1286,31 +2297,87 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       ) {
         return new construct(input, INTERNAL_CONSTRUCT);
       }
-      return new construct(initializeCreatedLifecycle(parse(input), input, state.lifecycle), INTERNAL_CONSTRUCT, true);
+      return new construct(parse(input), INTERNAL_CONSTRUCT, true);
     }
-    const parsed = policySafeParse()(input);
+    if (policy.maxIssues === undefined && policy.assert === undefined) {
+      try {
+        return policySuccess(policy, new construct(parse(input), INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues)) as InstanceType<TThis>;
+      }
+    }
+    const parsed = policySafeParse()(boundaryInput(input));
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
-    const created = initializeCreatedLifecycle(parsed.data, input, state.lifecycle);
     if (policy.assert !== undefined) {
-      const failure = policy.assert(created);
+      const failure = policy.assert(parsed.data);
       if (failure !== undefined) return policyFailure(policy, failure) as InstanceType<TThis>;
     }
-    return policySuccess(policy, new construct(created, INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
+    return policySuccess(policy, new construct(parsed.data, INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
   }
 
   function hydrate<TThis extends RuntimeClass<TSchema>>(this: TThis, input: Hydrate<TSchema>): InstanceType<TThis> {
     if (state.isAbstract && this === classTarget) {
       throw new JITError("INVALID_OPERATION", "Cannot hydrate an instance of an abstract JIT class");
     }
+    if (state.identity.state === "pending") {
+      throw new JITError("DDD_IDENTITY_MISSING", "Entity identity is pending a structural identifier extension");
+    }
+    if (state.identity.state === "ambiguous") {
+      throw new JITError("DDD_IDENTITY_AMBIGUOUS", "Entity identity has multiple structural identifier candidates");
+    }
     const construct = this as unknown as new (
       value: unknown,
       token: symbol,
       validated?: boolean
     ) => InstanceType<TThis>;
-    if (!policy.configured || !policy.hydrate) {
-      return new construct(hydrateState(input), INTERNAL_CONSTRUCT, true);
+    const customFactory = state.customFactories.hydrate;
+    if (customFactory !== undefined) {
+      const parsed =
+        policy.configured && policy.hydrate
+          ? policySafeHydrate()(boundaryInput(input))
+          : { success: true as const, data: hydrateInput(input) };
+      if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
+      if (policy.assert !== undefined) {
+        const failure = policy.assert(parsed.data);
+        if (failure !== undefined) return policyFailure(policy, failure) as InstanceType<TThis>;
+      }
+      const result = customFactory.call(this, parsed.data, {
+        construct: (value: unknown) => new construct(value, INTERNAL_CONSTRUCT, true),
+      } satisfies FactoryConstructionContext<InstanceType<TThis>>);
+      let instance: InstanceType<TThis>;
+      if (result instanceof this) {
+        instance = result as InstanceType<TThis>;
+      } else {
+        if (result === null || typeof result !== "object") {
+          const error = new JITError(
+            "CLASS_FACTORY_RESULT_INVALID",
+            "A custom object factory must return state or an instance"
+          );
+          if (policy.configured) return policyFailure(policy, error) as InstanceType<TThis>;
+          throw error;
+        }
+        instance = new construct(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured
+        ? (policySuccess(policy, instance) as InstanceType<TThis>)
+        : (instance as InstanceType<TThis>);
     }
-    const parsed = policySafeHydrate()(input);
+    if (!policy.configured || !policy.hydrate) {
+      return new construct(hydrateInput(input), INTERNAL_CONSTRUCT, true);
+    }
+    if (policy.maxIssues === undefined && policy.assert === undefined) {
+      try {
+        return policySuccess(
+          policy,
+          new construct(hydrateInput(input), INTERNAL_CONSTRUCT, true)
+        ) as InstanceType<TThis>;
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues)) as InstanceType<TThis>;
+      }
+    }
+    const parsed = policySafeHydrate()(boundaryInput(input));
     if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
     if (policy.assert !== undefined) {
       const failure = policy.assert(parsed.data);
@@ -1328,11 +2395,19 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         materialize: classTarget,
         representation: "object",
         identifier: false,
-      }) as unknown as ATS.RuntimeTypeSchema<TSchema, ATS.TypeofSchema<TSchema>>,
+        traits: runtimeTypeTraits("object", false, policy),
+        assertion: policy.assertionGuard,
+      }) as unknown as ATS.RuntimeTypeSchema<
+        TSchema,
+        ATS.TypeofSchema<TSchema>,
+        "object",
+        false,
+        ATS.RuntimeTypeTraits<"object", false>
+      >,
     },
     extends: {
       enumerable: false,
-      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput)[]) =>
+      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput | ClassMixin)[]) =>
         materializeClassState(resolveClassExtensions(state, extensions)),
     },
     validate: {
@@ -1358,9 +2433,11 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         if (state.constructionConfigured) {
           throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
         }
+        const createOption = resolveFactoryOption(options.create, state.factoryNames.create, "create");
+        const hydrateOption = resolveFactoryOption(options.hydrate, state.factoryNames.hydrate, "hydrate");
         const next = {
-          create: options.create === undefined ? state.factoryNames.create : options.create,
-          hydrate: options.hydrate === undefined ? state.factoryNames.hydrate : options.hydrate,
+          create: createOption.name,
+          hydrate: hydrateOption.name,
         };
         if (next.create === false && next.hydrate === false) {
           throw new JITError(
@@ -1373,6 +2450,14 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
           construction: "factory",
           factoriesConfigured: true,
           factoryNames: next,
+          customFactories: {
+            ...(state.customFactories.create === undefined && createOption.implementation === undefined
+              ? {}
+              : { create: createOption.implementation ?? state.customFactories.create }),
+            ...(state.customFactories.hydrate === undefined && hydrateOption.implementation === undefined
+              ? {}
+              : { hydrate: hydrateOption.implementation ?? state.customFactories.hydrate }),
+          },
         });
       },
     },
@@ -1438,6 +2523,7 @@ function materializeClassState(state: ClassDefinitionState): RuntimeClass<ATS.An
     state.freezeInstances,
     state.aggregate,
     state.construction,
+    state.encapsulateFields,
     state.accessors,
     state
   );
@@ -1445,7 +2531,7 @@ function materializeClassState(state: ClassDefinitionState): RuntimeClass<ATS.An
 
 function resolveClassExtensions(
   current: ClassDefinitionState,
-  extensions: readonly (AnyClassCapability | ClassMethodsInput)[]
+  extensions: readonly (AnyClassCapability | ClassMethodsInput | ClassMixin)[]
 ): ClassDefinitionState {
   let next: ClassDefinitionState = {
     ...current,
@@ -1453,9 +2539,13 @@ function resolveClassExtensions(
     methods: [...current.methods],
     managedFields: [...current.managedFields],
     members: current.members.clone(),
+    fieldPolicies: new Map(current.fieldPolicies),
   };
 
-  for (const extension of extensions) {
+  for (const rawExtension of extensions) {
+    const mixin = isClassMixin(rawExtension) ? rawExtension : undefined;
+    if (mixin !== undefined) validateMixinRequirements(next.schema, mixin.__requires);
+    const extension = mixin === undefined ? rawExtension : mixin();
     if (isClassCapability(extension)) {
       if (next.capabilities.some((capability) => capability.kind === extension.kind)) {
         throw new JITError(
@@ -1497,48 +2587,94 @@ function resolveClassExtensions(
         for (const name of names) assertNewMember(next.members, name, extension.kind);
         const members = next.members.clone();
         for (const name of names) addMember(members, name, "capability", extension.kind, "method");
-        next = { ...next, members, capabilities: [...next.capabilities, extension] };
+        next = {
+          ...next,
+          members,
+          capabilities: [...next.capabilities, extension],
+          ...(extension.kind.startsWith("identity:")
+            ? {
+                identity: {
+                  state: "resolved" as const,
+                  key: extension.kind.slice("identity:".length),
+                  explicit: true,
+                },
+              }
+            : {}),
+        };
       }
       continue;
     }
 
     const members = next.members.clone();
     const methods = [...next.methods];
+    const fieldPolicies = new Map(next.fieldPolicies);
     let schema = next.schema;
     for (const name of Object.getOwnPropertyNames(extension)) {
       const descriptor = Object.getOwnPropertyDescriptor(extension, name);
       if (descriptor === undefined) continue;
       const value = descriptor.value;
-      if (isOverwriteDescriptor(value)) {
+      if (isOverrideDescriptor(value)) {
         const existing = members.get(name);
         if (existing === undefined) {
           throw new JITError(
-            "CLASS_OVERWRITE_TARGET_NOT_FOUND",
-            `Class member ${JSON.stringify(name)} does not exist. JIT.overwrite() can only replace an existing member.`
+            "CLASS_OVERRIDE_TARGET_NOT_FOUND",
+            `Class member ${JSON.stringify(name)} does not exist. JIT.class.override() can only replace an existing member.`
           );
+        }
+        if (isClassMemberDescriptor(value.value)) {
+          const definition = value.value.definition;
+          if (definition.kind === "method") {
+            if (existing.kind === "field") {
+              throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is a schema field`);
+            }
+            replaceMethod(methods, name, methodDefinitionFromContract(name, definition));
+            members.replace(name, {
+              ...existing,
+              source: "override",
+              descriptor: { value: definition.implementation },
+            });
+          } else {
+            if (definition.kind === "factory") {
+              throw new JITError("CLASS_FACTORY_CONFLICT", "Factory descriptors cannot override instance members");
+            }
+            if (existing.kind !== "field") {
+              throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
+            }
+            if (definition.kind === "field" && definition.schema !== undefined) {
+              schema = replaceSchemaField(schema, name, unwrapSchema(definition.schema));
+              schema = reapplyManagedAfterOverride(schema, next.managedFields);
+              members.replace(name, {
+                ...existing,
+                source: "override",
+                schema: resolveEffectiveObjectSchema(schema).def.props[name],
+              });
+            }
+            applyFieldPolicy(fieldPolicies, name, definition);
+          }
+          continue;
         }
         if (isSchemaInputValue(value.value)) {
           if (existing.kind !== "field") {
             throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
           }
           schema = replaceSchemaField(schema, name, unwrapSchema(value.value as SchemaInput<ATS.AnyTypeSchema>));
-          schema = reapplyManagedAfterOverwrite(schema, next.managedFields);
+          schema = reapplyManagedAfterOverride(schema, next.managedFields);
           const effectiveField = resolveEffectiveObjectSchema(schema).def.props[name];
           members.replace(name, {
             ...existing,
-            source: "overwrite",
+            source: "override",
             schema: effectiveField,
           });
         } else {
           if (existing.kind === "field") {
             throw new JITError(
               "CLASS_MEMBER_ALREADY_EXISTS",
-              `Member ${JSON.stringify(name)} is a schema field; use a schema value with JIT.overwrite(...)`
+              `Member ${JSON.stringify(name)} is a schema field; use a schema value with JIT.class.override(...)`
             );
           }
           const replacement = methodDefinitionFromValue(name, value.value);
           replaceMethod(methods, name, replacement);
-          members.replace(name, { ...existing, source: "overwrite", descriptor: { value: replacement.source } });
+          members.replace(name, { ...existing, source: "override", descriptor: { value: replacement.source } });
         }
         continue;
       }
@@ -1546,8 +2682,65 @@ function resolveClassExtensions(
       if (members.has(name) || RESERVED_EXTENSION_NAMES.has(name)) {
         throw new JITError(
           "CLASS_MEMBER_ALREADY_EXISTS",
-          `Class member ${JSON.stringify(name)} would shadow an existing member. Use ${JSON.stringify(`${name}: JIT.overwrite(...)`)} to replace it explicitly.`
+          `Class member ${JSON.stringify(name)} would shadow an existing member. Use ${JSON.stringify(`${name}: JIT.class.override(...)`)} to replace it explicitly.`
         );
+      }
+      if (isClassMemberDescriptor(value)) {
+        const definition = value.definition;
+        if (definition.kind === "method") {
+          if (definition.implementation === undefined) {
+            throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+          }
+          const method = methodDefinitionFromContract(name, definition);
+          methods.push(method);
+          addMember(members, name, "extension", "custom extension", "method");
+          continue;
+        }
+        if (definition.kind === "factory") {
+          throw new JITError(
+            "INVALID_OPERATION",
+            "Factory descriptors belong in .factories(), not an instance extension"
+          );
+        }
+        const fieldSchema = definition.schema;
+        if (fieldSchema !== undefined) {
+          const field = unwrapSchema(fieldSchema);
+          if (definition.kind === "field" && definition.noConstructor && !hasDefault(field)) {
+            throw new JITError(
+              "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+              `No-constructor field ${JSON.stringify(name)} requires a default initializer`
+            );
+          }
+          schema = addSchemaField(schema, name, field);
+          members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+        } else {
+          const hasCustomAccessor =
+            definition.kind === "accessor" &&
+            (typeof definition.getter === "function" || typeof definition.setter === "function");
+          if (!hasCustomAccessor) {
+            throw new JITError(
+              "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+              `Class member ${JSON.stringify(name)} needs a schema or a custom getter/setter`
+            );
+          }
+          const methodDefinitions = descriptorMethods(name, definition);
+          methods.push(...methodDefinitions);
+          addMember(
+            members,
+            name,
+            "extension",
+            "custom extension",
+            methodDefinitions[0]?.kind === "get" ? "getter" : "setter"
+          );
+        }
+        applyFieldPolicy(fieldPolicies, name, definition);
+        continue;
+      }
+      if (isSchemaInputValue(value)) {
+        const field = unwrapSchema(value);
+        schema = addSchemaField(schema, name, field);
+        members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+        continue;
       }
       const method = methodDefinitionFromDescriptor(name, descriptor);
       methods.push(method);
@@ -1560,10 +2753,58 @@ function resolveClassExtensions(
       );
     }
     validateManagedFields(schema, next.managedFields);
-    next = { ...next, schema, methods, members };
+    next = { ...next, schema, methods, members, fieldPolicies };
+  }
+  if (next.identity.state === "pending") {
+    const object = resolveEffectiveObjectSchema(next.schema);
+    const candidates = Object.keys(object.def.props).filter((key) => isIdentifierSchema(object.def.props[key]));
+    if (candidates.length === 1) {
+      const key = candidates[0];
+      const identity = classType.identity(key);
+      const members = next.members.clone();
+      for (const name of capabilityMemberNames(identity))
+        addMember(members, name, "capability", identity.kind, "method");
+      next = {
+        ...next,
+        members,
+        capabilities: [...next.capabilities, identity],
+        identity: { state: "resolved", key, explicit: false },
+      };
+    } else if (candidates.length > 1) {
+      next = { ...next, identity: { state: "ambiguous", candidates: Object.freeze(candidates) } };
+    }
   }
   validateManagedFields(next.schema, next.managedFields);
   return next;
+}
+
+function validateMixinRequirements(schema: ATS.AnyTypeSchema, requirements: ClassMethodsInput | undefined): void {
+  if (requirements === undefined) return;
+  const object = resolveEffectiveObjectSchema(schema);
+  for (const name of Object.getOwnPropertyNames(requirements)) {
+    const required = requirements[name];
+    const actual = object.def.props[name];
+    if (actual === undefined) {
+      throw new JITError(
+        "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+        `Class mixin requires the host field ${JSON.stringify(name)}`
+      );
+    }
+    if (!isSchemaInputValue(required)) {
+      throw new JITError(
+        "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+        `Mixin requirement ${JSON.stringify(name)} must be a schema`
+      );
+    }
+    const expectedBase = resolveWrappers(unwrapSchema(required)).base;
+    const actualBase = resolveWrappers(actual).base;
+    if (expectedBase.type !== actualBase.type) {
+      throw new JITError(
+        "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+        `Class mixin requirement ${JSON.stringify(name)} is incompatible with the host field`
+      );
+    }
+  }
 }
 
 function capabilityOptions(capability: AnyClassCapability): CapabilityOptions | undefined {
@@ -1585,14 +2826,17 @@ function assertNewMember(members: ResolvedMemberTable, name: string, owner: stri
     }
     throw new JITError(
       "CLASS_MEMBER_ALREADY_EXISTS",
-      `Member ${JSON.stringify(name)} already exists. Existing source conflicts with ${owner}; use JIT.overwrite(...) explicitly.`
+      `Member ${JSON.stringify(name)} already exists. Existing source conflicts with ${owner}; use JIT.class.override(...) explicitly.`
     );
   }
 }
 
 function isSchemaInputValue(value: unknown): value is SchemaInput<ATS.AnyTypeSchema> {
   return (
-    (typeof value === "object" && value !== null && "schema" in value && typeof value.schema === "object") ||
+    ((typeof value === "object" || typeof value === "function") &&
+      value !== null &&
+      "schema" in value &&
+      typeof value.schema === "object") ||
     (typeof value === "object" && value !== null && "type" in value && "def" in value)
   );
 }
@@ -1616,7 +2860,21 @@ function replaceSchemaField(
   );
 }
 
-function reapplyManagedAfterOverwrite(
+function addSchemaField(schema: ATS.AnyTypeSchema, name: string, field: ATS.AnyTypeSchema): ATS.AnyTypeSchema {
+  const object = resolveEffectiveObjectSchema(schema);
+  return createSchema(
+    TypeName.object,
+    {
+      props: { ...object.def.props, [name]: field },
+      unknownKeys: object.def.unknownKeys,
+      catchall: object.def.catchall,
+      checks: object.def.checks,
+    },
+    object.annotations
+  );
+}
+
+function reapplyManagedAfterOverride(
   schema: ATS.AnyTypeSchema,
   managedFields: readonly ManagedFieldDescriptor[]
 ): ATS.AnyTypeSchema {
@@ -1645,11 +2903,101 @@ function methodDefinitionFromDescriptor(name: string, descriptor: PropertyDescri
   return { name, kind: "method", source: descriptor.value };
 }
 
+function methodDefinitionFromContract(
+  name: string,
+  definition: Extract<ClassMemberDefinition, { readonly kind: "method" }>
+): ClassMethodDefinition {
+  if (definition.implementation === undefined) {
+    throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+  }
+  return {
+    name,
+    kind: "method",
+    source: definition.implementation,
+    schema: definition.schema as ATS.FunctionSchema,
+    ...(definition.async === undefined ? {} : { async: definition.async }),
+  };
+}
+
+function descriptorMethods(
+  name: string,
+  definition: Extract<ClassMemberDefinition, { readonly kind: "accessor" | "field" }>
+): readonly ClassMethodDefinition[] {
+  const methods: ClassMethodDefinition[] = [];
+  if (typeof definition.getter === "function") methods.push({ name, kind: "get", source: definition.getter });
+  if (typeof definition.setter === "function") methods.push({ name, kind: "set", source: definition.setter });
+  return methods;
+}
+
+function applyFieldPolicy(
+  policies: Map<string, ClassFieldPolicy>,
+  name: string,
+  definition: Extract<ClassMemberDefinition, { readonly kind: "accessor" | "field" }>
+): void {
+  const previous = policies.get(name);
+  const visibility = definition.visibility ?? previous?.visibility ?? "public";
+  const hasAccessorIntent = definition.getter !== undefined || definition.setter !== undefined;
+  const defaultPublicField =
+    definition.kind === "field" &&
+    (definition.visibility === "public" || definition.noConstructor === true) &&
+    !hasAccessorIntent;
+  const internalVisibilityField =
+    definition.kind === "field" &&
+    (definition.visibility === "protected" || definition.visibility === "private") &&
+    !hasAccessorIntent;
+  const getter = definition.getter ?? previous?.getter ?? (defaultPublicField || internalVisibilityField);
+  const setter = definition.setter ?? previous?.setter ?? (defaultPublicField || internalVisibilityField);
+  if (previous !== undefined) {
+    if (definition.getter !== undefined && previous.getter !== false) {
+      throw new JITError("CLASS_ACCESSOR_CONFLICT", `Field ${JSON.stringify(name)} declares more than one getter`);
+    }
+    if (definition.setter !== undefined && previous.setter !== false) {
+      throw new JITError("CLASS_ACCESSOR_CONFLICT", `Field ${JSON.stringify(name)} declares more than one setter`);
+    }
+    if (definition.visibility !== undefined && previous.visibility !== definition.visibility) {
+      throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", `Field ${JSON.stringify(name)} has conflicting visibility`);
+    }
+  }
+  policies.set(name, {
+    visibility,
+    getter,
+    setter,
+    noConstructor:
+      definition.kind === "field" && definition.noConstructor === true ? true : (previous?.noConstructor ?? false),
+  });
+}
+
+function hasDefault(schema: ATS.AnyTypeSchema): boolean {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.default) return true;
+    if (current.type === TypeName.lazy) {
+      current = (current.def as ATS.LazyDef).getter();
+      continue;
+    }
+    if (
+      current.type === TypeName.readonly ||
+      current.type === TypeName.optional ||
+      current.type === TypeName.nullable ||
+      current.type === TypeName.nullish ||
+      current.type === TypeName.brand ||
+      current.type === TypeName.refine ||
+      current.type === TypeName.coerce ||
+      current.type === TypeName.pipe ||
+      current.type === TypeName.transform
+    ) {
+      current = (current.def as ATS.InnerTypeDef).innerType;
+      continue;
+    }
+    return false;
+  }
+}
+
 function methodDefinitionFromValue(name: string, value: unknown): ClassMethodDefinition {
   if (typeof value !== "function") {
     throw new JITError(
       "INVALID_OPERATION",
-      `Overwrite ${JSON.stringify(name)} must provide a method function or schema`
+      `Override ${JSON.stringify(name)} must provide a method function or schema`
     );
   }
   return { name, kind: "method", source: value };
@@ -1661,13 +3009,46 @@ function replaceMethod(methods: ClassMethodDefinition[], name: string, replaceme
   else methods[index] = replacement;
 }
 
-function installMethodDefinition(classTarget: Function, method: ClassMethodDefinition): void {
+function installMethodDefinition(
+  classTarget: Function,
+  method: ClassMethodDefinition,
+  mutationGate?: WeakSet<object>
+): void {
+  let source = method.source;
+  if (method.schema !== undefined) {
+    const args = compileValidator(method.schema.def.args);
+    const output = method.schema.def.output === undefined ? undefined : compileValidator(method.schema.def.output);
+    if (method.async === true) {
+      source = async function validatedAsyncMethod(this: unknown, ...rawArgs: unknown[]) {
+        const parsed = args.parse(rawArgs) as readonly unknown[];
+        const result = await method.source.apply(this, parsed as never[]);
+        return output === undefined ? result : output.parseAsync(result);
+      };
+    } else {
+      source = function validatedMethod(this: unknown, ...rawArgs: unknown[]) {
+        const parsed = args.parse(rawArgs) as readonly unknown[];
+        const result = method.source.apply(this, parsed as never[]);
+        return output === undefined ? result : output.parse(result);
+      };
+    }
+  }
+  if (mutationGate !== undefined && method.kind === "method") {
+    const body = source;
+    source = function domainMethod(this: object, ...args: unknown[]) {
+      mutationGate.add(this);
+      try {
+        return body.apply(this, args);
+      } finally {
+        mutationGate.delete(this);
+      }
+    };
+  }
   const descriptor: PropertyDescriptor =
     method.kind === "method"
-      ? { value: method.source, writable: false }
+      ? { value: source, writable: false }
       : method.kind === "get"
-        ? { get: method.source as () => unknown }
-        : { set: method.source as (value: unknown) => void };
+        ? { get: source as () => unknown }
+        : { set: source as (value: unknown) => void };
   Object.defineProperty(classTarget.prototype, method.name, {
     ...descriptor,
     configurable: true,
@@ -1871,27 +3252,6 @@ function checkedClock(clock: () => Date): Date {
   return value;
 }
 
-/** Applies create-only lifecycle semantics after the fused schema parse. */
-function initializeCreatedLifecycle(
-  value: unknown,
-  input: unknown,
-  lifecycle: LifecycleDefinition
-): Record<string, unknown> {
-  if (typeof value !== "object" || value === null) return value as Record<string, unknown>;
-  const result = value as Record<string, unknown>;
-  const supplied = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : undefined;
-  const timestamps = lifecycle.timestamps;
-  if (timestamps !== undefined) {
-    if (supplied?.[timestamps.createdAt] !== undefined) {
-      result[timestamps.createdAt] = timestamps.clock === undefined ? new Date() : checkedClock(timestamps.clock);
-    }
-    result[timestamps.updatedAt] = null;
-  }
-  if (lifecycle.softDelete !== undefined) result[lifecycle.softDelete.field] = null;
-  if (lifecycle.versioned !== undefined) result[lifecycle.versioned.field] = 0;
-  return result;
-}
-
 function installFactory<TSchema extends ATS.AnyTypeSchema>(
   classTarget: RuntimeClass<TSchema>,
   previous: string | false,
@@ -1920,6 +3280,27 @@ function installFactory<TSchema extends ATS.AnyTypeSchema>(
   });
 }
 
+function resolveFactoryOption(
+  option: string | false | ClassMemberDescriptor<ClassFactoryMemberDescriptor> | undefined,
+  previous: string | false,
+  phase: "create" | "hydrate"
+): { readonly name: string | false; readonly implementation?: Function } {
+  if (option === undefined) return { name: previous };
+  if (typeof option === "object") {
+    if (!isClassMemberDescriptor(option) || option.definition.kind !== "factory") {
+      throw new JITError("CLASS_FACTORY_CONFLICT", "Invalid class factory descriptor");
+    }
+    if (option.definition.phase !== phase) {
+      throw new JITError(
+        "CLASS_FACTORY_CONFLICT",
+        `A ${option.definition.phase} factory descriptor cannot configure ${phase}`
+      );
+    }
+    return { name: option.definition.name, implementation: option.definition.implementation };
+  }
+  return { name: option };
+}
+
 function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
   schema: TSchema,
   identifier: boolean,
@@ -1943,6 +3324,15 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     TSchema,
     ScalarValueObject<ATS.TypeofSchema<TSchema>>
   >;
+  Object.defineProperty(classTarget, TRUSTED_MATERIALIZER, {
+    configurable: false,
+    enumerable: false,
+    value: (value: unknown) => {
+      const instance = Object.create(classTarget.prototype) as { value: unknown };
+      instance.value = value;
+      return Object.freeze(instance);
+    },
+  });
   const installedCapabilities = ["equals", "hashCode"];
   const installedMethods: {
     readonly name: string;
@@ -1954,8 +3344,24 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     create: "create",
     hydrate: "hydrate",
   };
+  let customFactories: { create?: Function; hydrate?: Function } = {};
   let constructionConfigured = false;
   let factoriesConfigured = false;
+
+  const updateSchema = (): void => {
+    Object.defineProperty(classTarget, "schema", {
+      configurable: true,
+      enumerable: true,
+      value: createSchema(TypeName.runtimeType, {
+        innerType: schema,
+        materialize: classTarget,
+        representation: "value",
+        identifier,
+        traits: runtimeTypeTraits("value", identifier, policy),
+        assertion: undefined,
+      }),
+    });
+  };
 
   function create<TThis extends RuntimeClass<TSchema>>(
     this: TThis,
@@ -1969,7 +3375,39 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       token: symbol,
       validated?: boolean
     ) => InstanceType<TThis>;
+    if (customFactories.create !== undefined) {
+      const parsed =
+        policy.configured && policy.create
+          ? (() => {
+              safeParse ??= compileValidatorSelection(schema, ["safeParse"], {}).safeParse as (
+                input: unknown
+              ) => SafeParse<ATS.TypeofSchema<TSchema>>;
+              return safeParse(args[0]);
+            })()
+          : { success: true as const, data: parse(args[0]) };
+      if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
+      const result = customFactories.create.call(this, parsed.data, {
+        construct: (value: unknown) => new construct(value, INTERNAL_CONSTRUCT, true),
+      });
+      let instance: InstanceType<TThis>;
+      if (result instanceof this) {
+        instance = result as InstanceType<TThis>;
+      } else {
+        instance = new construct(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured
+        ? (policySuccess(policy, instance) as InstanceType<TThis>)
+        : (instance as InstanceType<TThis>);
+    }
     if (!policy.configured || !policy.create) return new construct(args[0], INTERNAL_CONSTRUCT);
+    if (policy.maxIssues === undefined) {
+      try {
+        return policySuccess(policy, new construct(parse(args[0]), INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues)) as InstanceType<TThis>;
+      }
+    }
     safeParse ??= compileValidatorSelection(schema, ["safeParse"], {
       ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
     }).safeParse as (input: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
@@ -1987,8 +3425,41 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       token: symbol,
       validated?: boolean
     ) => InstanceType<TThis>;
+    if (customFactories.hydrate !== undefined) {
+      const parsed =
+        policy.configured && policy.hydrate
+          ? (() => {
+              safeHydrate ??= compileSafeHydrator(schema) as (state: unknown) => SafeParse<ATS.TypeofSchema<TSchema>>;
+              return safeHydrate(state);
+            })()
+          : { success: true as const, data: hydrateState(state) };
+      if (!parsed.success) return policyFailure(policy, policyError(policy, parsed.issues)) as InstanceType<TThis>;
+      const result = customFactories.hydrate.call(this, parsed.data, {
+        construct: (value: unknown) => new construct(value, INTERNAL_CONSTRUCT, true),
+      });
+      let instance: InstanceType<TThis>;
+      if (result instanceof this) {
+        instance = result as InstanceType<TThis>;
+      } else {
+        instance = new construct(result, INTERNAL_CONSTRUCT, true);
+      }
+      return policy.configured
+        ? (policySuccess(policy, instance) as InstanceType<TThis>)
+        : (instance as InstanceType<TThis>);
+    }
     if (!policy.configured || !policy.hydrate) {
       return new construct(hydrateState(state), INTERNAL_CONSTRUCT, true);
+    }
+    if (policy.maxIssues === undefined) {
+      try {
+        return policySuccess(
+          policy,
+          new construct(hydrateState(state), INTERNAL_CONSTRUCT, true)
+        ) as InstanceType<TThis>;
+      } catch (error) {
+        if (!(error instanceof JITValidationError)) throw error;
+        return policyFailure(policy, policyError(policy, error.issues)) as InstanceType<TThis>;
+      }
     }
     safeHydrate ??= compileSafeHydrator(schema, {
       ...(policy.maxIssues === undefined ? {} : { maxIssues: policy.maxIssues }),
@@ -1998,10 +3469,12 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     return policySuccess(policy, new construct(parsed.data, INTERNAL_CONSTRUCT, true)) as InstanceType<TThis>;
   }
 
-  const register = () =>
+  const register = () => {
+    updateSchema();
     registerArtifact(classTarget, {
       kind: "class",
       schema,
+      wireSchema: schema,
       abstract: isAbstract,
       frozen: true,
       aggregate: false,
@@ -2011,25 +3484,37 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
       capabilities: installedCapabilities,
       ...(installedMethods.length === 0 ? {} : { methods: installedMethods }),
       factories: factoryNames,
+      ...(customFactories.create === undefined && customFactories.hydrate === undefined ? {} : { customFactories }),
     });
+  };
 
   Object.defineProperties(classTarget, {
     [CLASS_TARGET]: { enumerable: false, value: true },
     schema: {
+      configurable: true,
       enumerable: true,
       value: createSchema(TypeName.runtimeType, {
         innerType: schema,
         materialize: classTarget,
         representation: "value",
         identifier,
-      }) as ATS.RuntimeTypeSchema<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>,
+        traits: runtimeTypeTraits("value", identifier, policy),
+        assertion: undefined,
+      }) as ATS.RuntimeTypeSchema<
+        TSchema,
+        ScalarValueObject<ATS.TypeofSchema<TSchema>>,
+        "value",
+        boolean,
+        ATS.RuntimeTypeTraits<"value", boolean>
+      >,
     },
     create: { configurable: true, enumerable: false, value: create },
     hydrate: { configurable: true, enumerable: false, value: hydrate },
     extends: {
       enumerable: false,
-      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput)[]) => {
-        for (const extension of extensions) {
+      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput | ClassMixin)[]) => {
+        for (const rawExtension of extensions) {
+          const extension = isClassMixin(rawExtension) ? rawExtension() : rawExtension;
           if (isClassCapability(extension)) {
             if (installedCapabilities.includes(extension.kind)) {
               throw new JITError(
@@ -2045,7 +3530,7 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
             installedCapabilities.push(extension.kind);
             continue;
           }
-          installedMethods.push(...installMethods(classTarget, extension, SCALAR_MEMBERS, installedMethodNames));
+          installScalarExtension(classTarget, extension, installedMethods, installedMethodNames);
         }
         register();
         return classTarget;
@@ -2060,10 +3545,9 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
         if (constructionConfigured) {
           throw new JITError("INVALID_OPERATION", "Construction is already configured for this Runtime Class");
         }
-        const next = {
-          create: options.create === undefined ? factoryNames.create : options.create,
-          hydrate: options.hydrate === undefined ? factoryNames.hydrate : options.hydrate,
-        };
+        const createOption = resolveFactoryOption(options.create, factoryNames.create, "create");
+        const hydrateOption = resolveFactoryOption(options.hydrate, factoryNames.hydrate, "hydrate");
+        const next = { create: createOption.name, hydrate: hydrateOption.name };
         if (next.create === false && next.hydrate === false) {
           throw new JITError(
             "INVALID_OPERATION",
@@ -2074,6 +3558,10 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
         installFactory(classTarget, factoryNames.hydrate, next.hydrate, hydrate);
         factoriesConfigured = true;
         factoryNames = next;
+        customFactories = {
+          ...(createOption.implementation === undefined ? {} : { create: createOption.implementation }),
+          ...(hydrateOption.implementation === undefined ? {} : { hydrate: hydrateOption.implementation }),
+        };
         register();
         return classTarget;
       },
@@ -2155,37 +3643,115 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
   return classTarget as unknown as ScalarFactoryRuntimeClass<TSchema, ScalarValueObject<ATS.TypeofSchema<TSchema>>>;
 }
 
-function emitConstructor(
+function createClassLayoutPlan(
   properties: readonly string[],
+  accessors: ResolvedAccessors | undefined,
+  managedStorage: ReadonlyMap<string, ManagedStorageBinding>,
+  fieldPolicies: ReadonlyMap<string, ClassFieldPolicy>,
+  encapsulateFields: boolean,
+  initializers: ReadonlyMap<string, () => unknown>
+): ClassLayoutPlan {
+  return Object.freeze({
+    properties: Object.freeze([...properties]),
+    accessors,
+    managedStorage,
+    fieldPolicies,
+    encapsulateFields,
+    initializers,
+  });
+}
+
+/**
+ * Installs the internal validation ABI used by nested Runtime Type emitters.
+ * Validated nested state is written into the final instance directly, so the
+ * common hydrate path does not create a plain state object and copy it again
+ * through the public constructor. Layouts that use a native private slot keep
+ * the constructor fallback because JavaScript does not allow an external
+ * function to initialize that slot.
+ */
+function installTrustedMaterializer(
+  classTarget: Function,
+  layout: ClassLayoutPlan,
+  freezeInstances: boolean,
+  aggregate: boolean
+): void {
+  const accessorByKey = new Map(layout.accessors?.map((accessor) => [accessor.key, accessor]));
+  const hasNativePrivateSlot = layout.properties.some(
+    (property) => accessorByKey.get(property)?.field === "private" && !layout.managedStorage.has(property)
+  );
+  const materialize = (state: unknown): unknown => {
+    if (hasNativePrivateSlot) {
+      return new (classTarget as new (input: unknown, token: symbol, validated: boolean) => unknown)(
+        state,
+        INTERNAL_CONSTRUCT,
+        true
+      );
+    }
+    const instance = Object.create(classTarget.prototype) as Record<PropertyKey, unknown>;
+    for (const property of layout.properties) {
+      const initializer = layout.initializers.get(property);
+      const input = state as Record<string, unknown>;
+      const value = input[property] === undefined && initializer !== undefined ? initializer() : input[property];
+      const managed = layout.managedStorage.get(property);
+      if (managed === undefined) instance[property] = value;
+      else instance[managed.value] = value;
+    }
+    if (aggregate) Object.defineProperty(instance, "__jitEvents", { value: [], writable: true });
+    return freezeInstances ? Object.freeze(instance) : instance;
+  };
+  Object.defineProperty(classTarget, TRUSTED_MATERIALIZER, {
+    configurable: false,
+    enumerable: false,
+    value: materialize,
+  });
+}
+
+function emitConstructor(
+  layout: ClassLayoutPlan,
   freezeInstances: boolean,
   aggregate: boolean,
   parse: (input: unknown) => unknown,
   construction: { mode: ConstructionMode },
-  accessors?: ResolvedAccessors,
-  managedStorage: ReadonlyMap<string, ManagedStorageBinding> = new Map()
+  mutationGate?: WeakSet<object>
 ): unknown {
+  const { properties, accessors, managedStorage, fieldPolicies, encapsulateFields, initializers } = layout;
   const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
   const slots: string[] = [];
   const definitions: string[] = [];
+  const initializerEntries = [...initializers.entries()];
+  const initializerBindings = new Map(initializerEntries.map(([field], index) => [field, `__init${index}`] as const));
   let slotIndex = 0;
   const assignments = properties.map((property) => {
     const accessor = accessorByKey.get(property);
 
     const managed = managedStorage.get(property);
     if (managed !== undefined) {
-      if (accessor?.field === "private") {
-        if (accessor.get !== false)
-          definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this[${managed.name}]; }`);
-        if (accessor.set !== false)
-          definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this[${managed.name}] = value; }`);
-      } else {
-        definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
+      const policy = fieldPolicies.get(property);
+      const defaultDdd = encapsulateFields && policy === undefined;
+      const getter = policy?.getter === true || defaultDdd || (policy === undefined && accessor?.field !== "private");
+      const setter = policy?.setter === true;
+      if (getter) definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
+      if (setter || defaultDdd) {
+        const guarded = encapsulateFields && (policy?.visibility !== "public" || policy?.noConstructor === true);
+        definitions.push(
+          guarded
+            ? `set [${JSON.stringify(property)}](value) { if (!__mutationGate.has(this)) throw new TypeError("Field ${property} is readonly"); this[${managed.name}] = value; }`
+            : `set [${JSON.stringify(property)}](value) { this[${managed.name}] = value; }`
+        );
       }
-      return `this[${managed.name}] = state${emitPropertyAccess("", property)};`;
+      const initializer = initializerBindings.get(property);
+      const value =
+        initializer !== undefined
+          ? `(state${emitPropertyAccess("", property)} === undefined ? ${initializer}() : state${emitPropertyAccess("", property)})`
+          : `state${emitPropertyAccess("", property)}`;
+      return `this[${managed.name}] = ${value};`;
     }
 
     if (accessor?.field !== "private") {
-      return `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};`;
+      const initializer = initializers.get(property);
+      return initializer === undefined
+        ? `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};`
+        : `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
     }
 
     const slot = `#p${slotIndex++}`;
@@ -2193,42 +3759,109 @@ function emitConstructor(
     if (accessor.get !== false) definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
     if (accessor.set !== false)
       definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
-    return `this.${slot} = state${emitPropertyAccess("", property)};`;
+    const initializer = initializers.get(property);
+    return initializer === undefined
+      ? `this.${slot} = state${emitPropertyAccess("", property)};`
+      : `this.${slot} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
   });
-  const managedAccessors = [...managedStorage.entries()]
-    .filter(([field]) => accessorByKey.get(field)?.field !== "private")
-    .map(
-      ([field]) =>
-        `Object.defineProperty(this, ${JSON.stringify(field)}, { get: Object.getOwnPropertyDescriptor(JITRuntimeClass.prototype, ${JSON.stringify(field)}).get, enumerable: true, configurable: false });`
-    )
-    .join(" ");
   const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
   const storageEntries = [...managedStorage.values()];
   const storageNames = storageEntries.map((entry) => entry.name);
   const storageValues = storageEntries.map((entry) => entry.value);
-  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${managedAccessors.length === 0 ? "" : ` ${managedAccessors}`}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
+  const initializerNames = initializerEntries.map(([field]) => initializerBindings.get(field) as string);
+  const initializerValues = initializerEntries.map(([, initializer]) => initializer);
+  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
 
   return globalThis.Function(
     ...storageNames,
+    ...initializerNames,
     "__parse",
     "__construct",
     "__construction",
+    ...(mutationGate === undefined ? [] : ["__mutationGate"]),
     source
-  )(...storageValues, parse, INTERNAL_CONSTRUCT, construction);
+  )(
+    ...storageValues,
+    ...initializerValues,
+    parse,
+    INTERNAL_CONSTRUCT,
+    construction,
+    ...(mutationGate === undefined ? [] : [mutationGate])
+  );
 }
 
 function resolveManagedStorage(
   properties: readonly string[],
   _accessors: ResolvedAccessors | undefined,
-  managedFields: readonly ManagedFieldDescriptor[]
+  managedFields: readonly ManagedFieldDescriptor[],
+  encapsulateFields: boolean,
+  fieldPolicies: ReadonlyMap<string, ClassFieldPolicy>
 ): ReadonlyMap<string, ManagedStorageBinding> {
   const storage = new Map<string, ManagedStorageBinding>();
-  for (let index = 0; index < managedFields.length; index++) {
-    const field = managedFields[index]?.field;
-    if (field === undefined || !properties.includes(field)) continue;
-    storage.set(field, { name: `__managed${index}`, value: Symbol(`jit.${field}`) });
+  let index = 0;
+  for (const field of properties) {
+    const managed = managedFields.some((item) => item.field === field);
+    const policy = fieldPolicies.get(field);
+    const needsAccessorStorage =
+      policy !== undefined &&
+      (policy.visibility !== "public" || policy.getter !== false || policy.setter !== false || policy.noConstructor);
+    if (!managed && !encapsulateFields && !needsAccessorStorage) continue;
+    storage.set(field, { name: `__managed${index++}`, value: Symbol(`jit.${field}`) });
   }
   return storage;
+}
+
+function removeNoConstructorFields(
+  schema: ATS.AnyTypeSchema,
+  policies: ReadonlyMap<string, ClassFieldPolicy>
+): ATS.AnyTypeSchema {
+  const noConstructor = new Set(
+    [...policies.entries()].filter(([, policy]) => policy.noConstructor).map(([field]) => field)
+  );
+  if (noConstructor.size === 0) return schema;
+  const object = resolveEffectiveObjectSchema(schema);
+  const props = Object.fromEntries(Object.entries(object.def.props).filter(([field]) => !noConstructor.has(field)));
+  return createSchema(
+    TypeName.object,
+    {
+      props,
+      unknownKeys: object.def.unknownKeys,
+      catchall: object.def.catchall,
+      checks: object.def.checks,
+    },
+    object.annotations
+  );
+}
+
+function compileNoConstructorInitializers(
+  schema: ATS.AnyTypeSchema,
+  policies: ReadonlyMap<string, ClassFieldPolicy>
+): ReadonlyMap<string, () => unknown> {
+  const object = resolveEffectiveObjectSchema(schema);
+  const initializers = new Map<string, () => unknown>();
+  for (const [field, policy] of policies) {
+    if (!policy.noConstructor) continue;
+    const fieldSchema = object.def.props[field];
+    if (fieldSchema === undefined) continue;
+    const parse = compileValidator(fieldSchema).parse;
+    initializers.set(field, () => parse(undefined));
+  }
+  return initializers;
+}
+
+function installFieldDescriptorAccessors(classTarget: Function, policies: ReadonlyMap<string, ClassFieldPolicy>): void {
+  for (const [name, policy] of policies) {
+    const previous = Object.getOwnPropertyDescriptor(classTarget.prototype, name) ?? {
+      configurable: true,
+      enumerable: false,
+    };
+    const next: PropertyDescriptor = { ...previous };
+    if (typeof policy.getter === "function") next.get = policy.getter as () => unknown;
+    if (typeof policy.setter === "function") next.set = policy.setter as (value: unknown) => void;
+    if (typeof policy.getter === "function" || typeof policy.setter === "function") {
+      Object.defineProperty(classTarget.prototype, name, next);
+    }
+  }
 }
 
 function resolveAccessors<TSchema extends ATS.AnyTypeSchema>(
@@ -2273,6 +3906,18 @@ export interface ClassFactory {
    * pending events belong to the transition that raised them, not to a copy.
    */
   readonly clone: ClassCloneCapability;
+  readonly override: typeof override;
+  readonly public: typeof classPublic;
+  readonly protected: typeof classProtected;
+  readonly private: typeof classPrivate;
+  readonly getter: typeof classGetter;
+  readonly setter: typeof classSetter;
+  readonly method: typeof classMethod;
+  readonly factory: typeof classFactoryDescriptor;
+  readonly noConstructor: typeof classNoConstructor;
+  readonly mixin: typeof classMixin;
+  readonly json: <const TOptions extends ClassJsonOptions = {}>(options?: TOptions) => ClassJsonCapability<TOptions>;
+  readonly isFailure: typeof isFailure;
   identity<TKey extends string>(key: TKey): ClassCapability<IdentityMethods>;
 }
 
@@ -2340,6 +3985,29 @@ export const classType: ClassFactory = Object.assign(classFactory, {
     });
     return Object.freeze({ ...base, __clone: true as const });
   })(),
+  override,
+  public: classPublic,
+  protected: classProtected,
+  private: classPrivate,
+  getter: classGetter,
+  setter: classSetter,
+  method: classMethod,
+  factory: classFactoryDescriptor,
+  noConstructor: classNoConstructor,
+  mixin: classMixin,
+  json<const TOptions extends ClassJsonOptions = {}>(options?: TOptions): ClassJsonCapability<TOptions> {
+    const method = options?.method ?? "toJson";
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(method)) {
+      throw new JITError("INVALID_OPERATION", `Invalid class JSON method name ${JSON.stringify(method)}`);
+    }
+    return Object.freeze({
+      kind: "class.json" as const,
+      __options: (options ?? {}) as TOptions,
+      __memberNames: Object.freeze([method]),
+      install() {},
+    }) as ClassJsonCapability<TOptions>;
+  },
+  isFailure,
   identity(key: string): ClassCapability<IdentityMethods> {
     return capability<IdentityMethods>(
       `identity:${key}`,
@@ -2389,8 +4057,10 @@ export const classType: ClassFactory = Object.assign(classFactory, {
     );
   },
 });
+export type { OverrideDescriptor } from "../classes/override.js";
+/** @deprecated Use `JIT.class.override(...)` instead. */
+export { override, override as overwrite } from "../classes/override.js";
 export type { OverwriteDescriptor } from "../classes/overwrite.js";
-export { overwrite } from "../classes/overwrite.js";
 export { classType as class };
 
 const valueAccessorCapability = capability<ValueAccessor<unknown>>("value", (prototype) => {
@@ -2416,18 +4086,16 @@ export function valueObject<TSchema extends ATS.AnyTypeSchema>(
     return createScalarValueObject(unwrapped, false, false) as unknown as ValueObjectRuntimeClass<TSchema>;
   }
   const runtime = createRuntimeClass(unwrapped, false, true, false, "factory");
-  return (
-    "value" in (base as ATS.ObjectSchema).def.props
-      ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-          classType.equals,
-          classType.hashCode
-        )
-      : (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-          valueAccessorCapability,
-          classType.equals,
-          classType.hashCode
-        )
-  ) as ValueObjectRuntimeClass<TSchema>;
+  return ("value" in (base as ATS.ObjectSchema).def.props
+    ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+        classType.equals,
+        classType.hashCode
+      )
+    : (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+        valueAccessorCapability,
+        classType.equals,
+        classType.hashCode
+      )) as unknown as ValueObjectRuntimeClass<TSchema>;
 }
 
 type ObjectValueAccessor<TValue extends object> = "value" extends keyof TValue
@@ -2454,18 +4122,16 @@ export function abstractValueObject<TSchema extends ATS.AnyTypeSchema>(
     return createScalarValueObject(unwrapped, false, true) as unknown as ValueObjectRuntimeClass<TSchema>;
   }
   const runtime = createRuntimeClass(unwrapped, true, true, false, "factory");
-  return (
-    "value" in (base as ATS.ObjectSchema).def.props
-      ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-          classType.equals,
-          classType.hashCode
-        )
-      : (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-          valueAccessorCapability,
-          classType.equals,
-          classType.hashCode
-        )
-  ) as ValueObjectRuntimeClass<TSchema>;
+  return ("value" in (base as ATS.ObjectSchema).def.props
+    ? (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+        classType.equals,
+        classType.hashCode
+      )
+    : (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
+        valueAccessorCapability,
+        classType.equals,
+        classType.hashCode
+      )) as unknown as ValueObjectRuntimeClass<TSchema>;
 }
 
 type DefaultIdentifierSchema = ATS.DefaultSchema<ATS.StringSchema>;
@@ -2493,8 +4159,10 @@ export function uniqueIdentifier<TSchema extends ATS.AnyTypeSchema>(schema?: Sch
 }
 
 type HasIdentifierMetadata<TSchema extends ATS.AnyTypeSchema> =
-  TSchema extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "value", true>
-    ? true
+  TSchema extends ATS.RuntimeTypeSchema<ATS.AnyTypeSchema, unknown, "value", true, infer TTraits>
+    ? TTraits extends ATS.RuntimeTypeTraits<"value", true>
+      ? true
+      : false
     : TSchema extends ATS.LazySchema<infer TInner>
       ? HasIdentifierMetadata<TInner>
       : TSchema extends
@@ -2518,9 +4186,15 @@ type IdentityKeys<TSchema extends ATS.AnyTypeSchema> =
       }[keyof TShape] &
         string
     : never;
-type IsUnion<TValue, TWhole = TValue> = TValue extends unknown ? ([TWhole] extends [TValue] ? false : true) : never;
+type IsUnion<TValue, TWhole = TValue> = [TValue] extends [never]
+  ? false
+  : TValue extends unknown
+    ? [TWhole] extends [TValue]
+      ? false
+      : true
+    : never;
 type IdentityArguments<TSchema extends ATS.AnyTypeSchema> = [IdentityKeys<TSchema>] extends [never]
-  ? [options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
+  ? []
   : IsUnion<IdentityKeys<TSchema>> extends true
     ? [
         options: {
@@ -2532,26 +4206,28 @@ type IdentityArguments<TSchema extends ATS.AnyTypeSchema> = [IdentityKeys<TSchem
           readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string>;
         },
       ];
+type AggregateIdentityArguments<TSchema extends ATS.AnyTypeSchema> = [IdentityKeys<TSchema>] extends [never]
+  ? [options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
+  : IdentityArguments<TSchema>;
 
-function resolveIdentityKey(schema: ATS.AnyTypeSchema, explicit: string | undefined): string {
+function resolveIdentityState(
+  schema: ATS.AnyTypeSchema,
+  explicit: string | undefined,
+  label: "Entity" | "Aggregate"
+): IdentityState {
   const base = resolveWrappers(schema).base;
   if (base.type !== TypeName.object) {
-    throw new JITError("INVALID_OPERATION", "Entity identity requires an object schema");
+    throw new JITError("INVALID_OPERATION", `${label} identity requires an object schema`);
   }
-  if (explicit !== undefined) return explicit;
+  if (explicit !== undefined) return { state: "resolved", key: explicit, explicit: true };
   const candidates = Object.keys((base as ATS.ObjectSchema).def.props).filter((key) =>
     isIdentifierSchema((base as ATS.ObjectSchema).def.props[key])
   );
-  if (candidates.length === 1) return candidates[0];
-  if (candidates.length === 0) {
-    throw new JITError(
-      "INVALID_OPERATION",
-      "Entity identity must be explicit when the schema has no unique identifier"
-    );
-  }
+  if (candidates.length === 1) return { state: "resolved", key: candidates[0], explicit: false };
+  if (candidates.length === 0) return { state: "pending" };
   throw new JITError(
-    "INVALID_OPERATION",
-    "Entity identity must be explicit when the schema has multiple unique identifiers"
+    "DDD_IDENTITY_AMBIGUOUS",
+    `${label} identity must be explicit when the schema has multiple unique identifiers`
   );
 }
 
@@ -2638,29 +4314,83 @@ export function versioned<const TOptions extends VersionedOptions>(options?: TOp
 function createEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   isAbstract: boolean,
-  ...args: IdentityArguments<TSchema>
-): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
+  ...args: IdentityArguments<TSchema> | [{ readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
+): FactoryRuntimeClass<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+  InitialRuntimeTypeTraits<TSchema>,
+  true
+> {
   const unwrapped = unwrapSchema(schema);
-  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory");
+  const identity = resolveIdentityState(unwrapped, args[0]?.id, "Entity");
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory", true, undefined, {
+    identity,
+  });
+  if (identity.state !== "resolved") {
+    Reflect.deleteProperty(runtime, "create");
+    Reflect.deleteProperty(runtime, "hydrate");
+    return runtime as unknown as FactoryRuntimeClass<
+      TSchema,
+      Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+      InitialRuntimeTypeTraits<TSchema>,
+      true
+    >;
+  }
   return (runtime.extends as (...extensions: AnyClassExtension[]) => RuntimeClass<TSchema>)(
-    classType.identity(identity)
-  ) as FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods>;
+    classType.identity(identity.key)
+  ) as unknown as FactoryRuntimeClass<
+    TSchema,
+    Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+    InitialRuntimeTypeTraits<TSchema>,
+    true
+  >;
 }
 
 /** Concrete factory-first Entity with explicit or inferred identity semantics. */
 export function entity<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
+): EntityRuntimeClassFor<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
+  InitialRuntimeTypeTraits<TSchema>
+>;
+export function entity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  ...args: IdentityArguments<TSchema>
-): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
+  options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }
+): FactoryRuntimeClass<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+  InitialRuntimeTypeTraits<TSchema>,
+  true
+>;
+export function entity<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: IdentityArguments<TSchema> | [{ readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
+): unknown {
   return createEntity(schema, false, ...args);
 }
 
 /** Abstract factory-first Entity base, intended exclusively for subclassing. */
 export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
+): EntityRuntimeClassFor<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
+  InitialRuntimeTypeTraits<TSchema>
+>;
+export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  ...args: IdentityArguments<TSchema>
-): FactoryRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods> {
+  options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }
+): FactoryRuntimeClass<
+  TSchema,
+  Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods,
+  InitialRuntimeTypeTraits<TSchema>,
+  true
+>;
+export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: IdentityArguments<TSchema> | [{ readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
+): unknown {
   return createEntity(schema, true, ...args);
 }
 
@@ -2668,32 +4398,35 @@ export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
 function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   isAbstract: boolean,
-  ...args: IdentityArguments<TSchema>
-): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
+  ...args: AggregateIdentityArguments<TSchema>
+): AggregateRuntimeClass<TSchema, Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>> {
   const unwrapped = unwrapSchema(schema);
-  const identity = resolveIdentityKey(unwrapped, args[0]?.id);
-  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory");
+  const identity = resolveIdentityState(unwrapped, args[0]?.id, "Aggregate");
+  if (identity.state !== "resolved") {
+    throw new JITError("DDD_IDENTITY_MISSING", "Aggregate identity must be resolved before materialization");
+  }
+  const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory", true, undefined, { identity });
   return (runtime.extends as (extension: AnyClassCapability) => RuntimeClass<TSchema>)(
-    classType.identity(identity)
+    classType.identity(identity.key)
   ) as unknown as AggregateRuntimeClass<
     TSchema,
-    ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>
+    Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>
   >;
 }
 
 /** Concrete Aggregate Root with controlled mutation and an ordered event buffer. */
 export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  ...args: IdentityArguments<TSchema>
-): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
+  ...args: AggregateIdentityArguments<TSchema>
+): AggregateRuntimeClass<TSchema, Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>> {
   return createAggregateRoot(schema, false, ...args);
 }
 
 /** Abstract Aggregate Root base, intended exclusively for subclassing. */
 export function abstractAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
-  ...args: IdentityArguments<TSchema>
-): AggregateRuntimeClass<TSchema, ATS.TypeofSchema<TSchema> & IdentityMethods & AggregateMethods<TSchema>> {
+  ...args: AggregateIdentityArguments<TSchema>
+): AggregateRuntimeClass<TSchema, Readonly<ATS.TypeofSchema<TSchema>> & IdentityMethods & AggregateMethods<TSchema>> {
   return createAggregateRoot(schema, true, ...args);
 }
 
@@ -2856,7 +4589,7 @@ function installMethods(
     source: Function;
   }[] = [];
 
-  for (const name of Object.keys(methods)) {
+  for (const name of Object.getOwnPropertyNames(methods)) {
     if (RESERVED_EXTENSION_NAMES.has(name) || taken.has(name) || installed.has(name)) {
       throw new JITError(
         "INVALID_OPERATION",
@@ -2874,7 +4607,7 @@ function installMethods(
     Object.defineProperty(classTarget.prototype, name, {
       ...descriptor,
       enumerable: false,
-      configurable: false,
+      configurable: true,
     });
     installed.add(name);
     if (descriptor.get !== undefined) recorded.push({ name, kind: "get", source: descriptor.get });
@@ -2888,6 +4621,126 @@ function installMethods(
     }
   }
   return recorded;
+}
+
+type InstalledScalarMethod = {
+  name: string;
+  kind: "method" | "get" | "set";
+  source: Function;
+};
+
+/** Resolves scalar extensions through the same declaration descriptors as object Runtime Classes. */
+function installScalarExtension(
+  classTarget: Function,
+  extension: ClassMethodsInput,
+  installedMethods: InstalledScalarMethod[],
+  installedMethodNames: Set<string>
+): void {
+  for (const name of Object.getOwnPropertyNames(extension)) {
+    const property = Object.getOwnPropertyDescriptor(extension, name);
+    if (property === undefined) continue;
+    const value = property.value;
+    if (isOverrideDescriptor(value)) {
+      if (!installedMethodNames.has(name) || SCALAR_MEMBERS.has(name)) {
+        throw new JITError(
+          "CLASS_OVERRIDE_TARGET_NOT_FOUND",
+          `Scalar member ${JSON.stringify(name)} does not have an overridable custom declaration`
+        );
+      }
+      const replacement = value.value;
+      if (isClassMemberDescriptor(replacement)) {
+        installScalarDescriptor(classTarget, name, replacement.definition, installedMethods);
+      } else if (typeof replacement === "function") {
+        installScalarMethod(classTarget, { name, kind: "method", source: replacement }, installedMethods);
+      } else {
+        throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Scalar member ${JSON.stringify(name)} must be a method`);
+      }
+      continue;
+    }
+    if (SCALAR_MEMBERS.has(name) || installedMethodNames.has(name)) {
+      throw new JITError(
+        "CLASS_MEMBER_ALREADY_EXISTS",
+        `Scalar member ${JSON.stringify(name)} would shadow an existing member; use JIT.class.override(...) explicitly`
+      );
+    }
+    if (isClassMemberDescriptor(value)) {
+      installScalarDescriptor(classTarget, name, value.definition, installedMethods);
+    } else {
+      const recorded = installMethods(classTarget, { [name]: value }, SCALAR_MEMBERS, installedMethodNames);
+      installedMethods.push(...recorded);
+    }
+    installedMethodNames.add(name);
+  }
+}
+
+function installScalarDescriptor(
+  classTarget: Function,
+  name: string,
+  definition: ClassMemberDefinition,
+  installedMethods: InstalledScalarMethod[]
+): void {
+  if (definition.kind === "factory") {
+    throw new JITError(
+      "CLASS_FACTORY_CONFLICT",
+      "Factory descriptors belong in .factories(), not an instance extension"
+    );
+  }
+  if (definition.kind === "field") {
+    throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", "Scalar Runtime Types do not expose schema fields");
+  }
+  if (definition.kind === "method") {
+    if (definition.implementation === undefined) {
+      throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+    }
+    installScalarMethod(
+      classTarget,
+      {
+        name,
+        kind: "method",
+        source: definition.implementation,
+        schema: definition.schema as ATS.FunctionSchema,
+        ...(definition.async === undefined ? {} : { async: definition.async }),
+      },
+      installedMethods
+    );
+    return;
+  }
+  const getter = typeof definition.getter === "function" ? definition.getter : undefined;
+  const setter = typeof definition.setter === "function" ? definition.setter : undefined;
+  if (getter === undefined && setter === undefined) {
+    throw new JITError("CLASS_ACCESSOR_CONFLICT", `Scalar accessor ${JSON.stringify(name)} needs an implementation`);
+  }
+  const previous = Object.getOwnPropertyDescriptor(classTarget.prototype, name);
+  const accessor: PropertyDescriptor = {
+    configurable: true,
+    enumerable: false,
+  };
+  const resolvedGetter = getter ?? previous?.get;
+  const resolvedSetter = setter ?? previous?.set;
+  if (resolvedGetter !== undefined) accessor.get = resolvedGetter as () => unknown;
+  if (resolvedSetter !== undefined) accessor.set = resolvedSetter as (value: unknown) => void;
+  Object.defineProperty(classTarget.prototype, name, accessor);
+  if (getter !== undefined) replaceInstalledScalarMethod(installedMethods, { name, kind: "get", source: getter });
+  if (setter !== undefined) replaceInstalledScalarMethod(installedMethods, { name, kind: "set", source: setter });
+}
+
+function installScalarMethod(
+  classTarget: Function,
+  method: ClassMethodDefinition,
+  installedMethods: InstalledScalarMethod[]
+): void {
+  installMethodDefinition(classTarget, method);
+  replaceInstalledScalarMethod(installedMethods, {
+    name: method.name,
+    kind: method.kind,
+    source: method.source,
+  });
+}
+
+function replaceInstalledScalarMethod(installedMethods: InstalledScalarMethod[], method: InstalledScalarMethod): void {
+  const index = installedMethods.findIndex((item) => item.name === method.name && item.kind === method.kind);
+  if (index === -1) installedMethods.push(method);
+  else installedMethods[index] = method;
 }
 
 function definePrototype(prototype: object, key: string, value: Function, configurable = false): void {

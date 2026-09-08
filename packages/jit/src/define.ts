@@ -13,8 +13,19 @@ import {
   type ManagedFieldDescriptor,
   reapplyManagedFields,
 } from "./classes/effective-schema.js";
+import {
+  classFactory as classFactoryDescriptor,
+  classGetter,
+  classMethod,
+  classNoConstructor,
+  classPrivate,
+  classProtected,
+  classPublic,
+  classSetter,
+  isClassMemberDescriptor,
+} from "./classes/member-descriptors.js";
 import type { ResolvedMemberTable } from "./classes/members.js";
-import { isOverwriteDescriptor, overwrite } from "./classes/overwrite.js";
+import { isOverrideDescriptor, override } from "./classes/override.js";
 import {
   type AccessRule,
   resolveAccessContext,
@@ -66,6 +77,7 @@ import {
 import { resolveWrappers } from "./compiler/resolvers/resolve-wrappers.js";
 import { inspectRules, type RulesSink } from "./compiler/rules.js";
 import type { Sanitize } from "./compiler/sanitize.js";
+import { schemaChildren } from "./compiler/schema-recursion.js";
 import type { Serialize } from "./compiler/serialize.js";
 import type { UpdatePatch } from "./compiler/update.js";
 import type { SafeParseResult } from "./compiler/validate.js";
@@ -74,6 +86,13 @@ import type * as ATS from "./core/ats/index.js";
 import { createSchema, TypeName } from "./core/ats/index.js";
 import type { SchemaInput } from "./core/builder/index.js";
 import { unwrapSchema } from "./core/builder/index.js";
+import {
+  type FactoryPolicyCandidate,
+  type FactoryReturnMode,
+  type FactoryReturnModeInput,
+  normalizeFactoryReturnMode,
+  selectFactoryPolicyCandidate,
+} from "./core/factory-policy.js";
 import { AOT_ARTIFACT, type AOTArtifact, type ArtifactDescriptor } from "./core/host.js";
 import { JITError } from "./errors/index.js";
 import type { Ability, AccessBuilder, AccessPlan } from "./factories/access.js";
@@ -81,14 +100,17 @@ import type {
   AssertionOptions,
   ClassCapability,
   ClassFactory,
+  ClassJsonCapability,
+  ClassJsonOptions,
   ClassMethodsInput,
+  ClassMixin,
   FactoryOptions,
-  FactoryResultMode,
   FactoryValidationOptions,
   SoftDeleteOptions,
   TimestampOptions,
   VersionedOptions,
 } from "./factories/class.js";
+import { classMixin } from "./factories/class.js";
 import {
   type CollectionMutation,
   type CollectionMutationHost,
@@ -1730,6 +1752,14 @@ interface DefinedClassAssertionFailure {
   readonly error?: unknown;
 }
 
+interface DefinedClassFieldPolicy {
+  readonly name: string;
+  readonly visibility: "public" | "protected" | "private";
+  readonly getter: boolean;
+  readonly setter: boolean;
+  readonly noConstructor: boolean;
+}
+
 interface DefinedClassAssertions {
   readonly descriptors: readonly AssertionDescriptor[];
   readonly source: string;
@@ -1739,9 +1769,11 @@ interface DefinedClassAssertions {
 }
 
 interface DefinedClassPolicy {
-  readonly result: FactoryResultMode;
+  readonly result: FactoryReturnMode;
   readonly create: boolean;
   readonly hydrate: boolean;
+  readonly resultModeExplicit?: boolean;
+  readonly resultModeInherited?: boolean;
   readonly maxIssues?: number;
   readonly errorPriority?: number;
   readonly errorPriorityExplicit?: boolean;
@@ -1761,7 +1793,10 @@ interface DefinedClassState {
   readonly lifecycle: LifecycleDefinition;
   readonly managedFields: readonly ManagedFieldDescriptor[];
   readonly members: ResolvedMemberTable;
+  readonly fieldPolicies: readonly DefinedClassFieldPolicy[];
+  readonly encapsulateFields: boolean;
   readonly accessors: readonly unknown[];
+  readonly customFactories?: { readonly create?: Function; readonly hydrate?: Function };
   readonly validationConfigured: boolean;
   readonly policy: DefinedClassPolicy | undefined;
 }
@@ -1805,7 +1840,12 @@ function defineCapability(
   }) as DefinedCapability;
 }
 
-function defineClassState(schema: ATS.AnyTypeSchema, abstract: boolean, aggregate: boolean): DefinedClassState {
+function defineClassState(
+  schema: ATS.AnyTypeSchema,
+  abstract: boolean,
+  aggregate: boolean,
+  encapsulateFields = false
+): DefinedClassState {
   const initial = initialEffectiveSchema(schema);
   const members = initial.members.clone();
   const capabilities: string[] = [];
@@ -1825,6 +1865,8 @@ function defineClassState(schema: ATS.AnyTypeSchema, abstract: boolean, aggregat
     lifecycle: {},
     managedFields: [],
     members,
+    fieldPolicies: [],
+    encapsulateFields,
     accessors: [],
     validationConfigured: false,
     policy: undefined,
@@ -1850,12 +1892,38 @@ function isDefinedSchemaInput(value: unknown): value is SchemaInput<ATS.AnyTypeS
   );
 }
 
+function isDefinedClassMixin(value: unknown): value is ClassMixin {
+  return typeof value === "function" && (value as { readonly __classMixin?: unknown }).__classMixin === true;
+}
+
+function resolveDefinedFactoryName(
+  option: FactoryOptions["create"] | FactoryOptions["hydrate"] | undefined,
+  fallback: string,
+  phase: "create" | "hydrate"
+): { readonly name: string | false; readonly implementation?: Function } {
+  if (option === undefined) return { name: fallback };
+  if (typeof option === "object") {
+    if (!isClassMemberDescriptor(option) || option.definition.kind !== "factory") {
+      throw new JITError("CLASS_FACTORY_CONFLICT", "Invalid class factory descriptor");
+    }
+    if (option.definition.phase !== phase) {
+      throw new JITError(
+        "CLASS_FACTORY_CONFLICT",
+        `A ${option.definition.phase} factory descriptor cannot configure ${phase}`
+      );
+    }
+    return { name: option.definition.name, implementation: option.definition.implementation };
+  }
+  return { name: option };
+}
+
 function defineClassExtensions(
   state: DefinedClassState,
-  extensions: readonly (DefinedCapability | ClassMethodsInput)[]
+  extensions: readonly (DefinedCapability | ClassMethodsInput | ClassMixin)[]
 ): DefinedClassState {
   let next = state;
-  for (const extension of extensions) {
+  for (const rawExtension of extensions) {
+    const extension = isDefinedClassMixin(rawExtension) ? rawExtension() : rawExtension;
     if (
       typeof extension === "object" &&
       extension !== null &&
@@ -1872,7 +1940,7 @@ function defineClassExtensions(
         if (next.members.has(name)) {
           throw new JITError(
             "CLASS_MEMBER_ALREADY_EXISTS",
-            `Member ${JSON.stringify(name)} already exists; use JIT.overwrite(...) explicitly`
+            `Member ${JSON.stringify(name)} already exists; use JIT.class.override(...) explicitly`
           );
         }
       }
@@ -1916,20 +1984,76 @@ function defineClassExtensions(
 
     const members = next.members.clone();
     const methods = [...next.methods];
+    const fieldPolicies = [...next.fieldPolicies];
     let schema = next.schema;
     for (const name of Object.getOwnPropertyNames(extension)) {
       const descriptor = Object.getOwnPropertyDescriptor(extension, name);
       if (descriptor === undefined) continue;
       const value = descriptor.value;
-      if (isOverwriteDescriptor(value)) {
+      if (isOverrideDescriptor(value)) {
         const existing = members.get(name);
         if (existing === undefined) {
           throw new JITError(
-            "CLASS_OVERWRITE_TARGET_NOT_FOUND",
-            `Class member ${JSON.stringify(name)} does not exist. JIT.overwrite() can only replace an existing member.`
+            "CLASS_OVERRIDE_TARGET_NOT_FOUND",
+            `Class member ${JSON.stringify(name)} does not exist. JIT.class.override() can only replace an existing member.`
           );
         }
-        if (isDefinedSchemaInput(value.value)) {
+        const member = isClassMemberDescriptor(value.value) ? value.value.definition : undefined;
+        if (member?.kind === "factory") {
+          throw new JITError("CLASS_FACTORY_CONFLICT", "Factory descriptors cannot override instance members");
+        }
+        if (member?.kind === "method") {
+          if (existing.kind === "field") {
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is a schema field`);
+          }
+          if (member.implementation === undefined) {
+            throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+          }
+          const replacement = { name, kind: "method" as const, source: member.implementation };
+          const index = methods.findIndex((method) => method.name === name);
+          if (index === -1) methods.push(replacement);
+          else methods[index] = replacement;
+          members.replace(name, { ...existing, source: "override", descriptor: { value: member.implementation } });
+        } else if (member?.kind === "accessor") {
+          const implementation = member.getter ?? member.setter;
+          if (typeof implementation === "function") {
+            const kind = member.getter !== undefined ? "get" : "set";
+            const replacement = { name, kind: kind as "get" | "set", source: implementation };
+            const index = methods.findIndex((method) => method.name === name && method.kind === kind);
+            if (index === -1) methods.push(replacement);
+            else methods[index] = replacement;
+          }
+          applyDefinedFieldPolicy(fieldPolicies, name, member);
+          members.replace(name, { ...existing, source: "override" });
+        } else if (member?.kind === "field" && member.schema !== undefined) {
+          if (existing.kind !== "field") {
+            throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
+          }
+          const replacement = unwrapSchema(member.schema);
+          const object = resolveWrappers(schema).base;
+          if (object.type !== TypeName.object)
+            throw new JITError("INVALID_OPERATION", "Class schema must be an object");
+          const props = { ...(object as ATS.ObjectSchema).def.props, [name]: replacement };
+          schema = createSchema(
+            TypeName.object,
+            {
+              props,
+              unknownKeys: (object as ATS.ObjectSchema).def.unknownKeys,
+              catchall: (object as ATS.ObjectSchema).def.catchall,
+              checks: (object as ATS.ObjectSchema).def.checks,
+            },
+            object.annotations
+          );
+          const rechecked = applyManagedFieldsForDefine(schema, next.managedFields);
+          schema = rechecked;
+          const effectiveObject = resolveWrappers(schema).base;
+          const effectiveField =
+            effectiveObject.type === TypeName.object
+              ? (effectiveObject as ATS.ObjectSchema).def.props[name]
+              : replacement;
+          applyDefinedFieldPolicy(fieldPolicies, name, member);
+          members.replace(name, { ...existing, source: "override", schema: effectiveField });
+        } else if (isDefinedSchemaInput(value.value)) {
           if (existing.kind !== "field")
             throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is not a schema field`);
           const replacement = unwrapSchema(value.value as SchemaInput<ATS.AnyTypeSchema>);
@@ -1954,25 +2078,104 @@ function defineClassExtensions(
             effectiveObject.type === TypeName.object
               ? (effectiveObject as ATS.ObjectSchema).def.props[name]
               : replacement;
-          members.replace(name, { ...existing, source: "overwrite", schema: effectiveField });
+          members.replace(name, { ...existing, source: "override", schema: effectiveField });
         } else {
           if (existing.kind === "field")
             throw new JITError("CLASS_MEMBER_ALREADY_EXISTS", `Member ${JSON.stringify(name)} is a schema field`);
           if (typeof value.value !== "function")
-            throw new JITError("INVALID_OPERATION", `Overwrite ${JSON.stringify(name)} must provide a method`);
+            throw new JITError("INVALID_OPERATION", `Override ${JSON.stringify(name)} must provide a method`);
           const replacement = { name, kind: "method" as const, source: value.value };
           const index = methods.findIndex((method) => method.name === name);
           if (index === -1) methods.push(replacement);
           else methods[index] = replacement;
-          members.replace(name, { ...existing, source: "overwrite", descriptor: { value: value.value } });
+          members.replace(name, { ...existing, source: "override", descriptor: { value: value.value } });
         }
         continue;
       }
       if (members.has(name) || DEFINED_RESERVED_MEMBER_NAMES.has(name)) {
         throw new JITError(
           "CLASS_MEMBER_ALREADY_EXISTS",
-          `Member ${JSON.stringify(name)} already exists. Use ${JSON.stringify(`${name}: JIT.overwrite(...)`)} to replace it.`
+          `Member ${JSON.stringify(name)} already exists. Use ${JSON.stringify(`${name}: JIT.class.override(...)`)} to replace it.`
         );
+      }
+      if (isClassMemberDescriptor(value)) {
+        const definition = value.definition;
+        if (definition.kind === "factory") {
+          throw new JITError(
+            "CLASS_FACTORY_CONFLICT",
+            "Factory descriptors belong in .factories(), not an instance extension"
+          );
+        }
+        if (definition.kind === "method") {
+          if (definition.implementation === undefined) {
+            throw new JITError("INVALID_OPERATION", `Class method ${JSON.stringify(name)} must be implemented`);
+          }
+          methods.push({ name, kind: "method", source: definition.implementation });
+          addMember(members, name, "extension", "custom extension", "method");
+          continue;
+        }
+        if (definition.kind === "field" && definition.schema !== undefined) {
+          const field = unwrapSchema(definition.schema);
+          if (definition.noConstructor === true && !definedHasDefault(field)) {
+            throw new JITError(
+              "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+              `No-constructor field ${JSON.stringify(name)} requires a default initializer`
+            );
+          }
+          const object = resolveWrappers(schema).base;
+          if (object.type !== TypeName.object)
+            throw new JITError("INVALID_OPERATION", "Class schema must be an object");
+          schema = createSchema(
+            TypeName.object,
+            {
+              props: { ...(object as ATS.ObjectSchema).def.props, [name]: field },
+              unknownKeys: (object as ATS.ObjectSchema).def.unknownKeys,
+              catchall: (object as ATS.ObjectSchema).def.catchall,
+              checks: (object as ATS.ObjectSchema).def.checks,
+            },
+            object.annotations
+          );
+          applyDefinedFieldPolicy(fieldPolicies, name, definition);
+          members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+          continue;
+        }
+        if (definition.kind === "accessor") {
+          const implementation = definition.getter ?? definition.setter;
+          if (typeof implementation === "function") {
+            methods.push({
+              name,
+              kind: definition.getter !== undefined ? "get" : "set",
+              source: implementation,
+            });
+          }
+          addMember(
+            members,
+            name,
+            "extension",
+            "custom extension",
+            definition.getter !== undefined ? "getter" : "setter"
+          );
+          applyDefinedFieldPolicy(fieldPolicies, name, definition);
+          continue;
+        }
+        throw new JITError("CLASS_FIELD_DESCRIPTOR_CONFLICT", `Class member ${JSON.stringify(name)} is invalid`);
+      }
+      if (isDefinedSchemaInput(value)) {
+        const field = unwrapSchema(value);
+        const object = resolveWrappers(schema).base;
+        if (object.type !== TypeName.object) throw new JITError("INVALID_OPERATION", "Class schema must be an object");
+        schema = createSchema(
+          TypeName.object,
+          {
+            props: { ...(object as ATS.ObjectSchema).def.props, [name]: field },
+            unknownKeys: (object as ATS.ObjectSchema).def.unknownKeys,
+            catchall: (object as ATS.ObjectSchema).def.catchall,
+            checks: (object as ATS.ObjectSchema).def.checks,
+          },
+          object.annotations
+        );
+        members.add({ name, kind: "field", source: "extension", owner: "custom extension", schema: field });
+        continue;
       }
       if (descriptor.get === undefined && descriptor.set === undefined && typeof value !== "function") {
         throw new JITError("INVALID_OPERATION", `Class extension ${JSON.stringify(name)} must be a method or getter`);
@@ -1987,9 +2190,73 @@ function defineClassExtensions(
         kind === "get" ? "getter" : kind === "set" ? "setter" : "method"
       );
     }
-    next = { ...next, schema, methods, members };
+    next = { ...next, schema, methods, members, fieldPolicies };
   }
   return next;
+}
+
+function applyDefinedFieldPolicy(
+  policies: DefinedClassFieldPolicy[],
+  name: string,
+  definition: {
+    readonly kind: "field" | "accessor";
+    readonly visibility?: "public" | "protected" | "private";
+    readonly getter?: true | Function;
+    readonly setter?: true | Function;
+    readonly noConstructor?: true;
+  }
+): void {
+  const previous = policies.find((policy) => policy.name === name);
+  const visibility = definition.visibility ?? previous?.visibility ?? "public";
+  const hasAccessorIntent = definition.getter !== undefined || definition.setter !== undefined;
+  const defaultField =
+    definition.kind === "field" &&
+    (definition.visibility === "public" || definition.noConstructor === true) &&
+    !hasAccessorIntent;
+  const getter =
+    definition.getter !== undefined
+      ? definition.getter === true || typeof definition.getter === "function"
+      : (previous?.getter ?? defaultField);
+  const setter =
+    definition.setter !== undefined
+      ? definition.setter === true || typeof definition.setter === "function"
+      : (previous?.setter ?? defaultField);
+  const next: DefinedClassFieldPolicy = {
+    name,
+    visibility,
+    getter: getter === true || typeof getter === "function",
+    setter: setter === true || typeof setter === "function",
+    noConstructor: definition.noConstructor === true || previous?.noConstructor === true,
+  };
+  const index = policies.findIndex((policy) => policy.name === name);
+  if (index === -1) policies.push(next);
+  else policies[index] = next;
+}
+
+function definedHasDefault(schema: ATS.AnyTypeSchema): boolean {
+  let current = schema;
+  while (true) {
+    if (current.type === TypeName.default) return true;
+    if (current.type === TypeName.lazy) {
+      current = (current.def as ATS.LazyDef).getter();
+      continue;
+    }
+    if (
+      current.type === TypeName.optional ||
+      current.type === TypeName.nullable ||
+      current.type === TypeName.nullish ||
+      current.type === TypeName.brand ||
+      current.type === TypeName.readonly ||
+      current.type === TypeName.refine ||
+      current.type === TypeName.coerce ||
+      current.type === TypeName.pipe ||
+      current.type === TypeName.transform
+    ) {
+      current = (current.def as ATS.InnerTypeDef).innerType;
+      continue;
+    }
+    return false;
+  }
 }
 
 function applyManagedFieldsForDefine(
@@ -2013,6 +2280,58 @@ function definedPolicyBase(state: DefinedClassState): DefinedClassPolicy {
       hydrate: true,
     }
   );
+}
+
+function resolveDefinedNestedResultPolicy(schema: ATS.AnyTypeSchema): FactoryPolicyCandidate | undefined {
+  const candidates: FactoryPolicyCandidate[] = [];
+  const active = new Set<ATS.AnyTypeSchema>();
+  const visit = (current: ATS.AnyTypeSchema, depth: number): void => {
+    if (active.has(current)) return;
+    active.add(current);
+    if (current.type === TypeName.runtimeType) {
+      const traits = (current as ATS.RuntimeTypeSchema).def.traits.factoryPolicy;
+      if (traits.configured && (traits.resultModeExplicit || traits.resultModeInherited)) {
+        candidates.push({
+          mode: traits.resultMode as FactoryReturnMode,
+          priority: traits.priority,
+          explicitMode: traits.resultModeExplicit,
+          depth,
+          source: String(candidates.length),
+        });
+      }
+      active.delete(current);
+      return;
+    }
+    if (current.type === TypeName.object) {
+      for (const child of Object.values((current as ATS.ObjectSchema).def.props)) visit(child, depth + 1);
+    } else {
+      for (const child of schemaChildren(current)) visit(child, depth + 1);
+    }
+    active.delete(current);
+  };
+  visit(schema, 0);
+  return selectFactoryPolicyCandidate(candidates);
+}
+
+function resolveDefinedPolicy(state: DefinedClassState): DefinedClassPolicy | undefined {
+  if (state.validationConfigured) return state.policy;
+  const previous = state.policy;
+  if (previous !== undefined && previous.resultModeInherited !== true) return previous;
+  const nestedPolicy = resolveDefinedNestedResultPolicy(state.schema);
+  if (nestedPolicy === undefined) {
+    if (previous === undefined) return undefined;
+    return {
+      ...previous,
+      result: "throw",
+      resultModeInherited: false,
+    };
+  }
+  return {
+    ...(previous ?? { result: "throw", create: true, hydrate: true }),
+    result: nestedPolicy.mode,
+    errorPriority: nestedPolicy.priority,
+    resultModeInherited: true,
+  };
 }
 
 function definedAssertions(
@@ -2106,7 +2425,31 @@ function definedLifecycleMutation(lifecycle: LifecycleDefinition):
   };
 }
 
+function removeDefinedNoConstructorFields(
+  schema: ATS.AnyTypeSchema,
+  policies: readonly DefinedClassFieldPolicy[]
+): ATS.AnyTypeSchema {
+  const excluded = new Set(policies.filter((policy) => policy.noConstructor).map((policy) => policy.name));
+  if (excluded.size === 0) return schema;
+  const object = resolveWrappers(schema).base;
+  if (object.type !== TypeName.object) return schema;
+  return createSchema(
+    TypeName.object,
+    {
+      props: Object.fromEntries(
+        Object.entries((object as ATS.ObjectSchema).def.props).filter(([name]) => !excluded.has(name))
+      ),
+      unknownKeys: (object as ATS.ObjectSchema).def.unknownKeys,
+      catchall: (object as ATS.ObjectSchema).def.catchall,
+      checks: (object as ATS.ObjectSchema).def.checks,
+    },
+    object.annotations
+  );
+}
+
 function defineRuntimeClass(state: DefinedClassState): unknown {
+  const policy = resolveDefinedPolicy(state);
+  const resolvedState = policy === state.policy ? state : { ...state, policy };
   const target = function definedRuntimeClass(): never {
     return defineArtifactFailure();
   };
@@ -2116,51 +2459,74 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
     input: unknown,
     validated?: boolean
   ) => unknown;
-  const mutation = definedLifecycleMutation(state.lifecycle);
+  const mutation = definedLifecycleMutation(resolvedState.lifecycle);
+  const creationSchema = removeDefinedNoConstructorFields(resolvedState.schema, resolvedState.fieldPolicies);
+  const hydrateSchema = removeDefinedNoConstructorFields(resolvedState.schema, resolvedState.fieldPolicies);
+  const assertion = policy?.assertions === undefined ? undefined : () => undefined;
   registerArtifact(target, {
     kind: "class",
-    declaredSchema: state.declaredSchema,
-    schema: state.schema,
-    abstract: state.abstract,
+    declaredSchema: resolvedState.declaredSchema,
+    schema: resolvedState.schema,
+    creationSchema,
+    wireSchema: hydrateSchema,
+    abstract: resolvedState.abstract,
     frozen: false,
-    aggregate: state.aggregate,
-    construction: state.construction,
+    aggregate: resolvedState.aggregate,
+    construction: resolvedState.construction,
     representation: "object",
-    capabilities: state.capabilities,
-    managedFields: state.managedFields,
-    lifecycle: state.lifecycle,
-    resolvedMembers: state.members.entries(),
+    capabilities: resolvedState.capabilities,
+    managedFields: resolvedState.managedFields,
+    hydrateSchema,
+    encapsulateFields: resolvedState.encapsulateFields,
+    ...(resolvedState.fieldPolicies.length === 0 ? {} : { fieldPolicies: resolvedState.fieldPolicies }),
+    lifecycle: resolvedState.lifecycle,
+    resolvedMembers: resolvedState.members.entries(),
     ...(mutation === undefined ? {} : { mutation }),
-    ...(state.methods.length === 0 ? {} : { methods: state.methods }),
-    ...(state.policy === undefined ? {} : { policy: state.policy }),
-    factories: state.factories,
-    accessors: state.accessors as never,
+    ...(resolvedState.methods.length === 0 ? {} : { methods: resolvedState.methods }),
+    ...(policy === undefined ? {} : { policy }),
+    ...(resolvedState.customFactories === undefined ? {} : { customFactories: resolvedState.customFactories }),
+    factories: resolvedState.factories,
+    accessors: resolvedState.accessors as never,
   });
   Object.defineProperties(target, {
     schema: {
       enumerable: true,
       value: createSchema(TypeName.runtimeType, {
-        innerType: state.schema,
+        innerType: resolvedState.schema,
         materialize,
         representation: "object",
         identifier: false,
+        traits: {
+          representation: "object",
+          identifier: false,
+          factoryPolicy: {
+            configured: policy !== undefined,
+            resultMode: policy?.result ?? "throw",
+            resultModeExplicit: policy?.resultModeExplicit === true,
+            resultModeInherited: policy?.resultModeInherited === true,
+            errorType: undefined,
+            priority: policy?.errorPriority ?? 1000,
+            hasAssertions: policy?.assertions !== undefined,
+          },
+        },
+        assertion,
       }),
     },
     create: { enumerable: false, value: defineArtifactFailure },
     hydrate: { enumerable: false, value: defineArtifactFailure },
     extends: {
       enumerable: false,
-      value: (...extensions: readonly (DefinedCapability | ClassMethodsInput)[]) =>
-        defineRuntimeClass(defineClassExtensions(state, extensions)),
+      value: (...extensions: readonly (DefinedCapability | ClassMethodsInput | ClassMixin)[]) =>
+        defineRuntimeClass(defineClassExtensions(resolvedState, extensions)),
     },
     construction: {
       enumerable: false,
       value: (mode: "constructor" | "factory") => {
-        if (state.policy !== undefined) {
+        if (policy !== undefined) {
           throw new JITError("INVALID_OPERATION", "Construction must be configured before validation or assertions");
         }
         return defineRuntimeClass({
-          ...state,
+          ...resolvedState,
           construction: mode,
           factories: mode === "factory" ? { create: "create", hydrate: "hydrate" } : { create: false, hydrate: false },
         });
@@ -2168,28 +2534,33 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
     },
     factories: {
       enumerable: false,
-      value: (options: FactoryOptions) =>
-        defineRuntimeClass({
-          ...state,
+      value: (options: FactoryOptions) => {
+        const create = resolveDefinedFactoryName(options.create, "create", "create");
+        const hydrate = resolveDefinedFactoryName(options.hydrate, "hydrate", "hydrate");
+        return defineRuntimeClass({
+          ...resolvedState,
           construction: "factory",
-          factories: {
-            create: options.create === undefined ? "create" : options.create,
-            hydrate: options.hydrate === undefined ? "hydrate" : options.hydrate,
+          factories: { create: create.name, hydrate: hydrate.name },
+          customFactories: {
+            ...(resolvedState.customFactories ?? {}),
+            ...(create.implementation === undefined ? {} : { create: create.implementation }),
+            ...(hydrate.implementation === undefined ? {} : { hydrate: hydrate.implementation }),
           },
-        }),
+        });
+      },
     },
-    accessors: { enumerable: false, value: () => defineRuntimeClass(state) },
+    accessors: { enumerable: false, value: () => defineRuntimeClass(resolvedState) },
     identity: {
       enumerable: false,
       value: (key: string) =>
         defineRuntimeClass(
-          defineClassExtensions(state, [defineCapability(`identity:${key}`, ["identity", "sameIdentity"])])
+          defineClassExtensions(resolvedState, [defineCapability(`identity:${key}`, ["identity", "sameIdentity"])])
         ),
     },
     validate: {
       enumerable: false,
       value: (options?: FactoryValidationOptions) => {
-        if (state.validationConfigured) {
+        if (resolvedState.validationConfigured) {
           throw new JITError("INVALID_OPERATION", "Factory validation is already configured for this Runtime Class");
         }
         if (options?.maxIssues !== undefined && (!Number.isSafeInteger(options.maxIssues) || options.maxIssues < 1)) {
@@ -2198,19 +2569,23 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
         if (options?.priority !== undefined && !Number.isFinite(options.priority)) {
           throw new RangeError("priority must be a finite number");
         }
-        const previous = definedPolicyBase(state);
+        const previous = definedPolicyBase(resolvedState);
         return defineRuntimeClass({
-          ...state,
+          ...resolvedState,
           validationConfigured: true,
           policy: {
             ...previous,
-            result: options?.result ?? previous.result,
+            result:
+              options?.result === undefined
+                ? previous.result
+                : normalizeFactoryReturnMode(options.result as FactoryReturnModeInput),
             create: options?.create ?? previous.create,
             hydrate: options?.hydrate ?? previous.hydrate,
+            ...(options?.result === undefined ? {} : { resultModeExplicit: true, resultModeInherited: false }),
             ...(options?.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
-            ...(options?.error === undefined
+            ...(options?.priority === undefined
               ? {}
-              : { errorPriority: options.priority ?? 1000, errorPriorityExplicit: options.priority !== undefined }),
+              : { errorPriority: options.priority, errorPriorityExplicit: true }),
             ...(options?.error === undefined ? {} : { error: options.error }),
           },
         });
@@ -2219,7 +2594,7 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
     assert: {
       enumerable: false,
       value: (predicate: (query: QueryConditionBuilder<unknown>) => QueryConditionNode, options?: AssertionOptions) =>
-        defineRuntimeClass(defineClassAssertion(state, predicate, options)),
+        defineRuntimeClass(defineClassAssertion(resolvedState, predicate, options)),
     },
   });
   return target;
@@ -2236,6 +2611,18 @@ const defineClass = Object.assign(
     with: defineCapability("with", ["with"]),
     diff: defineCapability("diff", ["diff"]),
     clone: defineCapability("clone", ["clone"]),
+    override,
+    public: classPublic,
+    protected: classProtected,
+    private: classPrivate,
+    getter: classGetter,
+    setter: classSetter,
+    method: classMethod,
+    factory: classFactoryDescriptor,
+    noConstructor: classNoConstructor,
+    mixin: classMixin,
+    json: (options?: ClassJsonOptions) =>
+      defineCapability("class.json", [options?.method ?? "toJson"]) as ClassJsonCapability,
     identity: (key: string) => defineCapability(`identity:${key}`, ["identity", "sameIdentity"]),
   }
 ) as ClassFactory;
@@ -2256,12 +2643,12 @@ function defineIdentityKey(
   if (candidates.length === 1) return candidates[0];
   if (candidates.length === 0) {
     throw new JITError(
-      "INVALID_OPERATION",
+      "DDD_IDENTITY_MISSING",
       `${label} identity must be explicit when the schema has no unique identifier`
     );
   }
   throw new JITError(
-    "INVALID_OPERATION",
+    "DDD_IDENTITY_AMBIGUOUS",
     `${label} identity must be explicit when the schema has multiple unique identifiers`
   );
 }
@@ -2306,7 +2693,7 @@ const defineEntity = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { reado
       (object.type === TypeName.object && "id" in (object as ATS.ObjectSchema).def.props ? "id" : undefined),
     "Entity"
   );
-  const state = defineClassState(unwrapped, false, false);
+  const state = defineClassState(unwrapped, false, false, true);
   return defineRuntimeClass(
     defineClassExtensions({ ...state, construction: "factory", factories: { create: "create", hydrate: "hydrate" } }, [
       defineClass.identity(id),
@@ -2324,7 +2711,7 @@ const defineAggregateRoot = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: 
     "Aggregate"
   );
   return defineRuntimeClass(
-    defineClassExtensions(defineClassState(unwrapped, false, true), [defineClass.identity(id)])
+    defineClassExtensions(defineClassState(unwrapped, false, true, true), [defineClass.identity(id)])
   );
 }) as typeof RuntimeJIT.ddd.aggregateRoot;
 
@@ -2346,6 +2733,11 @@ const defineSoftDelete = ((options?: SoftDeleteOptions) =>
   )) as typeof RuntimeJIT.ddd.softDelete;
 const defineVersioned = ((options?: VersionedOptions) =>
   defineCapability("ddd.versioned", [], options)) as typeof RuntimeJIT.ddd.versioned;
+function extendDefineDdd<T extends Record<string, (...args: never[]) => unknown>>(
+  extensions: T
+): typeof RuntimeJIT.ddd & T {
+  return Object.freeze({ ...defineDdd, ...extensions }) as typeof RuntimeJIT.ddd & T;
+}
 const defineDdd = Object.freeze({
   ...RuntimeJIT.ddd,
   entity: defineEntity,
@@ -2353,6 +2745,7 @@ const defineDdd = Object.freeze({
   timestamps: defineTimestamps,
   softDelete: defineSoftDelete,
   versioned: defineVersioned,
+  $extends: extendDefineDdd,
   abstract: Object.freeze({
     ...RuntimeJIT.ddd.abstract,
     entity: ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { readonly id?: string }) => {
@@ -2385,7 +2778,8 @@ export const JIT = {
   ...RuntimeJIT,
   class: defineClass,
   ddd: defineDdd,
-  overwrite,
+  /** @deprecated Use `JIT.class.override(...)` instead. */
+  overwrite: override,
   validate,
   json,
   binary,
@@ -2458,7 +2852,7 @@ export const JIT = {
   readonly from: typeof from;
   readonly class: typeof defineClass;
   readonly ddd: typeof defineDdd;
-  readonly overwrite: typeof overwrite;
+  readonly overwrite: typeof override;
   readonly map: typeof RuntimeJIT.map;
   readonly clone: typeof clone;
   readonly format: typeof format;

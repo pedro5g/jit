@@ -42,6 +42,6 @@ export default defineConfig({
       checker: "tsc",
       tsconfig: "./tsconfig.json",
     },
-    silent: true,
+    silent: false,
   },
 });
