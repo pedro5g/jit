@@ -52,6 +52,7 @@
     "bench:csv": "tsx --conditions @jit/source bench/csv/index.ts",
     "bench:ndjson": "tsx --conditions @jit/source bench/ndjson/index.ts",
     "bench:classes": "tsx --conditions @jit/source bench/classes/index.ts",
+    "bench:classes:layout": "tsx --conditions @jit/source bench/classes/domain-state-layout.ts",
     "bench:flows": "tsx --conditions @jit/source bench/flows/index.ts",
     "bench:json": "tsx --conditions @jit/source bench/json/index.ts",
     "bench:binary": "tsx --conditions @jit/source bench/binary/index.ts",

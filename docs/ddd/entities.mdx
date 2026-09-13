@@ -1,6 +1,7 @@
 # Entities
 
-Entities are compared by stable identity rather than by every field:
+Entities retain stable identity metadata for planning while `equals()` keeps
+the Runtime Type's structural semantics:
 
 ```ts
 const UserBase = JIT.ddd.abstract.entity(
@@ -12,7 +13,7 @@ class User extends UserBase {}
 
 const before = User.hydrate({ id: "u_1", name: "Ada" });
 const after = User.hydrate({ id: "u_1", name: "Ada Lovelace" });
-before.sameIdentity(after); // true
+before.id === after.id; // true
 ```
 
 `JIT.ddd.entity(...)` creates a concrete factory-first Runtime Type. Use

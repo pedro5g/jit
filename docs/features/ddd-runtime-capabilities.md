@@ -5,28 +5,26 @@
 Timestamp, soft-delete, and optimistic-version behavior belongs to an
 Aggregate Root, but it should not create a second class builder or wrap every
 mutation in runtime closures. The class definition resolves lifecycle fields
-before the Aggregate Root's parser, constructor, and compiled mutation
-boundary, so JIT can lower the policies into that same generated method.
+before the Runtime Class parser and constructor, so JIT can lower the policies
+into the same specialized state layout and prototype methods.
 
 Identity follows the same separation of responsibilities: a Unique Identifier
 is a scalar Value Object with value semantics. The Entity or Aggregate Root
-selects which field is its identity and owns `identity()`/`sameIdentity()`.
+selects which field is its identity; identity metadata remains available to
+the equality, reconciliation, indexing, and query planners without adding
+identity methods to the domain instance.
 
 ## Canonical API
 
 ```ts
-const OrderBase = JIT.ddd
-  .abstract.aggregateRoot(
+const OrderBase = JIT.ddd.abstract
+  .aggregateRoot(
     JIT.object({
       id: JIT.ddd.uniqueIdentifier(),
       status: JIT.enum(["draft", "confirmed"]),
     }),
   )
-  .extends(
-    JIT.ddd.timestamps(),
-    JIT.ddd.softDelete(),
-    JIT.ddd.versioned(),
-  );
+  .extends(JIT.ddd.timestamps(), JIT.ddd.softDelete(), JIT.ddd.versioned());
 ```
 
 Exactly one Unique Identifier field makes the `{ id }` option unnecessary.
@@ -42,7 +40,7 @@ EffectiveSchema contains `createdAt: Date`, `updatedAt: Date | null`,
 `deletedAt: Date | null`, and `version: number` in the example above.
 
 Managed fields are required in `hydrate()` and omitted from the user portion
-of `create()` and `update()`. Creation initializes them as
+of `create()`. Creation initializes them as
 `createdAt = clock()`, `updatedAt = null`, `deletedAt = null`, and `version = 0`.
 Hydration consumes persisted values and never regenerates them.
 
@@ -99,20 +97,20 @@ contract.
 
 The capabilities are frozen descriptors installed through the Runtime Class
 `.extends()` path. They do not add AST node kinds. Declaration resolves a
-`ClassDefinition`, `ResolvedMemberTable`, EffectiveSchema, and managed-field
-plan; aggregate configuration then rebuilds one `AggregateMutationPlan`. The
-hot methods perform direct property reads and writes against statically bound
-fields.
+`ClassDefinition`, `ResolvedMemberTable`, EffectiveSchema, managed-field plan,
+and `ClassLayoutPlan.domainState`; the emitters then bind the final storage
+once. The hot methods perform direct property reads and writes against
+statically known fields.
 
 The default clock is emitted as `new Date()` and read at most once per
-effective mutation. A custom clock is bound once into the compiled update
-function. Renamed methods are installed directly on the prototype, without a
-dispatcher or per-instance function allocation.
+effective lifecycle transition. A custom clock is bound once into the compiled
+prototype method. Renamed methods are installed directly on the prototype,
+without a dispatcher or per-instance function allocation.
 
 Timestamp writes and version increments happen only after a semantic change.
 `touch()` is an explicit mutation. Soft deletion and restoration are explicit
 O(1) transitions; repeated transitions return before reading the clock.
-Readonly and managed schema fields remain excluded from ordinary update
+Readonly and managed schema fields remain excluded from ordinary `with()`
 patches and direct managed writes are rejected by the generated accessors.
 
 ## Representations and abstract bases
@@ -138,9 +136,10 @@ rather than dropping the policy or reconstructing a closure from source text.
 ## V5 regression recovery: Runtime Type and validation boundaries
 
 The DDD presets install structural behavior at declaration time. An Entity now
-has `equals()`, `hashCode()`, `identity()`, and `sameIdentity()` by default;
-an Aggregate Root adds the ordered event buffer and controlled `update()` and
-`commit()` surface. `JIT.class.equals()`, `hashCode()`, `clone()`, `diff()`,
+has `equals()` and `hashCode()` by default; an Aggregate Root adds the ordered
+typed event buffer and `commit()` surface. Domain methods mutate the protected
+`_props` state bag and call lifecycle transitions explicitly. `JIT.class.equals()`,
+`hashCode()`, `clone()`, `diff()`,
 and `json()` remain explicit callable capabilities for ordinary Runtime
 Classes. The callable form is equivalent to the compatible bare descriptor:
 
@@ -180,12 +179,13 @@ clocks, factories, and error constructors remain explicit skip reasons.
 
 ## Complexity, allocations, and measurement
 
-- Declaration recompiles the Aggregate Root mutation method once per installed
-  timestamp/version policy; this is compile-time work.
-- An effective timestamped mutation is O(number of statically known mutable
-  fields), exactly like the underlying compiled mutation, plus one clock read.
-- An ineffective mutation returns before reading the clock or allocating a
-  `Date`.
+- Declaration resolves lifecycle fields and emits each prototype transition
+  once per installed timestamp/version policy; this is compile-time work.
+- A domain assignment is one direct state-bag write. `touch()` is O(1), with
+  one clock read when timestamps are installed and one version increment when
+  versioning is installed.
+- No-op checks remain domain-method responsibility; lifecycle no-op transitions
+  return before reading the clock or allocating a `Date`.
 - Default clocks allocate the one `Date` required by the state transition.
   Injected clocks allocate only what the application clock chooses.
 - Capability methods are prototype-shared.
@@ -197,39 +197,42 @@ handwritten call. Results are persisted in `bench/results/classes.latest.json`
 with Node, CPU, timing distribution, and sampled heap data. The benchmark is a
 regression gate, not a cross-machine latency promise.
 
-Measured on Node 22.17.1 / Ryzen 7 5800H on 2026-09-06 UTC:
+Measured on Node 22.17.1 / Ryzen 7 5800H on 2026-09-11 UTC:
 
-| Effective timestamp mutation | Runtime JIT | AOT | Handwritten |
-| --- | ---: | ---: | ---: |
-| default clock | 70.59 ns / 112.16 B | 68.95 ns / 112.14 B | 67.86 ns / 112.20 B |
-| injected fixed clock | 3.33 ns / 0.04 B | unsupported binding | 1.03 ns / 0.02 B |
+| Effective timestamp mutation |         Runtime JIT |                 AOT |         Handwritten |
+| ---------------------------- | ------------------: | ------------------: | ------------------: |
+| default clock                | 75.22 ns / 112.14 B | 73.24 ns / 112.22 B | 73.95 ns / 112.19 B |
+| injected fixed clock         |    1.61 ns / 0.03 B | unsupported binding |    1.05 ns / 0.02 B |
 
-The default-clock result is at the handwritten ceiling because allocating the
-`Date` dominates the transition. The injected-clock result exposes the real
-binding-call cost: JIT is about 3.00 ns slower than the handwritten method in
-this run. The default path stays within measurement noise of the handwritten
-transition; the injected clock is a runtime binding and is intentionally not
-standalone-AOT reconstructive.
+The default-clock result stays within measurement noise of the handwritten
+transition because allocating the `Date` dominates it. The injected-clock
+result exposes the real binding-call cost: JIT is about 0.65 ns slower than the
+handwritten method in this run. The injected clock is a runtime binding and is
+intentionally not standalone-AOT reconstructive.
 
 The V3 class-layout scenarios were measured with the same command on the same
 machine:
 
-| Scenario | Runtime JIT | AOT | Handwritten |
-| --- | ---: | ---: | ---: |
-| DDD getter read | 0.44 ns / 0.10 B | 0.45 ns / 0.02 B | 0.46 ns / 0.01 B |
-| flat entity create | 18.49 ns / 48.22 B | 18.69 ns / 144.21 B | 6.19 ns / 48.13 B |
-| flat entity hydrate | 28.25 ns / 48.16 B | 9.83 ns / 48.15 B | — |
-| aggregate no-op update | 0.61 ns / 0.02 B | — | 0.42 ns / 0.01 B |
-| custom getter | 0.45 ns / 0.04 B | unsupported binding | 0.45 ns / 0.01 B |
-| private field read | 0.32 ns / 0.02 B | 0.33 ns / 0.01 B | 0.44 ns / 0.01 B |
-| protected-like field read | 0.32 ns / 0.01 B | 0.32 ns / 0.01 B | 0.43 ns / 0.01 B |
-| validated class method | 14.54 ns / 56.31 B | unsupported binding | 0.50 ns / 0.01 B |
+| Scenario                  |        Runtime JIT |                 AOT |       Handwritten |
+| ------------------------- | -----------------: | ------------------: | ----------------: |
+| DDD getter read           |   0.46 ns / 0.01 B |    0.50 ns / 0.01 B |  0.44 ns / 0.10 B |
+| flat entity create        | 14.30 ns / 32.20 B | 11.36 ns / 32.14 B | 6.62 ns / 48.13 B |
+| flat entity hydrate       | 13.56 ns / 32.10 B |  6.36 ns / 32.13 B |                 — |
+| aggregate domain mutation |   0.87 ns / 0.02 B |                   — |  0.85 ns / 0.02 B |
+| aggregate no-op check     |   0.42 ns / 0.01 B |                   — |  0.43 ns / 0.01 B |
+| aggregate event buffer*   | 22.73 ns / 184.11 B |                  — | 37.10 ns / 208.09 B |
+| custom getter             |   0.45 ns / 0.04 B | unsupported binding |  0.44 ns / 0.01 B |
+| private field read        |   0.33 ns / 0.01 B |    0.32 ns / 0.01 B |  0.46 ns / 0.01 B |
+| protected-like field read |   0.32 ns / 0.01 B |    0.33 ns / 0.01 B |  0.43 ns / 0.02 B |
+| validated class method    | 14.20 ns / 56.10 B | unsupported binding |  0.45 ns / 0.01 B |
 
 The getter result shows that a prototype accessor over one stable slot is within
 measurement noise of direct property access. A validated method includes its
 intentional argument/output checks; standalone AOT skips arbitrary method
 callbacks rather than serializing their source. Heap figures are sampled by
 Mitata and are regression signals, not allocation guarantees across engines.
+The event-buffer row uses one pre-materialized event for both implementations;
+event construction is measured separately.
 
 Nested Runtime Types use the outer factory's result boundary and lazy issue
 collection. Child policies never produce nested tuples or either wrappers. If
@@ -249,40 +252,41 @@ representations: for example, a UUID Value Object is a UUID class in
 
 An Entity with no identifier may remain pending while declaration extensions
 are applied. Adding exactly one unambiguous identifier field resolves that
-state and installs the identity capability; pending entities do not expose
-invalid `create()` or `hydrate()` factories. An explicit identity remains
-authoritative and is never replaced by a later mixin.
+state and restores its factories; pending entities do not expose invalid
+`create()` or `hydrate()` factories. Identity metadata remains internal to
+equality, reconciliation, indexing, and query planning. An explicit identity
+remains authoritative and is never replaced by a later mixin.
 
 `JIT.class.json()` adds a reconstructive `toJson(): string` capability. The
 serializer is compiled once from `Wire<EffectiveSchema>` and the class layout
-can bind managed slots directly, so the method does not call
+keeps semantic field access specialized, so the method does not call
 `JSON.stringify(this)` or compile a generic serializer on each invocation.
 Private and protected persisted fields remain serializable; visibility is not
 redaction. `noConstructor()` fields are transient and are excluded from wire
 output. The same serializer lowering is emitted for standalone AOT artifacts.
 
-## V4 performance pass
+## Current runtime benchmark
 
 The measurements below were produced by `pnpm bench:classes` on Node
-22.17.1 / Ryzen 7 5800H on 2026-09-06. Each cell is `ns/op / sampled B/op`.
+22.17.1 / Ryzen 7 5800H on 2026-09-11. Each cell is `ns/op / sampled B/op`.
 The handwritten-equivalent rows perform the same validation and nested
 materialization. The trusted rows omit validation and are ceilings, not fair
 API comparisons. Required instance and Value Object allocations are not
 counted as avoidable overhead.
 
-| Scenario | Runtime JIT | AOT | Handwritten-equivalent | Handwritten-trusted |
-| --- | ---: | ---: | ---: | ---: |
-| nested entity hydrate | 351.68 / 336.14 B | 310.68 / 409.62 B | 444.35 / 320.66 B | 111.44 / 264.26 B |
-| scalar Value Object create | 92.59 / 32.51 B | 97.39 / 156.88 B | — | 34.48 / 32.15 B |
-| validated class method | 14.54 / 56.31 B | unsupported callback | — | 0.50 / 0.01 B |
-| class `toJson()` | 57.96 / 233.75 B | 42.40 / 172.63 B | — | — |
+| Scenario                   |       Runtime JIT |                  AOT | Handwritten-equivalent | Handwritten-trusted |
+| -------------------------- | ----------------: | -------------------: | ---------------------: | ------------------: |
+| nested entity hydrate      | 499.32 / 723.21 B |    129.26 / 312.14 B |      437.09 / 320.53 B |   118.63 / 264.39 B |
+| scalar Value Object create |   41.52 / 32.24 B |      35.33 / 32.13 B |                      — |     35.23 / 32.15 B |
+| validated class method     |   14.20 / 56.09 B | unsupported callback |                      — |       0.47 / 0.01 B |
+| class `toJson()`           |   62.63 / 261.04 B |      55.23 / 230.21 B |                      — |                   — |
 
 Nested hydration is within the initial 2x handwritten-equivalent gate in this
-run (0.79x runtime and 0.70x AOT); benchmark variance is visible in the
+run (1.14x runtime and 0.30x AOT); benchmark variance is visible in the
 sampled handwritten baseline, so the saved artifact is the source of truth for
 this machine/run. The trusted row shows the remaining
 validation/materialization ceiling. The class serializer beats the external
-generic JIT serializer in the same run (177.65 ns/op) and
+generic JIT serializer in the same run (148.57 ns/op) and
 uses the physical layout, but native `JSON.stringify` and a handwritten
 serializer are not equivalent because symbol-backed managed storage is not
 visible to them. Validated methods retain the intentional validation cost and
@@ -294,27 +298,6 @@ the runtime `either` factory 68.48 ns / 40.27 B. The success result is the
 instance itself; there is no `{ ok: true, value }` allocation. The extra work
 is declaration-selected policy handling, while the failure-only object and
 issue list remain confined to rejection.
-
-## V5 benchmark run
-
-The following is a fresh `pnpm bench:classes` run after the Runtime Type and
-validation-boundary changes. It was collected on Node 22.22.3, Apple M1,
-arm64-darwin, on 2026-09-08. Each cell is `ns/op / sampled B/op`; this is a
-machine-local regression reference, not a cross-machine performance claim.
-
-| Scenario | Runtime JIT | AOT | Handwritten equivalent | Handwritten trusted |
-| --- | ---: | ---: | ---: | ---: |
-| flat entity create | 15.76 / 48.22 | 10.97 / 48.16 | 4.45 / 48.12 | — |
-| flat entity hydrate | 61.82 / 456.67 | 48.47 / 362.77 | — | — |
-| scalar Value Object create | 32.24 / 32.31 | 27.03 / 32.11 | — | 27.18 / 32.14 |
-| nested Runtime Type hydrate | 193.40 / 394.80 | 101.50 / 320.02 | 453.44 / 731.25 | 90.37 / 264.38 |
-| default-clock mutation | 54.20 / 112.18 | 54.08 / 112.11 | 54.27 / 112.16 | — |
-| no-op aggregate update | 0.73 / 0.02 | — | 0.43 / 0.01 | — |
-
-The benchmark includes the full class suite, including rejection, serializer,
-event-buffer, and method scenarios. The generated artifact is persisted by
-the benchmark runner under `bench/results/classes.latest.json`; rerun the
-command before making a new performance claim.
 
 ## Tradeoffs and non-goals
 

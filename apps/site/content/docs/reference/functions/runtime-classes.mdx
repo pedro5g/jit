@@ -23,8 +23,8 @@ ada.equals(grace); // false
 ```
 
 Capabilities are explicit, installed once on the prototype, and reuse the
-structural compilers: `equals`, `hashCode`, `diff`, `clone`, `with`, and
-`identity("field")`. `with` accepts the schema-derived update patch type; readonly
+structural compilers: `equals`, `hashCode`, `diff`, `clone`, and `with`.
+`with` accepts the schema-derived update patch type; readonly
 schema fields cannot be patched and are preserved by the compiled update.
 
 ## Extensions
@@ -214,7 +214,7 @@ const UserBase = JIT.ddd.abstract.entity(
 class User extends UserBase {}
 
 const user = User.create({ id: "u_1", name: "Ada" });
-user.identity; // "u_1"
+user.id; // "u_1"
 ```
 
 DDD lifecycle capabilities resolve their canonical fields before the class is
@@ -234,7 +234,7 @@ user.version; // 0
 ```
 
 Those managed fields are required by `hydrate()` and optional on `create()`;
-they remain excluded from ordinary update input. `touch()`, `softDelete()`, and `restore()` are specialized
+they remain excluded from ordinary class `with()` input. `touch()`, `softDelete()`, and `restore()` are specialized
 prototype methods with no lifecycle discovery in their hot path.
 
 ## Validation policies
@@ -245,19 +245,21 @@ from that same pass — so `.validate()` does not turn validation on. It chooses
 than to the call, so the factory's signature says which shape a caller gets.
 
 ```ts
-const Money = JIT.ddd.valueObject(
-  JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) }),
-).validate({ result: "either" });
+const Money = JIT.ddd
+  .valueObject(
+    JIT.object({ amount: JIT.number(), currency: JIT.enum(["BRL", "USD"]) }),
+  )
+  .validate({ result: "either" });
 
 const outcome = Money.create({ amount: 10, currency: "BRL" });
 if (!JIT.class.isFailure(outcome)) outcome.amount; // 10
 ```
 
-| `result` | `create(input)` returns |
-| --- | --- |
-| `"throw"` (default) | the instance, or throws `JITValidationError` |
+| `result`                                 | `create(input)` returns                                       |
+| ---------------------------------------- | ------------------------------------------------------------- |
+| `"throw"` (default)                      | the instance, or throws `JITValidationError`                  |
 | `"either"` (`"result"` deprecated alias) | the instance on success, or `{ ok: false; error }` on failure |
-| `"tuple"` | `[null, value]` or `[error, null]` |
+| `"tuple"`                                | `[null, value]` or `[error, null]`                            |
 
 The tuple puts the error first so it destructures the way callers read it.
 Pass `error` to build your own, and `create` / `hydrate` to leave one phase on
@@ -298,7 +300,7 @@ back as a value is one decision for the artifact, not one per invariant.
 ## Cloning
 
 `clone` is a capability, not a default. Copying a Value Object answers nothing
-— the value *is* the identity — and copying an Entity produces two objects
+— the value _is_ the identity — and copying an Entity produces two objects
 claiming to be the same one, which the domain has to decide rather than
 inherit.
 
@@ -402,7 +404,7 @@ const TicketId = JIT.ddd.uniqueIdentifier(JIT.int().positive());
 TicketId.create(42).value; // 42
 ```
 
-The metadata means *identifier-like*, not *the identity of this entity*.
+The metadata means _identifier-like_, not _the identity of this entity_.
 `entity` and `aggregateRoot` infer their identity field only when exactly one
 field carries it; zero candidates and several candidates are both rejected,
 because an entity may legitimately hold another aggregate's id. Explicit
@@ -423,12 +425,12 @@ User2.create({ name: "Ada" }).id.value; // generated, id omitted at the boundary
 
 Four representations, and they are not interchangeable:
 
-| Representation | What it is |
-| --- | --- |
-| Create input | the scalar the boundary accepts; defaults may be omitted |
-| Hydrate input | the complete persisted scalar; defaults are never regenerated |
-| Runtime | the wrapper object, with `value`, `equals()` and `hashCode()` |
-| Wire | the scalar again — `JSON.stringify` never emits `{ "value": ... }` |
+| Representation | What it is                                                         |
+| -------------- | ------------------------------------------------------------------ |
+| Create input   | the scalar the boundary accepts; defaults may be omitted           |
+| Hydrate input  | the complete persisted scalar; defaults are never regenerated      |
+| Runtime        | the wrapper object, with `value`, `equals()` and `hashCode()`      |
+| Wire           | the scalar again — `JSON.stringify` never emits `{ "value": ... }` |
 
 Nested Runtime Types accept their **wire** representation and are materialized
 by the compiled validator at each known field and array element, so a wrapper
@@ -468,9 +470,7 @@ const UserBase = JIT.ddd.abstract.entity(
 
 class User extends UserBase {}
 
-User.create({ id: "u_1", name: "Ada" }).sameIdentity(
-  User.create({ id: "u_1", name: "Grace" }),
-); // true
+User.create({ id: "u_1", name: "Ada" }).id; // "u_1"
 ```
 
 ## Domain events
@@ -498,29 +498,34 @@ event["~event"].type; // "order.confirmed"
 
 `JIT.ddd.aggregateRoot(schema, { id })` creates a concrete aggregate. Use
 `JIT.ddd.abstract.aggregateRoot(...)` for a base with identity, an ordered
-pending-event queue, and a compiled in-place `update()`.
-Subclass methods express the domain transition, then raise the event that
-describes it. Readonly schema fields remain unavailable to `update()`.
+pending-event queue, and protected `_props` domain state. Subclass methods
+express the domain transition, then raise the event that describes it.
+Readonly schema fields remain readonly in `_props`.
 
 ```ts
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
+  version: 1,
+  payload: JIT.object({ orderId: JIT.string() }),
+});
+
 const OrderBase = JIT.ddd.abstract.aggregateRoot(
   JIT.object({
     id: JIT.string().readonly(),
     status: JIT.enum(["draft", "confirmed"]),
   }),
   { id: "id" },
-);
+).events(OrderConfirmed);
 
 class Order extends OrderBase {
   confirm() {
-    this.update({ status: "confirmed" });
-    this.raise({ type: "order.confirmed" });
+    this._props.status = "confirmed";
+    this.raise(OrderConfirmed.create({ orderId: this.id }));
   }
 }
 
 const order = Order.create({ id: "o_1", status: "draft" });
 order.confirm();
-order.pullEvents(); // [{ type: "order.confirmed" }]
+order.pullEvents(); // [OrderConfirmed instance]
 ```
 
 `peekEvents()` returns a snapshot without clearing it. `pullEvents()` returns

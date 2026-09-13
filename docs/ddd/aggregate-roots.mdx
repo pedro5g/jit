@@ -3,23 +3,33 @@
 An aggregate root is an entity that owns a consistency boundary and an ordered pending-event queue. Persistence and repositories stay outside it.
 
 ```ts
-const OrderBase = JIT.ddd.abstract.aggregateRoot(
-  JIT.object({
-    id: JIT.string().readonly(),
-    status: JIT.enum(["draft", "confirmed"]),
-  }),
-  { id: "id" },
-);
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
+  version: 1,
+  payload: JIT.object({}),
+});
+
+const OrderBase = JIT.ddd.abstract
+  .aggregateRoot(
+    JIT.object({
+      id: JIT.string().readonly(),
+      status: JIT.enum(["draft", "confirmed"]),
+    }),
+    { id: "id" },
+  )
+  .events(OrderConfirmed);
 
 class Order extends OrderBase {
-  confirm(event: unknown): void {
-    this.update({ status: "confirmed" });
+  confirm(event: JIT.Typeof<typeof OrderConfirmed>): void {
+    this._props.status = "confirmed";
     this.raise(event);
   }
 }
 ```
 
-`update()` and `raise()` are protected. External direct mutation remains rejected by TypeScript, and readonly schema fields cannot appear in the update patch. Known fields are assigned with compiled field-specific code rather than `Object.assign`.
+`_props` and `raise()` are protected. External direct mutation remains rejected
+by TypeScript, and readonly schema fields cannot be reassigned in domain code.
+Known fields are still handled by schema-specialized compiler operations rather
+than `Object.assign`.
 
 `peekEvents()` returns a snapshot without exposing the internal array. `pullEvents()` preserves order and clears the queue. `commit(publisher)` publishes sequentially, clears the queue after the full sequence succeeds, and leaves it intact when publishing fails.
 
@@ -49,9 +59,8 @@ rejected; capabilities also cannot shadow schema fields or existing methods.
 Mutation no-ops return before reading a clock or allocating a `Date`:
 
 ```ts
-order.update({ status: order.status }); // no lifecycle change
-order.softDelete();                     // first transition only
-order.restore();                        // second transition only
+order.softDelete(); // first transition only
+order.restore(); // second transition only
 ```
 
 Names and clocks are explicit configuration, not global registries:

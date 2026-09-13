@@ -26,7 +26,6 @@ import {
 } from "../classes/member-descriptors.js";
 import type { ResolvedMemberTable } from "../classes/members.js";
 import { isOverrideDescriptor, type OverrideDescriptor, override } from "../classes/override.js";
-import { buildAggregateMutationPlan, emitAggregateMutationBody } from "../compiler/aggregate-mutation.js";
 import {
   type AssertionDescriptor,
   type AssertionErrorFactory,
@@ -60,6 +59,7 @@ import { createSchema, TypeName } from "../core/ats/index.js";
 import type { Input, Update as SchemaUpdate } from "../core/ats/input.js";
 import type { Hydrate } from "../core/ats/representations.js";
 import type { NO_CONSTRUCTOR_FIELD_MARKER } from "../core/ats/type-schema.js";
+import type { ResolveTypeofSchema } from "../core/ats/typeof.js";
 import type { SchemaInput } from "../core/builder/index.js";
 import { unwrapSchema } from "../core/builder/index.js";
 import type { CompareNumericLiteral } from "../core/builder/types.js";
@@ -78,6 +78,9 @@ import { createConditionBuilder, type QueryConditionBuilder } from "./query.js";
 
 const CLASS_TARGET = Symbol("jit.class.target");
 const INTERNAL_CONSTRUCT = Symbol("jit.class.construct");
+const DOMAIN_STATE = Symbol("jit.class.domainState");
+const EVENT_BUFFER = Symbol("jit.class.events");
+const CLASS_FIELD_BUILDER = Symbol("jit.class.fieldBuilder");
 const TRUSTED_MATERIALIZER = "__jitMaterialize";
 export type ConstructionMode = "constructor" | "factory";
 
@@ -613,24 +616,27 @@ export type ClassExtensionArgs<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TExtensions extends readonly AnyClassExtension[],
-> = ResolveClassExtensionArgs<TSchema, TInstance, TExtensions>;
+  TEncapsulated extends boolean = false,
+> = ResolveClassExtensionArgs<TSchema, TInstance, TExtensions, TEncapsulated>;
 
 type ResolveClassExtensionArgs<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TExtensions extends readonly AnyClassExtension[],
+  TEncapsulated extends boolean,
 > = number extends TExtensions["length"]
-  ? ClassExtensionArgument<TSchema, TInstance, TExtensions[number]>[]
+  ? ClassExtensionArgument<TSchema, TInstance, TExtensions[number], TEncapsulated>[]
   : TExtensions extends readonly [
         infer THead extends AnyClassExtension,
         ...infer TTail extends readonly AnyClassExtension[],
       ]
     ? [
-        ClassExtensionArgument<TSchema, TInstance, THead>,
+        ClassExtensionArgument<TSchema, TInstance, THead, TEncapsulated>,
         ...ResolveClassExtensionArgs<
           ApplyClassExtensionSchema<TSchema, THead>,
-          ExtendedInstance<TSchema, TInstance, [THead]>,
-          TTail
+          ExtendedInstance<TSchema, TInstance, [THead], TEncapsulated>,
+          TTail,
+          TEncapsulated
         >,
       ]
     : [];
@@ -639,20 +645,21 @@ type ClassExtensionArgument<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TExtension extends AnyClassExtension,
+  TEncapsulated extends boolean,
 > = TExtension extends AnyClassCapability
   ? NonConflictingCapability<TExtension, TSchema, TInstance>
   : TExtension extends ClassMixin
     ? MixinRequirementsMet<TSchema, TExtension> extends true
       ? TExtension
       : never
-    : TExtension &
-        ThisType<
-          MutableSurface<TInstance> &
-            ATS.TypeofSchema<AddSchemaFields<ApplySchemaOverride<TSchema, TExtension>, TExtension>> &
-            MethodsForExtension<TExtension, TSchema, TInstance>
-        > &
-        Partial<Record<Extract<NonOverrideMemberKeys<TExtension>, keyof TInstance>, never>> &
-        Partial<Record<Exclude<ExtensionOverrideMemberKeys<TExtension>, keyof TInstance>, never>>;
+    : TExtension extends (...args: never[]) => infer TOutput
+      ? TOutput extends ClassMethodsInput
+        ? (builder: ClassExtensionBuilder<TSchema, TInstance, TEncapsulated>) => TOutput
+        : never
+      : TExtension &
+          ThisType<ExtensionThisSurface<TSchema, TInstance, TExtension, TEncapsulated>> &
+          Partial<Record<Extract<NonOverrideMemberKeys<TExtension>, keyof TInstance>, never>> &
+          Partial<Record<Exclude<ExtensionOverrideMemberKeys<TExtension>, keyof TInstance>, never>>;
 
 type NonOverrideMemberKeys<TExtension> =
   TExtension extends Record<string, unknown>
@@ -669,7 +676,248 @@ type ExtensionOverrideMemberKeys<TExtension> =
 type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
 type IsOverrideValue<TValue> = IsAny<TValue> extends true ? false : TValue extends OverrideDescriptor ? true : false;
 
-type AnyClassExtension = AnyClassCapability | ClassMethodsInput | ClassMixin;
+export interface ClassExtensionBuilder<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TEncapsulated extends boolean = false,
+> {
+  field<TField extends SchemaInput<ATS.AnyTypeSchema>>(
+    schema: TField
+  ): ClassExtensionFieldBuilder<TSchema, TInstance, string, TField, TEncapsulated>;
+  /** The name is explicit so the setter `this` type remains exact. */
+  field<const TName extends string, TField extends SchemaInput<ATS.AnyTypeSchema>>(
+    name: TName,
+    schema: TField
+  ): ClassExtensionFieldBuilder<TSchema, TInstance, TName, TField, TEncapsulated>;
+}
+
+type FieldSchema<TField> = SchemaFromInput<TField> extends infer TSchema extends ATS.AnyTypeSchema ? TSchema : never;
+type FieldOutput<TField> = ResolveTypeofSchema<FieldSchema<TField>>;
+type FieldExtensionInstance<TInstance, TName extends string, TField> = string extends TName
+  ? TInstance
+  : TInstance & {
+      readonly [TKey in TName]: FieldOutput<TField>;
+    };
+type FieldExtensionThis<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TName extends string,
+  TField,
+  TEncapsulated extends boolean,
+> = TEncapsulated extends true
+  ? string extends TName
+    ? Omit<
+        InternalInstance<
+          TSchema,
+          TInstance,
+          IdentityKeysFromInstance<TInstance> extends never
+            ? IdentityKeys<TSchema>
+            : IdentityKeysFromInstance<TInstance>
+        >,
+        "_props"
+      > & {
+        /** The outer object key is unavailable inside this nested callback. */
+        readonly _props: Extract<
+          DomainState<
+            TSchema,
+            IdentityKeysFromInstance<TInstance> extends never
+              ? IdentityKeys<TSchema>
+              : IdentityKeysFromInstance<TInstance>
+          >,
+          object
+        > &
+          Record<string, FieldOutput<TField>>;
+      }
+    : ContextualInternalInstance<
+        AddSchemaFields<TSchema, { [TKey in TName]: TField }>,
+        FieldExtensionInstance<TInstance, TName, TField>,
+        IdentityKeysFromInstance<TInstance> extends never ? IdentityKeys<TSchema> : IdentityKeysFromInstance<TInstance>
+      >
+  : FieldExtensionInstance<TInstance, TName, TField>;
+
+type ContextualInternalInstance<TSchema extends ATS.AnyTypeSchema, TInstance, TIdentityKeys extends PropertyKey> = Omit<
+  InternalInstance<TSchema, TInstance, TIdentityKeys>,
+  "_props"
+> & {
+  readonly _props: Extract<DomainState<TSchema, TIdentityKeys, ManagedSchemaKeys<TSchema>>, object>;
+};
+
+type FieldBuilderDefinition<
+  TField extends SchemaInput<ATS.AnyTypeSchema>,
+  TVisibility extends ClassMemberVisibility,
+  TGetter extends Function | undefined,
+  TSetter extends Function | undefined,
+> = {
+  readonly kind: "field";
+  readonly schema: TField;
+  readonly visibility: TVisibility;
+} & (TGetter extends Function ? { readonly getter: TGetter } : {}) &
+  (TSetter extends Function ? { readonly setter: TSetter } : {});
+
+export interface ClassExtensionFieldBuilder<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TName extends string,
+  TField extends SchemaInput<ATS.AnyTypeSchema>,
+  TEncapsulated extends boolean = false,
+  TVisibility extends ClassMemberVisibility = "public",
+  TGetter extends Function | undefined = undefined,
+  TSetter extends Function | undefined = undefined,
+> extends ClassMemberDescriptor<FieldBuilderDefinition<TField, TVisibility, TGetter, TSetter>> {
+  public(): ClassExtensionFieldBuilder<TSchema, TInstance, TName, TField, TEncapsulated, "public", TGetter, TSetter>;
+  protected(): ClassExtensionFieldBuilder<
+    TSchema,
+    TInstance,
+    TName,
+    TField,
+    TEncapsulated,
+    "protected",
+    TGetter,
+    TSetter
+  >;
+  private(): ClassExtensionFieldBuilder<TSchema, TInstance, TName, TField, TEncapsulated, "private", TGetter, TSetter>;
+  getter(
+    implementation: (this: FieldExtensionThis<TSchema, TInstance, TName, TField, TEncapsulated>) => FieldOutput<TField>
+  ): ClassExtensionFieldBuilder<
+    TSchema,
+    TInstance,
+    TName,
+    TField,
+    TEncapsulated,
+    TVisibility,
+    (this: FieldExtensionThis<TSchema, TInstance, TName, TField, TEncapsulated>) => FieldOutput<TField>,
+    TSetter
+  >;
+  setter(
+    implementation: (
+      this: FieldExtensionThis<TSchema, TInstance, TName, TField, TEncapsulated>,
+      value: FieldOutput<TField>
+    ) => void
+  ): ClassExtensionFieldBuilder<
+    TSchema,
+    TInstance,
+    TName,
+    TField,
+    TEncapsulated,
+    TVisibility,
+    TGetter,
+    (this: FieldExtensionThis<TSchema, TInstance, TName, TField, TEncapsulated>, value: FieldOutput<TField>) => void
+  >;
+}
+
+type AnyClassExtensionFactory = (
+  builder: ClassExtensionBuilder<ATS.AnyTypeSchema, unknown, boolean>
+) => ClassMethodsInput;
+type AnyClassExtension = AnyClassCapability | ClassMethodsInput | ClassMixin | AnyClassExtensionFactory;
+
+type IsReadonlySchema<TSchema> = TSchema extends { readonly type: "readonly" }
+  ? true
+  : TSchema extends
+        | ATS.OptionalSchema<infer TInner>
+        | ATS.NullableSchema<infer TInner>
+        | ATS.NullishSchema<infer TInner>
+        | ATS.DefaultSchema<infer TInner>
+        | ATS.BrandSchema<infer TInner>
+        | ATS.RefineSchema<infer TInner>
+        | ATS.CoerceSchema<infer TInner>
+        | ATS.PipeSchema<infer TInner>
+        | ATS.TransformSchema<infer TInner>
+    ? IsReadonlySchema<TInner>
+    : false;
+type SchemaReadonlyKeys<TSchema extends ATS.AnyTypeSchema> = TSchema extends {
+  readonly type: "object";
+  readonly def: { readonly props: infer TShape extends ATS.SchemaShape };
+}
+  ? {
+      [TKey in keyof TShape]: IsReadonlySchema<TShape[TKey]> extends true ? TKey : never;
+    }[keyof TShape]
+  : never;
+
+type ManagedSchemaKeys<TSchema extends ATS.AnyTypeSchema> = TSchema extends {
+  readonly type: "object";
+  readonly def: { readonly props: infer TShape extends ATS.SchemaShape };
+}
+  ? {
+      [TKey in keyof TShape]: IsManagedFieldSchema<TShape[TKey]> extends true ? TKey : never;
+    }[keyof TShape]
+  : never;
+
+/** Mutable domain state is the protected counterpart of the public view. */
+export type DomainState<
+  TSchemaLike,
+  TIdentityKeys extends PropertyKey = never,
+  TManagedKeys extends PropertyKey = never,
+  TReadonlyKeys extends PropertyKey = never,
+> =
+  DomainStateSchema<TSchemaLike> extends infer TSchema extends ATS.AnyTypeSchema
+    ? ResolveTypeofSchema<TSchema> extends infer TValue
+      ? TValue extends object
+        ? Omit<
+            MutableDomainValue<TValue>,
+            Extract<
+              TIdentityKeys | TManagedKeys | TReadonlyKeys | SchemaReadonlyKeys<DomainStateSchema<TSchemaLike>>,
+              keyof TValue
+            >
+          > &
+            Readonly<
+              Pick<
+                MutableDomainValue<TValue>,
+                Extract<
+                  TIdentityKeys | TManagedKeys | TReadonlyKeys | SchemaReadonlyKeys<DomainStateSchema<TSchemaLike>>,
+                  keyof TValue
+                >
+              >
+            >
+        : TValue
+      : never
+    : never;
+
+type DomainStateSchema<TSchemaLike> = TSchemaLike extends { readonly schema: infer TSchema extends ATS.AnyTypeSchema }
+  ? TSchema
+  : TSchemaLike extends ATS.AnyTypeSchema
+    ? TSchemaLike
+    : never;
+
+type MutableDomainValue<TValue> = TValue extends object ? { -readonly [TKey in keyof TValue]: TValue[TKey] } : TValue;
+
+/** Type-only carrier used to make generated `_props` genuinely protected. */
+export declare abstract class DomainStateCarrier<TProps extends object, TIdentityKeys extends PropertyKey = never> {
+  protected readonly _props: TProps;
+  protected readonly _identityKeys: TIdentityKeys;
+}
+
+export type PublicInstance<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance = ResolveTypeofSchema<TSchema>,
+> = TInstance extends object ? { [TKey in keyof TInstance]: TInstance[TKey] } : TInstance;
+
+export type InternalInstance<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TIdentityKeys extends PropertyKey = IdentityKeys<TSchema>,
+  TManagedKeys extends PropertyKey = ManagedSchemaKeys<TSchema>,
+> = Omit<TInstance, "_props"> &
+  DomainStateCarrier<Extract<DomainState<TSchema, TIdentityKeys, TManagedKeys>, object>, TIdentityKeys>;
+
+type IdentityKeysFromInstance<TInstance> =
+  TInstance extends DomainStateCarrier<infer _TProps, infer TKeys> ? TKeys : never;
+
+type ExtensionThisSurface<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TExtension,
+  TEncapsulated extends boolean,
+> = TEncapsulated extends true
+  ? ContextualInternalInstance<
+      AddSchemaFields<ApplySchemaOverride<TSchema, TExtension>, TExtension>,
+      TInstance &
+        ATS.TypeofSchema<AddSchemaFields<ApplySchemaOverride<TSchema, TExtension>, TExtension>> &
+        MethodsForExtension<TExtension, TSchema, TInstance>,
+      IdentityKeysFromInstance<TInstance> extends never ? IdentityKeys<TSchema> : IdentityKeysFromInstance<TInstance>
+    >
+  : MutableSurface<TInstance> &
+      ATS.TypeofSchema<AddSchemaFields<ApplySchemaOverride<TSchema, TExtension>, TExtension>> &
+      MethodsForExtension<TExtension, TSchema, TInstance>;
 
 type MixinRequirements<TExtension> = TExtension extends ClassMixin<ClassMethodsInput, infer TRequires> ? TRequires : {};
 type MixinRequirementsMet<TSchema extends ATS.AnyTypeSchema, TExtension> =
@@ -705,7 +953,13 @@ type CapabilityAlreadyInstalled<
 type NonConflictingCapability<TCapability extends AnyClassCapability, TSchema extends ATS.AnyTypeSchema, TInstance> =
   CapabilityAlreadyInstalled<TCapability, TSchema> extends true
     ? never
-    : Extract<keyof MethodsForCapability<TCapability, TSchema, TInstance>, keyof TInstance> extends never
+    : Extract<
+          Exclude<
+            keyof MethodsForCapability<TCapability, TSchema, TInstance>,
+            TCapability extends TimestampCapability | VersionedCapability ? "touch" : never
+          >,
+          keyof TInstance
+        > extends never
       ? CompatibleCapability<TCapability, TSchema>
       : never;
 
@@ -760,7 +1014,7 @@ type MethodsForCapability<
 > = TCapability extends ClassWithCapability
   ? { with(patch: SchemaUpdate<TSchema>): TInstance }
   : TCapability extends ClassCloneCapability
-    ? { clone(): TInstance }
+    ? CloneMethods
     : TCapability extends ClassCapability<infer TMethods>
       ? TMethods
       : never;
@@ -971,15 +1225,7 @@ type OverrideMemberKeys<TExtension> = TExtension extends AnyClassCapability
     : never;
 type AllOverrideMemberKeys<TExtensions extends readonly AnyClassExtension[]> =
   TExtensions[number] extends infer TExtension ? OverrideMemberKeys<TExtension> : never;
-type LifecycleUpdateMethod<
-  TSchema extends ATS.AnyTypeSchema,
-  TInstance,
-  TExtensions extends readonly AnyClassExtension[],
-> = [Extract<TExtensions[number], TimestampCapability | SoftDeleteCapability | VersionedCapability>] extends [never]
-  ? {}
-  : "update" extends keyof TInstance
-    ? {}
-    : { update(patch: SchemaUpdate<ApplySchemaOverrides<TSchema, TExtensions>>): void };
+type LifecycleUpdateMethod = {};
 type ExplicitWritableFieldKeys<TExtension> =
   TExtension extends Record<string, unknown>
     ? {
@@ -1023,7 +1269,7 @@ type ExistingWritableFieldKeys<
   TEncapsulated extends boolean,
 > = TEncapsulated extends true ? PreservedWritableFieldKeys<TInstance, TSchema> : never;
 
-type ExtendedInstance<
+type ExtendedInstanceShape<
   TSchema extends ATS.AnyTypeSchema,
   TInstance,
   TExtensions extends readonly AnyClassExtension[],
@@ -1037,7 +1283,7 @@ type ExtendedInstance<
         | AllExplicitPublicFieldKeys<TExtensions>
       > &
       ExtensionMethods<TSchema, TInstance, TExtensions> &
-      LifecycleUpdateMethod<TSchema, TInstance, TExtensions>
+      LifecycleUpdateMethod
   : Omit<TInstance, AllOverrideMemberKeys<TExtensions> | AllHiddenClassMemberKeys<TExtensions>> &
       Omit<
         ClassFieldSurface<
@@ -1049,7 +1295,20 @@ type ExtendedInstance<
         AllHiddenClassMemberKeys<TExtensions>
       > &
       ExtensionMethods<TSchema, TInstance, TExtensions> &
-      LifecycleUpdateMethod<TSchema, TInstance, TExtensions>;
+      LifecycleUpdateMethod;
+
+type ExtendedInstance<
+  TSchema extends ATS.AnyTypeSchema,
+  TInstance,
+  TExtensions extends readonly AnyClassExtension[],
+  TEncapsulated extends boolean = false,
+> = TEncapsulated extends true
+  ? InternalInstance<
+      ApplySchemaOverrides<TSchema, TExtensions>,
+      ExtendedInstanceShape<TSchema, TInstance, TExtensions, TEncapsulated>,
+      IdentityKeysFromInstance<TInstance> extends never ? IdentityKeys<TSchema> : IdentityKeysFromInstance<TInstance>
+    >
+  : ExtendedInstanceShape<TSchema, TInstance, TExtensions, TEncapsulated>;
 
 type ClassFieldSurface<
   TSchema extends ATS.AnyTypeSchema,
@@ -1087,7 +1346,7 @@ export interface RuntimeClass<
     state: ClassHydrateInput<TSchema>
   ): InstanceType<TThis>;
   extends<const TExtensions extends readonly AnyClassExtension[]>(
-    ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
+    ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions, TEncapsulated>
   ): RuntimeClass<
     ApplySchemaOverrides<TSchema, TExtensions>,
     ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
@@ -1113,9 +1372,6 @@ export interface RuntimeClass<
     this: TThis,
     options: AccessorOptions<TSchema>
   ): TThis;
-  identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
-    key: TKey
-  ): RuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, TEncapsulated>;
   validate(policy?: FactoryValidationOptions): RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>;
   assert(
     predicate: (query: QueryConditionBuilder<ATS.TypeofSchema<TSchema>>) => QueryConditionNode,
@@ -1132,7 +1388,6 @@ type RuntimeClassConstructionMembers =
   | "factories"
   | "construction"
   | "accessors"
-  | "identity"
   | "validate"
   | "assert";
 
@@ -1147,7 +1402,7 @@ export type ConstructorRuntimeClass<
 ) => TInstance) &
   Omit<RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, RuntimeClassConstructionMembers> & {
     extends<const TExtensions extends readonly AnyClassExtension[]>(
-      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
+      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions, TEncapsulated>
     ): ConstructorRuntimeClass<
       ApplySchemaOverrides<TSchema, TExtensions>,
       ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
@@ -1175,12 +1430,6 @@ export type ConstructorRuntimeClass<
       input: ClassConstructorInput<TSchema>
     ) => TInstance) &
       Omit<ConstructorRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "accessors">;
-    identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
-      key: TKey
-    ): (new (
-      input: ClassConstructorInput<TSchema>
-    ) => TInstance & IdentityMethods) &
-      Omit<ConstructorRuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, TEncapsulated>, "identity">;
   };
 
 export interface FactoryOptions {
@@ -1435,7 +1684,7 @@ export type ConfiguredRuntimeClass<
   Omit<RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, RuntimeClassConstructionMembers> &
   FactoryMethods<TSchema, TInstance, TOptions, TMode, TError> & {
     extends<const TExtensions extends readonly AnyClassExtension[]>(
-      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
+      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions, TEncapsulated>
     ): ConfiguredRuntimeClass<
       ApplySchemaOverrides<TSchema, TExtensions>,
       ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
@@ -1566,7 +1815,7 @@ export type PendingEntityRuntimeClass<
   TTraits extends ATS.RuntimeTypeTraits = InitialRuntimeTypeTraits<TSchema>,
 > = Omit<FactoryRuntimeClass<TSchema, TInstance, TTraits, true>, "create" | "hydrate" | "factories" | "extends"> & {
   extends<const TExtensions extends readonly AnyClassExtension[]>(
-    ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
+    ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions, true>
   ): EntityRuntimeClassFor<
     ApplySchemaOverrides<TSchema, TExtensions>,
     ExtendedInstance<TSchema, TInstance, TExtensions, true>,
@@ -1580,7 +1829,12 @@ type EntityRuntimeClassFor<
   TTraits extends ATS.RuntimeTypeTraits = InitialRuntimeTypeTraits<TSchema>,
 > = [IdentityKeys<TSchema>] extends [never]
   ? PendingEntityRuntimeClass<TSchema, TInstance, TTraits>
-  : FactoryRuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, true>;
+  : FactoryRuntimeClass<TSchema, TInstance, TTraits, true>;
+
+type DddInstance<
+  TSchema extends ATS.AnyTypeSchema,
+  TIdentityKeys extends PropertyKey = IdentityKeys<TSchema>,
+> = InternalInstance<TSchema, Readonly<ResolveTypeofSchema<TSchema>> & StructuralValueMethods, TIdentityKeys>;
 
 type ConstructionFixedConstructor<
   TSchema extends ATS.AnyTypeSchema,
@@ -1652,7 +1906,7 @@ export type AbstractRuntimeClass<
 ) => TInstance) &
   Omit<RuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, RuntimeClassConstructionMembers> & {
     extends<const TExtensions extends readonly AnyClassExtension[]>(
-      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions>
+      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance, TExtensions, TEncapsulated>
     ): AbstractRuntimeClass<
       ApplySchemaOverrides<TSchema, TExtensions>,
       ExtendedInstance<TSchema, TInstance, TExtensions, TEncapsulated>,
@@ -1678,12 +1932,6 @@ export type AbstractRuntimeClass<
       input: ClassConstructorInput<TSchema>
     ) => TInstance) &
       Omit<AbstractRuntimeClass<TSchema, TInstance, TTraits, TEncapsulated>, "accessors">;
-    identity<TKey extends Extract<keyof ATS.TypeofSchema<TSchema>, string>>(
-      key: TKey
-    ): (abstract new (
-      input: ClassConstructorInput<TSchema>
-    ) => TInstance & IdentityMethods) &
-      Omit<AbstractRuntimeClass<TSchema, TInstance & IdentityMethods, TTraits, TEncapsulated>, "identity">;
   };
 
 /** An immutable, tree-shakeable operation that installs one prototype capability. */
@@ -1772,7 +2020,12 @@ function isClassMixin(value: unknown): value is ClassMixin {
   return typeof value === "function" && (value as { readonly [CLASS_MIXIN]?: unknown })[CLASS_MIXIN] === true;
 }
 
-type NormalizedClassExtension<TExtension> = TExtension extends ClassMixin<infer TOutput> ? TOutput : TExtension;
+type NormalizedClassExtension<TExtension> =
+  TExtension extends ClassMixin<infer TOutput>
+    ? TOutput
+    : TExtension extends (...args: never[]) => infer TOutput
+      ? TOutput
+      : TExtension;
 
 /** Names a custom extension may not take, whatever the schema declares. */
 /** A scalar Value Object is its value; those members are already taken. */
@@ -1787,7 +2040,6 @@ const RESERVED_EXTENSION_NAMES: ReadonlySet<string> = new Set([
   "factories",
   "construction",
   "accessors",
-  "identity",
   "validate",
   "assert",
 ]);
@@ -1801,9 +2053,86 @@ function isClassCapability(value: unknown): value is AnyClassCapability {
   );
 }
 
+function isClassExtensionFactory(value: unknown): value is AnyClassExtensionFactory {
+  return typeof value === "function" && !isClassCapability(value) && !isClassMixin(value);
+}
+
+interface RuntimeClassExtensionFieldBuilder {
+  readonly [CLASS_FIELD_BUILDER]: true;
+  readonly name: string | undefined;
+  readonly schema: SchemaInput<ATS.AnyTypeSchema>;
+  readonly visibility: ClassMemberVisibility;
+  readonly customGetter?: Function;
+  readonly customSetter?: Function;
+  public(): RuntimeClassExtensionFieldBuilder;
+  protected(): RuntimeClassExtensionFieldBuilder;
+  private(): RuntimeClassExtensionFieldBuilder;
+  getter(implementation: Function): RuntimeClassExtensionFieldBuilder;
+  setter(implementation: Function): RuntimeClassExtensionFieldBuilder;
+  toDescriptor(name: string): ClassMemberDescriptor;
+}
+
+function createClassExtensionFieldBuilder(
+  name: string | undefined,
+  schema: SchemaInput<ATS.AnyTypeSchema>,
+  visibility: ClassMemberVisibility = "public",
+  customGetter?: Function,
+  customSetter?: Function
+): RuntimeClassExtensionFieldBuilder {
+  const builder: RuntimeClassExtensionFieldBuilder = {
+    [CLASS_FIELD_BUILDER]: true,
+    name,
+    schema,
+    visibility,
+    ...(customGetter === undefined ? {} : { customGetter }),
+    ...(customSetter === undefined ? {} : { customSetter }),
+    public: () => createClassExtensionFieldBuilder(name, schema, "public", customGetter, customSetter),
+    protected: () => createClassExtensionFieldBuilder(name, schema, "protected", customGetter, customSetter),
+    private: () => createClassExtensionFieldBuilder(name, schema, "private", customGetter, customSetter),
+    getter: (implementation: Function) =>
+      createClassExtensionFieldBuilder(name, schema, visibility, implementation, customSetter),
+    setter: (implementation: Function) =>
+      createClassExtensionFieldBuilder(name, schema, visibility, customGetter, implementation),
+    toDescriptor: (propertyName: string) => {
+      if (name !== undefined && propertyName !== name) {
+        throw new JITError(
+          "CLASS_FIELD_DESCRIPTOR_CONFLICT",
+          `Class extension field ${JSON.stringify(name)} was assigned to ${JSON.stringify(propertyName)}`
+        );
+      }
+      const accessors = [
+        ...(customGetter === undefined ? [] : [classGetter(customGetter)]),
+        ...(customSetter === undefined ? [] : [classSetter(customSetter)]),
+      ];
+      if (visibility === "protected") return classProtected(schema, ...accessors);
+      if (visibility === "private") return classPrivate(schema, ...accessors);
+      return classPublic(schema, ...accessors);
+    },
+  };
+  return Object.freeze(builder);
+}
+
+function isClassExtensionFieldBuilder(value: unknown): value is RuntimeClassExtensionFieldBuilder {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { readonly [CLASS_FIELD_BUILDER]?: unknown })[CLASS_FIELD_BUILDER] === true
+  );
+}
+
+function createClassExtensionBuilder(): ClassExtensionBuilder<ATS.AnyTypeSchema, unknown, boolean> {
+  return Object.freeze({
+    field(nameOrSchema: string | SchemaInput<ATS.AnyTypeSchema>, schema?: SchemaInput<ATS.AnyTypeSchema>) {
+      return schema === undefined
+        ? createClassExtensionFieldBuilder(undefined, nameOrSchema as SchemaInput<ATS.AnyTypeSchema>)
+        : createClassExtensionFieldBuilder(nameOrSchema as string, schema);
+    },
+  }) as unknown as ClassExtensionBuilder<ATS.AnyTypeSchema, unknown, boolean>;
+}
+
 /** Minimal application-owned event publisher contract. */
 export interface EventPublisher<TEvent = unknown> {
-  publish(event: TEvent): void | Promise<void>;
+  publish(event: TEvent): void | PromiseLike<void>;
 }
 
 /** Versioned structural metadata exposed by a domain-event instance. */
@@ -1813,15 +2142,33 @@ export interface StandardEvent {
   readonly schemaVersion: number;
 }
 
+declare const DOMAIN_EVENT: unique symbol;
+
+/** Type-only marker carried by every event produced by `ddd.domainEvent()`. */
+export interface DomainEventBrand {
+  readonly [DOMAIN_EVENT]: true;
+}
+
+export type AnyDomainEvent = DomainEventBrand;
+
+type DomainEventConstructor = abstract new (...args: never[]) => DomainEventBrand;
+type DomainEventInstance<TConstructor> = TConstructor extends abstract new (
+  ...args: never[]
+) => infer TEvent
+  ? TEvent
+  : never;
+type DomainEventUnion<TConstructors extends readonly DomainEventConstructor[]> = DomainEventInstance<
+  TConstructors[number]
+>;
+
 type AnyClassCapability = ClassCapability<object>;
 type EqualsMethods = { equals(other: unknown): boolean };
 type HashCodeMethods = { hashCode(): number };
 type StructuralValueMethods = EqualsMethods & HashCodeMethods;
 type DiffMethods = { diff(other: unknown): DiffChange[] };
-type IdentityMethods = {
-  sameIdentity(other: unknown): boolean;
-  identity(): unknown;
-};
+interface CloneMethods {
+  clone(): this;
+}
 type ValueAccessor<TValue> = { readonly value: TValue };
 export interface ScalarValueObject<TValue> extends EqualsMethods, HashCodeMethods {
   readonly value: TValue;
@@ -1850,15 +2197,14 @@ export interface SoftDeleteOptions {
 export interface VersionedOptions {
   readonly field?: string;
 }
-declare class AggregateProtectedMethods<TSchema extends ATS.AnyTypeSchema> {
-  protected update(patch: SchemaUpdate<TSchema>): void;
-  protected raise(event: unknown): void;
+declare class AggregateProtectedMethods<TEvent extends DomainEventBrand = AnyDomainEvent> {
+  protected raise(event: TEvent): void;
 }
 
-type AggregateMethods<TSchema extends ATS.AnyTypeSchema> = AggregateProtectedMethods<TSchema> & {
-  peekEvents(): readonly unknown[];
-  pullEvents(): unknown[];
-  commit(publisher: EventPublisher): Promise<void>;
+type AggregateMethods<TEvent extends DomainEventBrand = AnyDomainEvent> = AggregateProtectedMethods<TEvent> & {
+  peekEvents(): readonly TEvent[];
+  pullEvents(): TEvent[];
+  commit(publisher: EventPublisher<TEvent>): Promise<void>;
 };
 type NamedMethod<TName extends string, TMethod> = {
   readonly [TKey in TName]: TMethod;
@@ -1869,6 +2215,7 @@ type OptionMethodName<TOptions, TKey extends PropertyKey, TFallback extends stri
   ? TName
   : TFallback;
 type TimestampMethodsFor<TOptions> = NamedMethod<OptionMethodName<TOptions, "touch", "touch">, () => void>;
+type VersionedMethods = { touch(): void };
 type SoftDeleteMethodsFor<TOptions> = NamedMethod<OptionMethodName<TOptions, "delete", "softDelete">, () => void> &
   NamedMethod<OptionMethodName<TOptions, "restore", "restore">, () => void> &
   Readonly<NamedMethod<OptionMethodName<TOptions, "isDeleted", "isDeleted">, boolean>>;
@@ -1886,21 +2233,59 @@ export interface SoftDeleteCapability<TOptions extends SoftDeleteOptions = SoftD
 }
 
 export interface VersionedCapability<TOptions extends VersionedOptions = VersionedOptions>
-  extends ClassCapability<object> {
+  extends ClassCapability<VersionedMethods> {
   readonly kind: "ddd.versioned";
   readonly __options?: TOptions;
 }
 
-type AggregateRuntimeClass<TSchema extends ATS.AnyTypeSchema, TInstance> = FactoryRuntimeClass<
-  TSchema,
+export type AggregateRuntimeClass<
+  TSchema extends ATS.AnyTypeSchema,
   TInstance,
-  InitialRuntimeTypeTraits<TSchema>,
-  true
->;
+  TEvent extends DomainEventBrand = AnyDomainEvent,
+> = (abstract new (
+  input: ClassConstructorInput<TSchema>
+) => TInstance & AggregateMethods<TEvent>) &
+  Omit<
+    FactoryRuntimeClass<TSchema, TInstance & AggregateMethods<TEvent>, InitialRuntimeTypeTraits<TSchema>, true>,
+    "extends"
+  > & {
+    extends<TOutput extends ClassMethodsInput>(
+      extension: (builder: ClassExtensionBuilder<TSchema, TInstance & AggregateMethods<TEvent>, true>) => TOutput
+    ): AggregateRuntimeClass<
+      ApplySchemaOverrides<TSchema, [TOutput]>,
+      ExtendedInstance<TSchema, TInstance & AggregateMethods<TEvent>, [TOutput], true>,
+      TEvent
+    >;
+    extends<TFirst extends AnyClassExtension, TOutput extends ClassMethodsInput>(
+      first: TFirst & ClassExtensionArgument<TSchema, TInstance & AggregateMethods<TEvent>, TFirst, true>,
+      extension: (
+        builder: ClassExtensionBuilder<
+          ApplyClassExtensionSchema<TSchema, TFirst>,
+          ExtendedInstance<TSchema, TInstance & AggregateMethods<TEvent>, [TFirst], true>,
+          true
+        >
+      ) => TOutput
+    ): AggregateRuntimeClass<
+      ApplySchemaOverrides<TSchema, [TFirst, TOutput]>,
+      ExtendedInstance<TSchema, TInstance & AggregateMethods<TEvent>, [TFirst, TOutput], true>,
+      TEvent
+    >;
+    extends<const TExtensions extends readonly AnyClassExtension[]>(
+      ...extensions: TExtensions & ClassExtensionArgs<TSchema, TInstance & AggregateMethods<TEvent>, TExtensions, true>
+    ): AggregateRuntimeClass<
+      ApplySchemaOverrides<TSchema, TExtensions>,
+      ExtendedInstance<TSchema, TInstance & AggregateMethods<TEvent>, TExtensions, true>,
+      TEvent
+    >;
+    events<const TEvents extends readonly DomainEventConstructor[]>(
+      ...events: TEvents
+    ): AggregateRuntimeClass<TSchema, TInstance, DomainEventUnion<TEvents>>;
+    events<TNextEvent extends DomainEventBrand>(): AggregateRuntimeClass<TSchema, TInstance, TNextEvent>;
+  };
 interface ClassWithCapability extends CallableClassCapability<object> {
   readonly __with: true;
 }
-interface ClassCloneCapability extends CallableClassCapability<object> {
+interface ClassCloneCapability extends CallableClassCapability<CloneMethods> {
   readonly __clone: true;
 }
 
@@ -1950,6 +2335,7 @@ interface ClassLayoutPlan {
   readonly properties: readonly string[];
   readonly accessors: ResolvedAccessors | undefined;
   readonly managedStorage: ReadonlyMap<string, ManagedStorageBinding>;
+  readonly domainState: ManagedStorageBinding | undefined;
   readonly fieldPolicies: ReadonlyMap<string, ClassFieldPolicy>;
   readonly encapsulateFields: boolean;
   readonly initializers: ReadonlyMap<string, () => unknown>;
@@ -1973,7 +2359,6 @@ interface ClassDefinitionState {
   readonly accessors: ResolvedAccessors | undefined;
   readonly fieldPolicies: ReadonlyMap<string, ClassFieldPolicy>;
   readonly encapsulateFields: boolean;
-  readonly mutationGate: WeakSet<object>;
   readonly capabilities: readonly AnyClassCapability[];
   readonly methods: readonly ClassMethodDefinition[];
   readonly lifecycle: LifecycleDefinition;
@@ -2004,7 +2389,6 @@ interface ClassStateSeed {
   readonly policy?: FactoryPolicyState;
   readonly fieldPolicies?: ReadonlyMap<string, ClassFieldPolicy>;
   readonly encapsulateFields?: boolean;
-  readonly mutationGate?: WeakSet<object>;
   readonly factoryNames?: { readonly create: string | false; readonly hydrate: string | false };
   readonly customFactories?: { readonly create?: Function; readonly hydrate?: Function };
   readonly constructionConfigured?: boolean;
@@ -2063,7 +2447,6 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
 ): RuntimeClass<TSchema> {
   const baseState = initialEffectiveSchema(schema);
   const members = seed?.members?.clone() ?? baseState.members;
-  if (aggregate && !members.has("update")) addMember(members, "update", "preset", "ddd.aggregateRoot", "method");
   if (aggregate) {
     addMember(members, "raise", "preset", "ddd.aggregateRoot", "method");
     addMember(members, "peekEvents", "preset", "ddd.aggregateRoot", "method");
@@ -2094,7 +2477,6 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     members,
     fieldPolicies: new Map(seed?.fieldPolicies ?? []),
     encapsulateFields: seed?.encapsulateFields ?? encapsulateFields,
-    mutationGate: seed?.mutationGate ?? new WeakSet<object>(),
     policy: clonePolicyState(seed?.policy),
     identity: seed?.identity ?? { state: "none" },
   };
@@ -2184,14 +2566,12 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     state.encapsulateFields,
     initializers
   );
-  const mutationGate = state.encapsulateFields ? state.mutationGate : undefined;
   const classTarget = emitConstructor(
     layout,
     state.freezeInstances,
     state.aggregate,
     parse,
-    constructionState,
-    mutationGate
+    constructionState
   ) as RuntimeClass<TSchema>;
   installTrustedMaterializer(classTarget, layout, state.freezeInstances, state.aggregate);
   parseCreation = compileValidator(creationSchema).parse;
@@ -2225,12 +2605,19 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       capabilityValue.install(classTarget, state.schema);
     }
   }
-  installLifecycleMethods(classTarget, state, managedStorage);
+  installLifecycleMethods(classTarget, state, managedStorage, layout.domainState);
   installFieldDescriptorAccessors(classTarget, state.fieldPolicies);
-  for (const method of state.methods) installMethodDefinition(classTarget, method, mutationGate);
+  for (const method of state.methods) installMethodDefinition(classTarget, method);
 
   function registerClass(): void {
     const mutation = lifecycleArtifact(state.lifecycle);
+    const domainStateLayout = state.encapsulateFields
+      ? {
+          storage: "symbol" as const,
+          mutableFields: properties.filter((field) => !resolveWrappers(objectSchema.def.props[field]).readonly),
+          readonlyFields: properties.filter((field) => resolveWrappers(objectSchema.def.props[field]).readonly),
+        }
+      : undefined;
     registerArtifact(classTarget, {
       kind: "class",
       declaredSchema: state.declaredSchema,
@@ -2247,6 +2634,7 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
       managedFields: state.managedFields,
       hydrateSchema,
       encapsulateFields: state.encapsulateFields,
+      ...(domainStateLayout === undefined ? {} : { domainStateLayout }),
       ...(state.fieldPolicies.size === 0
         ? {}
         : {
@@ -2489,9 +2877,20 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
     },
     extends: {
       enumerable: false,
-      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput | ClassMixin)[]) =>
+      value: (...extensions: readonly AnyClassExtension[]) =>
         materializeClassState(resolveClassExtensions(state, extensions)),
     },
+    ...(state.aggregate
+      ? {
+          events: {
+            enumerable: false,
+            value: (...eventTypes: readonly Function[]) => {
+              void eventTypes;
+              return classTarget;
+            },
+          },
+        }
+      : {}),
     validate: {
       enumerable: false,
       value: (options?: FactoryValidationOptions) => {
@@ -2584,15 +2983,6 @@ function createRuntimeClass<TSchema extends ATS.AnyTypeSchema>(
         });
       },
     },
-    identity: {
-      enumerable: false,
-      value: (key: Extract<keyof ATS.TypeofSchema<TSchema>, string>) => {
-        if (state.capabilities.some((capability) => capability.kind.startsWith("identity:"))) {
-          throw new JITError("INVALID_OPERATION", "Identity is already configured for this Runtime Class");
-        }
-        return materializeClassState(resolveClassExtensions(state, [classType.identity(key)]));
-      },
-    },
   });
   installFactory(classTarget, false, state.factoryNames.create, create);
   installFactory(classTarget, false, state.factoryNames.hydrate, hydrate);
@@ -2615,7 +3005,7 @@ function materializeClassState(state: ClassDefinitionState): RuntimeClass<ATS.An
 
 function resolveClassExtensions(
   current: ClassDefinitionState,
-  extensions: readonly (AnyClassCapability | ClassMethodsInput | ClassMixin)[]
+  extensions: readonly AnyClassExtension[]
 ): ClassDefinitionState {
   let next: ClassDefinitionState = {
     ...current,
@@ -2628,8 +3018,10 @@ function resolveClassExtensions(
 
   for (const rawExtension of extensions) {
     const mixin = isClassMixin(rawExtension) ? rawExtension : undefined;
+    const factory = isClassExtensionFactory(rawExtension) ? rawExtension : undefined;
     if (mixin !== undefined) validateMixinRequirements(next.schema, mixin.__requires);
-    const extension = mixin === undefined ? rawExtension : mixin();
+    const extension =
+      factory !== undefined ? factory(createClassExtensionBuilder()) : mixin === undefined ? rawExtension : mixin();
     if (isClassCapability(extension)) {
       if (next.capabilities.some((capability) => capability.kind === extension.kind)) {
         throw new JITError(
@@ -2675,15 +3067,6 @@ function resolveClassExtensions(
           ...next,
           members,
           capabilities: [...next.capabilities, extension],
-          ...(extension.kind.startsWith("identity:")
-            ? {
-                identity: {
-                  state: "resolved" as const,
-                  key: extension.kind.slice("identity:".length),
-                  explicit: true,
-                },
-              }
-            : {}),
         };
       }
       continue;
@@ -2696,7 +3079,9 @@ function resolveClassExtensions(
     for (const name of Object.getOwnPropertyNames(extension)) {
       const descriptor = Object.getOwnPropertyDescriptor(extension, name);
       if (descriptor === undefined) continue;
-      const value = descriptor.value;
+      const value = isClassExtensionFieldBuilder(descriptor.value)
+        ? descriptor.value.toDescriptor(name)
+        : descriptor.value;
       if (isOverrideDescriptor(value)) {
         const existing = members.get(name);
         if (existing === undefined) {
@@ -2844,14 +3229,8 @@ function resolveClassExtensions(
     const candidates = Object.keys(object.def.props).filter((key) => isIdentifierSchema(object.def.props[key]));
     if (candidates.length === 1) {
       const key = candidates[0];
-      const identity = classType.identity(key);
-      const members = next.members.clone();
-      for (const name of capabilityMemberNames(identity))
-        addMember(members, name, "capability", identity.kind, "method");
       next = {
         ...next,
-        members,
-        capabilities: [...next.capabilities, identity],
         identity: { state: "resolved", key, explicit: false },
       };
     } else if (candidates.length > 1) {
@@ -3029,7 +3408,9 @@ function applyFieldPolicy(
     definition.kind === "field" &&
     (definition.visibility === "protected" || definition.visibility === "private") &&
     !hasAccessorIntent;
-  const getter = definition.getter ?? previous?.getter ?? (defaultPublicField || internalVisibilityField);
+  const explicitPublicField = definition.kind === "field" && definition.visibility === "public";
+  const getter =
+    definition.getter ?? previous?.getter ?? (defaultPublicField || internalVisibilityField || explicitPublicField);
   const setter = definition.setter ?? previous?.setter ?? (defaultPublicField || internalVisibilityField);
   if (previous !== undefined) {
     if (definition.getter !== undefined && previous.getter !== false) {
@@ -3093,11 +3474,7 @@ function replaceMethod(methods: ClassMethodDefinition[], name: string, replaceme
   else methods[index] = replacement;
 }
 
-function installMethodDefinition(
-  classTarget: Function,
-  method: ClassMethodDefinition,
-  mutationGate?: WeakSet<object>
-): void {
+function installMethodDefinition(classTarget: Function, method: ClassMethodDefinition): void {
   let source = method.source;
   if (method.schema !== undefined) {
     const args = compileValidator(method.schema.def.args);
@@ -3115,17 +3492,6 @@ function installMethodDefinition(
         return output === undefined ? result : output.parse(result);
       };
     }
-  }
-  if (mutationGate !== undefined && method.kind === "method") {
-    const body = source;
-    source = function domainMethod(this: object, ...args: unknown[]) {
-      mutationGate.add(this);
-      try {
-        return body.apply(this, args);
-      } finally {
-        mutationGate.delete(this);
-      }
-    };
   }
   const descriptor: PropertyDescriptor =
     method.kind === "method"
@@ -3178,19 +3544,20 @@ function lifecycleArtifact(lifecycle: LifecycleDefinition):
 function installLifecycleMethods(
   classTarget: Function,
   state: ClassDefinitionState,
-  managedStorage: ReadonlyMap<string, ManagedStorageBinding>
+  managedStorage: ReadonlyMap<string, ManagedStorageBinding>,
+  domainState: ManagedStorageBinding | undefined
 ): void {
   const lifecycle = state.lifecycle;
   const timestamps = lifecycle.timestamps;
   const deletion = lifecycle.softDelete;
   const versioned = lifecycle.versioned;
-  const needsMutation =
-    state.aggregate || timestamps !== undefined || deletion !== undefined || versioned !== undefined;
   const managedAccess = (field: string): string => {
+    if (domainState !== undefined) return `this[__state][${JSON.stringify(field)}]`;
     const storage = managedStorage.get(field);
     return storage === undefined ? `this[${JSON.stringify(field)}]` : `this[${storage.name}]`;
   };
   const managedWrite = (field: string, value: string): string => {
+    if (domainState !== undefined) return `this[__state][${JSON.stringify(field)}] = ${value};`;
     const storage = managedStorage.get(field);
     return storage === undefined
       ? `Object.defineProperty(this, ${JSON.stringify(field)}, { value: ${value}, writable: false, enumerable: true, configurable: true });`
@@ -3203,64 +3570,25 @@ function installLifecycleMethods(
     const storageValues = storageEntries.map((entry) => entry.value);
     const method = globalThis.Function(
       ...storageNames,
+      ...(domainState === undefined ? [] : ["__state"]),
       ...(clock === undefined ? [] : ["__clock"]),
       source
-    )(...storageValues, ...(clock === undefined ? [] : [() => checkedClock(clock)])) as Function;
+    )(
+      ...storageValues,
+      ...(domainState === undefined ? [] : [domainState.value]),
+      ...(clock === undefined ? [] : [() => checkedClock(clock)])
+    ) as Function;
     definePrototype(classTarget.prototype, name, method, true);
   };
 
-  if (needsMutation) {
-    const object = resolveEffectiveObjectSchema(state.schema);
-    const fields = Object.keys(object.def.props);
-    const readonlyFields = fields.filter((field) => resolveWrappers(object.def.props[field]).readonly);
-    const mutableFields = fields.filter((field) => !readonlyFields.includes(field));
-    const updates = new Map<string, string | null>();
-    const names: string[] = [];
-    const values: ((value: unknown, patch: unknown) => unknown)[] = [];
-    for (const field of mutableFields) {
-      if (state.managedFields.some((managed) => managed.field === field)) continue;
-      const fieldSchema = object.def.props[field];
-      if (isPrimitiveLikeSchema(resolveWrappers(fieldSchema).base)) updates.set(field, null);
-      else {
-        const name = `__update${names.length}`;
-        names.push(name);
-        values.push(compileUpdate(fieldSchema) as (value: unknown, patch: unknown) => unknown);
-        updates.set(field, name);
-      }
-    }
-    const mutation = buildAggregateMutationPlan({
-      fields: mutableFields,
-      readonlyFields: [...readonlyFields, ...state.managedFields.map((managed) => managed.field)],
-      ...(timestamps?.touch !== "manual" && timestamps !== undefined ? { updatedAt: timestamps.updatedAt } : {}),
-      ...(versioned === undefined ? {} : { version: versioned.field }),
-      managedFields: state.managedFields.map((managed) => managed.field),
-      fieldAccess: new Map(
-        [...managedStorage.entries()].map(([field, storage]) => [field, `this[${storage.name}]`] as const)
-      ),
-    });
+  if (timestamps !== undefined || versioned !== undefined) {
     const clock = timestamps?.clock;
-    const clockNames = mutation.updatedAt === undefined || clock === undefined ? [] : ["__clock"];
-    const clockValues = clockNames.length === 0 ? [] : [() => checkedClock(clock as () => Date)];
-    const storageEntries = [...managedStorage.values()];
-    const storageNames = storageEntries.map((entry) => entry.name);
-    const storageValues = storageEntries.map((entry) => entry.value);
-    const update = globalThis.Function(
-      ...names,
-      ...storageNames,
-      ...clockNames,
-      `return function update(patch) { ${emitAggregateMutationBody(mutation, updates, clockNames.length === 0 ? "new Date()" : "__clock()")} };`
-    )(...values, ...storageValues, ...clockValues) as Function;
-    definePrototype(classTarget.prototype, "update", update as Function, true);
-  }
-
-  if (timestamps !== undefined) {
-    const clock = timestamps.clock;
-    const field = timestamps.updatedAt;
+    const field = timestamps?.updatedAt;
     const version = versioned?.field;
     installLifecycleMethod(
-      timestamps.touchMethod,
+      timestamps?.touchMethod ?? "touch",
       clock,
-      `const now = ${clock === undefined ? "new Date()" : "__clock()"}; ${managedWrite(field, "now")} ${version === undefined ? "" : managedWrite(version, `${managedAccess(version)} + 1`)}`
+      `${field === undefined ? "" : `const now = ${clock === undefined ? "new Date()" : "__clock()"}; ${managedWrite(field, "now")}`} ${version === undefined ? "" : managedWrite(version, `${managedAccess(version)} + 1`)}`
     );
   }
 
@@ -3278,11 +3606,13 @@ function installLifecycleMethods(
       timestampField === undefined ? undefined : clock,
       `if (${managedAccess(deletion.field)} === null) return; ${managedWrite(deletion.field, "null")} ${timestampField === undefined ? "" : managedWrite(timestampField, clock === undefined ? "new Date()" : "__clock()")} ${versioned === undefined ? "" : managedWrite(versioned.field, `${managedAccess(versioned.field)} + 1`)}`
     );
-    const deletionStorage = managedStorage.get(deletion.field);
     Object.defineProperty(classTarget.prototype, deletion.isDeletedMember, {
       configurable: true,
       enumerable: false,
       get(this: Record<PropertyKey, unknown>) {
+        if (domainState !== undefined)
+          return (this[domainState.value] as Record<string, unknown>)[deletion.field] !== null;
+        const deletionStorage = managedStorage.get(deletion.field);
         return deletionStorage === undefined ? this[deletion.field] !== null : this[deletionStorage.value] !== null;
       },
     });
@@ -3292,25 +3622,25 @@ function installLifecycleMethods(
     definePrototype(
       classTarget.prototype,
       "raise",
-      function raise(this: { __jitEvents: unknown[] }, event: unknown) {
-        this.__jitEvents[this.__jitEvents.length] = event;
+      function raise(this: { [EVENT_BUFFER]: AnyDomainEvent[] }, event: AnyDomainEvent) {
+        this[EVENT_BUFFER][this[EVENT_BUFFER].length] = event;
       },
       true
     );
     definePrototype(
       classTarget.prototype,
       "peekEvents",
-      function peekEvents(this: { __jitEvents: unknown[] }) {
-        return this.__jitEvents.slice();
+      function peekEvents(this: { [EVENT_BUFFER]: AnyDomainEvent[] }) {
+        return this[EVENT_BUFFER].slice();
       },
       true
     );
     definePrototype(
       classTarget.prototype,
       "pullEvents",
-      function pullEvents(this: { __jitEvents: unknown[] }) {
-        const events = this.__jitEvents;
-        this.__jitEvents = [];
+      function pullEvents(this: { [EVENT_BUFFER]: AnyDomainEvent[] }) {
+        const events = this[EVENT_BUFFER];
+        this[EVENT_BUFFER] = [];
         return events;
       },
       true
@@ -3318,10 +3648,13 @@ function installLifecycleMethods(
     definePrototype(
       classTarget.prototype,
       "commit",
-      async function commit(this: { __jitEvents: unknown[] }, publisher: EventPublisher): Promise<void> {
-        const pending = this.__jitEvents;
+      async function commit(
+        this: { [EVENT_BUFFER]: AnyDomainEvent[] },
+        publisher: EventPublisher<AnyDomainEvent>
+      ): Promise<void> {
+        const pending = this[EVENT_BUFFER];
         for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]);
-        this.__jitEvents.splice(0, pending.length);
+        pending.splice(0, pending.length);
       },
       true
     );
@@ -3342,7 +3675,9 @@ function installFactory<TSchema extends ATS.AnyTypeSchema>(
   next: string | false,
   factory: Function
 ): void {
-  if (previous !== false && previous !== next) Reflect.deleteProperty(classTarget, previous);
+  if (previous !== false && previous !== next) {
+    delete (classTarget as unknown as Record<string, unknown>)[previous];
+  }
   if (next === false) return;
   if (
     next === "schema" ||
@@ -3351,7 +3686,6 @@ function installFactory<TSchema extends ATS.AnyTypeSchema>(
     next === "factories" ||
     next === "construction" ||
     next === "accessors" ||
-    next === "identity" ||
     next === "validate" ||
     next === "assert"
   ) {
@@ -3362,6 +3696,11 @@ function installFactory<TSchema extends ATS.AnyTypeSchema>(
     enumerable: false,
     value: factory,
   });
+}
+
+function removeFactorySurface(runtime: Function, names: readonly string[]): void {
+  const surface = runtime as unknown as Record<string, unknown>;
+  for (const name of names) delete surface[name];
 }
 
 function resolveFactoryOption(
@@ -3625,9 +3964,12 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
     hydrate: { configurable: true, enumerable: false, value: hydrate },
     extends: {
       enumerable: false,
-      value: (...extensions: readonly (AnyClassCapability | ClassMethodsInput | ClassMixin)[]) => {
+      value: (...extensions: readonly AnyClassExtension[]) => {
         for (const rawExtension of extensions) {
-          const extension = isClassMixin(rawExtension) ? rawExtension() : rawExtension;
+          let extension: AnyClassCapability | ClassMethodsInput | ClassMixin;
+          if (isClassExtensionFactory(rawExtension)) extension = rawExtension(createClassExtensionBuilder());
+          else if (isClassMixin(rawExtension)) extension = rawExtension();
+          else extension = rawExtension;
           if (isClassCapability(extension)) {
             if (installedCapabilities.includes(extension.kind)) {
               throw new JITError(
@@ -3742,12 +4084,6 @@ function createScalarValueObject<TSchema extends ATS.AnyTypeSchema>(
         throw new JITError("INVALID_OPERATION", "Assertions describe object fields; refine the scalar schema instead");
       },
     },
-    identity: {
-      enumerable: false,
-      value: () => {
-        throw new JITError("INVALID_OPERATION", "Scalar Value Objects do not have object fields");
-      },
-    },
   });
   definePrototype(
     classTarget.prototype,
@@ -3789,6 +4125,7 @@ function createClassLayoutPlan(
     properties: Object.freeze([...properties]),
     accessors,
     managedStorage,
+    domainState: encapsulateFields ? { name: "__domainState", value: DOMAIN_STATE } : undefined,
     fieldPolicies,
     encapsulateFields,
     initializers,
@@ -3810,27 +4147,50 @@ function installTrustedMaterializer(
   aggregate: boolean
 ): void {
   const accessorByKey = new Map(layout.accessors?.map((accessor) => [accessor.key, accessor]));
+  const domainState = layout.domainState;
   const hasNativePrivateSlot = layout.properties.some(
     (property) => accessorByKey.get(property)?.field === "private" && !layout.managedStorage.has(property)
   );
-  const materialize = (state: unknown): unknown => {
+  const materialize = function materialize(this: Function, state: unknown): unknown {
     if (hasNativePrivateSlot) {
-      return new (classTarget as new (input: unknown, token: symbol, validated: boolean) => unknown)(
+      return new (this as new (input: unknown, token: symbol, validated: boolean) => unknown)(
         state,
         INTERNAL_CONSTRUCT,
         true
       );
     }
-    const instance = Object.create(classTarget.prototype) as Record<PropertyKey, unknown>;
+    const instance = Object.create(this.prototype) as Record<PropertyKey, unknown>;
+    const input = state as Record<string, unknown>;
+    if (domainState !== undefined) {
+      for (const property of layout.properties) {
+        const initializer = layout.initializers.get(property);
+        if (input[property] === undefined && initializer !== undefined) input[property] = initializer();
+      }
+      instance[domainState.value] = input;
+      if (aggregate) {
+        Object.defineProperty(instance, EVENT_BUFFER, {
+          configurable: false,
+          enumerable: false,
+          value: [],
+          writable: true,
+        });
+      }
+      return freezeInstances ? Object.freeze(instance) : instance;
+    }
     for (const property of layout.properties) {
       const initializer = layout.initializers.get(property);
-      const input = state as Record<string, unknown>;
       const value = input[property] === undefined && initializer !== undefined ? initializer() : input[property];
       const managed = layout.managedStorage.get(property);
       if (managed === undefined) instance[property] = value;
       else instance[managed.value] = value;
     }
-    if (aggregate) Object.defineProperty(instance, "__jitEvents", { value: [], writable: true });
+    if (aggregate)
+      Object.defineProperty(instance, EVENT_BUFFER, {
+        configurable: false,
+        enumerable: false,
+        value: [],
+        writable: true,
+      });
     return freezeInstances ? Object.freeze(instance) : instance;
   };
   Object.defineProperty(classTarget, TRUSTED_MATERIALIZER, {
@@ -3845,66 +4205,84 @@ function emitConstructor(
   freezeInstances: boolean,
   aggregate: boolean,
   parse: (input: unknown) => unknown,
-  construction: { mode: ConstructionMode },
-  mutationGate?: WeakSet<object>
+  construction: { mode: ConstructionMode }
 ): unknown {
-  const { properties, accessors, managedStorage, fieldPolicies, encapsulateFields, initializers } = layout;
+  const { properties, accessors, managedStorage, domainState, fieldPolicies, initializers } = layout;
   const accessorByKey = new Map(accessors?.map((accessor) => [accessor.key, accessor]));
   const slots: string[] = [];
   const definitions: string[] = [];
   const initializerEntries = [...initializers.entries()];
   const initializerBindings = new Map(initializerEntries.map(([field], index) => [field, `__init${index}`] as const));
   let slotIndex = 0;
-  const assignments = properties.map((property) => {
-    const accessor = accessorByKey.get(property);
-
-    const managed = managedStorage.get(property);
-    if (managed !== undefined) {
+  let assignments: string[];
+  if (domainState !== undefined) {
+    definitions.push(`get _props() { return this[__state]; }`);
+    for (const property of properties) {
+      const accessor = accessorByKey.get(property);
       const policy = fieldPolicies.get(property);
-      const defaultDdd = encapsulateFields && policy === undefined;
+      const defaultDdd = policy === undefined;
       const getter = policy?.getter === true || defaultDdd || (policy === undefined && accessor?.field !== "private");
-      const setter = policy?.setter === true;
-      if (getter) definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
-      if (setter || defaultDdd) {
-        const guarded = encapsulateFields && (policy?.visibility !== "public" || policy?.noConstructor === true);
+      if (getter)
+        definitions.push(`get [${JSON.stringify(property)}]() { return this[__state][${JSON.stringify(property)}]; }`);
+      if (policy?.setter === true) {
         definitions.push(
-          guarded
-            ? `set [${JSON.stringify(property)}](value) { if (!__mutationGate.has(this)) throw new TypeError("Field ${property} is readonly"); this[${managed.name}] = value; }`
-            : `set [${JSON.stringify(property)}](value) { this[${managed.name}] = value; }`
+          `set [${JSON.stringify(property)}](value) { this[__state][${JSON.stringify(property)}] = value; }`
         );
       }
-      const initializer = initializerBindings.get(property);
-      const value =
-        initializer !== undefined
-          ? `(state${emitPropertyAccess("", property)} === undefined ? ${initializer}() : state${emitPropertyAccess("", property)})`
-          : `state${emitPropertyAccess("", property)}`;
-      return `this[${managed.name}] = ${value};`;
     }
+    assignments = properties.map((property) => {
+      const initializer = initializerBindings.get(property);
+      if (initializer === undefined) return "";
+      const value = `(state${emitPropertyAccess("", property)} === undefined ? ${initializer}() : state${emitPropertyAccess("", property)})`;
+      return `state${emitPropertyAccess("", property)} = ${value};`;
+    });
+  } else {
+    assignments = properties.map((property) => {
+      const accessor = accessorByKey.get(property);
 
-    if (accessor?.field !== "private") {
+      const managed = managedStorage.get(property);
+      if (managed !== undefined) {
+        const policy = fieldPolicies.get(property);
+        const getter = policy?.getter === true || (policy === undefined && accessor?.field !== "private");
+        const setter = policy?.setter === true;
+        if (getter) definitions.push(`get [${JSON.stringify(property)}]() { return this[${managed.name}]; }`);
+        if (setter) definitions.push(`set [${JSON.stringify(property)}](value) { this[${managed.name}] = value; }`);
+        const initializer = initializerBindings.get(property);
+        const value =
+          initializer !== undefined
+            ? `(state${emitPropertyAccess("", property)} === undefined ? ${initializer}() : state${emitPropertyAccess("", property)})`
+            : `state${emitPropertyAccess("", property)}`;
+        return `this[${managed.name}] = ${value};`;
+      }
+
+      if (accessor?.field !== "private") {
+        const initializer = initializers.get(property);
+        return initializer === undefined
+          ? `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};`
+          : `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
+      }
+
+      const slot = `#p${slotIndex++}`;
+      slots.push(slot);
+      if (accessor.get !== false) definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
+      if (accessor.set !== false)
+        definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
       const initializer = initializers.get(property);
       return initializer === undefined
-        ? `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)};`
-        : `this${emitPropertyAccess("", property)} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
-    }
-
-    const slot = `#p${slotIndex++}`;
-    slots.push(slot);
-    if (accessor.get !== false) definitions.push(`get [${JSON.stringify(accessor.get)}]() { return this.${slot}; }`);
-    if (accessor.set !== false)
-      definitions.push(`set [${JSON.stringify(accessor.set)}](value) { this.${slot} = value; }`);
-    const initializer = initializers.get(property);
-    return initializer === undefined
-      ? `this.${slot} = state${emitPropertyAccess("", property)};`
-      : `this.${slot} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
-  });
-  const events = aggregate ? ' Object.defineProperty(this, "__jitEvents", { value: [], writable: true });' : "";
+        ? `this.${slot} = state${emitPropertyAccess("", property)};`
+        : `this.${slot} = state${emitPropertyAccess("", property)} === undefined ? ${initializerBindings.get(property)}() : state${emitPropertyAccess("", property)};`;
+    });
+  }
+  const state = domainState === undefined ? "" : " this[__state] = state;";
+  const events = aggregate
+    ? " Object.defineProperty(this, __events, { configurable: false, enumerable: false, value: [], writable: true });"
+    : "";
   const storageEntries = [...managedStorage.values()];
   const storageNames = storageEntries.map((entry) => entry.name);
   const storageValues = storageEntries.map((entry) => entry.value);
   const initializerNames = initializerEntries.map(([field]) => initializerBindings.get(field) as string);
   const initializerValues = initializerEntries.map(([, initializer]) => initializer);
-  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
+  const source = `return class JITRuntimeClass { ${slots.map((slot) => `${slot};`).join(" ")} constructor(input, token, validated) { if (__construction.mode === "factory" && token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : __parse(input); ${assignments.join(" ")}${state}${events}${freezeInstances ? " Object.freeze(this);" : ""} } ${definitions.join(" ")} };`;
 
   return globalThis.Function(
     ...storageNames,
@@ -3912,7 +4290,8 @@ function emitConstructor(
     "__parse",
     "__construct",
     "__construction",
-    ...(mutationGate === undefined ? [] : ["__mutationGate"]),
+    ...(domainState === undefined ? [] : ["__state"]),
+    ...(aggregate ? ["__events"] : []),
     source
   )(
     ...storageValues,
@@ -3920,7 +4299,8 @@ function emitConstructor(
     parse,
     INTERNAL_CONSTRUCT,
     construction,
-    ...(mutationGate === undefined ? [] : [mutationGate])
+    ...(domainState === undefined ? [] : [domainState.value]),
+    ...(aggregate ? [EVENT_BUFFER] : [])
   );
 }
 
@@ -3932,6 +4312,7 @@ function resolveManagedStorage(
   fieldPolicies: ReadonlyMap<string, ClassFieldPolicy>
 ): ReadonlyMap<string, ManagedStorageBinding> {
   const storage = new Map<string, ManagedStorageBinding>();
+  if (encapsulateFields) return storage;
   let index = 0;
   for (const field of properties) {
     const managed = managedFields.some((item) => item.field === field);
@@ -4052,7 +4433,6 @@ export interface ClassFactory {
   readonly mixin: typeof classMixin;
   readonly json: <const TOptions extends ClassJsonOptions = {}>(options?: TOptions) => ClassJsonCapability<TOptions>;
   readonly isFailure: typeof isFailure;
-  identity<TKey extends string>(key: TKey): CallableClassCapability<IdentityMethods>;
 }
 
 /** Runtime type factory. Capabilities are installed separately on the prototype. */
@@ -4114,54 +4494,6 @@ export const classType: ClassFactory = Object.assign(classFactory, {
     }) as ClassJsonCapability<TOptions>;
   },
   isFailure,
-  identity(key: string): CallableClassCapability<IdentityMethods> {
-    return capability<IdentityMethods>(
-      `identity:${key}`,
-      (prototype, schema) => {
-        const base = resolveWrappers(schema).base;
-        const props = base.type === TypeName.object ? (base as ATS.ObjectSchema).def.props : undefined;
-
-        if (!props || !(key in props)) {
-          throw new JITError("INVALID_OPERATION", `Identity key ${JSON.stringify(key)} is not a schema field`);
-        }
-        const runtimeIdentity = findRuntimeTypeSchema(props[key]);
-        const valueIdentity = runtimeIdentity?.def.representation === "value";
-        const equalIdentity = valueIdentity
-          ? (compileEqual(runtimeIdentity.def.innerType) as (left: unknown, right: unknown) => boolean)
-          : undefined;
-        definePrototype(
-          prototype,
-          "identity",
-          function identity(this: Record<string, unknown>) {
-            return this[key];
-          },
-          true
-        );
-        definePrototype(
-          prototype,
-          "sameIdentity",
-          function sameIdentity(this: Record<string, unknown>, other: unknown) {
-            if (typeof other !== "object" || other === null) return false;
-            const left = this[key];
-            const right = (other as Record<string, unknown>)[key];
-            if (!valueIdentity) return Object.is(left, right);
-            return (
-              typeof left === "object" &&
-              left !== null &&
-              typeof right === "object" &&
-              right !== null &&
-              (equalIdentity as (left: unknown, right: unknown) => boolean)(
-                (left as ScalarValueObject<unknown>).value,
-                (right as ScalarValueObject<unknown>).value
-              )
-            );
-          },
-          true
-        );
-      },
-      ["identity", "sameIdentity"]
-    );
-  },
 });
 export type { OverrideDescriptor } from "../classes/override.js";
 export { override } from "../classes/override.js";
@@ -4207,10 +4539,11 @@ export function valueObject<TSchema extends ATS.AnyTypeSchema>(
 type ObjectValueAccessor<TValue extends object> = "value" extends keyof TValue
   ? object
   : ValueAccessor<Readonly<TValue>>;
+type PublicSchemaOutput<TSchema extends ATS.AnyTypeSchema> = ResolveTypeofSchema<TSchema>;
 type ValueObjectInstance<TSchema extends ATS.AnyTypeSchema> =
-  ATS.TypeofSchema<TSchema> extends object
-    ? ATS.TypeofSchema<TSchema> & EqualsMethods & HashCodeMethods & ObjectValueAccessor<ATS.TypeofSchema<TSchema>>
-    : ScalarValueObject<ATS.TypeofSchema<TSchema>>;
+  PublicSchemaOutput<TSchema> extends object
+    ? PublicSchemaOutput<TSchema> & EqualsMethods & HashCodeMethods & ObjectValueAccessor<PublicSchemaOutput<TSchema>>
+    : ScalarValueObject<PublicSchemaOutput<TSchema>>;
 type ValueObjectRuntimeClass<TSchema extends ATS.AnyTypeSchema> =
   ATS.TypeofSchema<TSchema> extends object
     ? FactoryRuntimeClass<TSchema, ValueObjectInstance<TSchema>>
@@ -4423,23 +4756,13 @@ function createEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   isAbstract: boolean,
   ...args: IdentityArguments<TSchema> | [{ readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
-): FactoryRuntimeClass<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
-  InitialRuntimeTypeTraits<TSchema>,
-  true
-> {
+): FactoryRuntimeClass<TSchema, DddInstance<TSchema>, InitialRuntimeTypeTraits<TSchema>, true> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityState(unwrapped, args[0]?.id, "Entity");
   const members = initialEffectiveSchema(unwrapped).members;
   addMember(members, "equals", "preset", "ddd.entity", "method");
   addMember(members, "hashCode", "preset", "ddd.entity", "method");
   const capabilities: AnyClassCapability[] = [classType.equals, classType.hashCode];
-  if (identity.state === "resolved") {
-    addMember(members, "identity", "preset", "ddd.entity", "method");
-    addMember(members, "sameIdentity", "preset", "ddd.entity", "method");
-    capabilities.push(classType.identity(identity.key));
-  }
   const runtime = createRuntimeClass(unwrapped, isAbstract, false, false, "factory", true, undefined, {
     identity,
     members,
@@ -4447,18 +4770,17 @@ function createEntity<TSchema extends ATS.AnyTypeSchema>(
     factoryValidationOptIn: true,
   });
   if (identity.state !== "resolved") {
-    Reflect.deleteProperty(runtime, "create");
-    Reflect.deleteProperty(runtime, "hydrate");
+    removeFactorySurface(runtime, ["create", "hydrate"]);
     return runtime as unknown as FactoryRuntimeClass<
       TSchema,
-      Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
+      DddInstance<TSchema>,
       InitialRuntimeTypeTraits<TSchema>,
       true
     >;
   }
   return runtime as unknown as FactoryRuntimeClass<
     TSchema,
-    Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
+    DddInstance<TSchema>,
     InitialRuntimeTypeTraits<TSchema>,
     true
   >;
@@ -4467,22 +4789,14 @@ function createEntity<TSchema extends ATS.AnyTypeSchema>(
 /** Concrete factory-first Entity with explicit or inferred identity semantics. */
 export function entity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
-): EntityRuntimeClassFor<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> &
-    StructuralValueMethods &
-    ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
-  InitialRuntimeTypeTraits<TSchema>
->;
-export function entity<TSchema extends ATS.AnyTypeSchema>(
+): EntityRuntimeClassFor<TSchema, DddInstance<TSchema>, InitialRuntimeTypeTraits<TSchema>>;
+export function entity<
+  TSchema extends ATS.AnyTypeSchema,
+  const TId extends Extract<keyof ATS.TypeofSchema<TSchema>, string>,
+>(
   schema: SchemaInput<TSchema>,
-  options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }
-): FactoryRuntimeClass<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
-  InitialRuntimeTypeTraits<TSchema>,
-  true
->;
+  options: { readonly id: TId }
+): FactoryRuntimeClass<TSchema, DddInstance<TSchema, TId>, InitialRuntimeTypeTraits<TSchema>, true>;
 export function entity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   ...args: IdentityArguments<TSchema> | [{ readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
@@ -4493,22 +4807,14 @@ export function entity<TSchema extends ATS.AnyTypeSchema>(
 /** Abstract factory-first Entity base, intended exclusively for subclassing. */
 export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema> & (IsUnion<IdentityKeys<TSchema>> extends true ? never : unknown)
-): EntityRuntimeClassFor<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> &
-    StructuralValueMethods &
-    ([IdentityKeys<TSchema>] extends [never] ? {} : IdentityMethods),
-  InitialRuntimeTypeTraits<TSchema>
->;
-export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
+): EntityRuntimeClassFor<TSchema, DddInstance<TSchema>, InitialRuntimeTypeTraits<TSchema>>;
+export function abstractEntity<
+  TSchema extends ATS.AnyTypeSchema,
+  const TId extends Extract<keyof ATS.TypeofSchema<TSchema>, string>,
+>(
   schema: SchemaInput<TSchema>,
-  options: { readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }
-): FactoryRuntimeClass<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods,
-  InitialRuntimeTypeTraits<TSchema>,
-  true
->;
+  options: { readonly id: TId }
+): FactoryRuntimeClass<TSchema, DddInstance<TSchema, TId>, InitialRuntimeTypeTraits<TSchema>, true>;
 export function abstractEntity<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   ...args: IdentityArguments<TSchema> | [{ readonly id: Extract<keyof ATS.TypeofSchema<TSchema>, string> }]
@@ -4521,10 +4827,7 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   schema: SchemaInput<TSchema>,
   isAbstract: boolean,
   ...args: AggregateIdentityArguments<TSchema>
-): AggregateRuntimeClass<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
-> {
+): AggregateRuntimeClass<TSchema, DddInstance<TSchema>> {
   const unwrapped = unwrapSchema(schema);
   const identity = resolveIdentityState(unwrapped, args[0]?.id, "Aggregate");
   if (identity.state !== "resolved") {
@@ -4533,40 +4836,49 @@ function createAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
   const members = initialEffectiveSchema(unwrapped).members;
   addMember(members, "equals", "preset", "ddd.aggregateRoot", "method");
   addMember(members, "hashCode", "preset", "ddd.aggregateRoot", "method");
-  addMember(members, "identity", "preset", "ddd.aggregateRoot", "method");
-  addMember(members, "sameIdentity", "preset", "ddd.aggregateRoot", "method");
   const runtime = createRuntimeClass(unwrapped, isAbstract, false, true, "factory", true, undefined, {
     identity,
     members,
-    capabilities: [classType.equals, classType.hashCode, classType.identity(identity.key)],
+    capabilities: [classType.equals, classType.hashCode],
     factoryValidationOptIn: true,
   });
-  return runtime as unknown as AggregateRuntimeClass<
-    TSchema,
-    Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
-  >;
+  return runtime as unknown as AggregateRuntimeClass<TSchema, DddInstance<TSchema>>;
 }
 
 /** Concrete Aggregate Root with controlled mutation and an ordered event buffer. */
 export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema> & (IdentityKeys<TSchema> extends never ? never : unknown)
+): AggregateRuntimeClass<TSchema, DddInstance<TSchema>>;
+export function aggregateRoot<
+  TSchema extends ATS.AnyTypeSchema,
+  const TId extends Extract<keyof ATS.TypeofSchema<TSchema>, string>,
+>(
   schema: SchemaInput<TSchema>,
-  ...args: AggregateIdentityArguments<TSchema>
-): AggregateRuntimeClass<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
-> {
-  return createAggregateRoot(schema, false, ...args);
+  options: { readonly id: TId }
+): AggregateRuntimeClass<TSchema, DddInstance<TSchema, TId>>;
+export function aggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: [] | [{ readonly id: string }]
+): unknown {
+  return createAggregateRoot(schema, false, ...(args as AggregateIdentityArguments<TSchema>));
 }
 
 /** Abstract Aggregate Root base, intended exclusively for subclassing. */
 export function abstractAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema> & (IdentityKeys<TSchema> extends never ? never : unknown)
+): AggregateRuntimeClass<TSchema, DddInstance<TSchema>>;
+export function abstractAggregateRoot<
+  TSchema extends ATS.AnyTypeSchema,
+  const TId extends Extract<keyof ATS.TypeofSchema<TSchema>, string>,
+>(
   schema: SchemaInput<TSchema>,
-  ...args: AggregateIdentityArguments<TSchema>
-): AggregateRuntimeClass<
-  TSchema,
-  Readonly<ATS.TypeofSchema<TSchema>> & StructuralValueMethods & IdentityMethods & AggregateMethods<TSchema>
-> {
-  return createAggregateRoot(schema, true, ...args);
+  options: { readonly id: TId }
+): AggregateRuntimeClass<TSchema, DddInstance<TSchema, TId>>;
+export function abstractAggregateRoot<TSchema extends ATS.AnyTypeSchema>(
+  schema: SchemaInput<TSchema>,
+  ...args: [] | [{ readonly id: string }]
+): unknown {
+  return createAggregateRoot(schema, true, ...(args as AggregateIdentityArguments<TSchema>));
 }
 
 type EventSchema<TPayload extends ATS.AnyTypeSchema, TType extends string, TVersion extends number> = ATS.ObjectSchema<{
@@ -4581,23 +4893,24 @@ type DomainEventState<TPayload extends ATS.AnyTypeSchema, TType extends string, 
   readonly type: TType;
   readonly version: TVersion;
   readonly occurredAt: Date;
-  readonly payload: ATS.TypeofSchema<TPayload>;
+  readonly payload: ResolveTypeofSchema<TPayload>;
+} & DomainEventBrand;
+type DomainEventOutput<
+  TPayload extends ATS.AnyTypeSchema,
+  TType extends string,
+  TVersion extends number,
+> = DomainEventState<TPayload, TType, TVersion> & {
+  readonly "~event": StandardEvent;
 };
 export type DomainEvent<TPayload extends ATS.AnyTypeSchema, TType extends string, TVersion extends number> = Omit<
-  RuntimeClass<EventSchema<TPayload, TType, TVersion>, DomainEventState<TPayload, TType, TVersion>>,
+  RuntimeClass<EventSchema<TPayload, TType, TVersion>, DomainEventOutput<TPayload, TType, TVersion>>,
   "create" | "hydrate"
 > &
   (abstract new (
     input: Input<EventSchema<TPayload, TType, TVersion>>
-  ) => DomainEventState<TPayload, TType, TVersion> & {
-    readonly "~event": StandardEvent;
-  }) & {
-    create(input: Input<TPayload>): DomainEventState<TPayload, TType, TVersion> & {
-      readonly "~event": StandardEvent;
-    };
-    hydrate(state: Hydrate<EventSchema<TPayload, TType, TVersion>>): DomainEventState<TPayload, TType, TVersion> & {
-      readonly "~event": StandardEvent;
-    };
+  ) => DomainEventOutput<TPayload, TType, TVersion>) & {
+    create(input: Input<TPayload>): DomainEventOutput<TPayload, TType, TVersion>;
+    hydrate(state: Hydrate<EventSchema<TPayload, TType, TVersion>>): DomainEventOutput<TPayload, TType, TVersion>;
     readonly type: TType;
     readonly version: TVersion;
   };

@@ -1816,7 +1816,6 @@ const DEFINED_RESERVED_MEMBER_NAMES: ReadonlySet<string> = new Set([
   "factories",
   "construction",
   "accessors",
-  "identity",
   "validate",
   "assert",
 ]);
@@ -1861,7 +1860,7 @@ function defineClassState(
   const members = initial?.members.clone() ?? new ResolvedMemberTable();
   const capabilities: string[] = [];
   if (aggregate) {
-    for (const name of ["update", "raise", "peekEvents", "pullEvents", "commit"])
+    for (const name of ["raise", "peekEvents", "pullEvents", "commit"])
       addMember(members, name, "preset", "ddd.aggregateRoot", "method");
   }
   return {
@@ -2465,6 +2464,7 @@ function removeDefinedNoConstructorFields(
 function defineRuntimeClass(state: DefinedClassState): unknown {
   const policy = resolveDefinedPolicy(state);
   const resolvedState = policy === state.policy ? state : { ...state, policy };
+  const base = resolveWrappers(resolvedState.schema).base;
   const target = function definedRuntimeClass(): never {
     return defineArtifactFailure();
   };
@@ -2477,6 +2477,18 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
   const mutation = definedLifecycleMutation(resolvedState.lifecycle);
   const creationSchema = removeDefinedNoConstructorFields(resolvedState.schema, resolvedState.fieldPolicies);
   const hydrateSchema = removeDefinedNoConstructorFields(resolvedState.schema, resolvedState.fieldPolicies);
+  const domainStateLayout =
+    resolvedState.encapsulateFields && base.type === TypeName.object
+      ? {
+          storage: "symbol" as const,
+          mutableFields: Object.keys((base as ATS.ObjectSchema).def.props).filter(
+            (field) => !resolveWrappers((base as ATS.ObjectSchema).def.props[field]).readonly
+          ),
+          readonlyFields: Object.keys((base as ATS.ObjectSchema).def.props).filter(
+            (field) => resolveWrappers((base as ATS.ObjectSchema).def.props[field]).readonly
+          ),
+        }
+      : undefined;
   const assertion = policy?.assertions === undefined ? undefined : () => undefined;
   registerArtifact(target, {
     kind: "class",
@@ -2494,6 +2506,7 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
     managedFields: resolvedState.managedFields,
     hydrateSchema,
     encapsulateFields: resolvedState.encapsulateFields,
+    ...(domainStateLayout === undefined ? {} : { domainStateLayout }),
     ...(resolvedState.fieldPolicies.length === 0 ? {} : { fieldPolicies: resolvedState.fieldPolicies }),
     lifecycle: resolvedState.lifecycle,
     resolvedMembers: resolvedState.members.entries(),
@@ -2539,6 +2552,17 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
       value: (...extensions: readonly (DefinedCapability | ClassMethodsInput | ClassMixin)[]) =>
         defineRuntimeClass(defineClassExtensions(resolvedState, extensions)),
     },
+    ...(resolvedState.aggregate
+      ? {
+          events: {
+            enumerable: false,
+            value: (...eventTypes: readonly Function[]) => {
+              void eventTypes;
+              return target;
+            },
+          },
+        }
+      : {}),
     construction: {
       enumerable: false,
       value: (mode: "constructor" | "factory") => {
@@ -2570,13 +2594,6 @@ function defineRuntimeClass(state: DefinedClassState): unknown {
       },
     },
     accessors: { enumerable: false, value: () => defineRuntimeClass(resolvedState) },
-    identity: {
-      enumerable: false,
-      value: (key: string) =>
-        defineRuntimeClass(
-          defineClassExtensions(resolvedState, [defineCapability(`identity:${key}`, ["identity", "sameIdentity"])])
-        ),
-    },
     validate: {
       enumerable: false,
       value: (options?: FactoryValidationOptions) => {
@@ -2643,7 +2660,6 @@ const defineClass = Object.assign(
     mixin: classMixin,
     json: (options?: ClassJsonOptions) =>
       defineCapability("class.json", [options?.method ?? "toJson"]) as ClassJsonCapability,
-    identity: (key: string) => defineCapability(`identity:${key}`, ["identity", "sameIdentity"]),
   }
 ) as ClassFactory;
 
@@ -2797,7 +2813,7 @@ const defineDomainEvent = ((
 const defineEntity = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { readonly id?: string }) => {
   const unwrapped = unwrapSchema(schema);
   const object = resolveWrappers(unwrapped).base;
-  const id = defineIdentityKey(
+  defineIdentityKey(
     unwrapped,
     options?.id ??
       (object.type === TypeName.object && "id" in (object as ATS.ObjectSchema).def.props ? "id" : undefined),
@@ -2812,7 +2828,7 @@ const defineEntity = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { reado
         factoryValidationOptIn: true,
         factories: { create: "create", hydrate: "hydrate" },
       },
-      [defineClass.equals(), defineClass.hashCode(), defineClass.identity(id)]
+      [defineClass.equals(), defineClass.hashCode()]
     )
   );
 }) as typeof RuntimeJIT.ddd.entity;
@@ -2820,7 +2836,7 @@ const defineEntity = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { reado
 const defineAggregateRoot = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: { readonly id?: string }) => {
   const unwrapped = unwrapSchema(schema);
   const object = resolveWrappers(unwrapped).base;
-  const id = defineIdentityKey(
+  defineIdentityKey(
     unwrapped,
     options?.id ??
       (object.type === TypeName.object && "id" in (object as ATS.ObjectSchema).def.props ? "id" : undefined),
@@ -2828,11 +2844,7 @@ const defineAggregateRoot = ((schema: SchemaInput<ATS.AnyTypeSchema>, options?: 
   );
   const state = defineClassState(unwrapped, false, true, true);
   return defineRuntimeClass(
-    defineClassExtensions({ ...state, factoryValidationOptIn: true }, [
-      defineClass.equals(),
-      defineClass.hashCode(),
-      defineClass.identity(id),
-    ])
+    defineClassExtensions({ ...state, factoryValidationOptIn: true }, [defineClass.equals(), defineClass.hashCode()])
   );
 }) as typeof RuntimeJIT.ddd.aggregateRoot;
 

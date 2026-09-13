@@ -9,14 +9,20 @@ const UserState = JIT.object({
   active: JIT.boolean(),
 });
 const Money = JIT.ddd.valueObject(JIT.object({ amount: JIT.number(), currency: JIT.string() }));
+const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
+  payload: JIT.object({ orderId: JIT.string() }),
+  version: 1,
+});
 const UserBase = JIT.ddd.entity(UserState, { id: "id" });
-const OrderBase = JIT.ddd.aggregateRoot(
-  JIT.object({
-    id: JIT.string().readonly(),
-    status: JIT.enum(["draft", "confirmed"]),
-  }),
-  { id: "id" }
-);
+const OrderBase = JIT.ddd
+  .aggregateRoot(
+    JIT.object({
+      id: JIT.string().readonly(),
+      status: JIT.enum(["draft", "confirmed"]),
+    }),
+    { id: "id" }
+  )
+  .events(OrderConfirmed);
 const TimestampedOrderBase = JIT.ddd
   .aggregateRoot(
     JIT.object({
@@ -43,18 +49,18 @@ const ClockedOrderBase = JIT.ddd
       clock: () => fixedClockValue,
     })
   );
-const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
-  payload: JIT.object({ orderId: JIT.string() }),
-  version: 1,
-});
-
 class User extends UserBase {}
 class Order extends OrderBase {
   toggleStatus(): void {
-    this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
+    this._props.status = this._props.status === "draft" ? "confirmed" : "draft";
   }
 
-  recordAndPull(event: unknown): unknown[] {
+  setDraft(): void {
+    if (this._props.status === "draft") return;
+    this._props.status = "draft";
+  }
+
+  recordAndPull(event: JIT.Typeof<typeof OrderConfirmed>): JIT.Typeof<typeof OrderConfirmed>[] {
     this.raise(event);
     return this.pullEvents();
   }
@@ -62,13 +68,15 @@ class Order extends OrderBase {
 
 class TimestampedOrder extends TimestampedOrderBase {
   toggleStatus(): void {
-    this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
+    this._props.status = this._props.status === "draft" ? "confirmed" : "draft";
+    this.touch();
   }
 }
 
 class ClockedOrder extends ClockedOrderBase {
   toggleStatus(): void {
-    this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
+    this._props.status = this._props.status === "draft" ? "confirmed" : "draft";
+    this.touch();
   }
 }
 
@@ -79,8 +87,8 @@ class HandwrittenUser {
     readonly active: boolean
   ) {}
 
-  sameIdentity(other: HandwrittenUser): boolean {
-    return this.id === other.id;
+  equals(other: HandwrittenUser): boolean {
+    return this.id === other.id && this.name === other.name && this.active === other.active;
   }
 }
 
@@ -107,8 +115,8 @@ class HandwrittenOrder {
     this.status = this.status === "draft" ? "confirmed" : "draft";
   }
 
-  raiseAndPull(): unknown[] {
-    this.events.push({ type: "order.confirmed" });
+  raiseAndPull(event: unknown = { type: "order.confirmed" }): unknown[] {
+    this.events.push(event);
     return this.events.splice(0);
   }
 }
@@ -138,6 +146,7 @@ const runtimeSameUser = User.create({ ...userInput, name: "Grace" });
 const runtimeMoney = Money.create(moneyInput);
 const runtimeSameMoney = Money.create(moneyInput);
 const runtimeOrder = Order.create({ id: "o_1", status: "draft" });
+const benchmarkEvent = OrderConfirmed.create({ orderId: "o_1" });
 const runtimeNoopOrder = Order.create({ id: "o_noop", status: "draft" });
 const runtimeTimestampedOrder = TimestampedOrder.create({
   id: "o_2",
@@ -159,7 +168,8 @@ const timestampAot = await loadAotArtifacts<{ readonly TimestampedOrderBase: typ
 });
 class AotTimestampedOrder extends timestampAot.TimestampedOrderBase {
   toggleStatus(): void {
-    this.update({ status: this.status === "draft" ? "confirmed" : "draft" });
+    this._props.status = this._props.status === "draft" ? "confirmed" : "draft";
+    this.touch();
   }
 }
 const aotTimestampedOrder = AotTimestampedOrder.create({
@@ -236,15 +246,15 @@ registerScenario({
 });
 
 registerScenario({
-  op: "entity identity",
+  op: "entity equals",
   name: "flat entity",
   args: [],
-  jit: () => runtimeUser.sameIdentity(runtimeSameUser),
+  jit: () => runtimeUser.equals(runtimeSameUser),
   competitors: [
     {
       name: "handwritten class",
       args: [handwrittenUser, handwrittenSameUser],
-      fn: (left: HandwrittenUser, right: HandwrittenUser) => left.sameIdentity(right),
+      fn: (left: HandwrittenUser, right: HandwrittenUser) => left.equals(right),
     },
   ],
 });
@@ -259,9 +269,9 @@ registerScenario({
 
 registerScenario({
   op: "aggregate mutation",
-  name: "no-op update",
+  name: "no-op domain mutation",
   args: [runtimeNoopOrder],
-  jit: (order: Order) => (order as unknown as { update(patch: { status: "draft" }): void }).update({ status: "draft" }),
+  jit: (order: Order) => order.setDraft(),
   competitors: [
     {
       name: "handwritten class",
@@ -297,9 +307,15 @@ registerScenario({
 registerScenario({
   op: "aggregate event buffer",
   name: "raise and pull",
-  args: [runtimeOrder],
-  jit: (order: Order) => order.recordAndPull({ type: "order.confirmed" }),
-  competitors: [{ name: "handwritten class", fn: () => handwrittenOrder.raiseAndPull() }],
+  args: [runtimeOrder, benchmarkEvent],
+  jit: (order: Order, event: JIT.Typeof<typeof OrderConfirmed>) => order.recordAndPull(event),
+  competitors: [
+    {
+      name: "handwritten class",
+      args: [handwrittenOrder, benchmarkEvent],
+      fn: (order: HandwrittenOrder, event: JIT.Typeof<typeof OrderConfirmed>) => order.raiseAndPull(event),
+    },
+  ],
 });
 
 registerScenario({

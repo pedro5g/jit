@@ -18,7 +18,7 @@ describe("Runtime Type class capabilities", () => {
     return { EntityId, Email, schema };
   }
 
-  it("restores entity equality, hashing and identity as preset members", () => {
+  it("exposes entity equality and hashing without identity methods", () => {
     const { schema } = definitions();
     const User = JIT.ddd.entity(schema);
     const user = User.create({ name: "Pedro", email: "pedro@example.com" });
@@ -27,12 +27,16 @@ describe("Runtime Type class capabilities", () => {
     expect(typeof user.equals).toBe("function");
     expect(typeof user.hashCode).toBe("function");
     expect(user.hashCode()).toBe(user.hashCode());
-    expect(user.identity()).toBe(user.id);
-    expect(user.sameIdentity(user)).toBe(true);
+    expect("identity" in user).toBe(false);
+    expect("sameIdentity" in user).toBe(false);
     expectTypeOf(user.equals).toBeFunction();
     expectTypeOf(user.hashCode).toBeFunction();
-    expectTypeOf(user.identity).toBeFunction();
-    expectTypeOf(user.sameIdentity).toBeFunction();
+    if (Object.is(1, 2)) {
+      // @ts-expect-error identity is internal metadata, not a public method
+      user.identity;
+      // @ts-expect-error identity comparison is not a public method
+      user.sameIdentity;
+    }
   });
 
   it("restores the aggregate preset equality, hashing and event surface", async () => {
@@ -42,8 +46,8 @@ describe("Runtime Type class capabilities", () => {
 
     expect(user.equals(user)).toBe(true);
     expect(user.hashCode()).toBe(user.hashCode());
-    expect(user.identity()).toBe(user.id);
-    expect(user.sameIdentity(user)).toBe(true);
+    expect("identity" in user).toBe(false);
+    expect("sameIdentity" in user).toBe(false);
     expect(user.peekEvents()).toEqual([]);
     expect(user.pullEvents()).toEqual([]);
     await user.commit({ publish() {} });

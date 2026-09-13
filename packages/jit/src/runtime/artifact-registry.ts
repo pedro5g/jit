@@ -303,6 +303,12 @@ interface ClassArtifact {
   readonly hydrateSchema?: ATS.AnyTypeSchema;
   /** DDD fields use prototype accessors over stable symbol slots. */
   readonly encapsulateFields?: boolean;
+  /** The single physical state bag used by encapsulated domain classes. */
+  readonly domainStateLayout?: {
+    readonly storage: "symbol";
+    readonly mutableFields: readonly string[];
+    readonly readonlyFields: readonly string[];
+  };
   readonly fieldPolicies?: readonly {
     readonly name: string;
     readonly visibility: "public" | "protected" | "private";

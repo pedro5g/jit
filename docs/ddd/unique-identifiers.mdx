@@ -21,10 +21,9 @@ NumericId.create(42).value; // number
 
 Identifier metadata means “identifier-like”, not automatically “the entity identity”. Entity and Aggregate Root presets infer identity only when exactly one field carries this metadata. Multiple identifier fields require `{ id: "..." }` explicitly.
 
-The identifier Value Object itself does not expose `identity()` or
-`sameIdentity()`. A Value Object has value semantics (`equals` and `hashCode`);
-identity comparison belongs to the Entity or Aggregate Root that selects the
-field.
+The identifier Value Object has value semantics (`equals` and `hashCode`). Its
+identity metadata is consumed internally by the Entity or Aggregate Root that
+selects the field; no identity methods are added to the public domain surface.
 
 ## Boundary model
 
@@ -45,13 +44,13 @@ Nested object fields and arrays accept scalar boundary values and are materializ
 
 `pnpm bench:classes`, Ryzen 7 5800H, Node 22:
 
-| | runtime JIT | AOT | handwritten wrapper |
-| --- | --- | --- | --- |
-| create a scalar Value Object | 93 ns | 104 ns | 38 ns¹ |
-| `equals` | 345 ps | 449 ps | 324 ps |
-| read `.value` | 448 ps | 429 ps | 445 ps |
-| hydrate an entity with two nested wrappers and an array of them | 295 ns | 491 ns | 120 ns¹ |
-| create the same entity, identifier defaulted | 353 ns | 718 ns | — |
+|                                                                 | runtime JIT | AOT    | handwritten wrapper |
+| --------------------------------------------------------------- | ----------- | ------ | ------------------- |
+| create a scalar Value Object                                    | 93 ns       | 104 ns | 38 ns¹              |
+| `equals`                                                        | 345 ps      | 449 ps | 324 ps              |
+| read `.value`                                                   | 448 ps      | 429 ps | 445 ps              |
+| hydrate an entity with two nested wrappers and an array of them | 295 ns      | 491 ns | 120 ns¹             |
+| create the same entity, identifier defaulted                    | 353 ns      | 718 ns | —                   |
 
 ¹ not comparable: the handwritten wrapper stores a trusted string and applies
 no schema validation.

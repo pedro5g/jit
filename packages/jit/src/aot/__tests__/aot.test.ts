@@ -6,6 +6,9 @@ import { pathToFileURL } from "node:url";
 import { JIT as DefineJIT } from "../../define.js";
 import { AOT, JIT } from "../../index.js";
 
+declare const AotTestEventBrand: unique symbol;
+type AotTestEvent = { readonly [AotTestEventBrand]: true };
+
 describe("JIT AOT generate", () => {
   let outDir: string;
 
@@ -1002,7 +1005,13 @@ describe("JIT AOT generate", () => {
     expect(source).toMatchSnapshot("reconstructive runtime class layouts");
     expect(source).not.toContain('Object.defineProperty(this, "name"');
     expect(source).toContain('get ["name"]()');
-    expect(source).toContain("if (!changed) return;");
+    expect(source).toContain("get _props()");
+    expect(source).toContain("this[User_state] = state;");
+    expect(source).toContain("const User_state = Symbol();");
+    expect(source).not.toContain("Proxy");
+    expect(source).not.toContain("Reflect");
+    expect(source).not.toContain("sameIdentity");
+    expect(source).not.toContain("update(patch)");
   });
 
   it("lowers the class JSON capability through the serializer compiler", async () => {
@@ -1334,19 +1343,19 @@ describe("JIT AOT generate", () => {
       readonly UserBase: (abstract new (
         input: unknown
       ) => {
-        id: { readonly value: string };
+        id: { readonly value: string; equals(other: unknown): boolean };
         name: string;
-        sameIdentity(other: unknown): boolean;
+        equals(other: unknown): boolean;
       }) & {
         create(input: { name: string }): {
-          id: { readonly value: string };
+          id: { readonly value: string; equals(other: unknown): boolean };
           name: string;
-          sameIdentity(other: unknown): boolean;
+          equals(other: unknown): boolean;
         };
         hydrate(input: { id: string; name: string }): {
-          id: { readonly value: string };
+          id: { readonly value: string; equals(other: unknown): boolean };
           name: string;
-          sameIdentity(other: unknown): boolean;
+          equals(other: unknown): boolean;
         };
       };
     };
@@ -1358,7 +1367,9 @@ describe("JIT AOT generate", () => {
     expect(result.skipped).toEqual([]);
     expect(hydrated.id).toBeInstanceOf(generated.UserId);
     expect(hydrated.id.value).toBe(id);
-    expect(hydrated.sameIdentity(sameIdentity)).toBe(true);
+    expect(hydrated.id.equals(sameIdentity.id)).toBe(true);
+    expect("identity" in hydrated).toBe(false);
+    expect("sameIdentity" in hydrated).toBe(false);
     expect(User.create({ name: "Ada" }).id).toBeInstanceOf(generated.UserId);
   });
 
@@ -1676,17 +1687,17 @@ describe("JIT AOT generate", () => {
         'import { Money, OrderBase, UserBase } from "./index.js";',
         'Money.create({ amount: 10, currency: "BRL" }).equals(Money.create({ amount: 10, currency: "BRL" }));',
         "class User extends UserBase {}",
-        'User.create({ id: "u_1", name: "Ada" }).sameIdentity(User.create({ id: "u_1", name: "Grace" }));',
+        'User.create({ id: "u_1", name: "Ada" }).equals(User.create({ id: "u_1", name: "Grace" }));',
         "class Order extends OrderBase {",
-        '  confirm() { this.update({ status: "confirmed" }); this.raise({ type: "order.confirmed" }); }',
+        '  confirm() { this._props.status = "confirmed"; }',
         "}",
         'const order = Order.create({ id: "o_1", status: "draft" });',
         "order.confirm();",
         "order.peekEvents();",
         "// @ts-expect-error raise is domain-internal",
         'order.raise({ type: "external" });',
-        "// @ts-expect-error readonly identity is excluded from aggregate patches",
-        'order.update({ id: "o_2" });',
+        "// @ts-expect-error protected domain state is only available in subclasses",
+        "order._props;",
         "",
       ].join("\n")
     );
@@ -1752,19 +1763,27 @@ describe("JIT AOT generate", () => {
       outDir,
     });
     const source = readFileSync(join(outDir, "index.js"), "utf8");
+    abstract class GeneratedOrderState {
+      protected readonly _props!: {
+        status: "draft" | "confirmed";
+        shipping: { city: string; country: string };
+      };
+    }
     type OrderBaseConstructor = {
       new (
         state: unknown
-      ): {
-        update(patch: { status?: "confirmed"; shipping?: { city?: string; country?: string } }): void;
-        raise(event: unknown): void;
-        pullEvents(): unknown[];
-        commit(publisher: { publish(event: unknown): void | Promise<void> }): Promise<void>;
+      ): GeneratedOrderState & {
+        raise(event: AotTestEvent): void;
+        pullEvents(): AotTestEvent[];
+        commit(publisher: { publish(event: AotTestEvent): void | PromiseLike<void> }): Promise<void>;
       };
       create(input: {
         status: "draft" | "confirmed";
         shipping: { city: string; country: string };
-      }): InstanceType<new (state: unknown) => unknown>;
+      }): GeneratedOrderState & {
+        status: "draft" | "confirmed";
+        shipping: { city: string; country: string };
+      };
     };
     const generated = (await import(pathToFileURL(join(outDir, "index.js")).href)) as {
       readonly OrderBase: OrderBaseConstructor;
@@ -1772,29 +1791,32 @@ describe("JIT AOT generate", () => {
 
     class Order extends generated.OrderBase {
       confirm() {
-        this.update({ status: "confirmed" });
-        this.raise({ type: "order.confirmed" });
+        this._props.status = "confirmed";
+      }
+
+      shipTo(city: string) {
+        this._props.shipping = { ...this._props.shipping, city };
       }
     }
 
     const order = Order.create({
       status: "draft",
       shipping: { city: "Recife", country: "BR" },
-    }) as Order;
+    }) as unknown as Order;
 
     expect(result.skipped).toHaveLength(0);
     expect(source).toMatchSnapshot("AOT aggregate mutation and event buffer");
     order.confirm();
-    expect(order.pullEvents()).toEqual([{ type: "order.confirmed" }]);
+    expect(order.pullEvents()).toEqual([]);
     expect((order as Order & { status: string }).status).toBe("confirmed");
-    order.update({ id: "o_2" } as never);
     expect((order as Order & { id: string }).id).toBe("o_1");
-    order.update({ shipping: { city: "Sao Paulo" } });
+    expect(Object.keys(order)).toEqual([]);
+    expect(Object.getOwnPropertyNames(order)).toEqual([]);
+    order.shipTo("Sao Paulo");
     expect((order as Order & { shipping: { city: string; country: string } }).shipping).toEqual({
       city: "Sao Paulo",
       country: "BR",
     });
-    order.raise({ type: "order.persisted" });
     await order.commit({ publish: () => undefined });
     expect(order.pullEvents()).toEqual([]);
   });
@@ -1818,11 +1840,11 @@ describe("JIT AOT generate", () => {
         new (
           input: unknown
         ): {
-          update(patch: { status: string }): void;
+          readonly _props: { status: string };
           updatedAt: Date;
         };
         create(input: { id: string; status: string; updatedAt: Date }): {
-          update(patch: { status: string }): void;
+          readonly _props: { status: string };
           touch(): void;
           updatedAt: Date;
         };
@@ -1836,7 +1858,8 @@ describe("JIT AOT generate", () => {
       updatedAt: initial,
     });
 
-    order.update({ status: "confirmed" });
+    order._props.status = "confirmed";
+    order.touch();
     expect(order.updatedAt.getTime()).toBeGreaterThan(initial.getTime());
     const mutatedAt = order.updatedAt;
     order.touch();
@@ -1933,7 +1956,6 @@ describe("JIT AOT generate", () => {
           updatedAt: Date | null;
           deletedAt: Date | null;
           version: number;
-          update(patch: { name?: string }): void;
           touch(): void;
           softDelete(): void;
           restore(): void;
@@ -1955,7 +1977,7 @@ describe("JIT AOT generate", () => {
     expect(user.updatedAt).toBeNull();
     expect(user.deletedAt).toBeNull();
     expect(user.version).toBe(0);
-    user.update({ name: "Grace" });
+    user.touch();
     expect(user.updatedAt).toBeInstanceOf(Date);
     expect(user.version).toBe(1);
     user.softDelete();

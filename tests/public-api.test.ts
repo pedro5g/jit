@@ -19,7 +19,6 @@ describe("public API manifest", () => {
           "factory",
           "getter",
           "hashCode",
-          "identity",
           "isFailure",
           "json",
           "method",

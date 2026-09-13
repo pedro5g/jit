@@ -16,7 +16,16 @@ describe("Runtime Class lifecycle", () => {
       "version",
     ]);
 
-    const user = User.create({ id: "u_1", name: "Ada" });
+    class UserEntity extends User {
+      rename(name: string) {
+        if (this._props.name !== name) {
+          this._props.name = name;
+          this.touch();
+        }
+      }
+    }
+
+    const user = UserEntity.create({ id: "u_1", name: "Ada" });
     expect(user.createdAt).toBeInstanceOf(Date);
     expect(user.updatedAt).toBeNull();
     expect(user.deletedAt).toBeNull();
@@ -26,9 +35,8 @@ describe("Runtime Class lifecycle", () => {
     expectTypeOf(user.deletedAt).toEqualTypeOf<Date | null>();
     expectTypeOf(user.version).toEqualTypeOf<number>();
 
-    user.update({ name: "Ada" });
     expect(user.updatedAt).toBeNull();
-    user.update({ name: "Grace" });
+    user.rename("Grace");
     expect(user.updatedAt).toBeInstanceOf(Date);
     expect(user.version).toBe(1);
     expect(() => {

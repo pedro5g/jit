@@ -92,13 +92,15 @@ it("rejects ambiguous inferred identity at declaration time", () => {
 });
 
 it("exposes DDD fields as readonly while keeping internal extension this mutable", () => {
-  const User = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" }).extends({
-    age: JIT.number(),
-    rename(name: string) {
-      this.name = name;
-      this.age = this.age + 1;
-    },
+  const UserBase = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string(), age: JIT.number() }), {
+    id: "id",
   });
+  class User extends UserBase {
+    rename(name: string) {
+      this._props.name = name;
+      this._props.age = this._props.age + 1;
+    }
+  }
   const user = User.create({ id: "u_1", name: "Ada", age: 36 });
   user.rename("Grace");
   expectTypeOf(user.name).toEqualTypeOf<string>();

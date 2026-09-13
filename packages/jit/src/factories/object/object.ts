@@ -4,9 +4,11 @@ import { createBuilder, type SchemaInput, unwrapSchema } from "../../core/builde
 import { type ValidationMessage, withValidationMessage } from "../validation-message.js";
 
 type BuilderShape<TShape extends Record<string, SchemaInput>> = {
-  readonly [TKey in keyof TShape]: TShape[TKey] extends SchemaInput<infer TSchema extends AnyTypeSchema>
+  readonly [TKey in keyof TShape]: TShape[TKey] extends { readonly schema: infer TSchema extends AnyTypeSchema }
     ? TSchema
-    : never;
+    : TShape[TKey] extends AnyTypeSchema
+      ? TShape[TKey]
+      : never;
 };
 
 /**

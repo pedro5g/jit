@@ -14,7 +14,7 @@ the same class and schema infrastructure.
 ## A complete order transition
 
 Value objects are immutable structural values. Entities use an identity key.
-Aggregate roots add a controlled state transition and an ordered event buffer.
+Aggregate roots add a protected domain state bag and an ordered event buffer.
 
 ```ts
 const Money = JIT.ddd.valueObject(
@@ -32,19 +32,21 @@ const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
   }),
 });
 
-const OrderBase = JIT.ddd.aggregateRoot(
-  JIT.object({
-    id: JIT.string().readonly(),
-    status: JIT.enum(["draft", "confirmed"]),
-    total: Money,
-  }),
-  { id: "id" },
-);
+const OrderBase = JIT.ddd
+  .aggregateRoot(
+    JIT.object({
+      id: JIT.string().readonly(),
+      status: JIT.enum(["draft", "confirmed"]),
+      total: Money,
+    }),
+    { id: "id" },
+  )
+  .events(OrderConfirmed);
 
 class Order extends OrderBase {
   confirm() {
-    if (this.status === "confirmed") return;
-    this.update({ status: "confirmed" });
+    if (this._props.status === "confirmed") return;
+    this._props.status = "confirmed";
     this.raise(
       OrderConfirmed.create({ orderId: this.id, total: this.total.amount }),
     );
@@ -61,9 +63,10 @@ order.confirm();
 order.pullEvents(); // [OrderConfirmed instance], in insertion order
 ```
 
-`update()` applies only schema-derived mutable fields. A readonly identity such
-as `id` is never accepted in an update patch. Put domain behavior in subclass
-methods; call `raise()` only after the state transition succeeds.
+Domain methods mutate `_props` directly; the reference is protected and
+readonly, while ordinary state fields remain mutable. A readonly identity such
+as `id` cannot be reassigned. Put domain behavior in subclass methods; call
+`raise()` only after the state transition succeeds.
 
 ## Persistence boundaries
 
@@ -77,7 +80,7 @@ const encodeOrder = JIT.json.stringify(Order);
 const snapshot = encodeOrder(order);
 const restored = Order.hydrate(JSON.parse(snapshot));
 
-restored.sameIdentity(order); // true
+restored.id; // "o_1"
 ```
 
 Use `peekEvents()` to inspect pending events without changing them, and

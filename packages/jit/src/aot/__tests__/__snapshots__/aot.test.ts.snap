@@ -321,37 +321,16 @@ const OrderBase_hash = (function hash(value) {
 });
 const OrderBase = /*#__PURE__*/ (() => {
   const __construct = Symbol();
-  const __managed0 = Symbol();
-  const __managed1 = Symbol();
-  const __managed2 = Symbol();
-  const OrderBase_update_1 = (function update(value, patch) {
-  let out = value;
-  if (patch !== undefined) {
-    let next_city = value.city;
-    if (patch.city !== undefined && !Object.is(value.city, patch.city)) {
-      next_city = patch.city;
-    }
-    let next_country = value.country;
-    if (patch.country !== undefined && !Object.is(value.country, patch.country)) {
-      next_country = patch.country;
-    }
-    if (next_city !== value.city || next_country !== value.country) {
-      out = { "city": next_city, "country": next_country };
-    }
-  }
-  return out;
-});
+  const OrderBase_state = Symbol();
+  const OrderBase_events = Symbol();
   return class OrderBase {
-    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : OrderBase_validator.parse(input); this[__managed0] = state["id"]; this[__managed1] = state["status"]; this[__managed2] = state["shipping"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
-    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance[__managed0] = state["id"]; instance[__managed1] = state["status"]; instance[__managed2] = state["shipping"]; Object.defineProperty(instance, "__jitEvents", { value: [], writable: true }); return instance; }
+    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : OrderBase_validator.parse(input);    this[OrderBase_state] = state; Object.defineProperty(this, OrderBase_events, { configurable: false, enumerable: false, value: [], writable: true }); }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype);    instance[OrderBase_state] = state; Object.defineProperty(instance, OrderBase_events, { configurable: false, enumerable: false, value: [], writable: true }); return instance; }
     static create(input) { return new this(OrderBase_validator.parse(input), __construct, true); }
     static hydrate(state) { return new this(OrderBase_validator_1.parse(state), __construct, true); }
-    get ["id"]() { return this[__managed0]; }
-    set ["id"](value) { throw new TypeError("Field id is readonly"); }
-    get ["status"]() { return this[__managed1]; }
-    set ["status"](value) { throw new TypeError("Field status is readonly"); }
-    get ["shipping"]() { return this[__managed2]; }
-    set ["shipping"](value) { throw new TypeError("Field shipping is readonly"); }
+    get ["id"]() { return this[OrderBase_state]["id"]; }
+    get ["status"]() { return this[OrderBase_state]["status"]; }
+    get ["shipping"]() { return this[OrderBase_state]["shipping"]; }
     equals(other) { const l = this;
 const r = other;
 if (l === r) {
@@ -381,22 +360,11 @@ if (l_shipping.country !== r_shipping.country) {
 }
 return true; }
     hashCode() { return OrderBase_hash(this); }
-    identity() { return this["id"]; }
-    sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this["id"], other["id"]); }
-    update(patch) { let changed = false;
-if (patch.status !== undefined) {
-  const next = patch.status;
-  if (next !== this[__managed1]) { this[__managed1] = next; changed = true; }
-}
-if (patch.shipping !== undefined) {
-  const next = OrderBase_update_1(this[__managed2], patch.shipping);
-  if (next !== this[__managed2]) { this[__managed2] = next; changed = true; }
-}
-if (!changed) return; }
-    raise(event) { this.__jitEvents.push(event); }
-    peekEvents() { return this.__jitEvents.slice(); }
-    pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }
-    async commit(publisher) { const pending = this.__jitEvents; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); this.__jitEvents.splice(0, pending.length); }
+    raise(event) { this[OrderBase_events].push(event); }
+    peekEvents() { return this[OrderBase_events].slice(); }
+    pullEvents() { const events = this[OrderBase_events]; this[OrderBase_events] = []; return events; }
+    async commit(publisher) { const pending = this[OrderBase_events]; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); pending.splice(0, pending.length); }
+    get _props() { return this[OrderBase_state]; }
   };
 })();
 export { OrderBase };
@@ -576,17 +544,14 @@ const User_hash = (function hash(value) {
 });
 const User = /*#__PURE__*/ (() => {
   const __construct = Symbol();
-  const __managed0 = Symbol();
-  const __managed1 = Symbol();
+  const User_state = Symbol();
   return class User {
-    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : User_validator.parse(input); this[__managed0] = state["id"]; this[__managed1] = state["name"]; }
-    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance[__managed0] = state["id"]; instance[__managed1] = state["name"]; return instance; }
+    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : User_validator.parse(input);   this[User_state] = state; }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype);   instance[User_state] = state; return instance; }
     static create(input) { return new this(User_validator.parse(input), __construct, true); }
     static hydrate(state) { return new this(User_validator_1.parse(state), __construct, true); }
-    get ["id"]() { return this[__managed0]; }
-    set ["id"](value) { throw new TypeError("Field id is readonly"); }
-    get ["name"]() { return this[__managed1]; }
-    set ["name"](value) { throw new TypeError("Field name is readonly"); }
+    get ["id"]() { return this[User_state]["id"]; }
+    get ["name"]() { return this[User_state]["name"]; }
     equals(other) { const l = this;
 const r = other;
 if (l === r) {
@@ -600,8 +565,7 @@ if (l.name !== r.name) {
 }
 return true; }
     hashCode() { return User_hash(this); }
-    identity() { return this["id"]; }
-    sameIdentity(other) { return typeof other === "object" && other !== null && Object.is(this["id"], other["id"]); }
+    get _props() { return this[User_state]; }
   };
 })();
 const UserId_validator = /*#__PURE__*/ (() => {
@@ -784,38 +748,19 @@ const Order_hash = (function hash(value) {
 });
 const Order = /*#__PURE__*/ (() => {
   const __construct = Symbol();
-  const __managed0 = Symbol();
-  const __managed1 = Symbol();
-  const __managed2 = Symbol();
-  const __managed3 = Symbol();
-  const __managed4 = Symbol();
-  const __managed5 = Symbol();
-  const Order_identity_equal = (function equal(l, r) {
-  if (l === r) {
-    return true;
-  }
-  if (l !== r) {
-    return false;
-  }
-  return true;
-});
+  const Order_state = Symbol();
+  const Order_events = Symbol();
   return class Order {
-    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : Order_validator.parse(input); this[__managed0] = state["id"]; this[__managed1] = state["status"]; this[__managed2] = state["createdAt"]; this[__managed3] = state["updatedAt"]; this[__managed4] = state["deletedAt"]; this[__managed5] = state["version"]; Object.defineProperty(this, "__jitEvents", { value: [], writable: true }); }
-    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype); instance[__managed0] = state["id"]; instance[__managed1] = state["status"]; instance[__managed2] = state["createdAt"]; instance[__managed3] = state["updatedAt"]; instance[__managed4] = state["deletedAt"]; instance[__managed5] = state["version"]; Object.defineProperty(instance, "__jitEvents", { value: [], writable: true }); return instance; }
+    constructor(input, token, validated) { if (token !== __construct && token !== true) throw new Error("This Runtime Type uses factory construction; call its create() or hydrate() factory"); const state = token === true || validated === true ? input : Order_validator.parse(input);       this[Order_state] = state; Object.defineProperty(this, Order_events, { configurable: false, enumerable: false, value: [], writable: true }); }
+    static ["__jitMaterialize"](state) { const instance = Object.create(this.prototype);       instance[Order_state] = state; Object.defineProperty(instance, Order_events, { configurable: false, enumerable: false, value: [], writable: true }); return instance; }
     static create(input) { return new this(Order_validator.parse(input), __construct, true); }
     static hydrate(state) { return new this(Order_validator_1.parse(state), __construct, true); }
-    get ["id"]() { return this[__managed0]; }
-    set ["id"](value) { throw new TypeError("Field id is readonly"); }
-    get ["status"]() { return this[__managed1]; }
-    set ["status"](value) { throw new TypeError("Field status is readonly"); }
-    get ["createdAt"]() { return this[__managed2]; }
-    set ["createdAt"](value) { throw new TypeError("Field createdAt is readonly"); }
-    get ["updatedAt"]() { return this[__managed3]; }
-    set ["updatedAt"](value) { throw new TypeError("Field updatedAt is readonly"); }
-    get ["deletedAt"]() { return this[__managed4]; }
-    set ["deletedAt"](value) { throw new TypeError("Field deletedAt is readonly"); }
-    get ["version"]() { return this[__managed5]; }
-    set ["version"](value) { throw new TypeError("Field version is readonly"); }
+    get ["id"]() { return this[Order_state]["id"]; }
+    get ["status"]() { return this[Order_state]["status"]; }
+    get ["createdAt"]() { return this[Order_state]["createdAt"]; }
+    get ["updatedAt"]() { return this[Order_state]["updatedAt"]; }
+    get ["deletedAt"]() { return this[Order_state]["deletedAt"]; }
+    get ["version"]() { return this[Order_state]["version"]; }
     equals(other) { const l = this;
 const r = other;
 if (l === r) {
@@ -875,29 +820,15 @@ if (l_version !== r_version && (l_version === l_version || r_version === r_versi
 }
 return true; }
     hashCode() { return Order_hash(this); }
-    identity() { return this["id"]; }
-    sameIdentity(other) { return typeof other === "object" && other !== null && Order_identity_equal(this["id"].value, other["id"].value); }
-    update(patch) { let changed = false;
-if (patch.id !== undefined) {
-  const next = patch.id;
-  if (next !== this[__managed0]) { this[__managed0] = next; changed = true; }
-}
-if (patch.status !== undefined) {
-  const next = patch.status;
-  if (next !== this[__managed1]) { this[__managed1] = next; changed = true; }
-}
-if (!changed) return;
-const now = new Date();
-this[__managed3] = now;
-this[__managed5] = this[__managed5] + 1; }
-    raise(event) { this.__jitEvents.push(event); }
-    peekEvents() { return this.__jitEvents.slice(); }
-    pullEvents() { const events = this.__jitEvents; this.__jitEvents = []; return events; }
-    async commit(publisher) { const pending = this.__jitEvents; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); this.__jitEvents.splice(0, pending.length); }
-    softDelete() { if (this[__managed4] !== null) return; const now = new Date(); this[__managed4] = now; this[__managed3] = now; this[__managed5] = this[__managed5] + 1; }
-    restore() { if (this[__managed4] === null) return; this[__managed4] = null; const now = new Date(); this[__managed3] = now; this[__managed5] = this[__managed5] + 1; }
-    get isDeleted() { return this[__managed4] !== null; }
-    touch() { const now = new Date(); this[__managed3] = now; this[__managed5] = this[__managed5] + 1; }
+    raise(event) { this[Order_events].push(event); }
+    peekEvents() { return this[Order_events].slice(); }
+    pullEvents() { const events = this[Order_events]; this[Order_events] = []; return events; }
+    async commit(publisher) { const pending = this[Order_events]; for (let index = 0; index < pending.length; index++) await publisher.publish(pending[index]); pending.splice(0, pending.length); }
+    softDelete() { if (this[Order_state]["deletedAt"] !== null) return; const now = new Date(); this[Order_state]["deletedAt"] = now; this[Order_state]["updatedAt"] = now; this[Order_state]["version"] = this[Order_state]["version"] + 1; }
+    restore() { if (this[Order_state]["deletedAt"] === null) return; this[Order_state]["deletedAt"] = null; const now = new Date(); this[Order_state]["updatedAt"] = now; this[Order_state]["version"] = this[Order_state]["version"] + 1; }
+    get isDeleted() { return this[Order_state]["deletedAt"] !== null; }
+    touch() { const now = new Date(); this[Order_state]["updatedAt"] = now; this[Order_state]["version"] = this[Order_state]["version"] + 1; }
+    get _props() { return this[Order_state]; }
   };
 })();
 export { Plain, User, UserId, Order };

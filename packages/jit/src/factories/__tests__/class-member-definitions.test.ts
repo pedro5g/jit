@@ -20,12 +20,13 @@ describe("Runtime Class member definitions", () => {
     expect(user.age).toBe(38);
   });
 
-  it("uses a prototype getter and a gated internal setter for DDD defaults", () => {
-    const User = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" }).extends({
+  it("uses a prototype getter and protected domain state for DDD defaults", () => {
+    const UserBase = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
+    class User extends UserBase {
       rename(name: string) {
-        this.name = name;
-      },
-    });
+        this._props.name = name;
+      }
+    }
     const user = User.create({ id: "u_1", name: "Ada" });
 
     expect(user.name).toBe("Ada");
@@ -81,14 +82,14 @@ describe("Runtime Class member definitions", () => {
   it("validates a declared method contract once and installs it directly", () => {
     const Rename = JIT.class.method({ input: [JIT.string()], output: JIT.void() });
     const User = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" }).extends({
-      rename: Rename.implement(function (this: { name: string }, name: string) {
-        this.name = name;
+      rename: Rename.implement(function (this: { readonly name: string }, name: string) {
+        if (this.name === name) return;
       }),
     });
     const user = User.create({ id: "u_1", name: "Ada" });
 
     user.rename("Grace");
-    expect(user.name).toBe("Grace");
+    expect(user.name).toBe("Ada");
     expect(() => (user.rename as unknown as (...args: unknown[]) => unknown)(1)).toThrow();
     expectTypeOf(user.rename).toEqualTypeOf<(name: string) => void>();
   });

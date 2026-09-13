@@ -360,7 +360,7 @@ describe("JIT.class", () => {
     expect(created.aliases[0].value).toBe(alias);
     expect(hydrated.id).toBeInstanceOf(UserId);
     expect(hydrated.id.value).toBe(persisted);
-    expect(hydrated.sameIdentity(sameIdentity)).toBe(true);
+    expect(hydrated.id.equals(sameIdentity.id)).toBe(true);
     expect(JIT.json.stringify(User)(hydrated)).toBe(`{"id":"${persisted}","name":"Ada","aliases":["${alias}"]}`);
     expect(() => User.hydrate({ name: "Ada", aliases: [] } as never)).not.toThrow();
     expectTypeOf(created.id.value).toEqualTypeOf<string>();
@@ -819,8 +819,9 @@ describe("JIT.class", () => {
       const member = Member.create({ id: "u_1", tags: ["a"] });
       const memberCopy = member.clone();
 
-      // Two objects claiming to be the same entity: the reason this is opt-in.
-      expect(memberCopy.sameIdentity(member)).toBe(true);
+      // Identity metadata remains available to structural planners, but is not
+      // exposed as an instance method.
+      expect(memberCopy.id).toBe(member.id);
       expect(memberCopy).not.toBe(member);
 
       const OrderBase = JIT.ddd
@@ -828,10 +829,15 @@ describe("JIT.class", () => {
           id: "id",
         })
         .extends(JIT.class.clone);
-      class Order extends OrderBase {
+      const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
+        version: 1,
+        payload: JIT.object({}),
+      });
+      const TypedOrderBase = OrderBase.events(OrderConfirmed);
+      class Order extends TypedOrderBase {
         confirm() {
-          this.update({ status: "confirmed" });
-          this.raise({ type: "order.confirmed" });
+          this._props.status = "confirmed";
+          this.raise(OrderConfirmed.create({}));
         }
       }
       const order = Order.create({ id: "o_1", status: "draft" });
@@ -845,23 +851,18 @@ describe("JIT.class", () => {
     });
   });
 
-  it("binds identity keys to the object schema", () => {
-    const Identified = JIT.class.abstract(JIT.object({ id: JIT.string(), name: JIT.string() })).identity("id");
-    const UserBase = Identified.factories({ create: "create", hydrate: "hydrate" });
+  it("keeps identity metadata internal to DDD classes", () => {
+    const User = JIT.ddd.entity(JIT.object({ id: JIT.string(), name: JIT.string() }), { id: "id" });
+    const ada = User.create({ id: "u_1", name: "Ada" });
+    const grace = User.create({ id: "u_1", name: "Grace" });
 
-    class User extends UserBase {}
-
-    expect(User.create({ id: "u_1", name: "Ada" }).sameIdentity(User.create({ id: "u_1", name: "Grace" }))).toBe(true);
-    const assertInvalidIdentity = () => {
-      // @ts-expect-error identity keys must be schema fields
-      JIT.class.abstract(JIT.object({ id: JIT.string() })).identity("missing");
-      // @ts-expect-error identity is configured exactly once
-      Identified.identity("id");
-    };
-    void assertInvalidIdentity;
-    expect(() => (UserBase as unknown as { identity(key: string): unknown }).identity("name")).toThrow(
-      /already configured/i
-    );
+    expect(ada.equals(grace)).toBe(false);
+    expect("identity" in ada).toBe(false);
+    expect("sameIdentity" in ada).toBe(false);
+    if (Object.is(1, 2)) {
+      // @ts-expect-error JIT.class.identity was removed from the public API
+      JIT.class.identity("id");
+    }
   });
 
   it("touches a configured timestamp once for an effective aggregate mutation", () => {
@@ -872,7 +873,10 @@ describe("JIT.class", () => {
       .extends(JIT.ddd.timestamps({ updatedAt: "updatedAt" }));
     class Order extends OrderBase {
       confirm() {
-        this.update({ status: "confirmed" });
+        if (this._props.status !== "confirmed") {
+          this._props.status = "confirmed";
+          this.touch();
+        }
       }
     }
     const initial = new Date(0);
@@ -937,7 +941,8 @@ describe("JIT.class", () => {
       );
     class Order extends OrderBase {
       confirm() {
-        this.update({ status: "confirmed" });
+        this._props.status = "confirmed";
+        this.markChanged();
       }
     }
     const order = Order.create({ id: "o_1", status: "draft" });
@@ -985,7 +990,10 @@ describe("JIT.class", () => {
       .extends(JIT.ddd.versioned({ field: "version" }));
     class Order extends OrderBase {
       confirm() {
-        this.update({ status: "confirmed" });
+        if (this._props.status !== "confirmed") {
+          this._props.status = "confirmed";
+          this.touch();
+        }
       }
     }
     const order = Order.create({ id: "o_1", status: "draft" });
@@ -1004,26 +1012,37 @@ describe("JIT.class", () => {
     }
   });
 
+  it("provides touch for version-only aggregates", () => {
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), version: JIT.int() }), { id: "id" })
+      .extends(JIT.ddd.versioned({ field: "version" }));
+    class Order extends OrderBase {
+      recordMutation() {
+        this.touch();
+      }
+    }
+
+    const order = Order.create({ id: "o_1" });
+    order.recordMutation();
+    expect(order.version).toBe(1);
+    expectTypeOf(order.touch).toEqualTypeOf<() => void>();
+  });
+
   it("rejects non-object schemas before emitting a constructor", () => {
     expect(() => JIT.class(JIT.string())).toThrow(/object schema/i);
   });
 
   it("adds structural capabilities through immutable descriptors on the prototype", () => {
-    const User = JIT.class(UserSchema).extends(
-      JIT.class.equals,
-      JIT.class.hashCode,
-      JIT.class.diff,
-      JIT.class.identity("id")
-    );
+    const User = JIT.class(UserSchema).extends(JIT.class.equals, JIT.class.hashCode, JIT.class.diff);
     const ada = new User({ name: "Ada" });
     const same = new User({ name: "Ada" });
     const grace = new User({ name: "Grace" });
 
     expect(ada.equals(same)).toBe(true);
     expect(ada.hashCode()).toBe(same.hashCode());
-    expect(ada.sameIdentity(same)).toBe(true);
-    expect(ada.identity()).toBe("generated");
     expect(ada.diff(grace)).toEqual([{ type: "update", path: ["name"], value: "Grace" }]);
+    expect("identity" in ada).toBe(false);
+    expect("sameIdentity" in ada).toBe(false);
   });
 
   it("uses the compiled immutable update while preserving readonly fields", () => {
@@ -1078,12 +1097,12 @@ describe("JIT.class", () => {
     );
     class Order extends OrderBase {
       confirm() {
-        this.update({ status: "confirmed" });
+        this._props.status = "confirmed";
       }
 
       assertReadonlyTyping() {
-        // @ts-expect-error readonly fields stay absent from aggregate patches
-        this.update({ id: "o_2" });
+        // @ts-expect-error identity state is readonly inside the domain surface
+        this._props.id = "o_2";
       }
     }
     const order = Order.create({ status: "draft" });
@@ -1113,7 +1132,10 @@ describe("JIT.class", () => {
 
     class User extends UserBase {}
 
-    expect(User.create({ id: "u_1", name: "Ada" }).sameIdentity(User.create({ id: "u_1", name: "Grace" }))).toBe(true);
+    const ada = User.create({ id: "u_1", name: "Ada" });
+    const grace = User.create({ id: "u_1", name: "Grace" });
+    expect(ada.id).toBe(grace.id);
+    expect(ada.equals(grace)).toBe(false);
     expect(() => UserBase.create({ id: "u_1", name: "Ada" })).toThrow(/abstract JIT class/i);
     if (Object.is(1, 2)) {
       // @ts-expect-error identity must name an existing schema field
@@ -1121,22 +1143,32 @@ describe("JIT.class", () => {
     }
   });
 
-  it("keeps aggregate events ordered and applies updates through static assignments", () => {
-    const OrderBase = JIT.ddd.aggregateRoot(
-      JIT.object({
-        id: JIT.string().readonly(),
-        status: JIT.enum(["draft", "confirmed"]),
-      }),
-      { id: "id" }
-    );
+  it("keeps aggregate events ordered and applies domain state assignments", () => {
+    const OrderConfirmed = JIT.ddd.domainEvent("order.confirmed", {
+      version: 1,
+      payload: JIT.object({}),
+    });
+    const OrderNotified = JIT.ddd.domainEvent("order.notified", {
+      version: 1,
+      payload: JIT.object({}),
+    });
+    const OrderBase = JIT.ddd
+      .aggregateRoot(
+        JIT.object({
+          id: JIT.string().readonly(),
+          status: JIT.enum(["draft", "confirmed"]),
+        }),
+        { id: "id" }
+      )
+      .events(OrderConfirmed, OrderNotified);
     class Order extends OrderBase {
       confirm() {
-        this.update({ status: "confirmed" });
-        this.raise({ type: "order.confirmed" });
+        this._props.status = "confirmed";
+        this.raise(OrderConfirmed.create({}));
       }
 
       notify() {
-        this.raise({ type: "order.notified" });
+        this.raise(OrderNotified.create({}));
       }
     }
 
@@ -1145,14 +1177,12 @@ describe("JIT.class", () => {
     order.notify();
 
     expect(order.status).toBe("confirmed");
-    expect(order.peekEvents()).toEqual([{ type: "order.confirmed" }, { type: "order.notified" }]);
-    expect(order.pullEvents()).toEqual([{ type: "order.confirmed" }, { type: "order.notified" }]);
+    expect(order.peekEvents().map((event) => event.type)).toEqual(["order.confirmed", "order.notified"]);
+    expect(order.pullEvents().map((event) => event.type)).toEqual(["order.confirmed", "order.notified"]);
     expect(order.peekEvents()).toEqual([]);
     if (Object.is(1, 2)) {
-      // @ts-expect-error domain events can only be raised from aggregate behavior
-      order.raise({ type: "external" });
-      // @ts-expect-error aggregate mutation is domain-internal
-      order.update({ status: "draft" });
+      // @ts-expect-error event emission is protected
+      order.raise(OrderConfirmed.create({}));
     }
   });
 
@@ -1166,7 +1196,9 @@ describe("JIT.class", () => {
     );
     class Order extends OrderBase {
       shipTo(city: string) {
-        this.update({ shipping: { city } });
+        if (this._props.shipping.city !== city) {
+          this._props.shipping = { ...this._props.shipping, city };
+        }
       }
     }
     const order = Order.create({ id: "o_1", shipping: { city: "Recife", country: "BR" } });
@@ -1179,28 +1211,37 @@ describe("JIT.class", () => {
   });
 
   it("commits aggregate events in order and retains them when publication fails", async () => {
-    const OrderBase = JIT.ddd.aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string() }), { id: "id" });
+    const OrderEvent = JIT.ddd.domainEvent("order.recorded", {
+      version: 1,
+      payload: JIT.object({ value: JIT.string() }),
+    });
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string(), status: JIT.string() }), { id: "id" })
+      .events(OrderEvent);
     class Order extends OrderBase {
-      record(event: unknown) {
+      record(event: JIT.Typeof<typeof OrderEvent>) {
         this.raise(event);
       }
     }
     const order = Order.create({ id: "o_1", status: "draft" });
     const published: unknown[] = [];
 
-    order.record({ type: "first" });
-    order.record({ type: "second" });
+    order.record(OrderEvent.create({ value: "first" }));
+    order.record(OrderEvent.create({ value: "second" }));
     await order.commit({
       publish: async (event) => {
         published.push(event);
       },
     });
-    expect(published).toEqual([{ type: "first" }, { type: "second" }]);
+    expect(published.map((event) => (event as { payload: { value: string } }).payload.value)).toEqual([
+      "first",
+      "second",
+    ]);
     expect(order.peekEvents()).toEqual([]);
 
-    order.record({ type: "retry" });
+    order.record(OrderEvent.create({ value: "retry" }));
     await expect(order.commit({ publish: () => Promise.reject(new Error("offline")) })).rejects.toThrow("offline");
-    expect(order.peekEvents()).toEqual([{ type: "retry" }]);
+    expect(order.peekEvents()[0]?.payload.value).toBe("retry");
   });
 
   it("preserves the exact order of typed domain-event history", () => {
@@ -1216,7 +1257,9 @@ describe("JIT.class", () => {
       version: 1,
       payload: JIT.object({ orderId: JIT.string() }),
     });
-    const OrderBase = JIT.ddd.aggregateRoot(JIT.object({ id: JIT.string().readonly() }), { id: "id" });
+    const OrderBase = JIT.ddd
+      .aggregateRoot(JIT.object({ id: JIT.string().readonly() }), { id: "id" })
+      .events(OrderCreated, ItemAdded, OrderConfirmed);
     class Order extends OrderBase {
       recordHistory() {
         this.raise(OrderCreated.create({ orderId: this.id }));
@@ -1229,11 +1272,7 @@ describe("JIT.class", () => {
     order.recordHistory();
     const events = order.peekEvents();
 
-    expect(events.map((event) => (event as { type: string }).type)).toEqual([
-      "order.created",
-      "order.item-added",
-      "order.confirmed",
-    ]);
+    expect(events.map((event) => event.type)).toEqual(["order.created", "order.item-added", "order.confirmed"]);
     expect(events[0]).toBeInstanceOf(OrderCreated);
     expect(events[1]).toBeInstanceOf(ItemAdded);
     expect(events[2]).toBeInstanceOf(OrderConfirmed);
@@ -1249,7 +1288,7 @@ describe("JIT.class", () => {
     );
     class Order extends OrderBase {
       confirm() {
-        this.update({ status: "confirmed" });
+        this._props.status = "confirmed";
       }
     }
     const order = Order.create({ id: "o_1", status: "draft", total: { amount: 120, currency: "BRL" } });
