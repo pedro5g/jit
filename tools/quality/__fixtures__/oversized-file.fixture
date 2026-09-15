@@ -1,0 +1,2 @@
+// The structural fixture intentionally contains more logical lines than the configured target.
+export const oversizedFixture = true;

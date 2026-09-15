@@ -1,0 +1,26 @@
+{
+  "workspaces": {
+    ".": {
+      "entry": [
+        "packages/jit/src/index.ts",
+        "packages/jit/src/runtime.ts",
+        "packages/jit/src/define.ts",
+        "packages/jit/src/aot/index.ts",
+        "packages/jit/src/mcp.ts",
+        "tools/quality/cli.ts",
+        "scripts/*.ts",
+        "tests/**/*.ts"
+      ],
+      "project": ["packages/jit/src/**/*.ts", "tools/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+    },
+    "apps/site": {
+      "entry": ["app/**/*.{ts,tsx}", "lib/**/*.ts", "next.config.*"],
+      "project": ["app/**/*.{ts,tsx}", "lib/**/*.ts"]
+    },
+    "packages/examples": {
+      "entry": ["runtime/**/*.ts", "compiled/**/*.ts"],
+      "project": ["**/*.ts"]
+    }
+  },
+  "ignore": ["**/__tests__/**", "**/*.test.ts", "**/.generated/**", "packages/jit-cli/**"]
+}

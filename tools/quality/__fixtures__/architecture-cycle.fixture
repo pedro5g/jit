@@ -1,0 +1,3 @@
+import "./second.fixture";
+
+// The fixture runner supplies the reverse edge when testing cycle detection.

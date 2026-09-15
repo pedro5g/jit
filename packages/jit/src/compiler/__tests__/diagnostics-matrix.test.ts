@@ -155,7 +155,7 @@ function declaredCheckKinds(): ReadonlySet<string> {
   const source = readFileSync(fileURLToPath(new URL("../../core/builder/create-builder.ts", import.meta.url)), "utf8");
   const kinds = new Set<string>();
 
-  for (const match of source.matchAll(/appendCheck\(this\.schema, \{\s*kind:\s*"([A-Za-z0-9]+)"/g)) {
+  for (const match of source.matchAll(/append(?:Singleton)?Check\(this\.schema, \{\s*kind:\s*"([A-Za-z0-9]+)"/g)) {
     kinds.add(match[1] as string);
   }
   return kinds;

@@ -414,3 +414,19 @@ and builds reusable ordering, indexing, projection, reconciliation,
 authorization and transport plans. High-level abstractions must disappear from
 AOT output: no schema walker, query interpreter, permission rule walker,
 runtime compiler, or unrelated high-level dependency may remain.
+
+## Quality Workflow
+
+1. Run `pnpm quality:context <path>` before substantial changes.
+2. A block is not complete while `pnpm quality:block` fails.
+3. Fix the current block before starting the next one.
+4. Never weaken a gate to make an implementation pass.
+5. Never increase a baseline.
+6. New public fluent operations require an API grammar contract.
+7. New emitters require code generation audit coverage.
+8. Public APIs require useful JSDoc.
+9. Do not add narrative comments when code or tests can express the behavior.
+10. Do not write tests solely to increase coverage.
+11. Inspect existing implementation patterns before creating a new abstraction.
+12. Resolve API challenge findings before treating a fluent API block as semantically complete.
+13. For every new fluent operation, answer what it repeats with, what it combines with, what it conflicts with, whether it is terminal, and whether the TypeScript surface should expose the next transition.

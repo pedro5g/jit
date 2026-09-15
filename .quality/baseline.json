@@ -1,0 +1,7018 @@
+{
+  "version": 1,
+  "metrics": {
+    "__dirname.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/access/index.ts": {
+      "logicalLoc": 234,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 49,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 9,
+      "maxNesting": 4
+    },
+    "bench/api-query/index.ts": {
+      "logicalLoc": 302,
+      "exports": 0,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 31,
+      "maxFunctionLoc": 45,
+      "maxComplexity": 30,
+      "maxNesting": 5
+    },
+    "bench/binary/compositions.ts": {
+      "logicalLoc": 58,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 7,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 4,
+      "maxNesting": 3
+    },
+    "bench/binary/index.ts": {
+      "logicalLoc": 227,
+      "exports": 0,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 37,
+      "maxFunctionLoc": 15,
+      "maxComplexity": 5,
+      "maxNesting": 3
+    },
+    "bench/binary/strings.ts": {
+      "logicalLoc": 120,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 17,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "bench/cache-key/index.ts": {
+      "logicalLoc": 74,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 8,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/classes/domain-state-layout.ts": {
+      "logicalLoc": 149,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 48,
+      "maxFunctionLoc": 15,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/classes/index.ts": {
+      "logicalLoc": 677,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 102,
+      "maxFunctionLoc": 16,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "bench/clone/array.ts": {
+      "logicalLoc": 44,
+      "exports": 1,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 1,
+      "maxFunctionLoc": 27,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/clone/collections.ts": {
+      "logicalLoc": 29,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 25,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/clone/index.ts": {
+      "logicalLoc": 8,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/clone/objects.ts": {
+      "logicalLoc": 76,
+      "exports": 1,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 1,
+      "maxFunctionLoc": 40,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/coldstart/index.ts": {
+      "logicalLoc": 64,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 3,
+      "maxFunctionLoc": 19,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/collection-state/index.ts": {
+      "logicalLoc": 347,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 66,
+      "maxFunctionLoc": 15,
+      "maxComplexity": 8,
+      "maxNesting": 3
+    },
+    "bench/cqrs-aggregate/index.ts": {
+      "logicalLoc": 207,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 23,
+      "maxFunctionLoc": 21,
+      "maxComplexity": 8,
+      "maxNesting": 3
+    },
+    "bench/cqrs-physical/index.ts": {
+      "logicalLoc": 79,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 17,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 1
+    },
+    "bench/cqrs-terminal/index.ts": {
+      "logicalLoc": 93,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 15,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 3,
+      "maxNesting": 3
+    },
+    "bench/cqrs/index.ts": {
+      "logicalLoc": 65,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 7,
+      "maxFunctionLoc": 9,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "bench/csv/index.ts": {
+      "logicalLoc": 69,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "bench/derive/index.ts": {
+      "logicalLoc": 235,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 17,
+      "maxFunctionLoc": 31,
+      "maxComplexity": 11,
+      "maxNesting": 4
+    },
+    "bench/diff/array.ts": {
+      "logicalLoc": 30,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 29,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/diff/collections.ts": {
+      "logicalLoc": 35,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 33,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/diff/index.ts": {
+      "logicalLoc": 8,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/diff/objects.ts": {
+      "logicalLoc": 46,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 36,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/distinct/index.ts": {
+      "logicalLoc": 136,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 15,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 4,
+      "maxNesting": 3
+    },
+    "bench/equal/array.ts": {
+      "logicalLoc": 27,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/equal/deep.ts": {
+      "logicalLoc": 55,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 3,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/equal/generated.ts": {
+      "logicalLoc": 80,
+      "exports": 1,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 3,
+      "maxFunctionLoc": 25,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/equal/index.ts": {
+      "logicalLoc": 16,
+      "exports": 0,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/equal/large.ts": {
+      "logicalLoc": 57,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 5,
+      "maxFunctionLoc": 19,
+      "maxComplexity": 6,
+      "maxNesting": 2
+    },
+    "bench/equal/medium.ts": {
+      "logicalLoc": 39,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 16,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/equal/small.ts": {
+      "logicalLoc": 45,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 31,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/equal/worst-case.ts": {
+      "logicalLoc": 30,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/flows/index.ts": {
+      "logicalLoc": 127,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 9,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 15,
+      "maxNesting": 3
+    },
+    "bench/index/index.ts": {
+      "logicalLoc": 103,
+      "exports": 0,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 13,
+      "maxFunctionLoc": 19,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "bench/internal/codegen-audit.ts": {
+      "logicalLoc": 252,
+      "exports": 0,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 3,
+      "maxFunctionLoc": 7,
+      "maxComplexity": 1,
+      "maxNesting": 2
+    },
+    "bench/internal/runtime-type-cold.ts": {
+      "logicalLoc": 16,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 1
+    },
+    "bench/internal/runtime-type-fusion.ts": {
+      "logicalLoc": 211,
+      "exports": 0,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 40,
+      "maxFunctionLoc": 38,
+      "maxComplexity": 5,
+      "maxNesting": 3
+    },
+    "bench/internal/source-metrics.ts": {
+      "logicalLoc": 29,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 2,
+      "maxNesting": 0
+    },
+    "bench/internal/v8-probe.ts": {
+      "logicalLoc": 19,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 2,
+      "maxNesting": 2
+    },
+    "bench/internal/v8-trace.ts": {
+      "logicalLoc": 37,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 1,
+      "maxComplexity": 1,
+      "maxNesting": 1
+    },
+    "bench/join/index.ts": {
+      "logicalLoc": 125,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 12,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 5,
+      "maxNesting": 3
+    },
+    "bench/json/index.ts": {
+      "logicalLoc": 176,
+      "exports": 0,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 23,
+      "maxFunctionLoc": 34,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "bench/lazy/index.ts": {
+      "logicalLoc": 96,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 15,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "bench/load/index.ts": {
+      "logicalLoc": 191,
+      "exports": 1,
+      "imports": 10,
+      "fanOut": 10,
+      "functions": 13,
+      "maxFunctionLoc": 86,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "bench/lookup/index.ts": {
+      "logicalLoc": 94,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 17,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 4,
+      "maxNesting": 2
+    },
+    "bench/mapper/index.ts": {
+      "logicalLoc": 4,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/mapper/scenarios.ts": {
+      "logicalLoc": 103,
+      "exports": 1,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 12,
+      "maxFunctionLoc": 57,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "bench/migration/index.ts": {
+      "logicalLoc": 59,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 4,
+      "maxFunctionLoc": 11,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "bench/ndjson/index.ts": {
+      "logicalLoc": 89,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 12,
+      "maxFunctionLoc": 16,
+      "maxComplexity": 6,
+      "maxNesting": 3
+    },
+    "bench/object-ops/generic.ts": {
+      "logicalLoc": 102,
+      "exports": 8,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 13,
+      "maxFunctionLoc": 20,
+      "maxComplexity": 10,
+      "maxNesting": 2
+    },
+    "bench/object-ops/index.ts": {
+      "logicalLoc": 6,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/object-ops/keyed.ts": {
+      "logicalLoc": 80,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 6,
+      "maxFunctionLoc": 68,
+      "maxComplexity": 4,
+      "maxNesting": 3
+    },
+    "bench/object-ops/single-object.ts": {
+      "logicalLoc": 54,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 8,
+      "maxFunctionLoc": 51,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/projection/index.ts": {
+      "logicalLoc": 87,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 12,
+      "maxFunctionLoc": 11,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "bench/query/index.ts": {
+      "logicalLoc": 4,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/query/scenarios.ts": {
+      "logicalLoc": 189,
+      "exports": 1,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 27,
+      "maxFunctionLoc": 175,
+      "maxComplexity": 11,
+      "maxNesting": 3
+    },
+    "bench/reconcile/index.ts": {
+      "logicalLoc": 143,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 31,
+      "maxFunctionLoc": 27,
+      "maxComplexity": 9,
+      "maxNesting": 3
+    },
+    "bench/report.ts": {
+      "logicalLoc": 122,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 20,
+      "maxFunctionLoc": 53,
+      "maxComplexity": 22,
+      "maxNesting": 3
+    },
+    "bench/rules/index.ts": {
+      "logicalLoc": 615,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 80,
+      "maxFunctionLoc": 26,
+      "maxComplexity": 4,
+      "maxNesting": 3
+    },
+    "bench/serialize/index.ts": {
+      "logicalLoc": 4,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/serialize/scenarios.ts": {
+      "logicalLoc": 134,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 7,
+      "maxFunctionLoc": 57,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/shared/aot.ts": {
+      "logicalLoc": 17,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 2,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 2,
+      "maxNesting": 2
+    },
+    "bench/shared/competitors.ts": {
+      "logicalLoc": 11,
+      "exports": 4,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 2,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/shared/data.ts": {
+      "logicalLoc": 105,
+      "exports": 18,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 8,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/shared/persist.ts": {
+      "logicalLoc": 82,
+      "exports": 4,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 56,
+      "maxComplexity": 8,
+      "maxNesting": 4
+    },
+    "bench/shared/scenario.ts": {
+      "logicalLoc": 50,
+      "exports": 5,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 12,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "bench/sort/index.ts": {
+      "logicalLoc": 78,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 21,
+      "maxFunctionLoc": 27,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "bench/stream/index.ts": {
+      "logicalLoc": 4,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/stream/scenarios.ts": {
+      "logicalLoc": 86,
+      "exports": 1,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 9,
+      "maxFunctionLoc": 41,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "bench/types/typeof-performance.after.ts": {
+      "logicalLoc": 26,
+      "exports": 5,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/types/typeof-performance.before.ts": {
+      "logicalLoc": 31,
+      "exports": 5,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/types/typeof-performance.fixture.ts": {
+      "logicalLoc": 150,
+      "exports": 8,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/update/array.ts": {
+      "logicalLoc": 30,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 5,
+      "maxFunctionLoc": 27,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/update/collections.ts": {
+      "logicalLoc": 36,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 5,
+      "maxFunctionLoc": 33,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/update/index.ts": {
+      "logicalLoc": 10,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/update/mutations.ts": {
+      "logicalLoc": 127,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 18,
+      "maxFunctionLoc": 137,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "bench/update/objects.ts": {
+      "logicalLoc": 50,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 9,
+      "maxFunctionLoc": 39,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/validate/index.ts": {
+      "logicalLoc": 5,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "bench/validate/scenarios.ts": {
+      "logicalLoc": 419,
+      "exports": 2,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 30,
+      "maxFunctionLoc": 266,
+      "maxComplexity": 29,
+      "maxNesting": 3
+    },
+    "bench/validate/typia-gen/user.ts": {
+      "logicalLoc": 1105,
+      "exports": 18,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 157,
+      "maxFunctionLoc": 127,
+      "maxComplexity": 69,
+      "maxNesting": 2
+    },
+    "bench/validate/typia-src/user.ts": {
+      "logicalLoc": 32,
+      "exports": 18,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "commitlint.config.ts": {
+      "logicalLoc": 7,
+      "exports": 0,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/examples/__tests__/examples.test.ts": {
+      "logicalLoc": 70,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 5,
+      "maxFunctionLoc": 73,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/examples/compiled/catalog.jit.ts": {
+      "logicalLoc": 55,
+      "exports": 9,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 3,
+      "maxFunctionLoc": 1,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/examples/compiled/index.ts": {
+      "logicalLoc": 47,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 8,
+      "maxFunctionLoc": 43,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "packages/examples/jit.config.ts": {
+      "logicalLoc": 8,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/examples/runtime/index.ts": {
+      "logicalLoc": 112,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 14,
+      "maxFunctionLoc": 107,
+      "maxComplexity": 6,
+      "maxNesting": 1
+    },
+    "packages/examples/runtime/schemas.ts": {
+      "logicalLoc": 29,
+      "exports": 4,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/examples/shared/data.ts": {
+      "logicalLoc": 110,
+      "exports": 6,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/examples/shared/socket.ts": {
+      "logicalLoc": 73,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 15,
+      "maxFunctionLoc": 36,
+      "maxComplexity": 6,
+      "maxNesting": 2
+    },
+    "packages/examples/vitest.config.ts": {
+      "logicalLoc": 27,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/__tests__/architecture.test.ts": {
+      "logicalLoc": 40,
+      "exports": 0,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 8,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 4,
+      "maxNesting": 3
+    },
+    "packages/jit/src/__tests__/cli.test.ts": {
+      "logicalLoc": 262,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 23,
+      "maxFunctionLoc": 318,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/__tests__/entrypoints.test.ts": {
+      "logicalLoc": 630,
+      "exports": 0,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 54,
+      "maxFunctionLoc": 637,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "packages/jit/src/__tests__/mcp.test.ts": {
+      "logicalLoc": 392,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 30,
+      "maxFunctionLoc": 389,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/aot/__tests__/aot.test.ts": {
+      "logicalLoc": 2801,
+      "exports": 0,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 336,
+      "maxFunctionLoc": 3055,
+      "maxComplexity": 10,
+      "maxNesting": 1
+    },
+    "packages/jit/src/aot/__tests__/discover.test.ts": {
+      "logicalLoc": 379,
+      "exports": 0,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 34,
+      "maxFunctionLoc": 199,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/aot/__tests__/serialize-callback.test.ts": {
+      "logicalLoc": 35,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 12,
+      "maxFunctionLoc": 43,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/aot/__tests__/treeshake.test.ts": {
+      "logicalLoc": 547,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 50,
+      "maxFunctionLoc": 672,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/aot/artifact-types.ts": {
+      "logicalLoc": 434,
+      "exports": 20,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 46,
+      "maxFunctionLoc": 52,
+      "maxComplexity": 28,
+      "maxNesting": 5
+    },
+    "packages/jit/src/aot/classify.ts": {
+      "logicalLoc": 43,
+      "exports": 6,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 5,
+      "maxFunctionLoc": 16,
+      "maxComplexity": 10,
+      "maxNesting": 4
+    },
+    "packages/jit/src/aot/discover.ts": {
+      "logicalLoc": 290,
+      "exports": 10,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 22,
+      "maxFunctionLoc": 60,
+      "maxComplexity": 12,
+      "maxNesting": 5
+    },
+    "packages/jit/src/aot/emit-type.ts": {
+      "logicalLoc": 214,
+      "exports": 3,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 20,
+      "maxFunctionLoc": 111,
+      "maxComplexity": 49,
+      "maxNesting": 2
+    },
+    "packages/jit/src/aot/generate.ts": {
+      "logicalLoc": 2871,
+      "exports": 5,
+      "imports": 53,
+      "fanOut": 53,
+      "functions": 191,
+      "maxFunctionLoc": 2773,
+      "maxComplexity": 613,
+      "maxNesting": 7
+    },
+    "packages/jit/src/aot/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/aot/serialize-callback.ts": {
+      "logicalLoc": 288,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 11,
+      "maxFunctionLoc": 94,
+      "maxComplexity": 45,
+      "maxNesting": 8
+    },
+    "packages/jit/src/classes/effective-schema.ts": {
+      "logicalLoc": 405,
+      "exports": 16,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 28,
+      "maxFunctionLoc": 124,
+      "maxComplexity": 20,
+      "maxNesting": 3
+    },
+    "packages/jit/src/classes/member-descriptors.ts": {
+      "logicalLoc": 363,
+      "exports": 34,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 34,
+      "maxFunctionLoc": 76,
+      "maxComplexity": 36,
+      "maxNesting": 5
+    },
+    "packages/jit/src/classes/members.ts": {
+      "logicalLoc": 35,
+      "exports": 4,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 6,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/classes/override.ts": {
+      "logicalLoc": 18,
+      "exports": 5,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 6,
+      "maxFunctionLoc": 6,
+      "maxComplexity": 3,
+      "maxNesting": 0
+    },
+    "packages/jit/src/cli.ts": {
+      "logicalLoc": 454,
+      "exports": 4,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 45,
+      "maxFunctionLoc": 72,
+      "maxComplexity": 16,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/__tests__/binary-rowset.test.ts": {
+      "logicalLoc": 433,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 45,
+      "maxFunctionLoc": 485,
+      "maxComplexity": 5,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/clone.test.ts": {
+      "logicalLoc": 192,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 15,
+      "maxFunctionLoc": 224,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/codec.test.ts": {
+      "logicalLoc": 160,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 34,
+      "maxFunctionLoc": 197,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/coerce.test.ts": {
+      "logicalLoc": 87,
+      "exports": 0,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 11,
+      "maxFunctionLoc": 99,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/compiled-ops.test.ts": {
+      "logicalLoc": 168,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 28,
+      "maxFunctionLoc": 153,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/compiler.test.ts": {
+      "logicalLoc": 301,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 28,
+      "maxFunctionLoc": 344,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/__tests__/diagnostics-matrix.test.ts": {
+      "logicalLoc": 339,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 32,
+      "maxFunctionLoc": 239,
+      "maxComplexity": 12,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/__tests__/diff.test.ts": {
+      "logicalLoc": 174,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 13,
+      "maxFunctionLoc": 204,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/execution-optimize.test.ts": {
+      "logicalLoc": 81,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 15,
+      "maxFunctionLoc": 89,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/__tests__/formats.test.ts": {
+      "logicalLoc": 109,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 13,
+      "maxFunctionLoc": 111,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/from-json-schema.test.ts": {
+      "logicalLoc": 152,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 20,
+      "maxFunctionLoc": 182,
+      "maxComplexity": 7,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/generated-source-snapshots.test.ts": {
+      "logicalLoc": 352,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 53,
+      "maxFunctionLoc": 393,
+      "maxComplexity": 9,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/hash.test.ts": {
+      "logicalLoc": 65,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 7,
+      "maxFunctionLoc": 77,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/json-parse.test.ts": {
+      "logicalLoc": 117,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 17,
+      "maxFunctionLoc": 124,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/__tests__/json-schema.test.ts": {
+      "logicalLoc": 188,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 33,
+      "maxFunctionLoc": 227,
+      "maxComplexity": 6,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/lazy-query.test.ts": {
+      "logicalLoc": 178,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 26,
+      "maxFunctionLoc": 192,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/mapper.test.ts": {
+      "logicalLoc": 215,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 33,
+      "maxFunctionLoc": 244,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/mock.test.ts": {
+      "logicalLoc": 74,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 12,
+      "maxFunctionLoc": 92,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/mutation-plan.test.ts": {
+      "logicalLoc": 245,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 22,
+      "maxFunctionLoc": 257,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/object-ops.test.ts": {
+      "logicalLoc": 223,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 16,
+      "maxFunctionLoc": 241,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/__tests__/openapi-contract.test.ts": {
+      "logicalLoc": 112,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 19,
+      "maxFunctionLoc": 108,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/__tests__/parse-async.test.ts": {
+      "logicalLoc": 62,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 8,
+      "maxFunctionLoc": 78,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/physical-query.test.ts": {
+      "logicalLoc": 195,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 32,
+      "maxFunctionLoc": 226,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/pipeline.test.ts": {
+      "logicalLoc": 30,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 8,
+      "maxFunctionLoc": 32,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/quality-codegen.test.ts": {
+      "logicalLoc": 25,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 6,
+      "maxFunctionLoc": 26,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/query-aggregate.test.ts": {
+      "logicalLoc": 135,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 19,
+      "maxFunctionLoc": 151,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/query-boundary.test.ts": {
+      "logicalLoc": 74,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 6,
+      "maxFunctionLoc": 78,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/query-cost.test.ts": {
+      "logicalLoc": 77,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 9,
+      "maxFunctionLoc": 54,
+      "maxComplexity": 6,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/query-ir.test.ts": {
+      "logicalLoc": 161,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 17,
+      "maxFunctionLoc": 165,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/query.test.ts": {
+      "logicalLoc": 629,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 56,
+      "maxFunctionLoc": 652,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/recursive-schema.test.ts": {
+      "logicalLoc": 155,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 23,
+      "maxFunctionLoc": 188,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/security.test.ts": {
+      "logicalLoc": 166,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 19,
+      "maxFunctionLoc": 194,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/serialize.test.ts": {
+      "logicalLoc": 209,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 24,
+      "maxFunctionLoc": 242,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/stream.test.ts": {
+      "logicalLoc": 158,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 28,
+      "maxFunctionLoc": 210,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/update.test.ts": {
+      "logicalLoc": 393,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 40,
+      "maxFunctionLoc": 456,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/__tests__/validate.test.ts": {
+      "logicalLoc": 876,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 83,
+      "maxFunctionLoc": 1025,
+      "maxComplexity": 45,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/__tests__/validation-helper.ts": {
+      "logicalLoc": 14,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 1,
+      "maxFunctionLoc": 11,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/__tests__/watch.test.ts": {
+      "logicalLoc": 169,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 15,
+      "maxFunctionLoc": 177,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/access-path.ts": {
+      "logicalLoc": 175,
+      "exports": 7,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 17,
+      "maxFunctionLoc": 50,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/access.ts": {
+      "logicalLoc": 430,
+      "exports": 20,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 76,
+      "maxFunctionLoc": 74,
+      "maxComplexity": 16,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/aggregate-mutation.ts": {
+      "logicalLoc": 62,
+      "exports": 4,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 5,
+      "maxFunctionLoc": 25,
+      "maxComplexity": 9,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/api-authorization.ts": {
+      "logicalLoc": 103,
+      "exports": 3,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 7,
+      "maxFunctionLoc": 35,
+      "maxComplexity": 10,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/assertion.ts": {
+      "logicalLoc": 112,
+      "exports": 9,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 15,
+      "maxFunctionLoc": 31,
+      "maxComplexity": 7,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/binary-rowset.ts": {
+      "logicalLoc": 1808,
+      "exports": 25,
+      "imports": 10,
+      "fanOut": 10,
+      "functions": 146,
+      "maxFunctionLoc": 146,
+      "maxComplexity": 39,
+      "maxNesting": 4
+    },
+    "packages/jit/src/compiler/cache-key.ts": {
+      "logicalLoc": 198,
+      "exports": 7,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 30,
+      "maxFunctionLoc": 33,
+      "maxComplexity": 8,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/canonical.ts": {
+      "logicalLoc": 83,
+      "exports": 2,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 11,
+      "maxFunctionLoc": 47,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/change-layout.ts": {
+      "logicalLoc": 42,
+      "exports": 7,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 7,
+      "maxFunctionLoc": 15,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/changed.ts": {
+      "logicalLoc": 123,
+      "exports": 9,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 21,
+      "maxFunctionLoc": 21,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/clone.ts": {
+      "logicalLoc": 56,
+      "exports": 5,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 7,
+      "maxFunctionLoc": 23,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/clone/build-clone-ir.ts": {
+      "logicalLoc": 102,
+      "exports": 4,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 14,
+      "maxFunctionLoc": 20,
+      "maxComplexity": 8,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/clone/emit-clone.ts": {
+      "logicalLoc": 440,
+      "exports": 4,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 32,
+      "maxFunctionLoc": 48,
+      "maxComplexity": 16,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/clone/index.ts": {
+      "logicalLoc": 2,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/codec.ts": {
+      "logicalLoc": 37,
+      "exports": 4,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 6,
+      "maxFunctionLoc": 24,
+      "maxComplexity": 2,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/codec/emit-codec.ts": {
+      "logicalLoc": 990,
+      "exports": 3,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 89,
+      "maxFunctionLoc": 213,
+      "maxComplexity": 32,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/csv.ts": {
+      "logicalLoc": 415,
+      "exports": 11,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 58,
+      "maxFunctionLoc": 51,
+      "maxComplexity": 16,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/defaults.ts": {
+      "logicalLoc": 139,
+      "exports": 3,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 14,
+      "maxFunctionLoc": 34,
+      "maxComplexity": 14,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/derive.ts": {
+      "logicalLoc": 165,
+      "exports": 7,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 24,
+      "maxFunctionLoc": 56,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/diff.ts": {
+      "logicalLoc": 66,
+      "exports": 7,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 8,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/diff/build-diff-ir.ts": {
+      "logicalLoc": 103,
+      "exports": 4,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 14,
+      "maxFunctionLoc": 20,
+      "maxComplexity": 8,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/diff/emit-diff.ts": {
+      "logicalLoc": 447,
+      "exports": 2,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 64,
+      "maxFunctionLoc": 50,
+      "maxComplexity": 15,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/diff/index.ts": {
+      "logicalLoc": 2,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/distinct.ts": {
+      "logicalLoc": 94,
+      "exports": 6,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 6,
+      "maxFunctionLoc": 53,
+      "maxComplexity": 8,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/emitter/__tests__/emitter.test.ts": {
+      "logicalLoc": 165,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 27,
+      "maxFunctionLoc": 213,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/emitter/code-writer.ts": {
+      "logicalLoc": 15,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 4,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/emitter/emit-equal.ts": {
+      "logicalLoc": 30,
+      "exports": 2,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 5,
+      "maxFunctionLoc": 13,
+      "maxComplexity": 4,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/emitter/emit-expr.ts": {
+      "logicalLoc": 71,
+      "exports": 2,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 38,
+      "maxComplexity": 17,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/emitter/emit-node.ts": {
+      "logicalLoc": 231,
+      "exports": 2,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 28,
+      "maxFunctionLoc": 83,
+      "maxComplexity": 26,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/emitter/emit-query.ts": {
+      "logicalLoc": 13,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 3,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/emitter/emit-state.ts": {
+      "logicalLoc": 14,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 3,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/equal.ts": {
+      "logicalLoc": 69,
+      "exports": 7,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 8,
+      "maxFunctionLoc": 26,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/execution-lower.ts": {
+      "logicalLoc": 318,
+      "exports": 3,
+      "imports": 16,
+      "fanOut": 16,
+      "functions": 16,
+      "maxFunctionLoc": 298,
+      "maxComplexity": 56,
+      "maxNesting": 4
+    },
+    "packages/jit/src/compiler/execution-optimize.ts": {
+      "logicalLoc": 207,
+      "exports": 9,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 19,
+      "maxFunctionLoc": 42,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/execution-plan.ts": {
+      "logicalLoc": 174,
+      "exports": 23,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/format.ts": {
+      "logicalLoc": 62,
+      "exports": 3,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 5,
+      "maxFunctionLoc": 51,
+      "maxComplexity": 9,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/hash.ts": {
+      "logicalLoc": 192,
+      "exports": 6,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 12,
+      "maxFunctionLoc": 113,
+      "maxComplexity": 35,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/index.ts": {
+      "logicalLoc": 68,
+      "exports": 65,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/indexing.ts": {
+      "logicalLoc": 168,
+      "exports": 12,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 23,
+      "maxFunctionLoc": 45,
+      "maxComplexity": 6,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/ir/builders/build-equal-ir.ts": {
+      "logicalLoc": 502,
+      "exports": 1,
+      "imports": 11,
+      "fanOut": 11,
+      "functions": 21,
+      "maxFunctionLoc": 95,
+      "maxComplexity": 35,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/builders/build-query-ir.ts": {
+      "logicalLoc": 596,
+      "exports": 2,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 28,
+      "maxFunctionLoc": 93,
+      "maxComplexity": 22,
+      "maxNesting": 5
+    },
+    "packages/jit/src/compiler/ir/ir.ts": {
+      "logicalLoc": 271,
+      "exports": 36,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 33,
+      "maxFunctionLoc": 32,
+      "maxComplexity": 17,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/ir/optimizer/__tests__/optimizer.test.ts": {
+      "logicalLoc": 62,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 10,
+      "maxFunctionLoc": 70,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/ir/optimizer/__tests__/passes.test.ts": {
+      "logicalLoc": 151,
+      "exports": 0,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 20,
+      "maxFunctionLoc": 168,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/ir/optimizer/cost/expr-cost.ts": {
+      "logicalLoc": 29,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 28,
+      "maxComplexity": 15,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/ir/optimizer/cost/optimize-cost.ts": {
+      "logicalLoc": 108,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 9,
+      "maxFunctionLoc": 44,
+      "maxComplexity": 17,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/optimize-ir.ts": {
+      "logicalLoc": 30,
+      "exports": 6,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 5,
+      "maxFunctionLoc": 19,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/dedupe-loads.ts": {
+      "logicalLoc": 60,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 4,
+      "maxFunctionLoc": 44,
+      "maxComplexity": 13,
+      "maxNesting": 4
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/eliminate-dead.ts": {
+      "logicalLoc": 31,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 3,
+      "maxFunctionLoc": 30,
+      "maxComplexity": 10,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/flatten-blocks.ts": {
+      "logicalLoc": 15,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/hoist-array-elements.ts": {
+      "logicalLoc": 52,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 5,
+      "maxFunctionLoc": 21,
+      "maxComplexity": 7,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/hoist-loads.ts": {
+      "logicalLoc": 92,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 8,
+      "maxFunctionLoc": 35,
+      "maxComplexity": 9,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/inline-vars.ts": {
+      "logicalLoc": 201,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 11,
+      "maxFunctionLoc": 65,
+      "maxComplexity": 21,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/loop-fusion.ts": {
+      "logicalLoc": 96,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 8,
+      "maxFunctionLoc": 29,
+      "maxComplexity": 17,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/loop-hoist.ts": {
+      "logicalLoc": 94,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 10,
+      "maxFunctionLoc": 44,
+      "maxComplexity": 18,
+      "maxNesting": 4
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/loop-simplify.ts": {
+      "logicalLoc": 32,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 40,
+      "maxComplexity": 15,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/normalize-logic.ts": {
+      "logicalLoc": 129,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 12,
+      "maxFunctionLoc": 32,
+      "maxComplexity": 15,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/reorder-compares.ts": {
+      "logicalLoc": 105,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 9,
+      "maxFunctionLoc": 45,
+      "maxComplexity": 17,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ir/optimizer/passes/reorder-conditions.ts": {
+      "logicalLoc": 15,
+      "exports": 1,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 7,
+      "maxFunctionLoc": 11,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/ir/scope.ts": {
+      "logicalLoc": 17,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 1,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/join.ts": {
+      "logicalLoc": 329,
+      "exports": 10,
+      "imports": 14,
+      "fanOut": 14,
+      "functions": 28,
+      "maxFunctionLoc": 68,
+      "maxComplexity": 20,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/json-chunks.ts": {
+      "logicalLoc": 63,
+      "exports": 4,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 4,
+      "maxFunctionLoc": 31,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/json-parse.ts": {
+      "logicalLoc": 165,
+      "exports": 3,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 14,
+      "maxFunctionLoc": 105,
+      "maxComplexity": 49,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/json-schema/dialects.ts": {
+      "logicalLoc": 89,
+      "exports": 3,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 1,
+      "maxFunctionLoc": 13,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/json-schema/from-json-schema.ts": {
+      "logicalLoc": 290,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 25,
+      "maxFunctionLoc": 52,
+      "maxComplexity": 13,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/json-schema/index.ts": {
+      "logicalLoc": 14,
+      "exports": 5,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/json-schema/infer.ts": {
+      "logicalLoc": 67,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 2,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/json-schema/to-json-schema.ts": {
+      "logicalLoc": 538,
+      "exports": 1,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 36,
+      "maxFunctionLoc": 98,
+      "maxComplexity": 42,
+      "maxNesting": 4
+    },
+    "packages/jit/src/compiler/json-schema/types.ts": {
+      "logicalLoc": 38,
+      "exports": 8,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 5,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/lazy-query.ts": {
+      "logicalLoc": 804,
+      "exports": 18,
+      "imports": 15,
+      "fanOut": 15,
+      "functions": 66,
+      "maxFunctionLoc": 115,
+      "maxComplexity": 25,
+      "maxNesting": 8
+    },
+    "packages/jit/src/compiler/lookup.ts": {
+      "logicalLoc": 84,
+      "exports": 6,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 10,
+      "maxFunctionLoc": 24,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/mapper.ts": {
+      "logicalLoc": 194,
+      "exports": 4,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 20,
+      "maxFunctionLoc": 44,
+      "maxComplexity": 12,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/mapper/build-mapper-ir.ts": {
+      "logicalLoc": 130,
+      "exports": 2,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 5,
+      "maxFunctionLoc": 74,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/mapper/build-mapper-plan.ts": {
+      "logicalLoc": 205,
+      "exports": 5,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 14,
+      "maxFunctionLoc": 68,
+      "maxComplexity": 23,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/mask.ts": {
+      "logicalLoc": 61,
+      "exports": 3,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 9,
+      "maxFunctionLoc": 34,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/match.ts": {
+      "logicalLoc": 130,
+      "exports": 5,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 20,
+      "maxFunctionLoc": 40,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/migration.ts": {
+      "logicalLoc": 170,
+      "exports": 8,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 22,
+      "maxFunctionLoc": 42,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/mock.ts": {
+      "logicalLoc": 274,
+      "exports": 5,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 29,
+      "maxFunctionLoc": 108,
+      "maxComplexity": 49,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/mutation/collection-mutation.ts": {
+      "logicalLoc": 644,
+      "exports": 9,
+      "imports": 12,
+      "fanOut": 12,
+      "functions": 47,
+      "maxFunctionLoc": 60,
+      "maxComplexity": 21,
+      "maxNesting": 5
+    },
+    "packages/jit/src/compiler/mutation/emit-mutation.ts": {
+      "logicalLoc": 152,
+      "exports": 2,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 17,
+      "maxFunctionLoc": 33,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/mutation/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/mutation/mutation-plan.ts": {
+      "logicalLoc": 180,
+      "exports": 11,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 11,
+      "maxFunctionLoc": 43,
+      "maxComplexity": 12,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/ndjson.ts": {
+      "logicalLoc": 249,
+      "exports": 11,
+      "imports": 13,
+      "fanOut": 13,
+      "functions": 34,
+      "maxFunctionLoc": 47,
+      "maxComplexity": 8,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/object-ops.ts": {
+      "logicalLoc": 389,
+      "exports": 28,
+      "imports": 10,
+      "fanOut": 10,
+      "functions": 60,
+      "maxFunctionLoc": 44,
+      "maxComplexity": 6,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/ordering.ts": {
+      "logicalLoc": 110,
+      "exports": 7,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 8,
+      "maxFunctionLoc": 62,
+      "maxComplexity": 13,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/patch.ts": {
+      "logicalLoc": 235,
+      "exports": 6,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 26,
+      "maxFunctionLoc": 51,
+      "maxComplexity": 15,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/physical-query.ts": {
+      "logicalLoc": 123,
+      "exports": 7,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 5,
+      "maxFunctionLoc": 40,
+      "maxComplexity": 8,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/pipeline.ts": {
+      "logicalLoc": 122,
+      "exports": 5,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 13,
+      "maxFunctionLoc": 40,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/project.ts": {
+      "logicalLoc": 63,
+      "exports": 4,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 9,
+      "maxFunctionLoc": 16,
+      "maxComplexity": 4,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/projection.ts": {
+      "logicalLoc": 92,
+      "exports": 6,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 6,
+      "maxFunctionLoc": 64,
+      "maxComplexity": 12,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/query-boundary.ts": {
+      "logicalLoc": 112,
+      "exports": 10,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 4,
+      "maxFunctionLoc": 45,
+      "maxComplexity": 8,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/query-cost.ts": {
+      "logicalLoc": 92,
+      "exports": 8,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 7,
+      "maxFunctionLoc": 23,
+      "maxComplexity": 4,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/query.ts": {
+      "logicalLoc": 475,
+      "exports": 9,
+      "imports": 15,
+      "fanOut": 15,
+      "functions": 25,
+      "maxFunctionLoc": 101,
+      "maxComplexity": 45,
+      "maxNesting": 5
+    },
+    "packages/jit/src/compiler/reconcile.ts": {
+      "logicalLoc": 207,
+      "exports": 9,
+      "imports": 10,
+      "fanOut": 10,
+      "functions": 22,
+      "maxFunctionLoc": 80,
+      "maxComplexity": 18,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/resolvers/__tests__/resolvers.test.ts": {
+      "logicalLoc": 66,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 14,
+      "maxFunctionLoc": 80,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/resolvers/resolve-hints.ts": {
+      "logicalLoc": 21,
+      "exports": 4,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/resolvers/resolve-wrappers.ts": {
+      "logicalLoc": 67,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 64,
+      "maxComplexity": 14,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/row-keys.ts": {
+      "logicalLoc": 99,
+      "exports": 8,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 10,
+      "maxFunctionLoc": 37,
+      "maxComplexity": 21,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/rules.ts": {
+      "logicalLoc": 936,
+      "exports": 27,
+      "imports": 10,
+      "fanOut": 10,
+      "functions": 97,
+      "maxFunctionLoc": 106,
+      "maxComplexity": 31,
+      "maxNesting": 4
+    },
+    "packages/jit/src/compiler/runtime-type/resolve-runtime-type.ts": {
+      "logicalLoc": 43,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 44,
+      "maxComplexity": 16,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/runtime-type/runtime-type-node.ts": {
+      "logicalLoc": 18,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/sanitize.ts": {
+      "logicalLoc": 173,
+      "exports": 8,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 13,
+      "maxFunctionLoc": 34,
+      "maxComplexity": 15,
+      "maxNesting": 5
+    },
+    "packages/jit/src/compiler/schema-nodes.ts": {
+      "logicalLoc": 222,
+      "exports": 18,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 14,
+      "maxFunctionLoc": 62,
+      "maxComplexity": 19,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/schema-recursion.ts": {
+      "logicalLoc": 65,
+      "exports": 3,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 5,
+      "maxFunctionLoc": 32,
+      "maxComplexity": 20,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/security/emit-scrub.ts": {
+      "logicalLoc": 218,
+      "exports": 5,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 25,
+      "maxFunctionLoc": 79,
+      "maxComplexity": 13,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/serialize.ts": {
+      "logicalLoc": 39,
+      "exports": 4,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 6,
+      "maxFunctionLoc": 19,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/serialize/emit-serialize.ts": {
+      "logicalLoc": 397,
+      "exports": 2,
+      "imports": 10,
+      "fanOut": 10,
+      "functions": 36,
+      "maxFunctionLoc": 112,
+      "maxComplexity": 24,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/sort.ts": {
+      "logicalLoc": 55,
+      "exports": 3,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 11,
+      "maxFunctionLoc": 26,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/source/__tests__/source.test.ts": {
+      "logicalLoc": 49,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 15,
+      "maxFunctionLoc": 55,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/source/access.ts": {
+      "logicalLoc": 7,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/source/format-mask.ts": {
+      "logicalLoc": 29,
+      "exports": 3,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 3,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 4,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/source/guard.ts": {
+      "logicalLoc": 172,
+      "exports": 2,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 19,
+      "maxFunctionLoc": 76,
+      "maxComplexity": 38,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/source/literal.ts": {
+      "logicalLoc": 17,
+      "exports": 2,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 2,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/source/path.ts": {
+      "logicalLoc": 6,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 1,
+      "maxFunctionLoc": 7,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/compiler/source/query-condition.ts": {
+      "logicalLoc": 28,
+      "exports": 3,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 4,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 6,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/strategy/__tests__/strategy.test.ts": {
+      "logicalLoc": 42,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 9,
+      "maxFunctionLoc": 55,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/strategy/resolve-strategy.ts": {
+      "logicalLoc": 38,
+      "exports": 3,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 14,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/stream.ts": {
+      "logicalLoc": 320,
+      "exports": 5,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 41,
+      "maxFunctionLoc": 90,
+      "maxComplexity": 23,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/update.ts": {
+      "logicalLoc": 75,
+      "exports": 4,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 6,
+      "maxFunctionLoc": 24,
+      "maxComplexity": 10,
+      "maxNesting": 3
+    },
+    "packages/jit/src/compiler/update/build-update-ir.ts": {
+      "logicalLoc": 93,
+      "exports": 4,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 12,
+      "maxFunctionLoc": 23,
+      "maxComplexity": 10,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/update/emit-update.ts": {
+      "logicalLoc": 422,
+      "exports": 2,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 59,
+      "maxFunctionLoc": 48,
+      "maxComplexity": 13,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/update/index.ts": {
+      "logicalLoc": 2,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/compiler/validate.ts": {
+      "logicalLoc": 247,
+      "exports": 14,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 34,
+      "maxFunctionLoc": 78,
+      "maxComplexity": 25,
+      "maxNesting": 2
+    },
+    "packages/jit/src/compiler/validate/emit-validate.ts": {
+      "logicalLoc": 2360,
+      "exports": 7,
+      "imports": 11,
+      "fanOut": 11,
+      "functions": 182,
+      "maxFunctionLoc": 269,
+      "maxComplexity": 59,
+      "maxNesting": 4
+    },
+    "packages/jit/src/compiler/watch.ts": {
+      "logicalLoc": 206,
+      "exports": 5,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 22,
+      "maxFunctionLoc": 74,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "packages/jit/src/core/ast/__tests__/pipeline-ast.test.ts": {
+      "logicalLoc": 79,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 14,
+      "maxFunctionLoc": 91,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ast/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ast/query.ast.ts": {
+      "logicalLoc": 174,
+      "exports": 45,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ast/transform.ast.ts": {
+      "logicalLoc": 10,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ast/update.ast.ts": {
+      "logicalLoc": 7,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/__tests__/input.test.ts": {
+      "logicalLoc": 61,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 4,
+      "maxFunctionLoc": 65,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/__tests__/type-schema.test.ts": {
+      "logicalLoc": 70,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 6,
+      "maxFunctionLoc": 65,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/__tests__/typeof-display.fixture.ts": {
+      "logicalLoc": 28,
+      "exports": 11,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/__tests__/typeof-display.test.ts": {
+      "logicalLoc": 49,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 4,
+      "maxFunctionLoc": 29,
+      "maxComplexity": 4,
+      "maxNesting": 2
+    },
+    "packages/jit/src/core/ats/__tests__/typeof.test.ts": {
+      "logicalLoc": 67,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 8,
+      "maxFunctionLoc": 62,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/create-schema.ts": {
+      "logicalLoc": 15,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 1,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/async.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/binary.def.ts": {
+      "logicalLoc": 5,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/brand.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/checks/array.check.ts": {
+      "logicalLoc": 7,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/checks/check.ts": {
+      "logicalLoc": 4,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/checks/index.ts": {
+      "logicalLoc": 5,
+      "exports": 5,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/checks/number.check.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/checks/object.check.ts": {
+      "logicalLoc": 2,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/checks/string.check.ts": {
+      "logicalLoc": 12,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/coerce.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/constructor.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/default-value.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/discriminator.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/element.def.ts": {
+      "logicalLoc": 4,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/enum-value.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/error.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/getter.def.ts": {
+      "logicalLoc": 4,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/inner-type.def.ts": {
+      "logicalLoc": 4,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/key-value.def.ts": {
+      "logicalLoc": 5,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/literal-value.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/options.def.ts": {
+      "logicalLoc": 4,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/path.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/predicate.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/props.def.ts": {
+      "logicalLoc": 4,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/refine.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/transform.def.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/defs/common/tuple.def.ts": {
+      "logicalLoc": 5,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/index.ts": {
+      "logicalLoc": 7,
+      "exports": 7,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/input.ts": {
+      "logicalLoc": 136,
+      "exports": 6,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/representations.ts": {
+      "logicalLoc": 54,
+      "exports": 3,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/schema-annotation.ts": {
+      "logicalLoc": 5,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/type-name.ts": {
+      "logicalLoc": 56,
+      "exports": 4,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/type-schema.ts": {
+      "logicalLoc": 702,
+      "exports": 134,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 24,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/ats/typeof.ts": {
+      "logicalLoc": 132,
+      "exports": 16,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/builder/__tests__/builder-chain.test.ts": {
+      "logicalLoc": 193,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 28,
+      "maxFunctionLoc": 234,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/builder/__tests__/static-defaults.test.ts": {
+      "logicalLoc": 41,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 7,
+      "maxFunctionLoc": 62,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/builder/check-state.ts": {
+      "logicalLoc": 10,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/builder/checks.ts": {
+      "logicalLoc": 18,
+      "exports": 2,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 3,
+      "maxFunctionLoc": 9,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/core/builder/create-builder.ts": {
+      "logicalLoc": 793,
+      "exports": 2,
+      "imports": 11,
+      "fanOut": 11,
+      "functions": 157,
+      "maxFunctionLoc": 27,
+      "maxComplexity": 9,
+      "maxNesting": 3
+    },
+    "packages/jit/src/core/builder/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/builder/types.ts": {
+      "logicalLoc": 729,
+      "exports": 23,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 152,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/builder/unwrap-schema.ts": {
+      "logicalLoc": 5,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 1,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/core/factory-policy.ts": {
+      "logicalLoc": 39,
+      "exports": 6,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 3,
+      "maxFunctionLoc": 17,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/core/hints/__tests__/hints.test.ts": {
+      "logicalLoc": 75,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 14,
+      "maxFunctionLoc": 92,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/clone-hint.ts": {
+      "logicalLoc": 5,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/collection-hint.ts": {
+      "logicalLoc": 11,
+      "exports": 1,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/compare-hint.ts": {
+      "logicalLoc": 10,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/compile-hints.ts": {
+      "logicalLoc": 19,
+      "exports": 1,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/diff-hint.ts": {
+      "logicalLoc": 9,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/entity-hint.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/hash-hint.ts": {
+      "logicalLoc": 8,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/hint-merge.ts": {
+      "logicalLoc": 52,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 3,
+      "maxFunctionLoc": 25,
+      "maxComplexity": 16,
+      "maxNesting": 1
+    },
+    "packages/jit/src/core/hints/hint-resolver.ts": {
+      "logicalLoc": 40,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 2,
+      "maxFunctionLoc": 21,
+      "maxComplexity": 13,
+      "maxNesting": 1
+    },
+    "packages/jit/src/core/hints/hint-schema.ts": {
+      "logicalLoc": 25,
+      "exports": 2,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 13,
+      "maxComplexity": 2,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/hint-types.ts": {
+      "logicalLoc": 28,
+      "exports": 5,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/index.ts": {
+      "logicalLoc": 15,
+      "exports": 15,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/metadata.ts": {
+      "logicalLoc": 8,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/order-hint.ts": {
+      "logicalLoc": 18,
+      "exports": 6,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/serialize-hint.ts": {
+      "logicalLoc": 5,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/hints/shared.ts": {
+      "logicalLoc": 14,
+      "exports": 10,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 7,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/core/host.ts": {
+      "logicalLoc": 112,
+      "exports": 21,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 3,
+      "maxFunctionLoc": 4,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/define.ts": {
+      "logicalLoc": 2795,
+      "exports": 10,
+      "imports": 65,
+      "fanOut": 65,
+      "functions": 316,
+      "maxFunctionLoc": 274,
+      "maxComplexity": 71,
+      "maxNesting": 8
+    },
+    "packages/jit/src/errors/__tests__/errors.test.ts": {
+      "logicalLoc": 101,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 7,
+      "maxFunctionLoc": 111,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/errors/assertion-error.ts": {
+      "logicalLoc": 22,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 1,
+      "maxFunctionLoc": 7,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/errors/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/errors/jit-error.ts": {
+      "logicalLoc": 64,
+      "exports": 4,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/errors/validation-error.ts": {
+      "logicalLoc": 29,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 11,
+      "maxComplexity": 4,
+      "maxNesting": 3
+    },
+    "packages/jit/src/factories/__tests__/access.test.ts": {
+      "logicalLoc": 239,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 56,
+      "maxFunctionLoc": 282,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/cache-key.test.ts": {
+      "logicalLoc": 109,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 24,
+      "maxFunctionLoc": 71,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/canonical.test.ts": {
+      "logicalLoc": 50,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 10,
+      "maxFunctionLoc": 60,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/__tests__/changed.test.ts": {
+      "logicalLoc": 127,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 25,
+      "maxFunctionLoc": 117,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/class-lifecycle.test.ts": {
+      "logicalLoc": 185,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 21,
+      "maxFunctionLoc": 203,
+      "maxComplexity": 6,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/class-member-definitions.test.ts": {
+      "logicalLoc": 351,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 62,
+      "maxFunctionLoc": 389,
+      "maxComplexity": 11,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/class-runtime-type.test.ts": {
+      "logicalLoc": 139,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 26,
+      "maxFunctionLoc": 162,
+      "maxComplexity": 5,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/__tests__/class.test.ts": {
+      "logicalLoc": 1169,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 195,
+      "maxFunctionLoc": 1346,
+      "maxComplexity": 39,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/__tests__/collection-state.test.ts": {
+      "logicalLoc": 381,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 57,
+      "maxFunctionLoc": 426,
+      "maxComplexity": 24,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/__tests__/cqrs-aggregate.test.ts": {
+      "logicalLoc": 213,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 27,
+      "maxFunctionLoc": 247,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/cqrs-distinct.test.ts": {
+      "logicalLoc": 91,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 11,
+      "maxFunctionLoc": 107,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/__tests__/cqrs-join.test.ts": {
+      "logicalLoc": 200,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 23,
+      "maxFunctionLoc": 230,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/cqrs-terminals.test.ts": {
+      "logicalLoc": 128,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 30,
+      "maxFunctionLoc": 154,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/cqrs.test.ts": {
+      "logicalLoc": 940,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 158,
+      "maxFunctionLoc": 1005,
+      "maxComplexity": 15,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/csv.test.ts": {
+      "logicalLoc": 98,
+      "exports": 0,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 14,
+      "maxFunctionLoc": 92,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/ddd-domain-state.test.ts": {
+      "logicalLoc": 210,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 26,
+      "maxFunctionLoc": 231,
+      "maxComplexity": 6,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/ddd-type-spikes.test.ts": {
+      "logicalLoc": 37,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 8,
+      "maxFunctionLoc": 19,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/ddd.types.test.ts": {
+      "logicalLoc": 189,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 24,
+      "maxFunctionLoc": 82,
+      "maxComplexity": 7,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/derive.test.ts": {
+      "logicalLoc": 89,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 12,
+      "maxFunctionLoc": 97,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/dto.test.ts": {
+      "logicalLoc": 42,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 5,
+      "maxFunctionLoc": 46,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/__tests__/factories.test.ts": {
+      "logicalLoc": 508,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 50,
+      "maxFunctionLoc": 603,
+      "maxComplexity": 2,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/__tests__/indexing.test.ts": {
+      "logicalLoc": 100,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 17,
+      "maxFunctionLoc": 116,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/lookup.test.ts": {
+      "logicalLoc": 119,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 23,
+      "maxFunctionLoc": 146,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/match.test.ts": {
+      "logicalLoc": 85,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 33,
+      "maxFunctionLoc": 97,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/migration.test.ts": {
+      "logicalLoc": 83,
+      "exports": 0,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 11,
+      "maxFunctionLoc": 74,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/ndjson.test.ts": {
+      "logicalLoc": 101,
+      "exports": 0,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 18,
+      "maxFunctionLoc": 96,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/patch.test.ts": {
+      "logicalLoc": 155,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 36,
+      "maxFunctionLoc": 75,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/__tests__/projection.test.ts": {
+      "logicalLoc": 133,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 26,
+      "maxFunctionLoc": 74,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/reconcile.test.ts": {
+      "logicalLoc": 189,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 42,
+      "maxFunctionLoc": 225,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/rules.test.ts": {
+      "logicalLoc": 581,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 109,
+      "maxFunctionLoc": 148,
+      "maxComplexity": 14,
+      "maxNesting": 3
+    },
+    "packages/jit/src/factories/__tests__/runtime-ops.test.ts": {
+      "logicalLoc": 254,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 37,
+      "maxFunctionLoc": 279,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/__tests__/runtime-type-properties.test.ts": {
+      "logicalLoc": 56,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 7,
+      "maxFunctionLoc": 60,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/sort.test.ts": {
+      "logicalLoc": 78,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 13,
+      "maxFunctionLoc": 91,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/__tests__/standard-schema.test.ts": {
+      "logicalLoc": 57,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 11,
+      "maxFunctionLoc": 56,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/access.ts": {
+      "logicalLoc": 154,
+      "exports": 9,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 41,
+      "maxFunctionLoc": 29,
+      "maxComplexity": 8,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/api.ts": {
+      "logicalLoc": 8,
+      "exports": 3,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/cache-key.ts": {
+      "logicalLoc": 41,
+      "exports": 2,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 7,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/canonical.ts": {
+      "logicalLoc": 9,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/class.ts": {
+      "logicalLoc": 4818,
+      "exports": 88,
+      "imports": 32,
+      "fanOut": 32,
+      "functions": 392,
+      "maxFunctionLoc": 545,
+      "maxComplexity": 136,
+      "maxNesting": 6
+    },
+    "packages/jit/src/factories/coerce.ts": {
+      "logicalLoc": 39,
+      "exports": 2,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 11,
+      "maxFunctionLoc": 6,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/collection-state.ts": {
+      "logicalLoc": 220,
+      "exports": 5,
+      "imports": 13,
+      "fanOut": 13,
+      "functions": 49,
+      "maxFunctionLoc": 109,
+      "maxComplexity": 9,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/collection/collection.ts": {
+      "logicalLoc": 68,
+      "exports": 5,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 5,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/collection/index.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/composition/composition.ts": {
+      "logicalLoc": 62,
+      "exports": 5,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 5,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/composition/index.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/cqrs.ts": {
+      "logicalLoc": 1467,
+      "exports": 28,
+      "imports": 16,
+      "fanOut": 16,
+      "functions": 124,
+      "maxFunctionLoc": 231,
+      "maxComplexity": 79,
+      "maxNesting": 6
+    },
+    "packages/jit/src/factories/csv.ts": {
+      "logicalLoc": 73,
+      "exports": 6,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 14,
+      "maxFunctionLoc": 20,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/ddd.ts": {
+      "logicalLoc": 73,
+      "exports": 3,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 21,
+      "maxComplexity": 6,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/derive.ts": {
+      "logicalLoc": 117,
+      "exports": 4,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 27,
+      "maxFunctionLoc": 30,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/dto.ts": {
+      "logicalLoc": 28,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 1,
+      "maxFunctionLoc": 26,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/execution.ts": {
+      "logicalLoc": 992,
+      "exports": 21,
+      "imports": 17,
+      "fanOut": 17,
+      "functions": 172,
+      "maxFunctionLoc": 90,
+      "maxComplexity": 13,
+      "maxNesting": 3
+    },
+    "packages/jit/src/factories/index.ts": {
+      "logicalLoc": 229,
+      "exports": 57,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/indexing.ts": {
+      "logicalLoc": 75,
+      "exports": 4,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 9,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/iso.ts": {
+      "logicalLoc": 16,
+      "exports": 2,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 8,
+      "maxFunctionLoc": 1,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/json-schema.ts": {
+      "logicalLoc": 28,
+      "exports": 3,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 4,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/lookup.ts": {
+      "logicalLoc": 38,
+      "exports": 3,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 8,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/mapper.ts": {
+      "logicalLoc": 36,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 2,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/match.ts": {
+      "logicalLoc": 49,
+      "exports": 2,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 15,
+      "maxFunctionLoc": 9,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/migration.ts": {
+      "logicalLoc": 62,
+      "exports": 2,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 7,
+      "maxFunctionLoc": 25,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/ndjson.ts": {
+      "logicalLoc": 93,
+      "exports": 6,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 27,
+      "maxFunctionLoc": 34,
+      "maxComplexity": 3,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/object/index.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/object/object.ts": {
+      "logicalLoc": 34,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/ops.ts": {
+      "logicalLoc": 83,
+      "exports": 10,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 72,
+      "maxFunctionLoc": 41,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/patch.ts": {
+      "logicalLoc": 27,
+      "exports": 3,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 5,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/any.ts": {
+      "logicalLoc": 7,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/bigint.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/boolean.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/date.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/empty-def.ts": {
+      "logicalLoc": 2,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/file.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/index.ts": {
+      "logicalLoc": 16,
+      "exports": 16,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/int.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/nan.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/never.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/null.ts": {
+      "logicalLoc": 11,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/number.ts": {
+      "logicalLoc": 13,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/regex.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/string.ts": {
+      "logicalLoc": 13,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/symbol.ts": {
+      "logicalLoc": 10,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/undefined.ts": {
+      "logicalLoc": 11,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/unknown.ts": {
+      "logicalLoc": 7,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/primitive/void.ts": {
+      "logicalLoc": 11,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 1,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/process.ts": {
+      "logicalLoc": 329,
+      "exports": 4,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 51,
+      "maxFunctionLoc": 113,
+      "maxComplexity": 9,
+      "maxNesting": 4
+    },
+    "packages/jit/src/factories/project.ts": {
+      "logicalLoc": 66,
+      "exports": 4,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 7,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/query.ts": {
+      "logicalLoc": 853,
+      "exports": 18,
+      "imports": 13,
+      "fanOut": 13,
+      "functions": 162,
+      "maxFunctionLoc": 317,
+      "maxComplexity": 11,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/reconcile.ts": {
+      "logicalLoc": 101,
+      "exports": 10,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 22,
+      "maxFunctionLoc": 19,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/rules.ts": {
+      "logicalLoc": 328,
+      "exports": 16,
+      "imports": 8,
+      "fanOut": 8,
+      "functions": 84,
+      "maxFunctionLoc": 78,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/runtime-ops.ts": {
+      "logicalLoc": 350,
+      "exports": 21,
+      "imports": 23,
+      "fanOut": 23,
+      "functions": 54,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/security.ts": {
+      "logicalLoc": 18,
+      "exports": 2,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 2,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/serialize.ts": {
+      "logicalLoc": 22,
+      "exports": 2,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 10,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/sort.ts": {
+      "logicalLoc": 40,
+      "exports": 3,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 8,
+      "maxFunctionLoc": 15,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/special/index.ts": {
+      "logicalLoc": 14,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/special/special.ts": {
+      "logicalLoc": 136,
+      "exports": 12,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 32,
+      "maxFunctionLoc": 17,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/state.ts": {
+      "logicalLoc": 14,
+      "exports": 1,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/stream.ts": {
+      "logicalLoc": 45,
+      "exports": 2,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 7,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/transform.ts": {
+      "logicalLoc": 177,
+      "exports": 4,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 37,
+      "maxFunctionLoc": 33,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "packages/jit/src/factories/update.ts": {
+      "logicalLoc": 422,
+      "exports": 17,
+      "imports": 15,
+      "fanOut": 15,
+      "functions": 58,
+      "maxFunctionLoc": 45,
+      "maxComplexity": 12,
+      "maxNesting": 4
+    },
+    "packages/jit/src/factories/validation-message.ts": {
+      "logicalLoc": 8,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 2,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/watch.ts": {
+      "logicalLoc": 42,
+      "exports": 7,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 2,
+      "maxFunctionLoc": 10,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/factories/wrappers/index.ts": {
+      "logicalLoc": 2,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/factories/wrappers/wrappers.ts": {
+      "logicalLoc": 91,
+      "exports": 12,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 17,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/index.ts": {
+      "logicalLoc": 27,
+      "exports": 17,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/mcp-project.ts": {
+      "logicalLoc": 588,
+      "exports": 13,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 77,
+      "maxFunctionLoc": 51,
+      "maxComplexity": 16,
+      "maxNesting": 3
+    },
+    "packages/jit/src/mcp.ts": {
+      "logicalLoc": 493,
+      "exports": 5,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 42,
+      "maxFunctionLoc": 40,
+      "maxComplexity": 14,
+      "maxNesting": 3
+    },
+    "packages/jit/src/runtime.ts": {
+      "logicalLoc": 13,
+      "exports": 8,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/artifact-registry.ts": {
+      "logicalLoc": 369,
+      "exports": 4,
+      "imports": 18,
+      "fanOut": 18,
+      "functions": 3,
+      "maxFunctionLoc": 5,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/runtime/cache/__tests__/compile-cache.test.ts": {
+      "logicalLoc": 95,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 12,
+      "maxFunctionLoc": 113,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/cache/compile-cache.ts": {
+      "logicalLoc": 24,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 3,
+      "maxFunctionLoc": 17,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/runtime/cache/index.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/hash/__tests__/hash-runtime.test.ts": {
+      "logicalLoc": 20,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 4,
+      "maxFunctionLoc": 22,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/hash/hash-cache.ts": {
+      "logicalLoc": 13,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 3,
+      "maxFunctionLoc": 12,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/runtime/hash/hash-combine.ts": {
+      "logicalLoc": 3,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/hash/hash-primitives.ts": {
+      "logicalLoc": 36,
+      "exports": 5,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 5,
+      "maxFunctionLoc": 20,
+      "maxComplexity": 10,
+      "maxNesting": 2
+    },
+    "packages/jit/src/runtime/hash/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/index/__tests__/index-cache.test.ts": {
+      "logicalLoc": 24,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 3,
+      "maxFunctionLoc": 28,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/index/build-index.ts": {
+      "logicalLoc": 11,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 1,
+      "maxFunctionLoc": 10,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "packages/jit/src/runtime/index/index-cache.ts": {
+      "logicalLoc": 41,
+      "exports": 2,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 4,
+      "maxFunctionLoc": 14,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/runtime/index/index.ts": {
+      "logicalLoc": 2,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/runtime.ts": {
+      "logicalLoc": 4,
+      "exports": 4,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/stream/boundary-scanner.ts": {
+      "logicalLoc": 129,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 9,
+      "maxFunctionLoc": 80,
+      "maxComplexity": 30,
+      "maxNesting": 6
+    },
+    "packages/jit/src/runtime/update/index.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/update/reactive-update.ts": {
+      "logicalLoc": 387,
+      "exports": 12,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 69,
+      "maxFunctionLoc": 274,
+      "maxComplexity": 36,
+      "maxNesting": 3
+    },
+    "packages/jit/src/runtime/watch/__tests__/watched-list.test.ts": {
+      "logicalLoc": 108,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 13,
+      "maxFunctionLoc": 131,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/watch/index.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/runtime/watch/watched-list.ts": {
+      "logicalLoc": 252,
+      "exports": 5,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 26,
+      "maxFunctionLoc": 37,
+      "maxComplexity": 6,
+      "maxNesting": 3
+    },
+    "packages/jit/src/shared/__tests__/parse-utils.test.ts": {
+      "logicalLoc": 110,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 27,
+      "maxFunctionLoc": 112,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/shared/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/shared/parse.ts": {
+      "logicalLoc": 117,
+      "exports": 13,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 13,
+      "maxFunctionLoc": 30,
+      "maxComplexity": 13,
+      "maxNesting": 4
+    },
+    "packages/jit/src/shared/regexes.ts": {
+      "logicalLoc": 133,
+      "exports": 52,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 10,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 4,
+      "maxNesting": 1
+    },
+    "packages/jit/src/shared/utils.ts": {
+      "logicalLoc": 8,
+      "exports": 4,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 3,
+      "maxFunctionLoc": 2,
+      "maxComplexity": 4,
+      "maxNesting": 0
+    },
+    "packages/jit/src/transforms/__tests__/object.test.ts": {
+      "logicalLoc": 147,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 22,
+      "maxFunctionLoc": 182,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/transforms/__tests__/wrappers.test.ts": {
+      "logicalLoc": 78,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 16,
+      "maxFunctionLoc": 92,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "packages/jit/src/transforms/index.ts": {
+      "logicalLoc": 3,
+      "exports": 3,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/transforms/object/index.ts": {
+      "logicalLoc": 1,
+      "exports": 1,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/transforms/object/object.ts": {
+      "logicalLoc": 238,
+      "exports": 10,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 12,
+      "maxFunctionLoc": 21,
+      "maxComplexity": 6,
+      "maxNesting": 2
+    },
+    "packages/jit/src/transforms/wrappers/index.ts": {
+      "logicalLoc": 2,
+      "exports": 2,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "packages/jit/src/transforms/wrappers/wrappers.ts": {
+      "logicalLoc": 146,
+      "exports": 11,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 15,
+      "maxFunctionLoc": 15,
+      "maxComplexity": 5,
+      "maxNesting": 1
+    },
+    "packages/jit/vitest.config.ts": {
+      "logicalLoc": 15,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "quality.config.ts": {
+      "logicalLoc": 69,
+      "exports": 1,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "scripts/check-release.ts": {
+      "logicalLoc": 49,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 1,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "scripts/check-semver.ts": {
+      "logicalLoc": 23,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 2
+    },
+    "scripts/smoke-package.ts": {
+      "logicalLoc": 119,
+      "exports": 0,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 8,
+      "maxComplexity": 4,
+      "maxNesting": 2
+    },
+    "stryker.config.ts": {
+      "logicalLoc": 49,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 3,
+      "maxFunctionLoc": 10,
+      "maxComplexity": 2,
+      "maxNesting": 2
+    },
+    "tests/baseline.test.ts": {
+      "logicalLoc": 18,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 3,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "tests/public-api.test.ts": {
+      "logicalLoc": 159,
+      "exports": 0,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 3,
+      "maxFunctionLoc": 160,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "tests/quality/api-grammar.test.ts": {
+      "logicalLoc": 54,
+      "exports": 0,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 8,
+      "maxFunctionLoc": 50,
+      "maxComplexity": 2,
+      "maxNesting": 1
+    },
+    "tests/setup.ts": {
+      "logicalLoc": 8,
+      "exports": 0,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 1
+    },
+    "tests/vitest.config.ts": {
+      "logicalLoc": 27,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "tools/quality/api/contracts.ts": {
+      "logicalLoc": 433,
+      "exports": 4,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 35,
+      "maxComplexity": 14,
+      "maxNesting": 2
+    },
+    "tools/quality/api/grammar.ts": {
+      "logicalLoc": 50,
+      "exports": 4,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 4,
+      "maxFunctionLoc": 32,
+      "maxComplexity": 14,
+      "maxNesting": 2
+    },
+    "tools/quality/api/verifier.ts": {
+      "logicalLoc": 137,
+      "exports": 3,
+      "imports": 7,
+      "fanOut": 7,
+      "functions": 7,
+      "maxFunctionLoc": 58,
+      "maxComplexity": 12,
+      "maxNesting": 2
+    },
+    "tools/quality/ast/comments.ts": {
+      "logicalLoc": 74,
+      "exports": 5,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 7,
+      "maxFunctionLoc": 32,
+      "maxComplexity": 7,
+      "maxNesting": 3
+    },
+    "tools/quality/ast/exports.ts": {
+      "logicalLoc": 92,
+      "exports": 2,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 9,
+      "maxFunctionLoc": 40,
+      "maxComplexity": 22,
+      "maxNesting": 4
+    },
+    "tools/quality/ast/fluent.ts": {
+      "logicalLoc": 60,
+      "exports": 2,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 5,
+      "maxFunctionLoc": 36,
+      "maxComplexity": 15,
+      "maxNesting": 3
+    },
+    "tools/quality/ast/imports.ts": {
+      "logicalLoc": 70,
+      "exports": 3,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 6,
+      "maxFunctionLoc": 27,
+      "maxComplexity": 11,
+      "maxNesting": 3
+    },
+    "tools/quality/cli.ts": {
+      "logicalLoc": 261,
+      "exports": 0,
+      "imports": 23,
+      "fanOut": 23,
+      "functions": 23,
+      "maxFunctionLoc": 46,
+      "maxComplexity": 10,
+      "maxNesting": 8
+    },
+    "tools/quality/core/context.ts": {
+      "logicalLoc": 102,
+      "exports": 8,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 6,
+      "maxFunctionLoc": 35,
+      "maxComplexity": 7,
+      "maxNesting": 2
+    },
+    "tools/quality/core/finding.ts": {
+      "logicalLoc": 38,
+      "exports": 6,
+      "imports": 0,
+      "fanOut": 0,
+      "functions": 6,
+      "maxFunctionLoc": 11,
+      "maxComplexity": 7,
+      "maxNesting": 0
+    },
+    "tools/quality/core/gate.ts": {
+      "logicalLoc": 43,
+      "exports": 3,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 4,
+      "maxFunctionLoc": 26,
+      "maxComplexity": 4,
+      "maxNesting": 3
+    },
+    "tools/quality/core/metrics.ts": {
+      "logicalLoc": 116,
+      "exports": 3,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 10,
+      "maxFunctionLoc": 52,
+      "maxComplexity": 19,
+      "maxNesting": 2
+    },
+    "tools/quality/core/paths.ts": {
+      "logicalLoc": 66,
+      "exports": 11,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 13,
+      "maxFunctionLoc": 16,
+      "maxComplexity": 5,
+      "maxNesting": 3
+    },
+    "tools/quality/core/process.ts": {
+      "logicalLoc": 37,
+      "exports": 2,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 1,
+      "maxFunctionLoc": 24,
+      "maxComplexity": 6,
+      "maxNesting": 1
+    },
+    "tools/quality/core/ratchet.ts": {
+      "logicalLoc": 171,
+      "exports": 4,
+      "imports": 9,
+      "fanOut": 9,
+      "functions": 16,
+      "maxFunctionLoc": 72,
+      "maxComplexity": 15,
+      "maxNesting": 3
+    },
+    "tools/quality/core/reporter.ts": {
+      "logicalLoc": 31,
+      "exports": 2,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 18,
+      "maxComplexity": 10,
+      "maxNesting": 4
+    },
+    "tools/quality/core/result.ts": {
+      "logicalLoc": 11,
+      "exports": 3,
+      "imports": 1,
+      "fanOut": 1,
+      "functions": 2,
+      "maxFunctionLoc": 3,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "tools/quality/core/rule.ts": {
+      "logicalLoc": 8,
+      "exports": 1,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 1,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "tools/quality/gates/architecture.ts": {
+      "logicalLoc": 141,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 13,
+      "maxFunctionLoc": 80,
+      "maxComplexity": 17,
+      "maxNesting": 3
+    },
+    "tools/quality/gates/codegen.ts": {
+      "logicalLoc": 106,
+      "exports": 2,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 8,
+      "maxFunctionLoc": 59,
+      "maxComplexity": 16,
+      "maxNesting": 3
+    },
+    "tools/quality/gates/comments.ts": {
+      "logicalLoc": 64,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 2,
+      "maxFunctionLoc": 42,
+      "maxComplexity": 12,
+      "maxNesting": 4
+    },
+    "tools/quality/gates/coverage.ts": {
+      "logicalLoc": 114,
+      "exports": 2,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 15,
+      "maxFunctionLoc": 54,
+      "maxComplexity": 14,
+      "maxNesting": 3
+    },
+    "tools/quality/gates/dead-code.ts": {
+      "logicalLoc": 71,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 3,
+      "maxFunctionLoc": 49,
+      "maxComplexity": 16,
+      "maxNesting": 5
+    },
+    "tools/quality/gates/duplication.ts": {
+      "logicalLoc": 96,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 3,
+      "maxFunctionLoc": 76,
+      "maxComplexity": 24,
+      "maxNesting": 2
+    },
+    "tools/quality/gates/integrity.ts": {
+      "logicalLoc": 50,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 2,
+      "maxFunctionLoc": 47,
+      "maxComplexity": 14,
+      "maxNesting": 4
+    },
+    "tools/quality/gates/mutation.ts": {
+      "logicalLoc": 92,
+      "exports": 1,
+      "imports": 5,
+      "fanOut": 5,
+      "functions": 6,
+      "maxFunctionLoc": 46,
+      "maxComplexity": 8,
+      "maxNesting": 2
+    },
+    "tools/quality/gates/public-api.ts": {
+      "logicalLoc": 25,
+      "exports": 1,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 5,
+      "maxFunctionLoc": 17,
+      "maxComplexity": 3,
+      "maxNesting": 1
+    },
+    "tools/quality/gates/structure.ts": {
+      "logicalLoc": 114,
+      "exports": 1,
+      "imports": 4,
+      "fanOut": 4,
+      "functions": 3,
+      "maxFunctionLoc": 89,
+      "maxComplexity": 30,
+      "maxNesting": 3
+    },
+    "tools/quality/gates/tests.ts": {
+      "logicalLoc": 132,
+      "exports": 1,
+      "imports": 6,
+      "fanOut": 6,
+      "functions": 4,
+      "maxFunctionLoc": 126,
+      "maxComplexity": 20,
+      "maxNesting": 7
+    },
+    "tools/quality/git/changed-files.ts": {
+      "logicalLoc": 55,
+      "exports": 2,
+      "imports": 2,
+      "fanOut": 2,
+      "functions": 8,
+      "maxFunctionLoc": 27,
+      "maxComplexity": 10,
+      "maxNesting": 2
+    },
+    "vitest.config.ts": {
+      "logicalLoc": 59,
+      "exports": 0,
+      "imports": 3,
+      "fanOut": 3,
+      "functions": 0,
+      "maxFunctionLoc": 0,
+      "maxComplexity": 1,
+      "maxNesting": 0
+    },
+    "coverage:packages/jit/src/define.ts": {
+      "lines": 65.83541147132169,
+      "statements": 65.83541147132169,
+      "branches": 49.2
+    },
+    "coverage:packages/jit/src/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/mcp-project.ts": {
+      "lines": 79.61783439490446,
+      "statements": 79.61783439490446,
+      "branches": 62.96296296296296
+    },
+    "coverage:packages/jit/src/runtime.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/aot/artifact-types.ts": {
+      "lines": 85.71428571428571,
+      "statements": 85.71428571428571,
+      "branches": 66.66666666666666
+    },
+    "coverage:packages/jit/src/aot/classify.ts": {
+      "lines": 61.53846153846154,
+      "statements": 61.53846153846154,
+      "branches": 75
+    },
+    "coverage:packages/jit/src/aot/discover.ts": {
+      "lines": 89.08045977011494,
+      "statements": 89.08045977011494,
+      "branches": 79.45205479452055
+    },
+    "coverage:packages/jit/src/aot/emit-type.ts": {
+      "lines": 76.66666666666667,
+      "statements": 76.66666666666667,
+      "branches": 72.44094488188976
+    },
+    "coverage:packages/jit/src/aot/generate.ts": {
+      "lines": 79.94285714285714,
+      "statements": 79.94285714285714,
+      "branches": 74.84423676012462
+    },
+    "coverage:packages/jit/src/aot/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/aot/serialize-callback.ts": {
+      "lines": 82.82208588957054,
+      "statements": 82.82208588957054,
+      "branches": 74.32432432432432
+    },
+    "coverage:packages/jit/src/classes/effective-schema.ts": {
+      "lines": 83.87096774193549,
+      "statements": 83.87096774193549,
+      "branches": 78.98089171974523
+    },
+    "coverage:packages/jit/src/classes/member-descriptors.ts": {
+      "lines": 74.60317460317461,
+      "statements": 74.60317460317461,
+      "branches": 62.5
+    },
+    "coverage:packages/jit/src/classes/members.ts": {
+      "lines": 91.66666666666666,
+      "statements": 91.66666666666666,
+      "branches": 50
+    },
+    "coverage:packages/jit/src/classes/override.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/access-path.ts": {
+      "lines": 96.7032967032967,
+      "statements": 96.7032967032967,
+      "branches": 83.60655737704919
+    },
+    "coverage:packages/jit/src/compiler/access.ts": {
+      "lines": 96.95817490494296,
+      "statements": 96.95817490494296,
+      "branches": 87.12121212121212
+    },
+    "coverage:packages/jit/src/compiler/aggregate-mutation.ts": {
+      "lines": 0,
+      "statements": 0,
+      "branches": 0
+    },
+    "coverage:packages/jit/src/compiler/api-authorization.ts": {
+      "lines": 94,
+      "statements": 94,
+      "branches": 88.23529411764706
+    },
+    "coverage:packages/jit/src/compiler/assertion.ts": {
+      "lines": 89.36170212765957,
+      "statements": 89.36170212765957,
+      "branches": 66.66666666666666
+    },
+    "coverage:packages/jit/src/compiler/binary-rowset.ts": {
+      "lines": 85.05997818974919,
+      "statements": 85.05997818974919,
+      "branches": 78.48297213622291
+    },
+    "coverage:packages/jit/src/compiler/cache-key.ts": {
+      "lines": 92.94117647058823,
+      "statements": 92.94117647058823,
+      "branches": 80.43478260869566
+    },
+    "coverage:packages/jit/src/compiler/canonical.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 77.77777777777779
+    },
+    "coverage:packages/jit/src/compiler/change-layout.ts": {
+      "lines": 89.47368421052632,
+      "statements": 89.47368421052632,
+      "branches": 64.28571428571429
+    },
+    "coverage:packages/jit/src/compiler/changed.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 94.44444444444444
+    },
+    "coverage:packages/jit/src/compiler/clone.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/codec.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/csv.ts": {
+      "lines": 90.3765690376569,
+      "statements": 90.3765690376569,
+      "branches": 78.86178861788618
+    },
+    "coverage:packages/jit/src/compiler/defaults.ts": {
+      "lines": 80.48780487804879,
+      "statements": 80.48780487804879,
+      "branches": 78.125
+    },
+    "coverage:packages/jit/src/compiler/derive.ts": {
+      "lines": 98.80952380952381,
+      "statements": 98.80952380952381,
+      "branches": 80.76923076923077
+    },
+    "coverage:packages/jit/src/compiler/diff.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/distinct.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 92
+    },
+    "coverage:packages/jit/src/compiler/equal.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/execution-lower.ts": {
+      "lines": 84.61538461538461,
+      "statements": 84.61538461538461,
+      "branches": 75
+    },
+    "coverage:packages/jit/src/compiler/execution-optimize.ts": {
+      "lines": 83.14606741573034,
+      "statements": 83.14606741573034,
+      "branches": 73.33333333333333
+    },
+    "coverage:packages/jit/src/compiler/execution-plan.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/format.ts": {
+      "lines": 72.41379310344827,
+      "statements": 72.41379310344827,
+      "branches": 50
+    },
+    "coverage:packages/jit/src/compiler/hash.ts": {
+      "lines": 82.92682926829268,
+      "statements": 82.92682926829268,
+      "branches": 82.05128205128204
+    },
+    "coverage:packages/jit/src/compiler/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/indexing.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 93.75
+    },
+    "coverage:packages/jit/src/compiler/join.ts": {
+      "lines": 90.37433155080214,
+      "statements": 90.37433155080214,
+      "branches": 81.45161290322581
+    },
+    "coverage:packages/jit/src/compiler/json-chunks.ts": {
+      "lines": 85.71428571428571,
+      "statements": 85.71428571428571,
+      "branches": 66.66666666666666
+    },
+    "coverage:packages/jit/src/compiler/json-parse.ts": {
+      "lines": 71.73913043478261,
+      "statements": 71.73913043478261,
+      "branches": 50.96153846153846
+    },
+    "coverage:packages/jit/src/compiler/lazy-query.ts": {
+      "lines": 75,
+      "statements": 75,
+      "branches": 69.62962962962963
+    },
+    "coverage:packages/jit/src/compiler/lookup.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/mapper.ts": {
+      "lines": 46.875,
+      "statements": 46.875,
+      "branches": 35.8974358974359
+    },
+    "coverage:packages/jit/src/compiler/mask.ts": {
+      "lines": 96.55172413793103,
+      "statements": 96.55172413793103,
+      "branches": 88.23529411764706
+    },
+    "coverage:packages/jit/src/compiler/match.ts": {
+      "lines": 98.11320754716981,
+      "statements": 98.11320754716981,
+      "branches": 91.66666666666666
+    },
+    "coverage:packages/jit/src/compiler/migration.ts": {
+      "lines": 94.11764705882352,
+      "statements": 94.11764705882352,
+      "branches": 68
+    },
+    "coverage:packages/jit/src/compiler/mock.ts": {
+      "lines": 68.96551724137932,
+      "statements": 68.96551724137932,
+      "branches": 55.27950310559007
+    },
+    "coverage:packages/jit/src/compiler/ndjson.ts": {
+      "lines": 95.91836734693877,
+      "statements": 95.91836734693877,
+      "branches": 90.47619047619048
+    },
+    "coverage:packages/jit/src/compiler/object-ops.ts": {
+      "lines": 97.02970297029702,
+      "statements": 97.02970297029702,
+      "branches": 82.6086956521739
+    },
+    "coverage:packages/jit/src/compiler/ordering.ts": {
+      "lines": 96.29629629629629,
+      "statements": 96.29629629629629,
+      "branches": 94.11764705882352
+    },
+    "coverage:packages/jit/src/compiler/patch.ts": {
+      "lines": 95.9349593495935,
+      "statements": 95.9349593495935,
+      "branches": 78.57142857142857
+    },
+    "coverage:packages/jit/src/compiler/physical-query.ts": {
+      "lines": 93.54838709677419,
+      "statements": 93.54838709677419,
+      "branches": 88.23529411764706
+    },
+    "coverage:packages/jit/src/compiler/pipeline.ts": {
+      "lines": 97.95918367346938,
+      "statements": 97.95918367346938,
+      "branches": 95.23809523809523
+    },
+    "coverage:packages/jit/src/compiler/project.ts": {
+      "lines": 95.45454545454545,
+      "statements": 95.45454545454545,
+      "branches": 50
+    },
+    "coverage:packages/jit/src/compiler/projection.ts": {
+      "lines": 96.36363636363636,
+      "statements": 96.36363636363636,
+      "branches": 93.33333333333333
+    },
+    "coverage:packages/jit/src/compiler/query-boundary.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/query-cost.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/query.ts": {
+      "lines": 86.11111111111111,
+      "statements": 86.11111111111111,
+      "branches": 79.41176470588235
+    },
+    "coverage:packages/jit/src/compiler/reconcile.ts": {
+      "lines": 93.65079365079364,
+      "statements": 93.65079365079364,
+      "branches": 96.20253164556962
+    },
+    "coverage:packages/jit/src/compiler/row-keys.ts": {
+      "lines": 50.70422535211267,
+      "statements": 50.70422535211267,
+      "branches": 47.368421052631575
+    },
+    "coverage:packages/jit/src/compiler/rules.ts": {
+      "lines": 92.36499068901304,
+      "statements": 92.36499068901304,
+      "branches": 82.78688524590164
+    },
+    "coverage:packages/jit/src/compiler/sanitize.ts": {
+      "lines": 98.83720930232558,
+      "statements": 98.83720930232558,
+      "branches": 89.47368421052632
+    },
+    "coverage:packages/jit/src/compiler/schema-nodes.ts": {
+      "lines": 96.96969696969697,
+      "statements": 96.96969696969697,
+      "branches": 84.7457627118644
+    },
+    "coverage:packages/jit/src/compiler/schema-recursion.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 82.85714285714286
+    },
+    "coverage:packages/jit/src/compiler/serialize.ts": {
+      "lines": 88.88888888888889,
+      "statements": 88.88888888888889,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/sort.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/stream.ts": {
+      "lines": 80.92485549132948,
+      "statements": 80.92485549132948,
+      "branches": 55.91397849462365
+    },
+    "coverage:packages/jit/src/compiler/update.ts": {
+      "lines": 90.9090909090909,
+      "statements": 90.9090909090909,
+      "branches": 95
+    },
+    "coverage:packages/jit/src/compiler/validate.ts": {
+      "lines": 96.47058823529412,
+      "statements": 96.47058823529412,
+      "branches": 94.25287356321839
+    },
+    "coverage:packages/jit/src/compiler/watch.ts": {
+      "lines": 97.82608695652173,
+      "statements": 97.82608695652173,
+      "branches": 92.85714285714286
+    },
+    "coverage:packages/jit/src/compiler/clone/build-clone-ir.ts": {
+      "lines": 89.65517241379311,
+      "statements": 89.65517241379311,
+      "branches": 87.5
+    },
+    "coverage:packages/jit/src/compiler/clone/emit-clone.ts": {
+      "lines": 76.66666666666667,
+      "statements": 76.66666666666667,
+      "branches": 62.31884057971014
+    },
+    "coverage:packages/jit/src/compiler/clone/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/codec/emit-codec.ts": {
+      "lines": 89.03903903903904,
+      "statements": 89.03903903903904,
+      "branches": 79.02439024390245
+    },
+    "coverage:packages/jit/src/compiler/diff/build-diff-ir.ts": {
+      "lines": 82.75862068965517,
+      "statements": 82.75862068965517,
+      "branches": 81.25
+    },
+    "coverage:packages/jit/src/compiler/diff/emit-diff.ts": {
+      "lines": 87.5,
+      "statements": 87.5,
+      "branches": 80.55555555555556
+    },
+    "coverage:packages/jit/src/compiler/diff/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/emitter/code-writer.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/emitter/emit-equal.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/emitter/emit-expr.ts": {
+      "lines": 82.14285714285714,
+      "statements": 82.14285714285714,
+      "branches": 83.33333333333334
+    },
+    "coverage:packages/jit/src/compiler/emitter/emit-node.ts": {
+      "lines": 97.60479041916167,
+      "statements": 97.60479041916167,
+      "branches": 91.83673469387756
+    },
+    "coverage:packages/jit/src/compiler/emitter/emit-query.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/emitter/emit-state.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/ir/ir.ts": {
+      "lines": 86.20689655172413,
+      "statements": 86.20689655172413,
+      "branches": 84.78260869565217
+    },
+    "coverage:packages/jit/src/compiler/ir/scope.ts": {
+      "lines": 81.81818181818183,
+      "statements": 81.81818181818183,
+      "branches": 83.33333333333334
+    },
+    "coverage:packages/jit/src/compiler/ir/builders/build-equal-ir.ts": {
+      "lines": 96.44970414201184,
+      "statements": 96.44970414201184,
+      "branches": 85.71428571428571
+    },
+    "coverage:packages/jit/src/compiler/ir/builders/build-query-ir.ts": {
+      "lines": 97.38219895287958,
+      "statements": 97.38219895287958,
+      "branches": 89.8876404494382
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/optimize-ir.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/cost/expr-cost.ts": {
+      "lines": 58.333333333333336,
+      "statements": 58.333333333333336,
+      "branches": 50
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/cost/optimize-cost.ts": {
+      "lines": 85.71428571428571,
+      "statements": 85.71428571428571,
+      "branches": 81.48148148148148
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/dedupe-loads.ts": {
+      "lines": 62.857142857142854,
+      "statements": 62.857142857142854,
+      "branches": 54.83870967741935
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/eliminate-dead.ts": {
+      "lines": 76.47058823529412,
+      "statements": 76.47058823529412,
+      "branches": 84.21052631578947
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/flatten-blocks.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/hoist-array-elements.ts": {
+      "lines": 0,
+      "statements": 0,
+      "branches": 0
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/hoist-loads.ts": {
+      "lines": 0,
+      "statements": 0,
+      "branches": 0
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/inline-vars.ts": {
+      "lines": 78.0701754385965,
+      "statements": 78.0701754385965,
+      "branches": 78.4090909090909
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/loop-fusion.ts": {
+      "lines": 0,
+      "statements": 0,
+      "branches": 0
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/loop-hoist.ts": {
+      "lines": 0,
+      "statements": 0,
+      "branches": 0
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/loop-simplify.ts": {
+      "lines": 70.83333333333334,
+      "statements": 70.83333333333334,
+      "branches": 60
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/normalize-logic.ts": {
+      "lines": 69.23076923076923,
+      "statements": 69.23076923076923,
+      "branches": 65.15151515151516
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/reorder-compares.ts": {
+      "lines": 89.13043478260869,
+      "statements": 89.13043478260869,
+      "branches": 85.71428571428571
+    },
+    "coverage:packages/jit/src/compiler/ir/optimizer/passes/reorder-conditions.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/json-schema/dialects.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/json-schema/from-json-schema.ts": {
+      "lines": 82.87671232876713,
+      "statements": 82.87671232876713,
+      "branches": 65.18518518518519
+    },
+    "coverage:packages/jit/src/compiler/json-schema/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/json-schema/infer.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/json-schema/to-json-schema.ts": {
+      "lines": 72.52747252747253,
+      "statements": 72.52747252747253,
+      "branches": 69.58041958041959
+    },
+    "coverage:packages/jit/src/compiler/json-schema/types.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/mapper/build-mapper-ir.ts": {
+      "lines": 80,
+      "statements": 80,
+      "branches": 85.71428571428571
+    },
+    "coverage:packages/jit/src/compiler/mapper/build-mapper-plan.ts": {
+      "lines": 85.0574712643678,
+      "statements": 85.0574712643678,
+      "branches": 77.63157894736842
+    },
+    "coverage:packages/jit/src/compiler/mutation/collection-mutation.ts": {
+      "lines": 99.6742671009772,
+      "statements": 99.6742671009772,
+      "branches": 96.73202614379085
+    },
+    "coverage:packages/jit/src/compiler/mutation/emit-mutation.ts": {
+      "lines": 98.1651376146789,
+      "statements": 98.1651376146789,
+      "branches": 94.23076923076923
+    },
+    "coverage:packages/jit/src/compiler/mutation/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/mutation/mutation-plan.ts": {
+      "lines": 87.5,
+      "statements": 87.5,
+      "branches": 77.77777777777779
+    },
+    "coverage:packages/jit/src/compiler/resolvers/resolve-hints.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/resolvers/resolve-wrappers.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/runtime-type/resolve-runtime-type.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 90
+    },
+    "coverage:packages/jit/src/compiler/runtime-type/runtime-type-node.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/security/emit-scrub.ts": {
+      "lines": 91.80327868852459,
+      "statements": 91.80327868852459,
+      "branches": 75.51020408163265
+    },
+    "coverage:packages/jit/src/compiler/serialize/emit-serialize.ts": {
+      "lines": 86.69354838709677,
+      "statements": 86.69354838709677,
+      "branches": 84.68468468468468
+    },
+    "coverage:packages/jit/src/compiler/source/access.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/source/format-mask.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 87.5
+    },
+    "coverage:packages/jit/src/compiler/source/guard.ts": {
+      "lines": 35.294117647058826,
+      "statements": 35.294117647058826,
+      "branches": 26.82926829268293
+    },
+    "coverage:packages/jit/src/compiler/source/literal.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/source/path.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/source/query-condition.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 93.75
+    },
+    "coverage:packages/jit/src/compiler/strategy/resolve-strategy.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/update/build-update-ir.ts": {
+      "lines": 83.87096774193549,
+      "statements": 83.87096774193549,
+      "branches": 75
+    },
+    "coverage:packages/jit/src/compiler/update/emit-update.ts": {
+      "lines": 91.13475177304964,
+      "statements": 91.13475177304964,
+      "branches": 79.16666666666666
+    },
+    "coverage:packages/jit/src/compiler/update/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/compiler/validate/emit-validate.ts": {
+      "lines": 91.68096054888508,
+      "statements": 91.68096054888508,
+      "branches": 84.67908902691511
+    },
+    "coverage:packages/jit/src/core/factory-policy.ts": {
+      "lines": 85.71428571428571,
+      "statements": 85.71428571428571,
+      "branches": 63.63636363636363
+    },
+    "coverage:packages/jit/src/core/host.ts": {
+      "lines": 50,
+      "statements": 50,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ast/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ast/query.ast.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ast/transform.ast.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ast/update.ast.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/create-schema.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/input.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/representations.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/schema-annotation.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/type-name.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/type-schema.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/typeof.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/async.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/binary.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/brand.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/coerce.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/constructor.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/default-value.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/discriminator.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/element.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/enum-value.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/error.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/getter.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/inner-type.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/key-value.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/literal-value.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/options.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/path.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/predicate.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/props.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/refine.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/transform.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/tuple.def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/checks/array.check.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/checks/check.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/checks/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/checks/number.check.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/checks/object.check.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/ats/defs/common/checks/string.check.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/builder/check-state.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/builder/checks.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/builder/create-builder.ts": {
+      "lines": 95.39170506912443,
+      "statements": 95.39170506912443,
+      "branches": 90.35087719298247
+    },
+    "coverage:packages/jit/src/core/builder/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/builder/types.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/builder/unwrap-schema.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/clone-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/collection-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/compare-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/compile-hints.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/diff-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/entity-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/hash-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/hint-merge.ts": {
+      "lines": 96,
+      "statements": 96,
+      "branches": 88.63636363636364
+    },
+    "coverage:packages/jit/src/core/hints/hint-resolver.ts": {
+      "lines": 85.71428571428571,
+      "statements": 85.71428571428571,
+      "branches": 85
+    },
+    "coverage:packages/jit/src/core/hints/hint-schema.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/hint-types.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/metadata.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/order-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/serialize-hint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/core/hints/shared.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/errors/assertion-error.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 50
+    },
+    "coverage:packages/jit/src/errors/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/errors/jit-error.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/errors/validation-error.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 80
+    },
+    "coverage:packages/jit/src/factories/access.ts": {
+      "lines": 96.875,
+      "statements": 96.875,
+      "branches": 89.47368421052632
+    },
+    "coverage:packages/jit/src/factories/api.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/cache-key.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/canonical.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/class.ts": {
+      "lines": 80.26941362916006,
+      "statements": 80.26941362916006,
+      "branches": 71.51515151515152
+    },
+    "coverage:packages/jit/src/factories/coerce.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/collection-state.ts": {
+      "lines": 95.08196721311475,
+      "statements": 95.08196721311475,
+      "branches": 87.5
+    },
+    "coverage:packages/jit/src/factories/cqrs.ts": {
+      "lines": 90.86651053864169,
+      "statements": 90.86651053864169,
+      "branches": 84.44924406047517
+    },
+    "coverage:packages/jit/src/factories/csv.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/ddd.ts": {
+      "lines": 87.5,
+      "statements": 87.5,
+      "branches": 50
+    },
+    "coverage:packages/jit/src/factories/derive.ts": {
+      "lines": 96.15384615384616,
+      "statements": 96.15384615384616,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/dto.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/execution.ts": {
+      "lines": 86.19246861924687,
+      "statements": 86.19246861924687,
+      "branches": 85.39325842696628
+    },
+    "coverage:packages/jit/src/factories/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/indexing.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/iso.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/json-schema.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/lookup.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/mapper.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/match.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/migration.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/ndjson.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 75
+    },
+    "coverage:packages/jit/src/factories/ops.ts": {
+      "lines": 92.3076923076923,
+      "statements": 92.3076923076923,
+      "branches": 90
+    },
+    "coverage:packages/jit/src/factories/patch.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/process.ts": {
+      "lines": 75.89285714285714,
+      "statements": 75.89285714285714,
+      "branches": 62.745098039215684
+    },
+    "coverage:packages/jit/src/factories/project.ts": {
+      "lines": 85.71428571428571,
+      "statements": 85.71428571428571,
+      "branches": 50
+    },
+    "coverage:packages/jit/src/factories/query.ts": {
+      "lines": 93.01075268817203,
+      "statements": 93.01075268817203,
+      "branches": 81.25
+    },
+    "coverage:packages/jit/src/factories/reconcile.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/rules.ts": {
+      "lines": 95.45454545454545,
+      "statements": 95.45454545454545,
+      "branches": 84.0909090909091
+    },
+    "coverage:packages/jit/src/factories/runtime-ops.ts": {
+      "lines": 98.24561403508771,
+      "statements": 98.24561403508771,
+      "branches": 78.57142857142857
+    },
+    "coverage:packages/jit/src/factories/security.ts": {
+      "lines": 0,
+      "statements": 0,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/serialize.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/sort.ts": {
+      "lines": 88.88888888888889,
+      "statements": 88.88888888888889,
+      "branches": 66.66666666666666
+    },
+    "coverage:packages/jit/src/factories/state.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/stream.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/transform.ts": {
+      "lines": 0,
+      "statements": 0,
+      "branches": 0
+    },
+    "coverage:packages/jit/src/factories/update.ts": {
+      "lines": 78.80794701986756,
+      "statements": 78.80794701986756,
+      "branches": 77.06422018348624
+    },
+    "coverage:packages/jit/src/factories/validation-message.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/watch.ts": {
+      "lines": 75,
+      "statements": 75,
+      "branches": 75
+    },
+    "coverage:packages/jit/src/factories/collection/collection.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/collection/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/composition/composition.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/composition/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/object/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/object/object.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/any.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/bigint.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/boolean.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/date.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/empty-def.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/file.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/int.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/nan.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/never.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/null.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/number.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/regex.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/string.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/symbol.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/undefined.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/unknown.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/primitive/void.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/special/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/special/special.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/wrappers/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/factories/wrappers/wrappers.ts": {
+      "lines": 91.66666666666666,
+      "statements": 91.66666666666666,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/artifact-registry.ts": {
+      "lines": 55.55555555555556,
+      "statements": 55.55555555555556,
+      "branches": 71.42857142857143
+    },
+    "coverage:packages/jit/src/runtime/runtime.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/cache/compile-cache.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/cache/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/hash/hash-cache.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/hash/hash-combine.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/hash/hash-primitives.ts": {
+      "lines": 61.111111111111114,
+      "statements": 61.111111111111114,
+      "branches": 41.66666666666667
+    },
+    "coverage:packages/jit/src/runtime/hash/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/index/build-index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/index/index-cache.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/index/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/stream/boundary-scanner.ts": {
+      "lines": 90.9090909090909,
+      "statements": 90.9090909090909,
+      "branches": 85.71428571428571
+    },
+    "coverage:packages/jit/src/runtime/update/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/update/reactive-update.ts": {
+      "lines": 85.02994011976048,
+      "statements": 85.02994011976048,
+      "branches": 71.05263157894737
+    },
+    "coverage:packages/jit/src/runtime/watch/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/runtime/watch/watched-list.ts": {
+      "lines": 86.53846153846155,
+      "statements": 86.53846153846155,
+      "branches": 70.58823529411765
+    },
+    "coverage:packages/jit/src/shared/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/shared/parse.ts": {
+      "lines": 96,
+      "statements": 96,
+      "branches": 74.69879518072288
+    },
+    "coverage:packages/jit/src/shared/regexes.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/shared/utils.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/transforms/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/transforms/object/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/transforms/object/object.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/transforms/wrappers/index.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    },
+    "coverage:packages/jit/src/transforms/wrappers/wrappers.ts": {
+      "lines": 100,
+      "statements": 100,
+      "branches": 100
+    }
+  },
+  "findings": [
+    "site/lib/assistant/retrieval.ts|0|site/lib/copilot/application/context/stages.ts|0|9|78",
+    "site/lib/assistant/tokenize.ts|0|site/lib/copilot/application/retrieval/tokenizer.ts|0|118|234",
+    "site/lib/assistant/tokenize.ts|0|site/lib/copilot/config/synonyms.ts|0|50|477",
+    "site/lib/assistant/tokenize.ts|0|site/lib/copilot/config/synonyms.ts|0|30|214",
+    "site/lib/assistant/tokenize.ts|0|site/lib/copilot/config/synonyms.ts|0|14|116",
+    "site/lib/assistant/tokenize.ts|0|site/lib/copilot/application/retrieval/tokenizer.ts|0|149|723",
+    "site/lib/assistant/tokenize.ts|0|site/lib/copilot/application/retrieval/tokenizer.ts|0|61|276",
+    "site/lib/copilot/__tests__/audit.test.ts|0|site/lib/copilot/__tests__/audit.test.ts|0|26|116",
+    "site/lib/copilot/__tests__/audit.test.ts|0|site/lib/copilot/__tests__/browser-benchmark.test.ts|0|18|85",
+    "site/lib/copilot/__tests__/audit.test.ts|0|site/lib/copilot/__tests__/browser-benchmark.test.ts|0|17|75",
+    "site/lib/copilot/__tests__/browser-benchmark.test.ts|0|site/lib/copilot/__tests__/capability.test.ts|0|24|134",
+    "site/lib/copilot/__tests__/browser-benchmark.test.ts|0|site/lib/copilot/__tests__/context.test.ts|0|15|90",
+    "site/lib/copilot/__tests__/browser-benchmark.test.ts|0|site/lib/copilot/__tests__/coverage.test.ts|0|15|88",
+    "site/lib/copilot/__tests__/capability.test.ts|0|site/lib/copilot/__tests__/capability.test.ts|0|13|71",
+    "site/lib/copilot/__tests__/coverage.test.ts|0|site/lib/copilot/__tests__/knowledge.test.ts|0|19|104",
+    "site/lib/copilot/application/context/stages.ts|0|site/lib/copilot/application/retrieval/hybrid-retriever.ts|0|9|91",
+    "site/lib/copilot/eval/browser-run.ts|0|site/lib/copilot/eval/capability.ts|0|14|82",
+    "site/lib/copilot/eval/capability.ts|0|site/lib/copilot/eval/generation-run.ts|0|10|146",
+    "site/lib/copilot/infrastructure/models/copilot.worker.ts|0|site/lib/copilot/infrastructure/models/node-language-model.ts|0|13|112",
+    "site/lib/copilot/infrastructure/storage/fetch-artifact-loader.ts|0|site/lib/copilot/infrastructure/storage/node-artifact-loader.ts|0|26|170",
+    "site/lib/lab/compiler/virtual-fs.ts|0|site/lib/lab/compiler/virtual-path.ts|0|14|109",
+    "site/scripts/build-api-surface.ts|0|site/scripts/knowledge/parsers/api.ts|0|31|130",
+    "site/scripts/build-api-surface.ts|0|site/scripts/knowledge/parsers/api.ts|0|22|153",
+    "site/scripts/build-api-surface.ts|0|site/scripts/knowledge/parsers/api.ts|0|15|95",
+    "site/scripts/build-api-surface.ts|0|site/scripts/knowledge/parsers/api.ts|0|36|172",
+    "site/scripts/build-api-surface.ts|0|site/scripts/knowledge/parsers/api.ts|0|28|236",
+    "site/scripts/knowledge/label.ts|0|site/scripts/knowledge/rescore.ts|0|21|167",
+    "site/scripts/knowledge/parsers/api.ts|0|site/scripts/knowledge/transform/symbols.ts|0|9|79",
+    "examples/compiled/catalog.jit.ts|0|examples/runtime/schemas.ts|0|13|183",
+    "jit/src/__tests__/entrypoints.test.ts|0|jit/src/aot/__tests__/aot.test.ts|0|9|84",
+    "jit/src/aot/__tests__/aot.test.ts|0|jit/src/aot/__tests__/treeshake.test.ts|0|11|147",
+    "jit/src/aot/__tests__/aot.test.ts|0|jit/src/aot/__tests__/treeshake.test.ts|0|9|95",
+    "jit/src/aot/__tests__/aot.test.ts|0|jit/src/aot/__tests__/aot.test.ts|0|29|132",
+    "jit/src/aot/__tests__/aot.test.ts|0|jit/src/aot/__tests__/aot.test.ts|0|29|132",
+    "jit/src/aot/__tests__/aot.test.ts|0|jit/src/aot/__tests__/aot.test.ts|0|29|132",
+    "jit/src/aot/artifact-types.ts|0|jit/src/aot/artifact-types.ts|0|11|77",
+    "jit/src/aot/artifact-types.ts|0|jit/src/aot/artifact-types.ts|0|11|77",
+    "jit/src/aot/artifact-types.ts|0|jit/src/aot/artifact-types.ts|0|10|70",
+    "jit/src/aot/generate.ts|0|jit/src/aot/generate.ts|0|12|76",
+    "jit/src/aot/generate.ts|0|jit/src/compiler/execution-lower.ts|0|16|93",
+    "jit/src/compiler/__tests__/binary-rowset.test.ts|0|jit/src/compiler/__tests__/binary-rowset.test.ts|0|14|71",
+    "jit/src/compiler/__tests__/binary-rowset.test.ts|0|jit/src/compiler/__tests__/generated-source-snapshots.test.ts|0|11|120",
+    "jit/src/compiler/__tests__/binary-rowset.test.ts|0|jit/src/compiler/__tests__/binary-rowset.test.ts|0|14|85",
+    "jit/src/compiler/__tests__/clone.test.ts|0|jit/src/compiler/__tests__/compiler.test.ts|0|10|90",
+    "jit/src/compiler/__tests__/clone.test.ts|0|jit/src/compiler/__tests__/diff.test.ts|0|10|90",
+    "jit/src/compiler/__tests__/clone.test.ts|0|jit/src/compiler/__tests__/update.test.ts|0|10|90",
+    "jit/src/compiler/__tests__/clone.test.ts|0|jit/src/compiler/__tests__/hash.test.ts|0|9|83",
+    "jit/src/compiler/__tests__/clone.test.ts|0|jit/src/compiler/__tests__/clone.test.ts|0|12|134",
+    "jit/src/compiler/__tests__/compiler.test.ts|0|jit/src/compiler/__tests__/hash.test.ts|0|9|140",
+    "jit/src/compiler/__tests__/diff.test.ts|0|jit/src/compiler/__tests__/update.test.ts|0|11|114",
+    "jit/src/compiler/__tests__/lazy-query.test.ts|0|jit/src/compiler/__tests__/lazy-query.test.ts|0|13|72",
+    "jit/src/compiler/__tests__/mutation-plan.test.ts|0|jit/src/compiler/__tests__/mutation-plan.test.ts|0|15|102",
+    "jit/src/compiler/__tests__/query-ir.test.ts|0|jit/src/compiler/__tests__/query.test.ts|0|14|117",
+    "jit/src/compiler/__tests__/query-ir.test.ts|0|jit/src/compiler/__tests__/query.test.ts|0|14|74",
+    "jit/src/compiler/binary-rowset.ts|0|jit/src/compiler/query.ts|0|27|157",
+    "jit/src/compiler/cache-key.ts|0|jit/src/compiler/derive.ts|0|19|180",
+    "jit/src/compiler/cache-key.ts|0|jit/src/compiler/changed.ts|0|14|117",
+    "jit/src/compiler/canonical.ts|0|jit/src/compiler/patch.ts|0|12|84",
+    "jit/src/compiler/clone/build-clone-ir.ts|0|jit/src/compiler/diff/build-diff-ir.ts|0|21|72",
+    "jit/src/compiler/clone/build-clone-ir.ts|0|jit/src/compiler/diff/build-diff-ir.ts|0|9|72",
+    "jit/src/compiler/clone/build-clone-ir.ts|0|jit/src/compiler/diff/build-diff-ir.ts|0|11|80",
+    "jit/src/compiler/clone/build-clone-ir.ts|0|jit/src/compiler/diff/build-diff-ir.ts|0|17|89",
+    "jit/src/compiler/clone/build-clone-ir.ts|0|jit/src/compiler/update/build-update-ir.ts|0|15|71",
+    "jit/src/compiler/codec/emit-codec.ts|0|jit/src/compiler/codec/emit-codec.ts|0|11|86",
+    "jit/src/compiler/codec/emit-codec.ts|0|jit/src/compiler/codec/emit-codec.ts|0|12|77",
+    "jit/src/compiler/codec/emit-codec.ts|0|jit/src/compiler/codec/emit-codec.ts|0|13|87",
+    "jit/src/compiler/codec/emit-codec.ts|0|jit/src/compiler/codec/emit-codec.ts|0|17|110",
+    "jit/src/compiler/codec/emit-codec.ts|0|jit/src/compiler/codec/emit-codec.ts|0|18|118",
+    "jit/src/compiler/diff/emit-diff.ts|0|jit/src/compiler/diff/emit-diff.ts|0|34|233",
+    "jit/src/compiler/diff/emit-diff.ts|0|jit/src/compiler/diff/emit-diff.ts|0|19|111",
+    "jit/src/compiler/ir/builders/build-query-ir.ts|0|jit/src/compiler/ir/builders/build-query-ir.ts|0|13|84",
+    "jit/src/compiler/ir/builders/build-query-ir.ts|0|jit/src/compiler/ir/builders/build-query-ir.ts|0|14|91",
+    "jit/src/compiler/ir/optimizer/cost/expr-cost.ts|0|jit/src/compiler/ir/optimizer/cost/optimize-cost.ts|0|28|160",
+    "jit/src/compiler/ir/optimizer/cost/optimize-cost.ts|0|jit/src/compiler/ir/optimizer/passes/reorder-compares.ts|0|20|113",
+    "jit/src/compiler/ir/optimizer/cost/optimize-cost.ts|0|jit/src/compiler/ir/optimizer/passes/reorder-compares.ts|0|18|72",
+    "jit/src/compiler/ir/optimizer/passes/dedupe-loads.ts|0|jit/src/compiler/ir/optimizer/passes/hoist-array-elements.ts|0|19|97",
+    "jit/src/compiler/ir/optimizer/passes/dedupe-loads.ts|0|jit/src/compiler/ir/optimizer/passes/loop-fusion.ts|0|18|96",
+    "jit/src/compiler/json-schema/to-json-schema.ts|0|jit/src/compiler/schema-recursion.ts|0|12|101",
+    "jit/src/compiler/lazy-query.ts|0|jit/src/compiler/lazy-query.ts|0|17|80",
+    "jit/src/compiler/lazy-query.ts|0|jit/src/compiler/lazy-query.ts|0|10|111",
+    "jit/src/compiler/lazy-query.ts|0|jit/src/compiler/lazy-query.ts|0|12|76",
+    "jit/src/compiler/lazy-query.ts|0|jit/src/compiler/lazy-query.ts|0|10|75",
+    "jit/src/compiler/lazy-query.ts|0|jit/src/compiler/lazy-query.ts|0|19|105",
+    "jit/src/compiler/lazy-query.ts|0|jit/src/compiler/lazy-query.ts|0|19|105",
+    "jit/src/compiler/pipeline.ts|0|jit/src/compiler/update.ts|0|14|93",
+    "jit/src/compiler/pipeline.ts|0|jit/src/factories/update.ts|0|12|85",
+    "jit/src/compiler/runtime-type/resolve-runtime-type.ts|0|jit/src/define.ts|0|16|95",
+    "jit/src/compiler/security/emit-scrub.ts|0|jit/src/compiler/serialize/emit-serialize.ts|0|24|117",
+    "jit/src/compiler/security/emit-scrub.ts|0|jit/src/compiler/stream.ts|0|14|74",
+    "jit/src/compiler/security/emit-scrub.ts|0|jit/src/compiler/validate/emit-validate.ts|0|14|74",
+    "jit/src/compiler/stream.ts|0|jit/src/compiler/validate/emit-validate.ts|0|19|75",
+    "jit/src/compiler/update.ts|0|jit/src/factories/update.ts|0|11|73",
+    "jit/src/compiler/update/emit-update.ts|0|jit/src/compiler/update/emit-update.ts|0|19|117",
+    "jit/src/compiler/update/emit-update.ts|0|jit/src/compiler/update/emit-update.ts|0|14|81",
+    "jit/src/compiler/update/emit-update.ts|0|jit/src/compiler/update/emit-update.ts|0|9|103",
+    "jit/src/compiler/update/emit-update.ts|0|jit/src/compiler/update/emit-update.ts|0|14|76",
+    "jit/src/compiler/validate.ts|0|jit/src/compiler/validate.ts|0|24|72",
+    "jit/src/compiler/validate/emit-validate.ts|0|jit/src/compiler/validate/emit-validate.ts|0|10|85",
+    "jit/src/compiler/validate/emit-validate.ts|0|jit/src/compiler/validate/emit-validate.ts|0|33|222",
+    "jit/src/define.ts|0|jit/src/factories/runtime-ops.ts|0|10|90",
+    "jit/src/define.ts|0|jit/src/factories/migration.ts|0|14|83",
+    "jit/src/define.ts|0|jit/src/factories/project.ts|0|15|118",
+    "jit/src/define.ts|0|jit/src/define.ts|0|9|77",
+    "jit/src/define.ts|0|jit/src/factories/execution.ts|0|16|84",
+    "jit/src/define.ts|0|jit/src/factories/execution.ts|0|26|187",
+    "jit/src/define.ts|0|jit/src/factories/class.ts|0|15|94",
+    "jit/src/define.ts|0|jit/src/define.ts|0|22|169",
+    "jit/src/define.ts|0|jit/src/define.ts|0|13|110",
+    "jit/src/define.ts|0|jit/src/factories/class.ts|0|10|71",
+    "jit/src/define.ts|0|jit/src/factories/class.ts|0|25|163",
+    "jit/src/define.ts|0|jit/src/factories/class.ts|0|25|192",
+    "jit/src/define.ts|0|jit/src/factories/class.ts|0|9|76",
+    "jit/src/define.ts|0|jit/src/factories/class.ts|0|22|135",
+    "jit/src/define.ts|0|jit/src/factories/class.ts|0|17|81",
+    "jit/src/factories/__tests__/cqrs.test.ts|0|jit/src/factories/__tests__/cqrs.test.ts|0|14|82",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|13|87",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|13|87",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|29|247",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|14|112",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|10|101",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|14|107",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|10|76",
+    "jit/src/factories/class.ts|0|jit/src/factories/class.ts|0|16|105",
+    "jit/src/factories/collection-state.ts|0|jit/src/factories/collection-state.ts|0|13|80",
+    "jit/src/factories/execution.ts|0|jit/src/factories/execution.ts|0|17|84",
+    "jit/src/factories/indexing.ts|0|jit/src/factories/lookup.ts|0|12|87",
+    "jit/src/factories/process.ts|0|jit/src/factories/query.ts|0|15|138",
+    "jit/src/factories/process.ts|0|jit/src/factories/query.ts|0|15|131",
+    "jit/src/factories/process.ts|0|jit/src/factories/query.ts|0|27|152",
+    "jit/src/factories/query.ts|0|jit/src/factories/query.ts|0|10|75",
+    "jit/src/factories/reconcile.ts|0|jit/src/factories/sort.ts|0|11|80",
+    "jit/src/factories/runtime-ops.ts|0|jit/src/factories/runtime-ops.ts|0|9|74",
+    "jit/src/mcp-project.ts|0|jit/src/mcp.ts|0|12|100",
+    "jit/src/runtime/watch/watched-list.ts|0|jit/src/runtime/watch/watched-list.ts|0|12|75",
+    "quality/api/contracts.ts|0|quality/api/contracts.ts|0|72|144"
+  ],
+  "deadCodeFindings": [
+    "QG-DEAD-001|packages/examples/jit.config.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/security.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/async.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/binary.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/brand.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/coerce.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/constructor.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/default-value.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/discriminator.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/element.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/enum-value.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/error.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/getter.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/inner-type.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/key-value.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/literal-value.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/options.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/path.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/predicate.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/props.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/refine.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/transform.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/tuple.def.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/ir/optimizer/passes/hoist-array-elements.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/ir/optimizer/passes/hoist-loads.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/ir/optimizer/passes/loop-fusion.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/ir/optimizer/passes/loop-hoist.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/checks/array.check.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/checks/check.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/checks/index.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/checks/number.check.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/checks/object.check.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/ats/defs/common/checks/string.check.ts||Unclassified Knip issue",
+    "QG-DEAD-001|apps/site/package.json||Unclassified Knip issue",
+    "QG-DEAD-001|package.json||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/runtime/artifact-registry.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/cqrs.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/change-layout.ts||Unclassified Knip issue",
+    "QG-DEAD-001|tools/quality/gates/codegen.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/classes/effective-schema.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/factory-policy.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/class.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/execution.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/ndjson.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/validate/emit-validate.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/shared/parse.ts||Unclassified Knip issue",
+    "QG-DEAD-001|tools/quality/core/finding.ts||Unclassified Knip issue",
+    "QG-DEAD-001|tools/quality/core/paths.ts||Unclassified Knip issue",
+    "QG-DEAD-001|tools/quality/core/metrics.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/security/emit-scrub.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/mutation/mutation-plan.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/schema-nodes.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/shared/utils.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/update.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/ops.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/validation-message.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/emitter/emit-node.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/ir/optimizer/passes/normalize-logic.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/hints/compare-hint.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/hints/diff-hint.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/hints/order-hint.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/derive.ts||Unclassified Knip issue",
+    "QG-DEAD-001|tools/quality/core/context.ts||Unclassified Knip issue",
+    "QG-DEAD-001|tools/quality/api/contracts.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/classes/member-descriptors.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/classes/members.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/query.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/reconcile.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/rules.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/runtime-ops.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/mcp-project.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/query-boundary.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/query-cost.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/mutation/collection-mutation.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/factories/transform.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/hints/hint-types.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/core/hints/shared.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/compiler/equal.ts||Unclassified Knip issue",
+    "QG-DEAD-001|packages/jit/src/shared/regexes.ts||Unclassified Knip issue"
+  ]
+}

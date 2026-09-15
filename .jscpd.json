@@ -1,0 +1,9 @@
+{
+  "threshold": 0,
+  "minLines": 8,
+  "minTokens": 70,
+  "format": ["typescript", "javascript", "tsx", "jsx"],
+  "ignore": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "**/.next/**", "**/.generated/**", "**/generated/**", "**/*-generated.*", "**/*.wasm.ts"],
+  "reporters": ["json"],
+  "output": ".quality/reports"
+}

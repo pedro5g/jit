@@ -34,6 +34,9 @@ jobs:
       - name: install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: run quality system
+        run: pnpm quality:full
+
       - name: check formatting & lint
         run: |
           pnpm run format:check

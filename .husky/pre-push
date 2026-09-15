@@ -5,3 +5,4 @@ if [ -n "$(git ls-files --others --exclude-standard)" ]; then
 fi
 pnpm check:semver
 pnpm test
+pnpm quality:changed

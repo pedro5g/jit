@@ -25,6 +25,7 @@ import {
   type Metadata,
   type OrderDirection,
 } from "../hints/index.js";
+import { appendCheck, appendSingletonCheck } from "./checks.js";
 import type { AnyBuilder, Builder, ObjectBuilder, StandardSchemaIssue, StandardSchemaProps } from "./types.js";
 import { type SchemaInput, unwrapSchema } from "./unwrap-schema.js";
 
@@ -361,7 +362,7 @@ const baseBuilderPrototype = {
     const text =
       options?.message ?? (typeof patternOrMessageOrOptions === "string" ? patternOrMessageOrOptions : message);
 
-    return createBuilder(appendCheck(this.schema, { kind: "email", value: override, message: text }));
+    return createBuilder(appendSingletonCheck(this.schema, { kind: "email", value: override, message: text }));
   },
 
   uuid(
@@ -684,24 +685,6 @@ Object.defineProperty(baseBuilderPrototype, "~standard", {
     return getStandardSchema(this.schema);
   },
 });
-
-function appendCheck(
-  schema: AnyTypeSchema,
-  check: { readonly kind: string; readonly value?: unknown; readonly message?: string | undefined }
-): AnyTypeSchema {
-  const def = schema.def as { readonly checks?: readonly unknown[] };
-  const entry = {
-    kind: check.kind,
-    ...(check.value !== undefined ? { value: check.value } : {}),
-    ...(check.message !== undefined ? { message: check.message } : {}),
-  };
-  const checks = def.checks ? [...def.checks, entry] : [entry];
-
-  return {
-    ...schema,
-    def: { ...(schema.def as object), checks },
-  } as AnyTypeSchema;
-}
 
 const UNSAFE_HTML_TAGS = new Set([
   "base",

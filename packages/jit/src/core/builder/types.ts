@@ -56,7 +56,7 @@ import type {
   XorSchema,
 } from "../ats/index.js";
 import type { EntityHint, HashStrategy, Metadata, OrderDirection, PropertySelector } from "../hints/index.js";
-import type { SchemaInput } from "./unwrap-schema.js";
+import type { HasStringCheck, SchemaInput } from "./check-state.js";
 
 export interface StandardSchemaIssue {
   readonly message: string;
@@ -630,12 +630,11 @@ export interface StringCheckMethods<TSchema extends AnyTypeSchema> {
   ): Builder<AppendStringCheck<TSchema, SchemaCheck<"includes", TNeedle>>>;
   regex(pattern: RegExp, message?: string): Builder<TSchema>;
   /** Email format; pass a RegExp to override the default pattern (e.g. `JIT.regexes.rfc5322Email`). */
-  email(message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
-  email(pattern: RegExp, message?: string): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
-  email(options: {
-    readonly pattern?: RegExp;
-    readonly message?: string;
-  }): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
+  email(
+    this: HasStringCheck<TSchema, "email"> extends true ? never : StringCheckMethods<TSchema>,
+    patternOrMessageOrOptions?: RegExp | string | { readonly pattern?: RegExp; readonly message?: string },
+    message?: string
+  ): Builder<AppendStringCheck<TSchema, SchemaCheck<"email", RegExp>>>;
   /** RFC 9562/4122 UUID; pass a version (1-8) to pin it. */
   uuid(message?: string): Builder<TSchema>;
   uuid(version: number, message?: string): Builder<TSchema>;

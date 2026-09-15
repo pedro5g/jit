@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from "vitest";
-import { JIT, Transform } from "../../../../index.js";
+import { JIT, Transform } from "../../../index.js";
 
 type MoneyValue = {
   amount: number;

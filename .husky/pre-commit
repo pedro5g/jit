@@ -6,4 +6,5 @@ fi
 pnpm check:semver
 pnpm run format:check
 pnpm run lint:check
-npx lint-staged --verbose
+pnpm exec lint-staged --verbose
+pnpm quality:staged

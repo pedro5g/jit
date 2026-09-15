@@ -1,0 +1,3 @@
+const first = { alpha: 1, beta: 2, gamma: 3, delta: 4 };
+const second = { alpha: 1, beta: 2, gamma: 3, delta: 4 };
+export { first, second };

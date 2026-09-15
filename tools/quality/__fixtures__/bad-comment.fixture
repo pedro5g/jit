@@ -1,0 +1,5 @@
+// increment index
+i++;
+
+// TODO: remove this later
+const value = 1;

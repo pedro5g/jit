@@ -1,0 +1,1 @@
+JIT.cqrs.query(User).execute().refine(predicate);

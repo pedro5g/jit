@@ -34,7 +34,20 @@ export default defineConfig({
     globals: true,
     watch: false,
     isolate: true,
-    setupFiles: [resolve(__dirname, "tests/baseline.test.ts"), resolve(__dirname, "tests/setup.ts")],
+    setupFiles: [resolve(__dirname, "tests/setup.ts")],
+    coverage: {
+      provider: "v8",
+      include: ["packages/jit/src/**/*.ts"],
+      exclude: [
+        "**/__tests__/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "packages/jit/src/cli.ts",
+        "packages/jit/src/mcp.ts",
+      ],
+      reporter: ["json", "json-summary", "text"],
+      reportsDirectory: resolve(__dirname, "coverage"),
+    },
     typecheck: {
       include: ["**/*.test.ts"],
       enabled: true,

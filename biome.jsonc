@@ -73,6 +73,7 @@
       "!lib",
       "!coverage",
       "!dist",
+      "!.quality",
       "!.tshy",
       "!.tshy-build",
       "!experiments",

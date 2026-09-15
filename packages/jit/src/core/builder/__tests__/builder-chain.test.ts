@@ -202,5 +202,35 @@ describe("Builder chain", () => {
       });
       expect(assertInvalidFormats).toBeTypeOf("function");
     });
+
+    it("rejects repeated singleton checks while preserving accumulated refinements", () => {
+      const Email = JIT.string().email();
+      const Refined = JIT.string()
+        .refine((value) => value.length > 0)
+        .refine((value) => value.includes("@"));
+      const assertInvalidEmailChain = () => {
+        // @ts-expect-error email is a singleton check and cannot be applied twice
+        Email.email();
+      };
+
+      expect(() => (Email as unknown as { email(): unknown }).email()).toThrowError(/email cannot be applied twice/);
+      const EmailAndUrl = (Email as unknown as { url(): unknown }).url() as { email(): unknown };
+      expect(() => EmailAndUrl.email()).toThrowError(/email cannot be applied twice/);
+      const noEmptyCheck = JIT.string().noEmpty().schema.def.checks?.[0] as unknown as {
+        readonly kind: string;
+        readonly value?: unknown;
+      };
+      expect(noEmptyCheck).toEqual({ kind: "noEmpty" });
+      expect("value" in noEmptyCheck).toBe(false);
+      const urlChecks = JIT.string().url().schema.def.checks as unknown as readonly unknown[];
+      const urlCheck = urlChecks[0] as {
+        readonly kind: string;
+        readonly message?: unknown;
+      };
+      expect(urlCheck).toEqual({ kind: "url" });
+      expect("message" in urlCheck).toBe(false);
+      expect(Refined.schema.type).toBe(AST.TypeName.refine);
+      expect(assertInvalidEmailChain).toBeTypeOf("function");
+    });
   });
 });

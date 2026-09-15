@@ -16,6 +16,15 @@ minimumReleaseAgeExclude:
   - '@fumadocs/tailwind@0.1.1'
   - fumadocs-core@16.11.3
   - fumadocs-ui@16.11.3
+  - jscpd-darwin-arm64@5.2.1
+  - jscpd-darwin-x64@5.2.1
+  - jscpd-linux-arm64-gnu@5.2.1
+  - jscpd-linux-arm64-musl@5.2.1
+  - jscpd-linux-x64-gnu@5.2.1
+  - jscpd-linux-x64-musl@5.2.1
+  - jscpd-windows-arm64-msvc@5.2.1
+  - jscpd-windows-x64-msvc@5.2.1
+  - jscpd@5.2.1
 
 overrides:
   "@jit-compiler/cli-darwin-arm64": "link:./packages/jit-cli/native/darwin-arm64"
